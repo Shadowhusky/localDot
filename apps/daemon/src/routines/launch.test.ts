@@ -14,6 +14,7 @@ import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { RoutineLauncher } from "./launch.ts";
 import { askFirst, ExpiredRuns } from "./policy.ts";
+import { stopAll } from "./stop-all.ts";
 import { RoutineStore } from "./store.ts";
 import { FakeClock } from "./testing/fake-clock.ts";
 
@@ -526,5 +527,46 @@ describe("routine launcher", () => {
       outcome: "failed",
       note: "localDot restarted during this run.",
     });
+  });
+});
+
+describe("Stop everything during a launch", () => {
+  it("cancels a launch that is waiting for the computer", async () => {
+    const f = fixture();
+    f.live.set(f.cellId, ulid());
+    const launching = f.launcher.launch(f.routine(), DUE);
+    await f.clock.flush();
+    const outcome = await stopAll(
+      {
+        cells: f.cells,
+        live: { get: (c: string) => f.live.get(c) },
+        killSwitch: {
+          stopSession: async () => ({
+            revoked: true,
+            paused: true,
+            closed: false,
+            stopped: false,
+            errors: [],
+          }),
+          stopIdleCell: async () => undefined,
+        },
+        store: f.store,
+        launcher: f.launcher,
+        scheduler: { replan: () => {} },
+        audit: { append: () => {} },
+        publish: () => {},
+        now: f.clock.now,
+      },
+      "user",
+    );
+    expect(outcome.launchesCancelled).toBe(1);
+    expect(await launching).toMatchObject({
+      outcome: "skipped",
+      note: "Stopped by Stop everything.",
+    });
+    f.live.delete(f.cellId);
+    f.clock.advance(120_000);
+    await f.clock.flush();
+    expect(f.runner.start).not.toHaveBeenCalled();
   });
 });
