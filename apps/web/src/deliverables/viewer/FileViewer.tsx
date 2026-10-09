@@ -205,7 +205,7 @@ export function FileViewer({
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       const target = event.target as HTMLElement | null;
       const host = root.current;
-      if (!host || !viewerHears(host, target)) return;
+      if (!host || !viewerHears(host, event)) return;
       const step = event.key === "ArrowLeft" ? -1 : 1;
       if (target && scrollsAcross(target, -step, host)) return;
       event.preventDefault();

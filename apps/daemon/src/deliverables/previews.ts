@@ -25,11 +25,18 @@ const none = (reason: PreviewReason): { json: string } => ({
   json: JSON.stringify({ kind: "none", reason } satisfies JsonPreview),
 });
 
+// One making of a preview or of pages, shared by every request for it until the last has gone.
+interface Making {
+  work: Promise<Preview | Pages>;
+  stop: AbortController;
+  waiting: number;
+}
+
 // One preview per stored version; page images and pages are cached beside the task and never
 // change, because a numbered version's bytes never change.
 export class Previews {
   readonly #files: StoredFiles;
-  readonly #pending = new Map<string, Promise<Preview | Pages>>();
+  readonly #pending = new Map<string, Making>();
   #converting: Promise<unknown> = Promise.resolve();
   constructor(
     home: string,
@@ -43,8 +50,8 @@ export class Previews {
     version: number | null,
     signal: AbortSignal,
   ): Promise<Preview> {
-    return this.#once(`${sessionId}/${name}/${version ?? 0}`, () =>
-      this.#make(sessionId, name, version, signal),
+    return this.#once(`${sessionId}/${name}/${version ?? 0}`, signal, (stop) =>
+      this.#make(sessionId, name, version, stop),
     );
   }
   // An office document's every page as a PDF, made inside dot's computer.
@@ -54,16 +61,35 @@ export class Previews {
     version: number | null,
     signal: AbortSignal,
   ): Promise<Pages> {
-    return this.#once(`${sessionId}/${name}/${version ?? 0}/pages`, () =>
-      this.#makePages(sessionId, name, version, signal),
+    return this.#once(`${sessionId}/${name}/${version ?? 0}/pages`, signal, (stop) =>
+      this.#makePages(sessionId, name, version, stop),
     );
   }
-  #once<T extends Preview | Pages>(key: string, make: () => Promise<T>): Promise<T> {
-    const pending = this.#pending.get(key);
-    if (pending) return pending as Promise<T>;
-    const work = make().finally(() => this.#pending.delete(key));
-    this.#pending.set(key, work);
-    return work;
+  #once<T extends Preview | Pages>(
+    key: string,
+    signal: AbortSignal,
+    make: (stop: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const making = this.#pending.get(key) ?? this.#start(key, make);
+    making.waiting++;
+    const leave = () => {
+      if (--making.waiting > 0) return;
+      if (this.#pending.get(key) === making) this.#pending.delete(key);
+      making.stop.abort();
+    };
+    if (signal.aborted) leave();
+    else signal.addEventListener("abort", leave, { once: true });
+    return (making.work as Promise<T>).finally(() => signal.removeEventListener("abort", leave));
+  }
+  #start(key: string, make: (stop: AbortSignal) => Promise<Preview | Pages>): Making {
+    const stop = new AbortController();
+    const making: Making = { work: make(stop.signal), stop, waiting: 0 };
+    const done = () => {
+      if (this.#pending.get(key) === making) this.#pending.delete(key);
+    };
+    making.work.then(done, done);
+    this.#pending.set(key, making);
+    return making;
   }
   async #makePages(
     sessionId: string,

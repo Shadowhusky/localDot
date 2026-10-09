@@ -12,9 +12,6 @@ const READER = PACKAGED
       entry: new URL("./quiet-page-worker.ts", import.meta.url),
       flags: ["--experimental-transform-types", "--no-warnings"],
     };
-// The CPU limit is the kernel's, so a reading that spends it was too much work however busy the
-// Mac was, and one cut short by the clock alone was only slowed down.
-const LIMITED = 'ulimit -t "$1" && shift && exec "$0" "$@"';
 const KEPT_CHARS = 16 * 1024 * 1024;
 const KEPT_PAGES = 64;
 // A page of the largest size served, written out again with every character escaped.
@@ -48,19 +45,22 @@ const STOPPED: Quieted = { refused: "stopped" };
 
 const size = (quieted: Quieted) => ("body" in quieted ? quieted.body.length : 0);
 
+// The CPU limit is the kernel's, so a reading that spends it was too much work however busy the
+// Mac was, and one cut short by the clock alone was only slowed down. Only the soft limit is set:
+// at a hard one as well, Linux ends the reader with SIGKILL instead of SIGXCPU.
+export function cpuLimited(cpu: number, file: string, args: readonly string[]): string[] {
+  return ["-c", 'ulimit -S -t "$1" && shift && exec "$0" "$@"', file, String(cpu), ...args];
+}
+
 export const launchReader: LaunchReader = (limits) =>
   spawn(
     "/bin/sh",
-    [
-      "-c",
-      LIMITED,
-      process.execPath,
-      String(limits.cpu),
+    cpuLimited(limits.cpu, process.execPath, [
       ...READER.flags,
       `--max-old-space-size=${limits.heap}`,
       "--max-semi-space-size=16",
       fileURLToPath(READER.entry),
-    ],
+    ]),
     { env: {}, stdio: ["pipe", "pipe", "ignore"], windowsHide: true },
   );
 

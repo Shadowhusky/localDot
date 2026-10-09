@@ -1,6 +1,6 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { type LaunchReader, launchReader, PageQuieter } from "./page-quieter.ts";
+import { cpuLimited, type LaunchReader, launchReader, PageQuieter } from "./page-quieter.ts";
 
 // One tag whose attributes parse5 checks each against all before it: minutes at this size.
 const slow = (seed = 0) =>
@@ -43,12 +43,19 @@ describe("quieting a page apart from the daemon", () => {
     expect(await quieter.page(page, live())).toEqual({ refused: "too complex" });
     expect(performance.now() - started).toBeLessThan(4000);
     expect(quieter.running).toBe(0);
-    expect(gone(readers[0])).toBe(true);
+    expect(readers[0]?.signalCode).toBe("SIGXCPU");
     const again = quieter.page(page, live());
     expect(quieter.running).toBe(0);
     expect(await again).toEqual({ refused: "too complex" });
     expect(readers).toHaveLength(1);
   }, 15_000);
+
+  it("sets only the soft CPU limit, so Linux ends a reader with SIGXCPU and not SIGKILL", () => {
+    const limited = cpuLimited(1, "/bin/sh", ["-c", "ulimit -S -t; ulimit -H -t"]);
+    const [soft, hard] = execFileSync("/bin/sh", limited, { encoding: "utf8" }).trim().split("\n");
+    expect(soft).toBe("1");
+    expect(hard).not.toBe("1");
+  });
 
   it("refuses a page that runs its reader out of heap, keeps nothing, and reads the next", async () => {
     const { launch, readers } = watched();

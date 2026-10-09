@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import { TextLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 
@@ -36,6 +36,7 @@ export function PdfPage({
 }) {
   const art = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
+  const drawn = useRef<PDFPageProxy | null>(null);
   useEffect(() => {
     let task: RenderTask | undefined;
     let textLayer: TextLayer | undefined;
@@ -43,6 +44,7 @@ export function PdfPage({
     const draw = async () => {
       const page = await pdf.getPage(number);
       if (cancelled) return;
+      drawn.current = page;
       const base = page.getViewport({ scale: 1 });
       const scale = width / base.width;
       const viewport = page.getViewport({ scale });
@@ -89,6 +91,16 @@ export function PdfPage({
       textLayer?.cancel();
     };
   }, [pdf, number, width, text, wait]);
+  // pdf.js holds a drawn page's instructions and decoded pictures until told to let them go: kept
+  // across a zoom, let go once this page leaves.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lets go of the page drawn before either changes
+  useEffect(
+    () => () => {
+      drawn.current?.cleanup();
+      drawn.current = null;
+    },
+    [pdf, number],
+  );
   useEffect(() => {
     const host = art.current;
     return () => release(host?.firstElementChild);
