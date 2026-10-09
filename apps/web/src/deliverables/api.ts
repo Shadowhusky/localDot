@@ -9,6 +9,7 @@ import {
   TableFileReply,
   TextFileReply,
   ULID_PATTERN,
+  VIEWER_LIMITS,
 } from "@localdot/protocol";
 import {
   disposition,
@@ -88,6 +89,34 @@ export async function loadPreview(
     throw new DeliverableError(415, "unexpected preview");
   const body = await bounded(response, PREVIEW_LIMITS.jsonBytes);
   return JsonPreview.parse(JSON.parse(new TextDecoder().decode(body)));
+}
+export type LoadedPages =
+  | { kind: "pdf"; data: ArrayBuffer }
+  | Extract<JsonPreview, { kind: "none" }>;
+// An office document's every page as a PDF, made on dot's computer: a minute or more the first time
+// for a long deck, then kept for that version.
+export async function loadPages(
+  api: ApiClient,
+  sessionId: string,
+  name: string,
+  version: number | null,
+  signal: AbortSignal,
+): Promise<LoadedPages> {
+  const query = version === null ? "" : `?v=${version}`;
+  const response = await request(api, `${fileBase(sessionId, name)}/pages${query}`, {
+    signal,
+    timeoutMs: 150_000,
+  });
+  const type = response.headers.get("content-type");
+  if (type === "application/pdf")
+    return { kind: "pdf", data: await bounded(response, VIEWER_LIMITS.pdfBytes) };
+  if (type?.split(";", 1)[0] !== "application/json")
+    throw new DeliverableError(415, "unexpected pages");
+  const reply = JsonPreview.parse(
+    JSON.parse(new TextDecoder().decode(await bounded(response, PREVIEW_LIMITS.jsonBytes))),
+  );
+  if (reply.kind !== "none") throw new DeliverableError(415, "unexpected pages");
+  return reply;
 }
 export async function loadVersions(
   api: ApiClient,

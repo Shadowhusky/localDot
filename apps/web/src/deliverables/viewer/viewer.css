@@ -58,6 +58,11 @@
   min-width: 0;
 }
 
+.viewer-bar-end {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .viewer-bar-note {
   flex-shrink: 0;
   overflow: hidden;
@@ -122,6 +127,14 @@
 
 .viewer-progress {
   width: 160px;
+}
+
+.viewer-loading-note {
+  margin-top: calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
 }
 
 .viewer-message {
@@ -240,29 +253,61 @@
   pointer-events: none;
 }
 
-/* A PDF: thumbnails down the left on a wide screen, then the pages on their paper, one scroll. */
+/* A document's pages: thumbnails down the left on a wide screen, then the pages on their paper in
+   one scroll, only those near the view drawn. */
 .viewer-pdf {
   flex-direction: row;
 }
 
 .viewer-thumbs {
-  display: flex;
-  flex-direction: column;
   flex-shrink: 0;
-  gap: calc(var(--spacing) * 4);
-  width: 136px;
-  overflow-y: auto;
   overscroll-behavior: contain;
-  padding: calc(var(--spacing) * 5) calc(var(--spacing) * 5) calc(var(--spacing) * 6);
-  border-right: 1px solid var(--color-hairline);
   scrollbar-width: thin;
   scrollbar-color: var(--color-scrollbar) transparent;
 }
 
+.viewer-thumbs[data-axis="y"] {
+  width: 136px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-hairline);
+}
+
+.viewer-thumbs[data-axis="x"] {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: calc(var(--spacing) * 3) 0;
+  border-top: 1px solid var(--color-hairline);
+  scrollbar-width: none;
+}
+
+.viewer-thumbs-run {
+  position: relative;
+}
+
 .viewer-thumb {
+  position: absolute;
   display: grid;
   justify-items: center;
   gap: calc(var(--spacing) * 1.5);
+}
+
+.viewer-thumbs[data-axis="y"] .viewer-thumb {
+  left: calc(var(--spacing) * 5);
+}
+
+.viewer-thumbs[data-axis="x"] .viewer-thumb {
+  top: 0;
+}
+
+.viewer-thumb .ui-thumbnail {
+  background-color: var(--color-paper);
+}
+
+/* Paper is as light as the ring, so the ring stands off it by a line of the well. */
+.viewer-thumb .ui-thumbnail[aria-current="true"] {
+  box-shadow:
+    0 0 0 2px var(--color-well),
+    0 0 0 4px var(--color-fg-1);
 }
 
 .viewer-thumb-number {
@@ -272,16 +317,15 @@
     var(--font-ui);
 }
 
+.viewer-thumb:has([aria-current="true"]) .viewer-thumb-number {
+  color: var(--color-fg-1);
+}
+
 .viewer-pages {
-  display: flex;
   flex: 1 1 auto;
-  flex-direction: column;
-  align-items: center;
-  gap: calc(var(--spacing) * 4);
   min-width: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: calc(var(--spacing) * 6) calc(var(--spacing) * 8) calc(var(--spacing) * 12);
   scrollbar-width: thin;
   scrollbar-color: var(--color-scrollbar) transparent;
 }
@@ -290,9 +334,17 @@
   outline: none;
 }
 
-.viewer-paper {
+.viewer-pages-run {
   position: relative;
-  flex-shrink: 0;
+  transition: transform var(--dur-default) var(--ease-spring);
+}
+
+.viewer-pages-run[data-dragging] {
+  transition: none;
+}
+
+.viewer-paper {
+  position: absolute;
   border-radius: var(--radius-xs);
   background-color: var(--color-paper);
   box-shadow: var(--shadow-raised);
@@ -306,10 +358,6 @@
   background-color: var(--color-paper);
 }
 
-.viewer-thumb .viewer-page-art {
-  border-radius: var(--radius-row);
-}
-
 .viewer-page-canvas,
 .viewer-page-canvas canvas {
   position: absolute;
@@ -317,6 +365,151 @@
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* The counter: "Page 12 of 300" between the arrows, the number a field to type another into. */
+.viewer-pager {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 0.5);
+}
+
+.viewer-page-count {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  padding: 0 calc(var(--spacing) * 1);
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  white-space: nowrap;
+}
+
+.viewer-page-field > .ui-text-field {
+  width: calc(var(--_digits) * 1ch + var(--spacing) * 8);
+  min-width: calc(var(--spacing) * 10);
+  padding: 0 calc(var(--spacing) * 2);
+}
+
+.viewer-page-field .ui-input {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* A deck: the slide whole and centred on the well, its neighbours a stage's width away, the strip
+   of slides under it. */
+.viewer-slides {
+  overflow: hidden;
+}
+
+.viewer-slide-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer-slide {
+  position: absolute;
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  background-color: var(--color-paper);
+  box-shadow: var(--shadow-stage);
+  will-change: transform;
+}
+
+.viewer-slides .viewer-thumbs[data-axis="x"] {
+  background-color: var(--color-well);
+}
+
+/* On a phone the counter and its tools sit at the bottom, under the thumb. */
+.viewer-pager-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  height: calc(var(--spacing) * 14);
+  padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 1);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.viewer-pager-tools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1);
+}
+
+/* Presenting: the deck alone on black, filling the screen, its controls a glass pill that fades
+   once the pointer rests. */
+.viewer-present {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  background-color: var(--color-void);
+  outline: none;
+  animation: viewer-present-in var(--dur-default) var(--ease-spring);
+}
+
+.viewer-present:not([data-controls]) {
+  cursor: none;
+}
+
+.viewer-present .viewer-slide {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.viewer-present-bar {
+  position: absolute;
+  bottom: calc(var(--spacing) * 6 + env(safe-area-inset-bottom));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1);
+  height: calc(var(--spacing) * 12);
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  translate: -50% 0;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    translate var(--dur-default) var(--ease-spring);
+}
+
+.viewer-present:not([data-controls]) .viewer-present-bar {
+  opacity: 0;
+  translate: -50% calc(var(--spacing) * 2);
+  pointer-events: none;
+}
+
+.viewer-present-count {
+  min-width: calc(var(--spacing) * 14);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-align: center;
+}
+
+.viewer-present-rule {
+  width: 1px;
+  height: calc(var(--spacing) * 5);
+  margin: 0 calc(var(--spacing) * 1);
+  background-color: var(--color-glass-line);
+}
+
+@keyframes viewer-present-in {
+  from {
+    opacity: 0;
+    scale: 0.98;
+  }
 }
 
 /* pdf.js places each run of text over the page, transparent, so it can be selected and copied. The
@@ -692,8 +885,8 @@ div.viewer-json-row {
     display: none;
   }
 
-  .viewer-pages {
-    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3) calc(var(--spacing) * 8);
+  .viewer-page-count {
+    font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
   }
 
   .viewer-doc-page {
@@ -707,7 +900,28 @@ div.viewer-json-row {
 
 @media (prefers-reduced-motion: reduce) {
   .viewer-pane,
-  .viewer-canvas[data-settling] {
+  .viewer-canvas[data-settling],
+  .viewer-pages-run {
     transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+
+  .viewer-present {
+    animation-name: viewer-fade-in;
+  }
+
+  @starting-style {
+    .viewer-slide {
+      opacity: 0;
+    }
+  }
+
+  .viewer-slide {
+    transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+}
+
+@keyframes viewer-fade-in {
+  from {
+    opacity: 0;
   }
 }

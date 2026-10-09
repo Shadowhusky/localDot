@@ -400,6 +400,28 @@ export const ICONS = {
     ["path", { d: "M16 17H8" }],
     ["path", { d: "M10 9H8" }],
   ],
+  "layout-grid": [
+    ["rect", { x: "3", y: "3", width: "7", height: "7", rx: "1" }],
+    ["rect", { x: "14", y: "3", width: "7", height: "7", rx: "1" }],
+    ["rect", { x: "14", y: "14", width: "7", height: "7", rx: "1" }],
+    ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1" }],
+  ],
+  "zoom-in": [
+    ["circle", { cx: "11", cy: "11", r: "8" }],
+    ["path", { d: "m21 21-4.35-4.35" }],
+    ["path", { d: "M11 8v6" }],
+    ["path", { d: "M8 11h6" }],
+  ],
+  "zoom-out": [
+    ["circle", { cx: "11", cy: "11", r: "8" }],
+    ["path", { d: "m21 21-4.35-4.35" }],
+    ["path", { d: "M8 11h6" }],
+  ],
+  presentation: [
+    ["path", { d: "M2 3h20" }],
+    ["path", { d: "M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3" }],
+    ["path", { d: "m7 21 5-5 5 5" }],
+  ],
   repeat: [
     ["path", { d: "m17 2 4 4-4 4" }],
     ["path", { d: "M3 11v-1a4 4 0 0 1 4-4h14" }],

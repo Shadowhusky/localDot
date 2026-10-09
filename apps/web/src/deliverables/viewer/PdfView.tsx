@@ -1,48 +1,141 @@
-// biome-ignore-all lint/suspicious/noArrayIndexKey: A page has no identity but its number.
 import "@localdot/protocol/csp";
-import { VIEWER_LIMITS } from "@localdot/protocol";
+import { type PreviewReason, VIEWER_LIMITS } from "@localdot/protocol";
 import {
   GlobalWorkerOptions,
   getDocument,
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
-  type RenderTask,
-  TextLayer,
 } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { ApiClient } from "../../lib/api.ts";
-import { IconButton } from "../../ui/IconButton.tsx";
-import { PHONE, useMediaQuery } from "../../ui/media.ts";
-import { ThumbnailButton } from "../../ui/Thumbnail.tsx";
-import { loadPreviewBytes } from "../api.ts";
+import { Button } from "../../ui/Button.tsx";
+import { type LoadedPages, loadPages, loadPreviewBytes } from "../api.ts";
+import { PagesView } from "./PagesView.tsx";
+import type { PageSize } from "./PdfPage.tsx";
+import { modeFor } from "./paging.ts";
+import { SlidesView } from "./SlidesView.tsx";
 import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-// A page is never drawn larger than this many device pixels.
-const MAX_PIXELS = 16_000_000;
-const MAX_WIDTH = 920;
-const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
-const THUMB_WIDTH = 96;
+// Page sizes are read this many at a time after the first page shows, between frames.
+const SIZES_AT_ONCE = 32;
+const RETRY = new Set<PreviewReason>(["busy", "failed", "computer_off"]);
+const PAGES_REASONS: Record<PreviewReason, string> = {
+  attachment: "This kind of file has no pages to show.",
+  binary: "This kind of file has no pages to show.",
+  too_large: "It's too large to show here. Download it to open it.",
+  computer_off: "Turn on your computer to see its pages.",
+  busy: "Your computer is busy. Try again in a moment.",
+  failed: "Your computer couldn't open it. Download it to open it in another app.",
+  missing: "This version is no longer available.",
+};
 
-interface Doc {
-  pdf: PDFDocumentProxy;
-  // Width over height of each page, as known so far; the first page's until a page is drawn.
-  ratios: number[];
-}
-
-// A PDF drawn by pdf.js in this page: every page in one scroll, its text selectable, thumbnails
-// beside it on a wide screen. Nothing in the file runs: no scripts, forms or links are drawn.
-export function PdfView({ api, url, name }: { api: ApiClient; url: string; name: string }) {
-  const [doc, setDoc] = useState<Doc | "locked" | "failed" | null>(null);
+// A PDF the browser loads by its preview link.
+export function PdfFile({ api, url, name }: { api: ApiClient; url: string; name: string }) {
+  const [data, setData] = useState<ArrayBuffer | "failed" | null>(null);
   useEffect(() => {
     const controller = new AbortController();
+    loadPreviewBytes(api, url, VIEWER_LIMITS.pdfBytes, controller.signal).then(
+      (bytes) => !controller.signal.aborted && setData(bytes),
+      () => !controller.signal.aborted && setData("failed"),
+    );
+    return () => controller.abort();
+  }, [api, url]);
+  if (data === null) return <ViewerLoading label="Loading the PDF" />;
+  if (data === "failed") return <ViewerMessage name={name} title="Couldn't load the preview" />;
+  return <PdfView data={data} name={name} />;
+}
+
+// An office document, deck or workbook as the PDF dot's computer makes of it: a minute or so the
+// first time for a long deck, then at once for that version.
+export function OfficePages(props: {
+  api: ApiClient;
+  sessionId: string;
+  name: string;
+  version: number | null;
+  lead?: ReactNode;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  return <OfficeAttempt key={attempt} {...props} retry={() => setAttempt((n) => n + 1)} />;
+}
+
+function OfficeAttempt({
+  api,
+  sessionId,
+  name,
+  version,
+  lead,
+  retry,
+}: {
+  api: ApiClient;
+  sessionId: string;
+  name: string;
+  version: number | null;
+  lead?: ReactNode;
+  retry(): void;
+}) {
+  const [loaded, setLoaded] = useState<LoadedPages | "failed" | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadPages(api, sessionId, name, version, controller.signal).then(
+      (pages) => !controller.signal.aborted && setLoaded(pages),
+      () => !controller.signal.aborted && setLoaded("failed"),
+    );
+    return () => controller.abort();
+  }, [api, sessionId, name, version]);
+  if (loaded !== null && loaded !== "failed" && loaded.kind === "pdf")
+    return <PdfView data={loaded.data} name={name} lead={lead} />;
+  const reason: PreviewReason = loaded === "failed" || loaded === null ? "failed" : loaded.reason;
+  return (
+    <>
+      <ViewerBar>{lead}</ViewerBar>
+      {loaded === null ? (
+        <ViewerLoading label="Making the pages" note="Making the pages on your computer" />
+      ) : (
+        <ViewerMessage
+          name={name}
+          title="Can't show the pages"
+          action={
+            RETRY.has(reason) ? (
+              <Button size="md" variant="secondary" onClick={retry}>
+                Try again
+              </Button>
+            ) : undefined
+          }
+        >
+          {PAGES_REASONS[reason]}
+        </ViewerMessage>
+      )}
+    </>
+  );
+}
+
+interface Opened {
+  pdf: PDFDocumentProxy;
+  first: PageSize;
+}
+
+// A PDF drawn by pdf.js in this page, a slide at a time for a deck and as pages otherwise. Nothing
+// in the file runs: no scripts, forms or links are drawn.
+export function PdfView({
+  data,
+  name,
+  lead,
+}: {
+  data: ArrayBuffer;
+  name: string;
+  lead?: ReactNode;
+}) {
+  const [opened, setOpened] = useState<Opened | "locked" | "failed" | null>(null);
+  useEffect(() => {
     let task: PDFDocumentLoadingTask | undefined;
+    let gone = false;
     (async () => {
-      const data = await loadPreviewBytes(api, url, VIEWER_LIMITS.pdfBytes, controller.signal);
+      // pdf.js hands the bytes to its worker; a copy leaves the caller's whole for a later opening.
       task = getDocument({
-        data: new Uint8Array(data),
+        data: new Uint8Array(data.slice(0)),
         enableXfa: false,
         useWasm: false,
         stopAtErrors: false,
@@ -50,251 +143,67 @@ export function PdfView({ api, url, name }: { api: ApiClient; url: string; name:
       });
       const pdf = await task.promise;
       const first = (await pdf.getPage(1)).getViewport({ scale: 1 });
-      if (!controller.signal.aborted)
-        setDoc({ pdf, ratios: Array(pdf.numPages).fill(first.width / first.height) });
+      if (!gone) setOpened({ pdf, first: { w: first.width, h: first.height } });
     })().catch((error: unknown) => {
-      if (controller.signal.aborted) return;
-      setDoc((error as { name?: string })?.name === "PasswordException" ? "locked" : "failed");
+      if (gone) return;
+      setOpened((error as { name?: string })?.name === "PasswordException" ? "locked" : "failed");
     });
     return () => {
-      controller.abort();
+      gone = true;
       void task?.destroy();
     };
-  }, [api, url]);
-  if (doc === null) return <ViewerLoading label="Loading the PDF" />;
-  if (doc === "locked")
+  }, [data]);
+  if (opened === null) return <ViewerLoading label="Loading the PDF" />;
+  if (opened === "locked")
     return (
       <ViewerMessage name={name} title="This PDF is locked">
         It needs a password. Download it to open it.
       </ViewerMessage>
     );
-  if (doc === "failed")
+  if (opened === "failed")
     return (
       <ViewerMessage name={name} title="Can't show this PDF">
         It may be damaged. Download it to open it in another app.
       </ViewerMessage>
     );
-  return <Pages doc={doc} />;
+  return <Paged opened={opened} name={name} lead={lead} />;
 }
 
-function Pages({ doc }: { doc: Doc }) {
-  const phone = useMediaQuery(PHONE);
-  const scroller = useRef<HTMLDivElement>(null);
-  const [column, setColumn] = useState(0);
-  const [zoom, setZoom] = useState(2);
-  const [current, setCurrent] = useState(1);
-  const [ratios, setRatios] = useState(doc.ratios);
-  const count = doc.pdf.numPages;
-  useLayoutEffect(() => {
-    const host = scroller.current;
-    if (!host) return;
-    const measure = () => setColumn(host.clientWidth);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    let frame = 0;
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    });
-    observer.observe(host);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, []);
-  const fitWidth = Math.max(160, Math.min(MAX_WIDTH, column - (phone ? 24 : 64)));
-  const width = Math.round(fitWidth * (ZOOMS[zoom] ?? 1));
-  const sized = (page: number, ratio: number) =>
-    setRatios((was) =>
-      Math.abs((was[page - 1] ?? 0) - ratio) < 0.001
-        ? was
-        : was.map((r, i) => (i === page - 1 ? ratio : r)),
-    );
-  const show = (page: number) => {
-    scroller.current
-      ?.querySelector(`[data-page="${page}"]`)
-      ?.scrollIntoView({ block: "start", behavior: "smooth" });
-  };
-
-  // The page across the middle of the view is the one being read.
-  useEffect(() => {
-    const host = scroller.current;
-    if (!host || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries)
-          if (entry.isIntersecting)
-            setCurrent(Number((entry.target as HTMLElement).dataset.page) || 1);
-      },
-      { root: host, rootMargin: "-50% 0px -50% 0px" },
-    );
-    for (const page of host.querySelectorAll("[data-page]")) observer.observe(page);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <>
-      <ViewerBar
-        note={
-          <span className="num" aria-live="polite">
-            Page {current} of {count}
-          </span>
-        }
-      >
-        <div className="viewer-zoom">
-          <IconButton
-            icon="minus"
-            size={28}
-            label="Zoom out"
-            disabledReason={zoom === 0 ? "Zoomed out all the way" : undefined}
-            onClick={() => setZoom((z) => Math.max(0, z - 1))}
-          />
-          <span className="viewer-zoom-value num">{Math.round((ZOOMS[zoom] ?? 1) * 100)}%</span>
-          <IconButton
-            icon="plus"
-            size={28}
-            label="Zoom in"
-            disabledReason={zoom === ZOOMS.length - 1 ? "Zoomed in all the way" : undefined}
-            onClick={() => setZoom((z) => Math.min(ZOOMS.length - 1, z + 1))}
-          />
-        </div>
-      </ViewerBar>
-      <div className="viewer-stage viewer-pdf">
-        {!phone && count > 1 && (
-          <nav className="viewer-thumbs" aria-label="Pages">
-            {Array.from({ length: count }, (_, i) => (
-              <div key={i} className="viewer-thumb">
-                <ThumbnailButton
-                  label={`Page ${i + 1}`}
-                  ratio={ratios[i]}
-                  current={current === i + 1}
-                  onClick={() => show(i + 1)}
-                >
-                  <PdfPage doc={doc} number={i + 1} width={THUMB_WIDTH} ratio={ratios[i] ?? 1} />
-                </ThumbnailButton>
-                <span className="viewer-thumb-number num">{i + 1}</span>
-              </div>
-            ))}
-          </nav>
-        )}
-        <div ref={scroller} className="viewer-pages" tabIndex={-1}>
-          {Array.from({ length: count }, (_, i) => (
-            <div
-              key={i}
-              data-page={i + 1}
-              className="viewer-paper"
-              style={{ width, height: Math.round(width / (ratios[i] ?? 1)) }}
-            >
-              {column > 0 && (
-                <PdfPage
-                  doc={doc}
-                  number={i + 1}
-                  width={width}
-                  ratio={ratios[i] ?? 1}
-                  text
-                  onRatio={(ratio) => sized(i + 1, ratio)}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
+function Paged({ opened, name, lead }: { opened: Opened; name: string; lead?: ReactNode }) {
+  const sizes = useSizes(opened);
+  return modeFor(name, opened.first.w / opened.first.h) === "slides" ? (
+    <SlidesView pdf={opened.pdf} sizes={sizes} lead={lead} />
+  ) : (
+    <PagesView pdf={opened.pdf} sizes={sizes} lead={lead} />
   );
 }
 
-// One page, drawn once it comes near the view and let go again far from it.
-function PdfPage({
-  doc,
-  number,
-  width,
-  ratio,
-  text = false,
-  onRatio,
-}: {
-  doc: Doc;
-  number: number;
-  width: number;
-  ratio: number;
-  text?: boolean;
-  onRatio?(ratio: number): void;
-}) {
-  const host = useRef<HTMLDivElement>(null);
-  const art = useRef<HTMLDivElement>(null);
-  const layer = useRef<HTMLDivElement>(null);
-  const [near, setNear] = useState(false);
+// Every page's size, the first page's standing in until each is read, a few at a time, so a long
+// document lays out at once and settles as its odd-sized pages are found.
+function useSizes({ pdf, first }: Opened): PageSize[] {
+  const [sizes, setSizes] = useState<PageSize[]>(() => Array(pdf.numPages).fill(first));
   useEffect(() => {
-    const element = host.current;
-    if (!element || typeof IntersectionObserver === "undefined") {
-      setNear(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => setNear(entries.some((entry) => entry.isIntersecting)),
-      { rootMargin: "1200px 0px" },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  // Far from the view a page lets its drawing go.
-  useEffect(() => {
-    if (near) return;
-    art.current?.replaceChildren();
-    layer.current?.replaceChildren();
-  }, [near]);
-  const ratioSeen = useRef(onRatio);
-  ratioSeen.current = onRatio;
-  useEffect(() => {
-    if (!near) return;
-    let task: RenderTask | undefined;
-    let textLayer: TextLayer | undefined;
-    let cancelled = false;
+    let stopped = false;
     (async () => {
-      const page = await doc.pdf.getPage(number);
-      if (cancelled) return;
-      const base = page.getViewport({ scale: 1 });
-      ratioSeen.current?.(base.width / base.height);
-      const scale = width / base.width;
-      const viewport = page.getViewport({ scale });
-      const density = Math.min(
-        window.devicePixelRatio || 1,
-        2,
-        Math.sqrt(MAX_PIXELS / (viewport.width * viewport.height)),
-      );
-      // Drawn off to the side and swapped in whole, so a zoom never shows a blank page.
-      const target = document.createElement("canvas");
-      target.width = Math.floor(viewport.width * density);
-      target.height = Math.floor(viewport.height * density);
-      target.setAttribute("aria-hidden", "true");
-      task = page.render({
-        canvas: target,
-        viewport,
-        transform: density === 1 ? undefined : [density, 0, 0, density, 0, 0],
-      });
-      await task.promise;
-      if (cancelled) return;
-      art.current?.replaceChildren(target);
-      const container = layer.current;
-      if (!text || !container) return;
-      container.replaceChildren();
-      container.style.setProperty("--total-scale-factor", String(scale));
-      textLayer = new TextLayer({
-        textContentSource: page.streamTextContent(),
-        container,
-        viewport,
-      });
-      await textLayer.render();
+      const found: PageSize[] = Array(pdf.numPages).fill(first);
+      let changed = false;
+      for (let n = 2; n <= pdf.numPages && !stopped; n++) {
+        const view = (await pdf.getPage(n)).getViewport({ scale: 1 });
+        const was = found[n - 1] as PageSize;
+        if (Math.abs(view.width - was.w) > 0.5 || Math.abs(view.height - was.h) > 0.5) {
+          found[n - 1] = { w: view.width, h: view.height };
+          changed = true;
+        }
+        if (n % SIZES_AT_ONCE === 0 || n === pdf.numPages) {
+          if (changed && !stopped) setSizes([...found]);
+          changed = false;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+      }
     })().catch(() => {});
     return () => {
-      cancelled = true;
-      task?.cancel();
-      textLayer?.cancel();
+      stopped = true;
     };
-  }, [near, doc, number, width, text]);
-  return (
-    <div ref={host} className="viewer-page-art" data-ratio={ratio}>
-      <div ref={art} className="viewer-page-canvas" />
-      {text && <div ref={layer} className="viewer-pdf-text" />}
-    </div>
-  );
+  }, [pdf, first]);
+  return sizes;
 }
