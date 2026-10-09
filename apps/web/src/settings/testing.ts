@@ -1,5 +1,6 @@
 import { capabilityOf, normalizeCatalog, PROVIDERS } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
+import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import type { ProviderIndex } from "./settings-api.ts";
 
 // Test-only metadata. No production module imports this file.
@@ -39,5 +40,27 @@ export function providerFixture(): ProviderIndex {
         ...capabilityOf(p, m),
       })),
     })),
+  };
+}
+
+export function knownFixture(over: Partial<WhatDotKnows> = {}): WhatDotKnows {
+  const unused = async (): Promise<never> => {
+    throw new Error("fixture write");
+  };
+  return {
+    phase: "ready",
+    dir: "~/.localdot/memory",
+    files: { "USER.md": [], "MEMORY.md": [] },
+    people: [],
+    recent: [],
+    reload: () => {},
+    addFact: unused,
+    editFact: unused,
+    deleteFact: unused,
+    undo: unused,
+    addPerson: unused,
+    editPerson: unused,
+    deletePerson: unused,
+    ...over,
   };
 }

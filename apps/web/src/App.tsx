@@ -65,6 +65,7 @@ import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { CHATGPT } from "./settings/chooser.ts";
+import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
 import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
@@ -487,6 +488,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [typing, setTyping] = useState(false);
   const [pasteRefused, setPasteRefused] = useState<string | null>(null);
   const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const whatDotKnows = useWhatDotKnows(api, settings.open);
   const settingsAccounts = useAccounts(
     api,
     cell?.state === "ready" && !cell.paused ? cell.id : null,
@@ -1512,6 +1514,16 @@ function Theatre({ api }: { api: ApiClient }) {
           savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
           onAutonomy={settings.changeAutonomy}
           knowledge={settingsKnowledge}
+          known={whatDotKnows}
+          recentActivity={
+            settings.draft
+              ? { on: settings.draft.recentActivity, change: settings.recentActivity }
+              : undefined
+          }
+          onOpenTask={(id) => {
+            settings.close();
+            selectReplay(id);
+          }}
           accounts={settingsAccounts}
           rules={rules}
           spending={

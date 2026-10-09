@@ -78,6 +78,8 @@ const PLANNED: IconName[] = [
   // First-run setup: the ChatGPT plan and coding plans (design-v2 §11 A0).
   "message-circle",
   "code",
+  // What dot knows: a fact it always reads.
+  "pin",
 ];
 
 describe("Icon", () => {

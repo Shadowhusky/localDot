@@ -37,6 +37,8 @@ import {
 import { Conversations } from "../../../daemon/src/agent/conversation.ts";
 import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
+import { PeopleStore } from "../../../daemon/src/agent/people.ts";
+import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
@@ -72,6 +74,8 @@ import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
+import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
+import { SearchIndex } from "../../../daemon/src/search/search-index.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
@@ -308,6 +312,11 @@ let keys = SAMPLE_KEYS;
 const settingsStore = new SettingsStore(HOME);
 settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
+const people = new PeopleStore(HOME);
+const recentActivity = new RecentActivity({ log, isLive: (id) => live.cellOf(id) !== undefined });
+const searchIndex = new SearchIndex(HOME, { sessions: log });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog: log, notes: memory });
+searchFeed.start();
 const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
@@ -1000,6 +1009,9 @@ const agent: AgentRoutesDeps = {
     }),
   } as AgentRoutesDeps["keyd"],
   memory,
+  people,
+  recentActivity: () => recentActivity.list(),
+  sessionInfo: (ids) => log.sessionInfo(ids),
   skills: () => [
     {
       name: "sample-tables",
@@ -1246,6 +1258,7 @@ const routes = createApp({
   accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
   replay: {
     home: HOME,
@@ -2243,6 +2256,39 @@ routes.post("/__qa/older-task", (c) =>
     ),
   }),
 );
+// What dot knows: facts you and dot added, people dot reached, a daily note, and recent tasks.
+routes.post("/__qa/knows", (c) => {
+  const insurance = endedTask(
+    "Renew the car insurance before it lapses",
+    "I compared three quotes and renewed with the cheapest.",
+    "Renewed the car insurance with the cheaper quote.",
+  );
+  const henry = endedTask(
+    "Send Henry the quarterly report on WeChat",
+    "Sent the report to Henry on WeChat.",
+    "Sent the quarterly report to Henry.",
+  );
+  memory.addEntry("USER.md", "Allergic to penicillin", true);
+  memory.addEntry("USER.md", "Prefers aisle seats on long flights");
+  memory.apply(insurance, "USER.md", "append", "- Car insurance renews every September");
+  memory.apply(insurance, "MEMORY.md", "append", "- Insurer prefers email over phone calls");
+  const note = memory.appendNote(insurance, "Insurer reference is WINDSCREEN-42");
+  log.append(insurance, {
+    type: "memory.change",
+    agent: "main",
+    data: { file: note.file, patch: note.patch, changeId: note.changeId },
+  } as never);
+  people.record(henry, { name: "Henry Liu", app: "WeChat", handle: "henry_l" });
+  people.record(insurance, {
+    name: "Ana Souza",
+    app: "Email",
+    handle: "ana@example.com",
+    note: "Insurance broker",
+  });
+  people.add({ name: "Mum", app: "Phone", handle: "+44 7700 900123" });
+  return c.json({ ok: true });
+});
+routes.get("/__qa/boot-memory", (c) => c.json(memory.bootMemory()));
 routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as CellKind)));
 routes.post("/__qa/chatgpt/:state", (c) => {
   const state = c.req.param("state");

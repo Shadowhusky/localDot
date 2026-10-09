@@ -27,6 +27,8 @@ import {
 import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, SpendingLimits } from "./Limits.tsx";
+import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
+import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import {
@@ -95,6 +97,10 @@ export interface SettingsSheetProps {
   };
   purposeCheck?: PurposeCheckControl;
   knowledge?: Knowledge;
+  known?: WhatDotKnows;
+  recentActivity?: RecentActivityControl;
+  // Opens an earlier task's replay, from where a fact or a person came from.
+  onOpenTask?(sessionId: string): void;
   accounts?: AccountsView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
   // Shut down, and on a phone, where the sheet covers the island, the task's Stop.
@@ -393,7 +399,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     rules: !!props.rules,
     spending: !!props.spending && !chatgptMain,
     appearance: !!props.appearance,
-    knowledge: !!props.knowledge,
+    knowledge: !!props.knowledge && !!props.known,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
     computer: !!props.stop,
@@ -704,7 +710,14 @@ function SectionContent({
         <Appearance appearance={props.appearance} showDot={props.showDot} />
       ) : null;
     case "knowledge":
-      return props.knowledge ? <KnowledgeSection knowledge={props.knowledge} /> : null;
+      return props.knowledge && props.known ? (
+        <KnowledgeSection
+          knowledge={props.knowledge}
+          known={props.known}
+          recentActivity={props.recentActivity}
+          onOpenTask={props.onOpenTask}
+        />
+      ) : null;
     case "accounts":
       return props.accounts ? <AccountsSection accounts={props.accounts} /> : null;
     case "keys":

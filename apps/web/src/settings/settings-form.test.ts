@@ -369,6 +369,23 @@ describe("configuration validation before explicit save", () => {
       validateForm({ ...d, purposeCheck: true }, { main, purposeCheck: "off" }, providerFixture()),
     ).toEqual({ ok: true, document: { main } });
   });
+  it("tells tasks about recent ones unless the user turned it off, and saves only Off", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.recentActivity).toBe(true);
+    expect(formOf({ main, recentActivity: "off" }).recentActivity).toBe(false);
+    expect(validateForm({ ...d, recentActivity: false }, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, recentActivity: "off" },
+    });
+    expect(
+      validateForm(
+        { ...d, recentActivity: true },
+        { main, recentActivity: "off" },
+        providerFixture(),
+      ),
+    ).toEqual({ ok: true, document: { main } });
+  });
   it("keeps the limits and check-ins the user turned on, and drops ones turned off", () => {
     const saved = {
       main: { provider: "ollama", model: "custom" },
