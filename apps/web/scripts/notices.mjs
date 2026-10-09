@@ -46,8 +46,35 @@ export function writeNotices({ webDir, outDir }) {
   return { files: [name] };
 }
 
+const PDFJS = "6.3.289";
+
+// pdf.js (Apache-2.0) draws PDFs in the file preview; its license ships beside the build.
+export function writePdfNotice({ webDir, outDir }) {
+  const pkg = dirname(
+    createRequire(join(webDir, "package.json")).resolve("pdfjs-dist/package.json"),
+  );
+  const meta = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
+  if (meta.version !== PDFJS || meta.license !== "Apache-2.0")
+    throw new Error(`The build notice requires pdfjs-dist ${PDFJS} under Apache-2.0`);
+  const license = readFileSync(join(pkg, "LICENSE"));
+  if (license.length === 0) throw new Error("The installed pdfjs-dist license is empty");
+  const header = Buffer.from(
+    `pdfjs-dist ${PDFJS} (pdf.js, Mozilla Foundation)\n` +
+      "License: Apache License 2.0 (Apache-2.0)\n" +
+      "Used unmodified in localDot's file preview.\n" +
+      `Source: https://github.com/mozilla/pdf.js/tree/v${PDFJS}\n\n`,
+  );
+  const name = `licenses/pdfjs-dist-${PDFJS}.txt`;
+  mkdirSync(join(outDir, "licenses"), { recursive: true });
+  writeFileSync(join(outDir, name), Buffer.concat([header, license]));
+  return { files: [name] };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const webDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const receipt = writeNotices({ webDir, outDir: join(webDir, "dist/assets") });
-  console.log(`Shipped license notice: ${receipt.files.join(", ")}`);
+  const outDir = join(webDir, "dist/assets");
+  const files = [writeNotices({ webDir, outDir }), writePdfNotice({ webDir, outDir })].flatMap(
+    (receipt) => receipt.files,
+  );
+  console.log(`Shipped license notices: ${files.join(", ")}`);
 }

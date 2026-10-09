@@ -82,6 +82,10 @@ export interface SheetProps {
   sidebar?: ReactNode;
   // A bottom sheet closes with this word at its trailing edge, its title centred, instead of ×.
   doneLabel?: string;
+  // Wide holds one large thing, such as a file's preview, in an inspector up to 1120 px.
+  size?: "regular" | "wide";
+  // The body has no padding or scroll of its own: what it holds fills it and scrolls itself.
+  flush?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -117,6 +121,8 @@ function SheetLayer({
   detents = FIT,
   sidebar,
   doneLabel,
+  size = "regular",
+  flush = false,
   className,
   children,
   root,
@@ -371,6 +377,8 @@ function SheetLayer({
         inert={closing}
         className={clsx("ui-sheet", className)}
         data-side={placement}
+        data-size={size === "wide" ? size : undefined}
+        data-flush={flush ? "" : undefined}
         data-detents={placement === "bottom" ? detents.join(" ") : undefined}
         data-detent={placement === "bottom" ? detent : undefined}
         data-modal={modal ? "" : undefined}

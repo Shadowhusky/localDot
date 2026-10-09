@@ -11,9 +11,9 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { showToast } from "../ui/Toast.tsx";
-import { DeliverableError, openOnMac } from "./api.ts";
 import { CompareSheet } from "./CompareSheet.tsx";
 import { FilePreview } from "./FilePreview.tsx";
+import { openHere } from "./open-here.ts";
 import { requestRevise } from "./revise-draft.ts";
 import { usePreview } from "./usePreview.ts";
 import { useVersions } from "./useVersions.ts";
@@ -24,10 +24,9 @@ import {
   versionDetail,
   versionKey,
 } from "./versions.ts";
+import { entryKey, useFileViewer } from "./viewer/scope.tsx";
 
 type ResultFile = AgentResult["files"][number];
-// These refusals from Open on Mac are written for people.
-const SPOKEN = new Set([403, 415, 501]);
 
 export interface DeliverableFileProps {
   api: ApiClient;
@@ -69,6 +68,7 @@ export function DeliverableFile({
     open: boolean;
   } | null>(null);
   const versions = useVersions(api, sessionId, file.name, refresh) ?? [];
+  const viewer = useFileViewer();
   // A file listed without its number (from a recording's summary) is the newest of its task.
   const current =
     findVersion(versions, shown) ??
@@ -102,17 +102,10 @@ export function DeliverableFile({
           ]
             .filter(Boolean)
             .join(" · ");
-  const openHere = async () => {
+  const openOnMac = async () => {
     setOpening(true);
-    try {
-      await openOnMac(api, shown.sessionId, file.name, shown.version);
-      showToast({ title: `Opened ${file.name} on your Mac`, tone: "success" });
-    } catch (error) {
-      const said = error instanceof DeliverableError && SPOKEN.has(error.status) && error.message;
-      showToast({ title: said || `Couldn't open ${file.name} on your Mac.`, tone: "danger" });
-    } finally {
-      setOpening(false);
-    }
+    await openHere(api, shown.sessionId, file.name, shown.version);
+    setOpening(false);
   };
   const revise = () => {
     if (
@@ -143,16 +136,35 @@ export function DeliverableFile({
         onToggle={() => setOpen((was) => !was)}
         actions={
           <>
-            {onMac && canOpenOnMac(file.name) && (
+            {viewer ? (
               <Button
                 size="sm"
-                busy={opening}
-                aria-label={`Open ${file.name} on your Mac`}
+                aria-label={`Open ${file.name}`}
                 disabledReason={gone ? "This version is no longer available." : undefined}
-                onClick={() => void openHere()}
+                onClick={() =>
+                  viewer(entryKey({ resultId, file }), {
+                    sessionId: shown.sessionId,
+                    version: shown.version,
+                    bytes: current?.bytes ?? file.bytes,
+                    ...(versions.length > 1 && current ? { label: current.label } : {}),
+                  })
+                }
               >
                 Open
               </Button>
+            ) : (
+              onMac &&
+              canOpenOnMac(file.name) && (
+                <Button
+                  size="sm"
+                  busy={opening}
+                  aria-label={`Open ${file.name} on your Mac`}
+                  disabledReason={gone ? "This version is no longer available." : undefined}
+                  onClick={() => void openOnMac()}
+                >
+                  Open
+                </Button>
+              )
             )}
             <span className="result-file-action" data-state={state}>
               {state === "busy" && <Spinner className="result-file-ring" />}
@@ -176,6 +188,7 @@ export function DeliverableFile({
             kind={kind}
             name={file.name}
             onRetry={() => setAttempt((n) => n + 1)}
+            opens={viewer !== null}
           />
           {(revisable || pair || versions.length > 1) && (
             <div className="deliverable-tools">

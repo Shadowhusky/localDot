@@ -22,3 +22,5 @@ ignoredOptionalDependencies:
   - "@anthropic-ai/claude-agent-sdk-linux-x64-musl"
   - "@anthropic-ai/claude-agent-sdk-win32-arm64"
   - "@anthropic-ai/claude-agent-sdk-win32-x64"
+  # pdf.js runs only in the browser (file previews); its Node canvas binary is never used.
+  - "@napi-rs/canvas"

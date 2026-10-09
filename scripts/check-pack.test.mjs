@@ -14,6 +14,7 @@ const BASE = {
   "bin/localdot.mjs": "#!/usr/bin/env node\n",
   "dist/cli.mjs": "export {};\n",
   "dist/daemon.mjs": "export {};\n",
+  "dist/quiet-page-worker.mjs": "export {};\n",
   "dist/release-verification-worker.mjs": "export {};\n",
   "dist/browser-seccomp.json": "{}\n",
   "dist/canary-scan.py": "# scanner fixture\n",

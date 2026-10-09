@@ -449,13 +449,13 @@
       inset: -1px;
     }
 
-    /* The island is one short line: a glass button on it keeps its drawn size, as the island's
-       glyphs do, and reaches 44 px past it. */
-    .ui-button[data-variant="glass"] {
+    /* The island is one short line, and so is a line of text with a button set in it: such a
+       button keeps its drawn size, as the island's glyphs do, and reaches 44 px past it. */
+    .ui-button:is([data-variant="glass"], [data-inline]) {
       min-height: 0;
     }
 
-    .ui-button[data-variant="glass"]::after {
+    .ui-button:is([data-variant="glass"], [data-inline])::after {
       inset: calc(var(--spacing) * -2) calc(var(--spacing) * -1.5);
     }
   }

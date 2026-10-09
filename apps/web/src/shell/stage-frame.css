@@ -215,6 +215,47 @@
   color: var(--color-fg-3);
 }
 
+.narration-flow {
+  display: contents;
+}
+
+/* A tip's one step follows its words, on their last line when there is room. */
+.narration[data-act] {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.narration[data-act] .narration-flow {
+  display: block;
+}
+
+.narration[data-act] :is(.narration-text, .narration-line) {
+  display: inline;
+  height: auto;
+}
+
+.narration-act {
+  position: relative;
+  display: inline-flex;
+  margin-inline-start: calc(var(--spacing) * 2);
+  vertical-align: middle;
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-act[data-leaving] {
+  opacity: 0;
+}
+
+/* Under reduced motion a greeting or tip changes at once. */
+@media (prefers-reduced-motion: reduce) {
+  .narration[data-idle] :is(.narration-line, .narration-act) {
+    transition: none;
+    animation: none;
+  }
+}
+
 @keyframes narration-in {
   from {
     opacity: 0;

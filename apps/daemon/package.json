@@ -23,6 +23,7 @@
     "@modelcontextprotocol/sdk": "1.31.0",
     "hono": "4.13.12",
     "mediabunny": "1.61.0",
+    "parse5": "8.0.1",
     "sharp": "0.35.5",
     "undici": "8.11.2",
     "ws": "8.22.0",
