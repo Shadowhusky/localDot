@@ -253,7 +253,7 @@
 
 .keys-reenter-note > .ui-icon {
   flex: none;
-  margin-top: 3px;
+  margin-top: calc(var(--spacing) * 0.75);
   color: var(--color-fg-3);
 }
 
