@@ -244,10 +244,12 @@ function sampleLog(): string {
   return `${lines.join("\n")}\n`;
 }
 
-// Each way a page could reach a server with no script: hints to connect, fetch or render ahead, a
-// link that opens a window, and one that reports the click.
+// Each way a page could reach a server with no script: hints to connect, fetch or render ahead, the
+// same hints in a frame's srcdoc, a link that opens a window, and one that reports the click.
 function probeTags(port: number): { head: string; body: string } {
   const at = `http://127.0.0.1:${port}`;
+  const framed = `<iframe srcdoc="<link rel=preconnect href='${at}/srcdoc'>" title="srcdoc"></iframe>
+<svg width="1" height="1"><foreignObject width="1" height="1"><iframe srcdoc="&lt;link rel=preconnect href=&quot;${at}/escaped&quot;&gt;"></iframe></foreignObject></svg>`;
   return {
     head: [
       `<link rel="preconnect" href="${at}">`,
@@ -258,7 +260,7 @@ function probeTags(port: number): { head: string; body: string } {
       `<link rel="prerender" href="${at}/prerender">`,
       `<link rel="stylesheet" href="${at}/remote.css">`,
     ].join("\n"),
-    body: `<p class="links"><a href="${at}/window" target="_blank">New window</a> · <a href="${at}/page" ping="${at}/ping">Tracked link</a></p>`,
+    body: `<p class="links"><a href="${at}/window" target="_blank">New window</a> · <a href="${at}/page" ping="${at}/ping">Tracked link</a></p>\n${framed}`,
   };
 }
 

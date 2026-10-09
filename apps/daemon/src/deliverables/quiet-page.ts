@@ -6,6 +6,9 @@ const OPTIONS = { scriptingEnabled: false } as const;
 // Browsers stop nesting at 512 levels and would then read the page differently from here.
 const DEPTH = 256;
 const XLINK = "http://www.w3.org/1999/xlink";
+// Each holds a page of its own, which nothing here reads: WebKit acts on the hints in a srcdoc
+// before the policy applies. The policy loads none of them anyway.
+const FRAMES = new Set(["iframe", "frame", "object", "embed"]);
 
 function opensOrReports(attr: Html.Element["attrs"][number]): boolean {
   if (attr.namespace === XLINK) return attr.name === "show";
@@ -22,8 +25,8 @@ function stylesheet(link: Html.Element): boolean {
 }
 
 // Takes out what reaches a server before the page's policy applies in WebKit: a <link> that is not
-// a stylesheet (preconnect, prefetch, preload, prerender…), and where a link opens or reports a
-// click. Counts what it took out; past the depth it can check, Infinity.
+// a stylesheet (preconnect, prefetch, preload, prerender…), a frame, object or embed, and where a
+// link opens or reports a click. Counts what it took out; past the depth it can check, Infinity.
 function quiet(node: Html.ParentNode, depth: number): number {
   if (depth > DEPTH) return Number.POSITIVE_INFINITY;
   let found = 0;
@@ -33,7 +36,7 @@ function quiet(node: Html.ParentNode, depth: number): number {
       kept.push(child);
       continue;
     }
-    if (child.tagName === "link" && !stylesheet(child)) {
+    if ((child.tagName === "link" && !stylesheet(child)) || FRAMES.has(child.tagName)) {
       found++;
       continue;
     }

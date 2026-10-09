@@ -63,6 +63,21 @@ describe("a page as the preview serves it", () => {
     expect(elements(page).filter((e) => e.tagName === "a")).toHaveLength(5);
   });
 
+  it("takes out frames, objects and embeds, whose own pages it does not read", () => {
+    const page = served(`<p>before</p>
+      <iframe srcdoc="<link rel=preconnect href=//a.example>"></iframe>
+      <svg><foreignObject><iframe srcdoc="&lt;link rel=preconnect href=//b.example&gt;"></iframe></foreignObject></svg>
+      <object data=//c.example/x>fallback</object><embed src=//d.example/y>
+      <template><iframe srcdoc="<a href=//e.example target=_blank>e</a>"></iframe></template>
+      <p>after</p>`);
+    const framed = served("<frameset><frame src=//f.example></frameset>");
+    const kinds = [...elements(page), ...elements(framed)].map((e) => e.tagName);
+    for (const kind of ["iframe", "frame", "object", "embed"]) expect(kinds).not.toContain(kind);
+    expect(page).not.toContain("srcdoc");
+    expect(page).toContain("<p>before</p>");
+    expect(page).toContain("<p>after</p>");
+  });
+
   it("reads comments, raw text and odd attributes as the browser does", () => {
     const page = served(
       `<!-- <a title="--> <a href=//a.example target=_blank>">a</a>` +

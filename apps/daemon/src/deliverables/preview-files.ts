@@ -37,8 +37,8 @@ export const SVG_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-
 
 // A page dot made: no script, form, plugin, frame, font or connection; pictures only embedded or
 // from the same task's files, stylesheets inline or from them; framed only by localDot; sandboxed.
-// WebKit acts on connection hints and new-window links before this applies: quietPage takes those
-// out of the page itself.
+// WebKit acts on connection hints, a frame's srcdoc and new-window links before this applies:
+// quietPage takes those out of the page itself.
 export function htmlPolicy(origin: string, base: string): string {
   const own = `${origin}${base}`;
   return [
