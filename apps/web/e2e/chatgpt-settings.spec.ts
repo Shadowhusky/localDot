@@ -287,7 +287,10 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
     return route.abort();
   });
   await page.routeWebSocket("**/*", (socket) => {
-    expect(new globalThis.URL(socket.url()).pathname).toBe(`/api/cells/${CELL}/status`);
+    const path = new globalThis.URL(socket.url()).pathname;
+    // The app-wide events socket (routines, attention) stays open and quiet.
+    if (path === "/api/events") return;
+    expect(path).toBe(`/api/cells/${CELL}/status`);
     socket.send(
       JSON.stringify({
         id: CELL,

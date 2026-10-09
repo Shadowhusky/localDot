@@ -11,10 +11,12 @@ test.beforeEach(() => {
 const EARLIER = "Find last month's sales table";
 const LATEST = /^Summarise the sample sales table/;
 
-// The rail, on its chat.
+// The rail, on its chat; a phone's rail is only the chat.
 async function chat(page: Page) {
-  const view = page.getByRole("radio", { name: "Chat" });
-  if ((await view.getAttribute("aria-checked")) !== "true") await view.click();
+  if ((page.viewportSize()?.width ?? 0) >= 700) {
+    const view = page.getByRole("radio", { name: "Chat" });
+    if ((await view.getAttribute("aria-checked")) !== "true") await view.click();
+  }
   return page.getByRole("complementary", { name: "Conversation" });
 }
 
@@ -73,13 +75,15 @@ test("after Stop and Resume, the next message continues the conversation", async
 }) => {
   const fixture = await ui.open("running");
   const stopped = await shownTask(request, fixture.origin);
-  await page.getByRole("button", { name: "Stop", exact: true }).first().click();
-  await page.getByRole("button", { name: "Resume computer" }).click();
+  const island = page.locator(".island");
+  await island.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.getByTestId("hud-status")).toHaveText("Stopped");
+  await island.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByTestId("hud-status")).toHaveText("Task stopped");
   const rail = await chat(page);
   await expect(rail.getByRole("textbox", { name: "Message" })).toHaveAttribute(
     "placeholder",
-    "Message dot…",
+    "Message dot",
   );
   await send(page, "Now make the chart blue");
   const next = await latestTask(request, fixture.origin, stopped);
@@ -121,11 +125,13 @@ test("a daemon that went away under a task leaves the conversation to continue",
   await expect(page.getByTestId("hud-status")).toHaveText("Select the Net total cell");
   expect((await request.post(`${fixture.origin}/__qa/crash`)).ok()).toBe(true);
   // Without a reload, the page finds that no computer runs the task any more.
-  await expect(page.getByTestId("hud-status")).toHaveText("Task stopped", { timeout: 15_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Task interrupted", {
+    timeout: 15_000,
+  });
   await refresh(page);
   const rail = await chat(page);
   await expect(rail.getByText(LATEST)).toBeVisible();
-  await expect(page.getByTestId("hud-status")).toHaveText("Task stopped");
+  await expect(page.getByTestId("hud-status")).toHaveText("Task interrupted");
   await send(page, "Try that again");
   expect((await latestTask(request, fixture.origin, lost)).continues).toBe(lost);
 });
@@ -159,10 +165,18 @@ test("New conversation starts afresh and stays new after a refresh", async ({
 test("New conversation waits while dot works", async ({ page, ui }) => {
   await ui.open("running");
   await chat(page);
-  await expect(page.getByRole("button", { name: "New conversation" })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // In the rail's header; on a phone, first in More.
+  if ((page.viewportSize()?.width ?? 0) < 700) {
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(page.getByRole("menuitem", { name: "New conversation" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  } else
+    await expect(page.getByRole("button", { name: "New conversation" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
 });
 
 test("Continue on an older task in Replay makes its conversation current", async ({
@@ -183,7 +197,7 @@ test("Continue on an older task in Replay makes its conversation current", async
   );
   await page.goto(`${fixture.origin}/?replay=${older}#token=${TOKEN}`);
   await known;
-  const proceed = page.getByRole("button", { name: "Continue conversation" });
+  const proceed = page.getByRole("button", { name: "Continue working" });
   await expect(proceed).not.toHaveAttribute("aria-disabled", "true");
   await proceed.click();
   await expect(page).not.toHaveURL(/replay=/);

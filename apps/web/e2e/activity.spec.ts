@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { LocalDotEvent } from "@localdot/protocol";
 import { expect, type Page, test } from "@playwright/test";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { fits, isPhone, showActivity } from "./layout.ts";
 
 // Layout acceptance uses the built production page and its unchanged CSP. Only the API/stream
 // data are samples; no daemon, desktop, provider, keyd, account or shared browser is started.
@@ -217,7 +218,8 @@ async function load(page: Page, activeComposer = false) {
     if (url.pathname === `/api/cells/${CELL}/status`) ws.send(JSON.stringify(shownCell));
     else if (url.pathname === `/api/sessions/${SESSION}/stream`)
       for (const sample of samples) ws.send(sample);
-    else throw new Error("unexpected layout socket");
+    // The app-wide events socket (routines, attention) stays open and quiet.
+    else if (url.pathname !== "/api/events") throw new Error("unexpected layout socket");
   });
   await page.addInitScript(() => {
     localStorage.setItem("localdot.token", "a".repeat(43));
@@ -258,35 +260,20 @@ async function load(page: Page, activeComposer = false) {
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("sample timeline");
-  await expect(page.getByRole("list", { name: "Task plan", includeHidden: true })).toContainText(
-    "Prepare the report",
-  );
-  // The visible sample title also prevents these screenshots implying real application execution.
-  await expect(page.locator(".title")).toHaveText("Sample · mixed activity");
+  // A phone has no top bar; elsewhere the visible sample title also prevents these screenshots
+  // implying real application execution.
+  if (!isPhone(page))
+    await expect(page.locator(".bar-title")).toHaveText("Sample · mixed activity");
   return { errors, external, sockets };
 }
-async function fits(page: Page) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const box = await page.locator(".app").boundingBox();
-  expect(box?.height).toBe(await page.evaluate(() => innerHeight));
-  const stop = page.getByRole("button", { name: "Stop computer", exact: true });
-  await expect(stop).toBeVisible();
-  const touch = await stop.boundingBox();
-  expect(touch?.height).toBeGreaterThanOrEqual(44);
-  expect(touch?.width).toBeGreaterThanOrEqual(44);
-  expect((touch?.y ?? Infinity) + (touch?.height ?? Infinity)).toBeLessThanOrEqual(
-    await page.evaluate(() => innerHeight),
-  );
-}
-
 for (const width of [1280, 390]) {
   test(`mixed activity, filters and bounded inspection at ${width}px`, async ({ page }, info) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width, height: 800 });
     const proof = await load(page);
-    if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const rail = page.getByRole("complementary", { name: "Plan and steps" });
+    const rail = await showActivity(page);
     const plan = rail.getByRole("list", { name: "Task plan", exact: true });
+    await expect(plan).toContainText("Prepare the report");
     await expect(plan).toContainText("Send externally");
     await expect(plan.getByRole("img", { name: "Skipped", exact: true })).toHaveCount(1);
     await expect(rail.locator(".plan-count")).toHaveText("1 of 4 done");
@@ -346,8 +333,8 @@ for (const width of [1280, 390]) {
       page.getByRole("article", { name: "Your answer", includeHidden: true }),
     ).toContainText("Text report");
     expect(
-      await page.evaluate(() =>
-        [...document.querySelectorAll(".pane-activity *")]
+      await rail.evaluate((root) =>
+        [...root.querySelectorAll("*")]
           .filter((element) => /auto|scroll/.test(getComputedStyle(element).overflowY))
           .map((element) => element.className),
       ),

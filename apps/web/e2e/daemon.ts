@@ -10,7 +10,7 @@ import {
 } from "../../daemon/src/keyd/testing/keyd-process.ts";
 
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
-export const E2E_PORT = 4790;
+export const E2E_PORT = Number(process.env.LOCALDOT_E2E_PORT) || 4790;
 export const E2E_KEYD_PORTS = `${TEST_KEYD_PORTS.from}-${TEST_KEYD_PORTS.to}`;
 
 export type RunningKeyd = KeydProcess;

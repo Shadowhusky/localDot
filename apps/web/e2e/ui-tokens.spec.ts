@@ -132,7 +132,7 @@ for (const [engine, launch] of Object.entries(ENGINES)) {
           for (const [legacy, role] of [
             ["--color-surface", "--color-raised"],
             ["--color-surface-2", "--color-raised-2"],
-            ["--color-line", contrast ? "--color-field-line" : "--color-overlay"],
+            ["--color-line", contrast ? "--color-field-line" : "--color-popover"],
             ["--color-text", "--color-fg-1"],
             ["--color-text-2", "--color-fg-2"],
             ["--color-text-3", "--color-fg-3"],

@@ -1,15 +1,20 @@
 import type { Locator, Page } from "@playwright/test";
+import { nestedKeys } from "../settings-ui.ts";
 import { expect, type Harness, runAt, test } from "./harness.ts";
 
-// The Keys sheet beside the page at 1440, and as a sheet over it on a phone.
+// Keys, a section of Settings: in the inspector at 1440, and a page of its sheet on a phone.
 runAt("c14", "w39");
 
-// Opens Keys from the top bar; `then` gets the fixture's origin once the sheet shows.
+// Opens Keys from the top bar, or from More on a phone; `then` gets the fixture's origin once the
+// section shows.
 async function keys(page: Page, ui: Harness, then?: (origin: string) => Promise<void>) {
   const fixture = await ui.open("ready");
   await ui.picture();
-  await page.getByTestId("keys-button").click();
-  const sheet = page.getByRole("dialog", { name: "Keys", exact: true });
+  if ((page.viewportSize()?.width ?? 0) < 700) {
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Keys", exact: true }).click();
+  } else await page.getByTestId("keys-button").click();
+  const sheet = nestedKeys(page);
   await expect(sheet.getByText("Key isolation", { exact: true })).toBeVisible();
   await then?.(fixture.origin);
   return sheet;

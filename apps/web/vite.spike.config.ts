@@ -8,5 +8,8 @@ export default mergeConfig(base, {
   build: {
     outDir: fileURLToPath(new URL("./e2e/out/spike", import.meta.url)),
     emptyOutDir: true,
+    rolldownOptions: {
+      input: fileURLToPath(new URL("./src/ui/_spike/index.html", import.meta.url)),
+    },
   },
 });

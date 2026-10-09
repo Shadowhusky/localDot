@@ -15,6 +15,9 @@ import { AgentSession } from "../../daemon/src/agent/session.ts";
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { DesktopdTools } from "../../daemon/src/desktopd/tools-client.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { isPhone } from "./layout.ts";
+import { reach } from "./reach.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 // Owned production page/CSP, real authenticated agent routes, desktop file routes and actual
 // private files. Cell status/events/catalog are samples; no container, model or account runs.
@@ -235,6 +238,7 @@ async function load(page: Page) {
     external: string[] = [],
     downloads: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await skipSetup(page);
   page.on("download", (d) => downloads.push(d.suggestedFilename()));
   await page.route("**/*", (route) => {
     if (new URL(route.request().url()).origin === origin) return route.fallback();
@@ -247,7 +251,8 @@ async function load(page: Page) {
     if (url.pathname === `/api/cells/${CELL}/status`) ws.send(JSON.stringify(cell));
     else if (url.pathname === `/api/sessions/${SESSION}/stream`)
       for (const sample of samples) ws.send(sample);
-    else throw new Error("Unexpected owned fixture socket");
+    // The app-wide events socket (routines, attention) stays open and quiet.
+    else if (url.pathname !== "/api/events") throw new Error("Unexpected owned fixture socket");
   });
   await page.addInitScript(() => {
     localStorage.setItem("localdot.token", "a".repeat(43));
@@ -273,7 +278,8 @@ async function load(page: Page) {
   const response = await page.goto(origin);
   expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
   expect(response?.headers()["content-security-policy"]).not.toContain("unsafe-");
-  await expect(page.locator(".title")).toHaveText("Sample · files and results");
+  if (!isPhone(page))
+    await expect(page.locator(".bar-title")).toHaveText("Sample · files and results");
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("Sample report ready");
@@ -293,7 +299,6 @@ for (const width of [1280, 390])
   }, info) => {
     await page.setViewportSize({ width, height: 800 });
     const proof = await load(page);
-    if (width < 1100) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
     await page.getByLabel("Message", { exact: true }).fill("Read the two sample files");
     expect(messages).toEqual([]);
     expect(proof.downloads).toEqual([]);
@@ -372,11 +377,14 @@ for (const width of [1280, 390])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    const stop = page.locator(".task-bar").getByRole("button", { name: "Stop", exact: true });
-    await expect(stop).toBeVisible();
-    const box = await stop.boundingBox();
-    expect(box?.height).toBeGreaterThanOrEqual(44);
-    expect((box?.y ?? Infinity) + (box?.height ?? Infinity)).toBeLessThanOrEqual(800);
+    // The composer's controls stay on screen and take a finger after the files went through.
+    for (const name of ["Attach files", "Send follow-up"]) {
+      const control = page.getByRole("form", { name: "Message dot" }).getByRole("button", { name });
+      await expect(control).toBeVisible();
+      expect(await control.evaluate(reach), name).toEqual({ width: 44, height: 44 });
+      const box = await control.boundingBox();
+      expect((box?.y ?? Infinity) + (box?.height ?? Infinity)).toBeLessThanOrEqual(800);
+    }
     if (width < 1100) await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
     expect(proof.errors).toEqual([]);
     expect(proof.external).toEqual([]);

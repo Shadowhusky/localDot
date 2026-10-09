@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { LocalDotEvent } from "@localdot/protocol";
 import { expect, type Page, test } from "@playwright/test";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { fits, isPhone, showActivity } from "./layout.ts";
 
 // Layout acceptance uses the built production page and its unchanged CSP. Only the API/stream
 // data are samples; no daemon, desktop, provider, keyd, account or shared browser is started.
@@ -166,7 +167,8 @@ async function load(page: Page, activeComposer = false) {
     if (url.pathname === `/api/cells/${CELL}/status`) ws.send(JSON.stringify(shownCell));
     else if (url.pathname === `/api/sessions/${SESSION}/stream`)
       for (const sample of samples) ws.send(sample);
-    else throw new Error("unexpected layout socket");
+    // The app-wide events socket (routines, attention) stays open and quiet.
+    else if (url.pathname !== "/api/events") throw new Error("unexpected layout socket");
   });
   await page.addInitScript(() => {
     localStorage.setItem("localdot.token", "a".repeat(43));
@@ -207,25 +209,11 @@ async function load(page: Page, activeComposer = false) {
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("sample sales table");
-  await expect(page.getByRole("list", { name: "Task plan", includeHidden: true })).toContainText(
-    "Calculate monthly totals",
-  );
-  // The visible sample title also prevents these screenshots implying real application execution.
-  await expect(page.locator(".title")).toHaveText("Sample · monthly report");
+  // A phone has no top bar; elsewhere the visible sample title also prevents these screenshots
+  // implying real application execution.
+  if (!isPhone(page))
+    await expect(page.locator(".bar-title")).toHaveText("Sample · monthly report");
   return { errors, external, sockets };
-}
-async function fits(page: Page) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const box = await page.locator(".app").boundingBox();
-  expect(box?.height).toBe(await page.evaluate(() => innerHeight));
-  const stop = page.getByRole("button", { name: "Stop computer", exact: true });
-  await expect(stop).toBeVisible();
-  const touch = await stop.boundingBox();
-  expect(touch?.height).toBeGreaterThanOrEqual(44);
-  expect(touch?.width).toBeGreaterThanOrEqual(44);
-  expect((touch?.y ?? Infinity) + (touch?.height ?? Infinity)).toBeLessThanOrEqual(
-    await page.evaluate(() => innerHeight),
-  );
 }
 
 for (const width of [1280, 390]) {
@@ -237,16 +225,21 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 800 });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const proof = await load(page);
-    if (width < 1100) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
     const markdown = page.locator(".safe-markdown");
     await expect(markdown.locator("strong")).toHaveText("monthly total");
     await expect(markdown.locator("ul li")).toHaveCount(2);
     await expect(markdown.locator("pre")).toHaveText("Total: 12,480");
-    await expect(markdown.locator("a")).toHaveCount(1);
+    // The link, and the remote image as a chip that links to it instead of loading it.
+    await expect(markdown.locator("a")).toHaveCount(2);
     const link = markdown.getByRole("link", { name: "Report reference" });
+    const image = markdown.getByRole("link", { name: "Image · example.test" });
     await expect(link).toHaveAttribute("href", "https://example.test/report");
-    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
-    await expect(link).toHaveAttribute("referrerpolicy", "no-referrer");
+    await expect(image).toHaveAttribute("href", "https://example.test/image");
+    for (const anchor of [link, image]) {
+      await expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
+      await expect(anchor).toHaveAttribute("referrerpolicy", "no-referrer");
+    }
+    await expect(markdown).toContainText("[unsafe](javascript:alert(1))");
     // Only the code block's own copy icon is a picture; nothing in the reply renders as one.
     expect(
       await markdown.locator("img,svg:not(.ui-icon),iframe,object,embed,script,style").count(),
@@ -257,7 +250,10 @@ for (const width of [1280, 390]) {
         () => (window as unknown as { outputClipboard: { writes: number } }).outputClipboard.writes,
       ),
     ).toBe(0);
-    if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    const rail = await showActivity(page);
+    await expect(rail.getByRole("list", { name: "Task plan" })).toContainText(
+      "Calculate monthly totals",
+    );
     const trigger = page.getByRole("button", { name: /Check report/ });
     await trigger.click();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");

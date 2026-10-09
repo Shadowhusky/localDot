@@ -21,6 +21,7 @@ import { type AgentRoutesDeps, agentRoutes } from "../../daemon/src/agent/routes
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
 import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 // Production UI/CSP, real settings routes/private store and real browser ECDH/AES-GCM. The
 // computer, keyd metadata and catalog are owned stand-ins; no model/account/shared service runs.
@@ -210,6 +211,8 @@ async function load(page: Page) {
   });
   await page.routeWebSocket("**/*", (ws) => {
     const path = new URL(ws.url()).pathname;
+    // The app-wide events socket (routines, attention) stays open and quiet.
+    if (path === "/api/events") return;
     if (path !== `/api/cells/${CELL}/status`) throw new Error("unexpected settings socket");
     ws.send(
       JSON.stringify({
@@ -233,9 +236,8 @@ async function load(page: Page) {
       csp.push(event.effectiveDirective),
     );
   });
+  await skipSetup(page);
   await page.goto(origin);
-  const conversation = page.getByRole("tab", { name: "Conversation" });
-  if (await conversation.isVisible()) await conversation.click();
   await expect(page.getByRole("button", { name: "Choose…" })).toBeEnabled();
   return { errors, external };
 }
@@ -243,14 +245,13 @@ for (const width of [1280, 390])
   test(`sealed configuration and nested Keys ownership at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 800 });
     const audit = await load(page);
-    if (width < 1100) await page.getByRole("tab", { name: "Conversation" }).click();
     const draft = page.getByLabel("New task");
     await draft.fill("Prepare a sample report later.");
     await draft.press("Enter");
     const sheet = settingsSheet(page);
     await expect(sheet).toBeVisible();
-    // Beside the page on a wide screen, so the page stays live; a phone's sheet covers it.
-    await expect(page.locator(".theatre-content")).not.toHaveAttribute("inert", "");
+    // One inspector over the page, which waits under it.
+    await expect(sheet).toHaveAttribute("aria-modal", "true");
     const main = roleCard(sheet, "main");
     const provider = main.getByRole("combobox", { name: "Provider", exact: true });
     try {
@@ -280,8 +281,7 @@ for (const width of [1280, 390])
     await expect(input).toHaveValue("");
     await expect(output).toHaveValue("");
     await main.getByRole("button", { name: "Add key", exact: true }).click();
-    await expect(sheet).toBeHidden();
-    await expect(page.getByRole("dialog", { name: "Keys" })).toBeVisible();
+    // Keys is a section of Settings: on the same page beside a wide screen, pushed on a phone.
     const keySheet = nestedKeys(page);
     await expect(keySheet.getByRole("combobox", { name: "Provider" })).toHaveText(
       "OpenAI-compatible",
@@ -292,23 +292,24 @@ for (const width of [1280, 390])
     await keySheet.getByRole("button", { name: "Save key", exact: true }).click();
     await expect(keySheet.getByLabel("Key", { exact: true })).toHaveValue("");
     await expect(keySheet.getByRole("status")).toContainText("Saved fixture-gateway.");
-    await keySheet.getByRole("button", { name: "Settings", exact: true }).click();
-    await expect(page.locator("#keys-sheet")).toBeHidden();
-    await expect(sheet).toBeVisible();
-    await expect(main.getByRole("button", { name: "Add key", exact: true })).toBeFocused();
+    if (width < 700) {
+      await sheet.getByRole("button", { name: "Models", exact: true }).click();
+      await expect(keySheet).toBeHidden();
+    }
     await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(
       "fixture-gateway",
     );
     await expect(custom).toHaveValue("fixture-custom-x");
-    const save = sheet.getByRole("button", { name: "Save", exact: true });
-    await expect(save).toBeDisabled();
+    // Changes save themselves once they can be, and a model with no price can't be.
+    const problems = sheet.getByRole("status").filter({ hasText: "Before this can be saved:" });
+    await expect(problems).toBeVisible();
     await input.fill("0");
-    await expect(save).toBeDisabled();
+    await expect(problems).toBeVisible();
     await output.fill("0");
-    await expect(save).toBeDisabled();
+    await expect(problems).toBeVisible();
+    expect(settings.get()).toEqual({});
     await output.fill("2");
-    await expect(save).toBeEnabled();
-    await save.click();
+    await expect(problems).toBeHidden();
     await expect
       .poll(() => settings.get())
       .toEqual({
@@ -319,7 +320,6 @@ for (const width of [1280, 390])
           price: { inputUSDPerMTok: 0, outputUSDPerMTok: 2 },
         },
       });
-    await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
     await input.scrollIntoViewIfNeeded();
     const heading = await sheet.locator(".ui-sheet-header").boundingBox(),
       field = await input.boundingBox();
@@ -334,7 +334,9 @@ for (const width of [1280, 390])
         body.scrollTop = 0;
       });
     await page.screenshot({ path: info.outputPath(`settings-${width}-sample.png`) });
-    await page.getByRole("button", { name: "Close settings" }).click();
+    await sheet
+      .getByRole("button", { name: width < 700 ? "Done" : "Close settings", exact: true })
+      .click();
     await expect(draft).toBeFocused();
     await expect(draft).toHaveValue("Prepare a sample report later.");
     await expect(page.getByRole("button", { name: "Start task", exact: true })).toBeEnabled();

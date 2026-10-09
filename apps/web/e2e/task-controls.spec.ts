@@ -333,7 +333,7 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
           if (id === f.id) ws.send(JSON.stringify(event));
         });
         ws.onClose(unsubscribe);
-      } else throw new Error("Unexpected owned socket");
+      } else if (url.pathname !== "/api/events") throw new Error("Unexpected owned socket");
     },
   );
   await page.addInitScript(() => {

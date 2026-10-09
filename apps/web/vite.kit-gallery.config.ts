@@ -8,5 +8,8 @@ export default mergeConfig(base, {
   build: {
     outDir: fileURLToPath(new URL("./e2e/out/kit-gallery", import.meta.url)),
     emptyOutDir: true,
+    rolldownOptions: {
+      input: fileURLToPath(new URL("./src/ui/gallery/index.html", import.meta.url)),
+    },
   },
 });

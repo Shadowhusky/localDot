@@ -30,7 +30,10 @@ test("first run shows Turn on without scrolling and keeps the stage where the co
   ui,
 }) => {
   await ui.open("first-run");
-  const turnOn = page.locator(".curtain").getByRole("button", { name: "Turn on" });
+  // Once pressed it keeps its box but leaves the accessibility tree to the progress line.
+  const turnOn = page
+    .locator(".curtain")
+    .getByRole("button", { name: "Turn on", includeHidden: true });
   await expect(turnOn).toBeVisible();
   const viewport = page.viewportSize() ?? { width: 0, height: 0 };
   const button = await turnOn.boundingBox();
