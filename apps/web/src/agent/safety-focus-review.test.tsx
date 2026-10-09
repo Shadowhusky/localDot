@@ -3,7 +3,6 @@ import type { ApprovalCard, PauseSnapshot } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { DesktopFrame } from "../stage/DesktopFrame.tsx";
 import { type AgentFeedState, emptyAgentModel } from "./model.ts";
 import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -80,7 +79,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
     });
     return (
       <>
-        <DesktopFrame src="about:blank" onSource={() => {}} onStale={() => {}} />
+        <iframe src="about:blank" title="Desktop stream client" />
         <label>
           Parent task draft
           <input aria-label="Parent task draft" />

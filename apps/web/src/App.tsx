@@ -94,8 +94,10 @@ import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
+import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
@@ -257,6 +259,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
+  const streamChoice = useStreamPreference();
   const [replayId, setReplayId] = useState<string | null>(() =>
     replayAddress(new URLSearchParams(window.location.search).get("replay")),
   );
@@ -410,8 +413,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
     wasSettingsOpen.current = settings.open;
   }, [settings.open]);
-  const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
+  const [picture, setPicture] = useState<StreamPicture>("none");
   const conversation = useConversation(api);
   const session = useLiveSession(
     api,
@@ -447,6 +450,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const selectedScreen = agent.model.screen ?? agent.snapshot?.screen;
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
+  const hud = hudFor({
+    cell,
+    status,
+    pending,
+    picture: physicalStageCell === cell ? picture : "none",
+  });
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
   const phone = layout === "phone";
@@ -553,7 +562,11 @@ function Theatre({ api }: { api: ApiClient }) {
     return plan.kind === "answer" ? "answered" : "declined";
   };
   const manualLive =
-    yours && controls.canInput && physicalStageCell?.state === "ready" && !physicalStageCell.paused;
+    yours &&
+    controls.canInput &&
+    physicalStageCell?.state === "ready" &&
+    !physicalStageCell.paused &&
+    !(selectedScreen?.screen === "browser" && browserScreen.stale);
   const manual = useManualChannel(
     api,
     manualLive ? agent.sessionId : null,
@@ -639,10 +652,10 @@ function Theatre({ api }: { api: ApiClient }) {
         : physicalStageCell;
   // The displayed screen owns video visibility. Parent lifecycle controls still
   // use the desktop HUD, even when only the separate browser has a live viewer.
-  const stageHud = hudFor({ cell: stageCell, status, pending });
+  const stageHud = hudFor({ cell: stageCell, status, pending, picture });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
-      ? hudFor({ cell: stageCell, status, pending })
+      ? stageHud
       : hud;
   // Which conversation and task the thread shows is not known yet.
   const threadPending =
@@ -1088,7 +1101,7 @@ function Theatre({ api }: { api: ApiClient }) {
               boxRef={stageBox}
               onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
               light={appStatus.control ? "dot" : yours ? "you" : "none"}
-              live={stageHud.live}
+              live={stageHud.live || stageHud.phase === "reconnecting"}
               frozen={!!stageHud.paused}
               curtain={
                 <Presence show={curtain.up}>
@@ -1222,6 +1235,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 api={api}
                 reconnects={reconnects + browserScreen.reconnects}
                 listed={listed}
+                onPicture={setPicture}
                 manual={
                   yours && manualGeometry && !agent.model.ended
                     ? {
@@ -1436,6 +1450,7 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
+          stream={streamChoice}
           taskControls={<StopControl controls={controls} />}
           stop={sheetStopControl}
           open={settings.open}
