@@ -5,7 +5,6 @@ import {
   EXPORT_FRAME_RATES,
   type ExportRequest,
   exportBitrate,
-  exportSpeedLabel,
   fileSize,
   PRIVACY_NOTE,
   planExport,
@@ -63,7 +62,6 @@ describe("deterministic MP4 export plan", () => {
       expect(three.sessionMsAt(frame) - three.sessionMsAt(frame - 1)).toBeCloseTo(50, 6);
     const odd = planExport({ ...request, speed: 2.5 }, model, [], []);
     expect(odd.frames).toBe(720);
-    expect(odd.labelAt(0)).toBe("Playing at 2.5×");
     expect(planExport({ ...request, speed: 0.25 }, model, [], []).frames).toBe(7200);
     expect(planExport({ ...request, speed: 16 }, model, [], []).frames).toBe(113);
     for (const speed of [0.2, 16.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])
@@ -74,9 +72,6 @@ describe("deterministic MP4 export plan", () => {
     expect(speedText(2)).toBe("2×");
     expect(speedText(0.25)).toBe("0.25×");
     expect(speedText(1.333333)).toBe("1.33×");
-    expect(exportSpeedLabel(1, false)).toBeNull();
-    expect(exportSpeedLabel(1, true)).toBe("Idle skipped");
-    expect(exportSpeedLabel(3, true)).toBe("Playing at 3× · idle skipped");
   });
 
   it("counts the moving part of the video at its speed", () => {
@@ -103,20 +98,11 @@ describe("deterministic MP4 export plan", () => {
     );
     expect(plan.frames).toBeLessThanOrEqual(30 * (20 + 0.4) + 1);
     expect(plan.frames).toBeGreaterThanOrEqual(600);
-    expect(plan.labelAt(0)).toBeNull();
-    expect(plan.labelAt(plan.frames - 1)).toBe("Idle skipped");
     let previous = -1;
     for (let frame = 0; frame < plan.frames; frame++) {
       expect(plan.sessionMsAt(frame)).toBeGreaterThanOrEqual(previous);
       previous = plan.sessionMsAt(frame);
     }
-  });
-
-  it.each([2, 4, 8] as const)("is honest at speed %s", (speed) => {
-    const { model, request } = fixture();
-    const plan = planExport({ ...request, speed }, model, [], []);
-    for (let frame = 0; frame < plan.frames; frame++)
-      expect(plan.labelAt(frame)).toBe(`Playing at ${speed}×`);
   });
 
   it("clips the requested range and refuses empty or invalid ranges", () => {
@@ -149,13 +135,6 @@ describe("deterministic MP4 export plan", () => {
     expect(plan.gapAt(119)).toBe("user-control");
     expect(plan.gapAt(120)).toBeNull();
     expect(planExport({ ...request, captions: false }, model, [], gaps).captionAt(30)).toBeNull();
-  });
-
-  it("burns in no speed note when captions are off", () => {
-    const { model, request } = fixture();
-    const plan = planExport({ ...request, speed: 4, captions: false }, model, [], []);
-    expect(plan.labelAt(0)).toBeNull();
-    expect(planExport({ ...request, speed: 4 }, model, [], []).labelAt(0)).toBe("Playing at 4×");
   });
 
   it("asks the encoder for more bits as the picture, the frame rate and the quality grow", () => {

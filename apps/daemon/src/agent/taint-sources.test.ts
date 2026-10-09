@@ -36,6 +36,37 @@ describe("where a task reads private data", () => {
     expect(taints(h)).toEqual([{ kind: "screen", origin: "example.com" }]);
   });
 
+  it("controls found on a screen the user is signed in on, and not on another", async () => {
+    const h = toolHarness();
+    const desktop = h.tools.desktop;
+    h.tools.desktop = (cellId) => {
+      const tools = desktop(cellId);
+      if (!tools) return tools;
+      return {
+        ...tools,
+        elements: async () => ({
+          elements: [
+            {
+              source: "ax",
+              point: { x: 60, y: 20 },
+              role: "label",
+              name: "Balance 4417-1234-5678",
+              window: "Bank",
+              bbox: { x: 10, y: 10, w: 100, h: 20 },
+            },
+          ],
+          truncated: false,
+        }),
+      };
+    };
+    expect((await h.call("find", { text: "Balance" })).body.ok).toBe(true);
+    expect(taints(h)).toEqual([]);
+    h.session.taskAutonomy.signIn("desktop");
+    await h.call("find", { text: "Balance" });
+    expect(taints(h)).toEqual([{ kind: "screen", origin: "desktop screen" }]);
+    expect(h.session.taint.overlap("my balance is 4417-1234-5678").overlaps).toBe(true);
+  });
+
   it("a screenshot of a signed-in screen, from the tool or the frame it names", async () => {
     const h = toolHarness();
     await h.call("computer", { action: "screenshot" });

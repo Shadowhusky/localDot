@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import type { ApprovalCard, PauseSnapshot } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import type { PauseSnapshot } from "@localdot/protocol";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type AgentFeedState, emptyAgentModel } from "./model.ts";
@@ -84,7 +84,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
           Parent task draft
           <input aria-label="Parent task draft" />
         </label>
-        <SafetyNotes safety={current} agent={agent} cell={cell} />
+        <SafetyNotes safety={current} agent={agent} />
       </>
     );
   }

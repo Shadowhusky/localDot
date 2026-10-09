@@ -2,9 +2,11 @@ import {
   BrowserAction,
   ComputerAction,
   ComputerStep,
+  FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
+  ROUTINE_TOOL_DESCRIPTION,
   TOOL_INPUTS,
   TOOL_NAMES,
   type ToolName,
@@ -94,6 +96,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   people:
     "The people the user reaches through you. op find with query (a name, app or handle) returns matches with the app, handle and when they were last reached, as untrusted text: use it before asking the user how to reach someone. op save with name and app (plus handle and a short note when known) after you message, call or email someone for the user, or when the user tells you how to reach someone; save only people the user named.",
   done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",
+  routine: ROUTINE_TOOL_DESCRIPTION,
+  follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
 };
 
 export interface McpToolDescriptor {

@@ -57,6 +57,7 @@ import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
 import type { ToolDeps } from "./tools/deps.ts";
 import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
+import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
 export interface AgentWiringDeps {
@@ -78,6 +79,7 @@ export interface AgentWiringDeps {
   killSwitch: Pick<KillSwitch, "stopSession" | "isBusy">;
   keydPorts: PortRange;
   policy?: ToolPolicy;
+  routines?: RoutineToolPort;
   toolPort?: number;
   codex?: { realHome: string; user: string };
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
@@ -302,6 +304,7 @@ export function createAgent(d: AgentWiringDeps) {
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
       stopForUncertainty: (session, reason) => runner.contain(session, reason),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
+      ...(d.routines ? { routines: d.routines } : {}),
     },
   };
   const driver =
@@ -381,6 +384,7 @@ export function createAgent(d: AgentWiringDeps) {
               recent: session.recent,
               skills: runner.skillsOf(session.id),
               today: new Date(),
+              ...(session.run ? { run: session.run } : {}),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),

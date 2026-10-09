@@ -8,6 +8,9 @@ import {
   KeydEvent,
   KeydMinted,
   KeydOpened,
+  KeydPushKey,
+  KeydPushRequest,
+  KeydPushSent,
   KeydRecord,
   KeydRevoked,
   type KeydRouteModel,
@@ -217,6 +220,17 @@ export class KeydClient {
     if (result.route !== route)
       throw new KeydError(200, "bad-reply", "route identity mismatch", path);
     return result.models ?? [];
+  }
+
+  // keyd's Web Push key (the browsers' applicationServerKey). keyd makes it on first use.
+  pushKey(): Promise<KeydPushKey> {
+    return this.#json("GET", "/v1/push/key", undefined, KeydPushKey);
+  }
+
+  // keyd signs the VAPID token itself and sends the ciphertext to the push service named by the
+  // endpoint; the daemon never holds the signing key or the token.
+  async pushSend(request: KeydPushRequest): Promise<KeydPushSent> {
+    return this.#json("POST", "/v1/push/send", KeydPushRequest.parse(request), KeydPushSent);
   }
 
   budget(): Promise<KeydBudget> {

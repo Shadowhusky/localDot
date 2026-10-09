@@ -283,9 +283,9 @@
   }
 
   /* The surface runs on below the screen's edge, so a spring that overshoots never shows a gap.
-     Detents: fit hugs its content; medium leaves the stage in view (top 214); large covers all but
+     Detents: fit hugs its content; medium leaves the stage in view (top 238); large covers all but
      the top 40 and pushes the page back. Holding both, it is sized for large and rests in medium
-     174 px lower (sheet-drag.ts DETENT_TOP holds the same numbers). */
+     198 px lower (sheet-drag.ts DETENT_TOP holds the same numbers). */
   .ui-sheet[data-side="bottom"] {
     --_bleed: calc(var(--spacing) * 12);
     --_top: var(--sheet-large-top);

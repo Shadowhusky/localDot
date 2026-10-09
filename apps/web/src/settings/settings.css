@@ -383,6 +383,46 @@
   height: calc(var(--spacing) * 4);
 }
 
+/* Notifications: a Mac and a Phone column of switches, each head centred over its switch. A
+   switch with a hidden label keeps the kit's gap before it, so each head takes that gap too. */
+.settings-notify-columns {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  margin-right: calc(var(--spacing) * 2.5);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.settings-notify-columns > span {
+  width: 38px;
+  margin-left: calc(var(--spacing) * 3);
+  text-align: center;
+}
+
+.settings-notify-result {
+  display: inline;
+}
+
+.settings-notify-result[data-failed] {
+  color: var(--color-fg-2);
+}
+
+.settings-notify-result > svg {
+  margin-right: var(--spacing);
+  vertical-align: -1px;
+}
+
+/* A link the clipboard refused, under its row and in line with the row's text. */
+.settings-notify-link {
+  margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 1.5) calc(var(--spacing) * 10);
+}
+
+.settings-body .ui-group-row .settings-notify-link .ui-text-field {
+  width: auto;
+}
+
 @media (width < 700px) {
   .settings-body {
     gap: calc(var(--spacing) * 6.5);
@@ -407,6 +447,11 @@
 
   .settings-body .ui-group-row .ui-text-field {
     width: 8.5rem;
+  }
+
+  .settings-notify-columns {
+    gap: var(--spacing);
+    margin-right: calc(var(--spacing) * -0.5);
   }
 
   .settings-autonomy-row {

@@ -12,6 +12,7 @@ import {
   TranscriptAppend,
   TranscriptMessage,
 } from "./tool-api.ts";
+import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 import { GenericComputerInput, isToolName, TOOL_INPUTS, TOOL_NAMES } from "./tools.ts";
 
 const base = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "main" } as const;
@@ -36,6 +37,8 @@ describe("the v1 tool table", () => {
       "recall",
       "people",
       "done",
+      "routine",
+      "follow_up_at",
     ]);
     expect(isToolName("shell")).toBe(true);
     expect(isToolName("switch_screen")).toBe(true);
@@ -415,5 +418,31 @@ describe("agent events", () => {
         data: { askId: ID, question: "q".repeat(1001), options: [], allowText: true },
       }),
     ).toThrow();
+  });
+});
+
+describe("routine tools", () => {
+  it("are in the v1 table", () => {
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(["routine", "follow_up_at"]));
+    expect(TOOL_INPUTS.routine).toBe(RoutineToolInput);
+    expect(TOOL_INPUTS.follow_up_at).toBe(FollowUpAtInput);
+  });
+  it("give the model no way to activate, fund or loosen a routine", () => {
+    const parsed = RoutineToolInput.parse({
+      op: "propose",
+      name: "Bills",
+      instruction: "Check bills",
+      when: { kind: "daily", time: "08:30" },
+      active: true,
+      budget_usd: 50,
+      approval_window: 240,
+    });
+    expect(parsed).not.toHaveProperty("active");
+    expect(parsed).not.toHaveProperty("budget_usd");
+    expect(parsed).not.toHaveProperty("approval_window");
+    expect(RoutineToolInput.safeParse({ op: "propose", profile: "act_within_rules" }).success).toBe(
+      false,
+    );
+    expect(FollowUpAtInput.safeParse({ at: "2026-10-12 15:00", note: "x" }).success).toBe(false);
   });
 });

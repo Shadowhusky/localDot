@@ -255,6 +255,10 @@ export const ICONS = {
     ["line", { x1: "8", x2: "16", y1: "21", y2: "21" }],
     ["line", { x1: "12", x2: "12", y1: "17", y2: "21" }],
   ],
+  smartphone: [
+    ["rect", { width: "14", height: "20", x: "5", y: "2", rx: "2", ry: "2" }],
+    ["path", { d: "M12 18h.01" }],
+  ],
   power: [
     ["path", { d: "M12 2.5v9" }],
     ["path", { d: "M18.4 6.6a8.5 8.5 0 1 1-12.8 0" }],
@@ -395,6 +399,12 @@ export const ICONS = {
     ["path", { d: "M16 13H8" }],
     ["path", { d: "M16 17H8" }],
     ["path", { d: "M10 9H8" }],
+  ],
+  repeat: [
+    ["path", { d: "m17 2 4 4-4 4" }],
+    ["path", { d: "M3 11v-1a4 4 0 0 1 4-4h14" }],
+    ["path", { d: "m7 22-4-4 4-4" }],
+    ["path", { d: "M21 13v1a4 4 0 0 1-4 4H3" }],
   ],
 } as const satisfies Record<string, IconNode>;
 

@@ -93,7 +93,7 @@
   }
 }
 
-/* A phone (design-v2 §8.4, §11 M): four regions and no top bar. The island hangs on a stage near the
+/* A phone (design-v2 §8.4, §11 M): four regions and no top bar. The island sits over a stage near the
    top, dot and its line sit under it, the thread is the one scroller and the toolbar is its foot. */
 @media (--phone) {
   .app {
@@ -108,7 +108,7 @@
 
   .stage-col {
     grid-area: 1 / 1;
-    padding: calc(24px + env(safe-area-inset-top)) 8px 0;
+    padding: calc(var(--stage-top) + env(safe-area-inset-top)) 8px 0;
   }
 
   .stage-col > .stage-frame {
@@ -159,7 +159,13 @@
 
   .stage-col > .stage-frame {
     width: calc(
-      (100dvh - 24px - env(safe-area-inset-top) - var(--band-min) - env(safe-area-inset-bottom)) *
+      (
+        100dvh -
+        var(--stage-top) -
+        env(safe-area-inset-top) -
+        var(--band-min) -
+        env(safe-area-inset-bottom)
+      ) *
       1.6
     );
   }
@@ -170,7 +176,8 @@
 }
 
 /* Focus mode (design-v2 §8.5): sideways with the computer live, the picture takes the screen's
-   height, dot and the step it is on sit in the left margin and the task's controls in the right. */
+   height under the island's strip, dot and the step it is on sit in the left margin and the task's
+   controls in the right. */
 .app[data-focus] {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -181,11 +188,11 @@
 }
 
 .app[data-focus] .stage-col {
-  padding: 8px 0;
+  padding: var(--stage-top) 0 8px;
 }
 
 .app[data-focus] .stage-col > .stage-frame {
-  width: calc((100dvh - 16px) * 1.6);
+  width: calc((100dvh - var(--stage-top) - 8px) * 1.6);
   max-width: calc(100% - 2 * (56px + 16px));
 }
 

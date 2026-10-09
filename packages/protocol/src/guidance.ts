@@ -1,9 +1,29 @@
+import type { SessionRun } from "./routines.ts";
+
 // How dot works, for every harness that runs it: the brain's system prompt and the ChatGPT plan's
 // instructions. Every line is paid for on every model call, so it stays short.
 
 // How the model works the screen: inputs batched in one computer call, several computer calls in
 // one turn (tools without batches), or no computer at all.
 export type ScreenHands = "batch" | "calls" | "none";
+
+const PROFILE_LINE: Record<SessionRun["profile"], string> = {
+  read_only:
+    "This run is read-only: you can look, scroll and read, but not type, click, run commands or change files.",
+  ask_first: "Anything consequential waits for the user's approval.",
+  act_within_rules: "You may act within the user's usual approval rules.",
+};
+
+/** A routine started this task: nobody is watching, so finish cleanly and ask only when stuck. */
+export function thisRunSection(run: SessionRun | undefined): string {
+  if (!run) return "";
+  const name = run.name.replace(/["\r\n#<>]/g, " ").trim();
+  return `\n\n# This run\nThis task was started by the routine "${name}", not by the user in person: they are not watching. ${PROFILE_LINE[run.profile]}\n- Prefer finishing with done and a short summary of what you found and did.\n- Ask only when you cannot continue without the user. A question or approval waits up to ${run.approvalWindowMinutes} minutes, then this run ends.\n- If something was not possible, say what you could not do and why.`;
+}
+
+// Said with the memory files, which every prompt shows below its rules.
+export const CHECK_MEMORY_FIRST =
+  "Before asking the user something they may have told you, check these files, then people and recall.";
 
 const SEQUENCES: Record<Exclude<ScreenHands, "none">, string> = {
   batch:
@@ -29,7 +49,6 @@ export function workingRules(hands: ScreenHands): string {
     "Inside your computer, do whatever the task needs without asking: install packages, write and run scripts, open and use apps.",
     "The safety system asks the user before consequential steps such as sending, posting, buying, deleting online data, uploading files or changing account settings, so never ask the user for permission yourself.",
     "Use ask_user only when you cannot continue without the user's information or a choice that would change the result. Otherwise pick sensible defaults for small details and mention them in your summary.",
-    "Before asking the user something they may have told you before, check what you know below, then people and recall.",
     "Use the web browser screen for the web: it keeps the user's sign-ins. browser_navigate opens a site there and switches to it; switch_screen moves between it and the desktop (take a screenshot after switching, before GUI input). The desktop's Chromium is only for local files and localhost; a link a desktop app opens there has none of the user's sign-ins, so open it with browser_navigate. Shell and files work on the desktop.",
     "To sign in, ask with ask_user: a text field for the username or email and a secret field whose target is the password box (it is typed for you, unseen), or a code field for a one-time code. Prefer a password or code to a QR code: the user may be on the phone that would scan it. Sign-ins are kept for later tasks.",
     "Never ask for passwords, card numbers or other secrets in a plain message or a text field, and never type them yourself: ask with a secret field.",

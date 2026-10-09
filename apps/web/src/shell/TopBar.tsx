@@ -1,4 +1,4 @@
-import { type CSSProperties, memo, type ReactNode, type Ref } from "react";
+import { memo, type ReactNode, type Ref } from "react";
 import type { KeyStatus } from "../keys/useKeys.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
@@ -14,6 +14,8 @@ export interface TopBarProps {
   // Before the modes: what the stage's content offers, such as Continue on a recording.
   lead?: ReactNode;
   mode: Mode;
+  // While Replay shows, the live task needs you: Watch carries the amber point.
+  watchAttention?: boolean;
   replayEnabled: boolean;
   onMode(mode: Mode): void;
   // The chosen mode pressed again, such as Replay while a recording plays.
@@ -25,18 +27,18 @@ export interface TopBarProps {
   settingsOpen: boolean;
   onSettings(trigger: HTMLButtonElement): void;
   settingsRef?: Ref<HTMLButtonElement>;
-  // The risen island's width: the centre is its alone, and the title yields.
-  centre?: number;
-  ref?: Ref<HTMLElement>;
+  // At the very end: what has no place of its own, such as Stop everything.
+  more?: ReactNode;
 }
 
-// The wordmark and what is on the stage; the empty centre the island rises into; then the modes,
-// Settings and Keys. It redraws only when one of these changes, never with the task.
+// The wordmark and what is on the stage, then the modes, Settings and Keys. It redraws only when one
+// of these changes, never with the task.
 export const TopBar = memo(function TopBar({
   title,
   note,
   lead,
   mode,
+  watchAttention = false,
   replayEnabled,
   onMode,
   onModeAgain,
@@ -47,11 +49,10 @@ export const TopBar = memo(function TopBar({
   settingsOpen,
   onSettings,
   settingsRef,
-  centre,
-  ref,
+  more,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
-    { value: "watch", label: "Watch" },
+    { value: "watch", label: "Watch", attention: watchAttention },
     {
       value: "replay",
       label: "Replay",
@@ -59,12 +60,7 @@ export const TopBar = memo(function TopBar({
     },
   ];
   return (
-    <header
-      ref={ref}
-      className="bar"
-      data-centre={centre ? "" : undefined}
-      style={centre ? ({ "--bar-centre": `${centre}px` } as CSSProperties) : undefined}
-    >
+    <header className="bar">
       <div className="bar-l">
         <span className="bar-wordmark">localDot</span>
         {title && (
@@ -109,6 +105,7 @@ export const TopBar = memo(function TopBar({
           data-state={keys.state}
           onClick={onKeys}
         />
+        {more}
       </div>
     </header>
   );

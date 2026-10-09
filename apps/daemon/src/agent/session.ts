@@ -9,6 +9,7 @@ import type {
   RuleChange,
 } from "@localdot/protocol";
 import {
+  APPROVAL_TIMEOUT_MS,
   type ApprovalCard,
   type AutonomyPolicy,
   askValueProblem,
@@ -17,6 +18,7 @@ import {
   freezeAutonomy,
   InboxItem,
   type InboxReply,
+  SessionRun,
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
@@ -143,6 +145,13 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
+export interface AgentSessionOptions {
+  // An unattended run (a routine): approval cards and questions wait this long, then the step is
+  // refused.
+  readonly approvalTtlMs?: number;
+  readonly run?: SessionRun;
+}
+
 // Daemon-owned state outlives any brain or HTTP request. In particular, retirement cancels the
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
@@ -155,6 +164,8 @@ export class AgentSession {
   // The user's own words for this task: the request and every message since.
   readonly requests: string[];
   readonly #approvals: ApprovalBroker;
+  readonly #approvalWindowMs: number | undefined;
+  readonly #run: SessionRun | undefined;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
   });
@@ -236,7 +247,13 @@ export class AgentSession {
     private readonly eventLog: Pick<EventLog, "append">,
     autonomy?: AutonomyPolicy,
     rules?: Pick<RulesStore, "matches" | "add"> & Partial<Pick<RulesStore, "trusts">>,
+    options: AgentSessionOptions = {},
   ) {
+    const ttl = options.approvalTtlMs;
+    if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 60_000 || ttl > 14_400_000))
+      throw new RangeError("approval window must be between one minute and four hours");
+    this.#approvalWindowMs = ttl;
+    this.#run = options.run === undefined ? undefined : SessionRun.parse(options.run);
     this.#autonomy = freezeAutonomy(autonomy);
     this.taskAutonomy = new TaskAutonomy(rules);
     this.taint = new TaskTaint((source) => this.append("safety.taint", source));
@@ -278,7 +295,17 @@ export class AgentSession {
         this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
         if (change) this.append("rule.created", change);
       },
+      ttl ?? APPROVAL_TIMEOUT_MS,
     );
+  }
+  get unattended(): boolean {
+    return this.#approvalWindowMs !== undefined;
+  }
+  get approvalWindowMs(): number | undefined {
+    return this.#approvalWindowMs;
+  }
+  get run(): SessionRun | undefined {
+    return this.#run;
   }
   get autonomy(): Readonly<AutonomyPolicy> {
     return this.#autonomy;

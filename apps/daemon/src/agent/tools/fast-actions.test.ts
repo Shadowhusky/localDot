@@ -25,6 +25,7 @@ import { DEFAULT_ONSET_TABLE } from "../../gateway/onset-table.ts";
 import { keepPolicy } from "../../gateway/ring-onset.ts";
 import { FramePng } from "../frame-png.ts";
 import { redactor } from "../redact.ts";
+import { PurposeGate } from "../safety/purpose.ts";
 import { AgentSession } from "../session.ts";
 import { browserActTool } from "./browser-act.ts";
 import { computerTool, UNCHANGED } from "./computer.ts";
@@ -526,5 +527,77 @@ describe("browser_act", () => {
       "key",
     ]);
     expect(s.steps()).toHaveLength(3);
+  });
+});
+
+describe("text dot types through a batch or browser_act", () => {
+  const PRIVATE = "Account 4417-1234-5678 belongs to Jane Doe";
+  // A task that read a bank page, with a judge that finds the mail site unrelated to it.
+  const judged = async (s: Awaited<ReturnType<typeof setup>>) => {
+    s.session.taint.add("screen", "bank.example", PRIVATE);
+    s.session.purpose = new PurposeGate({
+      taint: s.session.taint,
+      purpose: () => s.session.currentPurpose,
+      judge: () => ({
+        name: "model",
+        destinations: async () => [],
+        fits: async () => 0.1,
+      }),
+      trusted: () => false,
+    });
+    s.asks.mockResolvedValue("deny");
+    const search = web({ x: 400, y: 120 }, "Search", "textbox");
+    s.fake.script.find = () => hit(search);
+    s.fake.script.hitTest = (p) => hit(web(p, "Search", "textbox"));
+    s.fake.script.focused = () => hit(search);
+  };
+  const typed = (s: Awaited<ReturnType<typeof setup>>) =>
+    s.fake.calls.filter((c) => c.path === "/type");
+  const purposeAsk = (s: Awaited<ReturnType<typeof setup>>) =>
+    s.asks.mock.calls.map(([, card]) => card.title);
+
+  it("goes through the purpose check like a typed step, and a refusal types nothing", async () => {
+    const single = await setup();
+    await judged(single);
+    await computerTool(single.deps, single.ctx, { action: "type", text: PRIVATE });
+    expect(purposeAsk(single)).toEqual(["Send data to mail.example?"]);
+    expect(typed(single)).toHaveLength(0);
+
+    const batch = await setup();
+    await judged(batch);
+    const result = await computerTool(batch.deps, batch.ctx, {
+      action: "batch",
+      steps: [
+        { action: "click", point: { x: 400, y: 120 }, button: "left", count: 1 },
+        { action: "type", text: PRIVATE },
+        { action: "key", keys: ["Return"] },
+      ],
+      basedOn: batch.basis,
+    });
+    expect(result.ok).toBe(false);
+    expect(purposeAsk(batch)).toEqual(["Send data to mail.example?"]);
+    expect(typed(batch)).toHaveLength(0);
+
+    const act = await setup();
+    await judged(act);
+    act.session.pageRefs = {
+      cellId: act.session.cellId,
+      url: "https://mail.example/inbox",
+      elements: new Map([
+        [
+          "e5",
+          { ref: "e5", role: "textbox", name: "Search", box: { x: 300, y: 105, w: 200, h: 30 } },
+        ],
+      ]),
+    };
+    const filled = await browserActTool(act.deps, act.ctx, {
+      action: "fill",
+      ref: "e5",
+      text: PRIVATE,
+      submit: true,
+    });
+    expect(filled.ok).toBe(false);
+    expect(purposeAsk(act)).toEqual(["Send data to mail.example?"]);
+    expect(typed(act)).toHaveLength(0);
   });
 });

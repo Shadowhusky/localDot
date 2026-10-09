@@ -16,7 +16,7 @@ describe("Codex developer instructions", () => {
       today: new Date("2026-10-09T12:00:00Z"),
     });
     expect(text).toContain("remember, recall, people, done");
-    expect(text).toContain("check what you know below, then people and recall");
+    expect(text).toContain("check these files, then people and recall");
     expect(text).toContain("- 2026-10-08 · done · Send Henry the report on WeChat");
     expect(text.match(/<\/recent_tasks>/g)).toHaveLength(1);
   });
@@ -95,5 +95,21 @@ describe("Codex developer instructions", () => {
     expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(
       "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
     );
+  });
+});
+
+describe("routine runs", () => {
+  it("tells the ChatGPT plan when a routine started the task", () => {
+    const input = { memory: { user: "", memory: "" }, skills: [], today: new Date() };
+    const run = {
+      kind: "routine" as const,
+      name: "Morning bills",
+      profile: "ask_first" as const,
+      approvalWindowMinutes: 60,
+    };
+    const text = codexInstructions({ ...input, run });
+    expect(text).toContain("# This run");
+    expect(text).toContain("not watching");
+    expect(codexInstructions(input)).not.toContain("# This run");
   });
 });

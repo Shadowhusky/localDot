@@ -5,6 +5,7 @@ import { ULID_PATTERN } from "./ids.ts";
 import { SwitchScreenInput } from "./screens.ts";
 import { PeopleInput } from "./tools/people.ts";
 import { RecallInput } from "./tools/recall.ts";
+import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
 // daemon's tool API runs, including M7's isolated browser screen.
@@ -25,6 +26,8 @@ export const TOOL_NAMES = [
   "recall",
   "people",
   "done",
+  "routine",
+  "follow_up_at",
 ] as const;
 export const ToolName = z.enum(TOOL_NAMES);
 export type ToolName = z.infer<typeof ToolName>;
@@ -329,6 +332,8 @@ export const TOOL_INPUTS = {
   recall: RecallInput,
   people: PeopleInput,
   done: DoneInput,
+  routine: RoutineToolInput,
+  follow_up_at: FollowUpAtInput,
 } as const satisfies Record<ToolName, z.ZodType>;
 
 // A tool's answer to the brain. Images are screenshots the daemon stored (by frameId) and sends

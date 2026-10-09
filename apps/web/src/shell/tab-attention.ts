@@ -1,12 +1,35 @@
+import type { AttentionLevel } from "@localdot/protocol";
 import { useEffect, useSyncExternalStore } from "react";
 import attentionIcon from "../favicon-attention.svg";
 import type { Status } from "../session/status.ts";
 
-const needsYou = (status: Status, hidden: boolean) => hidden && status.attention === "needs_you";
+// What waits for the user across tasks: how many, and the most urgent.
+export interface TabAttention {
+  count: number;
+  top: AttentionLevel;
+}
 
-// While dot needs you and the tab is out of sight, the amber point leads its title.
-export function tabTitle(status: Status, hidden: boolean): string {
-  return needsYou(status, hidden) ? `• ${status.label} · localDot` : status.title;
+const NOTHING: TabAttention = { count: 0, top: "none" };
+const WORDS: Partial<Record<AttentionLevel, string>> = {
+  needs_you: "Needs you",
+  blocked: "Paused",
+  failed: "Failed",
+  done: "Done",
+};
+
+const needsYou = (status: Status, attention: TabAttention) =>
+  status.attention === "needs_you" || attention.top === "needs_you";
+
+// Out of sight, the tab says what waits: the status' own words while dot needs you here, else the
+// most urgent thing across tasks, counted once there is more than one. The amber point leads it
+// whenever dot needs you.
+export function tabTitle(status: Status, hidden: boolean, attention = NOTHING): string {
+  if (!hidden) return status.title;
+  const own = status.attention === "needs_you";
+  const word = own ? status.label : WORDS[attention.top];
+  if (!word) return status.title;
+  const count = Math.max(attention.count, own ? 1 : 0);
+  return `${needsYou(status, attention) ? "• " : ""}${count > 1 ? `(${count}) ` : ""}${word} · localDot`;
 }
 
 function watchVisibility(onChange: () => void) {
@@ -16,14 +39,14 @@ function watchVisibility(onChange: () => void) {
 
 // The tab's title follows the status, and the tab's icon (the porcelain dot) gains the amber point
 // at its corner while dot needs you out of sight.
-export function useTabAttention(status: Status) {
+export function useTabAttention(status: Status, attention = NOTHING) {
   const hidden = useSyncExternalStore(
     watchVisibility,
     () => document.hidden,
     () => false,
   );
-  const title = tabTitle(status, hidden);
-  const marked = needsYou(status, hidden);
+  const title = tabTitle(status, hidden, attention);
+  const marked = hidden && needsYou(status, attention);
   useEffect(() => {
     document.title = title;
   }, [title]);

@@ -1,3 +1,4 @@
+import type { SessionOrigin } from "@localdot/protocol";
 import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
@@ -8,6 +9,7 @@ import type {
   AgentQuestion,
   AgentResult,
   AgentTakeover,
+  RoutineProposal,
   SpendCall,
 } from "./model.ts";
 
@@ -26,6 +28,10 @@ export type ThreadItem =
   | (Item<"question"> & { question: AgentQuestion })
   | (Item<"answer"> & { question: AgentQuestion })
   | (Item<"result"> & { result: AgentResult })
+  // A routine dot drafted, for the user to save.
+  | (Item<"routine"> & { proposal: RoutineProposal })
+  // What started a task the user didn't: a routine or a follow-up.
+  | (Item<"origin"> & { origin: SessionOrigin })
   // The computer changing hands: the user took it, or handed it back.
   | (Item<"control"> & { took: boolean; at?: number })
   | (Item<"work"> & {
@@ -61,6 +67,8 @@ export function threadItems(
   questions: Iterable<AgentQuestion> = [],
   results: Iterable<AgentResult> = [],
   takeovers: Iterable<AgentTakeover> = [],
+  proposals: Iterable<RoutineProposal> = [],
+  origin?: SessionOrigin,
 ): ThreadItem[] {
   const placed: Placed[] = [];
   const place = (item: ThreadItem, order: number | undefined) =>
@@ -105,6 +113,17 @@ export function threadItems(
       },
       result.seq,
     );
+  for (const proposal of proposals)
+    place(
+      {
+        kind: "routine",
+        key: `routine-${proposal.routineId}`,
+        speaker: "dot",
+        time: wallTime(proposal.id),
+        proposal,
+      },
+      proposal.seq,
+    );
   for (const takeover of takeovers) {
     // The user took it when they asked for it, or when they took the computer dot handed over.
     const took =
@@ -132,11 +151,14 @@ export function threadItems(
         takeover.endSeq,
       );
   }
-  return placed
+  const sorted = placed
     .sort((a, b) =>
       Number.isNaN(a.order) || Number.isNaN(b.order) ? a.index - b.index : a.order - b.order,
     )
     .map((entry) => entry.item);
+  return origin
+    ? [{ kind: "origin", key: `origin-${origin.runId}`, speaker: "dot", origin }, ...sorted]
+    : sorted;
 }
 
 // A task's steps, as the work lines of its turns show them.

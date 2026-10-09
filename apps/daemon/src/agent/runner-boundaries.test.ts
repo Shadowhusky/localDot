@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import {
   type BootConfig,
+  DEFAULT_AUTONOMY,
   type KeydRecord,
   RESUME_WAIT_REASON,
   type TaskPricing,
@@ -890,5 +891,81 @@ describe("plan tasks", () => {
     expect(h.raiseCalls).toHaveLength(1);
     h.live.stop(session.id);
     await h.live.settled(session.id);
+  });
+});
+
+describe("routine start options", () => {
+  const origin = () => ({
+    kind: "routine" as const,
+    routineId: ulid(),
+    runId: ulid(),
+    name: "Morning bills",
+    dueAt: "2026-10-12T07:30:00.000Z",
+  });
+  it("records the origin on session.start and titles the task after the routine", async () => {
+    const h = setup();
+    const o = origin();
+    const session = await h.runner.start(h.cellId, "Check statements", undefined, { origin: o });
+    expect(h.log.read(session.id).find((e) => e.type === "session.start")?.data).toMatchObject({
+      origin: o,
+      title: "Morning bills",
+    });
+  });
+  it("uses the run's autonomy and budget instead of the user's defaults", async () => {
+    const h = setup();
+    const autonomy = { ...DEFAULT_AUTONOMY, purchase: "handoff" as const };
+    const session = await h.runner.start(h.cellId, "Task", undefined, {
+      autonomy,
+      budgetUSD: 0.5,
+    });
+    await h.ready();
+    expect(session.autonomy).toEqual(autonomy);
+    expect(h.opens[0]?.budgetUSD).toBe(0.5);
+  });
+  it("marks the session unattended and tells the brain about the run", async () => {
+    const h = setup();
+    const run = {
+      kind: "routine" as const,
+      name: "Morning bills",
+      profile: "read_only" as const,
+      approvalWindowMinutes: 60,
+    };
+    const session = await h.runner.start(h.cellId, "Task", undefined, {
+      run,
+      approvalWindowMs: 3_600_000,
+    });
+    await h.ready();
+    expect(session.unattended).toBe(true);
+    expect(h.boots[0]?.run).toEqual(run);
+  });
+  it("ends right after done when idleMs is 0", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Task", undefined, { idleMs: 0 });
+    await h.ready();
+    h.exit(0, 0);
+    await until(() => h.log.read(session.id).some((e) => e.type === "session.end"));
+    expect(h.log.read(session.id).find((e) => e.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+  });
+  it.each([
+    [{ budgetUSD: 0 }],
+    [{ idleMs: -1 }],
+    [{ approvalWindowMs: 1_000 }],
+    [{ origin: { kind: "routine" } }],
+  ])("refuses invalid options %j", async (options) => {
+    const h = setup();
+    await expect(
+      h.runner.start(h.cellId, "Task", undefined, options as never),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+  it("end() stops a task quietly, without the kill switch", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Task");
+    await h.ready();
+    expect(h.runner.end(session.id)).toBe(true);
+    await until(() => h.log.read(session.id).some((e) => e.type === "session.end"));
+    expect(h.containments).toEqual([]);
+    expect(h.runner.end(session.id)).toBe(false);
   });
 });

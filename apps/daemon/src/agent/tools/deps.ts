@@ -70,6 +70,7 @@ export interface ToolDeps {
   ): Promise<void>;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
+  routines?: import("./routine.ts").RoutineToolPort;
 }
 
 export interface ToolCallContext {

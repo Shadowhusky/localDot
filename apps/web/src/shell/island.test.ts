@@ -9,6 +9,7 @@ import {
   islandAttention,
   islandDecision,
   islandShape,
+  islandTop,
   liftOverScrim,
   pauseSlot,
   takeReason,
@@ -201,18 +202,31 @@ describe("takeReason", () => {
   });
 });
 
+describe("islandTop", () => {
+  it("sits the island its height and a gap over the stage's top edge, so its foot never reaches the picture", () => {
+    expect(islandTop(40, 8)).toBe(-48);
+    expect(islandTop(32, 8)).toBe(-40);
+    for (const [height, gap] of [
+      [40, 8],
+      [32, 8],
+    ] as const)
+      expect(islandTop(height, gap) + height).toBeLessThan(0);
+  });
+});
+
 describe("decisionTop", () => {
   // The fixture's sign-in: the password box on a 2560 x 1600 desktop, and the decision it grows
-  // into as Chrome lays it out (487 x 320, its top 2 px over the island's).
+  // into as Chrome lays it out (487 x 320, its top 2 px over the island's, which sits 40 + 8 over
+  // the stage).
   const screenPx = { w: 2560, h: 1600 };
   const password = { point: { x: 1280, y: 760 }, bbox: { x: 1040, y: 732, w: 480, h: 56 } };
   const size = { w: 487, h: 320 };
-  const hung = -22;
+  const hung = islandTop(40, 8) - 2;
   // app.css on a laptop: the column less the rail and gutters, or what the height leaves above the
-  // band; the stage's top is 76 px down the page.
+  // band; the stage's top is 104 px down the page.
   const stageAt = (w: number, h: number) => {
-    const width = Math.min(w - 8 - 368 - 2 * 20, (h - 76 - 8 - 112) * 1.6);
-    return { w: width, h: width / 1.6, floor: h - 76 - 16 };
+    const width = Math.min(w - 8 - 368 - 2 * 20, (h - 104 - 8 - 112) * 1.6);
+    return { w: width, h: width / 1.6, floor: h - 104 - 16 };
   };
   const overlap = (a: Rect, b: Rect) =>
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -223,8 +237,8 @@ describe("decisionTop", () => {
   });
 
   for (const [w, h] of [
+    [1100, 800],
     [1280, 800],
-    [1440, 900],
   ] as const)
     it(`drops under the password's ring instead of covering it at ${w} x ${h}`, () => {
       const stage = stageAt(w, h);
@@ -238,6 +252,11 @@ describe("decisionTop", () => {
 
   it("stays hung from the top edge while no ring is under it", () => {
     const stage = stageAt(1440, 900);
+    // Hung over the stage, the decision ends above the password's ring at this size.
+    const pass = targetRingBox(password, screenPx, stage);
+    expect(decisionTop({ hung, size, stageW: stage.w, rings: [pass], floor: stage.floor })).toBe(
+      hung,
+    );
     const low = targetRingBox({ point: { x: 1280, y: 1500 } }, screenPx, stage);
     const aside = targetRingBox({ point: { x: 200, y: 400 } }, screenPx, stage);
     expect(
@@ -252,7 +271,7 @@ describe("decisionTop", () => {
     const pass = targetRingBox(password, screenPx, stage);
     const top = decisionTop({ hung, size, stageW: stage.w, rings: [pass, user], floor: 1e4 });
     expect(top).toBeCloseTo(pass.y + pass.h + 12, 6);
-    expect(decisionTop({ hung, size, stageW: stage.w, rings: [pass], floor: 500 })).toBe(
+    expect(decisionTop({ hung, size, stageW: stage.w, rings: [pass, user], floor: 500 })).toBe(
       500 - size.h,
     );
   });
@@ -268,7 +287,7 @@ describe("liftOverScrim", () => {
     right: width - 8,
     bottom: 792,
   });
-  const activity = { left: 0, top: 214, right: 390, bottom: 900 };
+  const activity = { left: 0, top: 238, right: 390, bottom: 900 };
 
   it("rises over the scrim where no sheet meets it", () => {
     expect(liftOverScrim(true, island1440, [inspector(1440)])).toBe(true);
