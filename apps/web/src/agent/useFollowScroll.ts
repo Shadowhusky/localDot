@@ -15,6 +15,8 @@ interface Tracking {
   jumping: boolean;
   glide: { frame: number; from: number; start: number; at: number } | null;
   height: number;
+  // Where the view was when it was last held or scrolled.
+  top: number;
 }
 
 // Following the end, a new row lifts the list by its height over this long, eased like --ease-enter.
@@ -60,12 +62,48 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     jumping: false,
     glide: null,
     height: 0,
+    top: 0,
   });
 
-  const settle = useCallback(() => {
+  const setPin = useCallback((next: boolean) => {
+    tracking.current.pinned = next;
+    setPinned(next);
+  }, []);
+
+  const pickAnchor = useCallback(() => {
     const t = tracking.current,
       element = t.element;
     if (!element) return;
+    const top = element.getBoundingClientRect().top;
+    t.anchor = null;
+    for (const row of element.querySelectorAll<HTMLElement>("[data-anchor]")) {
+      if (row.getBoundingClientRect().bottom > top) {
+        t.anchor = row;
+        t.anchorTop = topOf(row, element);
+        break;
+      }
+    }
+  }, []);
+
+  const hold = useCallback(() => {
+    const t = tracking.current,
+      element = t.element;
+    if (!element) return;
+    // Moved back from the end before its scroll event (a control brought into view as it takes the
+    // focus): the end is no longer held, or the move would be undone under the reader's press. A
+    // view only clamped by shorter content is still at the end.
+    const back = (height: number) => height - element.clientHeight - element.scrollTop >= PIN_SLACK;
+    if (
+      t.pinned &&
+      !t.jumping &&
+      !t.glide &&
+      element.scrollTop < t.top - 1 &&
+      back(t.height) &&
+      back(element.scrollHeight)
+    ) {
+      setPin(false);
+      pickAnchor();
+    }
     t.height = element.scrollHeight;
     if (t.pinned) {
       const end = element.scrollHeight - element.clientHeight;
@@ -105,27 +143,12 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     const delta = topOf(t.anchor, element) - t.anchorTop;
     if (Math.abs(delta) >= 0.5) element.scrollTop += delta;
     t.anchorTop = topOf(t.anchor, element);
-  }, []);
-
-  const setPin = useCallback((next: boolean) => {
-    tracking.current.pinned = next;
-    setPinned(next);
-  }, []);
-
-  const pickAnchor = useCallback(() => {
-    const t = tracking.current,
-      element = t.element;
-    if (!element) return;
-    const top = element.getBoundingClientRect().top;
-    t.anchor = null;
-    for (const row of element.querySelectorAll<HTMLElement>("[data-anchor]")) {
-      if (row.getBoundingClientRect().bottom > top) {
-        t.anchor = row;
-        t.anchorTop = topOf(row, element);
-        break;
-      }
-    }
-  }, []);
+  }, [setPin, pickAnchor]);
+  const settle = useCallback(() => {
+    hold();
+    const element = tracking.current.element;
+    if (element) tracking.current.top = element.scrollTop;
+  }, [hold]);
 
   const ref = useCallback(
     (element: HTMLDivElement | null) => {
@@ -161,6 +184,7 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     const t = tracking.current,
       element = t.element;
     if (!element) return t.pinned;
+    t.top = element.scrollTop;
     const below = element.scrollHeight - element.clientHeight - element.scrollTop;
     // Rows that arrived before their resize was observed moved the end, not the reader; a reader who
     // scrolled back further than they grew is reading.
