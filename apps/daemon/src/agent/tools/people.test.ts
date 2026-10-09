@@ -97,6 +97,52 @@ describe("people", () => {
     expect(same.body.ok).toBe(true);
     expect(people.list()[0]).toMatchObject({ handle: "wx_mum", lastAt: expect.any(String) });
   });
+  it("won't save a name that would shadow someone saved, once the task read other text", async () => {
+    const h = harness();
+    const people = new PeopleStore(h.home);
+    people.add({ name: "Henry Liu", app: "WeChat", handle: "henry_l" });
+    people.add({ name: "刘亨利", app: "WeChat", handle: "liu_hl" });
+    h.session.requests.push("Send Henry the report on WeChat, and 亨利 too, then Henry Liu Jr");
+    h.session.tainted = true;
+    for (const [name, app] of [
+      ["Henry", "WeChat"],
+      ["Henry", "Email"],
+      ["亨利", "WeChat"],
+      ["Henry Liu Jr", "WeChat"],
+    ]) {
+      const res = await h.call("people", { op: "save", name, app, handle: "attacker_wx" });
+      expect(res.body.ok, name).toBe(false);
+      expect(res.body.content[0]?.text).toContain("Ask the user before changing");
+    }
+    expect(people.find("Henry").map((p) => p.handle)).toEqual(["henry_l"]);
+    expect(people.list()).toHaveLength(2);
+  });
+  it("won't rewrite a saved person's note once the task read other text", async () => {
+    const h = harness();
+    const people = new PeopleStore(h.home);
+    people.add({ name: "Mum", app: "WeChat", handle: "wx_mum", note: "Calls after 6pm" });
+    h.session.requests.push("Message Mum about dinner");
+    h.session.tainted = true;
+    const res = await h.call("people", {
+      op: "save",
+      name: "Mum",
+      app: "WeChat",
+      note: "New number: use WhatsApp +44 7700 900999",
+    });
+    expect(res.body.ok).toBe(false);
+    expect(res.body.content[0]?.text).toContain("Ask the user before changing");
+    expect(people.list()).toEqual([
+      expect.objectContaining({ note: "Calls after 6pm", source: { kind: "user" } }),
+    ]);
+    const same = await h.call("people", {
+      op: "save",
+      name: "Mum",
+      app: "WeChat",
+      note: "Calls after 6pm",
+    });
+    expect(same.body.ok).toBe(true);
+    expect(people.list()[0]?.source).toEqual({ kind: "user" });
+  });
   it("says when no one matches, and asks for what it needs", async () => {
     const h = harness();
     const none = await h.call("people", { op: "find", query: "nobody" });

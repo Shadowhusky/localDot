@@ -136,14 +136,21 @@ export class PeopleStore {
       .slice(0, limit)
       .map(({ r }) => view(r));
   }
-  // Whether saving would change how the user reaches someone already saved: another handle on the
-  // same app, or the same name on another app.
+  // Whether saving would change how the user reaches someone already saved: another handle or note
+  // on the same app, the same name on another app, or a new name inside a saved one or holding it
+  // (Henry beside Henry Liu), which finding them would mix up.
   redirects(fields: PersonFields): boolean {
     const name = fold(fields.name);
-    const same = this.#read().filter((r) => fold(r.name) === name);
-    if (!same.length) return false;
+    const people = this.#read();
+    const same = people.filter((r) => fold(r.name) === name);
+    if (!same.length)
+      return people.some((r) => namedIn([r.name], fields.name) || namedIn([fields.name], r.name));
     const onApp = same.find((r) => fold(r.app) === fold(fields.app));
-    return !onApp || (fields.handle != null && fields.handle !== onApp.handle);
+    return (
+      !onApp ||
+      (fields.handle != null && fields.handle !== onApp.handle) ||
+      (fields.note != null && fields.note !== onApp.note)
+    );
   }
   // dot reached someone in a task: the same name on the same app is the same person.
   record(sessionId: string, fields: PersonFields): { person: StoredPerson; created: boolean } {

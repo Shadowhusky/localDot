@@ -8,7 +8,7 @@ const FOUND = 8;
 export const SAVE_UNNAMED =
   "Save someone only under a name the user wrote in this task, or ask the user to confirm first.";
 export const SAVE_REDIRECT =
-  "This person is already saved with another app or handle. Ask the user before changing how to reach them.";
+  "Someone by this name is already saved with another app, handle or note. Ask the user before changing how to reach them.";
 
 const line = (p: StoredPerson) =>
   [
@@ -19,7 +19,8 @@ const line = (p: StoredPerson) =>
   ].join(" · ");
 
 // After something other than the user reached the model, dot may only save people the user named,
-// and only as new or as they are saved: a page can't plant a contact or redirect one.
+// and only as new or as they are saved: a page can't plant a contact, redirect one or rewrite its
+// note.
 export function saveRefusal(
   session: AgentSession,
   input: PeopleInput,
@@ -29,7 +30,12 @@ export function saveRefusal(
   if (!namedIn(session.requests, input.name ?? "")) return SAVE_UNNAMED;
   if (!people || !input.name || !input.app) return undefined;
   try {
-    const fields = { name: input.name, app: input.app, handle: input.handle ?? null };
+    const fields = {
+      name: input.name,
+      app: input.app,
+      handle: input.handle ?? null,
+      note: input.note ?? null,
+    };
     return people.redirects(fields) ? SAVE_REDIRECT : undefined;
   } catch (error) {
     if (error instanceof PeopleError) return undefined;
