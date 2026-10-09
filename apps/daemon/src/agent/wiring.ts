@@ -784,6 +784,11 @@ export function createAgent(d: AgentWiringDeps) {
       !d.killSwitch.isBusy(session.cellId),
     desktop: upload,
     manual,
+    desktopPage: async (cellId, signal) => {
+      const cell = d.cells.get(cellId);
+      if (!ready || closing || cell?.state !== "ready" || cell.paused) return undefined;
+      return (await desktop(cellId)?.browserRead(1, signal))?.url;
+    },
     home: d.home,
     harness,
     ...(auth && installer && setup

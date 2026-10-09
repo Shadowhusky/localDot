@@ -101,7 +101,7 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     switch_screen: tool({
       description:
-        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. When a site needs the user to sign in, ask for the details with ask_user fields. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
+        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
       inputSchema: SwitchScreenInput,
     }),
     ask_user: tool({
@@ -111,7 +111,7 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     request_takeover: tool({
       description:
-        "Hand the screen to the user. Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in the note what they need to do. For passwords and codes, ask with ask_user fields instead.",
+        "Hand the screen to the user. Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in the note what they need to do. For passwords and codes, ask with ask_user fields instead. Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
       inputSchema: RequestTakeoverInput,
     }),
     remember: tool({

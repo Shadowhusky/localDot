@@ -764,3 +764,60 @@
 .settings-stop-details {
   margin: calc(var(--spacing) * 0.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);
 }
+
+/* Sign in to a site: a field and its button on one line, the common sites under them. */
+.settings-body .settings-signin {
+  padding-block: calc(var(--spacing) * 3);
+}
+
+.settings-signin-body {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  padding-top: calc(var(--spacing) * 3);
+}
+
+.settings-signin-form {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+}
+
+.settings-body .ui-group-row .settings-signin-form .ui-text-field {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.settings-signin-form > .ui-button {
+  flex: none;
+}
+
+.settings-signin-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* A folded failure line takes no room: the gap above it opens with it. */
+.settings-signin-body > .ui-collapse {
+  margin-top: calc(var(--spacing) * -3);
+}
+
+.settings-signin-failure {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0;
+  padding-top: calc(var(--spacing) * 3);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.settings-signin .settings-signin-failure > .ui-icon {
+  flex: none;
+  color: var(--color-danger-fg);
+}

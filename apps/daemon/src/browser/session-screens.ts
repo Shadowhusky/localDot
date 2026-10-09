@@ -22,12 +22,14 @@ export class SessionScreens {
   constructor(
     private readonly deps: {
       cells: Pick<CellApi, "get" | "subscribe" | "stop">;
-      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
+      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get"> &
+        Partial<Pick<BrowserOrchestrator, "health">>;
       streams: BrowserStreams;
       recordings: Pick<ScreenRecordings, "attach" | "fence">;
       registry: Pick<DesktopdRegistry, "for">;
       downloads?: Pick<BrowserDownloadCollector, "collect">;
       pendingStop?(sessionId: string): Promise<StopOutcome> | undefined;
+      report?(message: string): void;
       now(): number;
     },
   ) {}
@@ -50,6 +52,7 @@ export class SessionScreens {
           );
         },
         browser: this.deps.browser,
+        ...(this.deps.report ? { report: this.deps.report } : {}),
         revision: (instance) => this.#revision(instance),
         downloads: this.deps.downloads
           ? (endpoint, binding, owner) => {

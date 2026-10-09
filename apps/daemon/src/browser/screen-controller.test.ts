@@ -406,7 +406,7 @@ describe("session screen coordinator", () => {
     const f = fixture();
     vi.mocked(f.deps.browser.start).mockRejectedValue(new Error("synthetic start failure"));
     const refusal = () => f.controller.switchTo("browser", f.scope);
-    await expect(refusal()).rejects.toThrow(/isn't available.*tell the user/u);
+    await expect(refusal()).rejects.toThrow(/couldn't open.*tell the user/u);
     vi.mocked(f.deps.browser.get).mockReturnValue({
       id: f.endpoint.browserCellId,
       parentCellId: f.endpoint.parentCellId,
@@ -840,5 +840,87 @@ describe("session screen coordinator", () => {
       ["desktop", 2],
     ]);
     expect(f.holder()).toBe("user");
+  });
+});
+
+// A web browser whose controls had failed stayed "running": every switch to it failed at once and
+// told dot to carry on with the desktop, where sign-ins aren't kept.
+describe("a web browser that stopped working", () => {
+  it("is started again once when it no longer answers as ready", async () => {
+    const f = fixture();
+    const report = vi.fn();
+    const health = vi.fn(async () => "unready" as const);
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: { ...f.deps.browser, health },
+      report,
+    });
+    f.client.health.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    f.deps.browser.stop.mockImplementationOnce(async () => f.replace());
+    const result = await controller.switchTo("browser", f.scope);
+    expect(result.screen).toBe("browser");
+    expect(health).toHaveBeenCalledOnce();
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.deps.parentCellId);
+    expect(f.deps.browser.start).toHaveBeenCalledTimes(2);
+    expect(report).toHaveBeenCalledWith("the web browser stopped working; starting it again");
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    await controller.close();
+  });
+
+  it("is left alone when it still answers, and the switch fails without sending dot to the desktop", async () => {
+    const f = fixture();
+    const report = vi.fn();
+    const health = vi.fn(async () => "ready" as const);
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: { ...f.deps.browser, health },
+      report,
+    });
+    f.client.health.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    const failure = await controller.switchTo("browser", f.scope).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ScreenUnavailableError);
+    expect((failure as Error).message).toContain("Don't sign in on the desktop's Chromium");
+    expect((failure as Error).message).not.toContain("Carry on with the desktop");
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith(
+      expect.stringMatching(/^the web browser couldn't be shown: /),
+    );
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    await controller.close();
+  });
+});
+
+describe("a page opened for the user", () => {
+  it("shows the web browser on the page, then hands it to the user", async () => {
+    const f = fixture();
+    f.client.navigate.mockImplementation(async () => ({ done: true }) as never);
+    await f.controller.openForUser("https://accounts.google.com/", f.scope);
+    expect(f.client.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: { sessionId: f.scope.sessionId, generation: 1 } }),
+      f.tabId,
+      "https://accounts.google.com/",
+      expect.anything(),
+    );
+    expect(f.deps.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ screen: "browser", by: "daemon" }),
+    );
+    expect(f.controller.selection.screen).toBe("browser");
+    await f.controller.takeOver();
+    expect(f.holder()).toBe("user");
+    const manual = f.controller.manualAccess({ signal: f.abort.signal, check: () => {} });
+    expect(manual.selection.screen).toBe("browser");
+    manual.finish();
+    await f.controller.finish();
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(f.deps.contain).not.toHaveBeenCalled();
+  });
+
+  it("opens only before anyone has used the screens", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await expect(f.controller.openForUser("https://github.com/login", f.scope)).rejects.toThrow(
+      ScreenControlError,
+    );
+    await f.controller.close();
   });
 });
