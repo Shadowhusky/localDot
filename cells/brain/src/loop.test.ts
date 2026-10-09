@@ -233,6 +233,21 @@ describe("Agent", () => {
         "update_plan",
       ]);
     });
+
+    it("declares research, and says how to research, only in research mode", async () => {
+      const t = agent([call("done", { summary: "x" })], {
+        boot: { research: { sources: 12, minutes: 9 } },
+      });
+      await t.run();
+      const offered = t.main.model.doStreamCalls[0];
+      expect((offered?.tools ?? []).map((tool) => tool.name)).toContain("research");
+      expect(JSON.stringify(offered?.prompt)).toContain("about 12 sources and 9 minutes");
+      const plain = agent([call("done", { summary: "x" })]);
+      await plain.run();
+      expect(JSON.stringify(plain.main.model.doStreamCalls[0]?.prompt)).not.toContain(
+        "# Research mode",
+      );
+    });
   });
 
   describe("Review Focus 3: runaway loops and budgets", () => {

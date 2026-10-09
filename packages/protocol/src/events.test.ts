@@ -161,4 +161,44 @@ describe("parseEvent", () => {
         expect(() => parseEvent({ ...base, type, data: unplaced })).toThrow();
     }
   });
+
+  it("records a research task's budget, its numbered sources and why gathering stopped", () => {
+    const start = parseEvent({
+      ...base,
+      type: "session.start",
+      data: {
+        screen: { w: 1280, h: 800, scale: 1 },
+        os: "linux",
+        research: { sources: 20, minutes: 15 },
+      },
+    });
+    expect(start.type === "session.start" && start.data.research).toEqual({
+      sources: 20,
+      minutes: 15,
+    });
+    const source = { n: 3, url: "https://example.test/a", title: "A page", passages: 2 };
+    expect(parseEvent({ ...base, type: "research.source", data: source }).type).toBe(
+      "research.source",
+    );
+    expect(
+      parseEvent({ ...base, type: "research.source", data: { ...source, cited: true } }).type,
+    ).toBe("research.source");
+    for (const wrong of [
+      { ...source, n: 0 },
+      { ...source, cited: false },
+      { ...source, extra: 1 },
+    ])
+      expect(() => parseEvent({ ...base, type: "research.source", data: wrong })).toThrow();
+    for (const stopped of ["sources", "time", "user", undefined])
+      expect(
+        parseEvent({
+          ...base,
+          type: "research.budget",
+          data: { sources: 20, minutes: 15, ...(stopped ? { stopped } : {}) },
+        }).type,
+      ).toBe("research.budget");
+    expect(() =>
+      parseEvent({ ...base, type: "research.budget", data: { sources: 1, minutes: 15 } }),
+    ).toThrow();
+  });
 });

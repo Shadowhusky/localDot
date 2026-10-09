@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { ResearchInput } from "./research.ts";
 import { SwitchScreenInput } from "./screens.ts";
 import { PeopleInput } from "./tools/people.ts";
 import { RecallInput } from "./tools/recall.ts";
@@ -28,12 +29,18 @@ export const TOOL_NAMES = [
   "done",
   "routine",
   "follow_up_at",
+  "research",
 ] as const;
 export const ToolName = z.enum(TOOL_NAMES);
 export type ToolName = z.infer<typeof ToolName>;
 
 export function isToolName(name: string): name is ToolName {
   return (TOOL_NAMES as readonly string[]).includes(name);
+}
+
+// The tools a model is offered: research is declared only to a task in research mode.
+export function offeredTools(research: boolean): readonly ToolName[] {
+  return research ? TOOL_NAMES : TOOL_NAMES.filter((name) => name !== "research");
 }
 
 // The model's screen: every screenshot is 1280×800 and every model point is in these pixels once
@@ -355,6 +362,7 @@ export const TOOL_INPUTS = {
   done: DoneInput,
   routine: RoutineToolInput,
   follow_up_at: FollowUpAtInput,
+  research: ResearchInput,
 } as const satisfies Record<ToolName, z.ZodType>;
 
 // A tool's answer to the brain. Images are screenshots the daemon stored (by frameId) and sends

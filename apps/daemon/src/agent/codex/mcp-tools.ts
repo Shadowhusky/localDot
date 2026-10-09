@@ -6,9 +6,10 @@ import {
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
+  offeredTools,
+  RESEARCH_TOOL_DESCRIPTION,
   ROUTINE_TOOL_DESCRIPTION,
   TOOL_INPUTS,
-  TOOL_NAMES,
   type ToolName,
   type ToolResult,
 } from "@localdot/protocol";
@@ -102,6 +103,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   done: "Finish the task: a summary for the user, the paths of any files in the home to hand over (a revised file keeps its name), and what you checked about them.",
   routine: ROUTINE_TOOL_DESCRIPTION,
   follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
+  research: RESEARCH_TOOL_DESCRIPTION,
 };
 
 export interface McpToolDescriptor {
@@ -117,8 +119,9 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 export function codexTools(
   descriptions: Record<ToolName, string> = CODEX_TOOL_DESCRIPTIONS,
+  research = false,
 ): McpToolDescriptor[] {
-  return TOOL_NAMES.map((name) => ({
+  return offeredTools(research).map((name) => ({
     name,
     description: descriptions[name],
     inputSchema: jsonSchema(

@@ -2,6 +2,8 @@ import { type ComputerAction, computerWorkMs, type ShellInput } from "@localdot/
 import type { AgentSession } from "../session.ts";
 
 const WORK_MS = 120_000;
+// A PDF download and its text, or a report and its PDF.
+const RESEARCH_WORK_MS = 200_000;
 const TICK_MS = 1000;
 
 type WaitingSession = Pick<AgentSession, "pendingApproval" | "controlHeld" | "pendingAsk">;
@@ -48,7 +50,9 @@ export function startWorkClock(
       ? (((input as ShellInput).timeout_sec ?? 120) + 10) * 1000
       : tool === "computer"
         ? computerWorkMs(input as ComputerAction)
-        : WORK_MS;
+        : tool === "research"
+          ? RESEARCH_WORK_MS
+          : WORK_MS;
   return new WorkClock(
     allowance,
     () =>

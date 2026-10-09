@@ -11,6 +11,7 @@ import {
 } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { RECENT_TASKS, RecentLine } from "./recent-activity.ts";
+import { ResearchBudget } from "./research.ts";
 import { SessionRun } from "./routines.ts";
 
 // The brain's tool API (spec "Ports": 4751). The brain calls only these, through its gate, with
@@ -109,6 +110,8 @@ export const BootConfig = z.object({
   recent: z.array(RecentLine).max(RECENT_TASKS).optional(),
   // Present when a routine started this task: the brain is told it runs unattended.
   run: SessionRun.optional(),
+  // Present in research mode: the brain gets the research rules and tool, with this budget.
+  research: ResearchBudget.optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 

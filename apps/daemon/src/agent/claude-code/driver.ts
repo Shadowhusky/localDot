@@ -777,7 +777,7 @@ export class ClaudeCodeDriver {
           launch,
           model,
           instructions: redact(d.instructions(session)),
-          server: localdotServer(call),
+          server: localdotServer(call, !!session.research),
           abort,
           spawn,
         }),

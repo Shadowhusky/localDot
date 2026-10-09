@@ -7,6 +7,7 @@ import {
   type CheckIns,
   type ClaudeCodeStatus,
   DEFAULT_AGENT_LIMITS,
+  DEFAULT_RESEARCH_BUDGET,
   freezeAutonomy,
   isJevKey,
   type KeydRecord,
@@ -51,6 +52,7 @@ import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
 import type { RecentActivity } from "./recent-activity.ts";
+import { ResearchLog } from "./research.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
 import { gatewayCompletion } from "./safety/judge-model.ts";
@@ -105,6 +107,8 @@ export interface TaskStartOptions {
   readonly run?: SessionRun;
   // The handed-over file this task revises, from a task that has ended.
   readonly revises?: ReviseLink;
+  // Research mode, within the user's research budget.
+  readonly research?: boolean;
 }
 export class AgentError extends Error {
   constructor(
@@ -442,6 +446,11 @@ export class AgentRunner {
         },
       );
       session.earlier = earlier;
+      if (options.research)
+        session.research = new ResearchLog(
+          settings.research ?? DEFAULT_RESEARCH_BUDGET,
+          (type, data) => session.append(type, data),
+        );
       // dot's earlier replies may repeat what a page said: they never unlock memory writes.
       if (earlier.length) session.tainted = true;
       session.recent = recent;
@@ -474,6 +483,7 @@ export class AgentRunner {
           ...(continues ? { continues } : {}),
           ...(origin?.success ? { origin: origin.data } : {}),
           ...(revises?.success ? { revises: revises.data } : {}),
+          ...(session.research ? { research: session.research.budget } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
@@ -1371,6 +1381,7 @@ export class AgentRunner {
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
           ...(session.recent.length ? { recent: [...session.recent] } : {}),
           ...(session.run ? { run: session.run } : {}),
+          ...(session.research ? { research: session.research.budget } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

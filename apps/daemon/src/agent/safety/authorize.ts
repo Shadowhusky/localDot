@@ -302,6 +302,12 @@ export function toolRisk(
         schedule: { title: "Pause a routine", fields: [["Routine", routineName?.(id) ?? id]] },
       };
     }
+    case "research":
+      return input.op === "pdf"
+        ? { operation: "navigate", destination: String(input.url) }
+        : input.op === "report"
+          ? { operation: "files_write" }
+          : undefined;
     case "follow_up_at":
       return {
         operation: "schedule",
