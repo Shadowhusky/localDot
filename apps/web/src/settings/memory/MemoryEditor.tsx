@@ -2,7 +2,9 @@ import type { MemoryBook, MemoryEntry } from "@localdot/protocol";
 import { useState } from "react";
 import type { Knowledge } from "../../agent/useKnowledge.ts";
 import { Button } from "../../ui/Button.tsx";
+import { EmptyState } from "../../ui/EmptyState.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../../ui/Group.tsx";
+import { MiddleTruncate } from "../../ui/MiddleTruncate.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Skeleton } from "../../ui/Skeleton.tsx";
 import { Spinner } from "../../ui/Spinner.tsx";
@@ -213,7 +215,7 @@ export function MemoryEditor({
           </div>
         ) : known.phase === "error" ? (
           <GroupRow
-            label="Memory couldn't be read."
+            label="Couldn't load memory"
             trailing={
               <Button variant="quiet" size="sm" onClick={known.reload}>
                 Try again
@@ -221,7 +223,11 @@ export function MemoryEditor({
             }
           />
         ) : facts.length === 0 ? (
-          <GroupRow label="Nothing yet." detail={EMPTY[shelf]} />
+          <div className="ui-group-row">
+            <EmptyState layout="start" title="Nothing yet">
+              {EMPTY[shelf]}
+            </EmptyState>
+          </div>
         ) : (
           <>
             {pinned.length > 0 && (
@@ -239,7 +245,7 @@ export function MemoryEditor({
         {knowledge && !notes && (
           <GroupRow
             label={shown ? "Hide the file" : "Show the file"}
-            detail={`${known.dir || "~/.localdot/memory"}/${shelf}`}
+            detail={<MiddleTruncate text={`${known.dir || "~/.localdot/memory"}/${shelf}`} />}
             trailing={
               markdown && knowledge.memoryPhase === "loading" ? <Spinner size={14} /> : undefined
             }

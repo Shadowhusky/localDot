@@ -24,7 +24,7 @@ export function RecentActivity({
         <Switch
           className="ui-group-row"
           label="Tell dot about recent tasks"
-          description="Each new task starts with the titles and outcomes of your last five, so dot can pick up where you left off."
+          description="New tasks start with how your last five went, so dot picks up where you left off."
           checked={control.on}
           onCheckedChange={control.change}
         />

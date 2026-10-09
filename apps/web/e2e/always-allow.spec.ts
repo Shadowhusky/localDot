@@ -108,9 +108,7 @@ for (const size of SIZES)
         expect((await remove.boundingBox())?.height).toBeGreaterThanOrEqual(44);
         await remove.tap();
       } else await remove.click();
-      await expect(
-        sheet.getByText("Nothing yet. Use Always allow on a request to add one."),
-      ).toBeVisible();
+      await expect(sheet.getByText("Nothing allowed yet")).toBeVisible();
       await expect(list).toHaveCount(0);
       expect((await api<{ rules: unknown[] }>("/api/agent/rules", origin)).rules).toEqual([]);
     } finally {

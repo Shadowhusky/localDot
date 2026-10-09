@@ -2,12 +2,8 @@
    (the sheet's body). It lays kit parts out and never restyles them. */
 .keys-body {
   display: grid;
-  gap: calc(var(--spacing) * 6);
+  gap: var(--_settings-block);
   min-width: 0;
-}
-
-.keys-body > .settings-lede {
-  margin-bottom: calc(var(--spacing) * -2);
 }
 
 .keys-section {
@@ -192,10 +188,6 @@
 .keys-remove-label::after {
   visibility: hidden;
   content: attr(data-longest);
-}
-
-.keys-row-name {
-  overflow-wrap: anywhere;
 }
 
 /* The dot between two facts sits in the gap; a fact that wraps to the start of a line takes its dot

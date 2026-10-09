@@ -1,7 +1,7 @@
 import type { AutonomyPolicy, StartAtLoginState } from "@localdot/protocol";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
-import { type ComputerUpdate, UPDATE_READY } from "../cells/useComputerUpdate.ts";
+import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
 import type { FreshStart } from "../cells/useFreshStart.ts";
 import { spendText } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
@@ -120,7 +120,7 @@ export interface SettingsSheetProps {
   accounts?: AccountsView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
   // Shut down, and on a phone, where the sheet covers the island, the task's Stop.
-  stop?: { label: string; enabled: boolean; run(): void };
+  stop?: { label: string; enabled: boolean; run(): void; task?: boolean };
   // A new version of the computer, while one is ready or going on.
   update?: ComputerUpdate;
   // Erases the computer and starts a clean one, unless dot is at work or the user holds it.
@@ -188,13 +188,21 @@ function Section({
   id,
   title,
   heading = true,
+  aside,
   children,
 }: {
   id: SettingsSection;
   title: string;
   heading?: boolean;
+  // One action at the heading's end.
+  aside?: ReactNode;
   children: ReactNode;
 }) {
+  const h3 = (
+    <h3 id={`settings-${id}-title`} className="settings-section-title" tabIndex={-1}>
+      {title}
+    </h3>
+  );
   return (
     <section
       id={`settings-${id}`}
@@ -203,11 +211,15 @@ function Section({
       aria-labelledby={heading ? `settings-${id}-title` : undefined}
       aria-label={heading ? undefined : title}
     >
-      {heading && (
-        <h3 id={`settings-${id}-title`} className="settings-section-title" tabIndex={-1}>
-          {title}
-        </h3>
-      )}
+      {heading &&
+        (aside ? (
+          <div className="settings-section-head">
+            {h3}
+            {aside}
+          </div>
+        ) : (
+          h3
+        ))}
       {children}
     </section>
   );
@@ -307,7 +319,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     }
   }, [props.open, props.loading, props.section, phone]);
 
-  const shown = shownSections(props);
+  const shown = shownSections(props, phone);
   const problems = props.dirty && props.validation?.length ? props.validation : null;
   const footer =
     !props.loading && (props.error || problems) ? (
@@ -406,7 +418,12 @@ export function SettingsSheet(props: SettingsSheetProps) {
     >
       <div ref={body} id="settings-sheet-body" className="settings-body">
         {shown.map((id) => (
-          <Section key={id} id={id} title={sectionTitle(id)}>
+          <Section
+            key={id}
+            id={id}
+            title={sectionTitle(id)}
+            aside={id === "computer" && props.stop && <ShutDown stop={props.stop} props={props} />}
+          >
             {content(id)}
           </Section>
         ))}
@@ -415,7 +432,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
   );
 }
 
-function shownSections(props: SettingsSheetProps): SettingsSection[] {
+function shownSections(props: SettingsSheetProps, phone = false): SettingsSection[] {
   const planMain = subscription(props.choices.main?.provider);
   const has: Record<SettingsSection, boolean> = {
     models: true,
@@ -428,7 +445,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
     computer:
-      !!props.stop ||
+      (!!props.stop && !(phone && props.stop.task)) ||
       !!props.update?.available ||
       !!props.freshStart ||
       !!props.stream ||
@@ -537,7 +554,8 @@ function SectionIndex({
   );
 }
 
-// A phone's first page: each section as a row with what it holds now, Stop above them all.
+// A phone's first page: each section as a row with what it holds now, the task's Stop and the
+// computer above them all.
 function SectionList({
   props,
   shown,
@@ -563,6 +581,7 @@ function SectionList({
     notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
     keys: countValue(props.keysPanel?.keys.keys.length),
+    computer: props.update?.available ? "Update ready" : "",
   };
   const row = (id: SettingsSection) => {
     const section = SECTIONS.find((each) => each.id === id);
@@ -577,15 +596,15 @@ function SectionList({
       />
     );
   };
+  const task = props.stop?.task ? props.stop : undefined;
   return (
     <>
-      {(props.stop ||
-        props.stopNote ||
-        props.update?.available ||
-        props.freshStart ||
-        props.stream ||
-        props.stopAll ||
-        props.startAtLogin) && <ComputerControls props={props} />}
+      {(task || props.stopNote || shown.includes("computer")) && (
+        <Group>
+          {(task || props.stopNote) && <TaskRow stop={task} note={props.stopNote} />}
+          {row("computer")}
+        </Group>
+      )}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(
@@ -593,6 +612,56 @@ function SectionList({
         ).map(row)}
       </Group>
     </>
+  );
+}
+
+// On a phone, where the sheet covers the island: the task's Stop, then how the last Stop went, with
+// any cleanup it couldn't confirm behind Details.
+function TaskRow({ stop, note }: { stop?: SettingsSheetProps["stop"]; note?: StopNote }) {
+  return (
+    <GroupRow
+      leading={<IconTile icon="stop" />}
+      label="This task"
+      detail={note && <span role="status">{note.line}</span>}
+      trailing={
+        stop && (
+          <Button
+            size="sm"
+            disabledReason={stop.enabled ? undefined : "Not available right now"}
+            onClick={() => stop.run()}
+          >
+            {stop.label}
+          </Button>
+        )
+      }
+    >
+      {!!note?.details?.length && (
+        <DetailLines lines={note.details} className="settings-stop-details" />
+      )}
+    </GroupRow>
+  );
+}
+
+// Shut down sits at the computer's heading on a wide screen and ends its page on a phone.
+function ShutDown({
+  stop,
+  props,
+  wide = false,
+}: {
+  stop: NonNullable<SettingsSheetProps["stop"]>;
+  props: SettingsSheetProps;
+  wide?: boolean;
+}) {
+  return (
+    <Button
+      size={wide ? "xl" : "sm"}
+      icon="power"
+      className={wide ? "settings-wide" : undefined}
+      disabledReason={stop.enabled && !props.update?.busy ? undefined : "Not available right now"}
+      onClick={() => stop.run()}
+    >
+      {stop.label}
+    </Button>
   );
 }
 
@@ -631,45 +700,42 @@ export interface StopNote {
   details?: readonly string[];
 }
 
-// The computer's rows: Shut down, or on a phone the task's Stop, with how the last Stop went under
-// its name and any cleanup it couldn't confirm behind Details; then the stream's quality. Start at
-// login and Stop everything follow in a group of their own.
+// The computer's settings, then what acts on all of it: Stop everything, and Start fresh last
+// because it erases. On a phone, Shut down ends the page; a wide screen has it at the heading.
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
-  const { stop, stopNote: note, stream, freshStart, stopAll, startAtLogin: login } = props;
+  const { stream, freshStart, stopAll, startAtLogin: login } = props;
   const update = props.update?.available ? props.update : undefined;
   const phone = useMediaQuery(PHONE);
+  const shutDown = phone && props.stop && !props.stop.task ? props.stop : undefined;
   return (
     <>
-      {(stop || note || update || freshStart || stream) && (
+      {(update || login || stream) && (
         <div>
           <Group>
-            {(stop || note) && (
-              <GroupRow
-                leading={<IconTile icon="power" />}
-                label="Your computer"
-                detail={note && <span role="status">{note.line}</span>}
-                trailing={
-                  stop && (
-                    <Button
-                      size="sm"
-                      icon="stop"
-                      disabledReason={
-                        stop.enabled && !update?.busy ? undefined : "Not available right now"
-                      }
-                      onClick={() => stop.run()}
-                    >
-                      {stop.label}
-                    </Button>
-                  )
-                }
-              >
-                {!!note?.details?.length && (
-                  <DetailLines lines={note.details} className="settings-stop-details" />
-                )}
-              </GroupRow>
-            )}
             {update && <UpdateRow update={update} />}
-            {freshStart && <FreshStartRow freshStart={freshStart} />}
+            {login && (
+              <Switch
+                className="ui-group-row"
+                leading={<IconTile icon="repeat" />}
+                label="Open at login"
+                description={
+                  login.state === "unavailable"
+                    ? undefined
+                    : "So routines run without you opening anything"
+                }
+                checked={login.state === "on"}
+                disabledReason={
+                  login.state === "unavailable"
+                    ? "Works in the installed app on a Mac"
+                    : login.state === undefined
+                      ? "Checking…"
+                      : login.busy
+                        ? "Saving…"
+                        : undefined
+                }
+                onCheckedChange={(on) => login.set(on)}
+              />
+            )}
             {stream && (
               <GroupRow
                 leading={<IconTile icon="monitor" />}
@@ -685,51 +751,35 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           {stream && (
             <GroupNote>
               {stream.saved
-                ? "Auto follows your connection and this device. When either slows, Sharp keeps text crisp and Smooth keeps motion fluid."
+                ? "Auto picks for you. When things slow down, Sharp keeps text crisp and Smooth keeps motion fluid."
                 : "Applied for this visit. This browser couldn't save it."}
             </GroupNote>
           )}
         </div>
       )}
-      {(login || stopAll) && (
+      {(stopAll || freshStart) && (
         <Group>
-          {login && (
-            <Switch
-              className="ui-group-row"
-              leading={<IconTile icon="play" />}
-              label="Start localDot when I log in"
-              description={
-                login.state === "unavailable"
-                  ? undefined
-                  : "So your routines run without you opening anything"
-              }
-              checked={login.state === "on"}
-              disabledReason={
-                login.state === "unavailable"
-                  ? "Works in the installed app on a Mac"
-                  : login.state === undefined
-                    ? "Checking…"
-                    : login.busy
-                      ? "Saving…"
-                      : undefined
-              }
-              onCheckedChange={(on) => login.set(on)}
-            />
-          )}
           {stopAll && (
             <GroupRow
               leading={<IconTile icon="stop" />}
               label="Stop everything"
-              detail="Stops every task, pauses your routines and freezes your computer"
+              detail="Stops every task, pauses routines and freezes your computer."
               trailing={
-                <Button size="sm" busy={stopAll.running} onClick={() => stopAll.run()}>
-                  Stop everything
+                <Button
+                  size="sm"
+                  busy={stopAll.running}
+                  aria-label="Stop everything"
+                  onClick={() => stopAll.run()}
+                >
+                  Stop
                 </Button>
               }
             />
           )}
+          {freshStart && <FreshStartRow freshStart={freshStart} />}
         </Group>
       )}
+      {shutDown && <ShutDown stop={shutDown} props={props} wide />}
     </>
   );
 }
@@ -740,15 +790,15 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
       leading={<IconTile icon="download" />}
       label={
         <span className="settings-update-label" role="status">
-          <span data-shown={update.busy ? undefined : ""}>{UPDATE_READY}</span>
-          <span data-shown={update.busy ? "" : undefined}>Updating your computer…</span>
+          <span data-shown={update.busy ? undefined : ""}>New version ready</span>
+          <span data-shown={update.busy ? "" : undefined}>Updating…</span>
         </span>
       }
       detail={
         update.error && !update.busy ? (
           <span className="settings-computer-error">{update.error}</span>
         ) : (
-          "Your files and sign-ins stay. It restarts in about a minute."
+          "Files and sign-ins stay. Takes about a minute."
         )
       }
       trailing={
@@ -774,21 +824,24 @@ function FreshStartRow({
   return (
     <GroupRow
       leading={<IconTile icon="history" />}
-      label="Start over with a clean computer"
+      label="Start fresh"
       detail={
         freshStart.error && !freshStart.busy ? (
           <span className="settings-computer-error">{freshStart.error}</span>
         ) : (
-          "Erases your computer's files. Your sign-ins stay."
+          "Erases your computer's files. Your sign\u2011ins stay."
         )
       }
       trailing={
         <FreshStartButton
           size="sm"
+          variant="destructive"
           busy={freshStart.busy}
           disabledReason={freshStart.busy ? undefined : freshStart.waitReason}
           run={freshStart.run}
-        />
+        >
+          Erase…
+        </FreshStartButton>
       }
     />
   );
@@ -919,12 +972,12 @@ function SectionContent({
                   trailing={spendText(props.spent.dayUSD, props.spent.estimated)}
                 />
               </Group>
+              <GroupNote>
+                Spend also shows in Activity and in each conversation's summary. It never interrupts
+                you.
+              </GroupNote>
             </div>
           )}
-          <GroupNote>
-            Spend also shows in Activity's usage line and in each conversation's summary. It never
-            interrupts you.
-          </GroupNote>
         </>
       );
     case "appearance":
@@ -947,7 +1000,7 @@ function SectionContent({
     case "keys":
       return keysPanel;
     case "computer":
-      return <ComputerControls props={{ ...props, stopNote: undefined }} />;
+      return <ComputerControls props={props} />;
   }
 }
 
