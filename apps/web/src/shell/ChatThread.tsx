@@ -40,6 +40,9 @@ export function ChatThread({
   agent,
   composer,
   answer,
+  lead,
+  trail,
+  pinned = false,
   cover,
   covered = false,
   recovery,
@@ -58,6 +61,9 @@ export function ChatThread({
   agent?: AgentSessionView;
   composer?: ReactNode;
   answer?: ReactNode;
+  lead?: ReactNode;
+  trail?: ReactNode;
+  pinned?: boolean;
   cover?: ReactNode;
   covered?: boolean;
   recovery?: ReactNode;
@@ -124,6 +130,9 @@ export function ChatThread({
       computerReady={computerReady}
       composer={composer}
       answer={answer}
+      lead={lead}
+      trail={trail}
+      pinned={pinned}
       cover={cover}
       covered={covered}
       start={start}

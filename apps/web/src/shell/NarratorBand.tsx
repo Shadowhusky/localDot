@@ -10,11 +10,13 @@ export interface NarratorBandProps {
   speaker: "dot" | "system";
   // Settings → Appearance → Show dot. Without dot beside it, the line names its speaker.
   showDot: boolean;
+  // Under dot in place of its line, while the band sits in focus mode's margin: the task's step.
+  note?: string;
 }
 
 // The band under the stage (design-v2 §10.17, §11 D): dot docked at the stage's corner and its line
 // beside it, two lines at most, crossfading one line to the next.
-export function NarratorBand({ line, speaker, showDot }: NarratorBandProps) {
+export function NarratorBand({ line, speaker, showDot, note }: NarratorBandProps) {
   const { text, leaving } = useLine(line);
   return (
     <div className="narrator" data-dot={showDot ? "" : undefined}>
@@ -31,6 +33,7 @@ export function NarratorBand({ line, speaker, showDot }: NarratorBandProps) {
           </span>
         )}
       </p>
+      {note && <p className="narrator-note num">{note}</p>}
     </div>
   );
 }

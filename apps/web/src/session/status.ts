@@ -242,14 +242,14 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     countdownS: null,
     control: false,
   });
-  const waiting = (row: TaskRow, label: string, caption: string): TaskHud => ({
+  const waiting = (row: TaskRow, label: string, caption: string, control = false): TaskHud => ({
     row,
     phase: "waiting",
     label,
     caption,
     elapsedS: waitedS(model, row, nowMs),
     countdownS: null,
-    control: false,
+    control,
   });
   const running = (row: TaskRow, label: string, caption: string, control: boolean): TaskHud => ({
     row,
@@ -269,9 +269,15 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   const at = agentStateAt(model, nowMs);
   const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
   const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
-  if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.");
+  // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
+  if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
   if (facts?.question != null)
-    return waiting("question", "Has a question", facts.question || "Waiting for your answer.");
+    return waiting(
+      "question",
+      "Has a question",
+      facts.question || "Waiting for your answer.",
+      true,
+    );
   if (facts?.takeover != null)
     return waiting("takeover", "Your turn", facts.takeover || "Your turn to use the computer.");
   if (facts?.pause === "pausing" || state === "pausing")

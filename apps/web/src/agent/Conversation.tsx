@@ -317,6 +317,11 @@ export interface ConversationProps {
   // one. The composer stays mounted, so a draft survives.
   composer?: ReactNode;
   answer?: ReactNode;
+  // Beside the composer, as a phone's toolbar holds it: before it and after it.
+  lead?: ReactNode;
+  trail?: ReactNode;
+  // The composer stays at the foot however short the column gets, as a phone's toolbar does.
+  pinned?: boolean;
   // Another view of the task (Activity) laid over the thread, above the foot, so the composer
   // stays put under both.
   cover?: ReactNode;
@@ -346,6 +351,9 @@ export function Conversation({
   error,
   composer,
   answer,
+  lead,
+  trail,
+  pinned = false,
   cover,
   covered = false,
   onReplay,
@@ -538,15 +546,15 @@ export function Conversation({
     const inView = Math.max(0, Math.min(dockHost.offsetHeight, bottom - top));
     jump.current.style.setProperty("--thread-foot-shown", `${Math.round(inView)}px`);
   }, [dockHost]);
-  const coveredNow = useRef(covered);
-  coveredNow.current = covered;
+  const footHeld = useRef(covered || pinned);
+  footHeld.current = covered || pinned;
   const placeDock = useCallback(() => {
     const column = body.current;
     if (!column || !foot.current || !end.current) return;
     const height = column.clientHeight;
     const under = dockHost.parentElement === foot.current;
     const target =
-      coveredNow.current || height >= FOOT_FROM || (under && height >= END_BELOW)
+      footHeld.current || height >= FOOT_FROM || (under && height >= END_BELOW)
         ? foot.current
         : end.current;
     // Moving an element takes the focus out of it, so the foot moves once the focus has left it.
@@ -578,9 +586,10 @@ export function Conversation({
       shown?.disconnect();
     };
   }, [placeDock, footShown, dockHost]);
-  // A cover keeps the foot under it, so the foot is placed again as one comes or goes.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: covered is read through its ref
-  useLayoutEffect(placeDock, [covered, placeDock]);
+  // A cover or a pinned toolbar keeps the foot under it, so the foot is placed again as one comes
+  // or goes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: both are read through their ref
+  useLayoutEffect(placeDock, [covered, pinned, placeDock]);
 
   // Whether the thread's last row is in view; below it there may only be the foot.
   const history = useRef<HTMLElement>(null);
@@ -822,8 +831,12 @@ export function Conversation({
             )}
           </Collapse>
           {answer}
-          <div className="thread-composer" hidden={asking}>
-            {composer}
+          <div className="thread-toolbar">
+            {lead}
+            <div className="thread-composer" hidden={asking}>
+              {composer}
+            </div>
+            {trail}
           </div>
         </Outbox.Provider>,
         dockHost,

@@ -418,3 +418,22 @@ describe("opening on a snapshot", () => {
     expect(screen.getByText("Earlier messages are in Replay.")).toBeTruthy();
   });
 });
+
+it("holds a phone's toolbar at the foot however short the column is, its controls around the field", () => {
+  const { container } = render(
+    <Conversation
+      items={items([message("one")])}
+      truncated={false}
+      composer={<textarea aria-label="Message" />}
+      lead={<button type="button">Activity</button>}
+      trail={<button type="button">More</button>}
+      pinned
+    />,
+  );
+  const dock = container.querySelector(".thread-dock") as HTMLElement;
+  expect(dock.parentElement?.classList.contains("thread-foot")).toBe(true);
+  const controls = dock.querySelectorAll(".thread-toolbar button, .thread-toolbar textarea");
+  expect(
+    [...controls].map((element) => element.getAttribute("aria-label") ?? element.textContent),
+  ).toEqual(["Activity", "Message", "More"]);
+});
