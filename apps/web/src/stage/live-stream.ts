@@ -1,6 +1,8 @@
+import { qualityMessage, type StreamQualityReport } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 import { forgetOldTickets } from "./client-storage.ts";
 import { type FrameSource, tapVideoTrack } from "./frame-source.ts";
+import { deviceClass, QualityController, RoundTrips } from "./stream-quality.ts";
 
 export interface StreamTarget {
   api: ApiClient;
@@ -27,6 +29,11 @@ const KEYFRAME_TRIES = 3;
 // The decoder runs ahead of a tap that presents nothing: the tap is taken again, then the client.
 export const TAP_STALL_MS = 3_000;
 const MINT_RETRY_MS = { min: 1_000, max: 15_000 };
+// The stream's quality is judged this often, and a viewer's wish repeated this often for a relay
+// that may have restarted under the same client.
+export const TUNE_MS = 1_000;
+const REPORT_EVERY_MS = 10_000;
+export const PING_TIMEOUT_MS = 2_000;
 const TICKET_PATH = /^\/cells\/[^/]+\/(?:desktop|browser)\/[A-Za-z0-9_-]{22}\/$/;
 const OPEN = 1;
 // HAVE_CURRENT_DATA: the client's video has shown a frame.
@@ -110,6 +117,14 @@ export class LiveStream {
   #troubleSince: number | null = null;
   #picture: StreamPicture = "none";
   #listeners = new Set<() => void>();
+  readonly #quality = new QualityController(deviceClass());
+  readonly #trips = new RoundTrips();
+  #pinging = false;
+  #tunedAt = 0;
+  #source: FrameSource | null = null;
+  #presentedCount = 0;
+  #counted: { client: Client; at: number; decoded: number; presented: number } | null = null;
+  #reported: { client: Client; text: string; at: number } | null = null;
 
   constructor(target: StreamTarget) {
     this.target = target;
@@ -140,8 +155,9 @@ export class LiveStream {
     };
   }
 
-  // The stage presented a frame of this stream.
-  presented(): void {
+  // The stage presented frames of this stream: `count` so far from its current tap.
+  presented(count = this.#presentedCount): void {
+    this.#presentedCount = count;
     this.#hadPicture = true;
     this.#presentedAt = Date.now();
     this.#awaiting = false;
@@ -230,6 +246,8 @@ export class LiveStream {
     // A hidden page shows nothing, and its throttled timers are not a suspension.
     if (document.visibilityState === "hidden") {
       this.#polledAt = now;
+      this.#report(this.#current, { visible: false }, now);
+      this.#counted = null;
       return;
     }
     // Timers that stopped this long mean a suspended page, whose socket may hold an old backlog.
@@ -266,6 +284,7 @@ export class LiveStream {
       } else delivering = !!track && !stalled && !this.#awaiting;
     }
     if (transport && transport.readyState !== OPEN) delivering = false;
+    if (client && video && now - this.#tunedAt >= TUNE_MS) this.#tune(client, now);
     if (this.#awaiting && now - this.#tappedAt >= FIRST_FRAME_MS) this.#keyframe(transport, now);
     if (delivering) this.#troubleSince = null;
     else this.#troubleSince ??= now;
@@ -297,6 +316,7 @@ export class LiveStream {
   #tap(client: Client, video: ClientVideo, now: number): void {
     const source = tapVideoTrack(video);
     if (!source) return;
+    this.#source = source;
     client.tapped = source.trackId;
     this.#presentedAt = now;
     this.#tappedAt = now;
@@ -304,6 +324,64 @@ export class LiveStream {
     this.#keyframes = 0;
     if (this.#sink) this.#sink(source);
     else source.stop();
+  }
+
+  // One second of the stream: what the decoder produced, what the stage presented, and how long
+  // the link takes, decide the quality this viewer asks the daemon for.
+  #tune(client: Client, now: number): void {
+    this.#tunedAt = now;
+    this.#ping();
+    const decoded = Math.max(client.decoded, this.#source?.delivered?.() ?? 0);
+    const last = this.#counted;
+    this.#counted = { client, at: now, decoded, presented: this.#presentedCount };
+    if (last?.client !== client || now <= last.at) {
+      this.#report(client, { visible: true, ...this.#quality.quality }, now);
+      return;
+    }
+    const seconds = (now - last.at) / 1000;
+    // A new tap restarts both counts.
+    const since = (count: number, before: number) => (count >= before ? count - before : count);
+    const quality = this.#quality.tick({
+      rttMs: this.#trips.smoothed,
+      baseRttMs: this.#trips.base,
+      decodedFps: since(decoded, last.decoded) / seconds,
+      presentedFps: since(this.#presentedCount, last.presented) / seconds,
+    });
+    this.#report(client, { visible: true, ...quality }, now);
+  }
+
+  // The daemon's own health route, through the same link as the stream: a queue there is a queue
+  // in front of the stream.
+  #ping(): void {
+    if (this.#pinging) return;
+    this.#pinging = true;
+    const started = performance.now();
+    Promise.resolve()
+      .then(() =>
+        this.target.api.fetch(new URL("/healthz", window.location.origin), {
+          cache: "no-store",
+          signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+        }),
+      )
+      .then(
+        () => this.#trips.add(performance.now() - started),
+        () => this.#trips.add(PING_TIMEOUT_MS),
+      )
+      .finally(() => {
+        this.#pinging = false;
+      });
+  }
+
+  #report(client: Client | null, report: StreamQualityReport, now: number): void {
+    const { transport } = look(client);
+    if (!client || transport?.readyState !== OPEN || typeof transport.send !== "function") return;
+    const text = qualityMessage(report);
+    const last = this.#reported;
+    if (last?.client === client && last.text === text && now - last.at < REPORT_EVERY_MS) return;
+    try {
+      transport.send(text);
+      this.#reported = { client, text, at: now };
+    } catch {}
   }
 
   // Selkies accepts a viewer's key frame request; its encoder otherwise sends only what changed, so

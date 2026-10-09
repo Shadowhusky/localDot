@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import { qualityMessage } from "@localdot/protocol";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
+import { fakeChromium, playInClient } from "../testing/fake-chromium.ts";
 import { closeStreams, holdStream, KEEP_MS, STALE_MS } from "./live-stream.ts";
 
 const CELL = "01JXYZ0000000000000000ABCD";
@@ -72,4 +74,38 @@ it("asks again for a ticket the daemon refused, less often each time", async () 
   await vi.advanceTimersByTimeAsync(2_000);
   expect(minted()).toBe(3);
   expect(clients()).toHaveLength(0);
+});
+
+it("tells its relay each second what this viewer can take, and that a hidden page asks for nothing", async () => {
+  const restore = fakeChromium();
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  try {
+    const paths: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const { pathname } = new URL(String(input));
+      paths.push(pathname);
+      return pathname === "/healthz" ? new Response("ok") : Response.json({ path: ticket(1) });
+    }) as typeof fetch;
+    const api = createApi("a".repeat(43), { fetchImpl });
+    const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+    stream.connect(() => {});
+    await vi.advanceTimersByTimeAsync(250);
+    const [frame] = clients();
+    if (!frame) throw new Error("no client");
+    playInClient(frame, "track-1");
+    const send = vi.fn();
+    Object.assign(frame.contentWindow as object, { selkiesTransport: { readyState: 1, send } });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(send).toHaveBeenCalledWith(qualityMessage({ visible: true, framerate: 60, crf: 25 }));
+    expect(paths.filter((path) => path === "/healthz").length).toBeGreaterThan(0);
+
+    send.mockClear();
+    visibility = "hidden";
+    await vi.advanceTimersByTimeAsync(250);
+    expect(send.mock.calls).toEqual([[qualityMessage({ visible: false })]]);
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
+    restore();
+  }
 });

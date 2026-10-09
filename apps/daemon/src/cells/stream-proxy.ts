@@ -6,6 +6,7 @@ import { refuse, type UpgradeContext, type UpgradeRoute } from "../upgrade-route
 import type { CellApi } from "./orchestrator.ts";
 import { readCapped } from "./readiness.ts";
 import type { TicketRegistry } from "./secrets.ts";
+import type { StreamTuning, TunedViewer } from "./stream-tuning.ts";
 import type { StreamEndpoint } from "./types.ts";
 import { StallWatchdog } from "./watchdog.ts";
 
@@ -84,6 +85,7 @@ export interface StreamProxyDeps {
   upstreamTimeoutMs?: number;
   highWater?: number;
   lowWater?: number;
+  tuning?: StreamTuning;
 }
 
 export interface StreamCells extends Pick<CellApi, "get" | "subscribe" | "updateStream"> {
@@ -164,8 +166,10 @@ export function desktopStreamRoute(
   const streams = new CellStreams(deps.cells);
   // Leaving ready revokes the cell's ticket, and the streams it opened go with it.
   deps.cells.subscribe((cell) => {
-    if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
+    if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending) {
       streams.drop(cell.id);
+      deps.tuning?.drop(cell.id);
+    }
   });
   return {
     pattern: new RegExp(`^/cells/([^/]+)/${surface}/([^/]+)/api/websockets$`),
@@ -218,6 +222,7 @@ function relay(
     deps.upstreamTimeoutMs ?? UPSTREAM_TIMEOUT_MS,
   );
   let client: WebSocket | undefined;
+  let tuned: TunedViewer | undefined;
   let drain: NodeJS.Timeout | undefined;
   let finished = false;
   // 1012 sends the client back to reconnect, with a fresh ticket once its cell is ready again.
@@ -242,6 +247,7 @@ function relay(
     finished = true;
     clearInterval(drain);
     drain = undefined;
+    tuned?.leave();
     watchdog.stop();
     streams.close(id, viewer, last, watchdog.lastAt);
   };
@@ -256,7 +262,9 @@ function relay(
     opts.wss.handleUpgrade(req, socket, head, (ws) => {
       socket.off("close", abandon);
       client = ws;
+      if (!finished) tuned = deps.tuning?.join(id, () => deps.cells.endpoints(id)?.stream);
       ws.on("message", (data, isBinary) => {
+        if (!isBinary && tuned?.consume(data.toString())) return;
         if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });
       });
       ws.on("error", () => {});

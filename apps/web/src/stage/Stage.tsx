@@ -23,6 +23,7 @@ import {
 } from "./live-stream.ts";
 import { ManualSurface, type ManualSurfaceHandle, type PointerMode } from "./ManualSurface.tsx";
 import type { Flip } from "./probe.ts";
+import type { PumpStats } from "./pump.ts";
 import { StageCanvas } from "./StageCanvas.tsx";
 import type { ReplayHandle, StageCanvasHandle } from "./stage-engine.ts";
 import type { OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
@@ -200,9 +201,9 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     });
   }, [paused, params, manualActive]);
 
-  const onStats = useCallback(() => {
+  const onStats = useCallback((stats: PumpStats) => {
     if (sourceOwner.current !== currentOwner.current) return;
-    streamRef.current?.presented();
+    streamRef.current?.presented(stats.presented);
     setDisplayOwner(currentOwner.current);
   }, []);
   useEffect(() => {

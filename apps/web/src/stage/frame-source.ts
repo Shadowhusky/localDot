@@ -5,6 +5,8 @@ export interface FrameSource {
   frames?: (deliver: (frame: VideoFrame) => void) => void;
   trackId: string;
   first?: VideoFrame;
+  // Frames copied so far, where they pass the page (Safari's path).
+  delivered?: () => number;
   // Ends the tap and releases a seed frame that was never handed on.
   stop(): void;
 }
@@ -78,16 +80,19 @@ function tapPresentedFrames(video: VideoLike, trackId: string): FrameSource | un
   if (!request) return undefined;
   let handle: number | undefined;
   let ended = false;
+  let delivered = 0;
   const first = currentFrame(video);
   return {
     trackId,
     first,
+    delivered: () => delivered,
     frames: (deliver) => {
       const present = () => {
         handle = undefined;
         if (ended) return;
         try {
           deliver(new VideoFrame(video as unknown as HTMLVideoElement));
+          delivered++;
         } catch {}
         handle = request(present);
       };

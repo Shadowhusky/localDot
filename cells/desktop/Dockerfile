@@ -172,7 +172,8 @@ RUN ln -sfn localdot-chromium /usr/local/bin/chromium \
 # One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
 # set here that a client could change are locked: "|locked" on bools, a one-value span on ranges,
 # one item on enums (D1, D2). File transfers take "none" because s6 drops an empty variable, which
-# re-enables them.
+# re-enables them. Frame rate and quality stay open for the daemon's stream tuner, a controller
+# socket whose own video starts off; viewers cannot change settings (cells/stream-tuning.ts).
 ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     LOCALDOT_SCALE=2 \
     SELKIES_MANUAL_WIDTH=2560 \
@@ -182,7 +183,9 @@ ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     SELKIES_SCALING_DPI=96 \
     SELKIES_ENABLE_CURSORS="false|locked" \
     SELKIES_ENCODER=h264enc \
-    SELKIES_FRAMERATE=60-60 \
+    SELKIES_FRAMERATE=60,10-60 \
+    SELKIES_VIDEO_ON_START=false \
+    SELKIES_USE_PAINT_OVER_QUALITY=true \
     SELKIES_VIDEO_FULLCOLOR="false|locked" \
     SELKIES_AUDIO_ENABLED="false|locked" \
     SELKIES_MICROPHONE_ENABLED="false|locked" \
