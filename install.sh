@@ -472,7 +472,7 @@ ensure_go() {
 
 tools() {
   PATH="$TOOLS:$NODE_DIR/bin:$PATH" COREPACK_HOME="$RUNTIME/corepack" \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_AUTO_PIN=0 "$@"
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_AUTO_PIN=0 npm_config_update_notifier=false "$@"
 }
 
 build_app() {
@@ -857,7 +857,7 @@ finish() {
   fi
   case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
-  *) say "Add $HOME/.local/bin to your PATH to use the localdot command." ;;
+  *) say "To use the localdot command, open a new terminal or add $HOME/.local/bin to your PATH." ;;
   esac
 }
 
