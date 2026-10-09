@@ -183,6 +183,18 @@ describe("the Markdown dot writes in a reply", () => {
       vi.useRealTimers();
     }
   });
+  it("reads streamed text in the render that brings it once the last read is old enough", () => {
+    let now = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      const { container, rerender } = render(<SafeMarkdown text="One" streaming />);
+      now += 100;
+      rerender(<SafeMarkdown text="One two" streaming />);
+      expect(container.textContent).toBe("One two");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
   it("gives a table's first row a row's height until its delimiter arrives", () => {
     expect(parseMarkdown("Totals:\n\n| Month | Net |").blocks.at(-1)).toMatchObject({
       kind: "paragraph",

@@ -1,7 +1,7 @@
 import { type LocalDotEvent, ULID_PATTERN } from "@localdot/protocol";
 import { emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentFeed } from "../agent/model.ts";
+import type { AgentFeed, AgentWords } from "../agent/model.ts";
 import { createAgentFeed } from "../agent/reducer.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
@@ -12,7 +12,7 @@ import { syncClock } from "./clock-sync.ts";
 
 export interface LiveSession {
   sessionId: string | null;
-  agentFeed: AgentFeed;
+  agentFeed: AgentFeed & AgentWords;
   model: SessionModel;
   version: number;
   ended: boolean;
@@ -46,6 +46,24 @@ interface Shown {
   live: boolean;
 }
 
+// A word for a message already on show changes only that message, which reads it from the feed;
+// anything else (a new message, a new line for dot to say) draws the page again.
+function wordsOnly(
+  event: LocalDotEvent,
+  known: ReadonlyMap<string, unknown>,
+  model: SessionModel,
+  lines: number,
+): boolean {
+  return (
+    event.type === "message.delta" &&
+    known.has(event.data.messageId) &&
+    saidLines(model, event.data.messageId) === lines
+  );
+}
+
+const saidLines = (model: SessionModel, id: string) =>
+  model.said.findLast((entry) => entry.id === id)?.lines.length ?? 0;
+
 // The worker gets every event at once; React sees the model at most ten times a second.
 // The computer's live task is shown while there is one. Otherwise the conversation's latest task,
 // `resting` (undefined until known), stays on show as ended, so a refresh, a stopped computer or a
@@ -69,6 +87,7 @@ export function useLiveSession(
   // The render that adopts a new session runs before the effect that resets the model.
   const modelOwner = useRef<string | null>(null);
   const dirty = useRef(false);
+  const words = useRef(false);
   const cellId = cell?.id ?? null;
   const ready = cell?.state === "ready";
   const sessionId = shown && (!shown.live || shown.cellId === cellId) ? shown.sessionId : null;
@@ -85,6 +104,7 @@ export function useLiveSession(
     modelRef.current = emptyModel();
     modelOwner.current = null;
     dirty.current = false;
+    words.current = false;
     stage.current?.resetSession();
     if (live.current) setShown(null);
     setEnded(false);
@@ -228,7 +248,11 @@ export function useLiveSession(
     const flush = setInterval(() => {
       if (dirty.current) {
         dirty.current = false;
+        words.current = false;
         setVersion((v) => v + 1);
+      } else if (words.current) {
+        words.current = false;
+        agentFeed.words();
       }
     }, REACT_HZ_MS);
     // The task's history arrives whole, so the thread draws it at once; the live feed then goes on
@@ -250,11 +274,18 @@ export function useLiveSession(
           },
           onMessage: (data) => {
             if (disposed) return;
+            const known = agentFeed.read().model.messages;
             const event = agentFeed.accept(data);
             if (!event) return;
+            const lines =
+              event.type === "message.delta"
+                ? saidLines(modelRef.current, event.data.messageId)
+                : 0;
             foldEvents(modelRef.current, [event]);
             stage.current?.pushEvents([event]);
-            dirty.current = true;
+            // dot's thoughts change nothing the page shows.
+            if (wordsOnly(event, known, modelRef.current, lines)) words.current = true;
+            else if (event.type !== "thought.delta") dirty.current = true;
             if (event.type === "session.end") end();
           },
         },
@@ -279,6 +310,7 @@ export function useLiveSession(
           foldEvents(modelRef.current, events);
           stage.current?.pushEvents(events);
           dirty.current = false;
+          words.current = false;
           setVersion((v) => v + 1);
           if (agentFeed.read().model.ended) end();
           else live();

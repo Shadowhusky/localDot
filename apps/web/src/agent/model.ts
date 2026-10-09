@@ -222,3 +222,9 @@ export interface AgentFeed {
   // Only authority/transport invalidations notify; token deltas use the existing 10 Hz flush.
   subscribe(listener: () => void): () => void;
 }
+// New words for a message already on show, at most ten times a second: only that message draws
+// again for them, not the page.
+export interface AgentWords {
+  read(): AgentFeedState;
+  subscribeWords(listener: () => void): () => void;
+}

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
 import type { LiveWork } from "./LiveWorkLine.tsx";
-import type { AgentMessage, AgentResult } from "./model.ts";
+import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import type { ThreadItem, WorkStep } from "./thread.ts";
 
 const drawn = vi.hoisted(() => ({ work: 0, results: 0 }));
@@ -31,7 +31,10 @@ vi.mock("./ResultFiles.tsx", async (load) => {
   };
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const message = (id: string, text: string) =>
   ({ id, role: "user", text, final: true }) as AgentMessage;
@@ -92,4 +95,29 @@ it("leaves earlier turns' work lines and results alone while the clock ticks and
   );
   expect(drawn.work).toBe(before.work + 1);
   expect(drawn.results).toBe(before.results);
+});
+
+it("draws a message's new words from the feed when it says they came, with the page left alone", () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  let said = { id: "3", role: "assistant", text: "Opening", final: false } as AgentMessage;
+  const listeners = new Set<() => void>();
+  const words: AgentWords = {
+    read: () => ({ model: { messages: new Map([[said.id, said]]) } }) as never,
+    subscribeWords: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  const items: ThreadItem[] = [
+    { kind: "message", key: "message-3", speaker: "dot", message: said },
+  ];
+  const view = render(<Conversation items={items} truncated={false} words={words} />);
+  expect(view.container.querySelector(".safe-markdown")?.textContent).toBe("Opening");
+  now += 100;
+  said = { ...said, text: "Opening the sheet" };
+  act(() => {
+    for (const listener of listeners) listener();
+  });
+  expect(view.container.querySelector(".safe-markdown")?.textContent).toBe("Opening the sheet");
 });

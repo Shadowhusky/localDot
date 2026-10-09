@@ -12,6 +12,7 @@ import {
   type AgentFeedState,
   type AgentModel,
   type AgentStep,
+  type AgentWords,
   emptyAgentModel,
   AGENT_LIMITS as L,
 } from "./model.ts";
@@ -517,8 +518,10 @@ function wellFormed(e: LocalDotEvent): boolean {
   if (e.type === "tool.start" && e.data.tool.length > 256) return false;
   return true;
 }
-export interface AgentFeedOwner extends AgentFeed {
+export interface AgentFeedOwner extends AgentFeed, AgentWords {
   reset(cellId: string | null, sessionId: string | null): void;
+  // Tells the messages on show that new words arrived.
+  words(): void;
   connection(value: AgentConnection): void;
   accept(data: string): LocalDotEvent | null;
   // The task's history, read whole before the live feed opens. The daemon leaves out what the
@@ -537,6 +540,7 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
     model: emptyAgentModel(),
   };
   const listeners = new Set<() => void>();
+  const wordListeners = new Set<() => void>();
   let missingThrough = -1;
   let invalidPayload = false;
   const invalidate = () => {
@@ -550,6 +554,15 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
       return () => {
         listeners.delete(listener);
       };
+    },
+    subscribeWords: (listener) => {
+      wordListeners.add(listener);
+      return () => {
+        wordListeners.delete(listener);
+      };
+    },
+    words() {
+      for (const listener of wordListeners) listener();
     },
     reset(cellId, sessionId) {
       missingThrough = -1;

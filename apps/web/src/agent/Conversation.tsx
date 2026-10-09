@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
@@ -29,7 +30,7 @@ import { CopyButton } from "./CopyButton.tsx";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
-import type { AgentMessage, AgentResult } from "./model.ts";
+import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
@@ -84,6 +85,7 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
 
 interface ThreadContext {
   announce(text: string): void;
+  words?: AgentWords;
   downloads: ResultDownloads;
   // How many results the thread holds: another one changes the versions of files already shown.
   results: number;
@@ -104,13 +106,27 @@ interface CardKind<K extends ThreadKind> {
   same(was: ItemOf<K>, now: ItemOf<K>, then: ThreadContext, thread: ThreadContext): boolean;
 }
 
+// A message still arriving reads its newest words from the feed when it says they came, so the
+// page does not draw again for them.
+function useArriving(words: AgentWords | undefined, shown: AgentMessage): AgentMessage {
+  const feed = shown.final ? undefined : words;
+  const subscribe = useCallback(
+    (listener: () => void) => feed?.subscribeWords(listener) ?? (() => {}),
+    [feed],
+  );
+  return useSyncExternalStore(subscribe, () => feed?.read().model.messages.get(shown.id) ?? shown);
+}
+
 const MessageCard = memo(function MessageCard({
-  message,
+  message: shown,
+  words,
   announce,
 }: {
   message: AgentMessage;
+  words?: AgentWords;
   announce(text: string): void;
 }) {
+  const message = useArriving(words, shown);
   const user = message.role === "user";
   const { body, files } = user ? splitAttachments(message.text) : { body: message.text, files: [] };
   const copy = (
@@ -182,9 +198,13 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
 
 const CARDS: { [K in ThreadKind]: CardKind<K> } = {
   message: {
-    draw: ({ item, thread }) => <MessageCard message={item.message} announce={thread.announce} />,
+    draw: ({ item, thread }) => (
+      <MessageCard message={item.message} words={thread.words} announce={thread.announce} />
+    ),
     same: (was, now, then, thread) =>
-      was.message === now.message && then.announce === thread.announce,
+      was.message === now.message &&
+      then.announce === thread.announce &&
+      then.words === thread.words,
   },
   question: {
     draw: ({ item, thread }) => (
@@ -363,6 +383,7 @@ export interface ConversationProps {
   start?: ReactNode;
   // Counts the conversations the user chose: each one's thread comes in anew.
   reveal?: number;
+  words?: AgentWords;
 }
 
 export function Conversation({
@@ -393,6 +414,7 @@ export function Conversation({
   computerUpdating = false,
   start,
   reveal = 0,
+  words,
 }: ConversationProps) {
   // While its task is live, the latest turn's work line sits in the foot, always in view; once the
   // turn is over it joins the thread as that turn's last row.
@@ -673,6 +695,7 @@ export function Conversation({
 
   const thread: ThreadContext = {
     announce,
+    words,
     downloads,
     results: results.length,
     ended,

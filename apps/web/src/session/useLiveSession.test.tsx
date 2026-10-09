@@ -394,3 +394,39 @@ it("falls back to the live feed's own replay when the history can't be read", as
   });
   expect(f.view.result.current.agentFeed.read().history).toBe(true);
 });
+
+it("draws the page for a new message or line, and only the message for its other words", async () => {
+  const f = conversing();
+  f.run(SESSION);
+  await wait(1_000);
+  await f.play(SESSION, event(0, "session.start", START));
+  const feed = f.view.result.current.agentFeed;
+  const heard = vi.fn();
+  feed.subscribeWords(heard);
+  const version = () => f.view.result.current.version;
+  const MESSAGE = "01JXYZ00000000000000MESSAG";
+  const say = (seq: number, text: string) =>
+    event(seq, "message.delta", { messageId: MESSAGE, text });
+  let at = version();
+  await f.play(SESSION, say(1, "Opening"));
+  expect(version()).toBe(at + 1);
+  at = version();
+  await f.play(
+    SESSION,
+    say(2, " the"),
+    say(3, " sheet"),
+    event(4, "thought.delta", { text: "Hmm" }),
+  );
+  expect(version()).toBe(at);
+  expect(heard).toHaveBeenCalledOnce();
+  expect(feed.read().model.messages.get(MESSAGE)?.text).toBe("Opening the sheet");
+  await f.play(SESSION, say(5, " now."));
+  expect(version()).toBe(at + 1);
+  expect(f.view.result.current.model.said.at(-1)?.lines.at(-1)?.text).toBe(
+    "Opening the sheet now.",
+  );
+  at = version();
+  await f.play(SESSION, event(6, "thought.delta", { text: " Row 3?" }));
+  expect(version()).toBe(at);
+  expect(heard).toHaveBeenCalledOnce();
+});
