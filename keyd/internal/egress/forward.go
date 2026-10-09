@@ -117,18 +117,28 @@ func (c *Cell) swap(h http.Header, swaps []keys.Entry) error {
 // whose value the user has to enter again is named, so whoever made the request can say which.
 func (c *Cell) refuseSecret(w http.ResponseWriter, l audit.Line, err error) {
 	var reentry *vault.ReentryError
+	var rebound *vault.ReboundError
 	switch {
 	case errors.Is(err, errNoAudit):
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonNoAudit)
 	case errors.As(err, &reentry):
-		l.Decision, l.Reason, l.Status, l.Detail = audit.Deny, ReasonReenter, http.StatusBadGateway, "re-enter "+reentry.ID
-		c.record(l)
-		w.Header().Set("X-Keyd-Reason", ReasonReenter)
-		w.Header().Set("X-Keyd-Secret", reentry.ID)
-		http.Error(w, "keyd: "+ReasonReenter+": enter the key "+reentry.ID+" again in localDot's Keys", http.StatusBadGateway)
+		c.refuseNamed(w, l, ReasonReenter, reentry.ID, "re-enter "+reentry.ID,
+			"enter the key "+reentry.ID+" again in localDot's Keys")
+	case errors.As(err, &rebound):
+		c.refuseNamed(w, l, ReasonRebound, rebound.ID, "destination changed "+rebound.ID,
+			"the destination of the key "+rebound.ID+" was changed outside localDot; remove the key and add it again in localDot's Keys")
 	default:
 		c.deny(w, l, http.StatusBadGateway, ReasonSecret)
 	}
+}
+
+// refuseNamed refuses a request for a secret the user has to act on, naming it.
+func (c *Cell) refuseNamed(w http.ResponseWriter, l audit.Line, reason, id, detail, message string) {
+	l.Decision, l.Reason, l.Status, l.Detail = audit.Deny, reason, http.StatusBadGateway, detail
+	c.record(l)
+	w.Header().Set("X-Keyd-Reason", reason)
+	w.Header().Set("X-Keyd-Secret", id)
+	http.Error(w, "keyd: "+reason+": "+message, http.StatusBadGateway)
 }
 
 // relay sends the request with the generation's transport: verified upstream TLS, guarded dials,

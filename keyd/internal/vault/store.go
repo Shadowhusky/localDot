@@ -17,9 +17,11 @@ var errUnchanged = errors.New("nothing was written")
 // only storing it again makes it usable.
 var ErrReenter = errors.New("store it again")
 
-// errRebound means the value was stored for another binding than the one asked for: the index
-// that names the binding was rewritten after keyd stored the value.
-var errRebound = fmt.Errorf("the value was stored for another destination; %w", ErrReenter)
+// ErrRebound, wrapped in a Get's error, means the value was stored for another binding than the one
+// asked for: the index that names the binding was changed after keyd stored the value, outside
+// keyd. The value is never sent to the changed destination, and storing it again under the changed
+// record would send it there, so the user removes the key and adds it again.
+var ErrRebound = errors.New("the value was stored for another destination")
 
 // ReentryError is Value's error for a secret whose record stands but whose stored value is gone or
 // can never be read as it is stored: the user enters the value again.
@@ -33,6 +35,17 @@ func (e *ReentryError) Error() string {
 }
 
 func (e *ReentryError) Unwrap() error { return e.err }
+
+// ReboundError is Value's error for a secret whose destination was changed outside keyd.
+type ReboundError struct {
+	ID string
+}
+
+func (e *ReboundError) Error() string {
+	return "vault: secret " + e.ID + " was stored for another destination than its record names"
+}
+
+func (e *ReboundError) Unwrap() error { return ErrRebound }
 
 // needsReentry reports whether a store's Get error means only storing the value again helps.
 func needsReentry(err error) bool {
@@ -77,7 +90,7 @@ func (m *Memory) Get(id string, binding string) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 	if item.binding != binding {
-		return nil, fmt.Errorf("vault: %s: %w", id, errRebound)
+		return nil, fmt.Errorf("vault: %s: %w", id, ErrRebound)
 	}
 	return slices.Clone(item.value), nil
 }

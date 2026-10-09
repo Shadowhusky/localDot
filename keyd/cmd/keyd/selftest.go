@@ -45,9 +45,12 @@ func selfTest(args []string, stderr io.Writer) int {
 	return 0
 }
 
+// selfTestPorts is never the running keyd's range: the self-test runs beside it.
+var selfTestPorts = egress.PortRange{Min: 4797, Max: 4799}
+
 // serveOnce starts a memory-vault daemon in home, asks its admin socket for its status and stops.
 func serveOnce(home string) (string, error) {
-	d, err := start(Config{Home: home, Vault: "memory", Ports: egress.PortRange{Min: 4760, Max: 4789}})
+	d, err := start(Config{Home: home, Vault: "memory", Ports: selfTestPorts})
 	if err != nil {
 		return "", err
 	}

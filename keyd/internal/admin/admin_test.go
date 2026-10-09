@@ -186,6 +186,46 @@ func TestAKeyToEnterAgainIsListedUntilItIsStored(t *testing.T) {
 	}
 }
 
+// A key whose destination was changed outside keyd after its value was stored is listed, and
+// counted, apart from one to enter again, until it is removed.
+func TestAKeyChangedOutsideKeydIsListedApart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.json")
+	store := vault.NewMemory()
+	warm, _ := vault.Open(store, path)
+	if err := warm.Put(record("weather", weather()), []byte(fakeKey)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, bytes.Replace(raw, []byte("api.example.test"), []byte("collector.example.test"), 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := vault.Open(store, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixtureWithDeps(t, func(d *egress.Deps) { d.Vault = cold })
+	if _, err := cold.Value("weather"); !errors.Is(err, vault.ErrRebound) {
+		t.Fatalf("Value = %v", err)
+	}
+	_, list := f.call(t, "GET", "/v1/secrets", nil)
+	_, status := f.call(t, "GET", "/v1/status", nil)
+	secrets, _ := list["secrets"].([]any)
+	first, _ := secrets[0].(map[string]any)
+	if first["rebound"] != true || first["reenter"] != nil || status["rebound"] != float64(1) || status["reenter"] != float64(0) {
+		t.Fatalf("listed %v, status rebound %v reenter %v", first, status["rebound"], status["reenter"])
+	}
+	if code, _ := f.call(t, "DELETE", "/v1/secrets/weather", nil); code != 204 {
+		t.Fatalf("delete %d", code)
+	}
+	if _, status := f.call(t, "GET", "/v1/status", nil); status["rebound"] != float64(0) {
+		t.Fatalf("after removal: rebound %v", status["rebound"])
+	}
+}
+
 func TestSecretPutRefusals(t *testing.T) {
 	f := newFixture(t)
 	wrongID, _ := vault.Seal(f.s.Opener.PublicKey(), record("other", weather()), []byte(fakeKey))

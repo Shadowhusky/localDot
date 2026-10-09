@@ -63,5 +63,5 @@ func TestAnIndexKeydDidNotWriteCannotSendAStoredSecretElsewhere(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway || resp.Header.Get("X-Keyd-Secret") != "anthropic" {
 		t.Fatalf("status %d naming %q, want 502 naming the key to enter again", resp.StatusCode, resp.Header.Get("X-Keyd-Secret"))
 	}
-	w.waitLine(reasonIs(ReasonReenter))
+	w.waitLine(reasonIs(ReasonRebound))
 }

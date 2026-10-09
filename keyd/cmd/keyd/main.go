@@ -29,6 +29,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/egress"
 	"github.com/shadowhusky/localdot/keyd/internal/events"
 	"github.com/shadowhusky/localdot/keyd/internal/installlock"
+	_ "github.com/shadowhusky/localdot/keyd/internal/keydinfo"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
 	"github.com/shadowhusky/localdot/keyd/internal/nativewatch"
@@ -91,6 +92,10 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "self-test" {
 		return selfTest(args[1:], stderr)
+	}
+	if len(args) == 1 && args[0] == "requirement" {
+		fmt.Println(vault.DesignatedRequirement())
+		return 0
 	}
 	fs := flag.NewFlagSet("keyd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -195,13 +200,20 @@ func (d *Daemon) init(dir string, cfg Config) error {
 		store, index = vault.NewMemory(), ""
 	} else if err := keychain.Check(); err != nil {
 		return errors.New("keyd: the Keychain vault requires a signed native keyd build")
+	} else if err := keychain.Claim(); err != nil {
+		return errors.New("keyd: another keyd is using the Keychain, or the helper refused this one")
 	}
 	v, err := vault.Open(store, index)
 	if err != nil {
 		return err
 	}
-	if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter) > 0 || !m.Done {
-		detail := fmt.Sprintf("%d bound, %d to re-enter, done %v", len(m.Bound), len(m.Reenter), m.Done)
+	if cfg.Vault == "keychain" {
+		if err := d.adopt(keychain); err != nil {
+			return err
+		}
+	}
+	if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter)+len(m.Rebound) > 0 || !m.Done {
+		detail := fmt.Sprintf("%d bound, %d to re-enter, %d changed outside keyd, done %v", len(m.Bound), len(m.Reenter), len(m.Rebound), m.Done)
 		if _, err := d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "bindings", Detail: detail}); err != nil {
 			return err
 		}
@@ -269,6 +281,22 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	go d.server.Serve(ln)
 	_, err = d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "start", Detail: "boot " + d.BootID + ", version " + version})
 	return err
+}
+
+// adopt moves the items an earlier keyd stored to this keyd's access list. A move that fails leaves
+// them where they are, refused for now, and the next start carries on.
+func (d *Daemon) adopt(keychain *vault.Keychain) error {
+	moved, err := keychain.Adopt()
+	if err == nil && moved == 0 {
+		return nil
+	}
+	line := audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "adopt", Detail: fmt.Sprintf("%d items moved from an earlier keyd", moved)}
+	if err != nil {
+		line.Decision, line.Detail = audit.Deny, "items from an earlier keyd were not all moved"
+		log.Printf("keyd: %v", err)
+	}
+	_, werr := d.log.Write(line)
+	return werr
 }
 
 // newPusher keeps the VAPID key in keyd's own store, gives way to a user secret of the same name and

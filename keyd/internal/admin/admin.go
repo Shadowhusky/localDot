@@ -107,7 +107,8 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"sealKey": s.Opener.PublicKey(),
 		"cells":   len(s.Manager.Cells()),
 		"secrets": len(s.Vault.Records()),
-		"reenter": s.reentries(),
+		"reenter": s.needing(vault.Reenter),
+		"rebound": s.needing(vault.Rebound),
 		"limits":  s.Settings.Limits(),
 		"day":     map[string]any{"date": date, "spentUSD": spent},
 		"audit":   auditState,
@@ -122,26 +123,29 @@ func (s *Server) hairpin() any {
 	return s.Hairpin.Status()
 }
 
-// listedSecret is a record as the admin API lists it: Reenter says the stored value is gone or can
-// never be read as it is stored, so the user enters it again.
+// listedSecret is a record as the admin API lists it. Reenter says the stored value is gone or can
+// never be read as it is stored, so the user enters it again. Rebound says the record was changed
+// outside keyd after the value was stored, so the user removes the key and adds it again.
 type listedSecret struct {
 	vault.Record
 	Reenter bool `json:"reenter,omitempty"`
+	Rebound bool `json:"rebound,omitempty"`
 }
 
 func (s *Server) listSecrets(w http.ResponseWriter, _ *http.Request) {
 	records := s.Vault.Records()
 	listed := make([]listedSecret, len(records))
 	for i, rec := range records {
-		listed[i] = listedSecret{Record: rec, Reenter: s.Vault.NeedsReentry(rec.ID)}
+		attention := s.Vault.Attention(rec.ID)
+		listed[i] = listedSecret{Record: rec, Reenter: attention == vault.Reenter, Rebound: attention == vault.Rebound}
 	}
 	reply(w, http.StatusOK, map[string]any{"secrets": listed})
 }
 
-func (s *Server) reentries() int {
+func (s *Server) needing(attention vault.Attention) int {
 	n := 0
 	for _, rec := range s.Vault.Records() {
-		if s.Vault.NeedsReentry(rec.ID) {
+		if s.Vault.Attention(rec.ID) == attention {
 			n++
 		}
 	}

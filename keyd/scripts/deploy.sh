@@ -3,10 +3,11 @@
 #
 #   scripts/deploy.sh [--dry-run] [--label dev.localdot.keyd] [--target /path/to/live/keyd]
 #
-# --dry-run builds, signs, verifies and self-tests, then prints the switch it would make.
-# Without it the script stages both binaries next to the live keyd, renames them into place,
-# restarts the LaunchAgent and rolls back to the previous binaries if the new keyd is not healthy
-# within 20 seconds.
+# --dry-run builds, signs, verifies and runs the signed tests, then prints the switch it would
+# make. Without it the script stages both binaries next to the live keyd, renames them into place,
+# restarts the LaunchAgent, and rolls back to the previous binaries if the new keyd is not healthy
+# within 20 seconds. Once it is healthy, the previous binaries are deleted: they are signed keyd
+# builds of an earlier generation.
 set -euo pipefail
 
 TEAM=87FD3FSZBG
@@ -41,36 +42,64 @@ if [ -z "$TARGET" ]; then
 fi
 case "$TARGET" in /*) ;; *) fail "the live keyd path must be absolute: $TARGET" ;; esac
 LIVE_DIR=$(dirname "$TARGET")
-KEYD_HOME=$(plist_args | awk 'prev == "-home" { print; exit } { prev = $0 }')
-KEYD_HOME=${KEYD_HOME:-${LOCALDOT_HOME:-$HOME/.localdot}}
+
+# keyd's home as Go's flag package reads it: -home or --home, its value next or after "="; else
+# LOCALDOT_HOME from the LaunchAgent's environment; else ~/.localdot.
+KEYD_HOME=
+if [ -f "$PLIST" ]; then
+  KEYD_HOME=$(plist_args | awk '
+    taken { print; exit }
+    /^--?home=/ { sub(/^--?home=/, ""); print; exit }
+    /^--?home$/ { taken = 1 }')
+  if [ -z "$KEYD_HOME" ] && plist_args | grep -q -- '^--\{0,1\}home'; then
+    fail "cannot read keyd's home from the LaunchAgent's arguments"
+  fi
+  [ -n "$KEYD_HOME" ] || KEYD_HOME=$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:LOCALDOT_HOME" "$PLIST" 2>/dev/null || true)
+fi
+KEYD_HOME=${KEYD_HOME:-$HOME/.localdot}
+case "$KEYD_HOME" in /*) ;; *) fail "keyd's home must be an absolute path: $KEYD_HOME" ;; esac
 SOCKET="$KEYD_HOME/keyd/admin.sock"
 
 BUILD=$(mktemp -d "${TMPDIR:-/tmp}/keyd-deploy.XXXXXX")
 SELFTEST_HOME=$(mktemp -d /tmp/keyd-selftest.XXXXXX)
 trap 'rm -rf "$BUILD" "$SELFTEST_HOME"' EXIT
 
-requirement() {
-  printf 'identifier "%s" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "%s"' "$1" "$TEAM"
+signed_by() {
+  printf '%s and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "%s"' "$1" "$TEAM"
 }
 cdhash() { codesign -dv --verbose=4 "$1" 2>&1 | sed -n 's/^CDHash=//p'; }
 
 step "build"
-(cd "$KEYD_DIR" && CGO_ENABLED=1 go build -trimpath -o "$BUILD/keyd" ./cmd/keyd && CGO_ENABLED=1 go build -trimpath -o "$BUILD/keyd-native" ./cmd/keyd-native)
-echo "built $BUILD/keyd and $BUILD/keyd-native"
+(cd "$KEYD_DIR" && CGO_ENABLED=1 go build -trimpath -o "$BUILD/keyd" ./cmd/keyd &&
+  CGO_ENABLED=1 go build -trimpath -o "$BUILD/keyd-native" ./cmd/keyd-native &&
+  CGO_ENABLED=1 go test -c -o "$BUILD/keyd.test" ./cmd/keyd &&
+  CGO_ENABLED=1 go test -c -o "$BUILD/vault.test" ./internal/vault)
+# keyd's designated requirement asks for the generation its Info.plist carries. Every earlier keyd
+# meets only the earlier requirement; keyd adopts the items stored under it.
+KEYD_REQ=$("$BUILD/keyd" requirement)
+EARLIER_REQ=$(signed_by "identifier \"$KEYD_ID\"")
+NATIVE_REQ=$(signed_by "identifier \"$NATIVE_ID\"")
+case "$KEYD_REQ" in "$EARLIER_REQ and info [KeydGeneration] >= "*) ;; *) fail "keyd names an unexpected requirement: $KEYD_REQ" ;; esac
+otool -s __TEXT __info_plist "$BUILD/keyd" | grep -q '^0' || fail "keyd has no Info.plist"
+echo "built keyd, keyd-native and the signed tests' executables in $BUILD"
 
 step "sign ($IDENTITY, hardened runtime)"
 sign() {
-  codesign --force --sign "$IDENTITY" --identifier "$2" --options runtime --timestamp "$1" ||
+  local requirements=()
+  [ -z "${3:-}" ] || requirements=(--requirements "=designated => $3")
+  codesign --force --sign "$IDENTITY" --identifier "$2" --options runtime --timestamp ${requirements[@]+"${requirements[@]}"} "$1" ||
     fail "signing $1 failed; errSecInternalComponent means the login keychain is locked or the key needs your approval"
 }
-sign "$BUILD/keyd" "$KEYD_ID"
+# The tests' executables are signed as keyd so that they pass as its daemon; they stay in $BUILD,
+# which the script deletes.
+for bin in keyd keyd.test vault.test; do sign "$BUILD/$bin" "$KEYD_ID" "$KEYD_REQ"; done
 sign "$BUILD/keyd-native" "$NATIVE_ID"
 
 step "verify signatures"
-for pair in "keyd:$KEYD_ID" "keyd-native:$NATIVE_ID"; do
-  bin="$BUILD/${pair%%:*}"
-  id=${pair#*:}
-  codesign --verify --strict --verbose=2 -R="=$(requirement "$id")" "$bin"
+for pair in "keyd|$KEYD_ID|$KEYD_REQ" "keyd-native|$NATIVE_ID|$NATIVE_REQ"; do
+  IFS='|' read -r name id req <<<"$pair"
+  bin="$BUILD/$name"
+  codesign --verify --strict --verbose=2 -R "=$req" "$bin"
   details=$(codesign -dv --verbose=4 "$bin" 2>&1)
   grep -q "^Identifier=$id\$" <<<"$details" || fail "$bin is not signed as $id"
   grep -q "^TeamIdentifier=$TEAM\$" <<<"$details" || fail "$bin is not signed by team $TEAM"
@@ -79,6 +108,8 @@ for pair in "keyd:$KEYD_ID" "keyd-native:$NATIVE_ID"; do
   [ -z "$(codesign -d --entitlements - "$bin" 2>/dev/null)" ] || fail "$bin carries entitlements"
   echo "$bin: $id, team $TEAM, hardened runtime, no entitlements, cdhash $(cdhash "$bin")"
 done
+codesign -d -r- "$BUILD/keyd" 2>&1 | grep -q '^designated => .*KeydGeneration' || fail "keyd's designated requirement lacks its generation"
+! codesign --verify -R "=$KEYD_REQ" "$BUILD/keyd-native" 2>/dev/null || fail "keyd-native meets keyd's requirement"
 
 step "local Gatekeeper status (no notarization)"
 for bin in "$BUILD/keyd" "$BUILD/keyd-native"; do
@@ -92,7 +123,7 @@ for bin in "$BUILD/keyd" "$BUILD/keyd-native"; do
   echo "$bin: not quarantined, Gatekeeper source: $source (launchd starts it without a Gatekeeper check)"
 done
 
-step "self-test"
+step "self-test and signed tests"
 "$BUILD/keyd" self-test -home "$SELFTEST_HOME"
 set +e
 "$BUILD/keyd" keychain-item check localdot-keyd-test probe </dev/null >/dev/null 2>&1
@@ -100,9 +131,27 @@ direct=$?
 set -e
 [ "$direct" = 45 ] || fail "a direct call of the Keychain helper was not refused (exit $direct)"
 echo "a direct call of the Keychain helper is refused (exit 45)"
-gate=$(cd "$KEYD_DIR" && KEYD_SIGNED_DIR="$BUILD" go test -count=1 -v -run '^TestSignedHelperServesOnlyTheDaemon$' ./cmd/keyd 2>&1) || { echo "$gate"; fail "the signed helper gate test failed"; }
-grep -q -- '--- PASS: TestSignedHelperServesOnlyTheDaemon' <<<"$gate" || { echo "$gate"; fail "the signed helper gate test did not run"; }
-echo "the helper refuses keyd-native and direct callers, and serves signed keyd"
+# The signed tests make a keychain of their own. When the live keyd is from before generation 2,
+# the vault tests also store items under its access list and adopt them.
+EARLIER_BIN=
+if [ -f "$TARGET" ] && codesign --verify -R "=$EARLIER_REQ" "$TARGET" 2>/dev/null &&
+  ! codesign --verify -R "=$KEYD_REQ" "$TARGET" 2>/dev/null; then
+  EARLIER_BIN=$TARGET
+fi
+signed_test() {
+  local package=$1 executable=$2 run=$3 out
+  shift 3
+  out=$(cd "$KEYD_DIR/$package" && env "$@" "$BUILD/$executable" -test.run "$run" -test.v -test.count=1 2>&1) ||
+    { echo "$out"; fail "the signed tests in $package failed"; }
+  if ! grep -q -- '--- PASS' <<<"$out" || grep -q -- '--- SKIP' <<<"$out"; then
+    echo "$out"
+    fail "the signed tests in $package did not run"
+  fi
+  grep -- '--- PASS' <<<"$out"
+}
+signed_test cmd/keyd keyd.test '^TestSignedHelperServesOnlyTheDaemonThatClaimedIt$' KEYD_SIGNED_DIR="$BUILD"
+signed_test internal/vault vault.test '^TestSigned' KEYD_SIGNED_VAULT=1 KEYD_EARLIER_BIN="$EARLIER_BIN"
+rm -f "$BUILD/keyd.test" "$BUILD/vault.test"
 
 NEW_HASH=$(cdhash "$BUILD/keyd")
 launchd_pid() { launchctl print "gui/$UIDN/$LABEL" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }'; }
@@ -128,11 +177,12 @@ healthy() {
 
 PLAN=(
   "copy $BUILD/keyd to $LIVE_DIR/.keyd.next and $BUILD/keyd-native to $LIVE_DIR/.keyd-native.next; verify both"
-  "keep the running binaries as $TARGET.prev and $LIVE_DIR/keyd-native.prev"
+  "keep the running binaries as $TARGET.prev and $LIVE_DIR/keyd-native.prev until the new keyd is healthy"
   "rename .keyd-native.next to $LIVE_DIR/keyd-native, then .keyd.next to $TARGET (atomic renames)"
-  "launchctl kickstart -k gui/$UIDN/$LABEL"
+  "launchctl kickstart -k gui/$UIDN/$LABEL; roll back if it fails"
+  "at start the new keyd claims the Keychain service and adopts every item an earlier keyd stored, which then no earlier keyd can read"
   "health: within ${HEALTH_SECONDS}s launchd runs cdhash $NEW_HASH, $SOCKET answers /v1/status with a new boot and an intact audit"
-  "if unhealthy: rename the .prev binaries back, kickstart again and exit 1"
+  "if healthy, delete the .prev binaries; if not, rename them back, kickstart again and exit 1"
 )
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -150,8 +200,8 @@ step "stage"
 cp "$BUILD/keyd" "$LIVE_DIR/.keyd.next"
 cp "$BUILD/keyd-native" "$LIVE_DIR/.keyd-native.next"
 chmod 755 "$LIVE_DIR/.keyd.next" "$LIVE_DIR/.keyd-native.next"
-codesign --verify --strict -R="=$(requirement "$KEYD_ID")" "$LIVE_DIR/.keyd.next"
-codesign --verify --strict -R="=$(requirement "$NATIVE_ID")" "$LIVE_DIR/.keyd-native.next"
+codesign --verify --strict -R "=$KEYD_REQ" "$LIVE_DIR/.keyd.next"
+codesign --verify --strict -R "=$NATIVE_REQ" "$LIVE_DIR/.keyd-native.next"
 cmp -s "$BUILD/keyd" "$LIVE_DIR/.keyd.next" && cmp -s "$BUILD/keyd-native" "$LIVE_DIR/.keyd-native.next" || fail "the staged copies differ from the build"
 
 OLD_BOOT=$(status_field bootId || true)
@@ -163,24 +213,26 @@ if [ -f "$LIVE_DIR/keyd-native" ]; then
   HAD_NATIVE=1
 fi
 
+rollback() {
+  step "rollback: $1"
+  mv -f "$TARGET.prev" "$TARGET"
+  if [ "$HAD_NATIVE" = 1 ]; then mv -f "$LIVE_DIR/keyd-native.prev" "$LIVE_DIR/keyd-native"; else rm -f "$LIVE_DIR/keyd-native"; fi
+  launchctl kickstart -k "gui/$UIDN/$LABEL" || true
+  echo "items the new keyd adopted trust only keyd from generation 2, so the restored keyd cannot read them until a new keyd is deployed"
+  if healthy "" "$OLD_HASH"; then
+    fail "$1; the previous binaries are back and running"
+  fi
+  fail "$1, and the restored keyd did not come back either; see $KEYD_HOME/logs/keyd.log"
+}
+
 step "switch"
 mv -f "$LIVE_DIR/.keyd-native.next" "$LIVE_DIR/keyd-native"
 mv -f "$LIVE_DIR/.keyd.next" "$TARGET"
-launchctl kickstart -k "gui/$UIDN/$LABEL"
+launchctl kickstart -k "gui/$UIDN/$LABEL" || rollback "launchctl kickstart failed"
 
 step "health check (${HEALTH_SECONDS}s)"
-if healthy "$OLD_BOOT" "$NEW_HASH"; then
-  echo "keyd is healthy on cdhash $NEW_HASH (pid $(launchd_pid))"
-  echo "roll back by hand: mv -f '$TARGET.prev' '$TARGET' && launchctl kickstart -k gui/$UIDN/$LABEL"
-  echo "the .prev binaries still carry the old signed launcher; delete them once you are happy"
-  exit 0
-fi
-
-step "rollback"
-mv -f "$TARGET.prev" "$TARGET"
-if [ "$HAD_NATIVE" = 1 ]; then mv -f "$LIVE_DIR/keyd-native.prev" "$LIVE_DIR/keyd-native"; else rm -f "$LIVE_DIR/keyd-native"; fi
-launchctl kickstart -k "gui/$UIDN/$LABEL"
-if healthy "" "$OLD_HASH"; then
-  fail "the new keyd was not healthy; the previous binaries are back and running"
-fi
-fail "the new keyd was not healthy, and the restored keyd did not come back either; see $KEYD_HOME/logs/keyd.log"
+healthy "$OLD_BOOT" "$NEW_HASH" || rollback "the new keyd was not healthy"
+# An earlier keyd can still read nothing the new keyd adopted, but it keeps its launcher.
+rm -f "$TARGET.prev" "$LIVE_DIR/keyd-native.prev"
+echo "keyd is healthy on cdhash $NEW_HASH (pid $(launchd_pid)); the previous binaries are deleted"
+echo "keys to re-enter: $(status_field reenter || echo unknown); keys changed outside localDot: $(status_field rebound || echo unknown)"

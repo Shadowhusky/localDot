@@ -198,7 +198,7 @@ func TestKeychainRefusesAValueStoredForAnotherBinding(t *testing.T) {
 	}
 	other := bindingOf(Record{ID: "weather", Kind: KindHTTP, Hosts: []string{"attacker.example.test"}, Header: "X-Api-Key", Format: "raw"})
 	got, err := k.Get("weather", other)
-	if !errors.Is(err, errRebound) || got != nil || carries(err.Error(), value) {
+	if !errors.Is(err, ErrRebound) || errors.Is(err, ErrReenter) || got != nil || carries(err.Error(), value) {
 		t.Fatalf("Get for another binding = %q, %v", got, err)
 	}
 	argv, _ := os.ReadFile(filepath.Join(dir, "argv.log"))

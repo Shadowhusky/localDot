@@ -45,6 +45,80 @@ static size_t procargs(char *out, int argc, const char *const *args, int count, 
   return n;
 }
 
+static pid_t livePID;
+static uint64_t liveSec;
+static uint32_t liveUsec;
+// A stand-in for the process table: livePID runs, started at liveSec.liveUsec; nothing else does.
+static int startedAs(pid_t pid, uint64_t *sec, uint32_t *usec) {
+  if (pid != livePID) return 0;
+  *sec = liveSec; *usec = liveUsec; return 1;
+}
+
+static int sessions(void) {
+  keyd_session a = { .pid = 4242, .sec = 1760000000, .usec = 7 }, parsed;
+  unsigned char secret[KEYD_SESSION_SECRET];
+  for (int i = 0; i < KEYD_SESSION_SECRET; i++) secret[i] = (unsigned char)(i * 7);
+  keyd_session_digest(secret, a.digest);
+  char text[160];
+  int n = keyd_session_format(&a, text, sizeof(text));
+  if (n <= 0 || strncmp(text, "keyd-session:1:4242:1760000000.000007:", 38) != 0 ||
+      !keyd_session_parse(text, (size_t)n, &parsed) || !keyd_session_owns(&parsed, &a)) {
+    fprintf(stderr, "session round trip failed: %s\n", text); return 1;
+  }
+  printf("PASS session round trip\n");
+  char digest[65];
+  memcpy(digest, text + 38, 64); digest[64] = 0;
+  struct { const char *name; char value[200]; } bad[] = {
+    {"another prefix", ""}, {"another version", ""}, {"no parent", ""}, {"launchd as parent", ""},
+    {"leading zero", ""}, {"five-digit microseconds", ""}, {"seven-digit microseconds", ""},
+    {"capital hex", ""}, {"short digest", ""}, {"long digest", ""}, {"no seconds", ""},
+    {"huge pid", ""}, {"sign", ""}, {"trailing text", ""},
+  };
+  snprintf(bad[0].value, 200, "keyd-sessions:1:4242:1760000000.000007:%s", digest);
+  snprintf(bad[1].value, 200, "keyd-session:2:4242:1760000000.000007:%s", digest);
+  snprintf(bad[2].value, 200, "keyd-session:1:0:1760000000.000007:%s", digest);
+  snprintf(bad[3].value, 200, "keyd-session:1:1:1760000000.000007:%s", digest);
+  snprintf(bad[4].value, 200, "keyd-session:1:04242:1760000000.000007:%s", digest);
+  snprintf(bad[5].value, 200, "keyd-session:1:4242:1760000000.00007:%s", digest);
+  snprintf(bad[6].value, 200, "keyd-session:1:4242:1760000000.0000007:%s", digest);
+  snprintf(bad[7].value, 200, "keyd-session:1:4242:1760000000.000007:%s", digest);
+  for (char *c = bad[7].value + 38; *c; c++) if (*c >= 'a' && *c <= 'f') *c -= 32;
+  snprintf(bad[8].value, 200, "keyd-session:1:4242:1760000000.000007:%.63s", digest);
+  snprintf(bad[9].value, 200, "keyd-session:1:4242:1760000000.000007:%s0", digest);
+  snprintf(bad[10].value, 200, "keyd-session:1:4242:.000007:%s", digest);
+  snprintf(bad[11].value, 200, "keyd-session:1:99999999999:1760000000.000007:%s", digest);
+  snprintf(bad[12].value, 200, "keyd-session:1:-4242:1760000000.000007:%s", digest);
+  snprintf(bad[13].value, 200, "keyd-session:1:4242:1760000000.000007:%s\n", digest);
+  for (unsigned i = 0; i < sizeof(bad)/sizeof(bad[0]); i++) {
+    if (keyd_session_parse(bad[i].value, strlen(bad[i].value), &parsed)) {
+      fprintf(stderr, "session parse accepted: %s\n", bad[i].name); return 1;
+    }
+    printf("PASS session refuses %s\n", bad[i].name);
+  }
+  keyd_session other = a;
+  other.digest[31] ^= 1;
+  if (keyd_session_owns(&other, &a)) { fprintf(stderr, "another secret owns the session\n"); return 1; }
+  other = a; other.pid = 4343;
+  if (keyd_session_owns(&other, &a)) { fprintf(stderr, "another process owns the session\n"); return 1; }
+  other = a; other.usec = 8;
+  if (keyd_session_owns(&other, &a)) { fprintf(stderr, "a later process owns the session\n"); return 1; }
+  printf("PASS session owned only by its process and secret\n");
+
+  keyd_session holder = { .pid = 5000, .sec = 1760000001, .usec = 1 };
+  livePID = 5000; liveSec = 1760000001; liveUsec = 1;
+  if (keyd_session_claimable(&holder, &a, startedAs)) { fprintf(stderr, "a running daemon lost its claim\n"); return 1; }
+  printf("PASS claim refused while its daemon runs\n");
+  if (!keyd_session_claimable(&a, &a, startedAs)) { fprintf(stderr, "a daemon could not claim again\n"); return 1; }
+  printf("PASS claim kept by the daemon that made it\n");
+  liveUsec = 2;
+  if (!keyd_session_claimable(&holder, &a, startedAs)) { fprintf(stderr, "a reused PID kept the claim\n"); return 1; }
+  printf("PASS claim freed when its PID is reused\n");
+  livePID = 0;
+  if (!keyd_session_claimable(&holder, &a, startedAs)) { fprintf(stderr, "an exited daemon kept the claim\n"); return 1; }
+  printf("PASS claim freed when its daemon exits\n");
+  return 0;
+}
+
 static pid_t spawn(const char *path, char *const argv[]) {
   pid_t pid = 0;
   return posix_spawn(&pid, path, NULL, NULL, argv, environ) == 0 ? pid : -1;
@@ -72,8 +146,10 @@ int main(void) {
     parents[0] = gates[i].first; parents[1] = gates[i].second;
     parentReads = selfCalls = processCalls = modeCalls = 0; checkedPID = modePID = 0; modeCheckOnly = -1;
     selfResult = gates[i].self; processResult = gates[i].process; modeResult = gates[i].mode;
-    OSStatus status = keyd_identity_check(&checks, NULL, gates[i].checkOnly);
-    if ((status == errSecSuccess) != gates[i].ok || selfCalls != gates[i].selfCalls ||
+    pid_t checked = 0;
+    OSStatus status = keyd_identity_check(&checks, NULL, gates[i].checkOnly, &checked);
+    if ((status == errSecSuccess) != gates[i].ok || checked != (gates[i].ok ? gates[i].first : 0) ||
+        selfCalls != gates[i].selfCalls ||
         processCalls != gates[i].processCalls || modeCalls != gates[i].modeCalls ||
         (processCalls && checkedPID != gates[i].first) ||
         (modeCalls && (modePID != gates[i].first || modeCheckOnly != gates[i].checkOnly))) {
@@ -130,6 +206,18 @@ int main(void) {
   printf("PASS process with a subcommand\n");
   if (keyd_check_mode(other, 1) == errSecSuccess) { fprintf(stderr, "reaped process accepted\n"); return 1; }
   printf("PASS process gone\n");
+  uint64_t sec = 0, childSec = 0;
+  uint32_t usec = 0, childUsec = 0;
+  char *nap[] = {"sleep", "30", NULL};
+  pid_t child = spawn("/bin/sleep", nap);
+  int ownStart = keyd_started(getpid(), &sec, &usec), childStart = keyd_started(child, &childSec, &childUsec);
+  reap(child);
+  if (!ownStart || !childStart || childSec < sec || keyd_started(child, &childSec, &childUsec) ||
+      keyd_started(1, &sec, &usec) || keyd_started(0, &sec, &usec)) {
+    fprintf(stderr, "process start times: own %d child %d\n", ownStart, childStart); return 1;
+  }
+  printf("PASS process start times\n");
+  if (sessions()) return 1;
 
   CFNumberRef runtime = number(kSecCodeSignatureRuntime | kSecCodeSignatureLibraryValidation);
   CFNumberRef plain = number(kSecCodeSignatureLibraryValidation | kSecCodeSignatureRestrict);

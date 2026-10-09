@@ -10,20 +10,25 @@ package vault
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "keychain_acl_darwin.h"
-#include "keychain_identity_darwin.h"
-#ifdef KEYD_NATIVE_TRACE
-#include <stdio.h>
-#define KEYD_TRACE(phase) fprintf(stderr, "keychain-native %s status=%d\n", phase, (int)status)
-#else
-#define KEYD_TRACE(phase) ((void)0)
-#endif
+#include "keychain_items_darwin.h"
 
+#define KEYD_SIGNED_BY \
+  " and anchor apple generic and " \
+  "certificate 1[field.1.2.840.113635.100.6.2.6] exists and " \
+  "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and " \
+  "certificate leaf[subject.OU] = \"87FD3FSZBG\""
+
+// keyd is signed with this as its designated requirement, and its Info.plist (internal/keydinfo)
+// carries the generation. Every keyd before generation 2 could start a program as keyd's child, so
+// none of them meets it.
 static const char *keyd_requirement =
-  "identifier \"dev.localdot.keyd\" and anchor apple generic and "
-  "certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
-  "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and "
-  "certificate leaf[subject.OU] = \"87FD3FSZBG\"";
+  "identifier \"dev.localdot.keyd\"" KEYD_SIGNED_BY " and info [KeydGeneration] >= \"2\"";
+
+static const char *keyd_designated(void) { return keyd_requirement; }
+
+// What every earlier keyd's items trust. keyd meets it too, which is how it adopts them
+// (keyd_adopt); nothing else accepts it.
+static const char *keyd_earlier_requirement = "identifier \"dev.localdot.keyd\"" KEYD_SIGNED_BY;
 
 static OSStatus keyd_check_code(SecCodeRef code, SecRequirementRef requirement) {
   // Per-item identity checks stay offline. Release notarization/revocation acceptance is a
@@ -67,147 +72,120 @@ static OSStatus keyd_check_process(pid_t parentPID, SecRequirementRef requiremen
 
 static const keyd_identity_checks keyd_process_checks = { getppid, keyd_check_self, keyd_check_process, keyd_check_mode };
 
-// Identity checks are deliberately before even selecting the default keychain. No PID argument,
-// environment override, development bypass, generic security tool or unsigned fallback exists.
-static OSStatus keyd_authorized(int checkOnly) {
+// Identity checks are deliberately before even selecting the keychain. No PID argument,
+// development bypass, generic security tool or unsigned fallback exists.
+static OSStatus keyd_authorized(int checkOnly, pid_t *parent) {
   CFStringRef text = CFStringCreateWithCString(NULL, keyd_requirement, kCFStringEncodingUTF8);
   SecRequirementRef requirement = NULL;
   OSStatus status = text ? SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement) : errSecAllocate;
-  if (status == errSecSuccess) status = keyd_identity_check(&keyd_process_checks, requirement, checkOnly);
+  if (status == errSecSuccess) status = keyd_identity_check(&keyd_process_checks, requirement, checkOnly, parent);
   if (requirement) CFRelease(requirement);
   if (text) CFRelease(text);
   return status;
 }
 
-// Re-read the stored ACL and compare its pinned signing requirement, independent of the
-// previous release's descriptive executable path. Unknown or widened policies require migration.
-static OSStatus keyd_verify_access(SecKeychainItemRef item) {
-  SecAccessRef access = NULL;
-  OSStatus status = SecKeychainItemCopyAccess(item, &access);
-  if (status == errSecSuccess) status = keyd_acl_policy(access, keyd_requirement);
-  if (access) CFRelease(access);
+// keyd's service always lives in the default keychain. The test service may name a keychain the
+// test made; that never reaches keyd's own items.
+static OSStatus keyd_keychain(const char *service, SecKeychainRef *keychain) {
+  const char *test = getenv("KEYD_TEST_KEYCHAIN");
+  if (strcmp(service, "localdot-keyd-test") == 0 && test && test[0] == '/') return SecKeychainOpen(test, keychain);
+  return SecKeychainCopyDefault(keychain);
+}
+
+static OSStatus keyd_operate(const char *operation, const keyd_items *k, const keyd_session *parent,
+                             const char *account, const void *data, unsigned int length,
+                             void **output, unsigned int *outputLength, unsigned int *moved, int *mayHaveChanged) {
+  if (strcmp(operation, "claim") == 0) return keyd_claim(k, parent, keyd_started, mayHaveChanged);
+  OSStatus status = keyd_check_session(k, parent);
+  if (status != errSecSuccess) return status;
+  if (strcmp(operation, "adopt") == 0) return keyd_adopt(k, moved, mayHaveChanged);
+  if (strcmp(operation, "store") == 0) return keyd_store(k, k->service, account, data, length, mayHaveChanged);
+  if (strcmp(operation, "delete") == 0) return keyd_delete(k, k->service, account, mayHaveChanged);
+  if (strcmp(operation, "read") != 0) return errSecParam;
+  UInt32 size = 0;
+  status = keyd_read(k, k->service, account, output, &size);
+  *outputLength = size;
   return status;
 }
 
 static OSStatus keyd_item(const char *operation, const char *service, const char *account,
-                         const void *data, unsigned int length, void **output, unsigned int *outputLength,
-                         int *mayHaveChanged) {
-  OSStatus status = keyd_authorized(strcmp(operation, "check") == 0);
-  KEYD_TRACE("authorized");
+                         const void *data, unsigned int length, const unsigned char *secret, unsigned int secretLength,
+                         void **output, unsigned int *outputLength, unsigned int *moved, int *mayHaveChanged) {
+  int checkOnly = strcmp(operation, "check") == 0;
+  pid_t parentPID = 0;
+  OSStatus status = keyd_authorized(checkOnly, &parentPID);
   if (status != errSecSuccess) return status;
-  if (strcmp(operation, "check") == 0) return errSecSuccess;
-  // A locked keychain or legacy ACL must fail visibly in the caller, never pop a hidden prompt.
+  // The secret shows the daemon meant to run this helper. `check` opens no keychain, so it needs
+  // only the channel; every other operation needs the daemon's claim too.
+  if (!secret || secretLength != KEYD_SESSION_SECRET) return errSecAuthFailed;
+  if (checkOnly) return errSecSuccess;
+  keyd_session parent = { .pid = parentPID };
+  if (!keyd_started(parentPID, &parent.sec, &parent.usec)) return errSecAuthFailed;
+  keyd_session_digest(secret, parent.digest);
+  // A locked keychain must fail visibly in the caller, never pop a hidden prompt. Nothing here
+  // changes an item's access list in place, which only a Keychain prompt can authorize.
   status = SecKeychainSetUserInteractionAllowed(false);
-  SecKeychainRef keychain = NULL;
+  keyd_items k = { NULL, service, keyd_requirement, keyd_earlier_requirement, NULL };
   SecTrustedApplicationRef self = NULL;
   CFArrayRef trusted = NULL;
-  SecAccessRef access = NULL;
-  SecKeychainItemRef item = NULL;
-  if (status == errSecSuccess) status = SecKeychainCopyDefault(&keychain);
-  KEYD_TRACE("default-keychain");
+  if (status == errSecSuccess) status = keyd_keychain(service, &k.keychain);
   if (status == errSecSuccess) status = SecTrustedApplicationCreateFromPath(NULL, &self);
   if (status == errSecSuccess) {
     const void *apps[] = { self };
     trusted = CFArrayCreate(NULL, apps, 1, &kCFTypeArrayCallBacks);
     if (!trusted) status = errSecAllocate;
   }
-  if (status == errSecSuccess) status = SecAccessCreate(CFSTR("localDot secret — keyd only"), trusted, &access);
-  KEYD_TRACE("access-created");
-  if (status == errSecSuccess) {
-    status = SecKeychainFindGenericPassword(keychain, (UInt32)strlen(service), service,
-      (UInt32)strlen(account), account, NULL, NULL, &item);
-    KEYD_TRACE("find");
-    if (status == errSecItemNotFound && strcmp(operation, "store") == 0) {
-      SecKeychainAttribute attributes[] = {
-        { kSecServiceItemAttr, (UInt32)strlen(service), (void *)service },
-        { kSecAccountItemAttr, (UInt32)strlen(account), (void *)account }
-      };
-      SecKeychainAttributeList list = { 2, attributes };
-      *mayHaveChanged = 1;
-      status = SecKeychainItemCreateFromContent(kSecGenericPasswordItemClass, &list,
-        length, data, keychain, access, &item);
-      KEYD_TRACE("create-item");
-      // Creation supplies the restricted ACL atomically. Do not reapply the write below.
-      if (status == errSecSuccess) { status = keyd_verify_access(item); KEYD_TRACE("created-policy"); goto done; }
-    } else if (status == errSecSuccess) {
-      // A matching stored policy already restricts value access to signed keyd. Replacing
-      // that policy on every read unnecessarily asks for ACL-owner authorization, which
-      // can fail even while the item's existing decrypt grant correctly authorizes us.
-      // Only a nonmatching policy needs migration; verify the stored result before any
-      // value access. Never interpret failed migration as an absent or readable item.
-      status = keyd_verify_access(item);
-      KEYD_TRACE("inspect-access");
-      if (status != errSecSuccess) {
-        SecAccessRef existing = NULL;
-        status = SecKeychainItemCopyAccess(item, &existing);
-        if (status == errSecSuccess) status = keyd_acl_restrict(existing, trusted, keyd_requirement);
-        if (status == errSecSuccess) status = SecKeychainItemSetAccess(item, existing);
-        KEYD_TRACE("set-access");
-        if (existing) CFRelease(existing);
-        if (status == errSecSuccess) status = keyd_verify_access(item);
-      }
-      KEYD_TRACE("existing-policy");
-      if (status == errSecSuccess && strcmp(operation, "store") == 0) {
-        *mayHaveChanged = 1;
-        status = SecKeychainItemModifyAttributesAndData(item, NULL, length, data);
-      } else if (status == errSecSuccess && strcmp(operation, "delete") == 0) {
-        *mayHaveChanged = 1;
-        status = SecKeychainItemDelete(item);
-      } else if (status == errSecSuccess && strcmp(operation, "read") == 0)
-        status = SecKeychainItemCopyAttributesAndData(item, NULL, NULL, NULL, outputLength, output);
-    }
-  }
-done:
-  KEYD_TRACE("done");
-  if (item) CFRelease(item);
-  if (access) CFRelease(access);
+  if (status == errSecSuccess) status = SecAccessCreate(CFSTR("localDot secret — keyd only"), trusted, &k.access);
+  if (status == errSecSuccess)
+    status = keyd_operate(operation, &k, &parent, account, data, length, output, outputLength, moved, mayHaveChanged);
+  if (k.access) CFRelease(k.access);
   if (trusted) CFRelease(trusted);
   if (self) CFRelease(self);
-  if (keychain) CFRelease(keychain);
+  if (k.keychain) CFRelease(k.keychain);
   return status;
-}
-static void keyd_free_output(void *output, unsigned int length) {
-  if (output) {
-    volatile unsigned char *bytes = (volatile unsigned char *)output;
-    for (unsigned int i = 0; i < length; i++) bytes[i] = 0;
-    SecKeychainItemFreeAttributesAndData(NULL, output);
-  }
 }
 */
 import "C"
 
 import "unsafe"
 
-func nativeKeychainItem(operation, service, account string, data []byte) ([]byte, int) {
+func nativeKeychainItem(operation, service, account string, data, secret []byte) ([]byte, int, int) {
 	op, svc, acct := C.CString(operation), C.CString(service), C.CString(account)
 	defer C.free(unsafe.Pointer(op))
 	defer C.free(unsafe.Pointer(svc))
 	defer C.free(unsafe.Pointer(acct))
-	var input unsafe.Pointer
+	var input, session unsafe.Pointer
 	if len(data) > 0 {
 		input = unsafe.Pointer(&data[0])
 	}
+	if len(secret) > 0 {
+		session = unsafe.Pointer(&secret[0])
+	}
 	var output unsafe.Pointer
-	var length C.uint
+	var length, moved C.uint
 	var mayHaveChanged C.int
-	status := C.keyd_item(op, svc, acct, input, C.uint(len(data)), &output, &length, &mayHaveChanged)
-	defer C.keyd_free_output(output, length)
+	status := C.keyd_item(op, svc, acct, input, C.uint(len(data)), (*C.uchar)(session), C.uint(len(secret)),
+		&output, &length, &moved, &mayHaveChanged)
+	defer C.keyd_free(output, C.UInt32(length))
 	if code := nativeExit(int32(status), mayHaveChanged != 0); code != 0 {
-		return nil, code
+		return nil, 0, code
 	}
 	if length > helperItemLimit {
-		return nil, 1
+		return nil, 0, 1
 	}
 	if operation != "read" {
-		return nil, 0
+		return nil, int(moved), 0
 	}
 	if output == nil || length == 0 {
-		return nil, 1
+		return nil, 0, 1
 	}
-	return C.GoBytes(output, C.int(length)), 0
+	return C.GoBytes(output, C.int(length)), 0, 0
 }
 
-const nativeItemNotFound = int32(C.errSecItemNotFound)
+const (
+	nativeItemNotFound = int32(C.errSecItemNotFound)
+	nativeNotOurs      = int32(C.KEYD_NOT_OURS)
+)
 
 // nativeExit is the helper's status for a native result. Only a failure before any write began may
 // claim the old value is whole.
@@ -219,9 +197,17 @@ func nativeExit(status int32, mayHaveChanged bool) int {
 		return 0
 	case mayHaveChanged:
 		return 1
+	case status == nativeNotOurs:
+		return helperNotOurs
 	}
 	return helperUnchanged
 }
 
 // Used by an unsigned test executable to check the denial path without opening any keychain.
-func nativeKeychainAuthorized() bool { return C.keyd_authorized(1) == C.errSecSuccess }
+func nativeKeychainAuthorized() bool {
+	var parent C.pid_t
+	return C.keyd_authorized(1, &parent) == C.errSecSuccess
+}
+
+// DesignatedRequirement is what keyd must be signed with as its designated requirement.
+func DesignatedRequirement() string { return C.GoString(C.keyd_designated()) }

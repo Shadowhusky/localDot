@@ -22,11 +22,13 @@ const (
 	chunkBytes      = 1536
 	maxChunks       = (maxValueLen + chunkBytes - 1) / chunkBytes
 	keychainTimeout = 5 * time.Second
+	// Adopting every item an earlier keyd stored takes one helper for all of them.
+	adoptTimeout = 60 * time.Second
 )
 
 // Keychain stores generic passwords through a bounded child of the same signed keyd executable.
-// Security.framework gives keyd the explicit trusted-app ACL. Values travel on stdin, never argv.
-// A value is split into
+// Security.framework gives keyd the explicit trusted-app ACL. Values travel on stdin, never argv,
+// and each child gets the keyd's per-start secret on descriptor 3. A value is split into
 // chunk items <id>.0, <id>.1, …; the item <id> names their count, the write that made them and the
 // binding the value was stored for, so a read never mixes two writes or serves another binding.
 // The tool's output never leaves keyd: it can echo a value, so an error names only the operation,
@@ -39,12 +41,19 @@ type Keychain struct {
 	timeout time.Duration
 	// Package-local subprocess injection for offline fixtures; never populated by NewKeychain.
 	configureCommand func(*exec.Cmd)
+	// session is the secret this keyd made at start; the helper serves only the keyd that claimed
+	// the service with it.
+	session []byte
 }
 
 func NewKeychain(service string) *Keychain {
 	// An unavailable executable produces a closed failure, never a PATH-based fallback.
 	path, _ := os.Executable()
-	return &Keychain{Service: service, Path: path}
+	session := make([]byte, sessionBytes)
+	if _, err := rand.Read(session); err != nil {
+		session = nil
+	}
+	return &Keychain{Service: service, Path: path, session: session}
 }
 
 // Check verifies the native helper and its parent identity without opening a keychain.
@@ -52,6 +61,33 @@ func (k *Keychain) Check() error {
 	ctx, cancel := k.deadline()
 	defer cancel()
 	return k.run(ctx, "check", "status", nil, nil)
+}
+
+// Claim takes the service for this keyd daemon until it exits: the helper then runs item operations
+// only for it, and refuses another keyd daemon's claim, whatever its home.
+func (k *Keychain) Claim() error {
+	ctx, cancel := k.deadline()
+	defer cancel()
+	if err := k.run(ctx, "claim", sessionAccount, nil, nil); err != nil {
+		return fmt.Errorf("keychain: another keyd holds the Keychain, or the helper refused this one: %w", err)
+	}
+	return nil
+}
+
+// Adopt moves the items an earlier keyd stored, which every earlier keyd can read, to this keyd's
+// own access list, and reports how many it moved. A move cut short carries on at the next Adopt.
+func (k *Keychain) Adopt() (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), adoptTimeout)
+	defer cancel()
+	var out keychainOutput
+	if err := k.run(ctx, "adopt", serviceAccount, nil, &out); err != nil {
+		return 0, err
+	}
+	moved, err := strconv.Atoi(out.String())
+	if err != nil || moved < 0 {
+		return 0, errors.New("keychain: adopt: the helper did not say how many items it moved")
+	}
+	return moved, nil
 }
 
 // Put writes the chunks, then the item that names them, then reads the value back: a write the
@@ -133,7 +169,7 @@ func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) 
 	case bound == "":
 		return nil, fmt.Errorf("keychain: item %s was stored without its binding; %w", id, ErrReenter)
 	case bound != binding:
-		return nil, fmt.Errorf("keychain: item %s: %w", id, errRebound)
+		return nil, fmt.Errorf("keychain: item %s: %w", id, ErrRebound)
 	}
 	value := make([]byte, 0, count*chunkBytes)
 	for i := range count {
@@ -192,10 +228,25 @@ func (k *Keychain) remove(ctx context.Context, account string) error {
 
 // run reports only how the tool ended; what it printed is dropped.
 func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader, stdout io.Writer) error {
-	if (k.Service != "localdot-keyd" && k.Service != "localdot-keyd-test") || !accountPattern.MatchString(account) {
+	if !validRequest(op, k.Service, account) {
 		return fmt.Errorf("keychain: invalid item (%w)", errUnchanged)
 	}
+	// The secret goes ahead in the pipe, which holds it whole, so the child reads it and then the
+	// end of the channel.
+	session, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("keychain: %s %s: helper could not start (%w)", op, account, errUnchanged)
+	}
+	defer session.Close()
+	_, err = w.Write(k.session)
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("keychain: %s %s: helper could not start (%w)", op, account, errUnchanged)
+	}
 	cmd := exec.CommandContext(ctx, k.Path, "keychain-item", op, k.Service, account)
+	cmd.ExtraFiles = []*os.File{session}
 	// Do not pass provider credentials, loader hooks, HOME overrides or other ambient secrets.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=en_US.UTF-8"}
 	cmd.Dir = "/"
@@ -206,7 +257,7 @@ func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader,
 	// process has exited or was killed at its deadline.
 	cmd.WaitDelay = 100 * time.Millisecond
 	cmd.Stdin, cmd.Stdout = stdin, stdout
-	err := cmd.Run()
+	err = cmd.Run()
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
@@ -217,6 +268,8 @@ func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader,
 		return ErrNotFound
 	case errors.As(err, &exit) && exit.ExitCode() == helperUnchanged:
 		return fmt.Errorf("keychain: %s %s: helper refused before changing the value (%w)", op, account, errUnchanged)
+	case errors.As(err, &exit) && exit.ExitCode() == helperNotOurs:
+		return fmt.Errorf("keychain: item %s is not keyd's; %w", account, ErrReenter)
 	case errors.As(err, &exit):
 		return fmt.Errorf("keychain: %s %s: helper exited with status %d", op, account, exit.ExitCode())
 	}

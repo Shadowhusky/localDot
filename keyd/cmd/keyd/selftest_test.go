@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shadowhusky/localdot/keyd/internal/egress"
 )
 
 func TestSelfTestServesFromANewHome(t *testing.T) {
@@ -16,6 +18,12 @@ func TestSelfTestServesFromANewHome(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(home, "keyd", "admin.sock")); !os.IsNotExist(err) {
 		t.Fatal("the self-test left its admin socket behind")
+	}
+}
+
+func TestSelfTestPortsAreNotTheRunningKeyds(t *testing.T) {
+	if selfTestPorts.Max >= egress.DefaultPorts.Min && selfTestPorts.Min <= egress.DefaultPorts.Max {
+		t.Fatalf("the self-test's ports %v overlap the running keyd's %v", selfTestPorts, egress.DefaultPorts)
 	}
 }
 

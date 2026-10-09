@@ -13,6 +13,9 @@ import (
 // binary, which would otherwise run every test again in each helper it starts. Tests that start
 // the test binary as keyd itself set KEYD_TEST_RUN.
 func TestMain(m *testing.M) {
+	if os.Getenv("KEYD_HELPER_PROBE") == "1" {
+		os.Exit(helperProbe(os.Args[1:]))
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "keychain-item" || os.Getenv("KEYD_TEST_RUN") == "1") {
 		os.Exit(run(os.Args[1:], os.Stderr))
 	}

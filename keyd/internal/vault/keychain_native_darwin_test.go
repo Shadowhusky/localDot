@@ -8,9 +8,9 @@ func TestUnsignedNativeHelperRefusesBeforeKeychainAccess(t *testing.T) {
 	if nativeKeychainAuthorized() {
 		t.Fatal("test runner unexpectedly passed the production parent-signature gate")
 	}
-	for _, op := range []string{"check", "store", "read", "delete"} {
-		data, status := nativeKeychainItem(op, "localdot-keyd-test", "not-an-item", []byte("fake"))
-		if status == 0 || status == helperNotFound || len(data) != 0 {
+	for _, op := range []string{"check", "store", "read", "delete", "claim", "adopt"} {
+		data, moved, status := nativeKeychainItem(op, "localdot-keyd-test", "not-an-item", []byte("fake"), testSession)
+		if status == 0 || status == helperNotFound || status == helperNotOurs || len(data) != 0 || moved != 0 {
 			t.Fatal("unsigned helper reached keychain or disclosed data")
 		}
 	}
@@ -28,6 +28,8 @@ func TestNativeFailuresAfterAWriteBeganNeverClaimTheValueIsWhole(t *testing.T) {
 		{nativeItemNotFound, false, helperNotFound},
 		{authFailed, false, helperUnchanged},
 		{authFailed, true, 1},
+		{nativeNotOurs, false, helperNotOurs},
+		{nativeNotOurs, true, 1},
 	} {
 		if got := nativeExit(c.status, c.changed); got != c.want {
 			t.Errorf("status %d, may have changed %v: exit %d, want %d", c.status, c.changed, got, c.want)

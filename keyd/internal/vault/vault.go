@@ -68,7 +68,7 @@ const PushKeyID = "webpush-vapid"
 
 // Writable reports whether a user secret may be stored under id.
 func Writable(id string) bool {
-	return ValidID(id) && id != PushKeyID && id != BindingsMarkerID
+	return ValidID(id) && id != PushKeyID
 }
 
 // ValidID reports whether id can name a secret.
@@ -111,8 +111,30 @@ type Vault struct {
 	cache   map[string][]byte
 	reads   map[string]*read
 	failed  map[string]failure
-	// reentry holds the records whose stored values are gone or can never be read as stored.
-	reentry map[string]bool
+	// attention holds the records whose stored values cannot be used as they are stored, and why.
+	attention map[string]Attention
+}
+
+// Attention says why a record's stored value cannot be used until the user acts.
+type Attention string
+
+const (
+	// Reenter: the stored value is gone or can never be read as stored; the user enters it again.
+	Reenter Attention = "reenter"
+	// Rebound: the value was stored for another destination than the record names, so the record
+	// was changed outside keyd; the user removes the key and adds it again.
+	Rebound Attention = "rebound"
+)
+
+// attentionOf is the attention a store's Get error calls for, if any.
+func attentionOf(err error) Attention {
+	switch {
+	case errors.Is(err, ErrRebound):
+		return Rebound
+	case needsReentry(err):
+		return Reenter
+	}
+	return ""
 }
 
 // read is a store read that every caller of Value for the secret waits on.
@@ -138,7 +160,7 @@ func Open(store Store, path string) (*Vault, error) {
 	v := &Vault{
 		store: store, path: path, now: time.Now, write: writeFileAtomic,
 		records: map[string]Record{}, cache: map[string][]byte{}, reads: map[string]*read{}, failed: map[string]failure{},
-		reentry: map[string]bool{},
+		attention: map[string]Attention{},
 	}
 	if path == "" {
 		return v, nil
@@ -246,7 +268,7 @@ func (v *Vault) restore(id string, old Record, prev []byte) {
 		delete(v.records, id)
 	}
 	if _, kept := v.records[id]; kept && prev == nil {
-		v.reentry[id] = true
+		v.attention[id] = Reenter
 	}
 }
 
@@ -255,7 +277,7 @@ func (v *Vault) restore(id string, old Record, prev []byte) {
 func (v *Vault) settleLocked(id string, value []byte) {
 	delete(v.reads, id)
 	delete(v.failed, id)
-	delete(v.reentry, id)
+	delete(v.attention, id)
 	if value == nil {
 		delete(v.cache, id)
 	} else {
@@ -325,7 +347,11 @@ func (v *Vault) Value(id string) ([]byte, error) {
 	v.mu.Unlock()
 	if !reading {
 		r.value, r.err = v.store.Get(id, bindingOf(rec))
-		if needsReentry(r.err) {
+		attention := attentionOf(r.err)
+		switch attention {
+		case Rebound:
+			r.err = &ReboundError{ID: id}
+		case Reenter:
 			r.err = &ReentryError{ID: id, err: r.err}
 		}
 		v.mu.Lock()
@@ -335,8 +361,8 @@ func (v *Vault) Value(id string) ([]byte, error) {
 				v.cache[id] = r.value
 			} else {
 				v.failed[id] = failure{err: r.err, until: v.now().Add(failureHold)}
-				if needsReentry(r.err) {
-					v.reentry[id] = true
+				if attention != "" {
+					v.attention[id] = attention
 				}
 			}
 		}
@@ -351,33 +377,35 @@ func (v *Vault) Value(id string) ([]byte, error) {
 }
 
 // MigrateBindings runs the store's binding migration, if it has one, over every record, and keeps
-// which records need their values entered again. keyd runs it once at start, before serving.
+// which records need the user. keyd runs it once at start, before serving.
 func (v *Vault) MigrateBindings() Migration {
 	store, ok := v.store.(interface {
-		MigrateBindings(records []Record, now time.Time) Migration
+		MigrateBindings(records []Record) Migration
 	})
 	if !ok {
 		return Migration{Done: true}
 	}
 	v.change.Lock()
 	defer v.change.Unlock()
-	m := store.MigrateBindings(v.Records(), v.now())
+	m := store.MigrateBindings(v.Records())
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	for _, id := range m.Reenter {
-		if _, ok := v.records[id]; ok {
-			v.reentry[id] = true
+	for attention, ids := range map[Attention][]string{Reenter: m.Reenter, Rebound: m.Rebound} {
+		for _, id := range ids {
+			if _, ok := v.records[id]; ok {
+				v.attention[id] = attention
+			}
 		}
 	}
 	return m
 }
 
-// NeedsReentry reports whether id's stored value is known to be gone or unreadable as it is stored,
-// until a Put stores it again.
-func (v *Vault) NeedsReentry(id string) bool {
+// Attention reports why id's stored value is known to be unusable as it is stored, until a Put
+// stores it again or a Delete removes it; empty when nothing is known to be wrong.
+func (v *Vault) Attention(id string) Attention {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	return v.reentry[id]
+	return v.attention[id]
 }
 
 func (v *Vault) saveLocked() error {

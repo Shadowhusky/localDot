@@ -17,7 +17,8 @@ import (
 )
 
 // fakeSecurity mimics keyd's private item helper protocol, keeping fake items as files.
-// FAKE_FAIL=add makes every add fail after printing what it was given.
+// FAKE_FAIL=add makes every add fail after printing what it was given; FAKE_FOREIGN names an item
+// whose access list is not keyd's.
 const fakeSecurity = `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DIR/argv.log"
 store="$FAKE_DIR/store"
@@ -31,7 +32,10 @@ run() {
     store)
       if [ "$FAKE_FAIL" = add ]; then echo "item helper: cannot store $pw" >&2; return 45; fi
       printf '%s' "$pw" > "$item" ;;
-    read) [ -f "$item" ] || return 44; cat "$item" ;;
+    read)
+      [ -f "$item" ] || return 44
+      [ "$FAKE_FOREIGN" != "$acct" ] || return 46
+      cat "$item" ;;
     delete) [ -f "$item" ] || return 44; rm "$item" ;;
     *) echo "security: unknown command \"$cmd\"" >&2; return 1 ;;
   esac
@@ -48,7 +52,7 @@ func fakeKeychain(t *testing.T) (*Keychain, string) {
 	}
 	t.Setenv("FAKE_DIR", dir)
 	return &Keychain{Service: "localdot-keyd-test", Path: bin, configureCommand: func(cmd *exec.Cmd) {
-		cmd.Env = append(cmd.Env, "FAKE_DIR="+dir, "FAKE_FAIL="+os.Getenv("FAKE_FAIL"))
+		cmd.Env = append(cmd.Env, "FAKE_DIR="+dir, "FAKE_FAIL="+os.Getenv("FAKE_FAIL"), "FAKE_FOREIGN="+os.Getenv("FAKE_FOREIGN"))
 	}}, dir
 }
 
