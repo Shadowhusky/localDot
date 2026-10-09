@@ -383,6 +383,47 @@
   height: calc(var(--spacing) * 4);
 }
 
+/* Notifications: a Mac and a Phone column of switches, their heads above the switches. */
+.settings-notify-columns {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  margin-right: calc(var(--spacing) * 2.5);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.settings-notify-columns > span,
+.settings-notify-switch {
+  width: calc(var(--spacing) * 11);
+  text-align: center;
+}
+
+.settings-notify-switch.ui-choice {
+  justify-content: center;
+  gap: 0;
+  min-height: calc(var(--spacing) * 11);
+  padding-block: 0;
+}
+
+.settings-notify-switch .ui-choice-text {
+  flex: none;
+}
+
+.settings-notify-result {
+  display: inline;
+}
+
+.settings-notify-result[data-failed] {
+  color: var(--color-fg-2);
+}
+
+.settings-notify-result > svg {
+  margin-right: var(--spacing);
+  vertical-align: -1px;
+}
+
 @media (width < 700px) {
   .settings-body {
     gap: calc(var(--spacing) * 6.5);
@@ -407,6 +448,11 @@
 
   .settings-body .ui-group-row .ui-text-field {
     width: 8.5rem;
+  }
+
+  .settings-notify-columns {
+    gap: var(--spacing);
+    margin-right: calc(var(--spacing) * -0.5);
   }
 
   .settings-autonomy-row {

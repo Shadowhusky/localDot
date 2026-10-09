@@ -1,0 +1,202 @@
+import type { NotifySettings, PushDevice } from "@localdot/protocol";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ApiClient } from "../lib/api.ts";
+import { copyHomeScreenLink } from "../notify/home-screen-link.ts";
+import { notifyApi } from "../notify/notify-api.ts";
+import {
+  browserEnv,
+  type DeviceEnv,
+  type DeviceState,
+  deviceLabel,
+  deviceState,
+  turnOffThisDevice,
+  turnOnThisDevice,
+} from "../notify/this-device.ts";
+import { announce } from "../ui/Announcer.tsx";
+import { showToast } from "../ui/Toast.tsx";
+import type { ToastOptions } from "../ui/toasts.ts";
+import { errorLine, testResultLine } from "./notifications-copy.ts";
+
+export interface NotificationsView {
+  settings: NotifySettings | null;
+  // The saved settings or the phones could not be read; retry() reads them again.
+  failed: boolean;
+  devices: PushDevice[];
+  device: DeviceState | null;
+  // What this device is called in its row: "This Mac", "This iPhone".
+  name: string;
+  // This browser's own notification permission: on this Mac it lets a hidden tab show the
+  // notification itself, so a click opens the task (the Mac banner cannot).
+  tab: NotificationPermission | "unsupported";
+  busy: "device" | "test" | "link" | "tab" | null;
+  removing: string | null;
+  // What the last test reached, in one plain line.
+  result: { line: string; failed: boolean } | null;
+  save(next: NotifySettings): void;
+  retry(): void;
+  turnOn(): void;
+  turnOff(): void;
+  remove(id: string): void;
+  test(): void;
+  copyLink(): void;
+  allowTab(): void;
+}
+
+export interface NotificationsOptions {
+  env?: DeviceEnv;
+  clipboard?: Pick<Clipboard, "writeText">;
+  toast?(options: ToastOptions): void;
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const ANNOUNCE = "notifications";
+
+// Settings › Notifications, read afresh each time Settings opens. Every change saves at once; a
+// failed save puts the control back and says why.
+export function useNotifications(
+  api: ApiClient,
+  active: boolean,
+  opts: NotificationsOptions = {},
+): NotificationsView {
+  const notify = useMemo(() => notifyApi(api), [api]);
+  const envRef = useRef<DeviceEnv | null>(opts.env ?? null);
+  const env = useCallback(() => {
+    envRef.current ??= browserEnv();
+    return envRef.current;
+  }, []);
+  const toast = useRef(opts.toast ?? showToast);
+  toast.current = opts.toast ?? showToast;
+  const [settings, setSettings] = useState<NotifySettings | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [devices, setDevices] = useState<PushDevice[]>([]);
+  const [device, setDevice] = useState<DeviceState | null>(null);
+  const [tab, setTab] = useState<NotificationsView["tab"]>(
+    () => env().notification?.permission() ?? "unsupported",
+  );
+  const [busy, setBusy] = useState<NotificationsView["busy"]>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [result, setResult] = useState<NotificationsView["result"]>(null);
+  const [reads, setReads] = useState(0);
+  const saving = useRef(0);
+
+  const fail = useCallback((failure: unknown) => {
+    toast.current({ title: errorLine(failure), tone: "danger" });
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const list = await notify.devices();
+    setDevices(list);
+    setDevice(
+      await deviceState(
+        list.map((row) => row.id),
+        env(),
+      ),
+    );
+  }, [notify, env]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a retry reads everything again
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    Promise.all([notify.settings(), refresh()]).then(
+      ([loaded]) => {
+        if (cancelled) return;
+        setSettings(loaded);
+        setFailed(false);
+      },
+      () => {
+        if (!cancelled) setFailed(true);
+      },
+    );
+    setTab(env().notification?.permission() ?? "unsupported");
+    return () => {
+      cancelled = true;
+    };
+  }, [active, notify, refresh, env, reads]);
+
+  const run = (kind: NonNullable<NotificationsView["busy"]>, work: () => Promise<void>) => {
+    setBusy(kind);
+    work()
+      .catch(fail)
+      .finally(() => setBusy(null));
+  };
+
+  const label = deviceLabel(env().userAgent, env().maxTouchPoints);
+  return {
+    settings,
+    failed,
+    devices,
+    device,
+    name: LOOPBACK.has(env().hostname)
+      ? "This Mac"
+      : label === "This device"
+        ? label
+        : `This ${label}`,
+    tab,
+    busy,
+    removing,
+    result,
+    save(next) {
+      const before = settings;
+      const mine = ++saving.current;
+      setSettings(next);
+      notify.saveSettings(next).then(
+        (saved) => {
+          if (mine === saving.current) setSettings(saved);
+        },
+        (failure) => {
+          if (mine !== saving.current) return;
+          setSettings(before);
+          fail(failure);
+        },
+      );
+    },
+    retry: () => setReads((count) => count + 1),
+    // Straight from the click: iOS asks for permission only inside the user's gesture.
+    turnOn: () =>
+      run("device", async () => {
+        setDevice(await turnOnThisDevice(notify, env()));
+        await refresh();
+      }),
+    turnOff: () =>
+      run("device", async () => {
+        setDevice(await turnOffThisDevice(notify, env()));
+        await refresh();
+      }),
+    remove: (id) => {
+      setRemoving(id);
+      notify
+        .removeDevice(id)
+        .then(refresh)
+        .catch(fail)
+        .finally(() => setRemoving(null));
+    },
+    test: () =>
+      run("test", async () => {
+        setResult(null);
+        try {
+          const line = testResultLine(await notify.test());
+          setResult({ line, failed: false });
+          announce(ANNOUNCE, line);
+        } catch (failure) {
+          const line = errorLine(failure);
+          setResult({ line, failed: true });
+          announce(ANNOUNCE, line);
+        }
+      }),
+    // Straight from the click, like Turn on.
+    allowTab: () =>
+      run("tab", async () => {
+        setTab((await env().notification?.request()) ?? "unsupported");
+      }),
+    copyLink: () =>
+      run("link", async () => {
+        await copyHomeScreenLink(api, opts.clipboard ?? navigator.clipboard);
+        toast.current({
+          title: "Sign-in link copied",
+          description: "Paste it in the Home Screen app within a minute. It works once.",
+          tone: "success",
+        });
+      }),
+  };
+}
