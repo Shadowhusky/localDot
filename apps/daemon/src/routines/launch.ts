@@ -116,10 +116,12 @@ export class RoutineLauncher {
     this.#inFlight.add(routine.id);
     const cancel = new AbortController();
     this.#pending.set(run.id, cancel);
-    return this.#start(routine, run, cancel.signal)
+    // The computer this launch turned on, if any: it goes off again whatever happens next.
+    const started: { cellId?: string } = {};
+    return this.#start(routine, run, cancel.signal, started)
       .catch((error: unknown) =>
         cancel.signal.aborted
-          ? this.#finish(routine, run, "skipped", "Stopped by Stop everything.")
+          ? this.#finish(routine, run, "skipped", "Stopped by Stop everything.", started.cellId)
           : this.#finish(
               routine,
               run,
@@ -127,6 +129,7 @@ export class RoutineLauncher {
               error instanceof AgentError
                 ? `Couldn't start: ${error.message}`
                 : "Couldn't start the run.",
+              started.cellId,
             ),
       )
       .then((result) => {
@@ -160,7 +163,12 @@ export class RoutineLauncher {
     return open.length;
   }
 
-  async #start(routine: StoredRoutine, run: StoredRun, signal: AbortSignal): Promise<StoredRun> {
+  async #start(
+    routine: StoredRoutine,
+    run: StoredRun,
+    signal: AbortSignal,
+    turnedOn: { cellId?: string },
+  ): Promise<StoredRun> {
     const { cells, runner, store, clock } = this.deps;
     const cell = pickComputer(cells.list());
     if (!cell) return this.#finish(routine, run, "skipped", "No computer is set up yet.");
@@ -172,8 +180,8 @@ export class RoutineLauncher {
     signal.throwIfAborted();
     let started: string | undefined;
     if (cell.state === "stopped" || cell.state === "failed") {
+      started = turnedOn.cellId = cell.id;
       await cells.start(cell.id);
-      started = cell.id;
     }
     if (!(await this.#ready(cell.id, signal)))
       return this.#finish(routine, run, "failed", "Your computer didn't start.", started);
@@ -409,7 +417,7 @@ export class RoutineLauncher {
         endedAt: clock.now(),
       });
       this.#publish(routine, ended, notifyFor(routine.notify, outcome, changed));
-      if (stopCell) void this.#stopIfUnused(stopCell, ended.sessionId);
+      if (stopCell) void this.#stopIfUnused(stopCell, ended.sessionId, run.id);
       return ended;
     } catch (error) {
       // The routine was deleted while its run was in flight; its history went with it.
@@ -418,11 +426,14 @@ export class RoutineLauncher {
     }
   }
 
-  async #stopIfUnused(cellId: string, sessionId: string | null): Promise<void> {
+  async #stopIfUnused(cellId: string, sessionId: string | null, runId: string): Promise<void> {
     if (sessionId) await this.deps.runner.settled(sessionId).catch(() => {});
+    // A computer still starting (Stop everything cancelled the launch meanwhile) is let finish.
+    if (!(await this.#ready(cellId, new AbortController().signal))) return;
     const cell = this.deps.cells.get(cellId);
     if (cell?.state !== "ready" || cell.paused || cell.stream.viewers > 0) return;
-    if (this.deps.runner.live(cellId) !== undefined || this.#pending.size > 0) return;
+    if (this.deps.runner.live(cellId) !== undefined) return;
+    if ([...this.#pending.keys()].some((id) => id !== runId)) return;
     await this.deps.cells
       .stop(cellId)
       .catch(() => console.error("routines: a computer a routine started could not be shut down"));

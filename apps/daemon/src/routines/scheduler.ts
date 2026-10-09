@@ -17,7 +17,7 @@ export interface RoutineGate {
 }
 export interface SchedulerDeps {
   store: RoutineStore;
-  launcher: Pick<RoutineLauncher, "launch" | "recoverInterrupted">;
+  launcher: Pick<RoutineLauncher, "launch">;
   publish(event: RoutineAppEvent): void;
   clock: SchedulerClock;
   gate?: RoutineGate;
@@ -36,13 +36,14 @@ const DAY_MS = 86_400_000;
 export class RoutineScheduler {
   #timer: (() => void) | undefined;
   #interval: (() => void) | undefined;
+  #started = false;
   #paused = false;
   #lastWall = 0;
   #lastMono = 0;
   constructor(private readonly deps: SchedulerDeps) {}
 
   start(): void {
-    this.deps.launcher.recoverInterrupted();
+    this.#started = true;
     this.#lastWall = this.deps.clock.now();
     this.#lastMono = this.deps.clock.mono();
     this.#interval = this.deps.clock.setInterval(
@@ -66,8 +67,9 @@ export class RoutineScheduler {
     this.replan();
   }
 
+  // Nothing is due before start(): routes may change routines while the daemon is starting.
   replan(): void {
-    if (this.#paused) return;
+    if (!this.#started || this.#paused) return;
     this.#timer?.();
     this.#timer = undefined;
     const now = this.deps.clock.now();

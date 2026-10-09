@@ -97,6 +97,112 @@ describe("routine store", () => {
     );
   });
 
+  it("never counts proposals toward the routine limit, and keeps only the newest twenty", () => {
+    const { store } = open();
+    for (let i = 0; i < 49; i++) store.create({ ...draft, name: `R${i}` }, { state: "active" });
+    const sessions = Array.from({ length: 15 }, () => ulid());
+    for (const session of sessions)
+      for (let i = 0; i < 3; i++)
+        store.create(draft, { state: "proposed", createdFromSession: session });
+    expect(store.create(draft, { state: "active" }).state).toBe("active");
+    const proposals = store.list().filter((r) => r.state === "proposed");
+    expect(proposals).toHaveLength(20);
+    // Saving a proposal is still held to the limit.
+    const newest = proposals.at(-1);
+    expect(() => store.confirm(newest?.id ?? "", 1)).toThrow(
+      expect.objectContaining({ status: 409, message: expect.stringContaining("50 routines") }),
+    );
+  });
+
+  it("lets proposals nobody saved expire after a week", () => {
+    const home = mkdtempSync(join(tmpdir(), "ld-routines-"));
+    homes.push(home);
+    let now = clock;
+    const store = new RoutineStore(home, { now: () => now, zone: () => "Europe/London" });
+    stores.push(store);
+    const old = store.create(draft, { state: "proposed", createdFromSession: ulid() });
+    now += 7 * 86_400_000 + 1;
+    const fresh = store.create(draft, { state: "proposed", createdFromSession: ulid() });
+    expect(store.get(old.id)).toBeUndefined();
+    expect(store.get(fresh.id)?.state).toBe("proposed");
+  });
+
+  it("keeps the thirty newest finished routines with their history", () => {
+    const home = mkdtempSync(join(tmpdir(), "ld-routines-"));
+    homes.push(home);
+    let now = clock;
+    const store = new RoutineStore(home, { now: () => now++, zone: () => "Europe/London" });
+    stores.push(store);
+    const finished = Array.from({ length: 40 }, (_, i) => {
+      const once = store.create({ ...draft, name: `Once ${i}` }, { state: "active" });
+      store.recordRun({
+        routineId: once.id,
+        dueAt: now,
+        startedAt: now,
+        endedAt: now,
+        sessionId: null,
+        outcome: "done",
+        note: "",
+      });
+      return store.setState(once.id, "finished", null).id;
+    });
+    for (let i = 0; i < 50; i++) store.create({ ...draft, name: `R${i}` }, { state: "active" });
+    expect(store.list()).toHaveLength(80);
+    expect(store.get(finished[9] ?? "")).toBeUndefined();
+    expect(store.runs(finished[9] ?? "")).toEqual([]);
+    expect(store.get(finished[10] ?? "")?.state).toBe("finished");
+  });
+
+  it("answers invalid text and dates in plain words", () => {
+    const { store } = open();
+    for (const [input, message] of [
+      [{ ...draft, name: "Two\nlines" }, "A routine's name is one line of up to 80 characters."],
+      [{ ...draft, until: "2026-02-30" }, "The end date isn't a real date."],
+      [
+        { ...draft, when: { kind: "once", date: "2026-02-30", time: "09:00" } },
+        "That date isn't a real date.",
+      ],
+    ] as const)
+      expect(() => store.create(input as never, { state: "active" })).toThrow(
+        expect.objectContaining({ name: "RoutineError", status: 400, message }),
+      );
+  });
+
+  it("refuses a one-off whose time has passed, but not a rename of one", () => {
+    const { store } = open();
+    const passed = { kind: "once" as const, date: "2026-10-08", time: "10:59" };
+    expect(() => store.create({ ...draft, when: passed }, { state: "active" })).toThrow(
+      expect.objectContaining({ status: 400, message: "That time has passed. Pick a later one." }),
+    );
+    const later = store.create(
+      { ...draft, when: { kind: "once", date: "2026-10-08", time: "11:01" } },
+      { state: "active" },
+    );
+    expect(() => store.update(later.id, { revision: 1, when: passed })).toThrow(
+      expect.objectContaining({ status: 400 }),
+    );
+    const proposal = store.create(
+      { ...draft, when: { kind: "once", date: "2026-10-08", time: "11:01" } },
+      { state: "proposed", createdFromSession: ulid() },
+    );
+    expect(() => store.confirm(proposal.id, 1, { when: passed })).toThrow(
+      expect.objectContaining({ status: 400 }),
+    );
+  });
+
+  it("keeps a pending due time through a rename that resends the same schedule", () => {
+    const { store } = open();
+    const routine = store.create(draft, { state: "active" });
+    store.setNextDue(routine.id, 123);
+    const renamed = store.update(routine.id, {
+      revision: 1,
+      name: "Bills",
+      when: { kind: "weekdays", time: "08:30" },
+      until: null,
+    });
+    expect(renamed).toMatchObject({ name: "Bills", nextDueAt: 123 });
+  });
+
   it("hides follow-ups from the list unless asked", () => {
     const { store } = open();
     store.create(draft, { state: "active" });

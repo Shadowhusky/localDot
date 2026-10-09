@@ -17,7 +17,7 @@ afterEach(() => {
 const draft = {
   name: "Morning bills",
   instruction: "Check statements.",
-  when: { kind: "weekdays", time: "08:30" },
+  when: { kind: "weekdays" as const, time: "08:30" },
 };
 const stopped = {
   sessions: [],
@@ -222,6 +222,28 @@ describe("routine routes", () => {
     const reply = RoutineListReply.parse(await (await f.call("GET", "/api/routines")).json());
     expect(reply).toMatchObject({ timeZone: "Europe/London", startAtLogin: "off" });
     expect(reply.routines).toHaveLength(1);
+  });
+
+  it("still lists every routine once ignored proposals and finished one-offs pile up", async () => {
+    const f = fixture();
+    for (let i = 0; i < 40; i++) {
+      const once = f.store.create({ ...draft, name: `Once ${i}` }, { state: "active" });
+      f.store.setState(once.id, "finished", null);
+    }
+    for (let i = 0; i < 15; i++) {
+      const session = ulid();
+      for (let j = 0; j < 3; j++)
+        f.store.create(draft, { state: "proposed", createdFromSession: session });
+    }
+    for (let i = 0; i < 50; i++) {
+      const res = await f.call("POST", "/api/routines", { ...draft, name: `R${i}` });
+      expect(res.status).toBe(201);
+    }
+    const res = await f.call("GET", "/api/routines");
+    expect(res.status).toBe(200);
+    const reply = RoutineListReply.parse(await res.json());
+    expect(reply.routines).toHaveLength(100);
+    expect(reply.routines.filter((r) => r.state === "active")).toHaveLength(50);
   });
 
   it("still lists routines when the start-at-login record cannot be read", async () => {

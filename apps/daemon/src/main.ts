@@ -367,6 +367,8 @@ const routineLauncher = new RoutineLauncher({
   publish: (event) => appEvents.publish(event),
   clock: systemClock,
 });
+// Before any route can start a run of its own.
+routineLauncher.recoverInterrupted();
 scheduler = new RoutineScheduler({
   store: routineStore,
   launcher: routineLauncher,

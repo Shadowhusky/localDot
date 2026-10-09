@@ -34,7 +34,6 @@ function fixture(start = "2026-10-12T06:59:00Z") {
         note,
       });
     }),
-    recoverInterrupted: vi.fn(() => 0),
   };
   const scheduler = new RoutineScheduler({ store, launcher, clock, publish: () => {} });
   cleanup.push(() => {
@@ -130,22 +129,23 @@ describe("routine scheduler", () => {
     expect(f.launches).toHaveLength(1);
   });
 
-  it("recovers interrupted runs on start without relaunching their due time", () => {
+  it("does not relaunch the due time of a run a restart interrupted", () => {
     const f = fixture("2026-10-12T07:40:00Z");
     const routine = f.add({ kind: "daily", time: "08:30" });
     f.store.setNextDue(routine.id, Date.parse("2026-10-13T07:30:00Z"));
-    f.store.recordRun({
-      routineId: routine.id,
-      dueAt: Date.parse("2026-10-12T07:30:00Z"),
-      startedAt: 1,
-      endedAt: null,
-      sessionId: ulid(),
-      outcome: "running",
-      note: "",
-    });
     f.scheduler.start();
-    expect(f.launcher.recoverInterrupted).toHaveBeenCalledTimes(1);
     expect(f.launches).toEqual([]);
+  });
+
+  it("launches nothing before start, even when a route re-plans an overdue routine", () => {
+    const f = fixture("2026-10-12T07:40:00Z");
+    const routine = f.add({ kind: "hours", every: 1 });
+    f.store.setNextDue(routine.id, Date.parse("2026-10-12T08:00:00Z"));
+    f.clock.advance(3_600_000);
+    f.scheduler.replan();
+    expect(f.launches).toEqual([]);
+    f.scheduler.start();
+    expect(f.launches).toHaveLength(1);
   });
 
   it("does not back-fill while a routine was paused", () => {

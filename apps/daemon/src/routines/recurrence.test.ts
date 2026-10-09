@@ -44,6 +44,13 @@ describe("custom rules", () => {
   ])("refuses %s", (rule) => {
     expect(() => parseRule(rule)).toThrow(RecurrenceError);
   });
+  it.each([
+    ["FREQ=MONTHLY;BYDAY=MO;BYHOUR=9", "For a monthly routine, use BYMONTHDAY"],
+    ["FREQ=DAILY;BYMONTHDAY=1;BYHOUR=9", "BYMONTHDAY works only with FREQ=MONTHLY"],
+    ["FREQ=WEEKLY;BYDAY=MO;BYMONTHDAY=1;BYHOUR=9", "BYMONTHDAY works only with FREQ=MONTHLY"],
+  ])("refuses %s instead of running on days nobody asked for", (rule, message) => {
+    expect(() => parseRule(rule)).toThrow(message);
+  });
   it("counts INTERVAL weeks from the creation date", () => {
     expect(
       chain(

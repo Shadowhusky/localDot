@@ -390,7 +390,7 @@ describe("routine launcher", () => {
       {
         name: "Follow-up",
         instruction: "Check the parcel",
-        when: { kind: "once", date: "2026-10-12", time: "08:30" },
+        when: { kind: "once", date: "2026-10-12", time: "09:30" },
       },
       {
         state: "active",
@@ -418,7 +418,7 @@ describe("routine launcher", () => {
       {
         name: "Follow-up",
         instruction: "Check the parcel",
-        when: { kind: "once", date: "2026-10-12", time: "08:30" },
+        when: { kind: "once", date: "2026-10-12", time: "09:30" },
       },
       {
         state: "active",
@@ -552,35 +552,52 @@ describe("routine launcher", () => {
   });
 });
 
+function stopAllDeps(f: ReturnType<typeof fixture>) {
+  return {
+    cells: f.cells,
+    live: { get: (c: string) => f.live.get(c) },
+    killSwitch: {
+      stopSession: async () => ({
+        revoked: true,
+        paused: true,
+        closed: false,
+        stopped: false,
+        errors: [],
+      }),
+      stopIdleCell: async () => undefined,
+    },
+    store: f.store,
+    launcher: f.launcher,
+    scheduler: { replan: () => {} },
+    audit: { append: () => {} },
+    publish: () => {},
+    now: f.clock.now,
+  };
+}
+
 describe("Stop everything during a launch", () => {
+  it("turns a computer the routine was starting off again once it is up", async () => {
+    const f = fixture({ state: "stopped" });
+    const launching = f.launcher.launch(f.routine(), DUE);
+    await f.clock.flush();
+    expect(f.start).toHaveBeenCalledWith(f.cellId);
+    expect(f.cells.get(f.cellId)?.state).toBe("starting");
+    const outcome = await stopAll(stopAllDeps(f), "user");
+    expect(outcome.launchesCancelled).toBe(1);
+    expect(await launching).toMatchObject({ outcome: "skipped" });
+    expect(f.stop).not.toHaveBeenCalled();
+    f.cells.emit({ ...required(f.cells.get(f.cellId)), state: "ready" });
+    await f.clock.flush();
+    expect(f.stop).toHaveBeenCalledWith(f.cellId);
+    expect(f.runner.start).not.toHaveBeenCalled();
+  });
+
   it("cancels a launch that is waiting for the computer", async () => {
     const f = fixture();
     f.live.set(f.cellId, ulid());
     const launching = f.launcher.launch(f.routine(), DUE);
     await f.clock.flush();
-    const outcome = await stopAll(
-      {
-        cells: f.cells,
-        live: { get: (c: string) => f.live.get(c) },
-        killSwitch: {
-          stopSession: async () => ({
-            revoked: true,
-            paused: true,
-            closed: false,
-            stopped: false,
-            errors: [],
-          }),
-          stopIdleCell: async () => undefined,
-        },
-        store: f.store,
-        launcher: f.launcher,
-        scheduler: { replan: () => {} },
-        audit: { append: () => {} },
-        publish: () => {},
-        now: f.clock.now,
-      },
-      "user",
-    );
+    const outcome = await stopAll(stopAllDeps(f), "user");
     expect(outcome.launchesCancelled).toBe(1);
     expect(await launching).toMatchObject({
       outcome: "skipped",

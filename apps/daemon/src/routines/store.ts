@@ -19,7 +19,13 @@ import {
 } from "@localdot/protocol";
 import { z } from "zod";
 import { DatabaseSync } from "../sqlite.ts";
-import { describeSchedule, localDateOf, type Schedule } from "./schedule.ts";
+import {
+  describeSchedule,
+  localDateOf,
+  parseDateKey,
+  type Schedule,
+  zonedToUtc,
+} from "./schedule.ts";
 
 export class RoutineError extends Error {
   constructor(
@@ -93,6 +99,27 @@ CREATE INDEX IF NOT EXISTS routine_runs_by_routine ON routine_runs(routine_id, d
 CREATE INDEX IF NOT EXISTS routine_runs_open ON routine_runs(outcome);`;
 
 const STALE = "This routine changed on another device. Reload it and try again.";
+const FULL = `You already have ${ROUTINE_LIMITS.routines} routines. Delete one first.`;
+const INVALID: Record<string, string> = {
+  name: "A routine's name is one line of up to 80 characters.",
+  instruction: "Say what the routine should do, in up to 8,000 characters.",
+  until: "The end date isn't a real date.",
+  when: "That schedule isn't valid.",
+};
+// The model and the HTTP routes both reach the store; neither gets a raw validation dump.
+function valid<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
+  const parsed = schema.safeParse(input);
+  if (parsed.success) return parsed.data;
+  const path = parsed.error.issues[0]?.path ?? [];
+  const field = String(path[0] ?? "");
+  const message =
+    field === "when" && path[1] === "date"
+      ? "That date isn't a real date."
+      : (INVALID[field] ?? "That routine isn't valid.");
+  throw new RoutineError(400, message);
+}
+const sameWhen = (a: RoutineWhen, b: RoutineWhen) => JSON.stringify(a) === JSON.stringify(b);
+export const PASSED = "That time has passed. Pick a later one.";
 const COLUMNS = new Set([
   "name",
   "instruction",
@@ -181,6 +208,43 @@ export class RoutineStore {
     this.#db.exec(SCHEMA);
     this.#now = opts.now;
     this.#zone = opts.zone;
+    this.#prune();
+  }
+
+  // Proposals nobody saved expire, and only the newest finished routines and follow-ups are kept.
+  #prune(): void {
+    const { proposals, proposalDays, finished } = ROUTINE_LIMITS;
+    this.#db
+      .prepare(
+        `DELETE FROM routines WHERE state = 'proposed' AND (created_at < ? OR id NOT IN (
+          SELECT id FROM routines WHERE state = 'proposed' ORDER BY created_at DESC, id DESC LIMIT ?))`,
+      )
+      .run(this.#now() - proposalDays * 86_400_000, proposals);
+    for (const kind of ["routine", "follow_up"])
+      this.#db
+        .prepare(
+          `DELETE FROM routines WHERE kind = ? AND state = 'finished' AND id NOT IN (
+            SELECT id FROM routines WHERE kind = ? AND state = 'finished'
+            ORDER BY updated_at DESC, id DESC LIMIT ?)`,
+        )
+        .run(kind, kind, finished);
+    this.#db.exec("DELETE FROM routine_runs WHERE routine_id NOT IN (SELECT id FROM routines)");
+  }
+
+  // A one-off whose time has passed would finish at once without running.
+  #refusePassed(when: RoutineWhen, tz: string): void {
+    if (when.kind !== "once") return;
+    const [hh, mm] = when.time.split(":").map(Number) as [number, number];
+    if (zonedToUtc(parseDateKey(when.date), hh, mm, tz) <= this.#now())
+      throw new RoutineError(400, PASSED);
+  }
+
+  #full(): boolean {
+    return (
+      this.#count(
+        "SELECT COUNT(*) AS n FROM routines WHERE kind = 'routine' AND state IN ('active', 'paused')",
+      ) >= ROUTINE_LIMITS.routines
+    );
   }
 
   #fromRow(row: Row): StoredRoutine {
@@ -234,7 +298,10 @@ export class RoutineStore {
   }
 
   // Omit first: Partial<RoutineDraft>'s `until?: string` would intersect away RoutineUpdate's null.
-  #draftFields(patch: Omit<Partial<RoutineDraft>, "until"> & { until?: string | null }) {
+  #draftFields(
+    patch: Omit<Partial<RoutineDraft>, "until"> & { until?: string | null },
+    current?: StoredRoutine,
+  ) {
     const fields: Record<string, Value> = {};
     if (patch.name !== undefined) fields.name = patch.name;
     if (patch.instruction !== undefined) fields.instruction = patch.instruction;
@@ -247,21 +314,21 @@ export class RoutineStore {
       fields.approval_window_s = patch.approvalWindowMinutes * 60;
     if (patch.budgetUSD !== undefined) fields.budget_usd = patch.budgetUSD;
     if (patch.missedPolicy !== undefined) fields.missed_policy = patch.missedPolicy;
-    if (patch.when !== undefined || patch.tz !== undefined || patch.until !== undefined)
+    // Only a schedule that really changed is planned again; a rename keeps a due time pending.
+    if (
+      (patch.when !== undefined && !(current && sameWhen(patch.when, current.when))) ||
+      (patch.tz !== undefined && patch.tz !== current?.tz) ||
+      (patch.until !== undefined && patch.until !== current?.until)
+    )
       fields.next_due_at = null;
     return fields;
   }
 
   create(input: RoutineDraft, init: CreateInit): StoredRoutine {
-    const draft = RoutineDraft.parse(input);
+    const draft = valid(RoutineDraft, input);
     const kind = init.kind ?? "routine";
-    if (
-      kind === "routine" &&
-      this.#count(
-        "SELECT COUNT(*) AS n FROM routines WHERE kind = 'routine' AND state <> 'finished'",
-      ) >= ROUTINE_LIMITS.routines
-    )
-      throw new RoutineError(409, "You already have 50 routines. Delete one first.");
+    if (kind === "routine" && init.state === "active" && this.#full())
+      throw new RoutineError(409, FULL);
     if (
       init.state === "proposed" &&
       init.createdFromSession &&
@@ -281,6 +348,7 @@ export class RoutineStore {
     const now = this.#now(),
       tz = draft.tz ?? this.#zone(),
       id = ulid();
+    this.#refusePassed(draft.when, tz);
     this.#db
       .prepare(
         `INSERT INTO routines(id, kind, name, instruction, schedule_json, tz, end_at, anchor, profile,
@@ -310,6 +378,7 @@ export class RoutineStore {
         now,
         now,
       );
+    this.#prune();
     return this.#require(id);
   }
 
@@ -330,7 +399,7 @@ export class RoutineStore {
   }
 
   update(id: string, input: RoutineUpdate): StoredRoutine {
-    const patch = RoutineUpdate.parse(input);
+    const patch = valid(RoutineUpdate, input);
     const current = this.#require(id);
     if (current.revision !== patch.revision) throw new RoutineError(409, STALE);
     if (current.state === "proposed" && patch.state)
@@ -340,7 +409,9 @@ export class RoutineStore {
         409,
         "This routine has finished. Change its schedule to run it again.",
       );
-    const fields = this.#draftFields(patch);
+    const fields = this.#draftFields(patch, current);
+    if (fields.next_due_at === null)
+      this.#refusePassed(patch.when ?? current.when, patch.tz ?? current.tz);
     if (patch.state === "paused") Object.assign(fields, { state: "paused", paused_reason: "user" });
     if (patch.state === "active")
       Object.assign(fields, {
@@ -351,8 +422,10 @@ export class RoutineStore {
         last_seen_at: this.#now(),
       });
     // A finished routine whose schedule changes may run again.
-    if (current.state === "finished" && fields.next_due_at === null && patch.state === undefined)
+    if (current.state === "finished" && fields.next_due_at === null && patch.state === undefined) {
+      if (current.kind === "routine" && this.#full()) throw new RoutineError(409, FULL);
       Object.assign(fields, { state: "active", paused_reason: null });
+    }
     return this.#write(id, fields, true);
   }
 
@@ -360,7 +433,10 @@ export class RoutineStore {
     const current = this.#require(id);
     if (current.state !== "proposed") throw new RoutineError(409, "This routine is already saved.");
     if (current.revision !== revision) throw new RoutineError(409, STALE);
-    const fields = this.#draftFields(edits ? RoutineDraft.partial().parse(edits) : {});
+    if (this.#full()) throw new RoutineError(409, FULL);
+    const patch = edits ? valid(RoutineDraft.partial(), edits) : {};
+    this.#refusePassed(patch.when ?? current.when, patch.tz ?? current.tz);
+    const fields = this.#draftFields(patch, current);
     Object.assign(fields, {
       state: "active",
       paused_reason: null,
@@ -371,11 +447,13 @@ export class RoutineStore {
   }
 
   setState(id: string, state: RoutineState, pausedReason: PausedReason | null): StoredRoutine {
-    return this.#write(
+    const routine = this.#write(
       id,
       { state, paused_reason: pausedReason, ...(state === "active" ? { next_due_at: null } : {}) },
       true,
     );
+    if (state === "finished") this.#prune();
+    return routine;
   }
 
   setNextDue(id: string, at: number | null): void {

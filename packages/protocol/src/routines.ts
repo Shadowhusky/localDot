@@ -95,9 +95,14 @@ export const ROUTINE_DEFAULTS = Object.freeze({
   budgetUSD: null,
   missedPolicy: "run_once",
 } as const);
+// Saved routines count toward `routines`; ignored proposals and finished ones are pruned to theirs,
+// so a full list stays within RoutineListReply.
 export const ROUTINE_LIMITS = Object.freeze({
   routines: 50,
   proposalsPerSession: 3,
+  proposals: 20,
+  proposalDays: 7,
+  finished: 30,
   followUps: 20,
 });
 

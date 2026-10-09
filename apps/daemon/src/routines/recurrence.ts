@@ -65,6 +65,13 @@ export function parseRule(text: string): Rule {
     byMinute: byMinute[0] as number,
   };
   const days = fields.get("BYDAY");
+  const monthDays = fields.get("BYMONTHDAY");
+  if (days && freq === "MONTHLY")
+    throw new RecurrenceError(
+      "BYDAY works with DAILY or WEEKLY. For a monthly routine, use BYMONTHDAY.",
+    );
+  if (monthDays && freq !== "MONTHLY")
+    throw new RecurrenceError("BYMONTHDAY works only with FREQ=MONTHLY.");
   if (days) {
     const byDay = days.split(",").map((day) => {
       const n = DAYS[day];
@@ -74,7 +81,6 @@ export function parseRule(text: string): Rule {
     if (new Set(byDay).size !== byDay.length) throw new RecurrenceError("BYDAY repeats a value.");
     rule.byDay = byDay;
   }
-  const monthDays = fields.get("BYMONTHDAY");
   if (monthDays) rule.byMonthDay = ints(monthDays, 1, 31, "BYMONTHDAY");
   return rule;
 }
