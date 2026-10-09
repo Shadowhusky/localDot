@@ -1,12 +1,14 @@
 import { clipText, type PeopleInput, type ToolResult } from "@localdot/protocol";
-import { namedIn, PeopleError, type StoredPerson } from "../people.ts";
+import { namedIn, PeopleError, type PeopleStore, type StoredPerson } from "../people.ts";
 import type { AgentSession } from "../session.ts";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const FOUND = 8;
 export const SAVE_UNNAMED =
-  "Save someone only when the user named them in this task. Ask the user to confirm first.";
+  "Save someone only under a name the user wrote in this task, or ask the user to confirm first.";
+export const SAVE_REDIRECT =
+  "This person is already saved with another app or handle. Ask the user before changing how to reach them.";
 
 const line = (p: StoredPerson) =>
   [
@@ -16,10 +18,23 @@ const line = (p: StoredPerson) =>
     p.lastAt ? `last ${p.lastAt}` : "never reached through dot",
   ].join(" · ");
 
-// After something other than the user reached the model, dot may only save people the user named:
-// a page can't plant a contact the user never asked about.
-export function saveRefused(session: AgentSession, input: PeopleInput): boolean {
-  return input.op === "save" && session.tainted && !namedIn(session.requests, input.name ?? "");
+// After something other than the user reached the model, dot may only save people the user named,
+// and only as new or as they are saved: a page can't plant a contact or redirect one.
+export function saveRefusal(
+  session: AgentSession,
+  input: PeopleInput,
+  people?: Pick<PeopleStore, "redirects">,
+): string | undefined {
+  if (input.op !== "save" || !session.tainted) return undefined;
+  if (!namedIn(session.requests, input.name ?? "")) return SAVE_UNNAMED;
+  if (!people || !input.name || !input.app) return undefined;
+  try {
+    const fields = { name: input.name, app: input.app, handle: input.handle ?? null };
+    return people.redirects(fields) ? SAVE_REDIRECT : undefined;
+  } catch (error) {
+    if (error instanceof PeopleError) return undefined;
+    throw error;
+  }
 }
 
 export async function peopleTool(
@@ -47,7 +62,8 @@ export async function peopleTool(
     return { ok: true, content: [text(untrusted("people the user reaches", ctx.redact(body)))] };
   }
   if (!input.name || !input.app) return fail("Give name and app to save someone.");
-  if (saveRefused(ctx.session, input)) return fail(SAVE_UNNAMED);
+  const refusal = saveRefusal(ctx.session, input, people);
+  if (refusal) return fail(refusal);
   const name = ctx.redact(input.name);
   append(ctx, "step.start", { kind: "think" });
   append(ctx, "tool.start", {

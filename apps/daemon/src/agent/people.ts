@@ -76,10 +76,17 @@ function checked<T>(schema: z.ZodType<T>, value: unknown): T {
   return parsed.data;
 }
 
-// Whether the user's own words name this person: any word of two or more characters of the name.
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const literal = (s: string) => s.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
+
+// Whether the user's own words name this person: the whole name, as whole words. Chinese, Japanese
+// and Korean don't space their words, so there the whole name anywhere counts.
 export function namedIn(texts: readonly string[], name: string): boolean {
   const said = fold(texts.join("\n"));
-  return terms(name).some((word) => [...word].length >= 2 && said.includes(word));
+  const whole = fold(name);
+  if (!whole) return false;
+  if (UNSPACED.test(whole)) return said.includes(whole);
+  return new RegExp(`(?<![\\p{L}\\p{N}])${literal(whole)}(?![\\p{L}\\p{N}])`, "u").test(said);
 }
 
 // The people dot reaches for the user: a private file the user can read, edit and delete.
@@ -127,6 +134,15 @@ export class PeopleStore {
       .sort((a, b) => a.score - b.score || newest(a.r, b.r))
       .slice(0, limit)
       .map(({ r }) => view(r));
+  }
+  // Whether saving would change how the user reaches someone already saved: another handle on the
+  // same app, or the same name on another app.
+  redirects(fields: PersonFields): boolean {
+    const name = fold(fields.name);
+    const same = this.#read().filter((r) => fold(r.name) === name);
+    if (!same.length) return false;
+    const onApp = same.find((r) => fold(r.app) === fold(fields.app));
+    return !onApp || (fields.handle != null && fields.handle !== onApp.handle);
   }
   // dot reached someone in a task: the same name on the same app is the same person.
   record(sessionId: string, fields: PersonFields): { person: StoredPerson; created: boolean } {

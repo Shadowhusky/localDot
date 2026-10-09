@@ -93,10 +93,34 @@ describe("people dot knows", () => {
       expect(statusOf(() => people.add(fields))).toBe(400);
   });
 
-  it("tells whether the user's own words name someone", () => {
-    expect(namedIn(["Send Henry the report on WeChat"], "Henry Liu")).toBe(true);
+  it("tells whether the user's own words name someone: the whole name, as whole words", () => {
+    expect(namedIn(["Send Henry Liu the report on WeChat"], "Henry Liu")).toBe(true);
+    expect(namedIn(["Reply to Steve's email"], "Steve")).toBe(true);
+    expect(namedIn(["text  MUM about dinner"], "Mum")).toBe(true);
     expect(namedIn(["给小明发微信"], "小明")).toBe(true);
+    expect(namedIn(["Send Henry the report on WeChat"], "Henry Liu")).toBe(false);
+    expect(namedIn(["Reply to Steve's email"], "Eve Mallory")).toBe(false);
+    expect(namedIn(["Reply to Steve's email"], "Eve")).toBe(false);
+    expect(namedIn(["Check all my emails"], "Al Attacker")).toBe(false);
+    expect(namedIn(["Check all my emails"], "Al")).toBe(false);
+    expect(namedIn(["给小明发微信"], "小明明")).toBe(false);
     expect(namedIn(["Send the report"], "Mallory")).toBe(false);
     expect(namedIn(["Send it to A"], "A B")).toBe(false);
+    expect(namedIn(["Ping a.b"], "a.b")).toBe(true);
+    expect(namedIn(["Ping axb"], "a.b")).toBe(false);
+  });
+
+  it("tells when a save would change how someone saved is reached", () => {
+    const { people } = store();
+    people.add({ name: "Mum", app: "WeChat", handle: "wx_mum" });
+    people.add({ name: "Ana", app: "Email" });
+    expect(people.redirects({ name: "mum", app: "wechat", handle: "wx_mum" })).toBe(false);
+    expect(people.redirects({ name: "Mum", app: "WeChat" })).toBe(false);
+    expect(people.redirects({ name: "Mum", app: "WeChat", handle: "+44 7700 900123" })).toBe(true);
+    expect(people.redirects({ name: "Mum", app: "WhatsApp", handle: "+44 7700 900123" })).toBe(
+      true,
+    );
+    expect(people.redirects({ name: "Ana", app: "Email", handle: "ana@example.com" })).toBe(true);
+    expect(people.redirects({ name: "Bea", app: "Email", handle: "bea@example.com" })).toBe(false);
   });
 });

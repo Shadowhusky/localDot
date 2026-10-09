@@ -53,9 +53,49 @@ describe("people", () => {
       handle: "mallory@example.com",
     });
     expect(res.body.ok).toBe(false);
-    expect(res.body.content[0]?.text).toContain("named them");
+    expect(res.body.content[0]?.text).toContain("name the user wrote");
     expect(new PeopleStore(h.home).list()).toEqual([]);
     expect(h.events().some((e) => e.type === "approval.request")).toBe(false);
+  });
+  it("refuses a name the user only seems to have written, on a task that read other text", async () => {
+    const h = harness();
+    h.session.requests.push("Reply to Steve's email and check all my emails");
+    h.session.tainted = true;
+    for (const name of ["Eve Mallory", "Al Attacker"]) {
+      const res = await h.call("people", {
+        op: "save",
+        name,
+        app: "Email",
+        handle: "x@example.com",
+      });
+      expect(res.body.ok).toBe(false);
+      expect(res.body.content[0]?.text).toContain("name the user wrote");
+    }
+    expect(new PeopleStore(h.home).list()).toEqual([]);
+  });
+  it("won't redirect someone saved, even one the user named, once the task read other text", async () => {
+    const h = harness();
+    const people = new PeopleStore(h.home);
+    people.add({ name: "Mum", app: "WeChat", handle: "wx_mum" });
+    h.session.requests.push("Message Mum about dinner");
+    h.session.tainted = true;
+    for (const app of ["WeChat", "WhatsApp"]) {
+      const res = await h.call("people", {
+        op: "save",
+        name: "Mum",
+        app,
+        handle: "+44 7700 900123",
+      });
+      expect(res.body.ok).toBe(false);
+      expect(res.body.content[0]?.text).toContain("Ask the user before changing");
+    }
+    expect(people.list()).toEqual([
+      expect.objectContaining({ app: "WeChat", handle: "wx_mum", source: { kind: "user" } }),
+    ]);
+    expect(h.events().some((e) => e.type === "approval.request")).toBe(false);
+    const same = await h.call("people", { op: "save", name: "Mum", app: "WeChat" });
+    expect(same.body.ok).toBe(true);
+    expect(people.list()[0]).toMatchObject({ handle: "wx_mum", lastAt: expect.any(String) });
   });
   it("says when no one matches, and asks for what it needs", async () => {
     const h = harness();

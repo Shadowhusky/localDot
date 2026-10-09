@@ -53,7 +53,7 @@ export interface ToolDeps {
   memory: Pick<MemoryStore, "apply" | "appendNote">;
   // Earlier tasks matching a query, never the asking task itself.
   recall?(query: string, limit: number, excludeSessionId: string): RecallHit[];
-  people?: Pick<PeopleStore, "find" | "record">;
+  people?: Pick<PeopleStore, "find" | "record" | "redirects">;
   // Where a done task's files are kept for the result card: <home>/sessions/<id>/out/<name>.
   saveOutput(
     sessionId: string,

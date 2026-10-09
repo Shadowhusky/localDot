@@ -27,7 +27,7 @@ import { computerTool } from "./computer.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
-import { peopleTool, SAVE_UNNAMED, saveRefused } from "./people.ts";
+import { peopleTool, saveRefusal } from "./people.ts";
 import { updatePlanTool } from "./plan.ts";
 import { recallTool } from "./recall.ts";
 import { rememberTool } from "./remember.ts";
@@ -230,8 +230,11 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
-    if (name === "people" && saveRefused(session, frozen as PeopleInput))
-      return { status: 200, result: fail(SAVE_UNNAMED) };
+    const refusal =
+      name === "people"
+        ? saveRefusal(session, frozen as PeopleInput, deps.tools.people)
+        : undefined;
+    if (refusal) return { status: 200, result: fail(refusal) };
     // Public pages open in the web browser, where the user's sign-ins are; local addresses
     // only resolve on the desktop.
     let fellBack = false;
