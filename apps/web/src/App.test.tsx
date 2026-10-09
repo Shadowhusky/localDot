@@ -596,7 +596,9 @@ describe("App token states", () => {
     computerButton().click();
     expect(await screen.findByText(DOCKER_DOWN_CAPTION)).toBeTruthy();
     expect(document.body.textContent).not.toContain("ENOENT");
-    expect(calls.filter((call) => call.includes("/api/cells") && !call.endsWith("/live"))).toEqual([
+    expect(
+      calls.filter((call) => call.includes("/api/cells") && !/\/(live|accounts)$/.test(call)),
+    ).toEqual([
       "GET /api/cells",
       `POST /api/cells/${CELL_ID}/stop`,
       `POST /api/cells/${CELL_ID}/start`,
