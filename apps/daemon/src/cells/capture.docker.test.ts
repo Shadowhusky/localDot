@@ -191,9 +191,19 @@ describe.skipIf(!ENABLED)("a desktop app that ignores the proxy", () => {
       "https://example.com/",
     );
     expect(direct.out).toBe("200");
+    // An app's own protocol to an address on a web port, naming nothing, as WeChat's long link.
+    const opaque = await run(
+      "bash",
+      "-c",
+      `exec 3<>/dev/tcp/${address}/80 && printf '\\x16\\xf1\\x04 binary\\r\\n\\r\\n' >&3 && timeout 15 head -c 5 <&3`,
+    );
+    expect(opaque.out).toBe("HTTP/");
     expect(cards).toEqual([]);
     const captured = audit().filter((l) => l.via === "capture" && l.host === "example.com");
     expect(captured.map((l) => l.decision)).toEqual(["allow", "allow", "allow"]);
+    expect(audit().filter((l) => l.via === "capture" && l.host === address)).toMatchObject([
+      { decision: "allow", destPort: 80, mode: "tunnel" },
+    ]);
   });
 
   it("holds another port for the card, lets it through on a yes and remembers Always", async () => {
