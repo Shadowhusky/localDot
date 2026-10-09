@@ -183,6 +183,30 @@ describe("CellOrchestrator.update", () => {
     expect(orchestrator.endpoints(id)?.desktopd.token).toBe(record.tokens.desktopd);
   });
 
+  it("gives a computer made before capture the gate's token, and containers that capture", async () => {
+    const { store, boot, id, record } = await setup();
+    const { capture: _capture, ...tokens } = record.tokens;
+    store.save({ ...record, tokens });
+    for (const o of made.splice(0)) o.dispose();
+    const { updates, orchestrator } = boot();
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    rebuild();
+    await updates.check(store.get(id) as CellRecord);
+    await orchestrator.update(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    const capture = store.get(id)?.tokens.capture;
+    expect(capture).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(store.get(id)?.tokens).toMatchObject(tokens);
+    const gate = fake.state.containers.get(record.docker.gate)?.body as
+      | { Env?: string[]; User?: string }
+      | undefined;
+    expect(gate?.Env).toContain(`LD_CAPTURE_TOKEN=${capture}`);
+    expect(gate?.User).toBe("root");
+    expect(fake.state.containers.get(record.docker.desktop)?.body.HostConfig.Dns).toEqual([
+      record.docker.gateInternalIp,
+    ]);
+  });
+
   it("adopts a container whose create reply was lost instead of making a second", async () => {
     const { updates, orchestrator, store, id, record } = await setup();
     rebuild();

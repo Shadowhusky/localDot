@@ -14,6 +14,7 @@ import {
   UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
+import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -208,6 +209,12 @@ export class ComputerUpdates {
     if (ROLES.every((role, i) => old[i]?.Image === images[role])) {
       this.#available.set(record.id, false);
       return record;
+    }
+    // A computer made before the gate captured apps that ignore the proxy gets the gate's token
+    // now, kept before anything is made, so its new containers capture from their first start.
+    if (!record.tokens.capture) {
+      record = { ...record, tokens: { ...record.tokens, capture: newCellToken() } };
+      save(record);
     }
     let entry: ComputerUpdateRecord = {
       v: 1,
