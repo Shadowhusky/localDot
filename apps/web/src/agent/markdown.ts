@@ -8,15 +8,33 @@ export type Inline =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
   | { kind: "link"; text: string; href: string }
+  // A picture is never loaded: it shows as a link to it, named by its host.
+  | { kind: "image"; text: string; href: string }
   | { kind: "strong" | "em"; children: Inline[] };
 export type Align = "left" | "center" | "right" | null;
-export type Block =
-  | { kind: "paragraph" | "quote"; children: Inline[] }
+export interface ListItem {
+  children: Inline[];
+  // A task list's box: done or still to do.
+  task?: "done" | "todo";
+  list?: List;
+}
+export interface List {
+  ordered: boolean;
+  start: number;
+  items: ListItem[];
+}
+// Each block keeps the source it came from, so a renderer can redraw only the blocks that changed
+// as a message streams in.
+export type Block = { source: string } & (
+  | { kind: "paragraph"; children: Inline[]; pendingRow?: true }
+  | { kind: "quote"; children: Inline[] }
   | { kind: "heading"; level: number; children: Inline[] }
   | { kind: "code"; text: string; language: string }
-  | { kind: "list"; ordered: boolean; items: Inline[][] }
+  | ({ kind: "list" } & List)
   | { kind: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] }
-  | { kind: "rule" };
+  | { kind: "rule" }
+);
+type BlockBody = Block extends infer B ? (B extends Block ? Omit<B, "source"> : never) : never;
 
 const MAX_COLUMNS = 12;
 // A table row and its cells, without the outer pipes; escaped pipes stay in the cell.
@@ -46,6 +64,18 @@ const align = (cell: string): Align =>
         ? "left"
         : null;
 const QUOTE = /^ {0,3}> ?(.*)$/;
+const ITEM = /^( *)([-+*]|[0-9]{1,6}[.)])\s+(.*)$/;
+const TASK = /^\[([ xX])\]\s+(.*)$/;
+const NUMERIC = /^[\s$€£¥+−-]*[\d.,]+\s*%?$/;
+// A column of numbers reads right-aligned unless the table says otherwise.
+function numericColumns(rows: string[][], columns: number): boolean[] {
+  return Array.from(
+    { length: columns },
+    (_, i) =>
+      rows.length > 0 &&
+      rows.every((row) => (row[i] ?? "").trim() === "" || NUMERIC.test(row[i] ?? "")),
+  );
+}
 // A line that starts another block ends a paragraph.
 const OPENS_BLOCK = /^( {0,3}(`{3}|~{3}|[-+*]\s|[0-9]{1,6}[.)]\s|>)|#{1,6}\s)/;
 export function safeMarkdownLink(raw: string): string | null {
@@ -100,10 +130,14 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
           const end = rest.indexOf(")", middle + 2);
           if (end > middle && end - middle <= 2050) {
             const rawLink = rest.slice(0, end + 1),
-              href = image ? null : safeMarkdownLink(rest.slice(middle + 2, end));
+              href = safeMarkdownLink(rest.slice(middle + 2, end));
             if (href) {
               flush();
-              result.push({ kind: "link", text: rest.slice(1, middle), href });
+              result.push(
+                image
+                  ? { kind: "image", text: rest.slice(2, middle), href }
+                  : { kind: "link", text: rest.slice(1, middle), href },
+              );
               remaining--;
             } else plain += rawLink;
             i += end + 1;
@@ -150,12 +184,17 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
   const lines = input.replace(/\r\n?/g, "\n").split("\n"),
     blocks: Block[] = [];
   let position = 0;
+  let from = 0;
+  // A block ends where the reading has got to; its source is the lines it was read from.
+  const push = (block: BlockBody) =>
+    blocks.push({ ...block, source: lines.slice(from, position).join("\n") } as Block);
   while (position < lines.length && remaining > 1) {
     const line = lines[position] ?? "";
     if (!line.trim()) {
       position++;
       continue;
     }
+    from = position;
     const fence =
       line.length <= 128 ? /^ {0,3}(`{3,}|~{3,})([a-zA-Z0-9_-]{0,32})\s*$/.exec(line) : null;
     if (fence) {
@@ -169,13 +208,13 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
           break;
         body.push(next);
       }
-      blocks.push({ kind: "code", text: body.join("\n"), language: fence[2] ?? "" });
+      push({ kind: "code", text: body.join("\n"), language: fence[2] ?? "" });
       remaining--;
       continue;
     }
     if (isRule(line)) {
-      blocks.push({ kind: "rule" });
       position++;
+      push({ kind: "rule" });
       remaining--;
       continue;
     }
@@ -184,21 +223,26 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
       const head = cells(line).slice(0, MAX_COLUMNS);
       const columns = head.length;
       const aligns = cells(next).slice(0, columns).map(align);
-      const rows: Inline[][][] = [];
+      const raw: string[][] = [];
       position += 2;
       while (position < lines.length && remaining > columns + 1) {
         const row = lines[position] ?? "";
         if (!row.trim() || !row.includes("|")) break;
-        const values = cells(row);
-        rows.push(Array.from({ length: columns }, (_, i) => inline(values[i] ?? "")));
+        raw.push(cells(row));
         remaining -= columns;
         position++;
       }
-      blocks.push({
+      const numbers = numericColumns(raw, columns);
+      push({
         kind: "table",
-        align: Array.from({ length: columns }, (_, i) => aligns[i] ?? null),
+        align: Array.from(
+          { length: columns },
+          (_, i) => aligns[i] ?? (numbers[i] ? "right" : null),
+        ),
         head: head.map((cell) => inline(cell)),
-        rows,
+        rows: raw.map((values) =>
+          Array.from({ length: columns }, (_, i) => inline(values[i] ?? "")),
+        ),
       });
       remaining--;
       continue;
@@ -213,33 +257,60 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
         body.push(more[1] ?? "");
         position++;
       }
-      blocks.push({ kind: "quote", children: inline(body.join("\n").trim()) });
+      push({ kind: "quote", children: inline(body.join("\n").trim()) });
       remaining--;
       continue;
     }
-    const list = /^ {0,3}([-+*]|[0-9]{1,6}[.)])\s+(.+)$/.exec(line);
-    if (list) {
-      const ordered = /^[0-9]/.test(list[1] ?? ""),
-        items: Inline[][] = [];
+    const list = line.length <= SHORT ? ITEM.exec(line) : null;
+    if (list && (list[1] ?? "").length <= 3 && (list[3] ?? "").trim()) {
+      const ordered = /^[0-9]/.test(list[2] ?? "");
+      const root: List = {
+        ordered,
+        start: ordered ? Number.parseInt(list[2] ?? "1", 10) : 1,
+        items: [],
+      };
+      // Each open list with the indent its items start at; deeper than three lists flattens.
+      const open: { indent: number; list: List }[] = [{ indent: list[1]?.length ?? 0, list: root }];
       while (position < lines.length && remaining > 1) {
-        const next = /^ {0,3}([-+*]|[0-9]{1,6}[.)])\s+(.+)$/.exec(lines[position] ?? "");
-        if (!next || /^[0-9]/.test(next[1] ?? "") !== ordered) break;
-        items.push(inline(next[2] ?? ""));
+        const text = lines[position] ?? "";
+        const item = text.length <= SHORT ? ITEM.exec(text) : null;
+        if (!item) break;
+        const indent = item[1]?.length ?? 0;
+        const kind = /^[0-9]/.test(item[2] ?? "");
+        if (open.length === 1 && indent <= (open[0]?.indent ?? 0) && kind !== ordered) break;
+        while (open.length > 1 && indent < (open.at(-1)?.indent ?? 0)) open.pop();
+        let level = open.at(-1) as { indent: number; list: List };
+        const parent = level.list.items.at(-1);
+        if (indent >= level.indent + 2 && parent && open.length < MARKDOWN_LIMITS.depth) {
+          parent.list = {
+            ordered: kind,
+            start: kind ? Number.parseInt(item[2] ?? "1", 10) : 1,
+            items: [],
+          };
+          level = { indent, list: parent.list };
+          open.push(level);
+        }
+        const task = TASK.exec(item[3] ?? "");
+        level.list.items.push(
+          task
+            ? { task: task[1] === " " ? "todo" : "done", children: inline(task[2] ?? "") }
+            : { children: inline(item[3] ?? "") },
+        );
         position++;
         remaining--;
       }
-      blocks.push({ kind: "list", ordered, items });
+      push({ kind: "list", ...root });
       remaining--;
       continue;
     }
     const heading = line.length <= SHORT ? /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line) : null;
     if (heading) {
-      blocks.push({
+      position++;
+      push({
         kind: "heading",
         level: heading[1]?.length ?? 1,
         children: inline(heading[2] ?? ""),
       });
-      position++;
       remaining--;
       continue;
     }
@@ -253,13 +324,22 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
       !startsTable(lines[position] ?? "", lines[position + 1] ?? "")
     )
       paragraph.push(lines[position++] ?? "");
-    blocks.push({ kind: "paragraph", children: inline(paragraph.join("\n")) });
+    // A table's first row still waiting for its delimiter keeps a row's height meanwhile.
+    const pendingRow = position === lines.length && paragraph.length === 1 && /^\s*\|/.test(line);
+    push({
+      kind: "paragraph",
+      children: inline(paragraph.join("\n")),
+      ...(pendingRow ? { pendingRow: true as const } : {}),
+    });
     remaining--;
   }
-  if (position < lines.length)
-    blocks.push({
+  if (position < lines.length) {
+    from = position;
+    position = lines.length;
+    push({
       kind: "paragraph",
-      children: [{ kind: "text", text: lines.slice(position).join("\n") }],
+      children: [{ kind: "text", text: lines.slice(from).join("\n") }],
     });
+  }
   return { blocks, truncated: raw.length > MARKDOWN_LIMITS.chars };
 }

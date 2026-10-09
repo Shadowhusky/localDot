@@ -1,8 +1,16 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: Wide code and tables scroll sideways, so keyboard users can focus them.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Immutable parsed text has no child state; source position identifies each text span.
-import { memo, type ReactNode, useMemo } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Icon } from "../ui/Icon.tsx";
 import { CopyButton } from "./CopyButton.tsx";
-import { type Block, type Inline, parseMarkdown } from "./markdown.ts";
+import { type Block, type Inline, type List, parseMarkdown } from "./markdown.ts";
+
+// While a message streams in, its text is read again at most this often.
+const STREAM_PARSE_MS = 100;
+
+export function linkHost(href: string): string {
+  return new URL(href).hostname.replace(/^www\./, "");
+}
 
 function inlines(nodes: readonly Inline[]): ReactNode[] {
   return nodes.map((node, index) => {
@@ -10,15 +18,35 @@ function inlines(nodes: readonly Inline[]): ReactNode[] {
     if (node.kind === "code") return <code key={index}>{node.text}</code>;
     if (node.kind === "link")
       return (
+        <span key={index} className="md-link">
+          <a
+            href={node.href}
+            title={node.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            referrerPolicy="no-referrer"
+          >
+            {node.text}
+          </a>
+          <span className="md-host">
+            <Icon name="share" size={12} />
+            {linkHost(node.href)}
+          </span>
+        </span>
+      );
+    if (node.kind === "image")
+      return (
         <a
           key={index}
+          className="md-host md-image"
           href={node.href}
-          title={node.href}
+          title={node.text || node.href}
           target="_blank"
           rel="noopener noreferrer"
           referrerPolicy="no-referrer"
         >
-          {node.text}
+          <Icon name="share" size={12} />
+          Image · {linkHost(node.href)}
         </a>
       );
     if (node.kind === "strong") return <strong key={index}>{inlines(node.children)}</strong>;
@@ -26,10 +54,37 @@ function inlines(nodes: readonly Inline[]): ReactNode[] {
   });
 }
 
-function block(node: Block, index: number, announce?: (text: string) => void) {
+function ListView({ list }: { list: List }) {
+  const items = list.items.map((item, index) => (
+    <li key={index} data-task={item.task}>
+      {item.task && (
+        <span
+          className="md-box"
+          data-done={item.task === "done" || undefined}
+          role="img"
+          aria-label={item.task === "done" ? "Done" : "To do"}
+        >
+          {item.task === "done" && <Icon name="check" size={12} />}
+        </span>
+      )}
+      <span className="md-item">{inlines(item.children)}</span>
+      {item.list && <ListView list={item.list} />}
+    </li>
+  ));
+  const tasks = list.items.some((item) => item.task) ? "md-tasks" : undefined;
+  return list.ordered ? (
+    <ol className={tasks} start={list.start === 1 ? undefined : list.start}>
+      {items}
+    </ol>
+  ) : (
+    <ul className={tasks}>{items}</ul>
+  );
+}
+
+function BlockView({ node, announce }: { node: Block; announce?: (text: string) => void }) {
   if (node.kind === "code")
     return (
-      <section key={index} className="md-code" aria-label={node.language || "Code"}>
+      <section className="md-code" aria-label={node.language || "Code"}>
         <div className="md-code-head">
           <span className="md-code-language">{node.language || "Code"}</span>
           <CopyButton text={node.text} label="Copy code" announce={announce} />
@@ -39,21 +94,22 @@ function block(node: Block, index: number, announce?: (text: string) => void) {
         </pre>
       </section>
     );
-  if (node.kind === "list") {
-    const items = node.items.map((item, i) => <li key={i}>{inlines(item)}</li>);
-    return node.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>;
-  }
+  if (node.kind === "list") return <ListView list={node} />;
   if (node.kind === "heading")
     return node.level <= 2 ? (
-      <h3 key={index}>{inlines(node.children)}</h3>
+      <h3 data-level={node.level}>{inlines(node.children)}</h3>
+    ) : node.level === 3 ? (
+      <h4 data-level={3}>{inlines(node.children)}</h4>
     ) : (
-      <h4 key={index}>{inlines(node.children)}</h4>
+      <p>
+        <strong>{inlines(node.children)}</strong>
+      </p>
     );
-  if (node.kind === "quote") return <blockquote key={index}>{inlines(node.children)}</blockquote>;
-  if (node.kind === "rule") return <hr key={index} />;
+  if (node.kind === "quote") return <blockquote>{inlines(node.children)}</blockquote>;
+  if (node.kind === "rule") return <hr />;
   if (node.kind === "table")
     return (
-      <div key={index} className="md-table" tabIndex={0}>
+      <div className="md-table" tabIndex={0}>
         <table>
           <thead>
             <tr>
@@ -78,20 +134,55 @@ function block(node: Block, index: number, announce?: (text: string) => void) {
         </table>
       </div>
     );
-  return <p key={index}>{inlines(node.children)}</p>;
+  return <p data-row={node.pendingRow || undefined}>{inlines(node.children)}</p>;
+}
+
+// A block draws again only when its own source changes, so a streaming message redraws its last
+// block alone.
+const MarkdownBlock = memo(
+  BlockView,
+  (was, now) =>
+    was.node.source === now.node.source &&
+    was.node.kind === now.node.kind &&
+    was.announce === now.announce,
+);
+
+// Text that is still arriving is read again at most every STREAM_PARSE_MS; finished text at once.
+function useSettledText(text: string, streaming: boolean): string {
+  const [shown, setShown] = useState(text);
+  const last = useRef(0);
+  useEffect(() => {
+    if (!streaming) {
+      setShown(text);
+      return;
+    }
+    const wait = Math.max(0, last.current + STREAM_PARSE_MS - performance.now());
+    const timer = setTimeout(() => {
+      last.current = performance.now();
+      setShown(text);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [text, streaming]);
+  return streaming ? shown : text;
 }
 
 export const SafeMarkdown = memo(function SafeMarkdown({
   text,
+  streaming = false,
   announce,
 }: {
   text: string;
+  // The message is still arriving.
+  streaming?: boolean;
   announce?(text: string): void;
 }) {
-  const parsed = useMemo(() => parseMarkdown(text), [text]);
+  const settled = useSettledText(text, streaming);
+  const parsed = useMemo(() => parseMarkdown(settled), [settled]);
   return (
     <div className="safe-markdown">
-      {parsed.blocks.map((node, index) => block(node, index, announce))}
+      {parsed.blocks.map((node, index) => (
+        <MarkdownBlock key={index} node={node} announce={announce} />
+      ))}
       {parsed.truncated && <p className="thread-note">Message preview shortened.</p>}
     </div>
   );

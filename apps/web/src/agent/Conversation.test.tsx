@@ -40,7 +40,7 @@ function scrolled(top: number, height = 1000, view = 200, threadEnd = height) {
 }
 
 describe("the conversation thread", () => {
-  it("shows you in a bubble and dot under its name once per run of its messages", () => {
+  it("shows you in a bubble and dot as plain text with no name", () => {
     render(
       <Conversation
         items={items([
@@ -65,7 +65,8 @@ describe("the conversation thread", () => {
       false,
       true,
     ]);
-    expect(document.querySelectorAll(".thread-who")).toHaveLength(1);
+    // dot speaks without a name or a glyph: its words sit unbubbled on the left.
+    expect(document.querySelectorAll(".thread-who")).toHaveLength(0);
     expect(rows[0]?.querySelector(".thread-bubble")?.textContent).toBe("Draw a dog");
     expect(rows[1]?.querySelector(".thread-bubble")).toBeNull();
   });
@@ -187,7 +188,9 @@ describe("the conversation thread", () => {
         truncated={false}
       />,
     );
-    expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe("1 new");
+    expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe(
+      "1 new message",
+    );
     scrolled(800);
     expect(jump().hasAttribute("data-shown")).toBe(false);
   });
@@ -204,7 +207,7 @@ describe("the conversation thread", () => {
     scrolled(100);
     view.rerender(<Conversation items={items([message("one")], [question])} truncated={false} />);
     expect(within(jump()).getByRole("button", { name: "1 new question" }).textContent).toBe(
-      "1 new",
+      "1 new question",
     );
     view.rerender(
       <Conversation
@@ -229,7 +232,7 @@ describe("the conversation thread", () => {
     const scroller = history().closest(".thread-scroll") as HTMLElement;
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo;
-    fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
     expect(screen.getByText("Loading later…")).toBeTruthy();
     const outbox = history().querySelector(".thread-outbox");
     expect(outbox?.closest("[hidden]")).toBeNull();
@@ -277,7 +280,7 @@ it("mounts a bounded window of 10,000 messages and keeps the reader's rows throu
   const data = Array.from({ length: 10_000 }, (_, n) => message(`message-${n}`, `Content ${n}`));
   const v = render(<Conversation items={items(data)} truncated={false} ownerKey="large-task" />);
   expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
-  fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
   const kept = screen.getByText("Content 9960").closest("article");
   expect(screen.getByText("Content 9940")).toBeTruthy();
   v.rerender(
@@ -396,7 +399,7 @@ describe("opening on a snapshot", () => {
         earlier={{ more: true, reading: false, older }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
     expect(older).toHaveBeenCalledOnce();
     view.rerender(
       <Conversation

@@ -13,6 +13,7 @@ it("sizes files in bytes, then KB and MB", () => {
   expect(bytes(48)).toBe("48 bytes");
   expect(bytes(1536)).toBe("1.5 KB");
   expect(bytes(3 * 1024 * 1024)).toBe("3.0 MB");
+  expect(bytes(2.1 * 1024 * 1024 * 1024)).toBe("2.1 GB");
 });
 
 it("shows stated money plainly and estimates with ≈, to the cent or below it", () => {

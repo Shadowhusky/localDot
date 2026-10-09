@@ -164,7 +164,8 @@ export function useReplay(
   api: ApiClient,
   sessionId: string | null,
   stage: RefObject<StageHandle | null>,
-  opts: { onGoLive(): void },
+  // onExit leaves the recording, as Escape does; onGoLive follows a live task back to Watch.
+  opts: { onGoLive(): void; onExit?(): void },
 ): ReplayState {
   const [values, setValues] = useState<ReplayValues>(() => initialState(sessionId));
   const [choice, setChoice] = useState<{ sessionId: string | null; screen: ScreenName }>({
@@ -334,7 +335,7 @@ export function useReplay(
       case "exit":
         if (state.compare) update({ compare: null });
         else if (state.selection) update({ selection: null });
-        else options.current.onGoLive();
+        else (options.current.onExit ?? options.current.onGoLive)();
         break;
     }
   };

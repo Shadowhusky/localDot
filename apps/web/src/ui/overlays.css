@@ -41,13 +41,19 @@
     transition: opacity var(--dur-fade) var(--ease-standard);
   }
 
-  .ui-layer[data-closing] > .ui-scrim {
+  .ui-catcher[data-dim] {
+    background-color: var(--color-menu-dim);
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-layer[data-closing] > :is(.ui-scrim, .ui-catcher[data-dim]) {
     opacity: 0;
     transition-duration: var(--dur-exit);
   }
 
   @starting-style {
-    .ui-scrim {
+    .ui-scrim,
+    .ui-catcher[data-dim] {
       opacity: 0;
     }
   }

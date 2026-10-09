@@ -127,8 +127,26 @@ export function LiveWorkLine({
         className="thread-work-steps"
         summary={
           <>
-            {summary}
-            {meta && <span className="thread-work-meta num"> · {meta}</span>}
+            <StatusGlyph
+              className="thread-work-glyph"
+              state={
+                running
+                  ? "doing"
+                  : waiting
+                    ? PAUSED.has(live?.row)
+                      ? "skipped"
+                      : "ask"
+                    : ended === "stopped"
+                      ? "skipped"
+                      : ended === "error"
+                        ? "failed"
+                        : "done"
+              }
+            />
+            <span>
+              {summary}
+              {meta && <span className="thread-work-meta num"> · {meta}</span>}
+            </span>
           </>
         }
         open={open}
