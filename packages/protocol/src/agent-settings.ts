@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SECRET_ID_PATTERN } from "./keyd.ts";
 import { PurposeCheck } from "./purpose.ts";
+import { ResearchBudget } from "./research.ts";
 import { AutonomyPolicy } from "./safety.ts";
 
 export const AgentModelPrice = z
@@ -65,5 +66,7 @@ export const AgentSettingsDocument = z.strictObject({
   purposeCheck: PurposeCheck.optional(),
   // On when absent: each task starts knowing the user's last few tasks.
   recentActivity: z.enum(["on", "off"]).optional(),
+  // How far a research task reads before it writes; DEFAULT_RESEARCH_BUDGET when absent.
+  research: ResearchBudget.optional(),
 });
 export type AgentSettingsDocument = z.infer<typeof AgentSettingsDocument>;

@@ -1,5 +1,5 @@
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
-import { TOOL_NAMES } from "@localdot/protocol";
+import { offeredTools, TOOL_NAMES } from "@localdot/protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
@@ -99,7 +99,7 @@ describe("Claude Code as dot's brain", () => {
     const { server, call } = options();
     const mcp = await connect(server);
     const listed = await mcp.listTools();
-    expect(listed.tools.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
+    expect(listed.tools.map((tool) => tool.name)).toEqual([...offeredTools(false)]);
     expect(LOCALDOT_TOOLS).toHaveLength(TOOL_NAMES.length);
     const codex = codexTools();
     for (const tool of listed.tools)

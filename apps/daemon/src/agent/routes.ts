@@ -33,6 +33,7 @@ import {
   QuestionAnswerRequest,
   RecentActivityReply,
   type RecentTask,
+  ResearchChange,
   ResumeSafetyRequest,
   scanKeyLike,
   type TakeComputerReply,
@@ -148,7 +149,8 @@ const text = (max: number) =>
     .max(max)
     .refine((s) => s.isWellFormed() && !s.includes("\0"));
 const nonempty = (max: number) => text(max).refine((s) => s.trim().length > 0);
-const Task = z.strictObject({ task: nonempty(8000) });
+// research: dot reads many sources and writes a cited report.
+const Task = z.strictObject({ task: nonempty(8000), mode: z.literal("research").optional() });
 const Message = z.strictObject({ text: nonempty(8000), kind: z.enum(["steer", "followup"]) });
 const Budget = BudgetRaiseRequest;
 
@@ -548,11 +550,10 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
       const parsed = await json(c.req.raw, Task);
       check(c.req.raw.signal);
-      const result = await deps.runner.start(
-        cellId,
-        redact(parsed.task, undefined, cellId),
-        c.req.raw.signal,
-      );
+      const task = redact(parsed.task, undefined, cellId);
+      const result = await (parsed.mode === "research"
+        ? deps.runner.start(cellId, task, c.req.raw.signal, { research: true })
+        : deps.runner.start(cellId, task, c.req.raw.signal));
       check(c.req.raw.signal);
       return c.json({ sessionId: result.id }, 202);
     }),
@@ -640,6 +641,20 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         throw new RouteError(409, "hand back the computer, then message dot");
       s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
       return c.body(null, 202);
+    }),
+  );
+  // The user's word on a research task's budget: wrap up now, or keep going for longer.
+  app.post(
+    "/api/agent/sessions/:id/research",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const { change } = await json(c.req.raw, ResearchChange);
+      check(c.req.raw.signal);
+      if (!s.research) throw new RouteError(409, "this task is not research");
+      if (change === "wrap_up") s.research.wrapUp();
+      else s.research.more();
+      s.remind(`(${s.research.stopped ? s.research.stopNote() : s.research.moreNote()})`);
+      return c.body(null, 204);
     }),
   );
   app.post(

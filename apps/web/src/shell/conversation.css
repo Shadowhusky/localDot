@@ -1406,6 +1406,42 @@
   color: var(--color-fg-2);
 }
 
+/* Research for the next task: a chip that reads as a switch when on (the kit's pressed chip). dot's
+   suggestion brightens its edge and lights a neutral point at its corner; nothing moves. */
+.composer-research.ui-chip {
+  position: relative;
+  margin-inline-start: var(--spacing);
+  transition:
+    background-color var(--dur-hover) var(--ease-standard),
+    box-shadow var(--dur-fade) var(--ease-standard),
+    scale var(--dur-snappy) var(--ease-spring);
+}
+
+.composer-research.ui-chip[data-suggested] {
+  box-shadow: inset 0 0 0 1px var(--color-fg-3);
+}
+
+.composer-research-hint {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-fg-1);
+  box-shadow: 0 0 0 2px var(--color-raised);
+  opacity: 0;
+  scale: 0.4;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    scale var(--dur-snappy) var(--ease-spring);
+}
+
+.composer-research[data-suggested] > .composer-research-hint {
+  opacity: 1;
+  scale: 1;
+}
+
 /* Controls that come and go along the row grow in from where they sit, and shrink away there. */
 .composer-pop {
   display: inline-flex;

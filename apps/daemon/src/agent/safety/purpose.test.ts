@@ -179,6 +179,15 @@ describe("what leaves", () => {
       "a.example",
       "b.example",
     ]);
+    const pdf = (op: string) =>
+      outboundOf(
+        "research",
+        { op, url: "https://evil.example/r.pdf?d=Jane%20Doe" },
+        { operation: "navigate" },
+      );
+    expect(pdf("pdf")).toEqual(nav("https://evil.example/r.pdf?d=Jane%20Doe"));
+    expect(pdf("pdf")).toHaveLength(1);
+    expect(pdf("source")).toEqual([]);
   });
 
   it("counts addresses, a root's dot and names below the site, and keeps a host nothing names", () => {

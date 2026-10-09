@@ -25,6 +25,7 @@ export * from "./purpose.ts";
 export * from "./recent-activity.ts";
 export * from "./recording.ts";
 export * from "./release.ts";
+export * from "./research.ts";
 export * from "./routines.ts";
 export * from "./safety.ts";
 export * from "./screens.ts";

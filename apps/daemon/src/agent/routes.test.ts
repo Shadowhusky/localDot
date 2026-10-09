@@ -25,8 +25,9 @@ import type { ChatgptStatus } from "./codex/account.ts";
 import { SANDBOX_REASONS } from "./codex/setup.ts";
 import { TRANSFER_BYTES } from "./download.ts";
 import { MemoryStore } from "./memory.ts";
+import { ResearchLog } from "./research.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
-import { AgentError } from "./runner.ts";
+import { AgentError, type TaskStartOptions } from "./runner.ts";
 import { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 
@@ -93,7 +94,10 @@ async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness" | "cla
     },
   );
   const release = vi.fn();
-  const start = vi.fn(async (_cell: string, _task: string, _signal?: AbortSignal) => session);
+  const start = vi.fn(
+    async (_cell: string, _task: string, _signal?: AbortSignal, _options?: TaskStartOptions) =>
+      session,
+  );
   const raise = vi.fn(async (_id: string, _budget: number) => {});
   const redact = vi.fn((text: string) => text.replaceAll("credential-fixture", "[redacted]"));
   const deps: AgentRoutesDeps = {
@@ -615,6 +619,41 @@ describe("agent user routes", () => {
       data: { undoes: change.changeId },
     });
     expect((await f.send("POST", `/api/agent/memory/${change.changeId}/undo`)).status).toBe(409);
+  });
+});
+
+describe("research mode routes", () => {
+  it("starts a research task only when asked, and refuses an unknown mode", async () => {
+    const f = await setup();
+    const task = `/api/cells/${CELL}/agent`;
+    expect((await f.send("POST", task, { task: "Compare", mode: "research" })).status).toBe(202);
+    expect(f.start.mock.calls[0]?.[3]).toEqual({ research: true });
+    expect((await f.send("POST", task, { task: "Book" })).status).toBe(202);
+    expect(f.start.mock.calls[1]).toHaveLength(3);
+    expect((await f.send("POST", task, { task: "Book", mode: "deep" })).status).toBe(400);
+    expect(f.start).toHaveBeenCalledTimes(2);
+  });
+  it("lets the user wrap up or extend a research task, and tells dot at once", async () => {
+    const f = await setup();
+    expect((await f.send("POST", endpoint("research"), { change: "wrap_up" })).status).toBe(409);
+    f.session.research = new ResearchLog({ sources: 10, minutes: 10 }, (type, data) =>
+      f.session.append(type, data),
+    );
+    expect((await f.send("POST", endpoint("research"), { change: "stop" })).status).toBe(400);
+    expect((await f.send("POST", endpoint("research"), { change: "wrap_up" })).status).toBe(204);
+    expect(f.session.research.stopped).toBe("user");
+    expect((await f.send("POST", endpoint("research"), { change: "more" })).status).toBe(204);
+    expect(f.session.research.stopped).toBeUndefined();
+    expect(f.session.research.budget).toEqual({ sources: 20, minutes: 20 });
+    expect(f.events.filter((e) => e.type === "research.budget").map((e) => e.data)).toEqual([
+      { sources: 10, minutes: 10, stopped: "user" },
+      { sources: 20, minutes: 20 },
+    ]);
+    const notes = await f.session.inbox(0, 0);
+    expect(notes.items.map((item) => item.text)).toEqual([
+      expect.stringContaining("The user asked you to wrap up."),
+      expect.stringContaining("about 20 sources and 20 minutes"),
+    ]);
   });
 });
 

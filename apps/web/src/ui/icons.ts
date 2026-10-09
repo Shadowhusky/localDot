@@ -322,6 +322,12 @@ export const ICONS = {
       },
     ],
   ],
+  library: [
+    ["path", { d: "m16 6 4 14" }],
+    ["path", { d: "M12 6v14" }],
+    ["path", { d: "M8 8v12" }],
+    ["path", { d: "M4 4v16" }],
+  ],
   contrast: [
     ["circle", { cx: "12", cy: "12", r: "9.5" }],
     ["path", { d: "M12 17.5a5.5 5.5 0 0 0 0-11z", ...FILLED }],

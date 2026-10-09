@@ -92,6 +92,8 @@ const PLANNED: IconName[] = [
   "plus",
   // Settings › Notifications: a phone's row.
   "smartphone",
+  // Research: many sources.
+  "library",
 ];
 
 describe("Icon", () => {

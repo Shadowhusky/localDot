@@ -2,6 +2,9 @@ import type {
   ActionClass,
   ApprovalCard,
   EventOf,
+  ResearchBudget,
+  ResearchSourceData,
+  ResearchStop,
   RuleChange,
   ScreenSelectionSnapshot,
   SessionOrigin,
@@ -97,6 +100,14 @@ export type RoutineProposal = EventOf<"routine.proposed">["data"] & {
   readonly id: string;
   readonly seq: number;
 };
+// A research task: its budget, why gathering stopped, and its numbered sources in order.
+export interface AgentResearch {
+  // Session time (ms) the research began, for the minutes it has used.
+  readonly startMs: number;
+  readonly budget: ResearchBudget;
+  readonly stopped?: ResearchStop;
+  readonly sources: readonly ResearchSourceData[];
+}
 export type UsageRow = EventOf<"model.usage">["data"] & {
   readonly calls: number;
   readonly reasoningPartial: boolean;
@@ -159,6 +170,7 @@ export interface AgentModel {
   readonly results: readonly AgentResult[];
   // What started the task when the user did not: a routine or a follow-up.
   readonly origin?: SessionOrigin;
+  readonly research: AgentResearch | null;
   readonly routineProposals: ReadonlyMap<string, RoutineProposal>;
   readonly usage: readonly UsageRow[];
   readonly usagePartial: boolean;
@@ -195,6 +207,7 @@ export function emptyAgentModel(): AgentModel {
     changes: [],
     results: [],
     routineProposals: new Map(),
+    research: null,
     usage: [],
     usagePartial: false,
     retry: null,

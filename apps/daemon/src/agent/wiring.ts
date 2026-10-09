@@ -438,6 +438,7 @@ export function createAgent(d: AgentWiringDeps) {
               skills: runner.skillsOf(session.id),
               today: new Date(),
               ...(session.run ? { run: session.run } : {}),
+              ...(session.research ? { research: session.research.budget } : {}),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
@@ -524,6 +525,7 @@ export function createAgent(d: AgentWiringDeps) {
             skills: runner.skillsOf(session.id),
             today: new Date(),
             ...(session.run ? { run: session.run } : {}),
+            ...(session.research ? { research: session.research.budget } : {}),
           }),
         redactorFor: (session) => forText(session),
       })
