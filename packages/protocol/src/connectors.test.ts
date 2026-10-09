@@ -117,7 +117,10 @@ describe("connectorIdFor", () => {
     expect(connectorIdFor("GitHub", new Set(["github", "github2"]))).toBe("github3");
     expect(connectorIdFor("Ünïcode Notes!", new Set())).toBe("unicodenotes");
     expect(connectorIdFor("42", new Set())).toBe("app");
-    expect(ConnectorConfig.shape.id.safeParse(connectorIdFor("A very long app name indeed", new Set())).success).toBe(true);
+    expect(
+      ConnectorConfig.shape.id.safeParse(connectorIdFor("A very long app name indeed", new Set()))
+        .success,
+    ).toBe(true);
   });
 });
 
