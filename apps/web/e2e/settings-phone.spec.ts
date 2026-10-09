@@ -20,13 +20,26 @@ import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts"
 
 // Settings and Keys on a phone, in Chrome and in WebKit (Safari and Chrome on iOS), and in Chrome
 // at desktop width, against the fixture daemon serving the built UI.
-let fixture: UiFixture, origin: string, replayId: string;
+let fixture: UiFixture, origin: string, replayId: string, initial: string;
+
+const settingsApi = (init: RequestInit = {}) =>
+  fetch(`${origin}/api/agent/settings`, {
+    ...init,
+    headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+  });
 
 test.beforeAll(async () => {
   test.setTimeout(120_000);
   fixture = await startUiFixture("localdot-settings-phone");
   origin = fixture.origin;
   replayId = fixture.seeded[0] as string;
+  initial = await (await settingsApi()).text();
+});
+
+// Settings saves itself, so each test starts from the fixture's own settings again.
+test.beforeEach(async () => {
+  const reset = await settingsApi({ method: "PUT", body: initial });
+  expect(reset.ok, await reset.text()).toBe(true);
 });
 
 test.afterAll(async () => {
@@ -100,8 +113,9 @@ async function background(page: Page, whileHidden?: () => Promise<void>) {
 }
 
 // A wide screen keeps an autonomy row's label and its three choices on one line; a phone puts the
-// choices under the label, all three on one line.
-async function expectAutonomyRow(sheet: Locator, wide: boolean) {
+// choices under the label, all three on one line. A fixed choice's mode never wraps; on the
+// narrowest phone its label may.
+async function expectAutonomyRow(sheet: Locator, wide: boolean, narrow = false) {
   const row = sheet.getByRole("radiogroup", { name: "Read and look" });
   await row.scrollIntoViewIfNeeded();
   const label = sheet.locator(".settings-autonomy-row").first().locator(".ui-field-label");
@@ -118,7 +132,11 @@ async function expectAutonomyRow(sheet: Locator, wide: boolean) {
     .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
   expect(new Set(tops).size).toBe(1);
   const wrapped = await sheet
-    .locator(".settings-autonomy-row > .ui-field-label, .settings-locked li > span")
+    .locator(
+      narrow
+        ? ".settings-autonomy-row > .ui-field-label, .settings-locked-mode"
+        : ".settings-autonomy-row > .ui-field-label, .settings-locked li > span",
+    )
     .evaluateAll((spans) =>
       spans.flatMap((span) =>
         span.getBoundingClientRect().height >
@@ -134,8 +152,10 @@ async function expectThemeTiles(sheet: Locator) {
   await expect(sheet.getByText("Change it in Settings")).toHaveCount(0);
   const graphite = sheet.getByRole("radio", { name: "Graphite" });
   expect(await graphite.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
-  const tile = sheet.locator('.appearance-swatch[data-appearance="graphite"]');
-  expect(await tile.boundingBox()).toMatchObject({ width: 40, height: 28 });
+  // A mini preview of the theme, wider than it is tall.
+  const tile = await sheet.locator('.appearance-swatch[data-appearance="graphite"]').boundingBox();
+  expect(tile?.height).toBeGreaterThanOrEqual(28);
+  expect(tile?.width).toBeGreaterThan(tile?.height ?? Number.POSITIVE_INFINITY);
 }
 
 async function savedMain(): Promise<{ model?: string; key?: string } | undefined> {
@@ -249,7 +269,8 @@ for (const [engine, launch] of Object.entries(ENGINES))
       for (const name of ["Provider", "Model", "Key"]) {
         const control = main.getByRole("combobox", { name, exact: true });
         await control.scrollIntoViewIfNeeded();
-        expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
+        // An inline picker draws as its value and takes a finger past its edge.
+        expect((await control.evaluate(reach)).height, name).toBe(44);
         const size = await control.evaluate((el) =>
           Number.parseFloat(getComputedStyle(el).fontSize),
         );
@@ -308,8 +329,10 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }
+      await exporter.getByRole("button", { name: /^More options/ }).tap();
       for (const name of ["Skip idle", "Show the current step"]) {
-        const row = exporter.locator(".ui-choice").filter({ hasText: name });
+        const row = exporter.locator(".ui-group-row").filter({ hasText: name });
+        await row.scrollIntoViewIfNeeded();
         expect((await row.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }
       await context.close();
@@ -325,7 +348,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await eachAction(sheet);
       await expectAutonomyRow(sheet, false);
       await page.setViewportSize({ width: 360, height: 780 });
-      await expectAutonomyRow(sheet, false);
+      await expectAutonomyRow(sheet, false, true);
       // A row changed under the presets turns them to Custom without moving anything.
       await sheet.locator("#settings-autonomy").evaluate((section) => {
         const body = section.closest(".ui-sheet-body") as HTMLElement;
@@ -357,10 +380,11 @@ test("chrome at 1440: theme tiles, autonomy rows and pointer-sized pickers", asy
   expect(await pressed.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
     "rgba(0, 0, 0, 0)",
   );
+  // Under a pointer the inline pickers draw as one line of text, smaller than a finger's target.
   for (const name of ["Provider", "Model", "Key"]) {
     const height =
       (await main.getByRole("combobox", { name, exact: true }).boundingBox())?.height ?? 0;
-    expect(height, name).toBeGreaterThanOrEqual(32);
+    expect(height, name).toBeGreaterThanOrEqual(18);
     expect(height, name).toBeLessThan(44);
   }
   const knows = sheet.getByRole("region", { name: "What dot knows" });

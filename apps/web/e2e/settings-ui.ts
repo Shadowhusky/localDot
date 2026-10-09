@@ -9,10 +9,7 @@ export function settingsSheet(page: Page): Locator {
 
 // Keys: on a phone its own page slid over Settings, at desktop width a section of Settings' one page.
 export function nestedKeys(page: Page): Locator {
-  return page
-    .getByRole("dialog", { name: "Keys", exact: true })
-    .locator("#settings-sheet-body[data-page='keys']")
-    .or(settingsSheet(page).getByRole("region", { name: "Keys", exact: true }));
+  return settingsSheet(page).getByRole("region", { name: "Keys", exact: true });
 }
 
 // Settings opens from the top bar's gear, or from More on a phone, which has no top bar and lists

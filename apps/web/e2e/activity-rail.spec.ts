@@ -40,32 +40,45 @@ async function open(engine: keyof typeof ENGINES, options: BrowserContextOptions
 
 const qa = (path: string) => fetch(`${fixture?.origin}/__qa/${path}`, { method: "POST" });
 
-// What scrolls inside Activity, a view of the rail or a phone's sheet.
-function scrollers(page: Page) {
-  return page.evaluate(() =>
-    [...document.querySelectorAll("[aria-label='Plan and steps'] *")]
-      .filter((element) => {
-        const { overflowY } = getComputedStyle(element);
-        return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
-      })
-      .map((element) => element.className),
+// Activity's one scroller: its own beside the stage; on a phone the sheet it opens in, whose body
+// scrolls it whole.
+const SCROLLER = {
+  desktop: "ui-scroll-area activity-scroll",
+  phone: "ui-sheet-body",
+} as const;
+const pane = (size: keyof typeof SCROLLER) =>
+  size === "phone" ? "[role=dialog]:has(.activity-sheet)" : "[aria-label='Plan and steps']";
+
+function scrollers(page: Page, size: keyof typeof SCROLLER = "desktop") {
+  return page.evaluate(
+    (scope) =>
+      [...document.querySelectorAll(`${scope} *`)]
+        .filter((element) => {
+          const { overflowY } = getComputedStyle(element);
+          return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
+        })
+        .map((element) => element.className),
+    pane(size),
   );
 }
 
-function inView(page: Page, selector: string) {
-  return page.evaluate((query) => {
-    const row = document.querySelector(query)?.getBoundingClientRect();
-    const pane = document.querySelector(".activity-scroll")?.getBoundingClientRect();
-    return !!row && !!pane && row.top >= pane.top - 1 && row.bottom <= pane.bottom + 1;
-  }, selector);
+function inView(page: Page, selector: string, size: keyof typeof SCROLLER = "desktop") {
+  return page.evaluate(
+    ([query, scroller]) => {
+      const row = document.querySelector(query)?.getBoundingClientRect();
+      const view = document.querySelector(scroller)?.getBoundingClientRect();
+      return !!row && !!view && row.top >= view.top - 1 && row.bottom <= view.bottom + 1;
+    },
+    [selector, `.${SCROLLER[size].split(" ").at(-1)}`] as const,
+  );
 }
 
 for (const [engine, size, options] of MATRIX) {
   test(`a long task opens on its live step, in one scroller, as flat rows (${engine} ${size})`, async () => {
     const { browser, page, rail } = await open(engine, options);
-    await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
+    await expect.poll(() => inView(page, ".activity-row[data-current]", size)).toBe(true);
     await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
-    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
     await expect(rail.locator(".activity-group, .ui-disclosure")).toHaveCount(0);
     // The plan header stays in view, as a strip of the plan's progress once the list scrolls away.
     await expect(rail.locator(".plan-head")).toHaveAttribute("data-stuck");
@@ -100,7 +113,7 @@ for (const [engine, size, options] of MATRIX) {
         const box = await target.boundingBox();
         if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
       }
-    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
     await browser.close();
   });
 }
@@ -226,13 +239,14 @@ for (const [engine, size, options] of [
     const rail = await showActivity(page);
     await expect(rail.getByTestId("download-row")).toHaveCount(10);
     await expect(rail.getByText("Plan and steps appear here once dot starts.")).toBeVisible();
-    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
-    expect(await page.locator(".activity-scroll").evaluate((element) => element.scrollTop)).toBe(0);
+    expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
+    const scroller = page.locator(`.${SCROLLER[size].split(" ").at(-1)}`);
+    expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
     const refresh = rail.getByRole("button", { name: "Refresh downloads" });
     await refresh.scrollIntoViewIfNeeded();
-    await expect.poll(() => inView(page, ".download-actions")).toBe(true);
+    await expect.poll(() => inView(page, ".download-actions", size)).toBe(true);
     await expect
-      .poll(() => inView(page, ".download-row:nth-last-child(1 of .download-row)"))
+      .poll(() => inView(page, ".download-row:nth-last-child(1 of .download-row)", size))
       .toBe(true);
     await refresh.click();
     await browser.close();
