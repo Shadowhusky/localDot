@@ -50,14 +50,19 @@ type adoption struct{ moved, failed int }
 
 type keychainItemOperation func(operation, service, account string, data, secret []byte) ([]byte, adoption, int)
 
-// RunKeychainItem is an internal child protocol, not a public vault CLI. The native operation
-// authenticates this executable, its actual parent and the parent's mode before opening any
-// keychain, and then the secret the parent handed over on descriptor 3 against the parent's claim:
-// only the signed keyd daemon that holds the claim, running this helper on purpose, may drive it.
-// A caller cannot obtain secret bytes by invoking the signed executable from an unrelated process,
-// through a launcher, or from another keyd daemon.
+// keychainItemGate checks the helper's parent for an operation and returns the operation bound to
+// that parent, or nil when the parent may not drive it.
+type keychainItemGate func(operation string) keychainItemOperation
+
+// RunKeychainItem is an internal child protocol, not a public vault CLI. The native gate
+// authenticates this executable, its actual parent and the parent's mode before the helper reads
+// anything the parent sent, and the operation then checks the secret the parent handed over on
+// descriptor 3 against the parent's claim: only the signed keyd daemon that holds the claim,
+// running this helper on purpose, may drive it. A caller cannot obtain secret bytes by invoking the
+// signed executable from an unrelated process, through a launcher, or from another keyd daemon,
+// and none of them is kept waiting: the helper refuses before it reads their input.
 func RunKeychainItem(args []string, in io.Reader, out io.Writer) int {
-	return runKeychainItem(args, descriptor(3), in, out, nativeKeychainItem)
+	return runKeychainItem(args, descriptor(3), in, out, nativeKeychainGate)
 }
 
 // descriptor reads an inherited descriptor without taking it over, so nothing ever closes it: run
@@ -79,8 +84,14 @@ func (d descriptor) Read(p []byte) (int, error) {
 	}
 }
 
-func runKeychainItem(args []string, session, in io.Reader, out io.Writer, operate keychainItemOperation) int {
+func runKeychainItem(args []string, session, in io.Reader, out io.Writer, authorize keychainItemGate) int {
 	if len(args) != 3 || !validRequest(args[0], args[1], args[2]) {
+		return helperUnchanged
+	}
+	// A refused parent, such as a launcher whose caller holds this helper's input open, would
+	// otherwise keep it waiting for input it will never use.
+	operate := authorize(args[0])
+	if operate == nil {
 		return helperUnchanged
 	}
 	data, err := io.ReadAll(io.LimitReader(in, helperItemLimit+1))

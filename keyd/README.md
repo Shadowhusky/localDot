@@ -41,7 +41,8 @@ nothing generation 2 stores, and nothing it adopts, is readable by them:
   the key is listed as one to enter again; storing or removing the key replaces the item.
 
 The helper refuses every other caller: a direct call, a call through `keyd-native native-run`, a
-shell, any other keyd subcommand, or a keyd daemon without the claim. The launcher lives in
+shell, any other keyd subcommand, or a keyd daemon without the claim. It checks its parent before
+it reads anything the parent sends, so a refused caller is never kept waiting on its input. The launcher lives in
 `keyd-native`, so nothing it starts can pass as keyd's child.
 
 ## Commands

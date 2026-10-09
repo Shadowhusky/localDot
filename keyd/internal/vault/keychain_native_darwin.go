@@ -72,8 +72,9 @@ static OSStatus keyd_check_process(pid_t parentPID, SecRequirementRef requiremen
 
 static const keyd_identity_checks keyd_process_checks = { getppid, keyd_check_self, keyd_check_process, keyd_check_mode };
 
-// Identity checks are deliberately before even selecting the keychain. No PID argument,
-// development bypass, generic security tool or unsigned fallback exists.
+// Identity checks are deliberately before the helper reads anything its parent sent, let alone
+// selects a keychain. No PID argument, development bypass, generic security tool or unsigned
+// fallback exists.
 static OSStatus keyd_authorized(int checkOnly, pid_t *parent) {
   CFStringRef text = CFStringCreateWithCString(NULL, keyd_requirement, kCFStringEncodingUTF8);
   SecRequirementRef requirement = NULL;
@@ -114,14 +115,15 @@ static OSStatus keyd_operate(const char *operation, const keyd_items *k, const k
   return status;
 }
 
-static OSStatus keyd_item(const char *operation, const char *service, const char *account,
+// parentPID is the parent keyd_authorized checked before the helper read anything it sent. It must
+// still be this process's parent: one that exited meanwhile cannot lend its identity to whatever
+// inherited the helper.
+static OSStatus keyd_item(pid_t parentPID, const char *operation, const char *service, const char *account,
                          const void *data, unsigned int length, const unsigned char *secret, unsigned int secretLength,
                          void **output, unsigned int *outputLength, unsigned int *moved, unsigned int *failed,
                          int *mayHaveChanged) {
   int checkOnly = strcmp(operation, "check") == 0;
-  pid_t parentPID = 0;
-  OSStatus status = keyd_authorized(checkOnly, &parentPID);
-  if (status != errSecSuccess) return status;
+  if (parentPID <= 1 || getppid() != parentPID) return errSecAuthFailed;
   // The secret shows the daemon meant to run this helper. `check` opens no keychain, so it needs
   // only the channel; every other operation needs the daemon's claim too.
   if (!secret || secretLength != KEYD_SESSION_SECRET) return errSecAuthFailed;
@@ -131,7 +133,7 @@ static OSStatus keyd_item(const char *operation, const char *service, const char
   keyd_session_digest(secret, parent.digest);
   // A locked keychain must fail visibly in the caller, never pop a hidden prompt. Nothing here
   // changes an item's access list in place, which only a Keychain prompt can authorize.
-  status = SecKeychainSetUserInteractionAllowed(false);
+  OSStatus status = SecKeychainSetUserInteractionAllowed(false);
   keyd_items k = { NULL, service, keyd_requirement, keyd_earlier_requirement, NULL, NULL };
   SecTrustedApplicationRef self = NULL;
   CFArrayRef trusted = NULL;
@@ -157,7 +159,26 @@ import "C"
 
 import "unsafe"
 
-func nativeKeychainItem(operation, service, account string, data, secret []byte) ([]byte, adoption, int) {
+// nativeKeychainGate checks this executable, its parent and the parent's mode for operation, and
+// returns that operation bound to the parent it checked, or nil when the parent may not drive it.
+func nativeKeychainGate(operation string) keychainItemOperation {
+	var checkOnly C.int
+	if operation == "check" {
+		checkOnly = 1
+	}
+	var parent C.pid_t
+	if C.keyd_authorized(checkOnly, &parent) != C.errSecSuccess {
+		return nil
+	}
+	return func(op, service, account string, data, secret []byte) ([]byte, adoption, int) {
+		if op != operation {
+			return nil, adoption{}, helperUnchanged
+		}
+		return nativeKeychainItem(int(parent), op, service, account, data, secret)
+	}
+}
+
+func nativeKeychainItem(parent int, operation, service, account string, data, secret []byte) ([]byte, adoption, int) {
 	op, svc, acct := C.CString(operation), C.CString(service), C.CString(account)
 	defer C.free(unsafe.Pointer(op))
 	defer C.free(unsafe.Pointer(svc))
@@ -172,7 +193,7 @@ func nativeKeychainItem(operation, service, account string, data, secret []byte)
 	var output unsafe.Pointer
 	var length, moved, failed C.uint
 	var mayHaveChanged C.int
-	status := C.keyd_item(op, svc, acct, input, C.uint(len(data)), (*C.uchar)(session), C.uint(len(secret)),
+	status := C.keyd_item(C.pid_t(parent), op, svc, acct, input, C.uint(len(data)), (*C.uchar)(session), C.uint(len(secret)),
 		&output, &length, &moved, &failed, &mayHaveChanged)
 	limit := helperItemLimit
 	if operation == "list" {
@@ -217,12 +238,6 @@ func nativeExit(status int32, mayHaveChanged bool) int {
 		return helperNotOurs
 	}
 	return helperUnchanged
-}
-
-// Used by an unsigned test executable to check the denial path without opening any keychain.
-func nativeKeychainAuthorized() bool {
-	var parent C.pid_t
-	return C.keyd_authorized(1, &parent) == C.errSecSuccess
 }
 
 // DesignatedRequirement is what keyd must be signed with as its designated requirement.

@@ -2,16 +2,25 @@
 
 package vault
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestUnsignedNativeHelperRefusesBeforeKeychainAccess(t *testing.T) {
-	if nativeKeychainAuthorized() {
-		t.Fatal("test runner unexpectedly passed the production parent-signature gate")
+	ops := []string{"check", "store", "read", "delete", "claim", "adopt", "list"}
+	for _, op := range ops {
+		if nativeKeychainGate(op) != nil {
+			t.Fatalf("test runner unexpectedly passed the production parent-signature gate for %s", op)
+		}
 	}
-	for _, op := range []string{"check", "store", "read", "delete", "claim", "adopt", "list"} {
-		data, adopted, status := nativeKeychainItem(op, "localdot-keyd-test", "not-an-item", []byte("fake"), testSession)
-		if status == 0 || status == helperNotFound || status == helperNotOurs || len(data) != 0 || adopted != (adoption{}) {
-			t.Fatal("unsigned helper reached keychain or disclosed data")
+	// An operation runs only for a parent that is still this process's parent.
+	for _, parent := range []int{0, 1, os.Getpid()} {
+		for _, op := range ops {
+			data, adopted, status := nativeKeychainItem(parent, op, "localdot-keyd-test", "not-an-item", []byte("fake"), testSession)
+			if status != helperUnchanged || len(data) != 0 || adopted != (adoption{}) {
+				t.Fatalf("%s for parent %d reached keychain or disclosed data: %d", op, parent, status)
+			}
 		}
 	}
 }
