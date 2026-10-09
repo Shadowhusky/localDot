@@ -1,4 +1,4 @@
-import type { PauseSnapshot } from "@localdot/protocol";
+import type { PauseSnapshot, Rect } from "@localdot/protocol";
 import type { Status } from "../session/status.ts";
 
 // The island's fixed shapes; within one, its width never changes. Ready: the computer is on and
@@ -134,4 +134,34 @@ export function takeSlot(status: Status, { decision = null, blocked, taking }: T
   if (decision === "approval") return { primary: false } satisfies TakeSlot;
   if (taking) return { primary: false, busy: true } satisfies TakeSlot;
   return { primary: false, ...(blocked ? { reason: blocked } : {}) } satisfies TakeSlot;
+}
+
+// The space the decision keeps from a ring on a field dot will fill.
+const RING_CLEARANCE_PX = 12;
+
+export interface DecisionPlace {
+  // The decision's top while it hangs from the stage's top edge, in the stage's px.
+  hung: number;
+  size: { w: number; h: number };
+  stageW: number;
+  // The rings on the fields dot will fill, in the stage's px.
+  rings: readonly Rect[];
+  // How low the decision's foot may reach before it leaves the page.
+  floor: number;
+}
+
+// Where the decision's top sits: hung from the stage's top edge, or, when it would cover a ring on a
+// field dot will fill, just under that ring, as far as the page has room. The stage never moves.
+export function decisionTop({ hung, size, stageW, rings, floor }: DecisionPlace): number {
+  const left = (stageW - size.w) / 2;
+  let top = hung;
+  for (const ring of [...rings].sort((a, b) => a.y - b.y)) {
+    const covered =
+      ring.x - RING_CLEARANCE_PX < left + size.w &&
+      ring.x + ring.w + RING_CLEARANCE_PX > left &&
+      ring.y - RING_CLEARANCE_PX < top + size.h &&
+      ring.y + ring.h + RING_CLEARANCE_PX > top;
+    if (covered) top = ring.y + ring.h + RING_CLEARANCE_PX;
+  }
+  return Math.max(hung, Math.min(top, floor - size.h));
 }

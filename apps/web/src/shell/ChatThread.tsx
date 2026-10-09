@@ -39,7 +39,7 @@ export function NewConversationButton({ run, reason }: NewConversation) {
 export function ChatThread({
   agent,
   composer,
-  answer,
+  ask,
   lead,
   trail,
   tools,
@@ -61,7 +61,8 @@ export function ChatThread({
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
-  answer?: ReactNode;
+  // The fields of the question dot is waiting on, drawn under it in the thread.
+  ask?: ReactNode;
   lead?: ReactNode;
   trail?: ReactNode;
   // A phone's control toolbar in the composer's place, while the user has the computer.
@@ -139,7 +140,7 @@ export function ChatThread({
       onReplayTask={onReplayTask}
       computerReady={computerReady}
       composer={composer}
-      answer={answer}
+      ask={ask}
       lead={lead}
       trail={trail}
       tools={tools}

@@ -260,6 +260,18 @@ export function createAgent(d: AgentWiringDeps) {
       scaleOf: (id) => d.cells.get(id)?.scale,
       desktop,
       launcher: (id) => d.registry.for(id)?.client,
+      device: (id) => {
+        const cell = d.cells.get(id);
+        return !ready ||
+          closing ||
+          cell?.state !== "ready" ||
+          cell.paused ||
+          cell.fenced ||
+          cell.replacementPending ||
+          d.killSwitch.isBusy(id)
+          ? undefined
+          : d.registry.for(id);
+      },
       png,
       memory,
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),

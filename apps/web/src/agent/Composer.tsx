@@ -64,9 +64,15 @@ export interface ComposerProps {
   configured?: boolean;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
+  // While dot waits on a question: a message answers it, or turns it down so dot reads the message
+  // and its files.
+  reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
 }
+// What became of a message sent as a reply: it answered the question, it turned the question down
+// and goes on as a message, it did not arrive, or it was held with the reason why.
+export type ReplyOutcome = "answered" | "declined" | "failed" | { readonly hold: string };
 export interface Delivery {
   readonly id: number;
   readonly request: TextDelivery;
@@ -223,6 +229,7 @@ export function Composer(props: ComposerProps) {
     sessionId: props.agent.sessionId,
   });
   const composing = useRef(false);
+  const replying = useRef(false);
   const mounted = useRef(true);
   const wasKeysOpen = useRef(props.keysOpen);
   // Without a thread to wait in, a message waits above the composer.
@@ -461,7 +468,7 @@ export function Composer(props: ComposerProps) {
   };
   const submit = (later = false) => {
     const input = field();
-    if (!input || pending.current || composing.current) return;
+    if (!input || pending.current || composing.current || replying.current) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
@@ -492,6 +499,32 @@ export function Composer(props: ComposerProps) {
       setProblem("Write a message of 1–8,000 characters.");
       return;
     }
+    const reply = now.reply;
+    if (reply && chosen !== "new") {
+      replying.current = true;
+      setProblem(null);
+      void reply(text, uploads.rows.length > 0).then((outcome) => {
+        replying.current = false;
+        if (!mounted.current) return;
+        const box = field();
+        if (outcome === "declined") {
+          if (box?.value === text) deliver(text, chosen, later);
+        } else if (outcome === "answered") {
+          if (box?.value === text) {
+            box.value = "";
+            measure(box);
+          }
+        } else
+          setProblem(
+            outcome === "failed" ? "Your reply didn't reach dot. Try again." : outcome.hold,
+          );
+      });
+      return;
+    }
+    deliver(text, chosen, later);
+  };
+  const deliver = (text: string, chosen: MessageMode, later: boolean) => {
+    const now = current.current;
     const attached = uploads.forMessage();
     if (!attached) {
       setProblem("Finish or remove unconfirmed uploads before sending.");
@@ -748,7 +781,13 @@ export function Composer(props: ComposerProps) {
         </Collapse>
         <ComposerField
           label={newConversation ? "New task" : "Message"}
-          placeholder={newConversation && !pill ? "Ask dot to do something" : "Message dot"}
+          placeholder={
+            newConversation && !pill
+              ? "Ask dot to do something"
+              : props.reply
+                ? "Answer dot"
+                : "Message dot"
+          }
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}

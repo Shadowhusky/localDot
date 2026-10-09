@@ -42,7 +42,9 @@ describe("Codex developer instructions", () => {
       "The safety system asks the user before consequential steps such as sending, posting, buying, deleting online data, uploading files or changing account settings, so never ask the user for permission yourself.",
       "Use ask_user only when you cannot continue without the user's information or a choice that would change the result.",
       "pick sensible defaults for small details and mention them in your summary",
-      "Use request_takeover only for a login, 2FA, a CAPTCHA or payment card entry, or after you have tried at least two different approaches and cannot continue; say in the note what you tried.",
+      "Use request_takeover only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
+      "a secret field whose target is the password box",
+      "Never ask for passwords, card numbers or other secrets in a plain message or a text field",
     ])
       expect(text).toContain(rule);
     expect(text).not.toContain("rather than guess");
@@ -51,8 +53,9 @@ describe("Codex developer instructions", () => {
       "Only when you cannot continue without the user's information or a choice that would change the result",
     );
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("Never ask for permission");
+    expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("you only learn that it was provided");
     expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(
-      "Only for a login, 2FA, a CAPTCHA or payment card entry, or after you have tried at least two different approaches and cannot continue; say in the note what you tried.",
+      "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
     );
   });
 });

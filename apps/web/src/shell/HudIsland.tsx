@@ -2,12 +2,20 @@ import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction, Status } from "../session/status.ts";
+import { targetRingBox } from "../stage/geometry.ts";
+import type { FieldMark } from "../stage/worker-protocol.ts";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { useMediaQuery } from "../ui/media.ts";
 import { Presence } from "../ui/Presence.tsx";
-import { type IslandShape, islandAttention, type PauseSlot, type TakeSlot } from "./island.ts";
+import {
+  decisionTop,
+  type IslandShape,
+  islandAttention,
+  type PauseSlot,
+  type TakeSlot,
+} from "./island.ts";
 import { HANDHELD } from "./layout.ts";
 import "./hud.css";
 
@@ -24,6 +32,14 @@ const STOP_KEYS = ["Mod", "Shift", "."] as const;
 // taller each way.
 const DECISION_WIDTH = 480;
 const HEADER_GROWTH = 2;
+// The room a decision dropped under a field leaves at the foot of the page.
+const PAGE_FOOT = 16;
+
+// The fields dot will fill on the screen shown, in that screen's pixels.
+export interface StageFields {
+  screen: { w: number; h: number };
+  marks: readonly FieldMark[];
+}
 
 export interface HudIslandProps {
   status: Status;
@@ -50,6 +66,8 @@ export interface HudIslandProps {
   onRowWidth?(width: number): void;
   // Toasts hang from the island, or from the decision it grew into.
   ref?: RefObject<HTMLDivElement | null>;
+  // A decision never covers the rings on these; it drops under them instead.
+  fields?: StageFields;
 }
 
 // Status and the task's controls in one glass island hung on the stage's top edge. Every slot has a
@@ -73,6 +91,7 @@ export function HudIsland({
   rise = false,
   onRowWidth,
   ref,
+  fields,
 }: HudIslandProps) {
   const phone = useMediaQuery(HANDHELD);
   const own = useRef<HTMLDivElement>(null);
@@ -105,6 +124,7 @@ export function HudIsland({
         glass.style.width = `${content.offsetWidth}px`;
         glass.style.height = "";
         root.style.removeProperty("--_drop");
+        root.style.removeProperty("--_lower");
         return;
       }
       const width = Math.max(content.offsetWidth, DECISION_WIDTH);
@@ -113,14 +133,31 @@ export function HudIsland({
       glass.style.height = `${height}px`;
       root.style.setProperty("--_card-w", `${width}px`);
       root.style.setProperty("--_drop", `${height - HEADER_GROWTH}px`);
+      const stage = root.parentElement;
+      if (!stage) return;
+      const box = { w: stage.clientWidth, h: stage.clientHeight };
+      const hung = -content.offsetHeight / 2 - HEADER_GROWTH;
+      const top = decisionTop({
+        hung,
+        size: { w: width, h: height },
+        stageW: box.w,
+        rings:
+          fields && box.w > 0 && box.h > 0
+            ? fields.marks.map((mark) => targetRingBox(mark, fields.screen, box))
+            : [],
+        floor: window.innerHeight - stage.getBoundingClientRect().top - PAGE_FOOT,
+      });
+      if (top > hung) root.style.setProperty("--_lower", `${top - hung}px`);
+      else root.style.removeProperty("--_lower");
     };
     fit();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(fit);
     observer.observe(content);
     if (open && card.current) observer.observe(card.current);
+    if (open && root.parentElement) observer.observe(root.parentElement);
     return () => observer.disconnect();
-  }, [open, anchor]);
+  }, [open, anchor, fields]);
 
   const stop = status.actions.find((action) => action.kind === "stop-task");
   const computerActions = status.actions.filter(

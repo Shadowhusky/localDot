@@ -1,6 +1,7 @@
 import type { ToolResult } from "@localdot/protocol";
 import type { ScreenLease } from "../../browser/screen-controller.ts";
 import type { DesktopdClient } from "../../desktopd/client.ts";
+import type { NativeDevice } from "../../desktopd/registry.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
 import type { ActionContext, ActionGateway, NativeScreenBinding } from "../../gateway/gateway.ts";
 import type { FramePng } from "../frame-png.ts";
@@ -36,6 +37,9 @@ export interface ToolDeps {
       >
     | undefined;
   launcher(cellId: string): Pick<DesktopdClient, "launch"> | undefined;
+  // The desktop's input device while its computer takes input: where a secret answer is typed
+  // when the session has no screen controller.
+  device?(cellId: string): NativeDevice | undefined;
   png: Pick<FramePng, "png">;
   memory: Pick<MemoryStore, "apply">;
   // Where a done task's files are kept for the result card: <home>/sessions/<id>/out/<name>.

@@ -1,9 +1,11 @@
-import type { PauseSnapshot } from "@localdot/protocol";
+import type { PauseSnapshot, Rect } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import { statusFor, type TaskHud } from "../session/status.ts";
+import { targetRingBox } from "../stage/geometry.ts";
 import {
+  decisionTop,
   islandAttention,
   islandDecision,
   islandShape,
@@ -195,5 +197,62 @@ describe("takeReason", () => {
     );
     expect(takeReason({ task: true, ready: false, pause: "paused" })).toBe("Wait a moment");
     expect(takeReason({ task: true, ready: true, pause: "paused" })).toBeUndefined();
+  });
+});
+
+describe("decisionTop", () => {
+  // The fixture's sign-in: the password box on a 2560 x 1600 desktop, and the decision it grows
+  // into as Chrome lays it out (487 x 320, its top 2 px over the island's).
+  const screenPx = { w: 2560, h: 1600 };
+  const password = { point: { x: 1280, y: 760 }, bbox: { x: 1040, y: 732, w: 480, h: 56 } };
+  const size = { w: 487, h: 320 };
+  const hung = -22;
+  // app.css on a laptop: the column less the rail and gutters, or what the height leaves above the
+  // band; the stage's top is 76 px down the page.
+  const stageAt = (w: number, h: number) => {
+    const width = Math.min(w - 8 - 368 - 2 * 20, (h - 76 - 8 - 112) * 1.6);
+    return { w: width, h: width / 1.6, floor: h - 76 - 16 };
+  };
+  const overlap = (a: Rect, b: Rect) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const decisionAt = (stage: { w: number }, top: number): Rect => ({
+    x: (stage.w - size.w) / 2,
+    y: top,
+    ...size,
+  });
+
+  for (const [w, h] of [
+    [1280, 800],
+    [1440, 900],
+  ] as const)
+    it(`drops under the password's ring instead of covering it at ${w} x ${h}`, () => {
+      const stage = stageAt(w, h);
+      const ring = targetRingBox(password, screenPx, stage);
+      expect(overlap(ring, decisionAt(stage, hung))).toBe(true);
+      const top = decisionTop({ hung, size, stageW: stage.w, rings: [ring], floor: stage.floor });
+      expect(overlap(ring, decisionAt(stage, top))).toBe(false);
+      expect(top).toBeCloseTo(ring.y + ring.h + 12, 6);
+      expect(top + size.h).toBeLessThanOrEqual(stage.floor);
+    });
+
+  it("stays hung from the top edge while no ring is under it", () => {
+    const stage = stageAt(1440, 900);
+    const low = targetRingBox({ point: { x: 1280, y: 1500 } }, screenPx, stage);
+    const aside = targetRingBox({ point: { x: 200, y: 400 } }, screenPx, stage);
+    expect(
+      decisionTop({ hung, size, stageW: stage.w, rings: [low, aside], floor: stage.floor }),
+    ).toBe(hung);
+    expect(decisionTop({ hung, size, stageW: stage.w, rings: [], floor: stage.floor })).toBe(hung);
+  });
+
+  it("drops under every ring it would cover, as far as the page has room", () => {
+    const stage = stageAt(1440, 900);
+    const user = targetRingBox({ point: { x: 1280, y: 600 } }, screenPx, stage);
+    const pass = targetRingBox(password, screenPx, stage);
+    const top = decisionTop({ hung, size, stageW: stage.w, rings: [pass, user], floor: 1e4 });
+    expect(top).toBeCloseTo(pass.y + pass.h + 12, 6);
+    expect(decisionTop({ hung, size, stageW: stage.w, rings: [pass], floor: 500 })).toBe(
+      500 - size.h,
+    );
   });
 });

@@ -33,3 +33,19 @@ it("names its speaker on screen only when dot isn't beside it", () => {
   expect(document.querySelector(".narration-speaker")).toBeNull();
   expect(document.querySelector(".narrator-dock")).not.toBeNull();
 });
+
+it("shows the hidden characters in dot's question, with a warning, and only while it is the question", () => {
+  vi.useFakeTimers();
+  const asked = "Sign in to ‮kcab‬ your bank";
+  const band = render(<NarratorBand line={asked} speaker="dot" showDot reveal />);
+  expect(line()?.textContent).toBe("dot: Sign in to·U+202EkcabU+202C·your bank");
+  expect(line()?.textContent).not.toContain("‮");
+  expect(document.querySelector(".narration-warning")?.textContent).toBe(
+    "Contains hidden characters that change text direction, shown as U+ codes.",
+  );
+  band.rerender(<NarratorBand line="Signing in" speaker="dot" showDot />);
+  expect(line()?.textContent).toBe("dot: Sign in to·U+202EkcabU+202C·your bank");
+  act(() => vi.advanceTimersByTime(LINE_HOLD_MS + 120));
+  expect(line()?.textContent).toBe("dot: Signing in");
+  expect(document.querySelector(".narration-warning")).toBeNull();
+});

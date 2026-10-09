@@ -228,7 +228,8 @@ export class ToolClient {
   tool(name: string, callId: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     let timeoutMs: number | undefined = TOOL_WORK_MS;
     if (name === "shell") timeoutMs = ((ShellInput.parse(input).timeout_sec ?? 120) + 10) * 1000;
-    else if (name === "ask_user") timeoutMs = 30 * 60_000 + 10_000;
+    // The user has thirty minutes; a secret answer is then typed into its field.
+    else if (name === "ask_user") timeoutMs = 31 * 60_000;
     else if (name === "request_takeover") timeoutMs = undefined;
     if (timeoutMs !== undefined && WAITS_ON_USER.has(name)) timeoutMs += APPROVAL_TIMEOUT_MS;
     return this.#json(

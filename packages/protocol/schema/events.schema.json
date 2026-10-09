@@ -3621,6 +3621,153 @@
             },
             "allowText": {
               "type": "boolean"
+            },
+            "fields": {
+              "minItems": 1,
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,31}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "longtext",
+                      "secret",
+                      "code",
+                      "choice",
+                      "multichoice",
+                      "confirm",
+                      "number",
+                      "date",
+                      "email",
+                      "url",
+                      "phone",
+                      "file",
+                      "qr"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "hint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "options": {
+                    "minItems": 1,
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "length": {
+                    "type": "integer",
+                    "minimum": 4,
+                    "maximum": 12
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "screen": {
+                        "type": "string",
+                        "enum": [
+                          "desktop",
+                          "browser"
+                        ]
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "bbox": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          },
+                          "w": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "h": {
+                            "type": "number",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "w",
+                          "h"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "site": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      }
+                    },
+                    "required": [
+                      "screen",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "submit": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "decline": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "declinable": {
+              "type": "boolean",
+              "const": false
             }
           },
           "required": [
@@ -3690,6 +3837,55 @@
             "text": {
               "type": "string",
               "maxLength": 2000
+            },
+            "fields": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,31}$"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 8000
+                      },
+                      {
+                        "maxItems": 6,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provided": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "provided"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "declined": {
+              "type": "boolean",
+              "const": true
             },
             "by": {
               "type": "string",

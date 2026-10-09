@@ -1,5 +1,5 @@
-/* The conversation: one scroller holding the thread, with the composer (or the answer panel) held at
-   its foot. Messages, questions, results and the work line are rows of one card map. */
+/* The conversation: one scroller holding the thread, with the composer held at its foot. Messages,
+   questions, results and the work line are rows of one card map. */
 @custom-media --phone (width < 700px),
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
 
@@ -487,18 +487,19 @@
   text-align: end;
 }
 
-/* dot's question, then your answer as your own message. */
+/* dot's question reads as its message, its fields under it while dot waits; then your answer as
+   your own message. */
 .thread-question {
   display: grid;
   gap: var(--spacing);
+  min-width: 0;
 }
 
 .thread-question-text {
+  margin: 0;
   color: var(--color-fg-1);
-  font:
-    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-title-3--letter-spacing);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -790,12 +791,6 @@
   width: 100%;
 }
 
-.answer-panel-problem {
-  min-height: var(--text-callout--line-height);
-  color: var(--color-fg-1);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
 .thread-recovery-actions {
   display: flex;
   flex-wrap: wrap;
@@ -815,7 +810,7 @@
   padding-block: var(--spacing) calc(var(--spacing) * 2);
 }
 
-/* Under the thread: the live work line and the composer (or the answer panel). */
+/* Under the thread: the live work line and the composer. */
 /* The scroller's bar keeps a gutter; the foot keeps the same, so their right edges line up. */
 .thread-foot {
   --thread-gutter: 0px;
@@ -826,11 +821,6 @@
 
 .thread-dock {
   padding-top: calc(var(--spacing) * 2);
-}
-
-/* The composer comes back softly once an answer is sent. */
-.thread-composer:not([hidden]) {
-  animation: thread-fade-in var(--dur-fade) var(--ease-standard);
 }
 
 .thread-live .thread-work {
@@ -1164,8 +1154,7 @@
     padding: 0;
   }
 
-  .rail-panel .thread-live,
-  .rail-panel .thread-dock > .answer-panel {
+  .rail-panel .thread-live {
     padding-inline: calc(var(--spacing) * 4);
   }
 
@@ -1267,52 +1256,8 @@
   margin-bottom: 2px;
 }
 
-/* The answer panel takes the composer's place while dot waits. */
-.answer-panel {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
-  padding: calc(var(--spacing) * 3);
-  border-radius: var(--radius-xl);
-  background-color: var(--color-raised);
-  box-shadow: var(--shadow-raised);
-  /* It fades in as quickly as the composer it replaces went, and settles on the spring. */
-  animation:
-    thread-fade-in var(--dur-fade) var(--ease-standard),
-    thread-rise var(--dur-default) var(--ease-spring);
-}
-
-.answer-panel > form {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
-}
-
-.answer-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 2);
-  min-height: calc(var(--spacing) * 5);
-  color: var(--color-fg-3);
-  font:
-    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-.answer-panel-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing);
-}
-
-.answer-other > .ui-collapse-inner,
 .thread-recovery-custom > .ui-collapse-inner {
   padding-top: var(--spacing);
-}
-
-.answer-panel-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
 }
 
 .history-pages {
@@ -1364,8 +1309,7 @@
     }
   }
 
-  .thread-work-text,
-  .answer-panel {
+  .thread-work-text {
     animation-name: thread-fade-in;
   }
 
@@ -1412,7 +1356,6 @@
   .thread-bubble,
   .result-card,
   .thread-recovery,
-  .answer-panel,
   .composer-card,
   .composer-drop,
   .file-chip {

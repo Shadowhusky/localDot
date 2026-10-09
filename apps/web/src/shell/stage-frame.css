@@ -143,7 +143,9 @@
   top: var(--line-y);
   left: var(--line-x);
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   width: min(600px, 100% - var(--line-x) - 24px);
   height: var(--line-h);
   color: var(--color-fg-1);
@@ -170,6 +172,19 @@
 }
 
 .narration-line[data-leaving] {
+  opacity: 0;
+}
+
+/* Under dot's question when it hides characters, which its line shows as codes. */
+.narration-warning {
+  color: var(--color-danger-fg);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-warning[data-leaving] {
   opacity: 0;
 }
 
@@ -210,6 +225,11 @@
   .narration-line {
     -webkit-line-clamp: 3;
     line-clamp: 3;
+  }
+
+  .narration:has(.narration-warning) .narration-line {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
   }
 }
 

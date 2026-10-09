@@ -20,6 +20,7 @@ import { Collapse } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { SentFiles } from "./Attachments.tsx";
+import { answerSummary } from "./ask-form.ts";
 import { fileName, splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
@@ -27,7 +28,7 @@ import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult } from "./model.ts";
 import { Outbox } from "./outbox.ts";
-import { answerText, QuestionCard } from "./QuestionCard.tsx";
+import { QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
@@ -39,7 +40,7 @@ import {
   timeLabel,
   type WorkStep,
 } from "./thread.ts";
-import { reducedMotion, useFollowScroll } from "./useFollowScroll.ts";
+import { useFollowScroll } from "./useFollowScroll.ts";
 import { usePagedRows } from "./usePagedRows.ts";
 
 // The thread mounts at most this many items, the newest on opening; scrolling to either end moves it
@@ -47,9 +48,9 @@ import { usePagedRows } from "./usePagedRows.ts";
 const WINDOW = OPENING_ROWS;
 // The foot (the live work line and the composer) sits under the thread and stays put while it
 // scrolls. Only on a very short column (a phone on its side) does it join the end of the thread
-// instead, which keeps one scroller and room to read. Only the column's height decides, so typing, a
-// question or a field unfolding never moves the foot; the gap between the two heights covers the
-// task bar coming and going.
+// instead, which keeps one scroller and room to read. Only the column's height decides, so typing or
+// a field unfolding never moves the foot; the gap between the two heights covers the task bar
+// coming and going.
 const FOOT_FROM = 480;
 const SUGGESTIONS = [
   "Tidy my Downloads folder",
@@ -76,24 +77,13 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
   return count(kinds.length, one, many);
 }
 
-// Rows that would drop start where they were drawn, this far above, and ease down to where they sit.
-function easeDown(element: HTMLElement, from: number) {
-  const style = getComputedStyle(element);
-  const frames = [{ transform: `translateY(${from}px)` }, { transform: "none" }];
-  const spring = style.getPropertyValue("--dur-default").trim();
-  const duration = Number.parseFloat(spring) * (spring.endsWith("ms") ? 1 : 1000) || 470;
-  try {
-    element.animate(frames, { duration, easing: style.getPropertyValue("--ease-spring").trim() });
-  } catch {
-    element.animate(frames, { duration, easing: "ease-out" });
-  }
-}
-
 interface ThreadContext {
   announce(text: string): void;
   downloads: ResultDownloads;
   ended?: "done" | "stopped" | "error";
   pendingAsk: string | null;
+  // The fields of the question dot is waiting on, drawn under it.
+  ask?: ReactNode;
   latestWork: string | undefined;
   onReplay?: () => void;
   replayTask?: (sessionId: string) => void;
@@ -191,16 +181,21 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
   },
   question: {
     draw: ({ item, thread }) => (
-      <QuestionCard question={item.question} pending={thread.pendingAsk === item.question.askId} />
+      <QuestionCard
+        question={item.question}
+        pending={thread.pendingAsk === item.question.askId}
+        form={thread.pendingAsk === item.question.askId ? thread.ask : undefined}
+      />
     ),
     same: (was, now, then, thread) =>
       was.question === now.question &&
-      (then.pendingAsk === was.question.askId) === (thread.pendingAsk === now.question.askId),
+      (then.pendingAsk === was.question.askId) === (thread.pendingAsk === now.question.askId) &&
+      (thread.pendingAsk !== now.question.askId || then.ask === thread.ask),
   },
   answer: {
     draw: ({ item }) => (
       <article className="thread-message" data-role="user" aria-label="Your answer">
-        <p className="thread-bubble">{answerText(item.question)}</p>
+        <p className="thread-bubble">{answerSummary(item.question)}</p>
       </article>
     ),
     same: (was, now) => was.question === now.question,
@@ -325,10 +320,10 @@ export interface ConversationProps {
   sessionId?: string | null;
   recovery?: ReactNode;
   error?: string | null;
-  // Under the thread: the composer, and the answer panel, which takes its place while dot waits for
-  // one. The composer stays mounted, so a draft survives.
+  // Under the thread: the composer, always in its place, so a draft survives and nothing moves.
   composer?: ReactNode;
-  answer?: ReactNode;
+  // The fields of the question dot is waiting on, drawn under the question in the thread.
+  ask?: ReactNode;
   // Beside the composer, as a phone's toolbar holds it: before it and after it.
   lead?: ReactNode;
   trail?: ReactNode;
@@ -364,7 +359,7 @@ export function Conversation({
   recovery,
   error,
   composer,
-  answer,
+  ask,
   lead,
   trail,
   tools,
@@ -639,32 +634,6 @@ export function Conversation({
     observer.observe(history.current);
     return () => observer.disconnect();
   }, [seeEnd]);
-  // The answer panel and the composer differ in height, so while the reader follows the end, one
-  // taking the other's place would move the rows above at once. Rows that would rise glide up to the
-  // new end instead, and rows that would drop ease down from where they were drawn.
-  const asking = !!answer;
-  const swapped = useRef(asking);
-  const drawnTop = useRef(0);
-  if (swapped.current !== asking) drawnTop.current = scroller.current?.scrollTop ?? 0;
-  const glideNext = follow.glideNext;
-  const following = follow.following;
-  useLayoutEffect(() => {
-    if (swapped.current === asking) return;
-    swapped.current = asking;
-    const view = scroller.current,
-      thread = history.current;
-    if (!view || !thread || !following() || reducedMotion()) return;
-    const end = Math.max(0, view.scrollHeight - view.clientHeight);
-    const rise = end - drawnTop.current;
-    if (rise > 0.5) {
-      view.scrollTop = drawnTop.current;
-      glideNext();
-    } else if (rise < -0.5) {
-      view.scrollTop = end;
-      easeDown(thread, rise);
-    }
-  }, [asking, following, glideNext]);
-
   // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
   const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen);
 
@@ -673,6 +642,7 @@ export function Conversation({
     downloads,
     ended,
     pendingAsk,
+    ask,
     latestWork: latestWork?.key,
     onReplay: onReplay && replay,
     replayTask: onReplayTask && replayTask,
@@ -845,10 +815,9 @@ export function Conversation({
               />
             )}
           </Collapse>
-          {answer}
           <div className="thread-toolbar">
             {!tools && lead}
-            <div className="thread-composer" hidden={asking || !!tools}>
+            <div className="thread-composer" hidden={!!tools}>
               {composer}
             </div>
             {!tools && trail}

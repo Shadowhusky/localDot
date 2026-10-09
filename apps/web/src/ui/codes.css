@@ -1,0 +1,75 @@
+/* Codes: a one-time code's cells, and a QR code for another device. */
+@layer kit {
+  .ui-code {
+    display: flex;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  /* The field's edge and fill, each cell 44 × 52 with one large character. */
+  .ui-code-cell {
+    flex: 0 1 44px;
+    min-width: 0;
+    height: 52px;
+    padding: 0;
+    border: 1px solid var(--color-field-line);
+    border-radius: var(--radius-md);
+    background-color: var(--color-field);
+    color: var(--color-fg-1);
+    text-align: center;
+    font:
+      var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
+      var(--font-ui);
+    font-variant-numeric: tabular-nums;
+    caret-color: var(--color-fg-1);
+    outline: none;
+    transition:
+      border-color var(--dur-hover) var(--ease-standard),
+      box-shadow var(--dur-fade) var(--ease-standard);
+  }
+
+  @media (hover: hover) {
+    .ui-code-cell:not([readonly]):hover {
+      border-color: var(--color-field-line-hover);
+    }
+  }
+
+  .ui-code-cell:focus {
+    border-color: var(--color-fg-2);
+    box-shadow: 0 0 0 3px var(--color-field-ring);
+  }
+
+  .ui-code-cell[aria-invalid="true"] {
+    border-color: var(--color-danger-fg);
+  }
+
+  .ui-code-cell[readonly] {
+    border-color: var(--color-hairline);
+    background-color: transparent;
+  }
+
+  /* Dark on a porcelain tile, as scanners expect whatever the theme. */
+  .ui-qr-tile {
+    fill: var(--color-porcelain-top);
+    forced-color-adjust: none;
+  }
+
+  .ui-qr-dots {
+    fill: var(--color-porcelain-ink);
+    forced-color-adjust: none;
+  }
+
+  @media (forced-colors: active) {
+    .ui-code-cell {
+      border-color: ButtonText;
+    }
+
+    .ui-code-cell:focus {
+      outline: var(--focus-width) solid Highlight;
+      outline-offset: 1px;
+    }
+  }
+}

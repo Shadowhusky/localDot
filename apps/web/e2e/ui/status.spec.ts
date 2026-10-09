@@ -16,7 +16,7 @@ const STATUS: Record<
   "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
   running: { shape: "task", control: /^Pause$/, label: "Select the Net total cell", light: "dot" },
   approval: { shape: "task", control: /^Pause$/, label: "Needs your OK" },
-  ask: { shape: "task", control: /^Pause$/, label: "Has a question" },
+  ask: { shape: "task", control: /^Pause$/, label: "Needs your answer" },
   takeover: { shape: "task", control: /^Pause$/, label: "Your turn" },
   budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Reached your spending limit" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },

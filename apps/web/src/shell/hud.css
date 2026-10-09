@@ -4,15 +4,18 @@
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
 /* A point at the middle of the stage's top edge: the island hangs from it, and what the island
    grows into and drops follows the island's own size. Its foot is the island's, or the decision's
-   it grew into, so toasts hang from there. */
+   it grew into, so toasts hang from there. A decision that would cover a field dot will fill drops
+   under it (--_lower). */
 .island-anchor {
   position: absolute;
-  top: calc(var(--island-h) / -2);
+  top: calc(var(--island-h) / -2 + var(--_lower, 0px));
   left: 50%;
   z-index: var(--layer-island);
   width: 0;
   height: var(--_drop, var(--island-h));
-  transition: translate var(--dur-default) var(--ease-spring);
+  transition:
+    top var(--dur-default) var(--ease-spring),
+    translate var(--dur-default) var(--ease-spring);
 }
 
 /* While the user has the computer the island rises clear of the picture, into the top bar's empty

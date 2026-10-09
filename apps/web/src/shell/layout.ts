@@ -100,3 +100,13 @@ export function useCentreRoom(bar: RefObject<HTMLElement | null>): number {
   }, [bar]);
   return room;
 }
+
+// How much of the page's foot the on-screen keyboard covers, so a sheet can rest on top of it.
+function keyboardInset(): number {
+  const view = window.visualViewport;
+  return view ? Math.max(0, Math.round(window.innerHeight - view.height - view.offsetTop)) : 0;
+}
+
+export function useKeyboardInset(): number {
+  return useSyncExternalStore(onViewport, keyboardInset, () => 0);
+}
