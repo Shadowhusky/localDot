@@ -44,8 +44,8 @@ for (const size of SIZES)
       await expect(tab(page, /^Computer, needs your attention$/)).toHaveCount(1);
       await expect(tab(page, /^Conversation$/)).toHaveCount(1);
       if (size.phone) await expect(tab(page, /^Computer/)).toHaveAttribute("aria-selected", "true");
-      const surface = page.getByRole("button", { name: "Click on the computer" });
-      await expect(surface).toBeEnabled();
+      await expect(page.getByLabel("Type on the computer", { exact: true })).toBeEnabled();
+      await expect(page.locator(".manual-surface")).toHaveAttribute("data-live", "");
 
       const layout = await page.evaluate(() => {
         const stage = document.querySelector(".pane-computer .stage")?.getBoundingClientRect();
@@ -62,7 +62,7 @@ for (const size of SIZES)
           shown: shown / stage.height,
           inside: stage.left >= 0 && stage.right <= innerWidth,
           controlsBelow: controls.top >= stage.bottom,
-          centre: centre?.getAttribute("aria-label") ?? null,
+          centre: centre?.className ?? null,
           overflow: document.documentElement.scrollWidth > innerWidth,
         };
       });
@@ -70,9 +70,13 @@ for (const size of SIZES)
       expect(layout?.shown).toBeGreaterThanOrEqual(0.95);
       expect(layout?.inside).toBe(true);
       expect(layout?.controlsBelow).toBe(true);
-      expect(layout?.centre).toBe("Click on the computer");
+      expect(layout?.centre).toBe("manual-surface");
       expect(layout?.overflow).toBe(false);
-      await expect(panel).toContainText("Click or tap the computer to use it.");
+      await expect(panel).toContainText(
+        size.phone
+          ? "Tap the computer to click on it. Tap Keyboard to type on it."
+          : "Click the computer, then type: every key goes to it.",
+      );
 
       if (size.phone) {
         await tab(page, /^Conversation/).click();

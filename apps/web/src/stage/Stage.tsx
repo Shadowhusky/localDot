@@ -1,4 +1,4 @@
-import type { LocalDotEvent, ManualInput, ScreenSelectionSnapshot } from "@localdot/protocol";
+import type { LocalDotEvent, ManualStreamInput, ScreenSelectionSnapshot } from "@localdot/protocol";
 import {
   forwardRef,
   useCallback,
@@ -15,7 +15,7 @@ import { forgetOldTickets } from "./client-storage.ts";
 import { DesktopFrame } from "./DesktopFrame.tsx";
 import type { ProbeApi } from "./debug-hooks.ts";
 import { type FrameSource, frameTapSupport } from "./frame-source.ts";
-import { manualKey } from "./manual-point.ts";
+import { ManualSurface, type ManualSurfaceHandle, type PointerMode } from "./ManualSurface.tsx";
 import type { Flip } from "./probe.ts";
 import { type ReplayHandle, StageCanvas, type StageCanvasHandle } from "./StageCanvas.tsx";
 import type { OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
@@ -27,6 +27,8 @@ export interface StageHandle {
   setClock(clock: StageClock): void;
   setView(view: StageViewPatch): void;
   oracle(command: OracleRequest): Promise<unknown>;
+  // Raises or lowers the keyboard that types on the computer while the user has control.
+  keyboard(on: boolean): void;
 }
 
 export interface StageProps {
@@ -40,12 +42,12 @@ export interface StageProps {
   reconnects: number;
   listed: readonly string[];
   manual?: {
-    requestId: string;
     enabled: boolean;
     screen: { w: number; h: number };
-    button: "left" | "right";
-    count: 1 | 2;
-    input(requestId: string, input: ManualInput): Promise<boolean>;
+    pointer: PointerMode;
+    send(input: ManualStreamInput): void;
+    onTyping?(typing: boolean): void;
+    onRefused?(message: string | null): void;
   };
 }
 
@@ -63,6 +65,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
             reason: "This browser lacks WebCodecs. Open localDot in a current Chromium browser.",
           };
   const canvas = useRef<StageCanvasHandle>(null);
+  const keyboard = useRef<ManualSurfaceHandle>(null);
   const presentedAt = useRef(0);
   const [generation, setGeneration] = useState(0);
   const cellId = cell?.id ?? null;
@@ -243,6 +246,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     setClock: (clock) => canvas.current?.setClock(clock),
     setView: (view) => canvas.current?.setView(manual ? { ...view, zoom: 1 } : view),
     oracle: (command) => canvas.current?.oracle(command) ?? Promise.resolve(undefined),
+    keyboard: (on) => keyboard.current?.keyboard(on),
   }));
 
   if (!support.ok) {
@@ -269,49 +273,16 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
       </div>
       {mode === "live" && control && <div className="rim" aria-hidden="true" />}
       {mode === "live" && manual && (
-        <button
-          type="button"
-          className="manual-surface"
-          aria-label="Click on the computer"
-          disabled={!manual.enabled || !ready || reconnecting || !src || displayOwner !== owner}
-          onClick={(event) => {
-            if (
-              !manual.enabled ||
-              !ready ||
-              reconnecting ||
-              !src ||
-              displayOwner !== owner ||
-              event.detail === 0
-            )
-              return;
-            const point = canvas.current?.manualPoint(
-              { x: event.clientX, y: event.clientY },
-              manual.screen,
-            );
-            if (point)
-              void manual.input(manual.requestId, {
-                kind: "click",
-                at: point,
-                button: manual.button,
-                count: manual.count,
-              });
-          }}
-          onKeyDown={(event) => {
-            if (
-              !manual.enabled ||
-              !ready ||
-              reconnecting ||
-              !src ||
-              displayOwner !== owner ||
-              event.nativeEvent.isComposing
-            )
-              return;
-            const combo = manualKey(event.key, event);
-            if (combo) {
-              event.preventDefault();
-              void manual.input(manual.requestId, { kind: "key", combo });
-            }
-          }}
+        <ManualSurface
+          ref={keyboard}
+          live={manual.enabled && ready && !reconnecting && !!src && displayOwner === owner}
+          mode={manual.pointer}
+          locate={(point, follow) =>
+            canvas.current?.manualPoint(point, manual.screen, follow) ?? null
+          }
+          send={manual.send}
+          onTyping={manual.onTyping}
+          onRefused={manual.onRefused}
         />
       )}
     </>

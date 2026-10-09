@@ -80,22 +80,68 @@
 .stage > .manual-surface {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
   border-radius: var(--radius-stage);
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  cursor: crosshair;
   z-index: 2;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: box-shadow var(--duration-press) var(--ease-press);
 }
-.stage > .manual-surface:focus-visible {
-  outline: var(--focus-width) solid var(--color-text);
-  outline-offset: -4px;
+.stage > .manual-surface[data-live] {
+  cursor: crosshair;
 }
-.stage > .manual-surface:disabled {
-  cursor: default;
+/* Keys go to the computer while its keyboard field has focus. */
+.stage > .manual-surface[data-typing] {
+  box-shadow: inset 0 0 0 var(--focus-width) color-mix(in oklab, var(--color-fg-1) 60%, transparent);
+}
+/* At the stage's foot, so a phone keyboard scrolls the whole computer into view above it. 16 px
+   keeps iOS from zooming into it. */
+.stage > .manual-keyboard {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  overflow: hidden;
+  pointer-events: none;
+  font-size: 16px;
+  color: transparent;
+  caret-color: transparent;
+  background: transparent;
+}
+.manual-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0;
+}
+.manual-entry button {
+  gap: var(--spacing-button-glyph-gap);
+}
+.manual-entry button[aria-pressed="true"],
+.manual-entry button[aria-expanded="true"] {
+  border-color: var(--color-text-2);
+  background: var(--color-surface);
+}
+.manual-paste {
+  -webkit-text-security: disc;
+}
+.manual-hint-touch {
+  display: none;
+}
+@media (pointer: coarse) {
+  .manual-hint-pointer {
+    display: none;
+  }
+  .manual-hint-touch {
+    display: inline;
+  }
 }
 .pane-computer.manual-pane {
   overflow-y: auto;

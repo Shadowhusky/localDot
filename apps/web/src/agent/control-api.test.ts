@@ -1,13 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import {
-  answerQuestion,
-  ControlFailure,
-  manualInput,
-  returnControl,
-  stopTask,
-} from "./control-api.ts";
+import { answerQuestion, ControlFailure, returnControl, stopTask } from "./control-api.ts";
 
 const SESSION = "01JXYZ0000000000000000SESS",
   ID = "01JXYZ00000000000000000001";
@@ -17,21 +11,15 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
-it("sends exact owned IDs with header auth and credentials only to the masked desktop text route", async () => {
+it("sends exact owned IDs with header auth and keeps credentials out of answers and notes", async () => {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
   const api = fixture(fetchImpl),
     signal = new AbortController().signal;
   await answerQuestion(api, SESSION, { askId: ID, option: "A", text: "中文 answer" }, signal);
   await returnControl(api, SESSION, { requestId: ID, note: "Signed in" }, signal);
   const sentinel = `sk-proj-${"s".repeat(80)}`;
-  await manualInput(
-    api,
-    SESSION,
-    { requestId: ID, input: { kind: "text", text: sentinel } },
-    signal,
-  );
   const calls = fetchImpl.mock.calls;
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(2);
   for (const [url, init] of calls) {
     expect(String(url)).not.toContain(api.token);
     expect(init).toMatchObject({
@@ -41,19 +29,16 @@ it("sends exact owned IDs with header auth and credentials only to the masked de
       headers: { authorization: api.authorization() },
     });
   }
-  expect(calls[2]?.[1]?.body).toBe(
-    JSON.stringify({ requestId: ID, input: { kind: "text", text: sentinel } }),
-  );
   expect(() => answerQuestion(api, SESSION, { askId: ID, text: sentinel }, signal)).toThrow(
     ControlFailure,
   );
   expect(() => returnControl(api, SESSION, { requestId: ID, note: sentinel }, signal)).toThrow(
     ControlFailure,
   );
-  expect(() =>
-    manualInput(api, "wrong", { requestId: ID, input: { kind: "text", text: "x" } }, signal),
-  ).toThrow(ControlFailure);
-  expect(fetchImpl).toHaveBeenCalledTimes(3);
+  expect(() => returnControl(api, "wrong", { requestId: ID, note: "Signed in" }, signal)).toThrow(
+    ControlFailure,
+  );
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
 });
 it("decodes all-false Stop as unconfirmed facts, and refuses unexpected fields/errors instead of trusting202", async () => {
   const value = {

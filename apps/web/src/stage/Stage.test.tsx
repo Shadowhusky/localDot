@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ManualInput } from "@localdot/protocol";
+import type { ManualStreamInput } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,7 +123,7 @@ describe("Stage in a Chromium browser", () => {
     expect(FakeWorker.instances).toHaveLength(1);
   });
 
-  it("commits atomic input on click against the current takeover and real backing viewport without another worker", async () => {
+  it("streams the pointer, wheel and every key through the real backing viewport while the computer shows", async () => {
     vi.stubGlobal("devicePixelRatio", 2);
     vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
       left: 20,
@@ -137,21 +137,29 @@ describe("Stage in a Chromium browser", () => {
       toJSON: () => ({}),
     });
     const { api, calls } = daemon();
-    const input = vi.fn<(id: string, input: ManualInput) => Promise<boolean>>(async () => true);
+    const send = vi.fn<(input: ManualStreamInput) => void>();
+    const typing = vi.fn<(typing: boolean) => void>();
     const manual = {
-      requestId: "old-takeover",
       enabled: true,
       screen: { w: 2560, h: 1600 },
-      button: "left" as const,
-      count: 1 as const,
-      input,
+      pointer: "click" as const,
+      send,
+      onTyping: typing,
     };
+    const stage = createRef<StageHandle>();
     const view = render(
-      <Stage cell={ready} api={api} reconnects={0} listed={[CELL]} manual={manual} />,
+      <Stage ref={stage} cell={ready} api={api} reconnects={0} listed={[CELL]} manual={manual} />,
     );
-    const surface = screen.getByRole<HTMLButtonElement>("button", {
-      name: "Click on the computer",
+    const surface = document.querySelector(".manual-surface") as HTMLElement;
+    const keys = screen.getByLabelText<HTMLTextAreaElement>("Type on the computer");
+    const mouse = (x: number, y: number, button = 0) => ({
+      pointerId: 1,
+      pointerType: "mouse",
+      button,
+      clientX: x,
+      clientY: y,
     });
+    expect(keys.disabled).toBe(true); // A ticket alone does not show the computer.
     await waitFor(() => expect(client()).not.toBeNull());
     playInClient(client() as HTMLIFrameElement, "owned-input-track");
     await waitFor(() =>
@@ -168,43 +176,88 @@ describe("Stage in a Chromium browser", () => {
         },
       }),
     );
-    await waitFor(() => expect(surface.disabled).toBe(false));
-    fireEvent.pointerDown(surface, { clientX: 340, clientY: 330 });
-    fireEvent.pointerUp(surface, { clientX: 340, clientY: 330 });
-    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 50 }); // Letterboxing.
-    fireEvent.click(surface, { detail: 0, clientX: 340, clientY: 330 }); // Keyboard activation.
-    expect(input).not.toHaveBeenCalled();
-    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 330 });
-    expect(input).toHaveBeenLastCalledWith("old-takeover", {
-      kind: "click",
-      at: { x: 1280, y: 800 },
-      button: "left",
-      count: 1,
-    });
+    await waitFor(() => expect(keys.disabled).toBe(false));
+    expect(surface.hasAttribute("data-live")).toBe(true);
+
+    fireEvent.pointerDown(surface, mouse(340, 50)); // Letterboxing.
+    fireEvent.pointerUp(surface, mouse(340, 50));
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.pointerDown(surface, mouse(340, 330));
+    expect(document.activeElement).toBe(keys);
+    expect(typing).toHaveBeenLastCalledWith(true);
+    fireEvent.pointerMove(surface, mouse(360, 330));
+    fireEvent.pointerMove(surface, mouse(700, 330)); // Past the edge: the drag follows it.
+    fireEvent.pointerUp(surface, mouse(700, 330));
+    fireEvent.pointerDown(surface, mouse(340, 330, 2));
+    fireEvent.pointerUp(surface, mouse(340, 330, 2));
+    expect(send.mock.calls.map(([input]) => input)).toEqual([
+      { kind: "down", at: { x: 1280, y: 800 }, button: "left" },
+      { kind: "move", at: { x: 1360, y: 800 } },
+      { kind: "move", at: { x: 2559, y: 800 } },
+      { kind: "up", at: { x: 2559, y: 800 }, button: "left" },
+      { kind: "down", at: { x: 1280, y: 800 }, button: "right" },
+      { kind: "up", at: { x: 1280, y: 800 }, button: "right" },
+    ]);
+    send.mockClear();
+
+    fireEvent.wheel(surface, { deltaY: 120, clientX: 340, clientY: 330 });
+    fireEvent.wheel(surface, { deltaY: 30, deltaX: 0, clientX: 340, clientY: 330, ctrlKey: true });
+    expect(send.mock.calls.map(([input]) => input)).toEqual([
+      { kind: "scroll", at: { x: 1280, y: 800 }, dx: 0, dy: 2 },
+      { kind: "scroll", at: { x: 1280, y: 800 }, dx: 0, dy: 1, mods: ["ctrl"] },
+    ]);
+    send.mockClear();
+
+    fireEvent.input(keys, { target: { value: "u" } });
+    fireEvent.input(keys, { target: { value: "us" } });
+    expect(fireEvent.keyDown(keys, { key: "Tab" })).toBe(false);
+    fireEvent.compositionStart(keys);
+    fireEvent.input(keys, { target: { value: "ni" } });
+    fireEvent.compositionEnd(keys, { data: "你" });
+    fireEvent.input(keys, { target: { value: "你" } });
+    fireEvent.paste(keys, { clipboardData: { getData: () => "pass word!" } });
+    expect(fireEvent.keyDown(keys, { key: "Backspace" })).toBe(false);
+    expect(send.mock.calls.map(([input]) => input)).toEqual([
+      { kind: "text", text: "u" },
+      { kind: "text", text: "s" },
+      { kind: "key", combo: ["tab"] },
+      { kind: "text", text: "你" },
+      { kind: "text", text: "pass word!" },
+      { kind: "key", combo: ["backspace"] },
+    ]);
+    expect(keys.value).toBe("");
+    send.mockClear();
+
+    fireEvent.keyDown(keys, { key: "Escape" });
+    fireEvent.keyDown(keys, { key: "Escape" });
+    expect(send.mock.calls.map(([input]) => input)).toEqual([{ kind: "key", combo: ["esc"] }]);
+    expect(document.activeElement).not.toBe(keys);
+    expect(typing).toHaveBeenLastCalledWith(false);
+    act(() => stage.current?.keyboard(true));
+    expect(document.activeElement).toBe(keys);
+
     view.rerender(
       <Stage
+        ref={stage}
         cell={ready}
         api={api}
         reconnects={0}
         listed={[CELL]}
-        manual={{ ...manual, requestId: "current-takeover", button: "right" }}
+        manual={{ ...manual, pointer: "right" }}
       />,
     );
-    fireEvent.keyDown(surface, { key: "a" });
-    fireEvent.keyDown(surface, { key: "Tab" });
-    fireEvent.keyDown(surface, { key: "Process", isComposing: true });
-    expect(input).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(surface, { key: "ArrowLeft" });
-    expect(input).toHaveBeenLastCalledWith("current-takeover", { kind: "key", combo: ["left"] });
-    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 330 });
-    expect(input).toHaveBeenLastCalledWith("current-takeover", {
-      kind: "click",
-      at: { x: 1280, y: 800 },
-      button: "right",
-      count: 1,
-    });
+    send.mockClear();
+    const finger = { ...mouse(340, 330), pointerType: "touch" };
+    fireEvent.pointerDown(surface, finger);
+    fireEvent.pointerMove(surface, { ...finger, clientX: 342 }); // Within a finger's slop.
+    fireEvent.pointerUp(surface, { ...finger, clientX: 342 });
+    expect(send.mock.calls.map(([input]) => input)).toEqual([
+      { kind: "click", at: { x: 1280, y: 800 }, button: "right", count: 1 },
+    ]);
+
     view.rerender(
       <Stage
+        ref={stage}
         cell={{ ...ready, paused: true }}
         api={api}
         reconnects={0}
@@ -212,10 +265,12 @@ describe("Stage in a Chromium browser", () => {
         manual={manual}
       />,
     );
-    expect(surface.disabled).toBe(true);
-    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 330 });
-    fireEvent.keyDown(surface, { key: "Enter" });
-    expect(input).toHaveBeenCalledTimes(3);
+    send.mockClear();
+    expect(keys.disabled).toBe(true);
+    fireEvent.pointerDown(surface, mouse(340, 330));
+    fireEvent.keyDown(keys, { key: "Enter" });
+    fireEvent.input(keys, { target: { value: "late" } });
+    expect(send).not.toHaveBeenCalled();
     expect(client()).toBeNull();
     expect(calls).toHaveLength(1);
     expect(FakeWorker.instances).toHaveLength(1);
