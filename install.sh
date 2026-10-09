@@ -202,10 +202,10 @@ docker_problem() {
     *)
       if [ "$OS" = macos ]; then
         say "Docker is installed but not running. Start Docker Desktop and wait until it says it is running."
-      elif [ -n "$WSL" ] && ! command -v systemctl >/dev/null 2>&1; then
-        say "Docker is installed but not running. Start Docker Desktop for Windows."
+      elif [ -n "$WSL" ]; then
+        say "Docker is installed but not running. Start Docker Desktop for Windows, or for Docker Engine in this distro run: sudo systemctl enable --now docker"
       else
-        say "Docker is installed but not running. Run: sudo systemctl enable --now docker (with Docker Desktop for Windows: start it)."
+        say "Docker is installed but not running. Run: sudo systemctl enable --now docker"
       fi
       ;;
     esac
