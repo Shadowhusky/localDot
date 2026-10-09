@@ -109,7 +109,7 @@ export function HudIsland({
   const row = useRef<HTMLDivElement>(null);
   const plate = useRef<HTMLSpanElement>(null);
   const card = useRef<HTMLDivElement>(null);
-  const open = !!decision && shape === "task";
+  const open = !!decision && (shape === "task" || shape === "control");
   useLift(anchor, plate);
   // The card keeps what it last showed while it fades back into the island.
   const shown = useRef<ReactNode>(null);
