@@ -5,6 +5,7 @@ import type { ExportContext } from "./export-context.ts";
 import type { ExportFormat } from "./export-plan.ts";
 import {
   type ExportEnvironment,
+  hostEncodable,
   SIZE_CHOICES,
   type SizeChoice,
   sizeOf,
@@ -32,37 +33,43 @@ export function exportSource(context: ExportContext) {
   return geometry ? { w: geometry.w, h: geometry.h } : null;
 }
 
-// What this recording and this browser allow, filled in as each check answers.
-export function useExportEnvironment(context: ExportContext): ExportEnvironment {
+// What this recording and this browser allow, filled in as each check answers. When the host
+// makes the video, what it can encode counts instead of this browser.
+export function useExportEnvironment(
+  context: ExportContext,
+  host: Record<ExportFormat, number> | null = null,
+): ExportEnvironment {
   const [env, setEnv] = useState<ExportEnvironment>(() => ({
     ...UNKNOWN_ENVIRONMENT,
     source: exportSource(context),
   }));
+  const onHost = host !== null;
   useEffect(() => {
     let current = true;
     const base = { ...UNKNOWN_ENVIRONMENT, source: exportSource(context) };
     void rateOf(context).then((sourceRate) => {
       if (current) setEnv((was) => ({ ...was, sourceRate }));
     });
-    for (const format of Object.keys(CODECS) as ExportFormat[])
-      void Promise.all(
-        SIZE_CHOICES.map((choice) => {
-          const size = sizeOf(choice, base);
-          return canEncodeVideo(CODECS[format], { width: size.w, height: size.h }).catch(
-            () => false,
-          );
-        }),
-      ).then((found) => {
-        if (!current) return;
-        const encodable: Partial<Record<SizeChoice, boolean>> = {};
-        SIZE_CHOICES.forEach((choice, index) => {
-          encodable[choice] = found[index] === true;
+    if (!onHost)
+      for (const format of Object.keys(CODECS) as ExportFormat[])
+        void Promise.all(
+          SIZE_CHOICES.map((choice) => {
+            const size = sizeOf(choice, base);
+            return canEncodeVideo(CODECS[format], { width: size.w, height: size.h }).catch(
+              () => false,
+            );
+          }),
+        ).then((found) => {
+          if (!current) return;
+          const encodable: Partial<Record<SizeChoice, boolean>> = {};
+          SIZE_CHOICES.forEach((choice, index) => {
+            encodable[choice] = found[index] === true;
+          });
+          setEnv((was) => ({ ...was, encodable: { ...was.encodable, [format]: encodable } }));
         });
-        setEnv((was) => ({ ...was, encodable: { ...was.encodable, [format]: encodable } }));
-      });
     return () => {
       current = false;
     };
-  }, [context]);
-  return env;
+  }, [context, onHost]);
+  return host ? { ...env, encodable: hostEncodable(env, host) } : env;
 }

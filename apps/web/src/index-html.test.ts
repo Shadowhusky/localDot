@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import exportPage from "../export.html?raw";
 import page from "../index.html?raw";
 import icon from "./favicon.svg?raw";
 
@@ -19,8 +20,10 @@ describe("index.html", () => {
   });
 
   it("keeps everything the CSP refuses out: no inline script or style", () => {
-    expect(page).not.toMatch(/<style/);
-    expect(page).not.toMatch(/\sstyle=/);
-    for (const script of page.match(/<script[^>]*>/g) ?? []) expect(script).toMatch(/\ssrc="/);
+    for (const html of [page, exportPage]) {
+      expect(html).not.toMatch(/<style/);
+      expect(html).not.toMatch(/\sstyle=/);
+      for (const script of html.match(/<script[^>]*>/g) ?? []) expect(script).toMatch(/\ssrc="/);
+    }
   });
 });

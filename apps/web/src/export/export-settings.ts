@@ -66,6 +66,21 @@ export const DEFAULT_CHOICES: ExportChoices = {
   overlays: true,
 };
 
+// What the host can make: every size up to the largest picture it encodes in each format.
+export function hostEncodable(
+  env: ExportEnvironment,
+  maxPixels: Record<ExportFormat, number>,
+): ExportEnvironment["encodable"] {
+  const fits = (format: ExportFormat) =>
+    Object.fromEntries(
+      SIZE_CHOICES.map((choice) => {
+        const size = sizeOf(choice, env);
+        return [choice, size.w * size.h <= maxPixels[format]];
+      }),
+    ) as Record<SizeChoice, boolean>;
+  return { mp4: fits("mp4"), webm: fits("webm") };
+}
+
 const even = (value: number) => Math.max(16, 2 * Math.round(value / 2));
 
 // The recording's own size, made smaller to fit the largest export when it is bigger.

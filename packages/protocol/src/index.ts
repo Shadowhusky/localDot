@@ -9,6 +9,7 @@ export * from "./conversation.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";
 export * from "./events.ts";
+export * from "./exports.ts";
 export * from "./geometry.ts";
 export * from "./ids.ts";
 export * from "./input.ts";

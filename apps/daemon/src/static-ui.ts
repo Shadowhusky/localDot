@@ -28,16 +28,21 @@ export const UI_CSP = {
 };
 
 export function serveUi(app: Hono, dir: string): void {
-  app.get("/", (c) => {
-    const file = readStatic(dir, "/index.html");
-    if (!file) return c.text(BUILD_HINT, 503, NOSNIFF);
-    return c.body(file.body, 200, {
-      ...NOSNIFF,
-      ...UI_CSP,
-      "content-type": file.type,
-      "cache-control": "no-store",
+  // The export page is the daemon's own: its headless browser makes videos there.
+  for (const [path, page] of [
+    ["/", "/index.html"],
+    ["/export.html", "/export.html"],
+  ] as const)
+    app.get(path, (c) => {
+      const file = readStatic(dir, page);
+      if (!file) return c.text(BUILD_HINT, 503, NOSNIFF);
+      return c.body(file.body, 200, {
+        ...NOSNIFF,
+        ...UI_CSP,
+        "content-type": file.type,
+        "cache-control": "no-store",
+      });
     });
-  });
   // The phone's Home Screen app: its manifest, its service worker (push and notification taps only,
   // no caching) and its icons. Never immutable: these names carry no content hash. The worker runs
   // under the policy it is served with, so it gets the page's.
