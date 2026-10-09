@@ -156,21 +156,26 @@ export class ClaudeCodeSetup {
     return this.check();
   }
   check(): Promise<ClaudeCodeStatus> {
-    this.#flight ??= this.#check().finally(() => {
-      this.#flight = undefined;
-    });
-    return this.#flight;
+    return this.#run(true);
   }
-  // A task asks again, so a sign-out since the last check is noticed before anything starts.
+  // A task asks again, so a sign-out since the last check is noticed before anything starts. Its
+  // models were read already; listing them would start Claude Code once more.
   async launch(): Promise<ClaudeCodeLaunch> {
-    const status = await this.check();
+    const status = await this.#run(false);
     if (status.state !== "signed_in" || !this.#launch) throw new ClaudeCodeUnavailable(status);
     return this.#launch;
   }
   close(): void {
     this.#abort.abort();
   }
-  async #check(): Promise<ClaudeCodeStatus> {
+  #run(listing: boolean): Promise<ClaudeCodeStatus> {
+    this.#flight ??= this.#check(listing).finally(() => {
+      this.#flight = undefined;
+    });
+    return this.#flight;
+  }
+  async #check(listing: boolean): Promise<ClaudeCodeStatus> {
+    const known = this.#status?.state === "signed_in" ? this.#status.models : [];
     const checkedAt = this.#deps.now?.() ?? Date.now();
     const result = (
       fields: Omit<ClaudeCodeStatus, "models" | "checkedAt">,
@@ -247,16 +252,17 @@ export class ClaudeCodeSetup {
         reason: "Sign in to Claude Code, then check again.",
         command: CLAUDE_CODE_SIGN_IN,
       });
-    let models: ClaudeCodeModel[] = [];
-    try {
-      models = (await this.#deps.listModels(launch, signal))
-        .filter((model) => CLAUDE_CODE_MODEL.test(model.id) && model.name.trim())
-        .filter((model, i, all) => all.findIndex((m) => m.id === model.id) === i)
-        .slice(0, 32)
-        .map((model) => ({ id: model.id, name: model.name.trim().slice(0, 128) }));
-    } catch {
-      models = [];
-    }
+    let models: ClaudeCodeModel[] = listing ? [] : known;
+    if (listing || !models.length)
+      try {
+        models = (await this.#deps.listModels(launch, signal))
+          .filter((model) => CLAUDE_CODE_MODEL.test(model.id) && model.name.trim())
+          .filter((model, i, all) => all.findIndex((m) => m.id === model.id) === i)
+          .slice(0, 32)
+          .map((model) => ({ id: model.id, name: model.name.trim().slice(0, 128) }));
+      } catch {
+        models = [];
+      }
     const plan = auth.subscriptionType?.toLowerCase();
     const status = result(
       {

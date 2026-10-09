@@ -140,6 +140,8 @@ describe("Claude Code detection", () => {
       plan: "max",
     });
     expect(f.calls.filter((call) => call.args[0] === "auth")).toHaveLength(2);
+    // The models were read once; a task start does not start Claude Code again to list them.
+    expect(f.listModels).toHaveBeenCalledTimes(1);
   });
 });
 
