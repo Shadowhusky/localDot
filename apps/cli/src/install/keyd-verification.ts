@@ -46,12 +46,13 @@ export function verifyReleaseKeydNative(
 
 /** Only this build's trusted signing identity may supply teamId, never staged release metadata.
  * Apple TN3127: Developer ID CA + Developer ID Application leaf, Apple anchor, team, identifier.
+ * The order is keyd's own (`keyd requirement`), since keyd's designated requirement must equal it.
  */
 function developerIdRequirement(identifier: string, teamId: string): string[] {
   if (typeof teamId !== "string" || !TEAM_ID.test(teamId)) throw fail();
   return [
-    "anchor apple generic",
     `identifier "${identifier}"`,
+    "anchor apple generic",
     "certificate 1[field.1.2.840.113635.100.6.2.6] exists",
     "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
     `certificate leaf[subject.OU] = "${teamId}"`,
@@ -71,23 +72,46 @@ export function keydNativeRequirement(teamId: string): string {
   return developerIdRequirement(KEYD_NATIVE_IDENTIFIER, teamId).join(" and ");
 }
 
+function tool(path: string, args: string[], signal: AbortSignal) {
+  return execute(path, args, {
+    cwd: "/",
+    env: { PATH: "/usr/bin:/bin" },
+    signal,
+    timeout: 15_000,
+    killSignal: "SIGKILL",
+    maxBuffer: 64 * 1024,
+    encoding: "utf8",
+  });
+}
+
 /** Verify only: never sign, execute, notarize, or modify the candidate. */
 export const systemKeydSignatureCheck: KeydSignatureCheck = async (path, requirement, signal) => {
   signal.throwIfAborted();
   try {
-    await execute(
+    await tool(
       "/usr/bin/codesign",
       ["--verify", "--strict", "--all-architectures", "-R", `=${requirement}`, path],
-      {
-        cwd: "/",
-        env: { PATH: "/usr/bin:/bin" },
-        signal,
-        timeout: 15_000,
-        killSignal: "SIGKILL",
-        maxBuffer: 64 * 1024,
-        encoding: "utf8",
-      },
+      signal,
     );
+  } catch {
+    signal.throwIfAborted();
+    throw fail();
+  }
+  signal.throwIfAborted();
+};
+
+/** keyd's Keychain items trust its designated requirement, and keyd refuses to start unless that is
+ * the generation requirement: meeting it is not enough. Both sides are compared in
+ * Security.framework's text form, which keeps the clauses' order.
+ */
+export const systemKeydDesignatedCheck: KeydSignatureCheck = async (path, requirement, signal) => {
+  signal.throwIfAborted();
+  try {
+    const [signed, expected] = await Promise.all([
+      tool("/usr/bin/codesign", ["-d", "-r-", path], signal),
+      tool("/usr/bin/csreq", ["-r", `=${requirement}`, "-t"], signal),
+    ]);
+    if (signed.stdout.trim() !== `designated => ${expected.stdout.trim()}`) throw fail();
   } catch {
     signal.throwIfAborted();
     throw fail();
@@ -128,6 +152,7 @@ export function verifyKeydExecutable(
   trustedTeamId: string | null,
   signal: AbortSignal,
   signatureCheck: KeydSignatureCheck = systemKeydSignatureCheck,
+  designatedCheck: KeydSignatureCheck = systemKeydDesignatedCheck,
 ) {
   return verifySignedExecutable(
     path,
@@ -136,7 +161,10 @@ export function verifyKeydExecutable(
     keydRequirement,
     trustedTeamId,
     signal,
-    signatureCheck,
+    async (candidate, requirement, active) => {
+      await signatureCheck(candidate, requirement, active);
+      await designatedCheck(candidate, requirement, active);
+    },
   );
 }
 

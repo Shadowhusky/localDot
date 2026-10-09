@@ -73,6 +73,10 @@ The signed helper has a separate package-tree command:
 pnpm build:keyd-package /absolute/path/to/signed-keyd 0.0.0-rc.1 /absolute/path/to/new-helper-package /absolute/path/to/helper-receipt.json
 ```
 
+keyd must be signed with `--requirements "=designated => $(keyd requirement)"`, as
+[keyd/README.md](../keyd/README.md#signing-a-release-keyd) shows; release verification refuses a
+keyd whose designated requirement is any other, even one it meets.
+
 It requires the repository's pinned Go toolchain and cached modules/licenses. It checks the
 Developer ID signature before and after copying, Darwin/arm64 and native Security.framework build
 settings, and the dependency graph against `go.sum`; it collects the corresponding licenses.

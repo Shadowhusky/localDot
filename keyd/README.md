@@ -14,7 +14,7 @@ items whose access list trusts only keyd of generation 2 or later, signed by tea
 Both are signed with the Developer ID, the hardened runtime and no entitlements. keyd is also
 signed with an explicit designated requirement, which `keyd requirement` prints: the identifier,
 the team and `info [KeydGeneration] >= "2"`. Its Info.plist (`internal/keydinfo`) carries the
-generation.
+generation. See [Signing a release keyd](#signing-a-release-keyd).
 
 ## Who can use the Keychain items
 
@@ -103,3 +103,19 @@ point it elsewhere. It works through these steps:
 `errSecInternalComponent`, the login keychain is locked or the signing key is waiting for your
 approval.
 
+## Signing a release keyd
+
+A release keyd is signed as `scripts/deploy.sh` signs it, with keyd's requirement as its
+designated requirement:
+
+```sh
+codesign --force --sign "Developer ID Application: Richard Liao (87FD3FSZBG)" \
+  --identifier dev.localdot.keyd --options runtime --timestamp \
+  --requirements "=designated => $(bin/keyd requirement)" bin/keyd
+```
+
+Without `--requirements`, keyd still meets that requirement, but its designated requirement is the
+implicit one. The items keyd stores trust its designated requirement, so they would not be keyd's
+and keyd would refuse to start. Release verification (`apps/cli/src/install/keyd-verification.ts`)
+refuses such a build: the designated requirement must be exactly the one `keyd requirement`
+prints. keyd-native is signed without `--requirements`.
