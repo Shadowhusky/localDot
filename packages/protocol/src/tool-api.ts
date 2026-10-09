@@ -70,18 +70,16 @@ export const SkillSummary = z.object({
 });
 export type SkillSummary = z.infer<typeof SkillSummary>;
 
+// The check-ins are the user's to turn on: without maxTurns dot never asks "Keep going?", and
+// without maxFailedCalls repeated failures go back to the model as a cue to change approach.
 export const AgentLimits = z.object({
-  maxTurns: z.number().int().positive(),
-  maxFailedCalls: z.number().int().positive(),
+  maxTurns: z.number().int().positive().optional(),
+  maxFailedCalls: z.number().int().positive().optional(),
   maxRetries: z.number().int().nonnegative(),
 });
 export type AgentLimits = z.infer<typeof AgentLimits>;
 
-export const DEFAULT_AGENT_LIMITS: AgentLimits = {
-  maxTurns: 150,
-  maxFailedCalls: 5,
-  maxRetries: 3,
-};
+export const DEFAULT_AGENT_LIMITS: AgentLimits = { maxRetries: 8 };
 
 export const BootConfig = z.object({
   sessionId: z.string().regex(ULID_PATTERN),

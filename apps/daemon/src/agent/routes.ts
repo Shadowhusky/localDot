@@ -48,6 +48,7 @@ import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
+import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 
 export interface UploadAccess {
   tools: Pick<DesktopdTools, "putFile">;
@@ -72,7 +73,7 @@ export interface AgentRoutesDeps {
   conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
-  keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
+  keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
   memory: Pick<MemoryStore, "readBoth" | "undo">;
   skills(): SkillInfo[];
   canChangeMemory?(): boolean;
@@ -347,19 +348,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const catalog = deps.catalog.get();
       let keys: KeydRecord[] = [];
-      let defaultTaskBudgetUSD: number | null = null;
       let keyLayer: "online" | "offline" = "online";
       try {
         keys = await deps.keyd.secrets();
-        if (deps.keyd.budget) {
-          try {
-            const budget = await deps.keyd.budget();
-            const checked = AgentSettings.shape.taskBudgetUSD.unwrap().safeParse(budget.perTaskUSD);
-            if (checked.success) defaultTaskBudgetUSD = checked.data;
-          } catch (error) {
-            if (!(error instanceof KeydUnavailableError)) throw error;
-          }
-        }
       } catch (error) {
         if (!(error instanceof KeydUnavailableError)) throw error;
         keyLayer = "offline";
@@ -368,7 +359,6 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
-        defaultTaskBudgetUSD,
         subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
         keys: keys
           .filter((key) => key.kind === "llm")
@@ -444,7 +434,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         if (active.length) pricingOf(active);
       }
       check(c.req.raw.signal);
-      return c.json(deps.settings.put(parsed));
+      const saved = deps.settings.put(parsed);
+      // A task start retries this; until then keyd keeps the daily limit it had.
+      await syncDayLimit(deps.keyd, saved.dayBudgetUSD).catch(() =>
+        console.error("keyd's daily spending limit could not be updated"),
+      );
+      return c.json(saved);
     }),
   );
   app.post(

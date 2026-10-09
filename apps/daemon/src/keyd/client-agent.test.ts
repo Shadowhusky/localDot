@@ -75,6 +75,8 @@ describe("agent keyd adapters", () => {
       await expect(client.beginTask("c", "t", amount)).rejects.toThrow(RangeError);
     expect(() => client.setBudget(NaN, 10)).toThrow(RangeError);
     expect(() => client.setBudget(20, 10)).toThrow(RangeError);
+    expect(() => client.setBudget(-1, 0)).toThrow(RangeError);
+    expect(() => client.setBudget(0, 10_001)).toThrow(RangeError);
     expect(seen).toEqual([]);
   });
   it("encodes identifiers and validates the returned route identity", async () => {
@@ -99,6 +101,8 @@ describe("agent keyd adapters", () => {
     expect(await client.budget()).toEqual(budget);
     expect(await client.setBudget(5, 20)).toEqual(budget);
     expect(JSON.parse(seen.at(-1)?.body ?? "")).toEqual({ perTaskUSD: 5, perDayUSD: 20 });
+    await client.setBudget(0, 0);
+    expect(JSON.parse(seen.at(-1)?.body ?? "")).toEqual({ perTaskUSD: 0, perDayUSD: 0 });
   });
   it("keeps immutable conflicts and non-404 deletion errors visible", async () => {
     const { client } = await fakeKeyd((req) =>

@@ -51,7 +51,37 @@ func TestMeterReadsEachProvidersUsage(t *testing.T) {
 		{
 			"gemini sse", "text/event-stream",
 			"data: {\"usageMetadata\":{\"promptTokenCount\":1222,\"candidatesTokenCount\":10}}\r\n\r\ndata: {\"usageMetadata\":{\"promptTokenCount\":1222,\"candidatesTokenCount\":27,\"thoughtsTokenCount\":40}}\r\n\r\n",
-			Usage{Input: 1222, Output: 67, Reported: true},
+			Usage{Input: 1222, Output: 27, Reasoning: 40, Reported: true},
+		},
+		{
+			"gemini cached", "application/json",
+			`{"usageMetadata":{"promptTokenCount":5000,"cachedContentTokenCount":4000,"candidatesTokenCount":9}}`,
+			Usage{Input: 1000, CacheRead: 4000, Output: 9, Reported: true},
+		},
+		{
+			"openai chat cached and reasoning", "application/json",
+			`{"usage":{"prompt_tokens":3000,"completion_tokens":500,"total_tokens":3500,"prompt_tokens_details":{"cached_tokens":2048},"completion_tokens_details":{"reasoning_tokens":320}}}`,
+			Usage{Input: 952, CacheRead: 2048, Output: 180, Reasoning: 320, Reported: true},
+		},
+		{
+			"openai responses cached", "text/event-stream",
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":900,\"input_tokens_details\":{\"cached_tokens\":512},\"output_tokens\":33}}}\n\n",
+			Usage{Input: 388, CacheRead: 512, Output: 33, Reported: true},
+		},
+		{
+			"reasoning counted apart from output", "application/json",
+			`{"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":170,"completion_tokens_details":{"reasoning_tokens":50}}}`,
+			Usage{Input: 100, Output: 20, Reasoning: 50, Reported: true},
+		},
+		{
+			"moonshot cached", "application/json",
+			`{"usage":{"prompt_tokens":800,"completion_tokens":10,"total_tokens":810,"cached_tokens":600}}`,
+			Usage{Input: 200, CacheRead: 600, Output: 10, Reported: true},
+		},
+		{
+			"more cached than read", "application/json",
+			`{"usage":{"prompt_tokens":10,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":99}}}`,
+			Usage{Input: 10, Output: 1, Reported: true},
 		},
 		{
 			"gemini json array", "application/json",
@@ -100,8 +130,16 @@ func TestMeterReadsTheFirstClassBearerProviders(t *testing.T) {
 		"groq":       last(`"x_groq":{"id":"req_1","usage":` + usage + `}`),
 		"openrouter": last(`"usage":{"prompt_tokens":1200,"completion_tokens":80,"total_tokens":1280,"cost":0.0042}`),
 	}
-	want := Usage{Input: 1200, Output: 80, Reported: true}
+	plain := Usage{Input: 1200, Output: 80, Reported: true}
+	wants := map[string]Usage{
+		"xai":        {Input: 1200, Output: 50, Reasoning: 30, Reported: true},
+		"mistral":    plain,
+		"deepseek":   {Input: 200, CacheRead: 1000, Output: 80, Reported: true},
+		"groq":       plain,
+		"openrouter": {Input: 1200, Output: 80, Reported: true, Billed: true, BilledCost: 4200},
+	}
 	for name, body := range streams {
+		want := wants[name]
 		for _, chunk := range []int{1, 7, 1 << 20} {
 			if got := meter(t, "text/event-stream", body, chunk); got != want {
 				t.Errorf("%s (chunks of %d): %+v, want %+v", name, chunk, got, want)
@@ -124,6 +162,22 @@ func TestCostRoundsUpAndChargesCacheTokens(t *testing.T) {
 	}
 	if got := (Price{Input: 0.1}).Cost(Usage{Input: 1}); got != 1 {
 		t.Fatalf("a fraction of a micro-dollar rounds to %d, want 1", got)
+	}
+}
+
+func TestReasoningCostsItsOwnPriceOrTheOutputPrice(t *testing.T) {
+	u := Usage{Input: 1000, Output: 100, Reasoning: 400}
+	// 1000*1 + 100*4 + 400*4 micro-USD: reasoning falls back to the output price.
+	if got := (Price{Input: 1, Output: 4}).Cost(u); got != 3000 {
+		t.Fatalf("Cost = %d, want 3000", got)
+	}
+	// 1000*1 + 100*4 + 400*10
+	p := Price{Input: 1, Output: 4, Reasoning: 10}
+	if got := p.Cost(u); got != 5400 {
+		t.Fatalf("Cost = %d, want 5400", got)
+	}
+	if got := p.Ceiling(0, 100); got != 1000 {
+		t.Fatalf("a dearer reasoning price must bound the hold: ceiling %d, want 1000", got)
 	}
 }
 

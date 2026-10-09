@@ -24,13 +24,10 @@ import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
 import { startWorkClock } from "./work-clock.ts";
 
-// Daemon-side cap on one task's tool calls: the brain has its own turn limit, but the brain is in a
-// cell, and enforcement lives outside the cells (trust rule 5); keyd's budget caps the spend.
-export const MAX_TOOL_CALLS = 400;
-
 export interface DispatchDeps {
   tools: ToolDeps;
   policy?: ToolPolicy; // An extra restriction can refuse; it cannot grant execution authority.
+  // A task's own action limit, set by the user, wins over this one.
   maxToolCalls?: number;
 }
 
@@ -69,8 +66,10 @@ function blocked(
   session.append("step.end", { status: "blocked", note: clipText(note, 500) }, step);
 }
 
-// One tool call from the brain: the v1 table, the input's schema, the daemon's call cap and the
+// One tool call from the brain: the v1 table, the input's schema, the user's action limit and the
 // policy seam come first, in that order; only then does anything reach the computer or the user.
+// The limit is enforced here, outside the brain's cell (trust rule 5), and only when the user set
+// one; their next message starts its count again.
 export async function dispatchTool(
   deps: DispatchDeps,
   session: AgentSession,
@@ -177,14 +176,11 @@ async function dispatchAdmitted(
         result: fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
       };
     session.toolCalls += 1;
-    if (session.toolCalls > (deps.maxToolCalls ?? MAX_TOOL_CALLS)) {
-      blocked(
-        session,
-        name,
-        STEP_KIND[name],
-        "Tool call limit",
-        "this task used all its tool calls",
-      );
+    session.actionsSinceUser += 1;
+    const limit = session.actionLimit ?? deps.maxToolCalls;
+    if (limit !== undefined && session.actionsSinceUser > limit) {
+      session.actionLimitReached = true;
+      blocked(session, name, STEP_KIND[name], "Action limit", `reached your limit of ${limit}`);
       return {
         status: 200,
         result: {
@@ -193,7 +189,7 @@ async function dispatchAdmitted(
           content: [
             {
               type: "text",
-              text: "This task has used all its tool calls. Stop and tell the user what is left.",
+              text: `This task reached the user's limit of ${limit} actions. Stop; the user will tell you when to continue.`,
             },
           ],
         },

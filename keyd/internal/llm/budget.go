@@ -49,6 +49,7 @@ type TaskInfo struct {
 	SpentUSD float64 `json:"spentUSD"`
 }
 
+// A task's limit of 0 is none, as is a day limit of 0.
 type task struct {
 	id           string
 	limit        int64
@@ -118,7 +119,7 @@ func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budge
 			return nil, errors.New("llm: invalid budget date")
 		}
 		for id, saved := range b.day.Tasks {
-			if id == "" || len(id) > 256 || saved.Limit <= 0 || saved.Limit > micros(10_000) || saved.Spent < 0 {
+			if id == "" || len(id) > 256 || saved.Limit < 0 || saved.Limit > micros(10_000) || saved.Spent < 0 {
 				return nil, errors.New("llm: invalid persisted task budget")
 			}
 			var snapshot *TaskSnapshot
@@ -133,7 +134,7 @@ func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budge
 						return nil, errors.New("llm: invalid legacy task policy")
 					}
 				case "snapshot":
-					if saved.Pricing == nil || saved.InitialLimit <= 0 || saved.InitialLimit > micros(10_000) {
+					if saved.Pricing == nil || saved.InitialLimit < 0 || saved.InitialLimit > micros(10_000) {
 						return nil, errors.New("llm: missing immutable task policy")
 					}
 					var err error
@@ -156,7 +157,8 @@ func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budge
 
 // Begin attaches a cell to its session's durable task account. Replacing a worker,
 // ending its cell, or reopening keyd keeps that account's spend and explicit limit.
-// A zero budget uses the existing task's limit, or the default for a new task.
+// A zero budget uses the existing task's limit, or the default for a new task, which is none
+// unless the user set one.
 func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
 	return b.begin(cell, taskID, budgetUSD, nil)
 }
@@ -200,7 +202,7 @@ func (b *Budget) begin(cell, taskID string, budgetUSD float64, pricing *TaskSnap
 		if budgetUSD == 0 {
 			budgetUSD = b.limits().PerTaskUSD
 		}
-		if math.IsNaN(budgetUSD) || math.IsInf(budgetUSD, 0) || budgetUSD <= 0 || budgetUSD > 10_000 || micros(budgetUSD) < 1 {
+		if math.IsNaN(budgetUSD) || math.IsInf(budgetUSD, 0) || budgetUSD < 0 || budgetUSD > 10_000 || budgetUSD > 0 && micros(budgetUSD) < 1 {
 			return errors.New("llm: invalid default task budget")
 		}
 		t = &task{id: taskID, limit: micros(budgetUSD), pricing: pricing}
@@ -315,7 +317,7 @@ func (b *Budget) reserveLocked(cell string, ask Ask) (*Hold, error) {
 		return nil, err
 	}
 	dayLimit := micros(b.limits().PerDayUSD)
-	taskRoom, dayRoom := t.limit-t.spent, dayLimit-b.day.MicroUSD
+	taskRoom, dayRoom := roomLeft(t.limit, t.spent), roomLeft(dayLimit, b.day.MicroUSD)
 	room := min(taskRoom, dayRoom)
 	if least := ask.cost(min(ask.Tokens, 1)); least > room {
 		need := usd(ask.cost(ask.Tokens))
@@ -332,7 +334,7 @@ func (b *Budget) reserveLocked(cell string, ask Ask) (*Hold, error) {
 		}
 	}
 	amount := ask.cost(tokens)
-	if t.spent+t.held+amount > t.limit || b.day.MicroUSD+b.dayHeld+amount > dayLimit {
+	if t.limit > 0 && t.spent+t.held+amount > t.limit || dayLimit > 0 && b.day.MicroUSD+b.dayHeld+amount > dayLimit {
 		return nil, nil
 	}
 	t.held += amount
@@ -347,11 +349,19 @@ func (b *Budget) reserveLocked(cell string, ask Ask) (*Hold, error) {
 	return &Hold{b: b, t: t, amount: amount, tokens: tokens}, nil
 }
 
+// roomLeft is what a limit leaves: everything, for no limit.
+func roomLeft(limit, spent int64) int64 {
+	if limit == 0 {
+		return math.MaxInt64
+	}
+	return limit - spent
+}
+
 func (b *Budget) spentLocked(t *task) error {
-	if t.spent >= t.limit {
+	if t.limit > 0 && t.spent >= t.limit {
 		return &ExceededError{Scope: "task", TaskID: t.id, LimitUSD: usd(t.limit), SpentUSD: usd(t.spent)}
 	}
-	if limit := micros(b.limits().PerDayUSD); b.day.MicroUSD >= limit {
+	if limit := micros(b.limits().PerDayUSD); limit > 0 && b.day.MicroUSD >= limit {
 		return &ExceededError{Scope: "day", LimitUSD: usd(limit), SpentUSD: usd(b.day.MicroUSD)}
 	}
 	return nil
@@ -365,14 +375,14 @@ func (b *Budget) chargeLocked(t *task, cost int64) ([]ExceededError, error) {
 	}
 	var crossed []ExceededError
 	after := addMicro(t.spent, cost)
-	if t.spent < t.limit && after >= t.limit {
+	if t.limit > 0 && t.spent < t.limit && after >= t.limit {
 		crossed = append(crossed, ExceededError{Scope: "task", TaskID: t.id, LimitUSD: usd(t.limit), SpentUSD: usd(after)})
 	}
 	t.spent = after
 	limit := micros(b.limits().PerDayUSD)
 	before := b.day.MicroUSD
 	b.day.MicroUSD = addMicro(b.day.MicroUSD, cost)
-	if before < limit && b.day.MicroUSD >= limit {
+	if limit > 0 && before < limit && b.day.MicroUSD >= limit {
 		crossed = append(crossed, ExceededError{Scope: "day", LimitUSD: usd(limit), SpentUSD: usd(b.day.MicroUSD)})
 	}
 	return crossed, b.saveLocked()
@@ -417,6 +427,16 @@ func (h *Hold) Settle(cost int64) (crossed []ExceededError, err error) {
 		b.notifyLocked()
 	})
 	return crossed, err
+}
+
+// Account is the task the hold was for and the day, as they stand now.
+func (h *Hold) Account() (task, day TaskInfo) {
+	b := h.b
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rollLocked()
+	return TaskInfo{ID: h.t.id, LimitUSD: usd(h.t.limit), SpentUSD: usd(h.t.spent)},
+		TaskInfo{LimitUSD: b.limits().PerDayUSD, SpentUSD: usd(b.day.MicroUSD)}
 }
 
 // Release gives the hold back without a charge, for a request that never reached the provider.

@@ -62,6 +62,51 @@ const until = async (pred: () => boolean) => {
 };
 
 describe("KeydEventRouter", () => {
+  it("gives the live task what each of its model calls cost, and only its own", () => {
+    router = new KeydEventRouter({ keyd: new KeydClient(keyd.socketPath), live, eventLog });
+    const spend = (taskId: string, billed: boolean, taskLimitUSD = 0): KeydEvent => ({
+      type: "model.spend",
+      cell: CELL,
+      time: "2026-10-01T12:00:00Z",
+      data: {
+        taskId,
+        route: "openrouter",
+        model: "glm-5.3",
+        costUSD: 0.0042,
+        billed,
+        taskSpentUSD: 0.2,
+        taskLimitUSD,
+        daySpentUSD: 1.5,
+        dayLimitUSD: 0,
+      },
+    });
+    router.route(spend(sessionId, true));
+    router.route(spend(sessionId, false, 5));
+    router.route(spend("01JXYZ0000000000000000OTHR", true));
+    const spent = eventLog
+      .read(sessionId)
+      .filter((e) => e.type === "model.spend")
+      .map((e) => e.data);
+    expect(spent).toEqual([
+      {
+        route: "openrouter",
+        model: "glm-5.3",
+        costUSD: 0.0042,
+        basis: "billed",
+        taskSpentUSD: 0.2,
+        daySpentUSD: 1.5,
+      },
+      {
+        route: "openrouter",
+        model: "glm-5.3",
+        costUSD: 0.0042,
+        basis: "estimated",
+        taskSpentUSD: 0.2,
+        daySpentUSD: 1.5,
+        taskLimitUSD: 5,
+      },
+    ]);
+  });
   it("appends key use to the cell's live session as keyd, cutting what a cell chose", () => {
     router = new KeydEventRouter({ keyd: new KeydClient(keyd.socketPath), live, eventLog });
     router.route(

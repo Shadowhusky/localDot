@@ -54,10 +54,18 @@ export class EventSink {
       void this.flush();
     }, this.#opts.flushMs ?? 100);
   }
-  state(state: "thinking" | "acting" | "observing" | "paused" | "error", reason?: string): void {
+  state(
+    state: "thinking" | "acting" | "observing" | "paused" | "error",
+    reason?: string,
+    detail?: string,
+  ): void {
     this.push({
       type: "agent.state",
-      data: { state, ...(reason ? { reason: reason.slice(0, 200) } : {}) },
+      data: {
+        state,
+        ...(reason ? { reason: reason.slice(0, 200) } : {}),
+        ...(detail ? { detail: detail.slice(0, 200) } : {}),
+      },
     });
   }
   text(delta: string): void {
