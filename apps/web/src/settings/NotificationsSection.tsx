@@ -1,5 +1,6 @@
 import type { NotifyEvent, NotifySettings, QuietHours } from "@localdot/protocol";
 import { useState } from "react";
+import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -9,7 +10,7 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
-import { deviceCopy, deviceDetail, EVENT_ROWS } from "./notifications-copy.ts";
+import { computerNoun, deviceCopy, deviceDetail, EVENT_ROWS } from "./notifications-copy.ts";
 import type { NotificationsView } from "./useNotifications.ts";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -35,13 +36,22 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
   const save = (patch: Partial<NotifySettings>) => view.save({ ...s, ...patch });
   const channel = (event: NotifyEvent, which: "mac" | "phone", on: boolean) =>
     save({ events: { ...s.events, [event]: { ...s.events[event], [which]: on } } });
-  const copy = deviceCopy(view.device);
+  const copy = deviceCopy(view.device, view.banner);
+  const banners = view.banner !== "none";
+  const noun = computerNoun(view.banner);
   return (
     <>
       <p className="settings-lede">
-        dot nudges you when it needs you, finishes or fails: on this Mac with no tab open, and on
-        your phone.
+        {banners
+          ? `dot nudges you when it needs you, finishes or fails: on this ${noun} with no tab open, and on your phone.`
+          : "dot nudges you when it needs you, finishes or fails: on your phone, and in a tab you keep open."}
       </p>
+      {!banners && (
+        <Banner icon="monitor" title="No banners on this computer">
+          It has no screen of its own. Turn on notifications on your phone to hear from dot
+          anywhere.
+        </Banner>
+      )}
       <Group>
         <GroupRow
           leading={<IconTile icon={PHONE_NAME.test(view.name) ? "smartphone" : "monitor"} />}
@@ -131,7 +141,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
           title="Notify me about"
           aside={
             <span className="settings-notify-columns" aria-hidden="true">
-              <span>Mac</span>
+              {banners && <span>{view.banner === "mac" ? "Mac" : "Computer"}</span>}
               <span>Phone</span>
             </span>
           }
@@ -144,11 +154,13 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
               detail={row.description}
               trailing={
                 <>
-                  <Switch
-                    label={<VisuallyHidden>{`${row.label} on this Mac`}</VisuallyHidden>}
-                    checked={s.events[row.event].mac}
-                    onCheckedChange={(on) => channel(row.event, "mac", on)}
-                  />
+                  {banners && (
+                    <Switch
+                      label={<VisuallyHidden>{`${row.label} on this ${noun}`}</VisuallyHidden>}
+                      checked={s.events[row.event].mac}
+                      onCheckedChange={(on) => channel(row.event, "mac", on)}
+                    />
+                  )}
                   <Switch
                     label={<VisuallyHidden>{`${row.label} on phones`}</VisuallyHidden>}
                     checked={s.events[row.event].phone}
@@ -166,7 +178,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
           <Switch
             className="ui-group-row"
             label="Quiet hours"
-            description="On your Mac's clock. Done, Failed and routine results wait in localDot."
+            description={`On your ${noun}'s clock. Done, Failed and routine results wait in localDot.`}
             checked={s.quietHours.enabled}
             onCheckedChange={(enabled) => save({ quietHours: { ...s.quietHours, enabled } })}
           />
@@ -190,7 +202,11 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
           <Switch
             className="ui-group-row"
             label="Show task text in notifications"
-            description="Off: phones show only “dot needs you”. Your Mac always shows the task's title."
+            description={
+              banners
+                ? `Off: phones show only “dot needs you”. Your ${noun} always shows the task's title.`
+                : "Off: phones show only “dot needs you”."
+            }
             checked={s.showTaskText}
             onCheckedChange={(showTaskText) => save({ showTaskText })}
           />

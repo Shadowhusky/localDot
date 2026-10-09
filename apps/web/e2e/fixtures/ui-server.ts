@@ -9,6 +9,7 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
+  BannerKind,
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   type KeydRecord,
@@ -1301,6 +1302,7 @@ const routineChanged = (routineId: string) => {
 };
 
 // Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+// QA_BANNER=desktop|none shows Settings as on a Linux desktop or a machine with no screen.
 const pushKey = createECDH("prime256v1");
 pushKey.generateKeys();
 const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
@@ -1321,6 +1323,10 @@ const notify = createNotify({
       notified.mac.push([title, body]);
       return "shown";
     },
+  },
+  banner: {
+    kind: BannerKind.catch("mac").parse(process.env.QA_BANNER ?? "mac"),
+    notifier: { available: false, show: async () => "unavailable" },
   },
 });
 

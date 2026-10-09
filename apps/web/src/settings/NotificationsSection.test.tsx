@@ -44,8 +44,12 @@ function Harness({
   return <NotificationsSection view={view} />;
 }
 
-function setup(env = thisMac, clipboard?: Pick<Clipboard, "writeText">) {
-  const d = notifyDaemonFixture();
+function setup(
+  env = thisMac,
+  clipboard?: Pick<Clipboard, "writeText">,
+  banner: "mac" | "desktop" | "none" = "mac",
+) {
+  const d = notifyDaemonFixture(false, banner);
   render(<Harness d={d} env={env} clipboard={clipboard} />);
   return d;
 }
@@ -107,5 +111,23 @@ describe("Settings › Notifications", () => {
     setup();
     fireEvent.click(await screen.findByRole("button", { name: "Send" }));
     expect(await screen.findByText(/^Sent to this Mac\./)).toBeTruthy();
+  });
+
+  it("calls a Linux desktop this computer and leaves out the Mac's hint", async () => {
+    setup(thisMac, undefined, "desktop");
+    expect(await screen.findByRole("switch", { name: "Done on this computer" })).toBeTruthy();
+    expect(screen.getByText("This computer")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Sent to this computer.")).toBeTruthy();
+  });
+
+  it("says a machine with no screen shows no banners, and offers only phone switches", async () => {
+    setup(iPhoneSafari, undefined, "none");
+    expect(await screen.findByText("No banners on this computer")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Done on phones" })).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: /on this (Mac|computer)$/ })).toBeNull();
+    cleanup();
+    setup(thisMac, undefined, "none");
+    expect(await screen.findByText("Notifications show here while this tab is open.")).toBeTruthy();
   });
 });
