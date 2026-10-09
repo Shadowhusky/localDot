@@ -7,7 +7,7 @@ import type {
   TranscriptMessage,
   UpdatePlanInput,
 } from "@localdot/protocol";
-import { isToolName, RESUME_WAIT_REASON } from "@localdot/protocol";
+import { EARLIER_CHARS, earlierRecord, isToolName, RESUME_WAIT_REASON } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
 import { toComputerActions } from "./computer.ts";
@@ -79,6 +79,9 @@ interface Call {
 const RETRYABLE = (status: number | undefined) =>
   status === undefined || status === 408 || status === 409 || status === 429 || status >= 500;
 const COMPACT_AT = 0.6;
+// The most of the model's window what was said earlier in the conversation may take, in
+// estimateTokens' characters per token.
+const EARLIER_SHARE = 0.15;
 const MAX_NUDGES = 2;
 
 const defaultSleep = (ms: number, signal: AbortSignal) =>
@@ -190,7 +193,17 @@ export class Agent {
     const { boot, sink } = this.#o;
     signal.throwIfAborted();
     if (!boot.resume) {
-      const first: ModelMessage = { role: "user", content: [{ type: "text", text: boot.task }] };
+      const earlier = earlierRecord(
+        boot.earlier ?? [],
+        Math.min(EARLIER_CHARS, Math.floor(this.#binding().contextTokens * EARLIER_SHARE * 3.5)),
+      );
+      const first: ModelMessage = {
+        role: "user",
+        content: [
+          ...(earlier ? [{ type: "text" as const, text: earlier }] : []),
+          { type: "text", text: boot.task },
+        ],
+      };
       if (this.#binding().computer !== "none") {
         const shot = await this.#o.api.tool(
           "computer",

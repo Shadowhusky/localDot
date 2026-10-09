@@ -8,8 +8,9 @@ import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { KeydHealth } from "../keyd/monitor.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
+import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import type { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
@@ -254,4 +255,106 @@ it("an idle upload already registered before followup blocks a replacement until
     lease.release();
     await h.ready(2);
   }
+});
+
+describe("conversation continuity", () => {
+  function conversing() {
+    const h = setup();
+    const conversations = new Conversations(h.home, h.log);
+    h.deps.conversations = conversations;
+    const finished = async (n: number) => {
+      const brain = await h.ready(n + 1);
+      h.exit(n, 0);
+      const session = required(h.runner.get(brain.sessionId));
+      await until(() => session.status === "idle");
+      return session;
+    };
+    return { ...h, conversations, finished };
+  }
+  const start = (log: EventLog, id: string) => log.read(id).find((e) => e.type === "session.start");
+  const end = (log: EventLog, id: string) => log.read(id).find((e) => e.type === "session.end");
+
+  it("continues the conversation in the next task, with what was said before", async () => {
+    const h = conversing();
+    const first = await h.runner.start(h.cellId, "Draw a dog");
+    expect(start(h.log, first.id)?.data).not.toHaveProperty("continues");
+    expect(h.conversations.current()).toBe(first.id);
+    await h.finished(0);
+    await h.runner.release();
+    expect(end(h.log, first.id)?.data).toEqual({ reason: "done" });
+    const second = await h.runner.start(h.cellId, "Make it blue");
+    await h.ready(2);
+    expect(start(h.log, second.id)?.data).toMatchObject({ continues: first.id });
+    expect(h.boots[0]).not.toHaveProperty("earlier");
+    expect(h.boots[1]?.earlier).toEqual(["The user: Draw a dog"]);
+    expect(h.conversations.current()).toBe(second.id);
+  });
+
+  it("continues after Stop and after the daemon restarts", async () => {
+    const h = conversing();
+    const first = await h.runner.start(h.cellId, "Draw a dog");
+    await h.ready();
+    h.live.stop(first.id);
+    await h.live.settled(first.id);
+    expect(end(h.log, first.id)?.data).toEqual({ reason: "stopped" });
+    await h.runner.close();
+    const restarted = new AgentRunner({
+      ...h.deps,
+      conversations: new Conversations(h.home, h.log),
+    });
+    const boots: BootConfig[] = [];
+    h.deps.brains.start = async (brain) => {
+      boots.push(structuredClone(required(restarted.get(brain.sessionId)?.boot)));
+    };
+    try {
+      const second = await restarted.start(h.cellId, "Use red instead");
+      await until(() => boots.length === 1);
+      expect(start(h.log, second.id)?.data).toMatchObject({ continues: first.id });
+      expect(boots[0]?.earlier).toEqual(["The user: Draw a dog", "(That task was stopped.)"]);
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("starts the next task afresh in a new conversation", async () => {
+    const h = conversing();
+    await h.runner.start(h.cellId, "Draw a dog");
+    await h.finished(0);
+    await h.runner.release();
+    h.conversations.begin();
+    const fresh = await h.runner.start(h.cellId, "Something new");
+    await h.ready(2);
+    expect(start(h.log, fresh.id)?.data).not.toHaveProperty("continues");
+    expect(h.boots[1]).not.toHaveProperty("earlier");
+  });
+
+  it("starts a task even when the conversation it would continue can't be read", async () => {
+    const h = conversing();
+    h.deps.conversations = {
+      current: () => {
+        throw new Error("unreadable");
+      },
+      earlier: () => [],
+      adopt: () => {
+        throw new Error("unwritable");
+      },
+    };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const session = await h.runner.start(h.cellId, "Draw a dog");
+    await h.ready();
+    expect(start(h.log, session.id)?.data).not.toHaveProperty("continues");
+    expect(h.boots[0]).not.toHaveProperty("earlier");
+    expect(error).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends only a finished task, never one at work", async () => {
+    const h = conversing();
+    const working = await h.runner.start(h.cellId, "Draw a dog");
+    await h.ready();
+    await expect(h.runner.release()).rejects.toEqual(
+      new AgentError(409, "Finish or stop the current task first."),
+    );
+    expect(working.stopped).toBe(false);
+    expect(h.live.get(h.cellId)).toBe(working.id);
+  });
 });
