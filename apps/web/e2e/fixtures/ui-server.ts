@@ -38,6 +38,8 @@ import {
 import { Conversations } from "../../../daemon/src/agent/conversation.ts";
 import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
+import { PeopleStore } from "../../../daemon/src/agent/people.ts";
+import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
@@ -47,6 +49,7 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { PurposeGate } from "../../../daemon/src/agent/safety/purpose.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
@@ -80,6 +83,8 @@ import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.t
 import { nextDue } from "../../../daemon/src/routines/schedule.ts";
 import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
 import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
+import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
+import { SearchIndex } from "../../../daemon/src/search/search-index.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
@@ -367,6 +372,11 @@ let keys = SAMPLE_KEYS;
 const settingsStore = new SettingsStore(HOME);
 settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
+const people = new PeopleStore(HOME);
+const recentActivity = new RecentActivity({ log, isLive: (id) => live.cellOf(id) !== undefined });
+const searchIndex = new SearchIndex(HOME, { sessions: log });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog: log, notes: memory });
+searchFeed.start();
 const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
@@ -1078,6 +1088,10 @@ const agent: AgentRoutesDeps = {
     }),
   } as AgentRoutesDeps["keyd"],
   memory,
+  notesChanged: (file) => searchFeed.reindexNotes(file),
+  people,
+  recentActivity: () => recentActivity.list(),
+  sessionInfo: (ids) => log.sessionInfo(ids),
   skills: () => [
     {
       name: "sample-tables",
@@ -1370,6 +1384,7 @@ const routes = createApp({
   accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
   replay: {
     home: HOME,
@@ -1564,6 +1579,30 @@ function requestApproval(
       .then((permit) =>
         effects.push(`approval:${permit ? (permit.approved ? "approve" : "act") : "refused"}`),
       )
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
+  if (kind === "purpose") {
+    // A tainted task opening an unrelated site with data in its address, through the real purpose
+    // check, its judge finding the site unrelated.
+    session.taint.add("screen", "mail.example.test");
+    session.purpose = new PurposeGate({
+      taint: session.taint,
+      purpose: () => session?.currentPurpose ?? { request: [], plan: [] },
+      judge: () => ({ name: "jev", destinations: async () => [], fits: async () => 0.04 }),
+      trusted: () => false,
+    });
+    const input = { url: "https://paste.example.net/new?text=quarterly%20numbers" };
+    const navigate = toolRisk("browser_navigate", input);
+    if (!navigate) return "no facts";
+    void authorizePrepared(ctx, {
+      tool: "browser_navigate",
+      input,
+      target: null,
+      facts: navigate,
+      revalidate: async () => true,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return;
   }
@@ -2404,6 +2443,40 @@ routes.post("/__qa/older-task", (c) =>
     ),
   }),
 );
+// What dot knows: facts you and dot added, people dot reached, a daily note, and recent tasks.
+routes.post("/__qa/knows", (c) => {
+  const insurance = endedTask(
+    "Renew the car insurance before it lapses",
+    "I compared three quotes and renewed with the cheapest.",
+    "Renewed the car insurance with the cheaper quote.",
+  );
+  const henry = endedTask(
+    "Send Henry the quarterly report on WeChat",
+    "Sent the report to Henry on WeChat.",
+    "Sent the quarterly report to Henry.",
+  );
+  memory.addEntry("USER.md", "Allergic to penicillin", true);
+  memory.addEntry("USER.md", "Prefers aisle seats on long flights");
+  memory.apply(insurance, "USER.md", "append", "- Car insurance renews every September");
+  memory.apply(insurance, "MEMORY.md", "append", "- Insurer prefers email over phone calls");
+  const note = memory.appendNote(insurance, "Insurer reference is WINDSCREEN-42");
+  log.append(insurance, {
+    type: "memory.change",
+    agent: "main",
+    data: { file: note.file, patch: note.patch, changeId: note.changeId },
+  } as never);
+  people.record(henry, { name: "Henry Liu", app: "WeChat", handle: "henry_l" });
+  people.record(insurance, {
+    name: "Ana Souza",
+    app: "Email",
+    handle: "ana@example.com",
+    note: "Insurance broker",
+  });
+  people.add({ name: "Mum", app: "Phone", handle: "+44 7700 900123" });
+  return c.json({ ok: true });
+});
+routes.get("/__qa/boot-memory", (c) => c.json(memory.bootMemory()));
+
 // Routines: dot proposes one in the live thread; a routine's own run; a run history to browse.
 const MORNING_BILLS = {
   name: "Morning bills",

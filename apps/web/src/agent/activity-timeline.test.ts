@@ -100,6 +100,24 @@ describe("the activity timeline", () => {
     });
   });
 
+  it("names a daily note apart from the facts dot always reads", () => {
+    const memory = (path: string, undoes?: string) =>
+      ({
+        id: "m",
+        type: "memory",
+        path,
+        patch: "+- Gate code noted\n",
+        truncated: false,
+        changeId: "01JXYZ0000000000000000CHNG",
+        ...(undoes ? { undoes } : {}),
+      }) as const;
+    expect(changeView(memory("notes/2026-10-08.md")).meta).toMatch(/^Added to today's notes/);
+    expect(changeView(memory("notes/2026-10-08.md", "01JXYZ0000000000000000PREV")).meta).toMatch(
+      /^Daily note undone/,
+    );
+    expect(changeView(memory("MEMORY.md")).meta).toMatch(/^Memory updated/);
+  });
+
   it("says where a screen step happened and how, or why its input never reached the computer", () => {
     const row = (extra: Partial<StepRowView>): ActivityEntry => ({
       key: "s",

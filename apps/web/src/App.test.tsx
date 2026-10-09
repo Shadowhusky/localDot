@@ -414,7 +414,8 @@ describe("App token states", () => {
     const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
     const knows = await screen.findByRole("region", { name: "What dot knows" });
-    fireEvent.click(await within(knows).findByRole("button", { name: "Show memory" }));
+    fireEvent.click(within(knows).getByRole("radio", { name: "Notes" }));
+    fireEvent.click(await within(knows).findByRole("button", { name: /^Show the file/ }));
     await waitFor(() => expect(knows.textContent).toContain("Prefers short replies."));
     const index = screen.getByRole("navigation", { name: "Settings sections" });
     fireEvent.click(within(index).getByRole("button", { name: "Keys" }));

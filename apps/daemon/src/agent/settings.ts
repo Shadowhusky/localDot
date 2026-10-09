@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { AgentRoleChoice, AgentSettingsDocument } from "@localdot/protocol";
+import { AgentRoleChoice, AgentSettingsDocument, currentAutonomy } from "@localdot/protocol";
 import { z } from "zod";
 import { PrivateFiles } from "./private-files.ts";
 
@@ -36,7 +36,11 @@ export class SettingsStore {
   get(): AgentSettings {
     try {
       const text = this.#files.text("agent.json", 64 * 1024);
-      return text === undefined ? {} : AgentSettings.parse(JSON.parse(text));
+      if (text === undefined) return {};
+      const settings = AgentSettings.parse(JSON.parse(text));
+      return settings.autonomy
+        ? { ...settings, autonomy: currentAutonomy(settings.autonomy) }
+        : settings;
     } catch {
       throw new SettingsError(409, "saved agent settings are invalid; review them before saving");
     }

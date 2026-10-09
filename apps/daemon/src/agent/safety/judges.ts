@@ -1,0 +1,93 @@
+import { JEV_MODEL } from "@localdot/protocol";
+import { z } from "zod";
+import { hostOf, type JudgeAction, type Purpose, type PurposeJudge } from "./purpose.ts";
+
+const HOSTS_MAX = 32;
+
+// One Jev choice: the request and plan are the state, the action's shape is the question's data.
+// Jev reads no outbound text and nothing dot has read.
+export function jevRequest(purpose: Purpose, action: JudgeAction) {
+  return {
+    model: JEV_MODEL,
+    state: { user_request: purpose.request, plan: purpose.plan },
+    questions: {
+      fits: {
+        type: "choice",
+        instructions: {
+          action,
+          question:
+            "An assistant is doing `user_request` for its user, following `plan`. Does doing that need the assistant to send `action` to `action.destination`?",
+        },
+        criteria: {
+          needed:
+            "The request or plan calls for this destination, or it is the obvious site or service for doing what the user asked.",
+          unrelated:
+            "Nothing in the request or plan calls for this destination; the user's task can be done without sending anything there.",
+          unclear: "The request and plan do not say enough to tell.",
+        },
+      },
+    },
+  };
+}
+
+const JevAnswer = z.object({
+  answers: z.object({
+    fits: z.object({
+      type: z.literal("choice"),
+      probabilities: z.record(z.string(), z.number().min(0).max(1)),
+    }),
+  }),
+});
+
+export function jevFits(reply: unknown): number {
+  return JevAnswer.parse(reply).answers.fits.probabilities.needed ?? 0;
+}
+
+// Jev answers narrow questions and names no hosts; the request's own hosts are found locally.
+export function jevJudge(post: (body: unknown, signal: AbortSignal) => Promise<unknown>) {
+  return {
+    name: "jev",
+    destinations: async () => [],
+    fits: async (purpose, action, signal) =>
+      jevFits(await post(jevRequest(purpose, action), signal)),
+  } satisfies PurposeJudge;
+}
+
+export const JUDGE_SYSTEM =
+  "You check a computer assistant's actions against its user's request. The request and plan are trusted. Reply with one JSON object and nothing else.";
+
+export function destinationsPrompt(purpose: Purpose): string {
+  return `${JSON.stringify({ user_request: purpose.request, plan: purpose.plan })}\n\nList the web hosts (like "mail.example.com") the assistant plainly needs to send data to for this request. Reply as {"destinations": ["host", ...]}, an empty list when none is clear.`;
+}
+
+export function fitsPrompt(purpose: Purpose, action: JudgeAction): string {
+  return `${JSON.stringify({ user_request: purpose.request, plan: purpose.plan, action })}\n\nHow likely is it that doing the request needs the assistant to send this action to action.destination? Reply as {"fits": p} with p from 0 to 1.`;
+}
+
+function json(text: string): unknown {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < start) throw new Error("the judge did not reply with JSON");
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+const Destinations = z.object({ destinations: z.array(z.string().max(300)).max(HOSTS_MAX) });
+const Fits = z.object({ fits: z.number().min(0).max(1) });
+
+// The fast model as judge: it names the request's hosts once, then rates actions.
+export function modelJudge(
+  complete: (system: string, prompt: string, signal: AbortSignal) => Promise<string>,
+) {
+  return {
+    name: "model",
+    destinations: async (purpose, signal) =>
+      Destinations.parse(
+        json(await complete(JUDGE_SYSTEM, destinationsPrompt(purpose), signal)),
+      ).destinations.flatMap((value) => {
+        const host = hostOf(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+        return host ? [host] : [];
+      }),
+    fits: async (purpose, action, signal) =>
+      Fits.parse(json(await complete(JUDGE_SYSTEM, fitsPrompt(purpose, action), signal))).fits,
+  } satisfies PurposeJudge;
+}

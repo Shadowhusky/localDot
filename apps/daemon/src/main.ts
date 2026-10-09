@@ -5,6 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { manualStreamRoute } from "./agent/manual-stream.ts";
+import { MemoryStore } from "./agent/memory.ts";
 import { ComputerFences } from "./agent/safety/fences.ts";
 import { createReplacementController } from "./agent/safety/replacement-controller.ts";
 import { Transfers } from "./agent/transfers.ts";
@@ -69,6 +70,9 @@ import { stopAll } from "./routines/stop-all.ts";
 import { fileStopAllAudit } from "./routines/stop-all-audit.ts";
 import { RoutineStore, type StoredRoutine } from "./routines/store.ts";
 import { routineToolPort } from "./routines/tool-port.ts";
+import { recallHits } from "./search/recall-hits.ts";
+import { SearchFeed } from "./search/search-feed.ts";
+import { SearchIndex } from "./search/search-index.ts";
 import { retainManagedDaemonLease } from "./service-lease.ts";
 import { ManagedServiceReadiness, managedServiceFromEnv } from "./service-readiness.ts";
 import { SessionIndex } from "./sessions/index-store.ts";
@@ -287,6 +291,9 @@ keydMonitor.subscribe((now, before) => {
       .catch(() => console.error("keyd: a computer could not reconnect"));
   }
 });
+const searchIndex = new SearchIndex(home, { sessions: eventLog });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog, notes: new MemoryStore(home) });
+const stopSearchFeed = searchFeed.start();
 const transfers = new Transfers();
 const quarantine = await QuarantineStore.open(home);
 const downloads = new BrowserDownloadCollector({ store: quarantine, transfers });
@@ -358,6 +365,8 @@ agent = createAgent({
   killSwitch,
   keydPorts,
   codex: { realHome: userInfo().homedir, user: userInfo().username },
+  recall: (query, limit, exclude) => recallHits(searchIndex, query, limit, exclude),
+  notesChanged: (file) => searchFeed.reindexNotes(file),
   policy: routinePolicy({ runOf: (id) => agent?.runner.get(id)?.run, expired: expiredRuns }),
   routines: routineToolPort({ store: routineStore, now: Date.now, zone, changed: routineChanged }),
 });
@@ -465,6 +474,8 @@ shutdown.push(
   () => recorder.stopAll(SHUTDOWN_FINALIZE_MS),
   () => browserStreams.dispose(),
   () => sessionIndex?.close(),
+  () => stopSearchFeed(),
+  () => searchIndex.close(),
   () => notify.close(),
   () => eventLog.close(),
 );
@@ -481,6 +492,7 @@ const app = createApp({
     ? { doctorSelfTests: { cells: orchestrator, readiness: serviceReadiness } }
     : {}),
   agent: agent.routes,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
   replay: {
     home,

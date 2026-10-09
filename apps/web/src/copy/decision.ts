@@ -95,8 +95,11 @@ const WORK: Readonly<Record<ActionClass, string>> = {
 
 const WAITS = "dot waits here; nothing times out.";
 
-// The daemon's own words for this action win; its plain class name becomes a question.
-export function decisionWords(card: Pick<ApprovalCard, "actionClass" | "title">): DecisionWords {
+// The daemon's own words for this action and its reason win; its plain class name becomes a
+// question.
+export function decisionWords(
+  card: Pick<ApprovalCard, "actionClass" | "title" | "why">,
+): DecisionWords {
   const { actionClass } = card;
   const verb = VERB[actionClass] ?? "Allow";
   const always = ALWAYS_ASKS[actionClass];
@@ -106,9 +109,11 @@ export function decisionWords(card: Pick<ApprovalCard, "actionClass" | "title">)
     title,
     primary: verb,
     secondary: `Don't ${verb.toLowerCase()}`,
-    why: always
-      ? `${always} always needs your OK. ${WAITS}`
-      : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
+    why: card.why
+      ? `${card.why} ${WAITS}`
+      : always
+        ? `${always} always needs your OK. ${WAITS}`
+        : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
     line: askLine(actionClass, title),
   };
 }
@@ -116,8 +121,11 @@ export function decisionWords(card: Pick<ApprovalCard, "actionClass" | "title">)
 export const ONCE = "once";
 export type DecisionScope = AlwaysScope | typeof ONCE;
 
-// How far a yes reaches until changed: once for anything that acts as you, this task for the rest.
-export function defaultScope(card: Pick<ApprovalCard, "actionClass" | "always">): DecisionScope {
-  if (ALWAYS_ASKS[card.actionClass]) return ONCE;
+// How far a yes reaches until changed: once for anything that acts as you or sends what dot read
+// somewhere new, this task for the rest.
+export function defaultScope(
+  card: Pick<ApprovalCard, "actionClass" | "always" | "destinations">,
+): DecisionScope {
+  if (ALWAYS_ASKS[card.actionClass] || card.destinations) return ONCE;
   return card.always?.some((option) => option.scope === "task") ? "task" : ONCE;
 }

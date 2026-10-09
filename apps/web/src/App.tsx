@@ -1,5 +1,6 @@
 import {
   DEFAULT_AUTONOMY,
+  isJevKey,
   LLM_PROVIDERS,
   type QuestionAnswerRequest,
   SessionIndexPage,
@@ -41,6 +42,7 @@ import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
 import { createExportJob } from "./export/job.ts";
+import { JEV_KEY } from "./keys/binding.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
@@ -80,6 +82,9 @@ import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
+import { CHATGPT } from "./settings/chooser.ts";
+import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
+import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
@@ -598,6 +603,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [typing, setTyping] = useState(false);
   const [pasteRefused, setPasteRefused] = useState<string | null>(null);
   const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const whatDotKnows = useWhatDotKnows(api, settings.open);
   const settingsNotifications = useNotifications(api, settings.open);
   const settingsAccounts = useAccounts(
     api,
@@ -1721,6 +1727,16 @@ function Theatre({ api }: { api: ApiClient }) {
           savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
           onAutonomy={settings.changeAutonomy}
           knowledge={settingsKnowledge}
+          known={whatDotKnows}
+          recentActivity={
+            settings.draft
+              ? { on: settings.draft.recentActivity, change: settings.recentActivity }
+              : undefined
+          }
+          onOpenTask={(id) => {
+            settings.close();
+            selectReplay(id);
+          }}
           notifications={settingsNotifications}
           accounts={settingsAccounts}
           rules={rules}
@@ -1732,6 +1748,21 @@ function Theatre({ api }: { api: ApiClient }) {
           checkIns={
             settings.draft
               ? { value: settings.draft.checkIns, change: settings.checkIn }
+              : undefined
+          }
+          purposeCheck={
+            settings.draft
+              ? {
+                  on: settings.draft.purposeCheck,
+                  change: settings.purposeCheck,
+                  judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
+                  plan: settings.draft.choices.main?.provider === CHATGPT,
+                  addJevKey: (trigger) => {
+                    keyCapture.current = null;
+                    setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
+                    goToSettings(trigger, "keys");
+                  },
+                }
               : undefined
           }
           spent={agent.model.spend}

@@ -7,8 +7,10 @@ import {
   type CheckIns,
   DEFAULT_AGENT_LIMITS,
   freezeAutonomy,
+  isJevKey,
   type KeydRecord,
   type ModelBinding,
+  type RecentLine,
   SESSION_PAUSE_REASONS,
   SessionOrigin,
   SessionRun,
@@ -44,10 +46,15 @@ import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
+import type { RecentActivity } from "./recent-activity.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
+import { gatewayCompletion } from "./safety/judge-model.ts";
+import { jevJudge, modelJudge } from "./safety/judges.ts";
+import { judgeChoice, PurposeGate, type PurposeJudge, unreadableJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
+import { taintMemory } from "./safety/taint.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
@@ -116,7 +123,8 @@ export interface AgentRunnerDeps {
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
-  memory: Pick<MemoryStore, "readBoth">;
+  memory: Pick<MemoryStore, "bootMemory">;
+  recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
     Partial<Pick<Conversations, "title">>;
@@ -128,6 +136,8 @@ export interface AgentRunnerDeps {
   limits?: AgentLimits;
   sleep?(ms: number, signal: AbortSignal): Promise<void>;
   idleMs?: number;
+  // Asks Jev, through keyd, with the named key.
+  jev?(secretId: string, body: unknown, signal: AbortSignal): Promise<unknown>;
   codex?: {
     driver: Pick<CodexDriver, "run"> &
       Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">>;
@@ -308,6 +318,8 @@ export class AgentRunner {
           : this.deps.live.settled(current));
       }
       let selection: ModelSelection;
+      // Undefined when the saved keys couldn't be read.
+      let keys: KeydRecord[] | undefined = [];
       if (settings.main?.provider === CHATGPT) {
         for (const role of ["main", "fast", "local"] as const) {
           const choice = settings[role];
@@ -334,8 +346,16 @@ export class AgentRunner {
           model: settings.main.model,
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
+        // The plan's own models need no key; only a Jev key can check where data goes. Keys that
+        // can't be read leave the check unable to answer, never off.
+        if (settings.purposeCheck !== "off")
+          keys = await this.deps.keyd.secrets().then(
+            (all) => all.filter(isJevKey),
+            () => undefined,
+          );
+        signal?.throwIfAborted();
       } else {
-        const keys = await this.deps.keyd.secrets();
+        keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
         const roles = this.resolveRoles(keys, settings);
         // Settings saved while keyd was away reach it here, before the task's first model call.
@@ -369,6 +389,13 @@ export class AgentRunner {
           continues = undefined;
           earlier = [];
         }
+      let recent: RecentLine[] = [];
+      if (settings.recentActivity !== "off" && this.deps.recentActivity)
+        try {
+          recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
+        } catch {
+          console.error("recent activity could not be read");
+        }
       const title = (
         origin?.success && origin.data.kind === "routine" ? origin.data.name : task
       ).slice(0, 200);
@@ -386,6 +413,9 @@ export class AgentRunner {
         },
       );
       session.earlier = earlier;
+      // dot's earlier replies may repeat what a page said: they never unlock memory writes.
+      if (earlier.length) session.tainted = true;
+      session.recent = recent;
       session.actionLimit = settings.checkIns?.actions;
       const rt: Runtime = {
         session,
@@ -397,6 +427,13 @@ export class AgentRunner {
         serial: Promise.resolve(),
         ...(idle !== undefined ? { idleMs: idle } : {}),
       };
+      const judge = this.#judge(rt, settings, keys);
+      session.purpose = new PurposeGate({
+        taint: session.taint,
+        purpose: () => session.currentPurpose,
+        judge: () => judge,
+        trusted: (host) => session.taskAutonomy.trusts(host),
+      });
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
       try {
@@ -409,6 +446,9 @@ export class AgentRunner {
           ...(origin?.success ? { origin: origin.data } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
+        if (recent.length)
+          session.taint.add("memory", "recent activity", recent.map((r) => r.title).join("\n"));
         this.#safety(rt);
         this.deps.live.start(
           cellId,
@@ -433,6 +473,28 @@ export class AgentRunner {
     } finally {
       this.#starting.delete(cellId);
     }
+  }
+  #judge(
+    rt: Runtime,
+    settings: AgentSettings,
+    keys: KeydRecord[] | undefined,
+  ): PurposeJudge | undefined {
+    if (!keys) return unreadableJudge;
+    const fast =
+      rt.selection.kind === "api"
+        ? rt.selection.roles.find((role) => role.role === "fast")
+        : undefined;
+    const choice = judgeChoice(settings.purposeCheck, keys, fast !== undefined);
+    const jev = this.deps.jev;
+    if (choice?.kind === "jev" && jev)
+      return jevJudge((body, signal) => jev(choice.secretId, body, signal));
+    if (choice?.kind !== "model" || !fast) return undefined;
+    return modelJudge(
+      gatewayCompletion(
+        () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
+        () => (rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined),
+      ),
+    );
   }
   // A parked (approval, question, takeover, budget) or idle task ends here without the kill
   // switch: no revoke and no freeze. The runner's own finally block appends session.end.
@@ -1162,6 +1224,8 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
+        const memory = this.deps.memory.bootMemory();
+        taintMemory(session.taint, memory);
         const boot = BootConfig.parse({
           sessionId: session.id,
           task: session.task,
@@ -1171,12 +1235,13 @@ export class AgentRunner {
             ...(models.local ? { local: models.local } : {}),
           },
           proxy: { url: brain.proxyUrl, token: brain.proxyToken },
-          memory: this.deps.memory.readBoth(),
+          memory,
           skills,
           limits: this.deps.limits ?? rt.limits,
           resume,
           inboxAfter: session.delivered,
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
+          ...(session.recent.length ? { recent: [...session.recent] } : {}),
           ...(session.run ? { run: session.run } : {}),
         });
         session.publishBrain(generation, {

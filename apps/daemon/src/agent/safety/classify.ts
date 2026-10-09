@@ -93,6 +93,9 @@ const PATTERNS = {
     ["eval", {}],
     ["chroot", { long: /^--(?:userspec|groups)$/, operands: 1 }],
     ["exec", { value: "a" }],
+    ["busybox", {}],
+    // watch runs its words as one command string, through a shell.
+    ["watch", { value: "nq", long: /^--(?:interval|equexit)$/ }],
     [
       "xargs",
       {
@@ -262,8 +265,13 @@ function input(facts: RiskFacts): ActionClass[] {
       ? facts.tabbed === true
       : keys.some((key) => PATTERNS.tab.test(key)) &&
         keys.some((key) => !PATTERNS.tab.test(key) && !PATTERNS.modifier.test(key));
-  if (!identified)
+  if (!identified) {
+    // A name nothing confirmed can only add a check: an unclear press the model calls "Buy" asks
+    // as a purchase, while one it calls anything else stays unclear.
+    const claimed = named(target?.name ?? "");
+    if (claimed.length && facts.operation !== "type") return claimed;
     return facts.operation === "type" && !facts.newline && !tabbed ? ["computer"] : ["unknown"];
+  }
   const terminal = PATTERNS.terminal.test(identified.role ?? "");
   const submits =
     keys.some((key) => PATTERNS.enter.test(key) || endsLine(key)) ||
@@ -853,6 +861,7 @@ function program(stage: Stage): Run {
       const options = PATTERNS.wrappers.get(name);
       const rest = options && unwrap(args, options);
       if (!rest) return { words: tokens, nested };
+      if (name === "watch" && rest.length) nested.push(rest.join(" "));
       tokens = rest;
     }
   }
@@ -1114,4 +1123,36 @@ function echoed(tokens: readonly string[]): string {
   if (base(tokens[0]) === "printf") return (args.length > 1 ? args.slice(1) : args).join(" ");
   const start = args.findIndex((arg) => !/^-[neE]+$/.test(arg));
   return start < 0 ? "" : args.slice(start).join(" ");
+}
+
+export interface CommandLine {
+  readonly text: string;
+  // The words each of its stages runs, past their wrappers.
+  readonly runs: readonly (readonly string[])[];
+}
+// Every command line a command runs, read as `effects` reads them: with the lines of the command
+// strings, here-docs and piped scripts it runs, and each physical line again with # as text.
+export function commandLines(command: string, depth = 0): CommandLine[] {
+  if (depth > MAX_NESTING) return [];
+  const found: CommandLine[] = [];
+  const read = (text: string, comments: boolean) => {
+    const { lines, bodies, codes } = parse(text, comments);
+    for (const line of lines) {
+      const runs = line.stages.map(program);
+      found.push({ text: line.text, runs: runs.map((run) => run.words) });
+      runs.forEach((run, index) => {
+        for (const code of run.nested) found.push(...commandLines(code, depth + 1));
+        const next = runs[index + 1];
+        if (!next || !reads(next, depth)) return;
+        const name = base(run.words[0]);
+        const piped =
+          name === "echo" || name === "printf" ? echoed(run.words) : line.stages[index]?.input;
+        if (piped !== undefined) found.push(...commandLines(piped, depth + 1));
+      });
+    }
+    for (const code of [...codes, ...bodies]) found.push(...commandLines(code, depth + 1));
+  };
+  read(command, true);
+  for (const line of physicalLines(command)) read(line, false);
+  return found;
 }

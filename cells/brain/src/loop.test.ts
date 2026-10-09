@@ -223,6 +223,8 @@ describe("Agent", () => {
         "files",
         "find",
         "follow_up_at",
+        "people",
+        "recall",
         "remember",
         "request_takeover",
         "routine",

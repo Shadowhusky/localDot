@@ -19,6 +19,7 @@ import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
 import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
 import { type RoutineRoutesDeps, routineRoutes } from "./routines/routes.ts";
+import { type SearchRoutesDeps, searchRoutes } from "./search/routes.ts";
 import type { ManagedServiceReadiness } from "./service-readiness.ts";
 import { NDJSON_TYPE } from "./sessions/ndjson.ts";
 import { eventStreamResponse, type ReplayRoutesDeps, replayRoutes } from "./sessions/routes.ts";
@@ -37,6 +38,7 @@ export interface AppOptions {
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
   agent?: AgentRoutesDeps;
+  search?: SearchRoutesDeps;
   recorder?: Pick<Recorder, "info" | "isLive">;
   replay?: ReplayRoutesDeps;
   installCodes?: InstallCodes;
@@ -58,6 +60,7 @@ export function createApp({
   gateway,
   keys,
   agent,
+  search,
   replay,
   installCodes,
   serviceReadiness,
@@ -173,6 +176,7 @@ export function createApp({
   if (cells) cellRoutes(app, cells);
   if (keys) keyRoutes(app, keys);
   if (agent) agentRoutes(app, agent);
+  if (search) searchRoutes(app, search);
   if (routines) routineRoutes(app, routines);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (replay) replayRoutes(app, replay);

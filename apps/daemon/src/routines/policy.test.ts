@@ -97,10 +97,16 @@ describe("routine policy", () => {
       purchase: "act",
       send: "handoff",
       post: "act",
+      download_execute: "act",
       reading: "act",
       browsing: "ask",
     } as const;
-    expect(askFirst(user)).toEqual({ ...user, purchase: "ask", post: "ask" });
+    expect(askFirst(user)).toEqual({
+      ...user,
+      purchase: "ask",
+      post: "ask",
+      download_execute: "ask",
+    });
     expect(autonomyFor("act_within_rules", user)).toEqual(user);
     expect(autonomyFor("read_only", user)).toEqual(askFirst(user));
     expect(autonomyFor("ask_first", user)).toEqual(askFirst(user));

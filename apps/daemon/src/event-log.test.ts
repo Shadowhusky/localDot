@@ -70,6 +70,25 @@ const multibyte: EventDraft = {
 };
 
 describe("EventLog", () => {
+  it("looks up titles and start times, skipping unknown and deleted tasks", () => {
+    const dir = home();
+    const log = new EventLog(dir);
+    try {
+      const kept = log.createSession("Renew the car insurance");
+      const gone = log.createSession("Plan the Lisbon trip");
+      log.forget(gone);
+      const info = log.sessionInfo([kept, gone, ulid(), "not-a-ulid"]);
+      expect([...info.keys()]).toEqual([kept]);
+      expect(info.get(kept)).toEqual({
+        title: "Renew the car insurance",
+        startedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      });
+    } finally {
+      log.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("maps daemon microseconds onto a session's time base", () => {
     const clock = fakeClock(5_000_000);
     const log = new EventLog(home(), clock);

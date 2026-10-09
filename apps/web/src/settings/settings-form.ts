@@ -40,6 +40,9 @@ export interface SettingsDraft {
   spending: SpendingDraft;
   checkIns: CheckInsDraft;
   autonomy?: AutonomyPolicy;
+  // On is Auto.
+  purposeCheck: boolean;
+  recentActivity: boolean;
 }
 export const roles = ["main", "fast", "local"] as const;
 const CHECK_INS = ["steps", "failures", "actions"] as const;
@@ -72,6 +75,8 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
         return [key, { on: value !== undefined, value: String(value ?? CHECK_IN_START[key]) }];
       }),
     ) as CheckInsDraft,
+    purposeCheck: settings.purposeCheck !== "off",
+    recentActivity: settings.recentActivity !== "off",
   };
 }
 export function pickerKeys(index: ProviderIndex): PickerKey[] {
@@ -169,6 +174,10 @@ export function validateForm(
   }
   if (Object.keys(checkIns).length) document.checkIns = checkIns;
   else delete document.checkIns;
+  if (draft.purposeCheck) delete document.purposeCheck;
+  else document.purposeCheck = "off";
+  if (draft.recentActivity) delete document.recentActivity;
+  else document.recentActivity = "off";
   if (problems.length) return { ok: false, problems };
   if (
     draft.autonomy !== undefined &&

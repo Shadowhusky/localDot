@@ -149,6 +149,14 @@ export class BrainCells {
   reservedPorts(): number[] {
     return [...this.#reserved];
   }
+  // A listener port for the daemon's own judge, from the same range, never one a brain or a
+  // computer holds.
+  reservePort(): number {
+    return this.#allocate();
+  }
+  releasePort(port: number): void {
+    this.#reserved.delete(port);
+  }
   #allocate(): number {
     if (this.#sweeping || this.#sweepFailed)
       throw new BrainStateError("brain startup cleanup is incomplete");

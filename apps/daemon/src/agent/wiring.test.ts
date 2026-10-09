@@ -8,8 +8,9 @@ import {
   type CodexInstaller,
   type HarnessAvailability,
 } from "@localdot/codex-harness";
-import { ulid } from "@localdot/protocol";
+import { type ScreenName, ulid } from "@localdot/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ScreenController, ScreenScope } from "../browser/screen-controller.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
@@ -475,6 +476,41 @@ describe("ChatGPT production integration", () => {
       cellId: s.cellId,
       signal: expect.any(AbortSignal),
     });
+  });
+  it("taints the task with the screen a ChatGPT turn starts on, when the user is signed in there", async () => {
+    const f = setup();
+    f.deps.sessionScreens = {
+      install: vi.fn(),
+      manual: vi.fn(),
+      bind: vi.fn(() => ({ cellId: f.cellId })),
+    } as unknown as AgentWiringDeps["sessionScreens"];
+    await f.agent.start();
+    const observeOn = async (screen: ScreenName) => {
+      const s = f.session();
+      s.attachScreens({
+        activate: async () => ({}),
+        lease: (scope: ScreenScope) => ({
+          selection: { screen, cellId: f.cellId, geometry: null, revision: 1 },
+          signal: scope.signal,
+          check: () => scope.check(),
+          finish() {},
+        }),
+        takeOver: async () => {},
+        close: async () => {},
+      } as unknown as ScreenController);
+      const g = s.beginBrain();
+      await s.prepareScreens(g);
+      await required(m.driver).observe(s, g, g.signal);
+      return s;
+    };
+    const browser = await observeOn("browser");
+    expect(
+      f.log
+        .read(browser.id)
+        .filter((event) => event.type === "safety.taint")
+        .map((event) => event.data),
+    ).toEqual([{ kind: "screen", origin: "browser screen" }]);
+    expect((await observeOn("desktop")).taint.tainted).toBe(false);
   });
   it.each(["endpoint", "generation", "control", "keyd", "busy", "pause"])(
     "rejects a capture when %s changes while the gateway is pending",

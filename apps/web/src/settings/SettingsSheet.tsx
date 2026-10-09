@@ -34,7 +34,10 @@ import {
 import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, SpendingLimits } from "./Limits.tsx";
+import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
+import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
+import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import {
   autonomyValue,
@@ -104,7 +107,12 @@ export interface SettingsSheetProps {
     value: CheckInsDraft;
     change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
+  purposeCheck?: PurposeCheckControl;
   knowledge?: Knowledge;
+  known?: WhatDotKnows;
+  recentActivity?: RecentActivityControl;
+  // Opens an earlier task's replay, from where a fact or a person came from.
+  onOpenTask?(sessionId: string): void;
   notifications?: NotificationsView;
   accounts?: AccountsView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
@@ -413,7 +421,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     spending: !!props.spending && !chatgptMain,
     appearance: !!props.appearance,
     notifications: !!props.notifications,
-    knowledge: !!props.knowledge,
+    knowledge: !!props.knowledge && !!props.known,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
     computer:
@@ -859,6 +867,7 @@ function SectionContent({
             saved={props.savedAutonomy}
             onChange={props.onAutonomy}
           />
+          {props.purposeCheck && <PurposeCheck control={props.purposeCheck} />}
           {props.checkIns && (
             <CheckIns value={props.checkIns.value} onChange={props.checkIns.change} />
           )}
@@ -912,7 +921,14 @@ function SectionContent({
     case "notifications":
       return props.notifications ? <NotificationsSection view={props.notifications} /> : null;
     case "knowledge":
-      return props.knowledge ? <KnowledgeSection knowledge={props.knowledge} /> : null;
+      return props.knowledge && props.known ? (
+        <KnowledgeSection
+          knowledge={props.knowledge}
+          known={props.known}
+          recentActivity={props.recentActivity}
+          onOpenTask={props.onOpenTask}
+        />
+      ) : null;
     case "accounts":
       return props.accounts ? <AccountsSection accounts={props.accounts} /> : null;
     case "keys":

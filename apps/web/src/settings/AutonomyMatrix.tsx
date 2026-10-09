@@ -84,8 +84,8 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
         />
         <GroupNote>
           {active ? "" : `${CUSTOM_SUMMARY} `}
-          {checksSummary(policy)} Uploads and unclear steps always ask first, and passwords, codes
-          and card details are always yours to enter.
+          {checksSummary(policy)} Uploads always ask first, and passwords, codes and card details
+          are always yours to enter.
         </GroupNote>
       </div>
       <Disclosure summary="Choose for each kind of action" className="settings-matrix">

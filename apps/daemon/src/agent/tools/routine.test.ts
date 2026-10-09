@@ -75,6 +75,7 @@ describe("routine tool", () => {
     expect(request?.data).toMatchObject({
       actionClass: "system_settings",
       title: "Pause a routine",
+      why: "Changing when dot works needs your OK.",
       preview: { fields: expect.arrayContaining([["Routine", "Morning bills"]]) },
     });
     expect(routines.pause).toHaveBeenCalledWith(id);

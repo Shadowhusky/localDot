@@ -10,38 +10,10 @@ import {
 import { abortable } from "../agent/session.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import type { CellApi } from "../cells/orchestrator.ts";
+import { siteOf } from "../sites.ts";
 import { BrowserClient, type BrowserScope } from "./client.ts";
 
-// Country-code domains sell names one level down (example.co.uk). A short list keeps such
-// sites whole without shipping the public suffix list.
-const SECOND_LEVEL = new Set([
-  "ac",
-  "co",
-  "com",
-  "edu",
-  "gen",
-  "go",
-  "gob",
-  "gov",
-  "ltd",
-  "mil",
-  "ne",
-  "net",
-  "nic",
-  "nom",
-  "or",
-  "org",
-  "plc",
-  "sch",
-]);
 const HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/u;
-
-export function siteOf(host: string): string {
-  const labels = host.split(".");
-  const [second, top] = labels.slice(-2);
-  const keep = top?.length === 2 && SECOND_LEVEL.has(second ?? "") && labels.length > 2 ? 3 : 2;
-  return labels.slice(-keep).join(".");
-}
 
 // Groups cookie domains into the sites a person recognises; local names and addresses are left
 // out, as the web browser cannot open them.

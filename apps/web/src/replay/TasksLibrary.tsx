@@ -1,4 +1,4 @@
-import { type SessionCard, SessionIndexPage } from "@localdot/protocol";
+import { type SearchHit, type SessionCard, SessionIndexPage } from "@localdot/protocol";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -12,6 +12,7 @@ import {
 } from "react";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { dayLabel } from "../settings/memory/memory-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -21,6 +22,7 @@ import { ListRow } from "../ui/ListRow.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { Highlight } from "./Highlight.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import {
   byDay,
@@ -32,6 +34,7 @@ import {
   timeLabel,
   verdictGlyph,
 } from "./replay-view.ts";
+import type { TaskMatches } from "./search-api.ts";
 
 // A deleted row folds away over this long before the list lets it go.
 const FOLD_MS = 470;
@@ -148,16 +151,30 @@ export function TasksSearch({
   );
 }
 
-// The recordings a search and a filter leave, in the index's order.
+// The recordings a search and a filter leave, in the index's order: a title that matches, or
+// words said in the task that the search index found.
 export function shownCards(
   cards: readonly SessionCard[],
   search: string,
   filter: LibraryFilter = "all",
+  matches?: TaskMatches,
 ): SessionCard[] {
   return cards.filter(
-    (card) => inFilter(card, filter) && (search.trim() === "" || matchesSearch(card, search)),
+    (card) =>
+      inFilter(card, filter) &&
+      (search.trim() === "" || matchesSearch(card, search) || !!matches?.tasks.has(card.id)),
   );
 }
+
+const MATCH_KIND: Record<SearchHit["kind"], string> = {
+  title: "Title",
+  user: "You wrote",
+  assistant: "dot replied",
+  summary: "Result",
+  step: "Step",
+  file: "File",
+  note: "Daily note",
+};
 
 function rowButtons(list: HTMLElement): HTMLElement[] {
   return [...list.querySelectorAll<HTMLElement>(".ui-list-row-select")];
@@ -172,12 +189,14 @@ export function TaskList({
   onSelect,
   onDeleted,
   continueTask,
+  matches,
   variant = "library",
 }: {
   api: ApiClient;
   index: TaskIndex;
   search: string;
   filter?: LibraryFilter;
+  matches?: TaskMatches;
   selectedId: string | null;
   // A row was chosen: the library shows it beside the list, a phone or the rail opens it.
   onSelect(id: string): void;
@@ -194,7 +213,8 @@ export function TaskList({
   const [folding, setFolding] = useState<ReadonlySet<string>>(new Set());
   const now = useMemo(() => new Date(), []);
   const searching = search.trim() !== "" || filter !== "all";
-  const shown = shownCards(index.cards, search, filter);
+  const shown = shownCards(index.cards, search, filter, matches);
+  const notes = search.trim() && filter === "all" ? (matches?.notes ?? []) : [];
   const { more, loading, failed, loadMore, forget } = index;
 
   // A search looks through every task, so it reads the pages a scroll has not reached yet. A page
@@ -264,7 +284,7 @@ export function TaskList({
         Each task dot runs is recorded here, to watch again.
       </EmptyState>
     );
-  else if (shown.length === 0 && !(more || loading))
+  else if (shown.length === 0 && notes.length === 0 && !(more || loading || matches?.pending))
     body = (
       <EmptyState
         layout="start"
@@ -284,6 +304,7 @@ export function TaskList({
             selected={variant !== "phone" && card.id === selectedId}
             folding={folding.has(card.id)}
             continueTask={variant === "rail" ? undefined : continueTask}
+            match={matchesSearch(card, search) ? undefined : matches?.tasks.get(card.id)}
             onSelect={() => onSelect(card.id)}
             onDelete={(trigger) => ask(card, trigger)}
           />
@@ -295,6 +316,7 @@ export function TaskList({
     // biome-ignore lint/a11y/noStaticElementInteractions: the rows' own buttons take the keys; the list only moves focus between them.
     <div ref={list} className="replay-tasks" data-variant={variant} onKeyDown={onKeyDown}>
       {body}
+      {notes.length > 0 && <NoteMatches notes={notes} now={now} />}
       {index.failed && index.cards.length > 0 && (
         <p className="replay-tasks-note" role="alert">
           More recordings couldn't load.{" "}
@@ -343,6 +365,22 @@ function Day({ day, children }: { day: string; children: ReactNode }) {
   );
 }
 
+// Daily notes that match: dot's own notes, from tasks that may since have been deleted.
+function NoteMatches({ notes, now }: { notes: readonly SearchHit[]; now: Date }) {
+  return (
+    <Day day="Daily notes">
+      {notes.map((note) => (
+        <li key={`${note.at}:${note.snippet}`} className="replay-note">
+          <span className="replay-note-text">
+            <Highlight text={note.snippet} />
+          </span>
+          <span className="replay-note-day num">{dayLabel(note.at, now)}</span>
+        </li>
+      ))}
+    </Day>
+  );
+}
+
 function TaskRow({
   api,
   card,
@@ -350,6 +388,7 @@ function TaskRow({
   selected,
   folding,
   continueTask,
+  match,
   onSelect,
   onDelete,
 }: {
@@ -359,6 +398,8 @@ function TaskRow({
   selected: boolean;
   folding: boolean;
   continueTask?: ContinueTask;
+  // What the task said that a search found, when its title alone did not match.
+  match?: SearchHit;
   onSelect(): void;
   onDelete(trigger: HTMLElement): void;
 }) {
@@ -378,7 +419,15 @@ function TaskRow({
           meta={
             <>
               <StatusGlyph state={verdict.state} label={verdict.label} />
-              <span className="num">{rowMeta(card, !wide)}</span>
+              {match ? (
+                <span className="replay-match">
+                  {/* A narrow row leads with the matched word itself. */}
+                  {!phone && `${MATCH_KIND[match.kind]} · `}
+                  <Highlight text={match.snippet} before={phone ? 0 : 8} />
+                </span>
+              ) : (
+                <span className="num">{rowMeta(card, !wide)}</span>
+              )}
             </>
           }
           trailing={wide && card.durationMs !== null ? timeLabel(card.durationMs) : undefined}

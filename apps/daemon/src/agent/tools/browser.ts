@@ -8,6 +8,7 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import { DesktopdError } from "../../desktopd/client.ts";
+import { hostOf } from "../safety/purpose.ts";
 import { untrusted } from "../untrusted.ts";
 import {
   append,
@@ -16,6 +17,7 @@ import {
   screenContext,
   type ToolCallContext,
   type ToolDeps,
+  taintScreen,
   text,
 } from "./deps.ts";
 import { ELEMENTS_HEADER, elementLine, pageElement } from "./elements.ts";
@@ -85,6 +87,7 @@ export async function browserReadTool(
   const elements = page.elements ?? (desktop ? await desktopElements(deps, ctx, page.url) : []);
   ctx.check();
   ctx.session.tainted = true;
+  taintScreen(ctx, hostOf(page.url), page.text);
   ctx.session.pageRefs = {
     cellId: ctx.nativeScreen?.cellId ?? ctx.session.cellId,
     ...(browser ? { tabId: browser.tabId } : {}),

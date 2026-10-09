@@ -140,6 +140,39 @@ const titles: Record<ActionClass, string> = {
   credentials: "Enter a password or code yourself",
   unknown: "Unclear step",
 };
+// Acting as the user, and a step dot can't read, always ask; anything else asks only because the
+// user's settings say so.
+const HARD_WHY: Partial<Record<ActionClass, string>> = {
+  purchase: "Paying always needs your OK.",
+  send: "Sending as you always needs your OK.",
+  post: "Posting as you always needs your OK.",
+  delete: "Deleting your online data always needs your OK.",
+  system_settings: "Changing your account always needs your OK.",
+  upload: "Sharing your files always needs your OK.",
+  credentials: "Using a password or code always needs your OK.",
+  unknown: "dot can't tell for sure what this step does, so it checks with you.",
+};
+const WORK: Readonly<Record<ActionClass, string>> = {
+  reading: "reading",
+  browsing: "opening websites",
+  computer: "steps on its computer",
+  purchase: "paying",
+  send: "sending",
+  post: "posting",
+  delete: "deleting",
+  download_execute: "running downloaded programs",
+  system_settings: "changing accounts",
+  memory: "saving to memory",
+  upload: "uploading files",
+  credentials: "using passwords",
+  unknown: "unclear steps",
+};
+export function askWhy(actionClass: ActionClass, facts: Pick<RiskFacts, "operation">): string {
+  if (actionClass === "unknown" && facts.operation === "navigate")
+    return "This address isn't a plain web page, so dot checks with you before opening it.";
+  if (facts.operation === "schedule") return "Changing when dot works needs your OK.";
+  return HARD_WHY[actionClass] ?? `Your settings ask before ${WORK[actionClass]}.`;
+}
 export function buildApprovalCard(
   facts: RiskFacts,
   decision: RiskDecision,
@@ -159,6 +192,7 @@ export function buildApprovalCard(
     actionClass: decision.actionClass,
     risk: decision.risk === "high" ? "high" : "medium",
     title: facts.schedule?.title ?? titles[decision.actionClass],
+    why: askWhy(decision.actionClass, facts),
     fields,
   });
 }

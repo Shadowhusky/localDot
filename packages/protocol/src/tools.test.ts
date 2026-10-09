@@ -34,6 +34,8 @@ describe("the v1 tool table", () => {
       "ask_user",
       "request_takeover",
       "remember",
+      "recall",
+      "people",
       "done",
       "routine",
       "follow_up_at",
@@ -49,6 +51,26 @@ describe("the v1 tool table", () => {
       expect(isToolName(name)).toBe(false);
     }
     expect(Object.keys(TOOL_INPUTS).sort()).toEqual([...TOOL_NAMES].sort());
+  });
+
+  it("takes daily notes, bounded recall and flat people lookups", () => {
+    expect(TOOL_INPUTS.remember.safeParse({ file: "notes", op: "append", text: "x" }).success).toBe(
+      true,
+    );
+    expect(
+      TOOL_INPUTS.remember.safeParse({ file: "notes/2026-10-08.md", op: "append", text: "x" })
+        .success,
+    ).toBe(false);
+    expect(TOOL_INPUTS.recall.safeParse({ query: "x", limit: 8 }).success).toBe(true);
+    expect(TOOL_INPUTS.recall.safeParse({ query: "x", limit: 9 }).success).toBe(false);
+    expect(TOOL_INPUTS.recall.safeParse({ query: "" }).success).toBe(false);
+    expect(TOOL_INPUTS.people.safeParse({ op: "find", query: "Henry" }).success).toBe(true);
+    expect(
+      TOOL_INPUTS.people.safeParse({ op: "save", name: "Henry", app: "WeChat", handle: "henry_l" })
+        .success,
+    ).toBe(true);
+    expect(TOOL_INPUTS.people.safeParse({ op: "delete", name: "Henry" }).success).toBe(false);
+    expect(JSON.stringify(z.toJSONSchema(TOOL_INPUTS.people))).not.toMatch(/anyOf|oneOf/);
   });
 
   it("gives the generic computer tool a JSON Schema Gemini accepts: arrays, never tuples", () => {

@@ -2,6 +2,8 @@ import {
   CLAUDE_PLAN_REFUSAL,
   claudePlanToken,
   type HTTP_FORMATS,
+  JEV_HOST,
+  JEV_SECRET_ID,
   type LLM_PROVIDERS,
   PRINTABLE_ASCII,
   RESERVED_SECRET_IDS,
@@ -28,6 +30,14 @@ export const EMPTY_DRAFT: KeyDraft = {
   provider: "anthropic",
   baseURL: "",
   hosts: "",
+  header: "Authorization",
+  format: "bearer",
+};
+
+// A Jev key, for the purpose check: a web API key sent to Jev's host as a bearer token.
+export const JEV_KEY: Pick<KeyDraft, "id" | "hosts" | "header" | "format"> = {
+  id: JEV_SECRET_ID,
+  hosts: JEV_HOST,
   header: "Authorization",
   format: "bearer",
 };
