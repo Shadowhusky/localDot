@@ -258,4 +258,20 @@ describe("DotView", () => {
     expect(root.childElementCount).toBe(0);
     expect(root.dataset.skin).toBeUndefined();
   });
+
+  it("tells the loop how long a calm dot can wait, and draws a prop's loops at half rate", () => {
+    const { view } = mount({ size: 96 });
+    const waits: number[] = [];
+    drive(view, T0, T0 + 4000);
+    drive(view, clock, clock + 1000, (t) => waits.push(view.frame(t)));
+    expect(Math.max(...waits)).toBeGreaterThan(16);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(33);
+
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    view.setTool("typing");
+    drive(view, clock, clock + 2000);
+    const looping: number[] = [];
+    drive(view, clock, clock + 500, (t) => looping.push(view.frame(t)));
+    expect(looping.filter((w) => w > 0).length).toBeGreaterThan(looping.length / 3);
+  });
 });

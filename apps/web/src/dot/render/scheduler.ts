@@ -2,15 +2,20 @@ export interface Frameable {
   readonly root: Element;
   // Cleared while the view is scrolled away or hidden.
   visible: boolean;
-  frame(t: number): void;
+  // Renders if it needs to, and says how long until it next needs a frame (0 or nothing: the next).
+  frame(t: number): number | undefined;
 }
 
 // One requestAnimationFrame loop for every live dot. A view decides on each frame whether it needs
-// to render; views off screen and hidden tabs get no frames at all.
+// to render; views off screen and hidden tabs get no frames at all, and while every view is calm
+// the loop sleeps until the first one needs a frame again.
 const views = new Set<Frameable>();
 let raf = 0;
+let sleeping: ReturnType<typeof setTimeout> | undefined;
 let observer: IntersectionObserver | null = null;
 let listening = false;
+// A shorter wait than this is not worth a timer.
+const SLEEP_MIN_MS = 20;
 
 export const now = (): number => performance.now();
 
@@ -37,10 +42,13 @@ export function removeView(view: Frameable): void {
   observer?.unobserve(view.root);
 }
 
-function kick(): void {
+// Something changed: the views get the next display frame.
+export function kick(): void {
   if (raf || document.hidden) return;
   for (const view of views) {
     if (view.visible) {
+      clearTimeout(sleeping);
+      sleeping = undefined;
       raf = requestAnimationFrame(frame);
       return;
     }
@@ -51,6 +59,8 @@ function frame(): void {
   raf = 0;
   if (document.hidden) return;
   const t = now();
-  for (const view of views) if (view.visible) view.frame(t);
-  kick();
+  let wait = Number.POSITIVE_INFINITY;
+  for (const view of views) if (view.visible) wait = Math.min(wait, view.frame(t) ?? 0);
+  if (wait < SLEEP_MIN_MS) kick();
+  else if (Number.isFinite(wait)) sleeping = setTimeout(kick, wait);
 }

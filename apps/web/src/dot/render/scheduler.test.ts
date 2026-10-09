@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addView, removeView } from "./scheduler.ts";
+import { addView, kick, removeView } from "./scheduler.ts";
 
 type Report = (entries: Pick<IntersectionObserverEntry, "target" | "isIntersecting">[]) => void;
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("scheduler", () => {
@@ -60,5 +61,35 @@ describe("scheduler", () => {
     expect(view.frame).toHaveBeenCalledTimes(3);
     expect(pending).toHaveLength(0);
     delete (document as { hidden?: boolean }).hidden;
+  });
+
+  it("sleeps while every view is calm, until the first needs a frame or something changes", () => {
+    vi.useFakeTimers();
+    const pending: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => pending.push(cb));
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const flush = () => {
+      for (const cb of pending.splice(0)) cb(0);
+    };
+    let wait = 0;
+    const view = { root: document.createElement("span"), visible: true, frame: vi.fn(() => wait) };
+    addView(view);
+    flush();
+    expect(pending).toHaveLength(1);
+
+    wait = 120;
+    flush();
+    expect(view.frame).toHaveBeenCalledTimes(2);
+    expect(pending).toHaveLength(0);
+    vi.advanceTimersByTime(119);
+    expect(pending).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(pending).toHaveLength(1);
+
+    flush();
+    expect(pending).toHaveLength(0);
+    kick();
+    expect(pending).toHaveLength(1);
+    removeView(view);
   });
 });
