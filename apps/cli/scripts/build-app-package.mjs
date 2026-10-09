@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   KEYD_IDENTIFIER,
+  KEYD_NATIVE_IDENTIFIER,
   KEYD_PACKAGE,
   PackagePath,
   ReleaseManifest,
@@ -16,7 +17,7 @@ import {
   MAX_PACKAGE_FILES,
   PACK_ALLOWLIST,
 } from "../../../scripts/check-pack.mjs";
-import { verifyReleaseKeyd } from "../src/install/keyd-verification.ts";
+import { verifyReleaseKeyd, verifyReleaseKeydNative } from "../src/install/keyd-verification.ts";
 import { nativeDependencyPlan } from "../src/install/native-plan.ts";
 import { KEYD_RELEASE_TEAM_ID } from "../src/install/release-trust.ts";
 import { verifyStagedRelease } from "../src/install/staged-release.ts";
@@ -116,13 +117,18 @@ async function pathsIn(root) {
  * native installation and installed acceptance are separate gates. verify is an offline test seam;
  * there is no CLI or environment override for the production signing identity.
  */
-export async function buildAppPackage(input, verify = verifyReleaseKeyd) {
-  const { output, runtimeDirectory, keydBinary, commit } = input;
+export async function buildAppPackage(
+  input,
+  verify = verifyReleaseKeyd,
+  verifyNative = verifyReleaseKeydNative,
+) {
+  const { output, runtimeDirectory, keydBinary, keydNativeBinary, commit } = input;
   const runtime = structuredClone(input.runtimeReceipt),
     images = structuredClone(input.images);
   const out = resolve(output),
     source = resolve(runtimeDirectory),
-    binary = resolve(keydBinary);
+    binary = resolve(keydBinary),
+    nativeBinary = resolve(keydNativeBinary);
   const version = runtime?.version;
   // Validate untrusted build descriptions before any copying or executable verification.
   const base = ReleaseManifest.parse({
@@ -138,6 +144,11 @@ export async function buildAppPackage(input, verify = verifyReleaseKeyd) {
       sha256: "0".repeat(64),
       identifier: KEYD_IDENTIFIER,
       teamId: KEYD_RELEASE_TEAM_ID,
+      native: {
+        path: "bin/keyd-native",
+        sha256: "0".repeat(64),
+        identifier: KEYD_NATIVE_IDENTIFIER,
+      },
     },
   });
   if (
@@ -192,8 +203,13 @@ export async function buildAppPackage(input, verify = verifyReleaseKeyd) {
     lock.toString("utf8"),
     version,
   );
-  const keyd = { ...base.keyd, sha256: hash(await bytesAt(binary, 64 * 1024 * 1024)) };
+  const keyd = {
+    ...base.keyd,
+    sha256: hash(await bytesAt(binary, 64 * 1024 * 1024)),
+    native: { ...base.keyd.native, sha256: hash(await bytesAt(nativeBinary, 64 * 1024 * 1024)) },
+  };
   await verify(binary, keyd, AbortSignal.timeout(30000));
+  await verifyNative(nativeBinary, keyd, AbortSignal.timeout(30000));
   // No input package hook, optional dependency or incidental metadata is promoted here.
   const packageJSON = {
     name: "localdot",
@@ -277,6 +293,7 @@ export async function buildAppPackage(input, verify = verifyReleaseKeyd) {
   };
   await verifyStagedRelease(out, metadataDigests, AbortSignal.timeout(30000));
   await verify(binary, keyd, AbortSignal.timeout(30000));
+  await verifyNative(nativeBinary, keyd, AbortSignal.timeout(30000));
   return {
     output: out,
     version,

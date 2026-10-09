@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { TufVersions } from "../../../../packages/protocol/src/install-update.ts";
 import {
   KEYD_IDENTIFIER,
+  KEYD_NATIVE_IDENTIFIER,
   KEYD_PACKAGE,
   type ReleaseManifest,
 } from "../../../../packages/protocol/src/release.ts";
@@ -15,6 +16,7 @@ import { verifyReleaseKeyd } from "./keyd-verification.ts";
 import { privateRecordStore } from "./private-record.ts";
 import { registryResourceURL } from "./registry-download.ts";
 import { KEYD_RELEASE_TEAM_ID } from "./release-trust.ts";
+import { KEYD_EXECUTABLES } from "./stage-keyd.ts";
 import { claimedReleaseCommit } from "./verified-download.ts";
 import {
   assertTrustFloors,
@@ -23,7 +25,7 @@ import {
 } from "./verify-release.ts";
 
 const fail = () => new Error("The installation lock helper could not be authenticated.");
-const required = ["package.json", "bin/keyd", "LICENSE", "THIRD-PARTY.md"];
+const required = ["package.json", ...KEYD_EXECUTABLES, "LICENSE", "THIRD-PARTY.md"];
 
 /** Valid only inside the awaited lock callback. Runtime cleanup must use this authenticated
  * bootstrap helper, not an executable from a possibly damaged installed release. */
@@ -73,7 +75,7 @@ export async function withBootstrapInstallLock<T>(
         )
           throw fail();
         for (const [name, file] of Object.entries(extracted.files))
-          if (name !== "bin/keyd" && (file.bytes > 1024 * 1024 || file.mode !== 0o600))
+          if (!KEYD_EXECUTABLES.includes(name) && (file.bytes > 1024 * 1024 || file.mode !== 0o600))
             throw fail();
         const raw = await readFile(join(extracted.root, "package.json"));
         const metadata: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
@@ -102,14 +104,21 @@ export async function withBootstrapInstallLock<T>(
           ].some((field) => field in metadata)
         )
           throw fail();
-        const binary = extracted.files["bin/keyd"];
-        if (!binary) throw fail();
+        const binary = extracted.files["bin/keyd"],
+          launcher = extracted.files["bin/keyd-native"];
+        if (!binary || !launcher) throw fail();
+        // The lock runs keyd alone; keyd-native is verified where the release is staged.
         const expected: ReleaseManifest["keyd"] = Object.freeze({
           package: KEYD_PACKAGE,
           path: "bin/keyd",
           sha256: binary.sha256,
           identifier: KEYD_IDENTIFIER,
           teamId: KEYD_RELEASE_TEAM_ID,
+          native: Object.freeze({
+            path: "bin/keyd-native",
+            sha256: launcher.sha256,
+            identifier: KEYD_NATIVE_IDENTIFIER,
+          }),
         });
         await verifyReleaseKeyd(join(extracted.root, "bin/keyd"), expected, active);
         const copied = join(directory, "helper");

@@ -26,6 +26,16 @@ describe("release manifest", () => {
     ],
     ["a short keyd hash", (m: SampleManifest) => (m.keyd.sha256 = "abc")],
     ["another keyd identifier", (m: SampleManifest) => (m.keyd.identifier = "com.evil.keyd")],
+    [
+      "keyd-native signed as keyd",
+      (m: SampleManifest) => (m.keyd.native.identifier = "dev.localdot.keyd"),
+    ],
+    ["keyd-native elsewhere", (m: SampleManifest) => (m.keyd.native.path = "bin/keyd")],
+    ["a short keyd-native hash", (m: SampleManifest) => (m.keyd.native.sha256 = "abc")],
+    [
+      "no keyd-native",
+      (m: SampleManifest) => delete (m.keyd as Partial<SampleManifest["keyd"]>).native,
+    ],
     ["an empty file list", (m: SampleManifest) => (m.files = {})],
     [
       "a swapped image role",

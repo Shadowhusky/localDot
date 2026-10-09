@@ -19,9 +19,11 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { ReleaseManifest } from "../../../../packages/protocol/src/release.ts";
 import { sampleManifest } from "../../../../packages/protocol/src/testing/sample-release.ts";
 import {
+  keydNativeRequirement,
   keydRequirement,
   systemKeydSignatureCheck,
   verifyKeydExecutable,
+  verifyKeydNativeExecutable,
   verifyReleaseKeyd,
 } from "./keyd-verification.ts";
 import { KEYD_RELEASE_TEAM_ID } from "./release-trust.ts";
@@ -50,9 +52,11 @@ async function fixture() {
   body.writeUInt32LE(0x0100000c, 4);
   body.writeUInt32LE(2, 12);
   await writeFile(path, body, { mode: 0o700 });
+  const sample = sampleManifest().keyd;
   const expected = ReleaseManifest.shape.keyd.parse({
-    ...sampleManifest().keyd,
+    ...sample,
     sha256: hash(body),
+    native: { ...sample.native, sha256: hash(body) },
   });
   return { root, path, body, expected };
 }
@@ -70,6 +74,28 @@ it("binds bytes, arm64 executable shape, release team and exact Developer ID req
   expect(requirement).toContain("1.2.840.113635.100.6.2.6");
   expect(requirement).toContain("1.2.840.113635.100.6.1.13");
   expect(requirement).toContain('certificate leaf[subject.OU] = "TESTTEAM01"');
+  // An earlier keyd, which could start a program its caller named, lacks the generation.
+  expect(requirement).toContain('info [KeydGeneration] >= "2"');
+});
+it("binds keyd-native to its own pin and signing identifier", async () => {
+  const f = await fixture(),
+    signature = vi.fn(async () => {});
+  const result = await verifyKeydNativeExecutable(f.path, f.expected, TEAM, signal(), signature);
+  expect(result.identifier).toBe("dev.localdot.keyd.native");
+  const requirement = keydNativeRequirement(TEAM);
+  expect(signature).toHaveBeenCalledWith(f.path, requirement, expect.any(AbortSignal));
+  expect(requirement).toContain('identifier "dev.localdot.keyd.native"');
+  expect(requirement).toContain('certificate leaf[subject.OU] = "TESTTEAM01"');
+  expect(requirement).not.toContain("KeydGeneration");
+  // keyd's pin never vouches for keyd-native, nor the other way round.
+  f.expected.native.sha256 = "a".repeat(64);
+  await expect(
+    verifyKeydNativeExecutable(f.path, f.expected, TEAM, signal(), signature),
+  ).rejects.toThrow("release verification");
+  await expect(
+    verifyKeydExecutable(f.path, f.expected, TEAM, signal(), signature),
+  ).resolves.toBeTruthy();
+  expect(signature).toHaveBeenCalledTimes(2);
 });
 it.each([null, "", "BAD", 'A" or always', "testteam01"])(
   "fails closed with unconfigured/invalid trusted team %s",
@@ -166,13 +192,13 @@ it("propagates cancellation without exposing diagnostic content", async () => {
   ).rejects.toThrow(/^The staged keyd executable did not pass release verification\.$/);
 });
 it("has valid native requirement syntax and rejects the real locally built keyd's non-Developer-ID signature", async () => {
-  const requirement = keydRequirement(TEAM);
-  await expect(
-    promisify(execFile)("/usr/bin/csreq", ["-r", `=${requirement}`, "-t"], {
-      timeout: 5_000,
-      maxBuffer: 64 * 1024,
-    }),
-  ).resolves.toBeTruthy();
+  for (const requirement of [keydRequirement(TEAM), keydNativeRequirement(TEAM)])
+    await expect(
+      promisify(execFile)("/usr/bin/csreq", ["-r", `=${requirement}`, "-t"], {
+        timeout: 5_000,
+        maxBuffer: 64 * 1024,
+      }),
+    ).resolves.toBeTruthy();
   if (!binary) throw new Error("Missing test executable");
   const path = binary.path;
   const expected = ReleaseManifest.shape.keyd.parse({

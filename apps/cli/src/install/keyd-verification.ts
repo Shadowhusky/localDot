@@ -4,7 +4,11 @@ import { type BigIntStats, constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import { promisify } from "node:util";
-import { KEYD_IDENTIFIER, ReleaseManifest } from "../../../../packages/protocol/src/release.ts";
+import {
+  KEYD_IDENTIFIER,
+  KEYD_NATIVE_IDENTIFIER,
+  ReleaseManifest,
+} from "../../../../packages/protocol/src/release.ts";
 import { KEYD_RELEASE_TEAM_ID } from "./release-trust.ts";
 
 const execute = promisify(execFile);
@@ -31,18 +35,40 @@ export function verifyReleaseKeyd(
   return verifyKeydExecutable(path, expected, KEYD_RELEASE_TEAM_ID, signal);
 }
 
+/** Production entry point for keyd-native, the task launcher the keyd package carries. */
+export function verifyReleaseKeydNative(
+  path: string,
+  expected: ReleaseManifest["keyd"],
+  signal: AbortSignal,
+) {
+  return verifyKeydNativeExecutable(path, expected, KEYD_RELEASE_TEAM_ID, signal);
+}
+
 /** Only this build's trusted signing identity may supply teamId, never staged release metadata.
  * Apple TN3127: Developer ID CA + Developer ID Application leaf, Apple anchor, team, identifier.
  */
-export function keydRequirement(teamId: string): string {
+function developerIdRequirement(identifier: string, teamId: string): string[] {
   if (typeof teamId !== "string" || !TEAM_ID.test(teamId)) throw fail();
   return [
     "anchor apple generic",
-    `identifier "${KEYD_IDENTIFIER}"`,
+    `identifier "${identifier}"`,
     "certificate 1[field.1.2.840.113635.100.6.2.6] exists",
     "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
     `certificate leaf[subject.OU] = "${teamId}"`,
-  ].join(" and ");
+  ];
+}
+
+/** keyd also carries its Keychain generation (keyd/internal/keydinfo); an earlier keyd, which
+ * could start a program its caller named as keyd's child, does not meet this.
+ */
+export function keydRequirement(teamId: string): string {
+  return [...developerIdRequirement(KEYD_IDENTIFIER, teamId), 'info [KeydGeneration] >= "2"'].join(
+    " and ",
+  );
+}
+
+export function keydNativeRequirement(teamId: string): string {
+  return developerIdRequirement(KEYD_NATIVE_IDENTIFIER, teamId).join(" and ");
 }
 
 /** Verify only: never sign, execute, notarize, or modify the candidate. */
@@ -96,18 +122,58 @@ function same(a: BigIntStats, b: BigIntStats): boolean {
  * staging ownership is required throughout verification and subsequent execution/copying. This
  * establishes the keyd check only; archive provenance, dependencies and image pins are separate.
  */
-export async function verifyKeydExecutable(
+export function verifyKeydExecutable(
   path: string,
   expectedInput: ReleaseManifest["keyd"],
   trustedTeamId: string | null,
   signal: AbortSignal,
   signatureCheck: KeydSignatureCheck = systemKeydSignatureCheck,
+) {
+  return verifySignedExecutable(
+    path,
+    expectedInput,
+    (expected) => ({ sha256: expected.sha256, identifier: KEYD_IDENTIFIER }),
+    keydRequirement,
+    trustedTeamId,
+    signal,
+    signatureCheck,
+  );
+}
+
+/** The same checks for keyd-native, against its own pin and signing identifier. */
+export function verifyKeydNativeExecutable(
+  path: string,
+  expectedInput: ReleaseManifest["keyd"],
+  trustedTeamId: string | null,
+  signal: AbortSignal,
+  signatureCheck: KeydSignatureCheck = systemKeydSignatureCheck,
+) {
+  return verifySignedExecutable(
+    path,
+    expectedInput,
+    (expected) => ({ sha256: expected.native.sha256, identifier: KEYD_NATIVE_IDENTIFIER }),
+    keydNativeRequirement,
+    trustedTeamId,
+    signal,
+    signatureCheck,
+  );
+}
+
+async function verifySignedExecutable(
+  path: string,
+  expectedInput: ReleaseManifest["keyd"],
+  pin: (expected: ReleaseManifest["keyd"]) => { sha256: string; identifier: string },
+  requirement: (teamId: string) => string,
+  trustedTeamId: string | null,
+  signal: AbortSignal,
+  signatureCheck: KeydSignatureCheck,
 ): Promise<{ path: string; sha256: string; teamId: string; identifier: string }> {
   signal.throwIfAborted();
   if (typeof trustedTeamId !== "string" || !TEAM_ID.test(trustedTeamId))
     throw new Error("This build has no trusted release signing identity configured.");
   try {
     const expected = ReleaseManifest.shape.keyd.parse(expectedInput);
+    const { sha256, identifier } = pin(expected);
     if (
       expected.teamId !== trustedTeamId ||
       !isAbsolute(path) ||
@@ -144,19 +210,19 @@ export async function verifyKeydExecutable(
         position += read.bytesRead;
       }
       if (
-        hash.digest("hex") !== expected.sha256 ||
+        hash.digest("hex") !== sha256 ||
         !same(before, await handle.stat({ bigint: true })) ||
         !same(before, await lstat(path, { bigint: true }))
       )
         throw fail();
-      await signatureCheck(path, keydRequirement(trustedTeamId), signal);
+      await signatureCheck(path, requirement(trustedTeamId), signal);
       signal.throwIfAborted();
       if (
         !same(before, await handle.stat({ bigint: true })) ||
         !same(before, await lstat(path, { bigint: true }))
       )
         throw fail();
-      return { path, sha256: expected.sha256, teamId: trustedTeamId, identifier: KEYD_IDENTIFIER };
+      return { path, sha256, teamId: trustedTeamId, identifier };
     } finally {
       await handle.close();
     }
