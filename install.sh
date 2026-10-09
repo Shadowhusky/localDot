@@ -495,8 +495,9 @@ build_keyd() {
   step "Building the key service"
   mkdir -p "$PREFIX/bin"
   (cd "$APP/keyd" && GOTOOLCHAIN=local GOPATH="$RUNTIME/gopath" GOCACHE="$RUNTIME/gocache" \
-    GOFLAGS=-modcacherw "$GO_DIR/bin/go" build -trimpath -o "$binary.new" ./cmd/keyd) ||
+    GOFLAGS=-modcacherw "$GO_DIR/bin/go" build -trimpath -buildvcs=false -o "$binary.new" ./cmd/keyd) ||
     die "Building the key service failed; see the messages above."
+  # The same key service from a newer version is left running, so its vault stays unlocked.
   if [ -x "$binary" ] && cmp -s "$binary" "$binary.new"; then
     rm -f "$binary.new"
   else

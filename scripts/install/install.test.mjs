@@ -229,7 +229,9 @@ chmod 755 "$script_dir/pnpm"`,
 ${logged("go")}
 previous=""
 for arg; do [ "$previous" != -o ] || out=$arg; previous=$arg; done
-echo "keyd build \${STUB_KEYD_BUILD:-1}" > "$out"
+# Like Go, stamp the checkout's commit into the binary unless told not to.
+case " $* " in *" -buildvcs=false "*) stamp="" ;; *) stamp=$(git rev-parse HEAD) ;; esac
+echo "keyd build \${STUB_KEYD_BUILD:-1} $stamp" > "$out"
 chmod 755 "$out"`,
   );
 
