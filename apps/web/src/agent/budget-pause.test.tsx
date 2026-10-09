@@ -197,7 +197,9 @@ it("a Pause held at the task's spending limit offers the budget form, then Conti
 it("a Pause held at the shared daily limit explains it and keeps Continue available", async () => {
   const fake = open("day");
   const recovery = await screen.findByRole("region", { name: "Task recovery" });
-  expect(recovery.textContent).toContain("today's is used up. It resets at midnight");
+  expect(recovery.textContent).toContain(
+    "Today's spending limit is used up. All tasks share it, and it resets at midnight.",
+  );
   expect(screen.queryByRole("form", { name: "Raise the spending limit" })).toBeNull();
   expect(
     screen.getAllByRole("button", { name: /^Continue/ }),
