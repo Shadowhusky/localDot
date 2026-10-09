@@ -229,3 +229,23 @@ func TestSecretServiceShorterValueLeavesNoOldParts(t *testing.T) {
 		t.Fatalf("Get = %q, %v", got, err)
 	}
 }
+
+// A program planted on PATH never stands in for the system's secret-tool or systemd-creds.
+func TestSystemProgramIgnoresPath(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"localdot-planted-tool", "sh"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if found, err := exec.LookPath("localdot-planted-tool"); err != nil || filepath.Dir(found) != dir {
+		t.Fatalf("the planted program is not first on PATH: %q %v", found, err)
+	}
+	if got := systemProgram("localdot-planted-tool"); got != "" {
+		t.Fatalf("found the planted program: %q", got)
+	}
+	if got := systemProgram("sh"); got != "/usr/bin/sh" && got != "/bin/sh" {
+		t.Fatalf("sh resolved to %q", got)
+	}
+}
