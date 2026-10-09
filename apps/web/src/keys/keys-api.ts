@@ -17,6 +17,8 @@ export interface KeydHealth {
   sealKey?: string;
   audit?: { ok: boolean; error?: string };
   hairpin?: HairpinGuard;
+  // How many keys need entering again.
+  reenter?: number;
   error?: string;
 }
 
@@ -28,8 +30,12 @@ export interface KeyRecord {
   hosts?: string[] | null;
   header?: string;
   format?: string;
+  methods?: string[] | null;
+  paths?: string[] | null;
   createdAt: string;
   updatedAt: string;
+  // The stored value is gone or can't be read as stored, so it has to be entered again.
+  reenter?: boolean;
 }
 
 export type Seal = (publicKey: string, binding: SecretBinding, value: string) => Promise<Sealed>;

@@ -2,7 +2,9 @@ import { bindingJson, LLM_PROVIDERS, SecretBinding } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import {
   bindingOf,
+  bindingOfRecord,
   describeKey,
+  destinationOf,
   EMPTY_DRAFT,
   type KeyDraft,
   needsBaseURL,
@@ -292,5 +294,54 @@ describe("suggestedId", () => {
   });
   it("never suggests a name kept for local servers", () => {
     expect(suggestedId(draft({ kind: "http", hosts: "ollama.example" }), [])).toBe("ollama-2");
+  });
+});
+
+describe("a saved key's binding", () => {
+  const at = { createdAt: "t", updatedAt: "t" };
+  it("is the binding the key was stored with, to store it again", () => {
+    expect(
+      bindingOfRecord({
+        id: "gateway",
+        kind: "llm",
+        provider: "openai-compatible",
+        baseURL: "https://api.example.com/v1",
+        ...at,
+      }),
+    ).toEqual({
+      id: "gateway",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://api.example.com/v1",
+    });
+    expect(
+      bindingOfRecord({
+        id: "weather",
+        kind: "http",
+        hosts: ["api.weather.example"],
+        header: "X-Api-Key",
+        format: "raw",
+        methods: null,
+        paths: [],
+        ...at,
+      }),
+    ).toEqual({
+      id: "weather",
+      kind: "http",
+      hosts: ["api.weather.example"],
+      header: "X-Api-Key",
+      format: "raw",
+    });
+    expect(bindingOfRecord({ id: "odd", kind: "llm", provider: "nobody", ...at })).toBeUndefined();
+  });
+
+  it("says where the key goes", () => {
+    expect(destinationOf({ kind: "llm", provider: "deepseek" })).toBe("DeepSeek");
+    expect(
+      destinationOf({ kind: "llm", provider: "azure", baseURL: "https://x.openai.azure.com/" }),
+    ).toBe("x.openai.azure.com");
+    expect(destinationOf({ kind: "http", hosts: ["a.example", "b.example"] })).toBe(
+      "a.example, b.example",
+    );
   });
 });

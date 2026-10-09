@@ -101,6 +101,138 @@ function chooseProvider(text: string) {
   fireEvent.keyDown(search, { key: "Enter" });
 }
 
+describe("a key to enter again", () => {
+  const deepseek: KeyRecord = {
+    id: "deepseek",
+    kind: "llm",
+    provider: "deepseek",
+    createdAt: "2026-10-01T09:00:00Z",
+    updatedAt: "2026-10-01T09:00:00Z",
+    reenter: true,
+  };
+  const scoped: KeyRecord = {
+    ...weather,
+    id: "forecast",
+    methods: ["GET"],
+    paths: ["/v1/forecast"],
+    reenter: true,
+  };
+
+  it("says the key needs re-entering in its row, with Re-enter under it and Remove kept", () => {
+    const reenter = vi.fn();
+    render(
+      <KeyList active keys={[deepseek, anthropic]} remove={async () => {}} reenter={reenter} />,
+    );
+    const row = screen.getByText("deepseek").closest("li") as HTMLElement;
+    expect(row.hasAttribute("data-reenter")).toBe(true);
+    expect(within(row).getByText("Needs re-entering")).toBeTruthy();
+    expect(row.textContent).not.toMatch(/Added/);
+    expect(within(row).getByRole("button", { name: "Remove deepseek" })).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Re-enter deepseek" }));
+    expect(reenter).toHaveBeenCalledWith(deepseek);
+    const other = screen.getByText("anthropic").closest("li") as HTMLElement;
+    expect(within(other).queryByText("Needs re-entering")).toBeNull();
+    expect(within(other).queryByRole("button", { name: /Re-enter/ })).toBeNull();
+  });
+
+  it("asks only for the key, then stores it under the same name and destination", async () => {
+    const save = vi.fn(async (_binding: unknown, _value: string) => ({ restart: false }));
+    render(
+      <KeysSheet open keys={controller({ keys: [deepseek, scoped], save })} onClose={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Re-enter forecast" }));
+    const form = screen.getByRole("form", { name: "Re-enter forecast" });
+    expect(document.activeElement).toBe(field("Key"));
+    expect(form.textContent).toContain("Sent only to api.weather.example, as before.");
+    expect(within(form).queryByLabelText(LABEL)).toBeNull();
+    expect(within(form).queryByLabelText("Hosts")).toBeNull();
+    expect(within(form).queryByRole("radio", { name: "Web API" })).toBeNull();
+    type("Key", " sk-forecast-entered-again ");
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save).toHaveBeenCalledWith(
+      {
+        id: "forecast",
+        kind: "http",
+        hosts: ["api.weather.example"],
+        header: "Authorization",
+        format: "bearer",
+        methods: ["GET"],
+        paths: ["/v1/forecast"],
+      },
+      "sk-forecast-entered-again",
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("form", { name: "Re-enter forecast" })).toBeNull(),
+    );
+  });
+
+  it("opens the form for the key a task asked for, and Cancel folds it away", () => {
+    render(
+      <KeysSheet
+        open
+        keys={controller({ keys: [deepseek] })}
+        onClose={() => {}}
+        reenter={{ requestId: 1, id: "deepseek" }}
+      />,
+    );
+    const form = screen.getByRole("form", { name: "Re-enter deepseek" });
+    expect(form.textContent).toContain("Sent only to DeepSeek, as before.");
+    expect(screen.queryByRole("form", { name: "Add a key" })).toBeNull();
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("form", { name: "Re-enter deepseek" })).toBeNull();
+  });
+
+  it("puts the amber point on the Keys button and names why", () => {
+    const status = keyStatus({ ...HEALTHY, reenter: 1 });
+    expect(status).toEqual({
+      label: "Keys",
+      state: "reenter",
+      spoken: "Keys, a key needs re-entering",
+    });
+    render(
+      <TopBar
+        title="t"
+        mode="watch"
+        replayEnabled={false}
+        onMode={() => {}}
+        keys={status}
+        keysOpen={false}
+        onKeys={() => {}}
+        settingsOpen={false}
+        onSettings={() => {}}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Keys, a key needs re-entering" });
+    expect(button.querySelector(".ui-icon-button-attention")).toBeTruthy();
+  });
+
+  it("lists the keys again when keyd finds one to enter again", async () => {
+    let reenter = 0;
+    const lists = vi.fn(() => ({ keys: [{ ...deepseek, reenter: reenter > 0 }] }));
+    const api = createApi("test", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url) =>
+        new Response(
+          JSON.stringify(
+            new URL(String(url)).pathname === "/api/keyd" ? { ...HEALTHY, reenter } : lists(),
+          ),
+        ),
+    });
+    function Probe() {
+      const keys = useKeys(api, 20);
+      return <span data-testid="state">{keys.keys.map((k) => String(k.reenter)).join()}</span>;
+    }
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("false"));
+    reenter = 1;
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("true"));
+    const calls = lists.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(lists.mock.calls.length).toBe(calls);
+  });
+});
+
 describe("Keys", () => {
   it("opens a Jev key's form as a web API key bound to Jev's host", async () => {
     const save = vi.fn(async (_binding: unknown, _value: string) => ({ restart: false }));

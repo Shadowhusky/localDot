@@ -13,7 +13,9 @@ import {
   EARLIER_CHARS,
   earlierRecord,
   isToolName,
+  KEYD_REENTER,
   RESUME_WAIT_REASON,
+  SECRET_ID_PATTERN,
   STALL,
 } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
@@ -149,11 +151,23 @@ interface ModelStep {
   basedOn?: string;
 }
 
+function responseHeader(error: APICallError, name: string): string | undefined {
+  return Object.entries(error.responseHeaders ?? {}).find(
+    ([key]) => key.toLowerCase() === name,
+  )?.[1];
+}
+
+// The key keyd refused a model call for because its stored value has to be entered again.
+export function keyToReenter(error: unknown): string | undefined {
+  if (!APICallError.isInstance(error) || responseHeader(error, "x-keyd-reason") !== KEYD_REENTER)
+    return undefined;
+  const id = responseHeader(error, "x-keyd-secret") ?? "";
+  return SECRET_ID_PATTERN.test(id) ? id : "";
+}
+
 function retryAfterMs(error: unknown): number | undefined {
   if (!APICallError.isInstance(error)) return undefined;
-  const headers = error.responseHeaders ?? {};
-  const header = (name: string) =>
-    Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+  const header = (name: string) => responseHeader(error, name);
   const ms = Number(header("retry-after-ms"));
   if (Number.isFinite(ms) && ms >= 0) return ms;
   const after = header("retry-after")?.trim();
@@ -574,6 +588,14 @@ export class Agent {
             sink.busy(true);
             continue;
           }
+        }
+        // A key to enter again is the user's to fix: the task waits, naming it, and goes on after.
+        const reenter = keyToReenter(err);
+        if (reenter !== undefined) {
+          if (!(await this.#waitForResume(STALL.keyReenter, signal, reenter || undefined)))
+            return "stopped";
+          attempt = 0;
+          continue;
         }
         // keyd's budget refusal (Part 4a): the task pauses until the user raises the budget.
         if (status === 402) {

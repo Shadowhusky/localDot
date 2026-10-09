@@ -13,7 +13,7 @@ import { GroupHead, GroupNote } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Skeleton } from "../ui/Skeleton.tsx";
-import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
+import { type KeyField, KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import type { KeyRecord } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
@@ -30,6 +30,8 @@ export interface KeysPanelProps {
   keys: KeysController;
   intakeRef?: Ref<KeyIntake>;
   preset?: KeyFormPreset;
+  // Asked from elsewhere (a task that stopped on it) to enter a saved key's value again.
+  reenter?: { readonly requestId: number; readonly id: string };
   onSaved?(key: KeyRecord, requestId: number): void;
   // How many times this task has used each key.
   uses?: Readonly<Record<string, number>>;
@@ -45,6 +47,7 @@ export function KeysPanel({
   keys,
   intakeRef,
   preset,
+  reenter,
   onSaved,
   uses,
   onHolding,
@@ -53,13 +56,15 @@ export function KeysPanel({
   const phone = useMediaQuery(PHONE);
   const [fresh, setFresh] = useState<{ id: string; at: number } | null>(null);
   const [adding, setAdding] = useState(!!preset);
+  const [reentering, setReentering] = useState<string | null>(reenter?.id ?? null);
+  const field = useRef<KeyField>(null);
   const saves = useRef(0);
   const owner = useRef({ active, preset, onSaved, generation: 0 });
   const form = useRef<HTMLElement>(null);
   const intake = useRef<KeyIntake>(null);
   const revealing = useRef(reveal);
   revealing.current = reveal;
-  const toReveal = useRef(!!preset);
+  const toReveal = useRef(!!preset || !!reenter);
   const health = keys.health;
   const offline = health?.online === false;
   const held = health?.online === true && health.audit?.ok === false;
@@ -81,8 +86,15 @@ export function KeysPanel({
   useLayoutEffect(() => {
     if (!preset) return;
     toReveal.current = true;
+    setReentering(null);
     setAdding(true);
   }, [preset]);
+  useLayoutEffect(() => {
+    if (!reenter) return;
+    toReveal.current = true;
+    setReentering(reenter.id);
+  }, [reenter]);
+  const again = reentering ? keys.keys.find((key) => key.id === reentering) : undefined;
   useLayoutEffect(() => {
     if (!toReveal.current || !form.current) return;
     toReveal.current = false;
@@ -106,7 +118,10 @@ export function KeysPanel({
     () => ({
       receive(source, provider) {
         toReveal.current = true;
-        flushSync(() => setAdding(true));
+        flushSync(() => {
+          setReentering(null);
+          setAdding(true);
+        });
         const taken = intake.current?.receive(source, provider) ?? false;
         source.value = "";
         return taken;
@@ -132,6 +147,20 @@ export function KeysPanel({
     },
     [keys.save],
   );
+  // Stored again, the key leaves its form and lights up in the list.
+  const saveAgain = useCallback(
+    async (binding: Parameters<KeysController["save"]>[0], value: string) => {
+      const result = await save(binding, value);
+      setReentering((now) => (now === binding.id ? null : now));
+      return result;
+    },
+    [save],
+  );
+  const startReentry = (key: KeyRecord) => {
+    toReveal.current = true;
+    flushSync(() => setReentering(key.id));
+    field.current?.focus();
+  };
   const add = (wide: boolean) => (
     <Button
       size={wide ? "xxl" : "sm"}
@@ -140,7 +169,10 @@ export function KeysPanel({
       disabledReason={unavailable}
       onClick={() => {
         toReveal.current = true;
-        flushSync(() => setAdding(true));
+        flushSync(() => {
+          setReentering(null);
+          setAdding(true);
+        });
         form.current
           ?.querySelector<HTMLElement>("[role=combobox], input")
           ?.focus({ preventScroll: true });
@@ -178,6 +210,7 @@ export function KeysPanel({
                   uses={uses}
                   fresh={fresh}
                   remove={keys.remove}
+                  reenter={startReentry}
                 />
               </div>
             )}
@@ -185,7 +218,24 @@ export function KeysPanel({
           </>
         )}
       </section>
-      {formShown ? (
+      {again ? (
+        <section ref={form} className="keys-section" aria-labelledby="keys-reenter">
+          <GroupHead id="keys-reenter" title={`Re-enter ${again.id}`} />
+          <Card>
+            <KeyForm
+              key={again.id}
+              fieldRef={field}
+              active={active}
+              unavailable={unavailable}
+              busy={keys.busy}
+              reenter={again}
+              onHolding={onHolding}
+              onCancel={() => setReentering(null)}
+              save={saveAgain}
+            />
+          </Card>
+        </section>
+      ) : formShown ? (
         <section ref={form} className="keys-section" aria-labelledby="keys-add">
           <GroupHead id="keys-add" title="Add a key" />
           <Card>

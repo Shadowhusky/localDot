@@ -97,7 +97,7 @@ export const TopBar = memo(function TopBar({
           size={32}
           icon="key-round"
           label={keys.spoken ?? keys.label}
-          attention={keys.state === "offline" || keys.state === "audit" || keys.state === "guard"}
+          attention={["offline", "audit", "reenter", "guard"].includes(keys.state)}
           aria-haspopup="dialog"
           aria-expanded={keysOpen}
           aria-controls="keys-sheet"

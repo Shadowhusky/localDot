@@ -245,3 +245,28 @@ it("offers to carry on a task localDot went away under, and says when that can't
   );
   expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
 });
+
+it("names the key to enter again and opens Keys at it, with Continue for after", () => {
+  const onReenterKey = vi.fn();
+  const resume = vi.fn(async () => true);
+  const agent = agentWith("key needs re-entering");
+  agent.model.state = { state: "paused", reason: "key needs re-entering", detail: "deepseek" };
+  render(
+    <TaskRecovery
+      agent={agent}
+      controls={{ ...controls, canResumeTask: true, resume }}
+      onSettings={vi.fn()}
+      onReenterKey={onReenterKey}
+    />,
+  );
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect(screen.getByRole("heading", { name: "Re-enter your deepseek key" })).toBeTruthy();
+  expect(region.textContent).toContain("Enter it again in Keys, then continue.");
+  expect(region.textContent).not.toContain("Reported reason");
+  const reenter = screen.getByRole("button", { name: "Re-enter key" });
+  expect(reenter.getAttribute("data-variant")).toBe("primary");
+  fireEvent.click(reenter);
+  expect(onReenterKey).toHaveBeenCalledWith(reenter, "deepseek");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(resume).toHaveBeenCalled();
+});

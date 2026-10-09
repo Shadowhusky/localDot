@@ -92,6 +92,8 @@ export const STALL = {
   modelUnavailable: "model unavailable",
   modelRefused: "model refused",
   actionLimit: "action limit",
+  // The detail names the key whose value the user enters again.
+  keyReenter: "key needs re-entering",
 } as const;
 export const Heartbeat = event(
   "heartbeat",

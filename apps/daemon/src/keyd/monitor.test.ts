@@ -61,6 +61,17 @@ describe("credential service health polling", () => {
     expect(listener).toHaveBeenCalledTimes(4);
   });
 
+  it("says how many keys need entering again without rewiring cells over it", async () => {
+    const read = vi.fn<() => Promise<KeydStatus>>().mockResolvedValue(status());
+    const monitor = new KeydMonitor({ status: read });
+    expect((await monitor.refresh()).reenter).toBe(0);
+    const listener = vi.fn();
+    monitor.subscribe(listener);
+    read.mockResolvedValue({ ...status(), reenter: 2 });
+    expect((await monitor.refresh()).reenter).toBe(2);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("stops polling and drops a reply that arrives after stop", async () => {
     vi.useFakeTimers();
     const reply = Promise.withResolvers<KeydStatus>();

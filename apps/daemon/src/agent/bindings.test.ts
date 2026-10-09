@@ -121,6 +121,20 @@ describe("resolveRole", () => {
     });
   });
 
+  it("refuses a key whose value has to be entered again, naming it", () => {
+    const stale = keys.map((k) => (k.id === "deepseek" ? { ...k, reenter: true } : k));
+    expect(() =>
+      resolveRole(
+        "main",
+        { provider: "deepseek", model: "deepseek-chat", key: "deepseek" },
+        catalog,
+        stale,
+      ),
+    ).toThrow(
+      new BindingError("main", "key deepseek needs re-entering: enter it again under Keys"),
+    );
+  });
+
   it("refuses an unknown model, a model without tools as main, and M8 providers", () => {
     expect(() =>
       resolveRole(

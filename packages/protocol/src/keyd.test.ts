@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   KeydEvent,
   KeydOpened,
+  KeydRecord,
   KeydStatus,
   RESERVED_SECRET_IDS,
   Sealed,
@@ -223,5 +224,23 @@ describe("push key name", () => {
   it("reserves keyd's push key name", () => {
     expect(RESERVED_SECRET_IDS).toContain("webpush-vapid");
     expect(SecretId.safeParse("webpush-vapid").success).toBe(false);
+  });
+
+  it("reserves the name of keyd's binding migration record", () => {
+    expect(SecretId.safeParse("keyd-bindings").success).toBe(false);
+  });
+});
+
+describe("keys to enter again", () => {
+  it("keeps keyd's re-entry flag on a listed key and its count in the status", () => {
+    const record = {
+      id: "deepseek",
+      kind: "llm",
+      provider: "deepseek",
+      createdAt: "2026-10-08T01:00:00Z",
+      updatedAt: "2026-10-08T01:00:00Z",
+    };
+    expect(KeydRecord.parse({ ...record, reenter: true }).reenter).toBe(true);
+    expect(KeydRecord.parse(record).reenter).toBeUndefined();
   });
 });

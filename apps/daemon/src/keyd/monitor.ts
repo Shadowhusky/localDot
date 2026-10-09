@@ -10,6 +10,8 @@ export interface KeydHealth {
   // Whether keyd knows the public address it denies (hairpin NAT); a keyd that does not say is
   // reported as unknown, never as active.
   hairpin?: HairpinGuard;
+  // How many keys need entering again (their stored values are gone or unreadable as stored).
+  reenter?: number;
   error?: string;
 }
 
@@ -57,6 +59,7 @@ export class KeydMonitor {
         sealKey: s.sealKey,
         audit: s.audit,
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
+        reenter: s.reenter ?? 0,
       };
     } catch (err) {
       next = { online: false, error: err instanceof Error ? err.message : String(err) };
