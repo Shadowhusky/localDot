@@ -153,7 +153,7 @@ test("Replay reads a Pause as pausing until the step it waits on ends, as live d
 test("a question puts the question first", async ({ page }) => {
   await open(page);
   await qa(page, "ask");
-  await expectWaiting(page, "Has a question");
+  await expectWaiting(page, "Needs your answer");
   await expect(page.locator(".narration")).toContainText("Which report format should I use?");
 });
 

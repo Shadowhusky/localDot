@@ -274,7 +274,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (facts?.question != null)
     return waiting(
       "question",
-      "Has a question",
+      "Needs your answer",
       facts.question || "Waiting for your answer.",
       true,
     );

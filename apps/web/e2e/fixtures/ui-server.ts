@@ -48,7 +48,7 @@ import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
-import { AgentSession } from "../../../daemon/src/agent/session.ts";
+import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
@@ -1755,6 +1755,132 @@ function ask(allowText: boolean): string | undefined {
     .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
+// Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
+// The secret fields' targets are in the screen's pixels (2560x1600).
+const ASK_FORMS: Record<string, AskForm> = {
+  login: {
+    question: "Sign in to your mail so I can read the latest message.",
+    fields: [
+      { id: "username", kind: "text", label: "Username" },
+      {
+        id: "password",
+        kind: "secret",
+        label: "Password",
+        target: {
+          screen: "desktop",
+          point: { x: 1280, y: 760 },
+          bbox: { x: 1040, y: 732, w: 480, h: 56 },
+          site: "mail.example.test",
+        },
+      },
+    ],
+    submit: "Sign in",
+    decline: "Not now",
+  },
+  pin: {
+    question: "The bank app wants your PIN.",
+    fields: [
+      {
+        id: "pin",
+        kind: "secret",
+        label: "PIN",
+        hint: "Typed into the PIN box for you. dot never sees it.",
+        target: { screen: "desktop", point: { x: 1280, y: 800 } },
+      },
+    ],
+    submit: "Enter PIN",
+  },
+  code: {
+    question: "Enter the code the site sent to your phone.",
+    fields: [{ id: "code", kind: "code", label: "Code", length: 6 }],
+    submit: "Send code",
+    decline: "Not now",
+  },
+  choice: {
+    question: "Which report format should I use?",
+    fields: [
+      { id: "format", kind: "choice", label: "Format", options: ["Markdown", "Plain text", "PDF"] },
+    ],
+    submit: "Use this",
+  },
+  multichoice: {
+    question: "What should the summary include?",
+    fields: [
+      {
+        id: "parts",
+        kind: "multichoice",
+        label: "Include",
+        options: ["Totals", "Charts", "Notes from the team"],
+      },
+    ],
+    submit: "Write it",
+  },
+  longtext: {
+    question: "What should the reply to Sam say?",
+    fields: [
+      {
+        id: "reply",
+        kind: "longtext",
+        label: "Reply",
+        hint: "A few lines is enough; I will tidy the wording.",
+      },
+    ],
+    submit: "Draft reply",
+  },
+  confirm: {
+    question: "Delete the 12 old drafts in your mail?",
+    fields: [{ id: "sure", kind: "confirm", label: "Delete 12 drafts" }],
+    submit: "Delete",
+    decline: "Keep them",
+  },
+  details: {
+    question: "A few details for the booking form.",
+    fields: [
+      { id: "guests", kind: "number", label: "Guests" },
+      { id: "arrival", kind: "date", label: "Arrival" },
+      { id: "phone", kind: "phone", label: "Phone" },
+      { id: "site", kind: "url", label: "Hotel website", hint: "The hotel's own page" },
+    ],
+    submit: "Fill in the form",
+  },
+  file: {
+    question: "Which photo should go on the profile?",
+    fields: [{ id: "photo", kind: "file", label: "Photo" }],
+    submit: "Use this photo",
+  },
+  qr: {
+    question: "Scan this with your phone to link the account.",
+    fields: [
+      {
+        id: "pair",
+        kind: "qr",
+        label: "Link your phone",
+        value: "https://pair.example.test/a1b2c3",
+        hint: "Code: A1B2-C3",
+      },
+    ],
+    submit: "Done",
+  },
+  pair: {
+    question: "Show this to the TV to link it.",
+    fields: [{ id: "pair", kind: "qr", label: "Pair the TV", value: "TV-PAIR-4K7Q-82LM" }],
+    submit: "Done",
+  },
+};
+function askForm(name: string): string | undefined {
+  const form = ASK_FORMS[name];
+  if (!form) return `no question named ${name}; try ${Object.keys(ASK_FORMS).join(", ")}`;
+  if (!session) return "no session";
+  void session
+    .askFields(form, 0)
+    .then((a) =>
+      effects.push(
+        `ask:${JSON.stringify(a)}`,
+        ...(a.secrets?.size ? [`ask-secrets:${a.secrets.size}`] : []),
+      ),
+    )
+    .catch((e) => effects.push(`ask-error:${String(e)}`));
+}
 // A field name, or a known localDot key, types into it through the real authorization.
 function takeover(field?: string, known = false): string | undefined {
   if (!session) return "no session";
@@ -1920,7 +2046,10 @@ routes.post("/__qa/keys", () => reply(keySteps()));
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/actions", () => reply(liveActions()));
-routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
+routes.post("/__qa/ask", (c) => {
+  const form = c.req.query("fields");
+  return reply(form ? askForm(form) : ask(c.req.query("text") !== "0"));
+});
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),
 );

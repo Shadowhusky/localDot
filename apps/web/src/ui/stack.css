@@ -9,6 +9,7 @@
 @import "./overlays.css";
 @import "./feedback.css";
 @import "./structure.css";
+@import "./codes.css";
 /* Only the kit is scanned, so words in legacy files cannot mint utilities that outrank legacy rules
    of the same name. Add a folder here when it moves onto the kit. */
 @import "tailwindcss/utilities.css" layer(utilities) source(none);

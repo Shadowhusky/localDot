@@ -6,7 +6,7 @@ import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
 import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { withAttachments } from "./attachments.ts";
-import { Composer, type ComposerProps } from "./Composer.tsx";
+import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -1094,5 +1094,62 @@ describe("typing", () => {
     });
     expect(f.field.value).toBe("token ");
     expect(f.requests).toEqual([]);
+  });
+});
+describe("answering dot from the composer", () => {
+  it("answers dot's question, turns it down before sending the message on, or holds the message", async () => {
+    const reply = vi.fn<(text: string, attached: boolean) => Promise<ReplyOutcome>>();
+    const f = setup(undefined, { reply });
+    expect(f.field.placeholder).toBe("Answer dot");
+    reply.mockResolvedValueOnce("answered");
+    f.input("PDF");
+    f.submit();
+    await waitFor(() => expect(f.field.value).toBe(""));
+    expect(reply).toHaveBeenLastCalledWith("PDF", false);
+    expect(f.requests).toEqual([]);
+    reply.mockResolvedValueOnce("declined");
+    f.input("use my work account");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${sessionId}/messages`,
+      body: { kind: "steer", text: "use my work account" },
+    });
+    reply.mockResolvedValueOnce({ hold: "Type it in dot's question above." });
+    f.input("hunter2");
+    f.submit();
+    await screen.findByText("Type it in dot's question above.");
+    expect(f.field.value).toBe("hunter2");
+    expect(f.requests).toHaveLength(1);
+    f.update({ reply: undefined });
+    expect(f.field.placeholder).toBe("Message dot");
+  });
+
+  it("turns the question down before a message with files goes, rather than leaving it unread", async () => {
+    const calls: { path: string; body: unknown }[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url, init) => {
+        const target = new URL(String(url));
+        calls.push({ path: target.pathname, body: init?.body });
+        return target.pathname.endsWith("/upload")
+          ? Response.json({ path: "~/Downloads/plan.pdf" }, { status: 201 })
+          : new Response(null, { status: 202 });
+      },
+    });
+    const reply = vi.fn(async (_text: string, _attached: boolean): Promise<ReplyOutcome> => {
+      return "declined";
+    });
+    const f = setup(undefined, { api, reply });
+    f.input("Use this plan instead");
+    f.attach(new File(["plan"], "plan.pdf"));
+    await waitFor(() => expect(screen.getByText("Uploaded to Downloads")).toBeTruthy());
+    f.submit();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(reply).toHaveBeenCalledExactlyOnceWith("Use this plan instead", true);
+    expect(JSON.parse(String(calls[1]?.body))).toEqual({
+      kind: "steer",
+      text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
+    });
   });
 });

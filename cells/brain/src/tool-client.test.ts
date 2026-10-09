@@ -117,12 +117,12 @@ describe("tool deadlines own the whole response lifetime", () => {
       expect(String(call.state.error)).toContain("cancelled");
     },
   );
-  it("keeps ask_user pending for six minutes but expires at thirty minutes plus ten seconds", async () => {
+  it("keeps ask_user pending for six minutes but expires at thirty-one minutes", async () => {
     vi.useFakeTimers();
     const call = observe(client(delayed(2_000_000)).tool("ask_user", "c", {}));
     await vi.advanceTimersByTimeAsync(360_000);
     expect(call.state.done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1_449_999);
+    await vi.advanceTimersByTimeAsync(1_499_999);
     expect(call.state.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(call.state.done).toBe(true);
