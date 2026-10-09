@@ -11,7 +11,9 @@ import {
   STALE_MS,
   TAP_STALL_MS,
   TRACK_PROOF_MS,
+  TUNE_MS,
 } from "./live-stream.ts";
+import { chooseStreamPreference } from "./stream-preference.ts";
 
 const CELL = "01JXYZ0000000000000000ABCD";
 const ticket = (n: number) => `/cells/${CELL}/desktop/${String(n).padStart(22, "T")}/`;
@@ -130,13 +132,119 @@ it("tells its relay each second what this viewer can take, from the round trip t
   }
 });
 
+// A Chromium client whose relay reports `rtt()` each second once its numbers are asked for, on a
+// touch screen when `coarse`.
+async function relayClient(rtt: () => number = () => 80, coarse = false) {
+  const restore = fakeChromium();
+  if (coarse)
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(pointer: coarse)",
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+  const { api, minted } = daemon((n) => Response.json({ path: ticket(n) }));
+  const held = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+  const disconnect = held.stream.connect(() => {});
+  await vi.advanceTimersByTimeAsync(250);
+  const [frame] = clients();
+  const view = frame?.contentWindow;
+  if (!frame || !view) throw new Error("no client");
+  playInClient(frame, "track-1");
+  const send = vi.fn();
+  const stats = { open: true, latest: null as { t: number; rtt_ms: number } | null };
+  const transport = { readyState: 1, send };
+  Object.assign(view, { selkiesTransport: transport, stream_stats: stats });
+  const second = async () => {
+    stats.latest = { t: Date.now(), rtt_ms: rtt() };
+    await vi.advanceTimersByTimeAsync(1_000);
+  };
+  const reports = () =>
+    send.mock.calls.map(([text]) => text).filter((text) => String(text).startsWith("_ld_q"));
+  return { ...held, disconnect, send, transport, second, reports, minted, restore };
+}
+
+it("asks for full quality on a phone too, from its first report", async () => {
+  const { second, send, restore } = await relayClient(undefined, true);
+  try {
+    await second();
+    expect(send).toHaveBeenCalledWith(qualityMessage({ visible: true, framerate: 60, crf: 25 }));
+    expect(send).not.toHaveBeenCalledWith(
+      qualityMessage({ visible: true, framerate: 30, crf: 25 }),
+    );
+  } finally {
+    restore();
+  }
+});
+
+it("gives up frames before detail on a queued link once the viewer chose Sharp", async () => {
+  let rtt = 80;
+  const { second, reports, restore } = await relayClient(() => rtt);
+  try {
+    for (let n = 0; n < 4; n++) await second();
+    chooseStreamPreference("sharp");
+    rtt = 400;
+    for (let n = 0; n < 3; n++) await second();
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 45, crf: 25 }));
+  } finally {
+    chooseStreamPreference("auto");
+    restore();
+  }
+});
+
+it("tells its relay it asks for nothing once no stage shows it, unless a stage takes it at once", async () => {
+  const { stream, disconnect, second, reports, restore } = await relayClient();
+  try {
+    await second();
+    disconnect();
+    const again = stream.connect(() => {});
+    await vi.advanceTimersByTimeAsync(TUNE_MS * 2);
+    expect(reports()).not.toContain(qualityMessage({ visible: false }));
+    again();
+    await vi.advanceTimersByTimeAsync(TUNE_MS);
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: false }));
+  } finally {
+    restore();
+  }
+});
+
+it("keeps its client when the page comes back after a long time hidden, unless its socket died", async () => {
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  const { stream, minted, transport, restore } = await relayClient();
+  try {
+    expect(minted()).toBe(1);
+    visibility = "hidden";
+    await vi.advanceTimersByTimeAsync(250);
+    // A backgrounded phone runs no timers at all.
+    vi.setSystemTime(Date.now() + STALE_MS * 3);
+    visibility = "visible";
+    stream.refresh();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(minted()).toBe(1);
+    visibility = "hidden";
+    await vi.advanceTimersByTimeAsync(250);
+    vi.setSystemTime(Date.now() + STALE_MS * 3);
+    visibility = "visible";
+    // A timer that fires before the page hears it is visible again changes nothing either.
+    await vi.advanceTimersByTimeAsync(250);
+    expect(minted()).toBe(1);
+    transport.readyState = 3;
+    stream.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(minted()).toBe(2);
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
+    restore();
+  }
+});
+
 // Safari: no MediaStreamTrackProcessor on the page. Its client counts decoded frames itself, as
 // WebKit's video counts none of a track a worker writes.
 async function safariClient(frames: boolean) {
   const restore = fakeChromium();
   vi.stubGlobal("MediaStreamTrackProcessor", undefined);
   const { api } = daemon(() => Response.json({ path: ticket(1) }));
-  const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+  const { stream, release } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
   const sources: FrameSource[] = [];
   stream.connect((source) => sources.push(source));
   await vi.advanceTimersByTimeAsync(250);
@@ -155,7 +263,7 @@ async function safariClient(frames: boolean) {
   const send = vi.fn();
   Object.assign(view, { selkiesTransport: { readyState: 1, send }, videoChunksReceived: 0 });
   const keyframes = () => send.mock.calls.filter(([text]) => text === "REQUEST_KEYFRAME").length;
-  return { stream, sources, view, keyframes, restore };
+  return { stream, release, sources, view, keyframes, restore };
 }
 
 it("asks for a key frame at once for a tap without the video's frame, as a still screen sends none", async () => {
@@ -185,6 +293,28 @@ it("copies the video's frames once the worker's read of the track twice showed n
     expect(sources[2]?.frames).toBeTypeOf("function");
   } finally {
     restore();
+  }
+});
+
+it("never makes a later stream wait out a track read that failed", async () => {
+  const first = await safariClient(true);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    for (const chunks of [30, 60]) {
+      first.view.videoChunksReceived = chunks;
+      await vi.advanceTimersByTimeAsync(TRACK_PROOF_MS);
+    }
+    expect(first.sources.map((source) => !!source.track)).toEqual([true, true, false]);
+    first.release(0);
+  } finally {
+    first.restore();
+  }
+  const later = await safariClient(true);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    expect(later.sources.map((source) => !!source.track)).toEqual([false]);
+  } finally {
+    later.restore();
   }
 });
 

@@ -6,10 +6,12 @@ import type { StreamQuality } from "@localdot/protocol";
 // device can't keep up). The daemon runs the shared capture at the most constrained visible
 // viewer's choice.
 
-export type DeviceClass = "phone" | "desktop";
+// The viewer's choice in Settings: Auto, or what the stream keeps longest when it has to give.
+export type StreamPreference = "auto" | "sharp" | "smooth";
+export const STREAM_PREFERENCES: readonly StreamPreference[] = ["auto", "sharp", "smooth"];
 
 export interface QualitySample {
-  // Smoothed round trip of the stream, and the lowest of the last minute: the empty link.
+  // Smoothed round trip of the stream, and the empty link's (see RoundTrips).
   rttMs: number | null;
   baseRttMs: number | null;
   // Frames the client decoded, and the stage presented, in the last second.
@@ -21,8 +23,6 @@ export const FRAMERATES = [60, 45, 30, 24, 18, 12] as const;
 // x264 CRF: each step up saves about a fifth of the bit rate, and the picture softens. Still
 // screens are sharpened again by Selkies' paint-over whatever the step.
 export const CRFS = [25, 28, 31, 34, 37, 41] as const;
-// A phone shows a small picture of a large screen: half the frames are plenty.
-const PHONE_TOP_FRAMERATE = 30;
 
 // Round trip above the empty link's that means a queue, a long one, and one that has drained.
 export const QUEUE_MS = { bad: 150, severe: 600, clear: 60 };
@@ -42,23 +42,49 @@ export const RECOVER_MAX_TICKS = 120;
 export const PROBE_TICKS = 10;
 
 type Knob = "framerate" | "crf";
+type Cause = "link" | "device";
+
+// The knobs each cause turns down, the first with room first. Auto spares a slow device frames
+// and gives a slow link detail only: fewer frames of a moving screen each change more, and cost as
+// many bits or more (2560x1600 scrolling: 30 fps took 6.1 Mbps where 60 took 3.7). Sharp gives
+// frames before detail, Smooth detail before frames.
+const ORDER: Record<StreamPreference, Record<Cause, readonly Knob[]>> = {
+  auto: { link: ["crf"], device: ["framerate", "crf"] },
+  sharp: { link: ["framerate", "crf"], device: ["framerate", "crf"] },
+  smooth: { link: ["crf", "framerate"], device: ["crf", "framerate"] },
+};
 
 export class QualityController {
-  readonly #top: number;
-  #framerate: number;
+  #preference: StreamPreference;
+  #framerate = 0;
   #crf = 0;
-  // The knobs turned down, latest last: a recovery turns them back up in reverse.
-  readonly #lowered: Knob[] = [];
+  // The steps down, latest last, each with its cause: a step comes back once its cause has cleared,
+  // the latest such first.
+  readonly #lowered: { knob: Knob; cause: Cause }[] = [];
   #bad = 0;
-  #clear = 0;
+  // Seconds of a clear link, and of a device keeping up with a moving screen.
+  readonly #clear: Record<Cause, number> = { link: 0, device: 0 };
   #cooldown = 0;
   #recover = RECOVER_TICKS;
   // Seconds since the last step up, while that step is still on trial.
   #probe: number | null = null;
 
-  constructor(device: DeviceClass) {
-    this.#top = device === "phone" ? FRAMERATES.indexOf(PHONE_TOP_FRAMERATE) : 0;
-    this.#framerate = this.#top;
+  constructor(preference: StreamPreference = "auto") {
+    this.#preference = preference;
+  }
+
+  // A new choice starts again from full quality, giving what it prefers to give as needed.
+  prefer(preference: StreamPreference): void {
+    if (preference === this.#preference) return;
+    this.#preference = preference;
+    this.#framerate = 0;
+    this.#crf = 0;
+    this.#lowered.length = 0;
+    this.#bad = 0;
+    this.#clear.link = 0;
+    this.#clear.device = 0;
+    this.#cooldown = 0;
+    this.#probe = null;
   }
 
   get quality(): StreamQuality {
@@ -75,44 +101,39 @@ export class QualityController {
     const queue =
       sample.rttMs !== null && sample.baseRttMs !== null ? sample.rttMs - sample.baseRttMs : null;
     const network = queue !== null && queue > QUEUE_MS.bad;
+    const moving = sample.decodedFps >= MOTION_FPS;
     // Frames that arrive in bursts off a queued link reach the stage faster than it presents, so
-    // the device is judged only on a clear link.
-    const device =
-      !network &&
-      sample.decodedFps >= MOTION_FPS &&
-      sample.presentedFps < sample.decodedFps * DEVICE_KEEPS;
+    // the device is judged only on a link that is not queued.
+    const device = !network && moving && sample.presentedFps < sample.decodedFps * DEVICE_KEEPS;
     if (network || device) {
-      this.#clear = 0;
+      const cause: Cause = network ? "link" : "device";
+      this.#clear[cause] = 0;
       this.#bad++;
       const severe = queue !== null && queue > QUEUE_MS.severe;
       const due = network ? this.#bad >= BAD_TICKS || severe : this.#bad >= DEVICE_BAD_TICKS;
       if (due && this.#cooldown === 0) {
         if (this.#probe !== null) this.#recover = Math.min(RECOVER_MAX_TICKS, this.#recover * 2);
         this.#probe = null;
-        // A slow device is spared frames first. A slow link loses detail only, all of it at once
-        // when the queue is already long: fewer frames of a moving screen each change more, and
-        // cost as many bits or more (2560x1600 scrolling: 30 fps took 6.1 Mbps where 60 took 3.7).
-        if (device) this.#lower(["framerate", "crf"], 1);
-        else this.#lower(["crf"], severe ? CRFS.length : 1);
+        // A queue that is already long takes all of the first knob at once.
+        this.#lower(ORDER[this.#preference][cause], cause, severe ? Number.POSITIVE_INFINITY : 1);
       }
       return this.quality;
     }
     this.#bad = 0;
-    if (queue === null || queue >= QUEUE_MS.clear) {
-      this.#clear = 0;
-      return this.quality;
-    }
-    this.#clear++;
+    this.#clear.link = queue !== null && queue < QUEUE_MS.clear ? this.#clear.link + 1 : 0;
+    // A still screen says nothing of the device.
+    if (moving) this.#clear.device++;
     if (this.#probe !== null && ++this.#probe >= PROBE_TICKS) {
       this.#recover = Math.max(RECOVER_TICKS, this.#recover / 2);
       this.#probe = null;
     }
-    if (this.#clear >= this.#recover && this.#lowered.length) this.#raise();
+    const at = this.#lowered.findLastIndex((step) => this.#clear[step.cause] >= this.#recover);
+    if (at >= 0) this.#raise(at);
     return this.quality;
   }
 
   // Turns the first knob in `order` that has room down by up to `steps`.
-  #lower(order: Knob[], steps: number): void {
+  #lower(order: readonly Knob[], cause: Cause, steps: number): void {
     for (const knob of order) {
       const room =
         knob === "framerate"
@@ -122,7 +143,7 @@ export class QualityController {
       for (let n = Math.min(steps, room); n > 0; n--) {
         if (knob === "framerate") this.#framerate++;
         else this.#crf++;
-        this.#lowered.push(knob);
+        this.#lowered.push({ knob, cause });
       }
       this.#bad = 0;
       this.#cooldown = COOLDOWN_TICKS;
@@ -130,18 +151,21 @@ export class QualityController {
     }
   }
 
-  #raise(): void {
-    const knob = this.#lowered.pop();
-    if (knob === "framerate") this.#framerate = Math.max(this.#top, this.#framerate - 1);
-    else if (knob === "crf") this.#crf = Math.max(0, this.#crf - 1);
-    this.#clear = 0;
+  #raise(at: number): void {
+    const [step] = this.#lowered.splice(at, 1);
+    if (step?.knob === "framerate") this.#framerate = Math.max(0, this.#framerate - 1);
+    else if (step?.knob === "crf") this.#crf = Math.max(0, this.#crf - 1);
+    this.#clear.link = 0;
+    this.#clear.device = 0;
     this.#probe = 0;
   }
 }
 
-// Round trips of the stream: smoothed, and the lowest of the last WINDOW of them.
+// Round trips of the stream: smoothed, and the empty link's: a low share of the last WINDOW of them,
+// so one lucky ping does not make a jittery link look queued for a minute.
 export class RoundTrips {
   static readonly WINDOW = 60;
+  static readonly BASE_SHARE = 0.1;
   readonly #recent: number[] = [];
   #smoothed: number | null = null;
 
@@ -156,14 +180,8 @@ export class RoundTrips {
   }
 
   get base(): number | null {
-    return this.#recent.length ? Math.min(...this.#recent) : null;
-  }
-}
-
-export function deviceClass(): DeviceClass {
-  try {
-    return window.matchMedia("(pointer: coarse)").matches ? "phone" : "desktop";
-  } catch {
-    return "desktop";
+    if (!this.#recent.length) return null;
+    const sorted = [...this.#recent].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length * RoundTrips.BASE_SHARE)] ?? null;
   }
 }

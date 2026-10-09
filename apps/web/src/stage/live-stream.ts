@@ -2,7 +2,8 @@ import { qualityMessage, type StreamQualityReport } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 import { forgetOldTickets } from "./client-storage.ts";
 import { type FrameSource, tapVideoTrack } from "./frame-source.ts";
-import { deviceClass, QualityController, RoundTrips } from "./stream-quality.ts";
+import { streamPreference } from "./stream-preference.ts";
+import { QualityController, RoundTrips } from "./stream-quality.ts";
 
 export interface StreamTarget {
   api: ApiClient;
@@ -32,6 +33,10 @@ export const TAP_STALL_MS = 3_000;
 // one that fails twice running is not tried again, and the video's frames are copied instead.
 export const TRACK_PROOF_MS = 1_500;
 const TRACK_TRIES = 2;
+// Whether the worker's own read of a track shows frames in this browser: unknown, proven or given
+// up on. Every stream of the page shares it, so a later one never waits out a failed proof again.
+let trackReads: boolean | null = null;
+let trackFailures = 0;
 const MINT_RETRY_MS = { min: 1_000, max: 15_000 };
 // The stream's quality is judged this often, and a viewer's wish repeated this often for a relay
 // that may have restarted under the same client.
@@ -134,16 +139,13 @@ export class LiveStream {
   // The current tap handed the worker a track, and the decoder's count when it was taken.
   #trackTap = false;
   #tapDecoded = 0;
-  // Whether the worker's own read of a track shows frames here: unknown, proven or given up on.
-  #tracks: boolean | null = null;
-  #trackFailures = 0;
   #keyframeAt = 0;
   #keyframes = 0;
   #hadPicture = false;
   #troubleSince: number | null = null;
   #picture: StreamPicture = "none";
   #listeners = new Set<() => void>();
-  readonly #quality = new QualityController(deviceClass());
+  readonly #quality = new QualityController(streamPreference());
   readonly #trips = new RoundTrips();
   #tripAt = 0;
   #tunedAt = 0;
@@ -151,6 +153,9 @@ export class LiveStream {
   #presentedCount = 0;
   #counted: { client: Client; at: number; decoded: number; presented: number } | null = null;
   #reported: { client: Client; text: string; at: number } | null = null;
+  // The last poll found the page hidden: the gap before the next is the page's, not a suspension.
+  #away = false;
+  #leaving: ReturnType<typeof setTimeout> | undefined;
 
   constructor(target: StreamTarget) {
     this.target = target;
@@ -168,6 +173,7 @@ export class LiveStream {
   // Hands every new tap to `sink`, starting with one of the client already streaming, if any.
   connect(sink: (source: FrameSource) => void): () => void {
     this.#sink = sink;
+    clearTimeout(this.#leaving);
     if (this.#current) this.#current.tapped = null;
     this.#polledAt = Date.now();
     clearInterval(this.#timer);
@@ -178,6 +184,13 @@ export class LiveStream {
       this.#sink = null;
       clearInterval(this.#timer);
       this.#timer = undefined;
+      this.#counted = null;
+      // A stream no stage shows asks the shared capture for nothing, unless a stage takes it again
+      // at once.
+      this.#leaving = setTimeout(
+        () => this.#report(this.#current, { visible: false }, Date.now()),
+        TUNE_MS,
+      );
     };
   }
 
@@ -188,7 +201,7 @@ export class LiveStream {
     this.#presentedAt = Date.now();
     this.#awaiting = false;
     this.#retapped = false;
-    if (this.#trackTap) this.#tracks = true;
+    if (this.#trackTap) trackReads = true;
     this.#troubleSince = null;
     this.#show("live");
   }
@@ -200,9 +213,13 @@ export class LiveStream {
     });
   }
 
-  // The page is visible again: its frames are taken afresh.
+  // The page is visible again: its frames are taken afresh. Its client paused its feed while hidden
+  // (Selkies' STOP_VIDEO), so it holds no backlog; only a client whose socket died is replaced.
   refresh(): void {
+    this.#polledAt = Date.now();
     if (this.#current) this.#current.tapped = null;
+    const { transport } = look(this.#current);
+    if (transport && (transport.readyState ?? OPEN) > OPEN) this.replace();
     this.#poll();
   }
 
@@ -220,6 +237,7 @@ export class LiveStream {
     this.#closed = true;
     this.#sink = null;
     clearInterval(this.#timer);
+    clearTimeout(this.#leaving);
     this.#current?.frame.remove();
     this.#next?.frame.remove();
     this.#current = this.#next = null;
@@ -273,12 +291,15 @@ export class LiveStream {
     // A hidden page shows nothing, and its throttled timers are not a suspension.
     if (document.visibilityState === "hidden") {
       this.#polledAt = now;
+      this.#away = true;
       this.#report(this.#current, { visible: false }, now);
       this.#counted = null;
       return;
     }
-    // Timers that stopped this long mean a suspended page, whose socket may hold an old backlog.
-    if (now - this.#polledAt >= STALE_MS) this.replace();
+    // Timers that stopped this long on a visible page mean it was suspended, and its socket may
+    // hold an old backlog.
+    if (!this.#away && now - this.#polledAt >= STALE_MS) this.replace();
+    this.#away = false;
     this.#polledAt = now;
     this.#promote(now);
     const client = this.#current;
@@ -303,12 +324,12 @@ export class LiveStream {
       const unproven =
         this.#trackTap &&
         this.#awaiting &&
-        this.#tracks === null &&
+        trackReads === null &&
         decoded > this.#tapDecoded &&
         now - this.#tappedAt >= TRACK_PROOF_MS;
       if (track && track.id !== client.tapped) this.#tap(client, video, transport, now);
       else if (track && unproven) {
-        if (++this.#trackFailures >= TRACK_TRIES) this.#tracks = false;
+        if (++trackFailures >= TRACK_TRIES) trackReads = false;
         this.#tap(client, video, transport, now);
       } else if (track && stalled && !this.#retapped) {
         this.#retapped = true;
@@ -354,7 +375,7 @@ export class LiveStream {
     transport: Transport | null | undefined,
     now: number,
   ): void {
-    const source = tapVideoTrack(video, { tracks: this.#tracks !== false });
+    const source = tapVideoTrack(video, { tracks: trackReads !== false });
     if (!source) return;
     this.#source = source;
     // The stage's count starts again with the new tap.
@@ -377,6 +398,7 @@ export class LiveStream {
   // trip the relay measured on the stream's own socket, decide the quality this viewer asks for.
   #tune(client: Client, now: number): void {
     this.#tunedAt = now;
+    this.#quality.prefer(streamPreference());
     this.#roundTrip(client, now);
     const decoded = Math.max(client.decoded, this.#source?.delivered?.() ?? 0);
     const last = this.#counted;
@@ -508,7 +530,9 @@ export function holdStream(
   };
 }
 
-// Closes every stream, held or kept.
+// Closes every stream, held or kept, and forgets what they learned of this browser.
 export function closeStreams(): void {
   for (const close of [...closers]) close();
+  trackReads = null;
+  trackFailures = 0;
 }
