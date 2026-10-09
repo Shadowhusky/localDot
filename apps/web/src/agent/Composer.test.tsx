@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
+import { requestRevise } from "../deliverables/revise-draft.ts";
 import { createApi } from "../lib/api.ts";
 import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { withAttachments } from "./attachments.ts";
@@ -1176,5 +1177,81 @@ describe("answering dot from the composer", () => {
       kind: "steer",
       text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
     });
+  });
+});
+
+describe("revising a result file", () => {
+  const link = { sessionId, name: "totals.csv", version: 1 };
+  it("fills the composer, keeps what was typed and focuses it", () => {
+    const f = setup();
+    f.input("add a total row");
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    expect(f.field.value).toBe("Revise totals.csv: add a total row");
+    expect(document.activeElement).toBe(f.field);
+    expect(screen.getByRole("button", { name: "Stop revising totals.csv" })).toBeTruthy();
+  });
+  it("sends a revision of an ended task to the revise route with the link", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const ended = { ...agent, model: { ...emptyAgentModel(), ended: { reason: "done" as const } } };
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }), {
+      agent: ended,
+      configured: true,
+    });
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    f.input("Revise totals.csv: add a total row");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${sessionId}/files/totals.csv/revise`,
+      body: { cellId, version: 1, text: "Revise totals.csv: add a total row" },
+    });
+  });
+  it("sends a revision of an open task as a plain follow-up, and a removed chip drops the link", async () => {
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(undefined, { agent: idle });
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    f.input("Revise totals.csv: bigger chart");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
+    act(() => {
+      requestRevise({ link, label: 1, newest: false });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Stop revising totals.csv" }));
+    f.input("Revise totals.csv: from the first one");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(2));
+    expect(f.requests[1]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
+  });
+  it("revises an older version of an open task in a new linked task", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }), {
+      agent: idle,
+      configured: true,
+    });
+    act(() => {
+      requestRevise({ link, label: 1, newest: false });
+    });
+    f.input("Revise totals.csv: start again from this one");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/files/totals.csv/revise`);
+  });
+  it("asks to wait before revising an older version while dot is working", async () => {
+    const f = setup();
+    act(() => {
+      requestRevise({ link, label: 1, newest: false });
+    });
+    f.input("Revise totals.csv: x");
+    f.submit();
+    expect(await screen.findByText("Wait for dot to finish, then revise v1.")).toBeTruthy();
+    expect(f.requests).toEqual([]);
   });
 });

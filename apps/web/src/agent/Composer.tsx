@@ -14,6 +14,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { CellSummary } from "../cells/types.ts";
+import {
+  linkFor,
+  onReviseRequest,
+  prefill,
+  type ReviseDraft,
+} from "../deliverables/revise-draft.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
@@ -32,6 +38,7 @@ import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
+import { RevisingChip } from "./RevisingChip.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
@@ -206,6 +213,12 @@ function Pop({ shown, children }: { shown: boolean; children: ReactNode }) {
 export function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // A file the message revises, from Revise on a file dot handed over.
+  const [revising, setRevising] = useState<ReviseDraft | null>(null);
+  const revisingNow = useRef(revising);
+  revisingNow.current = revising;
+  const shownRevising = useRef(revising);
+  if (revising) shownRevising.current = revising;
   const [online, setOnline] = useState(() => navigator.onLine);
   const [text, setText] = useState<TextShape>({ blank: true, length: 0 });
   const shown = useRef(text);
@@ -282,6 +295,7 @@ export function Composer(props: ComposerProps) {
     pending.current = null;
     setDelivery(null);
     setProblem(null);
+    setRevising(null);
     // A different task does not inherit an uncertain request. Preserve ordinary unsent text.
     revision.current += 1;
   }, [props.api, props.cell?.id, props.agent.sessionId, delivery]);
@@ -356,6 +370,22 @@ export function Composer(props: ComposerProps) {
     shown.current = next;
     setText(next);
   }, []);
+  // Revise on a file fills the message with the file's name, keeps what was typed and focuses it.
+  useEffect(
+    () =>
+      onReviseRequest((draft) => {
+        const input = form.current?.querySelector("textarea");
+        if (!input || input.readOnly) return;
+        input.value = prefill(input.value, draft.link.name);
+        revision.current += 1;
+        measure(input);
+        setProblem(null);
+        setRevising(draft);
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }),
+    [measure],
+  );
   // A key taken out, or discarded, changes the text under the composer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a notice's change is the trigger.
   useLayoutEffect(() => {
@@ -365,6 +395,7 @@ export function Composer(props: ComposerProps) {
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
     announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
+    if (linkFor(record.draftText, revisingNow.current)) setRevising(null);
     uploads.acknowledge(record.attachmentIDs);
     const input = field();
     if (revision.current === record.revision && input && input.value === record.draftText) {
@@ -499,6 +530,18 @@ export function Composer(props: ComposerProps) {
       setProblem("Write a message of 1–8,000 characters.");
       return;
     }
+    // A revision goes to the revise route when the task has ended, or when it revises an older
+    // version of an open task: a follow-up would make dot edit the newest file instead.
+    const draft = revisingNow.current;
+    const link = linkFor(text, draft);
+    if (link && chosen === "steer" && !draft?.newest) {
+      setProblem(`Wait for dot to finish, then revise v${draft?.label}.`);
+      return;
+    }
+    if (link && (chosen === "new" || (chosen === "followup" && !draft?.newest))) {
+      deliver(text, "new", false, link);
+      return;
+    }
     const reply = now.reply;
     if (reply && chosen !== "new") {
       replying.current = true;
@@ -523,7 +566,12 @@ export function Composer(props: ComposerProps) {
     }
     deliver(text, chosen, later);
   };
-  const deliver = (text: string, chosen: MessageMode, later: boolean) => {
+  const deliver = (
+    text: string,
+    chosen: MessageMode,
+    later: boolean,
+    revise?: TextDelivery["revise"],
+  ) => {
     const now = current.current;
     const attached = uploads.forMessage();
     if (!attached) {
@@ -538,8 +586,18 @@ export function Composer(props: ComposerProps) {
       setProblem("Shorten the message or attachment names before sending.");
       return;
     }
+    if (revise && sent.length > 7500) {
+      setProblem("Shorten the message to 7,500 characters to revise a file.");
+      return;
+    }
     void perform(
-      { cellId: now.cell?.id as string, sessionId: now.agent.sessionId, mode: chosen, text: sent },
+      {
+        cellId: now.cell?.id as string,
+        sessionId: now.agent.sessionId,
+        mode: chosen,
+        text: sent,
+        ...(revise ? { revise } : {}),
+      },
       revision.current,
       {
         draftText: text,
@@ -775,6 +833,11 @@ export function Composer(props: ComposerProps) {
               <span>{notice.text}</span>
             </p>
           ))}
+        </Collapse>
+        <Collapse open={!!revising} className="composer-files">
+          {shownRevising.current && (
+            <RevisingChip draft={shownRevising.current} onClear={() => setRevising(null)} />
+          )}
         </Collapse>
         <Collapse open={rows.length > 0} className="composer-files">
           <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />

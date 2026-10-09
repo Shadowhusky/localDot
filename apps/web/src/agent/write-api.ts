@@ -1,4 +1,4 @@
-import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
+import { keyLikePresent, ReviseLink, ULID_PATTERN } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 
 export type MessageMode = "new" | "steer" | "followup";
@@ -7,6 +7,8 @@ export interface TextDelivery {
   readonly sessionId: string | null;
   readonly mode: MessageMode;
   readonly text: string;
+  // A new task that revises a file dot handed over before, starting from that version.
+  readonly revise?: ReviseLink;
 }
 export class DeliveryFailure extends Error {
   constructor(
@@ -33,11 +35,17 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
     request.text.length > 8000 ||
     request.text.includes("\0") ||
     !request.text.isWellFormed() ||
-    keyLikePresent(request.text)
+    keyLikePresent(request.text) ||
+    (request.revise &&
+      (request.mode !== "new" ||
+        !ReviseLink.safeParse(request.revise).success ||
+        request.text.length > 7500))
   )
     throw new DeliveryFailure(false);
-  const path =
-    request.mode === "new"
+  const revise = request.mode === "new" ? request.revise : undefined;
+  const path = revise
+    ? `/api/agent/sessions/${revise.sessionId}/files/${encodeURIComponent(revise.name)}/revise`
+    : request.mode === "new"
       ? `/api/cells/${request.cellId}/agent`
       : `/api/agent/sessions/${request.sessionId}/messages`;
   const abort = new AbortController();
@@ -46,9 +54,11 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
       method: "POST",
       headers: { authorization: api.authorization(), "content-type": "application/json" },
       body: JSON.stringify(
-        request.mode === "new"
-          ? { task: request.text }
-          : { kind: request.mode, text: request.text },
+        revise
+          ? { cellId: request.cellId, version: revise.version, text: request.text }
+          : request.mode === "new"
+            ? { task: request.text }
+            : { kind: request.mode, text: request.text },
       ),
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
     });
