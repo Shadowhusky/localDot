@@ -21,4 +21,7 @@ export interface CellSummary {
   error?: string;
   // Frozen by Stop until Resume refreshes credentials and thaws the desktop.
   paused?: true;
+  // A newer build of the computer is ready; Update restarts it on that build.
+  updateAvailable?: true;
+  updating?: true;
 }

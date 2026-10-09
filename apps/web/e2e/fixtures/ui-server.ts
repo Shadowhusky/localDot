@@ -52,6 +52,7 @@ import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
+import { ComputerUpdateRefused } from "../../../daemon/src/cells/computer-update.ts";
 import type { CellControls } from "../../../daemon/src/cells/orchestrator.ts";
 import { TicketRegistry } from "../../../daemon/src/cells/secrets.ts";
 import { cellStatusRoute } from "../../../daemon/src/cells/status-stream.ts";
@@ -302,6 +303,25 @@ cells.start = async (id) => {
       });
   }, 1500);
 };
+
+// Update: the computer stops, comes back on the new version and is ready a moment later.
+async function updateCell(id: string): Promise<void> {
+  const c = cells.get(id);
+  if (!c?.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
+  const { updateAvailable: _available, ...rest } = c;
+  const none = { connection: "none" as const, viewers: 0, lastUpstreamAt: null };
+  cells.emit({ ...rest, state: "stopping", updating: true, stream: none });
+  setTimeout(() => cells.emit({ ...rest, state: "starting", updating: true, stream: none }), 800);
+  setTimeout(
+    () =>
+      cells.emit({
+        ...rest,
+        state: "ready",
+        stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+      }),
+    Number(process.env.QA_UPDATE_MS ?? 2500),
+  );
+}
 
 let keys = SAMPLE_KEYS;
 const settingsStore = new SettingsStore(HOME);
@@ -1241,7 +1261,7 @@ const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
-  cells: { cells, tickets },
+  cells: { cells, tickets, update: updateCell },
   accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
@@ -2063,6 +2083,13 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
 const reply = (problem: string | undefined) =>
   problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });
 
+// A new version of the computer becomes ready.
+routes.post("/__qa/update", () => {
+  const c = cells.get(cellId);
+  if (!c) return reply("no computer");
+  cells.emit({ ...c, updateAvailable: true });
+  return reply(undefined);
+});
 routes.post("/__qa/approval", async (c) => {
   const call = c.req.header("content-type")?.startsWith("application/json")
     ? ((await c.req.json()) as ToolCall)

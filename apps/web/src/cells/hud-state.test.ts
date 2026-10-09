@@ -202,4 +202,24 @@ describe("hudFor", () => {
       expect(hud.live, hud.label).toBe(phase === "live");
     }
   });
+
+  it("shows an update's stop and start as one waking step that offers no control", () => {
+    for (const state of ["stopping", "starting"] as const) {
+      expect(hudFor(known({ ...cell(state), updating: true }))).toMatchObject({
+        phase: "starting",
+        label: "Updating…",
+        action: { kind: "stop", enabled: false },
+      });
+    }
+    const unfinished = cell(
+      "failed",
+      "none",
+      "The update didn't finish. Turn on your computer to finish it.",
+    );
+    expect(hudFor(known(unfinished))).toMatchObject({
+      phase: "failed",
+      caption: "The update didn't finish. Turn on your computer to finish it.",
+      action: { kind: "start", enabled: true },
+    });
+  });
 });

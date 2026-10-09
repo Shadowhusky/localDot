@@ -1,6 +1,7 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
+import { type ComputerUpdate, UPDATE_READY } from "../cells/useComputerUpdate.ts";
 import { spendText } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
@@ -97,6 +98,8 @@ export interface SettingsSheetProps {
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
   // Shut down, and on a phone, where the sheet covers the island, the task's Stop.
   stop?: { label: string; enabled: boolean; run(): void };
+  // A new version of the computer, while one is ready or going on.
+  update?: ComputerUpdate;
   // On a phone, what Stop reports, which stays after Stop itself has gone; the island says it
   // on a wider screen.
   taskControls?: ReactNode;
@@ -394,7 +397,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     knowledge: !!props.knowledge,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
-    computer: !!props.stop,
+    computer: !!props.stop || !!props.update?.available,
   };
   return SECTIONS.filter((section) => has[section.id]).map((section) => section.id);
 }
@@ -538,7 +541,9 @@ function SectionList({
   };
   return (
     <>
-      {(props.stop || props.taskControls) && <ComputerControls props={props} />}
+      {(props.stop || props.taskControls || props.update?.available) && (
+        <ComputerControls props={props} />
+      )}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(["spending", "appearance", "knowledge", "accounts", "keys"] as const).map(row)}
@@ -548,28 +553,60 @@ function SectionList({
 }
 
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
+  const update = props.update?.available ? props.update : undefined;
   return (
     <div>
-      {props.stop && (
+      {(props.stop || update) && (
         <Group>
-          <GroupRow
-            leading={<IconTile icon="power" />}
-            label="Your computer"
-            trailing={
-              <Button
-                size="sm"
-                icon="stop"
-                disabledReason={props.stop.enabled ? undefined : "Not available right now"}
-                onClick={() => props.stop?.run()}
-              >
-                {props.stop.label}
-              </Button>
-            }
-          />
+          {props.stop && (
+            <GroupRow
+              leading={<IconTile icon="power" />}
+              label="Your computer"
+              trailing={
+                <Button
+                  size="sm"
+                  icon="stop"
+                  disabledReason={
+                    props.stop.enabled && !update?.busy ? undefined : "Not available right now"
+                  }
+                  onClick={() => props.stop?.run()}
+                >
+                  {props.stop.label}
+                </Button>
+              }
+            />
+          )}
+          {update && <UpdateRow update={update} />}
         </Group>
       )}
       {props.taskControls}
     </div>
+  );
+}
+
+function UpdateRow({ update }: { update: ComputerUpdate }) {
+  return (
+    <GroupRow
+      leading={<IconTile icon="download" />}
+      label={
+        <span className="settings-update-label" role="status">
+          <span data-shown={update.busy ? undefined : ""}>{UPDATE_READY}</span>
+          <span data-shown={update.busy ? "" : undefined}>Updating your computer…</span>
+        </span>
+      }
+      detail={
+        update.error && !update.busy ? (
+          <span className="settings-update-error">{update.error}</span>
+        ) : (
+          "Your files and sign-ins stay. It restarts in about a minute."
+        )
+      }
+      trailing={
+        <Button size="sm" variant="primary" busy={update.busy} onClick={update.run}>
+          Update
+        </Button>
+      }
+    />
   );
 }
 

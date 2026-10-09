@@ -527,4 +527,29 @@ describe("settings inspector", () => {
       expect(within(sheet()).getByText("Stopped.")).toBeTruthy();
     }
   });
+
+  it("offers Update for a new version even with the computer off, and keeps the row while it runs", () => {
+    const run = vi.fn();
+    const update = { available: true, busy: false, error: null, run };
+    const view = render(<SettingsSheet {...props()} update={update} />);
+    expect(within(sheet()).getByText("A new version of your computer is ready")).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Update" }));
+    expect(run).toHaveBeenCalledOnce();
+    view.rerender(
+      <SettingsSheet
+        {...props()}
+        stop={{ label: "Shut down", enabled: true, run: vi.fn() }}
+        update={{ ...update, busy: true }}
+      />,
+    );
+    expect(within(sheet()).getByText("Updating your computer…")).toBeTruthy();
+    expect(within(sheet()).getByRole("button", { name: "Update" }).getAttribute("aria-busy")).toBe(
+      "true",
+    );
+    expect(
+      within(sheet()).getByRole("button", { name: "Shut down" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    view.rerender(<SettingsSheet {...props()} update={{ ...update, available: false }} />);
+    expect(within(sheet()).queryByText(/new version/)).toBeNull();
+  });
 });

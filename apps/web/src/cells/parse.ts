@@ -15,6 +15,8 @@ export const CellSummarySchema = z.strictObject({
   paused: z.literal(true).optional(),
   fenced: ComputerFence.optional(),
   replacementPending: z.literal(true).optional(),
+  updateAvailable: z.literal(true).optional(),
+  updating: z.literal(true).optional(),
 });
 export function parseCells(value: unknown): CellSummary[] {
   const rows = z.array(CellSummarySchema).max(1024).parse(value);

@@ -16,6 +16,8 @@ export interface CurtainProps {
   first: boolean;
   // A Turn on is on its way.
   waking: boolean;
+  // The computer is moving onto a new version, from its stop until it is ready again.
+  updating?: boolean;
   // The computer's own words, for a failure.
   caption: string;
   // Why the last request was refused, in place of the usual words.
@@ -44,6 +46,7 @@ export function Curtain({
   phase,
   first,
   waking,
+  updating = false,
   caption,
   notice,
   action,
@@ -62,7 +65,7 @@ export function Curtain({
         progress: false,
         button: { label: "Replace computer" },
       }
-    : curtainCopy(phase, { first, waking, caption, notice, action });
+    : curtainCopy(phase, { first, waking, updating, caption, notice, action });
   const enabled = recovering ? replace.enabled : action?.enabled;
   return (
     <section
@@ -128,13 +131,22 @@ function curtainCopy(
   {
     first,
     waking,
+    updating,
     caption,
     notice,
     action,
-  }: Pick<CurtainProps, "first" | "waking" | "caption" | "notice" | "action">,
+  }: Pick<CurtainProps, "first" | "waking" | "updating" | "caption" | "notice" | "action">,
 ): Copy | null {
   const turnOn = { label: "Turn on", icon: "power" as const };
   if (phase === "checking") return null;
+  if (updating && (STARTING.has(phase) || phase === "stopping"))
+    return {
+      title: "Updating your computer",
+      sub: "Your files and sign-ins stay.",
+      clock: true,
+      progress: true,
+      button: turnOn,
+    };
   if (phase === "restarting") {
     const attempt = ATTEMPT.exec(caption);
     return {

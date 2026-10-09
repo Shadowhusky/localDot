@@ -31,6 +31,7 @@ import { deliverText } from "./agent/write-api.ts";
 import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
@@ -324,6 +325,7 @@ function Theatre({ api }: { api: ApiClient }) {
     retry,
     selectReady,
   } = useCell(api);
+  const computerUpdate = useComputerUpdate(api, cell);
   const keys = useKeys(api);
   const settings = useSettings(api);
   const rules = useRules(api, settings.open);
@@ -657,6 +659,11 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
+  useUpdateNotice(
+    cell,
+    hud.phase === "live" && (!task || task.phase === "finished"),
+    computerUpdate,
+  );
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -1081,6 +1088,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     phase={curtain.phase}
                     first={!cell && listed.length === 0}
                     waking={pending === "start" || pending === "create"}
+                    updating={!!cell?.updating}
                     caption={computer.caption}
                     notice={error}
                     action={computerAction}
@@ -1431,6 +1439,7 @@ function Theatre({ api }: { api: ApiClient }) {
           showDot={showDot}
           taskControls={<StopControl controls={controls} />}
           stop={sheetStopControl}
+          update={computerUpdate}
           open={settings.open}
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}
