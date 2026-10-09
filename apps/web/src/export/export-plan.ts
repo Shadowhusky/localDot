@@ -17,7 +17,6 @@ import {
 import {
   buildPlaybackMap,
   busySpans,
-  chapters,
   mergeSpans,
   playDuration,
   type SessionModel,
@@ -25,6 +24,8 @@ import {
   sessionAt,
 } from "@localdot/stage";
 import { timeLabel } from "../replay/replay-view.ts";
+import { taskHud } from "../session/status.ts";
+import { atWork, LINE_HOLD_MS, narrationLine } from "../shell/narration.ts";
 
 export {
   EXPORT_FORMATS,
@@ -54,10 +55,6 @@ export interface ExportPlan {
 }
 export const PRIVACY_NOTE =
   "This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.";
-
-export function speedText(speed: number): string {
-  return `${Number(speed.toFixed(2))}×`;
-}
 
 // Bits per pixel of each frame the encoder is asked for, at 30 fps. A screen changes little from one
 // frame to the next, so a higher frame rate costs less than its share: the rate grows by fps^0.6.
@@ -105,6 +102,35 @@ function knownEnd(model: SessionModel, activity: ActivitySpan[]): number {
     );
   for (const span of activity) endMs = Math.max(endMs, microsToMs(span.to));
   return endMs;
+}
+
+// The caption at a moment of the recording: the band's line then, before any hold, and whether it
+// is for the user, so it skips the hold.
+function bandAt(model: SessionModel, time: number): { line: string; forUser: boolean } {
+  const hud = taskHud(model, time);
+  return { line: narrationLine(hud.row, hud.caption, model, time), forUser: !atWork(hud.row) };
+}
+
+export const bandLineAt = (model: SessionModel, time: number) => bandAt(model, time).line;
+
+// The band's line at each frame, each held long enough to read in the video, as the band holds it.
+function heldLines(
+  frames: number,
+  fps: number,
+  lineAt: (frame: number) => { line: string; forUser: boolean },
+): string[] {
+  const hold = Math.ceil((LINE_HOLD_MS * fps) / 1000);
+  const lines: string[] = [];
+  let since = 0;
+  for (let frame = 0; frame < frames; frame++) {
+    const shown = lines[frame - 1];
+    const { line, forUser } = lineAt(frame);
+    if (shown === undefined || (line !== shown && (!shown || forUser || frame - since >= hold))) {
+      lines.push(line);
+      since = frame;
+    } else lines.push(shown);
+  }
+  return lines;
 }
 
 function precedingIndex<T>(
@@ -157,7 +183,6 @@ export function planExport(
   const frames = Math.ceil((playDuration(map) * fps) / (1000 * speed));
   let busyMs = 0;
   for (const span of mergeSpans(busy, startMs, endMs)) busyMs += span.to - span.from;
-  const chapterList = chapters(model, endMs);
   const gapSpans = new Map<RecordingGapReason, Span[]>();
   for (const reason of GAP_PRIORITY)
     gapSpans.set(
@@ -173,6 +198,7 @@ export function planExport(
         endMs,
       ),
     );
+  let captionTrack: string[] | undefined;
   const sessionMsAt = (frame: number) => {
     if (!Number.isSafeInteger(frame) || frame < 0 || frame >= frames)
       throw new RangeError("Export frame is outside the chosen range.");
@@ -186,10 +212,10 @@ export function planExport(
     movingS: Math.min(frames / fps, busyMs / (1000 * speed)),
     sessionMsAt,
     captionAt(frame) {
-      const time = sessionMsAt(frame);
+      sessionMsAt(frame);
       if (!captions) return null;
-      const chapter = chapterList[precedingIndex(chapterList, time, (entry) => entry.startT)];
-      return chapter && time < chapter.endT ? chapter.label : null;
+      captionTrack ??= heldLines(frames, fps, (index) => bandAt(model, sessionMsAt(index)));
+      return captionTrack[frame] || null;
     },
     gapAt(frame) {
       const time = sessionMsAt(frame);

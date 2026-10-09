@@ -8,6 +8,9 @@ export const EXPORT_QUALITIES = ["low", "medium", "high"] as const;
 export type ExportQuality = (typeof EXPORT_QUALITIES)[number];
 export const EXPORT_FORMATS = ["mp4", "webm"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+// Where dot sits in the video: in a band under the picture, as in the app, or in a corner of it.
+export const DOT_PLACEMENTS = ["under", "over"] as const;
+export type DotPlacement = (typeof DOT_PLACEMENTS)[number];
 export const SPEED_LIMITS = { min: 0.25, max: 16 } as const;
 // The largest picture an export makes: the computer's own screen.
 export const MAX_EXPORT_SIZE = { w: 2560, h: 1600 } as const;
@@ -49,6 +52,8 @@ export const ExportRequest = z
     captions: z.boolean(),
     // dot's pointer, clicks and typing drawn over the picture.
     overlays: z.boolean(),
+    // dot and its words in the video; without it, none. Under the picture, size includes the band.
+    dot: z.enum(DOT_PLACEMENTS).optional(),
     size: z.strictObject({ w: z.number(), h: z.number() }).refine(validSize),
     fps: z.union(EXPORT_FRAME_RATES.map((rate) => z.literal(rate))),
     quality: z.enum(EXPORT_QUALITIES),

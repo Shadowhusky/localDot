@@ -25,7 +25,7 @@ import {
 import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
-import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { findTool } from "./find.ts";
@@ -314,7 +314,7 @@ async function dispatchAdmitted(
       input = frozen as never;
     switch (name) {
       case "computer":
-        append(ctx, "step.start", { kind: "gui" });
+        append(ctx, "step.start", { kind: "gui", ...intentOf(ctx, input) });
         result = await computerTool(t, ctx, input);
         ctx.check();
         // A step refused for a stale look did nothing: dot looks again, nothing failed.
@@ -343,7 +343,7 @@ async function dispatchAdmitted(
         result = await browserUploadTool(t, ctx, input);
         break;
       case "browser_act":
-        append(ctx, "step.start", { kind: "gui" });
+        append(ctx, "step.start", { kind: "gui", ...intentOf(ctx, input) });
         result = await browserActTool(t, ctx, input);
         ctx.check();
         append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });

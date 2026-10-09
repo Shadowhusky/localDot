@@ -1,3 +1,4 @@
+import type { DotPlacement } from "@localdot/protocol";
 import type { ExportFormat, ExportPlan, ExportQuality, ExportSize } from "./export-plan.ts";
 
 // Fitted to exports of a 2-minute recording in Chrome on an Apple silicon Mac (lane L13's notes),
@@ -20,6 +21,9 @@ const FILL: Record<ExportQuality, number> = { low: 0.55, medium: 0.45, high: 0.2
 const KEY_EVERY_S = 5;
 const KEY_FRAME_S = 0.07;
 const CONTAINER_BYTES = 64 * 1024;
+// dot is alive in every frame, so with dot each frame is a new picture, and its corner moving costs
+// about this share of the rate the whole way through (Showcase on a 2-minute recording, lane L10).
+const DOT_FILL = 0.075;
 const CALIBRATION_KEY = "localdot.export-calibration.v1";
 
 export interface ExportEstimate {
@@ -37,10 +41,12 @@ export const UNCALIBRATED: Calibration = { time: 1, size: 1 };
 
 export function estimateExport(
   plan: Pick<ExportPlan, "frames" | "fps" | "durationS" | "movingS" | "bitrate">,
-  request: { size: ExportSize; format: ExportFormat; quality: ExportQuality },
+  request: { size: ExportSize; format: ExportFormat; quality: ExportQuality; dot?: DotPlacement },
   calibration: Calibration = UNCALIBRATED,
 ): ExportEstimate {
-  const pictures = Math.min(plan.frames, NEW_PICTURES * plan.movingS * plan.fps + plan.durationS);
+  const pictures = request.dot
+    ? plan.frames
+    : Math.min(plan.frames, NEW_PICTURES * plan.movingS * plan.fps + plan.durationS);
   const pictureMs =
     (PICTURE_MS + (MEGAPIXEL_MS * request.size.w * request.size.h) / 1_000_000) *
     (request.format === "webm" ? WEBM_FACTOR : 1);
@@ -48,7 +54,8 @@ export function estimateExport(
     bytes:
       ((plan.bitrate / 8) *
         (plan.movingS * FILL[request.quality] +
-          ((plan.durationS - plan.movingS) / KEY_EVERY_S) * KEY_FRAME_S) +
+          ((plan.durationS - plan.movingS) / KEY_EVERY_S) * KEY_FRAME_S +
+          (request.dot ? plan.durationS * DOT_FILL : 0)) +
         CONTAINER_BYTES) *
       calibration.size,
     ms: (START_MS + pictures * pictureMs) * calibration.time,

@@ -18,6 +18,13 @@ const MARK: Record<string, string> = {
   skipped: "[-]",
 };
 
+// The computer tool, and find with it, are offered only to a model that sees the screen. Anthropic's
+// own computer tools take one input a call.
+export function screenHands(model: ModelBinding): ScreenHands {
+  if (model.computer === "none" || !model.vision) return "none";
+  return model.computer === "generic" ? "batch" : "calls";
+}
+
 // The system prompt, rebuilt for every model call: the plan lives outside the conversation (spec
 // "Harness rules") and is shown here, current, instead of piling up in the history.
 export function systemPrompt(
@@ -26,13 +33,7 @@ export function systemPrompt(
   plan: PlanLine[],
   today: Date,
 ): string {
-  // The computer tool, and find with it, are offered only to a model that sees the screen.
-  const hands: ScreenHands =
-    model.computer === "none" || !model.vision
-      ? "none"
-      : model.computer === "generic"
-        ? "batch"
-        : "calls";
+  const hands = screenHands(model);
   const screen =
     hands === "none"
       ? "You cannot see the screen with this model: work through the shell, files and page reading."

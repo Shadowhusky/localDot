@@ -14,7 +14,6 @@ import {
   type AgentStep,
   emptyAgentModel,
   AGENT_LIMITS as L,
-  type Said,
 } from "./model.ts";
 import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.ts";
 
@@ -55,10 +54,6 @@ function put<T>(
     next.delete(key);
   }
   return next;
-}
-const SAID_TAIL = 600;
-function said(from: Said["from"], text: string, open: boolean, messageId?: string): Said {
-  return { from, text: text.slice(-SAID_TAIL), open, ...(messageId ? { messageId } : {}) };
 }
 // A message keeps its place in the conversation as later deltas and its final text arrive.
 function firstSeen(old: { seq?: number; at?: number } | undefined, e: LocalDotEvent) {
@@ -104,11 +99,6 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "screen.switch": {
       const { screen, cellId, geometry, revision } = e.data;
       next = { ...next, screen: { screen, cellId, geometry, revision } };
-      break;
-    }
-    case "thought.delta": {
-      const going = model.said?.from === "thought" && model.said.open ? model.said.text : "";
-      next = { ...next, said: said("thought", going + e.data.text, true) };
       break;
     }
     case "agent.state":
@@ -287,7 +277,6 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           L.messages,
         ),
         historyTruncated: next.historyTruncated || (!old && model.messages.size >= L.messages),
-        said: said("message", text, true, e.data.messageId),
       };
       break;
     }
@@ -309,7 +298,6 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           L.messages,
         ),
         historyTruncated: next.historyTruncated || (!old && model.messages.size >= L.messages),
-        said: said("message", e.data.text, false, e.data.messageId),
       };
       break;
     }
@@ -337,7 +325,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       const old = step(model, e.step);
       let row: AgentStep = { ...old, firstSeenAt: old.firstSeenAt ?? e.t };
       if (e.type === "step.start")
-        row = { ...row, kind: e.data.kind, planItem: e.data.planItem, startedAt: e.t };
+        row = {
+          ...row,
+          kind: e.data.kind,
+          planItem: e.data.planItem,
+          ...(e.data.intent ? { intent: e.data.intent } : {}),
+          startedAt: e.t,
+        };
       else if (e.type === "step.end")
         row = { ...row, status: e.data.status, note: e.data.note, endedAt: e.t };
       else if (e.type === "tool.start")
@@ -358,11 +352,6 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         steps: put(model.steps, e.step, row, L.steps),
         historyTruncated:
           next.historyTruncated || (!model.steps.has(e.step) && model.steps.size >= L.steps),
-        ...(e.type === "step.end"
-          ? { said: null }
-          : e.type === "step.start" && model.said?.open
-            ? { said: { ...model.said, open: false } }
-            : {}),
       };
       break;
     }

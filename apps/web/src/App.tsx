@@ -114,7 +114,7 @@ import {
 import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
-import { narrationLine } from "./shell/narration.ts";
+import { atWork, narrationLine } from "./shell/narration.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -1183,7 +1183,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   appStatus.row,
                   appStatus.caption.text,
                   // Out of touch, dot's last words are old news; the caption says what is going on.
-                  linkLost ? null : agent.model.said,
+                  linkLost || !session.sessionId ? null : session.model,
+                  now,
                 )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
@@ -1377,6 +1378,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     line={narration}
                     speaker={speaker}
                     reveal={!!asked && narration === asked}
+                    forUser={!atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
                   />

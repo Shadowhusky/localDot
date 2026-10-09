@@ -15,6 +15,7 @@ describe("theme tokens", () => {
   it("reads every overlay colour and the label font from the CSS tokens", () => {
     const vars: Record<string, string> = {
       "--color-xenon": "#3fb5de",
+      "--color-attention": "#e9b44c",
       "--color-xenon-a10": "rgba(63, 181, 222, 0.1)",
       "--color-cursor-fill": "#ffffff",
       "--color-cursor-rim": "#121316",
@@ -30,6 +31,8 @@ describe("theme tokens", () => {
       "--color-glyph-light": "#ffffff",
       "--color-glyph-mid": "#d9dce0",
       "--color-glyph-shade": "#9fa4ab",
+      "--color-spill": "rgba(220, 228, 238, 0.07)",
+      "--color-spill-xenon": "rgba(63, 181, 222, 0.11)",
       "--font-ui": ' system-ui, -apple-system, "Segoe UI Variable Text", sans-serif',
     };
     const theme = readTheme({
@@ -40,6 +43,7 @@ describe("theme tokens", () => {
     expect(theme.font).toBe('system-ui, -apple-system, "Segoe UI Variable Text", sans-serif');
     expect(theme.dragUnder.alpha).toBeCloseTo(0.12, 6);
     expect(Object.keys(theme).sort()).toEqual([
+      "attention",
       "cursorFill",
       "cursorRim",
       "dragUnder",
@@ -52,6 +56,8 @@ describe("theme tokens", () => {
       "hudSolid",
       "keyBevel",
       "shadeCursor",
+      "spill",
+      "spillXenon",
       "text",
       "text2",
       "void",

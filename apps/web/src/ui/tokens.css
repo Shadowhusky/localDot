@@ -191,10 +191,12 @@
   --rim-you-glow:
     0 0 0 1px rgba(242, 243, 245, 0.3), 0 0 28px var(--color-you-glow),
     0 0 90px rgba(242, 243, 245, 0.06);
-  --spill: radial-gradient(ellipse 50% 70% at 50% 0, rgba(220, 228, 238, 0.07), transparent 70%);
+  --color-spill: rgba(220, 228, 238, 0.07);
+  --color-spill-xenon: rgba(63, 181, 222, 0.11);
+  --spill: radial-gradient(ellipse 50% 70% at 50% 0, var(--color-spill), transparent 70%);
   --spill-xenon: radial-gradient(
     ellipse 50% 70% at 50% 0,
-    rgba(63, 181, 222, 0.11),
+    var(--color-spill-xenon),
     transparent 70%
   );
   --spill-you: radial-gradient(
