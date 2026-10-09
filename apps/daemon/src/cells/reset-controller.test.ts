@@ -9,6 +9,7 @@ import { AccountsProfile } from "./accounts-profile.ts";
 import { BrowserLedgerStore } from "./browser-ledger.ts";
 import { BrowserOrchestrator } from "./browser-orchestrator.ts";
 import { browserNames } from "./browser-spec.ts";
+import { ComputerUpdateStore, ComputerUpdates, UPDATE_LABEL } from "./computer-update.ts";
 import { DockerClient, DockerError } from "./docker.ts";
 import { CellOrchestrator } from "./orchestrator.ts";
 import { createComputerResetController } from "./reset-controller.ts";
@@ -26,6 +27,13 @@ const cleanups: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
+interface Container {
+  Id: string;
+  Name: string;
+  State: { Running: boolean; Paused: boolean };
+  Config: { Labels: Record<string, string> };
+  mounts: string[];
+}
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "localdot-reset-controller-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
@@ -67,6 +75,9 @@ function fixture() {
     [browserId, { cellId: browserId, role: "browser", port: 4761 }],
   ]);
   const events: string[] = [];
+  const containers = new Map<string, Container>();
+  const container = (ref: string) =>
+    containers.get(ref) ?? [...containers.values()].find((c) => c.Id === ref);
   const cell = vi.fn(async (id: string) => keys.get(id));
   const closeCell = vi.fn(async (id: string) => {
     events.push(`close:${id}`);
@@ -82,7 +93,12 @@ function fixture() {
   const docker = new DockerClient(join(home, "unused.sock"));
   const copy = "c".repeat(64);
   const request = vi.spyOn(docker, "request").mockImplementation(async (input) => {
-    if (input.path === "/containers/json") return [];
+    if (input.path === "/containers/json") {
+      const { volume = [] } = JSON.parse(input.query?.filters ?? "{}") as { volume?: string[] };
+      return [...containers.values()]
+        .filter((c) => c.mounts.some((mount) => volume.includes(mount)))
+        .map((c) => ({ Id: c.Id }));
+    }
     if (input.path === "/volumes" && input.method === "GET")
       return {
         Volumes: [...volumes].map(([Name, Labels]) => ({ Name, Labels, CreatedAt: "" })),
@@ -100,6 +116,14 @@ function fixture() {
     }
     if (input.path === `/containers/${copy}/wait`) return { StatusCode: 0 };
     if (input.path.startsWith(`/containers/${copy}`)) return undefined;
+    const ref = /^\/containers\/([^/]+?)(\/json)?$/.exec(input.path);
+    const found = ref && container(decodeURIComponent(ref[1] as string));
+    if (found && input.method === "GET" && ref[2]) return found;
+    if (found && input.method === "DELETE" && !ref[2]) {
+      events.push(`remove:${found.Name.slice(1)}`);
+      containers.delete(found.Name.slice(1));
+      return undefined;
+    }
     const name = input.path.startsWith("/volumes/")
       ? decodeURIComponent(input.path.slice(9))
       : undefined;
@@ -112,10 +136,13 @@ function fixture() {
     volumes.delete(name);
     return undefined;
   });
+  const images = { desktop: "fixture:dev", gate: "fixture:dev" };
+  const updates = new ComputerUpdates({ home, docker, images, stream: { fullcolor: false } });
   const cells = new CellOrchestrator({
     store,
     docker,
-    images: { desktop: "fixture:dev", gate: "fixture:dev" },
+    images,
+    updates,
     permanentFence: (id) => fences.isFenced(id),
     candidateHold: (id) => holds.candidateHeld(id),
     probeDesktopd: async () => undefined,
@@ -199,6 +226,8 @@ function fixture() {
     store,
     ledgers,
     volumes,
+    containers,
+    oldRecord,
     keys,
     events,
     runner,
@@ -304,6 +333,37 @@ it("leaves source records and volumes intact when task drain or key closure is u
   expect(g.store.get(old)).toBeDefined();
   expect(g.volumes.size).toBe(2);
   expect(g.create).not.toHaveBeenCalled();
+});
+it("removes what an unfinished update left beside the computer before it checks what it erases", async () => {
+  const f = fixture();
+  const operationId = "01JXYZ00000000000000000005";
+  const leftover = `${f.oldRecord.docker.desktop}-update`;
+  new ComputerUpdateStore(f.home).write({
+    v: 1,
+    operationId,
+    cellId: old,
+    previous: { gate: "a".repeat(64), desktop: "b".repeat(64) },
+    images: { gate: `sha256:${"c".repeat(64)}`, desktop: `sha256:${"d".repeat(64)}` },
+    candidates: { gate: null, desktop: null },
+    phase: "creating",
+  });
+  f.containers.set(leftover, {
+    Id: "e".repeat(64),
+    Name: `/${leftover}`,
+    State: { Running: false, Paused: false },
+    Config: {
+      Labels: { "localdot.cell": old, "localdot.role": "desktop", [UPDATE_LABEL]: operationId },
+    },
+    mounts: [f.oldRecord.docker.homeVolume],
+  });
+
+  expect((await f.controller.reset(old, confirmation)).phase).toBe("ready");
+  expect(f.events).toContain(`remove:${leftover}`);
+  expect(f.events.indexOf(`remove:${leftover}`)).toBeLessThan(f.events.indexOf("drain"));
+  expect(f.containers.size).toBe(0);
+  expect(new ComputerUpdateStore(f.home).read(old)).toBeUndefined();
+  expect(f.store.get(old)).toBeUndefined();
+  expect(f.store.get(fresh)).toBeDefined();
 });
 it("refuses foreign ownership and candidate identities before task drain or volume mutation", async () => {
   const f = fixture();
