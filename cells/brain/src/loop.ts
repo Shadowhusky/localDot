@@ -13,6 +13,7 @@ import {
   EARLIER_CHARS,
   earlierRecord,
   isToolName,
+  KEYD_REBOUND,
   KEYD_REENTER,
   RESUME_WAIT_REASON,
   SECRET_ID_PATTERN,
@@ -157,12 +158,19 @@ function responseHeader(error: APICallError, name: string): string | undefined {
   )?.[1];
 }
 
-// The key keyd refused a model call for because its stored value has to be entered again.
-export function keyToReenter(error: unknown): string | undefined {
-  if (!APICallError.isInstance(error) || responseHeader(error, "x-keyd-reason") !== KEYD_REENTER)
-    return undefined;
+const KEY_STALLS: Record<string, string> = {
+  [KEYD_REENTER]: STALL.keyReenter,
+  [KEYD_REBOUND]: STALL.keyRebound,
+};
+
+// A model call keyd refused for a key only the user can fix: its stored value has to be entered
+// again, or the key was changed outside localDot. The id is empty when keyd named no valid key.
+export function keyToFix(error: unknown): { stall: string; id: string } | undefined {
+  if (!APICallError.isInstance(error)) return undefined;
+  const stall = KEY_STALLS[responseHeader(error, "x-keyd-reason") ?? ""];
+  if (!stall) return undefined;
   const id = responseHeader(error, "x-keyd-secret") ?? "";
-  return SECRET_ID_PATTERN.test(id) ? id : "";
+  return { stall, id: SECRET_ID_PATTERN.test(id) ? id : "" };
 }
 
 function retryAfterMs(error: unknown): number | undefined {
@@ -589,10 +597,11 @@ export class Agent {
             continue;
           }
         }
-        // A key to enter again is the user's to fix: the task waits, naming it, and goes on after.
-        const reenter = keyToReenter(err);
-        if (reenter !== undefined) {
-          if (!(await this.#waitForResume(STALL.keyReenter, signal, reenter || undefined)))
+        // A key to enter again, or one changed outside localDot, is the user's to fix: the task
+        // waits, naming it, and goes on after.
+        const key = keyToFix(err);
+        if (key) {
+          if (!(await this.#waitForResume(key.stall, signal, key.id || undefined)))
             return "stopped";
           attempt = 0;
           continue;

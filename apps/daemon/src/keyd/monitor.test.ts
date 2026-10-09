@@ -67,8 +67,8 @@ describe("credential service health polling", () => {
     expect((await monitor.refresh()).reenter).toBe(0);
     const listener = vi.fn();
     monitor.subscribe(listener);
-    read.mockResolvedValue({ ...status(), reenter: 2 });
-    expect((await monitor.refresh()).reenter).toBe(2);
+    read.mockResolvedValue({ ...status(), reenter: 2, rebound: 1 });
+    expect(await monitor.refresh()).toMatchObject({ reenter: 2, rebound: 1 });
     expect(listener).not.toHaveBeenCalled();
   });
 

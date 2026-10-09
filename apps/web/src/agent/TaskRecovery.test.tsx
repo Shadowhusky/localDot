@@ -8,9 +8,12 @@ import type { TaskControls } from "./useTaskControls.ts";
 
 const sessionId = "01JXYZ0000000000000000SESS";
 const controls = { fenced: false, canRaiseBudget: false, canResumeTask: false } as TaskControls;
-const agentWith = (reason: string): AgentSessionView => ({
+const agentWith = (reason: string, detail?: string): AgentSessionView => ({
   sessionId,
-  model: { ...emptyAgentModel(), state: { state: "paused", reason } },
+  model: {
+    ...emptyAgentModel(),
+    state: { state: "paused", reason, ...(detail ? { detail } : {}) },
+  },
   snapshot: { sessionId, cellId: "01JXYZ0000000000000000CE11", status: "running", toolCalls: 0 },
   availability: "ready",
   error: null,
@@ -249,8 +252,7 @@ it("offers to carry on a task localDot went away under, and says when that can't
 it("names the key to enter again and opens Keys at it, with Continue for after", () => {
   const onReenterKey = vi.fn();
   const resume = vi.fn(async () => true);
-  const agent = agentWith("key needs re-entering");
-  agent.model.state = { state: "paused", reason: "key needs re-entering", detail: "deepseek" };
+  const agent = agentWith("key needs re-entering", "deepseek");
   render(
     <TaskRecovery
       agent={agent}
@@ -269,4 +271,33 @@ it("names the key to enter again and opens Keys at it, with Continue for after",
   expect(onReenterKey).toHaveBeenCalledWith(reenter, "deepseek");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(resume).toHaveBeenCalled();
+});
+
+// Entering the key again would store the real key for the changed destination, so the card offers
+// Keys, where the key is removed and added again, and never Re-enter.
+it("names a key changed outside localDot and opens Keys, never re-entry", () => {
+  const onReenterKey = vi.fn();
+  const onSettings = vi.fn();
+  render(
+    <TaskRecovery
+      agent={agentWith("key changed outside localDot", "deepseek")}
+      controls={{ ...controls, canResumeTask: true }}
+      onSettings={onSettings}
+      onReenterKey={onReenterKey}
+    />,
+  );
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect(
+    screen.getByRole("heading", { name: "Your deepseek key was changed outside localDot" }),
+  ).toBeTruthy();
+  expect(region.textContent).toContain("Remove it in Keys and add it again");
+  expect(screen.queryByRole("button", { name: "Re-enter key" })).toBeNull();
+  const keys = screen.getByRole("button", { name: "Open Keys" });
+  expect(keys.getAttribute("data-variant")).toBe("primary");
+  fireEvent.click(keys);
+  expect(onSettings).toHaveBeenCalledWith(keys, "keys");
+  expect(onReenterKey).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Continue" }).getAttribute("data-variant")).toBe(
+    "secondary",
+  );
 });

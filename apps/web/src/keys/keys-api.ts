@@ -19,6 +19,8 @@ export interface KeydHealth {
   hairpin?: HairpinGuard;
   // How many keys need entering again.
   reenter?: number;
+  // How many keys were changed outside localDot.
+  rebound?: number;
   error?: string;
 }
 
@@ -36,6 +38,9 @@ export interface KeyRecord {
   updatedAt: string;
   // The stored value is gone or can't be read as stored, so it has to be entered again.
   reenter?: boolean;
+  // Where it is sent was changed outside localDot after it was stored, so it is removed and added
+  // again rather than entered again.
+  rebound?: boolean;
 }
 
 export type Seal = (publicKey: string, binding: SecretBinding, value: string) => Promise<Sealed>;

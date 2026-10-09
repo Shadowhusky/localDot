@@ -49,6 +49,11 @@ function knownReason(
       title: "A key needs re-entering",
       text: "I can't use this key as it's stored. Enter it again in Keys, then continue. Its name and everything that uses it stay the same.",
     };
+  if (reason === STALL.keyRebound)
+    return {
+      title: "A key was changed outside localDot",
+      text: "Where this key is sent was changed outside localDot, so I won't use it. Remove it in Keys and add it again, then continue.",
+    };
   if (reason === STALL.actionLimit)
     return {
       title: "I reached your action limit",
@@ -246,8 +251,9 @@ export function TaskRecovery({
       )
     : null;
   const retry = RETRY.has(reason);
-  // The key to enter again, when keyd named one.
+  // The key to enter again, or to remove and add again, when keyd named one.
   const reentry = !hold && reason === STALL.keyReenter ? (state.detail ?? "") : undefined;
+  const changed = !hold && reason === STALL.keyRebound ? (state.detail ?? "") : undefined;
   const resume = limited ? (
     <Button
       variant="primary"
@@ -259,7 +265,7 @@ export function TaskRecovery({
     </Button>
   ) : (
     <Button
-      variant={raising || reentry !== undefined ? "secondary" : "primary"}
+      variant={raising || reentry !== undefined || changed !== undefined ? "secondary" : "primary"}
       disabledReason={controls.canResumeTask ? undefined : "The task can't continue right now."}
       onClick={() => void controls.resume()}
     >
@@ -271,8 +277,10 @@ export function TaskRecovery({
       <h3 className="thread-recovery-title">
         {reentry
           ? `Re-enter your ${reentry} key`
-          : (known?.title ??
-            (hold || state.state === "paused" ? "Task paused" : "The task needs attention"))}
+          : changed
+            ? `Your ${changed} key was changed outside localDot`
+            : (known?.title ??
+              (hold || state.state === "paused" ? "Task paused" : "The task needs attention"))}
       </h3>
       <p className="thread-recovery-text">
         {dayLimit
@@ -373,6 +381,15 @@ export function TaskRecovery({
                 }
               >
                 Re-enter key
+              </Button>
+            )}
+            {changed !== undefined && (
+              <Button
+                variant="primary"
+                icon="key-round"
+                onClick={(event) => onSettings(event.currentTarget, "keys")}
+              >
+                Open Keys
               </Button>
             )}
             {resume}

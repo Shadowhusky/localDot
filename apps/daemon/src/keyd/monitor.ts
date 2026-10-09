@@ -12,6 +12,8 @@ export interface KeydHealth {
   hairpin?: HairpinGuard;
   // How many keys need entering again (their stored values are gone or unreadable as stored).
   reenter?: number;
+  // How many keys were changed outside localDot after their values were stored.
+  rebound?: number;
   error?: string;
 }
 
@@ -60,6 +62,7 @@ export class KeydMonitor {
         audit: s.audit,
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
         reenter: s.reenter ?? 0,
+        rebound: s.rebound ?? 0,
       };
     } catch (err) {
       next = { online: false, error: err instanceof Error ? err.message : String(err) };

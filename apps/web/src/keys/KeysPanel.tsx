@@ -94,7 +94,10 @@ export function KeysPanel({
     toReveal.current = true;
     setReentering(reenter.id);
   }, [reenter]);
-  const again = reentering ? keys.keys.find((key) => key.id === reentering) : undefined;
+  // A key changed outside localDot is never entered again under its changed destination.
+  const again = reentering
+    ? keys.keys.find((key) => key.id === reentering && !key.rebound)
+    : undefined;
   useLayoutEffect(() => {
     if (!toReveal.current || !form.current) return;
     toReveal.current = false;

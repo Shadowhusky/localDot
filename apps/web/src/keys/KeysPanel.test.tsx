@@ -233,6 +233,76 @@ describe("a key to enter again", () => {
   });
 });
 
+describe("a key changed outside localDot", () => {
+  const moved: KeyRecord = {
+    id: "deepseek",
+    kind: "llm",
+    provider: "deepseek",
+    createdAt: "2026-10-01T09:00:00Z",
+    updatedAt: "2026-10-01T09:00:00Z",
+    rebound: true,
+  };
+
+  it("says so in its row, with why and Remove, and never offers Re-enter", () => {
+    const reenter = vi.fn();
+    render(<KeyList active keys={[moved, anthropic]} remove={async () => {}} reenter={reenter} />);
+    const row = screen.getByText("deepseek").closest("li") as HTMLElement;
+    expect(row.hasAttribute("data-rebound")).toBe(true);
+    expect(row.hasAttribute("data-reenter")).toBe(false);
+    expect(within(row).getByText("Changed elsewhere")).toBeTruthy();
+    expect(row.textContent).toContain("Remove it, then add it again.");
+    expect(row.textContent).not.toMatch(/Added|Needs re-entering/);
+    expect(within(row).queryByRole("button", { name: /Re-enter/ })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Remove deepseek" })).toBeTruthy();
+  });
+
+  it("opens no form that would store the key for the changed destination", () => {
+    render(
+      <KeysSheet
+        open
+        keys={controller({ keys: [moved] })}
+        onClose={() => {}}
+        reenter={{ requestId: 1, id: "deepseek" }}
+      />,
+    );
+    expect(screen.queryByRole("form", { name: "Re-enter deepseek" })).toBeNull();
+    expect(document.body.textContent).not.toContain("as before");
+  });
+
+  it("puts the amber point on the Keys button and names why", () => {
+    expect(keyStatus({ ...HEALTHY, rebound: 1 })).toEqual({
+      label: "Keys",
+      state: "reenter",
+      spoken: "Keys, a key was changed outside localDot",
+    });
+    expect(keyStatus({ ...HEALTHY, rebound: 1, reenter: 1 }).spoken).toBe(
+      "Keys, keys need your attention",
+    );
+  });
+
+  it("lists the keys again when keyd finds one changed outside localDot", async () => {
+    let rebound = 0;
+    const lists = vi.fn(() => ({ keys: [{ ...moved, rebound: rebound > 0 }] }));
+    const api = createApi("test", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url) =>
+        new Response(
+          JSON.stringify(
+            new URL(String(url)).pathname === "/api/keyd" ? { ...HEALTHY, rebound } : lists(),
+          ),
+        ),
+    });
+    function Probe() {
+      const keys = useKeys(api, 20);
+      return <span data-testid="state">{keys.keys.map((k) => String(k.rebound)).join()}</span>;
+    }
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("false"));
+    rebound = 1;
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("true"));
+  });
+});
+
 describe("Keys", () => {
   it("opens a Jev key's form as a web API key bound to Jev's host", async () => {
     const save = vi.fn(async (_binding: unknown, _value: string) => ({ restart: false }));

@@ -135,10 +135,12 @@ export function KeyList({
             const count = uses?.[k.id] ?? 0;
             const facts = [
               ...describeKey(k).split(" · "),
-              k.reenter ? undefined : added(k.createdAt),
+              k.reenter || k.rebound ? undefined : added(k.createdAt),
               count > 0 ? `Used ${count}× this task` : undefined,
             ].filter((fact): fact is string => Boolean(fact));
             const stale = k.reenter && !leaving;
+            // Changed outside localDot: removing and adding the key again is the only fix.
+            const changed = k.rebound && !leaving;
             const lit = fresh?.id === k.id && !leaving;
             return (
               <li
@@ -149,6 +151,7 @@ export function KeyList({
                 data-leaving={leaving ? "" : undefined}
                 data-fresh={lit ? "" : undefined}
                 data-reenter={stale ? "" : undefined}
+                data-rebound={changed ? "" : undefined}
                 inert={leaving}
               >
                 <GroupRow
@@ -158,15 +161,15 @@ export function KeyList({
                   detail={
                     // Each fact wraps whole, so no line starts or ends with a separator.
                     <span className="keys-row-meta">
-                      {stale && (
+                      {(stale || changed) && (
                         <span className="keys-row-reenter">
                           <span className="keys-row-point" aria-hidden="true" />
-                          Needs re-entering
+                          {changed ? "Changed elsewhere" : "Needs re-entering"}
                         </span>
                       )}
                       {facts.map((fact, at) => (
                         <span key={fact}>
-                          {(at > 0 || stale) && <VisuallyHidden>, </VisuallyHidden>}
+                          {(at > 0 || stale || changed) && <VisuallyHidden>, </VisuallyHidden>}
                           {fact}
                         </span>
                       ))}
@@ -214,7 +217,13 @@ export function KeyList({
                     </Button>
                   }
                 >
-                  {stale && reenter && (
+                  {changed && (
+                    <p className="keys-row-fix keys-row-why">
+                      Where this key is sent was changed outside localDot. Remove it, then add it
+                      again.
+                    </p>
+                  )}
+                  {stale && !changed && reenter && (
                     <div className="keys-row-fix">
                       <Button
                         size="sm"

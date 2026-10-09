@@ -135,6 +135,23 @@ describe("resolveRole", () => {
     );
   });
 
+  it("refuses a key changed outside localDot, naming it, and never as one to enter again", () => {
+    const changed = keys.map((k) => (k.id === "deepseek" ? { ...k, rebound: true } : k));
+    expect(() =>
+      resolveRole(
+        "main",
+        { provider: "deepseek", model: "deepseek-chat", key: "deepseek" },
+        catalog,
+        changed,
+      ),
+    ).toThrow(
+      new BindingError(
+        "main",
+        "key deepseek was changed outside localDot: remove it under Keys and add it again",
+      ),
+    );
+  });
+
   it("refuses an unknown model, a model without tools as main, and M8 providers", () => {
     expect(() =>
       resolveRole(

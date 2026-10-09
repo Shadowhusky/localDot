@@ -392,6 +392,36 @@ describe("Agent", () => {
       expect(t.events.some((e) => e.type === "model.retry")).toBe(false);
     });
 
+    it("waits, naming the key, when keyd finds a key changed outside localDot", async () => {
+      const rebound = new APICallError({
+        message: "Bad Gateway",
+        url: "http://llm.ldot/deepseek/chat/completions",
+        requestBodyValues: {},
+        statusCode: 502,
+        responseHeaders: { "x-keyd-reason": "secret-rebound", "x-keyd-secret": "deepseek" },
+        isRetryable: true,
+      });
+      let t: ReturnType<typeof agent>;
+      t = agent([
+        () => {
+          t.f.inbox.push({ seq: 1, messageId: ulid(), kind: "resume", text: "" });
+          return rebound;
+        },
+        call("done", { summary: "x" }),
+      ]);
+      expect(await t.run()).toBe("done");
+      const states = t.events.filter((e) => e.type === "agent.state").map((e) => e.data);
+      expect(states).toContainEqual({
+        state: "paused",
+        reason: "key changed outside localDot",
+        detail: "deepseek",
+      });
+      expect(states).not.toContainEqual(
+        expect.objectContaining({ reason: "key needs re-entering" }),
+      );
+      expect(t.events.some((e) => e.type === "model.retry")).toBe(false);
+    });
+
     it("retries a failing provider with backoff, then falls back to the local model", async () => {
       const down = () =>
         new APICallError({

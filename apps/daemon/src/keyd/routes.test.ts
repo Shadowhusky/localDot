@@ -100,6 +100,7 @@ describe("key routes", () => {
       audit: { ok: false, error: "disk full" },
       hairpin: { state: "active", source: "nat-pmp", addresses: 1 },
       reenter: 0,
+      rebound: 0,
     });
     keyd.hairpin = { state: "unknown", addresses: 0, error: "nat-pmp: timeout" };
     const unknown = await app.request(url("/api/keyd"), { headers: json });

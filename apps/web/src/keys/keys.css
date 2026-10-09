@@ -242,6 +242,14 @@
   padding: calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);
 }
 
+/* A key changed outside localDot says why under its row; Remove, beside it, is the fix. */
+.keys-row-why {
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
 /* Entering a key again names where it goes, which the key form would otherwise ask. */
 .keys-reenter-note {
   display: flex;

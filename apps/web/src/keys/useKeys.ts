@@ -33,17 +33,21 @@ export type KeyStatus = {
 // Says when key protection is off; while keyd cannot write its audit log it swaps no key, which the
 // user sees as every keyed request failing, so that is said too, as is a key to enter again; and
 // network protection that does not know the public address is never silent (the sheet says why).
+function attentionText({ reenter = 0, rebound = 0 }: KeydHealth): string {
+  if (reenter && rebound) return "keys need your attention";
+  if (rebound)
+    return rebound === 1
+      ? "a key was changed outside localDot"
+      : "keys were changed outside localDot";
+  return reenter === 1 ? "a key needs re-entering" : "keys need re-entering";
+}
+
 export function keyStatus(health: KeydHealth | null): KeyStatus {
   if (!health) return { label: "Keys", state: "unknown" };
   if (!health.online) return { label: "Key protection off", state: "offline" };
   if (health.audit && !health.audit.ok) return { label: "Keys held", state: "audit" };
-  if (health.reenter)
-    return {
-      label: "Keys",
-      state: "reenter",
-      spoken:
-        health.reenter === 1 ? "Keys, a key needs re-entering" : "Keys, keys need re-entering",
-    };
+  if (health.reenter || health.rebound)
+    return { label: "Keys", state: "reenter", spoken: `Keys, ${attentionText(health)}` };
   if (health.hairpin?.state !== "active") {
     const guard = health.hairpin?.state === "off" ? "off" : "checking";
     return { label: "Keys", state: "guard", spoken: `Keys, network protection ${guard}` };
@@ -68,6 +72,7 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     let listed = false;
     let bootId: string | undefined;
     let reenter: number | undefined;
+    let rebound: number | undefined;
     setMetadataReady(false);
     if (previousApi.current !== api) {
       previousApi.current = api;
@@ -86,12 +91,19 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
         listed = false;
         setKeys([]);
         setLoadError(null);
-      } else if (!listed || next.bootId !== bootId || next.reenter !== reenter) {
-        // A key keyd found it must have entered again is relisted in place.
+      } else if (
+        !listed ||
+        next.bootId !== bootId ||
+        next.reenter !== reenter ||
+        next.rebound !== rebound
+      ) {
+        // A key keyd found it must have entered again, or changed outside localDot, is relisted
+        // in place.
         setMetadataReady(false);
         if (listed && next.bootId !== bootId) setKeys([]);
         bootId = next.bootId;
         reenter = next.reenter;
+        rebound = next.rebound;
         try {
           const list = await loadKeys(api);
           if (cancelled) return;

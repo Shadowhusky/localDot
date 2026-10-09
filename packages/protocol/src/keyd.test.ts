@@ -226,8 +226,8 @@ describe("push key name", () => {
     expect(SecretId.safeParse("webpush-vapid").success).toBe(false);
   });
 
-  it("reserves the name of keyd's binding migration record", () => {
-    expect(SecretId.safeParse("keyd-bindings").success).toBe(false);
+  it("leaves keyd-bindings to the user, as before the binding migration", () => {
+    expect(SecretId.safeParse("keyd-bindings").success).toBe(true);
   });
 });
 
@@ -242,5 +242,6 @@ describe("keys to enter again", () => {
     };
     expect(KeydRecord.parse({ ...record, reenter: true }).reenter).toBe(true);
     expect(KeydRecord.parse(record).reenter).toBeUndefined();
+    expect(KeydRecord.parse({ ...record, rebound: true }).rebound).toBe(true);
   });
 });
