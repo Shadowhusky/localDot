@@ -255,12 +255,11 @@ export function ActivityRail({
 
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
-      {replay && (
-        <div className="rail-h">
-          <h2>Activity</h2>
-          <span className="num">As of {timeLabel(asOfMs)}</span>
-        </div>
-      )}
+      {/* A tab or the column names it on screen; Replay says how far its record runs. */}
+      <div className={replay ? "rail-h" : "ui-visually-hidden"}>
+        <h2>Activity</h2>
+        {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
+      </div>
       <div className="activity-body">
         <ScrollArea
           ref={follow.ref}

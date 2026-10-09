@@ -61,6 +61,10 @@ export const UI_SCENARIOS = {
     boot: { QA_PHASE: "finished" },
     step: "finish",
   },
+  continued: {
+    about: "The finished task continues an earlier one in the same conversation",
+    boot: { QA_PHASE: "finished", QA_EARLIER: "1" },
+  },
   reconnecting: {
     about: "The picture stalled while the task runs",
     boot: { QA_CELL: "reconnecting" },

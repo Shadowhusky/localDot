@@ -14,6 +14,7 @@ import { StopControl } from "./agent/StopControl.tsx";
 import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
+import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -50,7 +51,7 @@ import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { Caption } from "./shell/Caption.tsx";
-import { ChatThread } from "./shell/ChatThread.tsx";
+import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { HudIsland } from "./shell/HudIsland.tsx";
 import { islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
 import { useLayout } from "./shell/layout.ts";
@@ -355,7 +356,21 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [settings.open, keysOpen]);
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
-  const session = useLiveSession(api, cell, stage);
+  const conversation = useConversation(api);
+  const session = useLiveSession(
+    api,
+    cell,
+    stage,
+    status === "known" && conversation.known ? (conversation.sessions.at(-1) ?? null) : undefined,
+    conversation.choice,
+  );
+  const seen = useRef<string | null>(null);
+  const { reload: rereadConversation } = conversation;
+  useEffect(() => {
+    const now = `${session.sessionId}:${session.ended}`;
+    if (seen.current !== null && seen.current !== now) rereadConversation();
+    seen.current = now;
+  }, [session.sessionId, session.ended, rereadConversation]);
   useEffect(() => {
     if (session.sessionId && !session.ended) {
       setNewestReplayId(session.sessionId);
@@ -500,6 +515,15 @@ function Theatre({ api }: { api: ApiClient }) {
     (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
   );
   const task = session.sessionId ? taskHud(session.model, now, facts) : null;
+  // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
+  // the daemon says which, the choice is offered and the daemon has the last word.
+  const taskStatus = agent.snapshot?.status;
+  const conversationReason =
+    !session.ended && taskStatus && taskStatus !== "idle" && taskStatus !== "ended"
+      ? FINISH_FIRST
+      : conversation.busy
+        ? "Just a moment…"
+        : undefined;
   const computer = error ? { ...containedHud, caption: error } : containedHud;
   const appStatus = statusFor({
     computer: {
@@ -572,6 +596,13 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     document.title = appStatus.title;
   }, [appStatus.title]);
+  const newConversation: NewConversation = {
+    run: () => {
+      void conversation.startNew();
+      setRailView("chat");
+    },
+    reason: conversationReason,
+  };
   const curtainUp = !replayId && status === "known" && !cell && listed.length === 0;
   // The curtain over the stage: first-run setup.
   const welcome = (
@@ -790,9 +821,19 @@ function Theatre({ api }: { api: ApiClient }) {
           view={shownView}
           onView={(view) => setRailView(view as RailView)}
           end={
-            layout === "phone" && (
+            layout === "phone" ? (
               <MoreMenu
                 items={[
+                  ...(agent.sessionId
+                    ? [
+                        {
+                          label: "New conversation",
+                          icon: "compose" as const,
+                          disabledReason: newConversation.reason,
+                          run: newConversation.run,
+                        },
+                      ]
+                    : []),
                   {
                     label: "Replay",
                     icon: "history",
@@ -803,6 +844,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
                 ]}
               />
+            ) : (
+              agent.sessionId && <NewConversationButton {...newConversation} />
             )
           }
         >
@@ -818,6 +861,9 @@ function Theatre({ api }: { api: ApiClient }) {
                 ? () => selectReplay(agent.sessionId)
                 : undefined
             }
+            onReplayTask={selectReplay}
+            sessions={conversation.sessions}
+            more={conversation.more}
             covered={shownView !== "chat"}
             cover={
               <>
@@ -881,6 +927,14 @@ function Theatre({ api }: { api: ApiClient }) {
             if (id === replayId) selectReplay(null, "replace");
           }}
           onTitle={setRecorded}
+          continueTask={{
+            current: conversation.sessions.at(-1) ?? null,
+            reason: conversationReason,
+            run: (id) =>
+              void conversation.continueFrom(id).then((done) => {
+                if (done) selectReplay(null);
+              }),
+          }}
           exportJob={exportJob}
           visible={!keysOpen && !settings.open && !safety.approval}
         />

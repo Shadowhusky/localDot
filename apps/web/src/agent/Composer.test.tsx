@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
+import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { withAttachments } from "./attachments.ts";
 import { Composer, type ComposerProps } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
@@ -17,6 +19,29 @@ vi.mock("../ui/Announcer.tsx", async (importOriginal) => ({
 // What the composer said through the page's one polite region.
 const said = () =>
   spoken.announce.mock.calls.flatMap(([channel, text]) => (channel === "composer" ? [text] : []));
+
+// How often the message field itself renders, and how often a key scan runs.
+const counts = vi.hoisted(() => ({ field: 0, scans: 0 }));
+vi.mock("../ui/TextArea.tsx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../ui/TextArea.tsx")>();
+  return {
+    ...actual,
+    TextArea: (props: TextAreaProps) => {
+      counts.field += 1;
+      return <actual.TextArea {...props} />;
+    },
+  };
+});
+vi.mock("@localdot/protocol", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@localdot/protocol")>();
+  return {
+    ...actual,
+    scanKeyLike: (text: string) => {
+      counts.scans += 1;
+      return actual.scanKeyLike(text);
+    },
+  };
+});
 
 // Lets one test pass a key-shaped name through the upload's own guards to reach Send's check.
 const transfer = vi.hoisted(() => ({ trustNames: false }));
@@ -734,6 +759,27 @@ describe("the composer's controls", () => {
     expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Stop/ })).toBeNull();
   });
+  it("invites a message that continues the conversation while an ended task is on show", async () => {
+    const f = setup(
+      () => Response.json({ sessionId: "01JXYZ0000000000000000NEXT" }, { status: 202 }),
+      {
+        agent: {
+          ...agent,
+          model: { ...emptyAgentModel(), ended: { reason: "stopped" } },
+          snapshot: { sessionId, cellId, status: "ended", toolCalls: 0 },
+          fresh: false,
+        },
+      },
+    );
+    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe(
+      "Message dot",
+    );
+    f.input("Now make it blue");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
+    expect(f.requests).toEqual([
+      { path: `/api/cells/${cellId}/agent`, body: { task: "Now make it blue" } },
+    ]);
+  });
   it("shows a dragged file over the card and adds what is dropped", async () => {
     transfer.trustNames = true;
     setup();
@@ -973,5 +1019,76 @@ describe("a message on its way", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
     expect(end.needs).toHaveBeenLastCalledWith(null);
     outbox.remove();
+  });
+});
+describe("typing", () => {
+  // Characters typed one at a time, as a keyboard sends them.
+  const type = (field: HTMLTextAreaElement, text: string) => {
+    for (const data of text) {
+      field.value += data;
+      fireEvent(field, new InputEvent("input", { bubbles: true, inputType: "insertText", data }));
+    }
+  };
+  it("renders nothing per keystroke, and the task's updates leave the field alone", () => {
+    const commits = vi.fn();
+    const props: ComposerProps = {
+      api: createApi("fixture", { origin: "http://127.0.0.1:4790" }),
+      cell,
+      agent,
+      known: true,
+      pending: false,
+      keysOpen: false,
+      receiveKey: vi.fn(() => false),
+    };
+    const view = render(
+      <Profiler id="composer" onRender={commits}>
+        <Composer {...props} />
+      </Profiler>,
+    );
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    const send = screen.getByRole("button", { name: "Send now" });
+    type(field, "A");
+    expect(send.getAttribute("aria-disabled")).toBeNull();
+    commits.mockClear();
+    type(field, "dd a chart of the monthly totals");
+    expect(commits).not.toHaveBeenCalled();
+    const renders = counts.field;
+    for (let update = 0; update < 5; update++)
+      view.rerender(
+        <Profiler id="composer" onRender={commits}>
+          <Composer {...props} agent={{ ...agent, model: emptyAgentModel() }} />
+        </Profiler>,
+      );
+    expect(commits).toHaveBeenCalled();
+    expect(counts.field).toBe(renders);
+    expect(field.value).toBe("Add a chart of the monthly totals");
+  });
+  it("checks typed text for keys once typing pauses, and at once on Send or leaving", async () => {
+    const f = setup();
+    const key = `sk-ant-api03-${"x".repeat(40)}`;
+    counts.scans = 0;
+    type(f.field, `token ${key}`);
+    expect(counts.scans).toBe(0);
+    expect(screen.queryByRole("region", { name: "Key safeguard" })).toBeNull();
+    await waitFor(() => expect(f.field.value).toBe("token "));
+    expect(counts.scans).toBe(1);
+    expect(screen.getByRole("region", { name: "Key safeguard" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
+
+    type(f.field, key);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(f.field.value).toBe("token ");
+    expect(screen.getByRole("region", { name: "Key safeguard" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
+
+    type(f.field, key);
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(f.field.value).toBe("token ");
+    expect(f.requests).toEqual([]);
   });
 });

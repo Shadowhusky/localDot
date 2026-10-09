@@ -7,8 +7,10 @@ export interface KeyNotice {
 }
 export interface KeyGuard {
   readonly notice: KeyNotice | null;
-  // Call on input/paste and again before copying text to delivery state or a request.
+  // Call on paste and again before copying text to delivery state or a request.
   check(field: HTMLTextAreaElement): boolean;
+  // Call on input: text that lands at once is checked now, typing once it pauses.
+  input(field: HTMLTextAreaElement, event: Event): void;
   remove(): void;
   cancel(): void;
   move(
@@ -16,6 +18,16 @@ export interface KeyGuard {
     receive: (source: HTMLInputElement, provider?: KeyMatch["provider"]) => boolean,
   ): boolean;
 }
+// Typing pauses this long before what was typed is checked, so no keystroke waits on the scan.
+const PAUSE_MS = 150;
+// One typed character, a deletion or an input method's step, rather than text landing at once.
+const typed = (event: Event) =>
+  typeof InputEvent !== "undefined" &&
+  event instanceof InputEvent &&
+  ((event.inputType === "insertText" && (event.data?.length ?? 0) <= 1) ||
+    event.inputType === "insertCompositionText" ||
+    event.inputType === "insertLineBreak" ||
+    event.inputType.startsWith("delete"));
 function withoutKeys(text: string, matches: readonly KeyMatch[]): string {
   let clean = text;
   for (const match of [...matches].reverse())
@@ -31,6 +43,7 @@ export function useKeyGuard(active = true): KeyGuard {
   const owner = useRef<HTMLTextAreaElement | null>(null);
   const available = useRef(active);
   const moving = useRef(false);
+  const pause = useRef<number | undefined>(undefined);
   const inputs = useMemo(
     () =>
       Array.from({ length: KEY_SCAN_MATCHES }, () => {
@@ -75,15 +88,17 @@ export function useKeyGuard(active = true): KeyGuard {
     document.addEventListener("visibilitychange", visible);
     return () => {
       available.current = false;
+      window.clearTimeout(pause.current);
       clear(false);
       window.removeEventListener("pagehide", hide);
       window.removeEventListener("pageshow", visible);
       document.removeEventListener("visibilitychange", visible);
     };
   }, [active, clear]);
-  return {
+  const guard: KeyGuard = {
     notice,
     check(field) {
+      window.clearTimeout(pause.current);
       if (!available.current || document.hidden || !field.isConnected) {
         clear();
         // A forged input after close/hide may target a field this owner never admitted.
@@ -113,6 +128,19 @@ export function useKeyGuard(active = true): KeyGuard {
         raw = "";
       }
       return false;
+    },
+    input(field, event) {
+      if (!typed(event) || !available.current || document.hidden) {
+        guard.check(field);
+        return;
+      }
+      window.clearTimeout(pause.current);
+      // Owned at once, so leaving the page clears what has not been checked yet.
+      if (owner.current !== field) {
+        if (owner.current) clear();
+        owner.current = field;
+      }
+      pause.current = window.setTimeout(() => guard.check(field), PAUSE_MS);
     },
     remove() {
       clear();
@@ -148,4 +176,5 @@ export function useKeyGuard(active = true): KeyGuard {
       return received;
     },
   };
+  return guard;
 }

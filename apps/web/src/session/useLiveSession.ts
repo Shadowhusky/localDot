@@ -1,6 +1,6 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentFeed } from "../agent/model.ts";
 import { createAgentFeed } from "../agent/reducer.ts";
 import type { CellSummary } from "../cells/types.ts";
@@ -15,6 +15,8 @@ export interface LiveSession {
   model: SessionModel;
   version: number;
   ended: boolean;
+  // The task shown is the conversation's latest, and no computer is running it.
+  resting: boolean;
   stop(): void;
   check(): void;
 }
@@ -26,13 +28,36 @@ const REACT_HZ_MS = 100;
 const CLOCK_EVERY_MS = 20_000;
 const NO_MODEL = emptyModel();
 
+// A task at rest whose log stops short of its end (the daemon went away under it) is over all the
+// same, from its last moment.
+function cutShort(model: SessionModel): SessionModel {
+  if (model.ended) return model;
+  const t = Math.max(model.startT ?? 0, ...model.agentStates.map((state) => state.t));
+  return { ...model, ended: { t, reason: "stopped" } };
+}
+
+interface Shown {
+  sessionId: string;
+  // The computer running it, while it is live.
+  cellId: string | null;
+  live: boolean;
+}
+
 // The worker gets every event at once; React sees the model at most ten times a second.
+// The computer's live task is shown while there is one. Otherwise the conversation's latest task,
+// `resting` (undefined until known), stays on show as ended, so a refresh, a stopped computer or a
+// restarted daemon reopens the conversation rather than an empty page. `choice` counts the
+// conversations the user chose (New, Continue).
 export function useLiveSession(
   api: ApiClient,
   cell: CellSummary | null,
   stage: RefObject<StageHandle | null>,
+  resting?: string | null,
+  choice = 0,
 ): LiveSession {
-  const [identity, setIdentity] = useState<{ cellId: string; sessionId: string } | null>(null);
+  const [shown, setShown] = useState<Shown | null>(null);
+  // The computer that has answered whether it runs a task.
+  const [answered, setAnswered] = useState<string | null>(null);
   const [agentFeed] = useState(createAgentFeed);
   const [version, setVersion] = useState(0);
   const [ended, setEnded] = useState(false);
@@ -42,9 +67,13 @@ export function useLiveSession(
   const dirty = useRef(false);
   const cellId = cell?.id ?? null;
   const ready = cell?.state === "ready";
-  const sessionId = identity?.cellId === cellId ? (identity?.sessionId ?? null) : null;
+  const sessionId = shown && (!shown.live || shown.cellId === cellId) ? shown.sessionId : null;
   const previousCell = useRef(cellId);
   const lookNow = useRef(() => {});
+  const live = useRef(shown?.live ?? false);
+  live.current = shown?.live ?? false;
+  // A task that has ended never runs again, whatever a slower answer says.
+  const over = useRef(new Set<string>());
 
   useEffect(() => {
     if (previousCell.current === cellId) return;
@@ -53,40 +82,90 @@ export function useLiveSession(
     modelOwner.current = null;
     dirty.current = false;
     stage.current?.resetSession();
-    setIdentity(null);
+    if (live.current) setShown(null);
     setEnded(false);
     setVersion((v) => v + 1);
   }, [cellId, stage]);
 
-  // Looks for a live session while there is none or the shown one has ended; an ended session
-  // stays on screen until the cell starts another. An idle computer is checked less often.
+  // A conversation chosen anew (a new one, or an older one continued) takes the page once no live
+  // task is at work there. On opening, a running computer first says whether it still runs one.
+  const applied = useRef<string | null | undefined>(undefined);
+  const working = !!shown?.live && !ended;
+  const asking = !!cellId && ready && answered !== cellId;
   useEffect(() => {
-    if (!cellId || !ready || (sessionId && !ended)) return;
+    if (resting === undefined || resting === applied.current) return;
+    if (applied.current === undefined) {
+      if (asking) return;
+      // A task the computer runs takes the page on opening, and keeps it once it ends.
+      if (working) applied.current = resting;
+    }
+    if (working) return;
+    applied.current = resting;
+    setShown((now) => {
+      if (now?.live) over.current.add(now.sessionId);
+      if (now?.sessionId === resting) return now.live ? { ...now, live: false } : now;
+      return resting ? { sessionId: resting, cellId: null, live: false } : null;
+    });
+  }, [resting, working, asking]);
+
+  // Answers about the computer's task asked before the user chose a conversation say nothing
+  // about it, so the computer is asked again at once.
+  const choices = useRef(0);
+  const chosen = useRef(choice);
+  useEffect(() => {
+    if (chosen.current === choice) return;
+    chosen.current = choice;
+    choices.current++;
+    lookNow.current();
+  }, [choice]);
+
+  // Asks the computer for its task: often while it may be starting one, every five seconds
+  // otherwise. A task the computer no longer runs stays on show, at rest.
+  useEffect(() => {
+    if (!cellId || !ready) return;
     let cancelled = false;
     let polling = false;
+    let again = false;
+    let first = true;
     let misses = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       if (polling) return;
       polling = true;
+      again = false;
+      const asked = choices.current;
       try {
-        const live = await api.get<{ sessionId: string } | undefined>(`/api/cells/${cellId}/live`);
-        if (
-          !cancelled &&
-          typeof live?.sessionId === "string" &&
-          ULID_PATTERN.test(live.sessionId) &&
-          live.sessionId !== sessionId
-        )
-          setIdentity({ cellId, sessionId: live.sessionId });
+        const reply = await api.get<{ sessionId: string } | undefined>(`/api/cells/${cellId}/live`);
+        const found =
+          typeof reply?.sessionId === "string" &&
+          ULID_PATTERN.test(reply.sessionId) &&
+          !over.current.has(reply.sessionId)
+            ? reply.sessionId
+            : null;
+        if (!cancelled && asked === choices.current)
+          setShown((now) => {
+            if (found)
+              return now?.live && now.cellId === cellId && now.sessionId === found
+                ? now
+                : { sessionId: found, cellId, live: true };
+            if (!now?.live || now.cellId !== cellId) return now;
+            over.current.add(now.sessionId);
+            return { ...now, live: false };
+          });
       } catch {
       } finally {
         polling = false;
         misses++;
-        if (!cancelled) timer = setTimeout(poll, misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
+        if (!cancelled) {
+          if (first) setAnswered(cellId);
+          first = false;
+          timer = setTimeout(poll, again ? 0 : misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
+        }
       }
     };
     lookNow.current = () => {
       misses = 0;
+      again = polling;
       if (polling) return;
       clearTimeout(timer);
       void poll();
@@ -97,7 +176,7 @@ export function useLiveSession(
       clearTimeout(timer);
       lookNow.current = () => {};
     };
-  }, [api, cellId, ready, sessionId, ended]);
+  }, [api, cellId, ready]);
 
   useEffect(() => {
     const prior = agentFeed.read();
@@ -166,6 +245,7 @@ export function useLiveSession(
           dirty.current = true;
           if (event.type === "session.end") {
             closed = true;
+            over.current.add(sessionId);
             agentFeed.connection("ended");
             socket?.close();
             setEnded(true);
@@ -187,12 +267,19 @@ export function useLiveSession(
   const check = useCallback(() => lookNow.current(), []);
 
   const owned = modelOwner.current === sessionId;
+  const atRest = !!sessionId && !shown?.live;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the model is folded in place, so its version is what changes
+  const model = useMemo(
+    () => (!owned ? NO_MODEL : atRest ? cutShort(modelRef.current) : modelRef.current),
+    [owned, atRest, version],
+  );
   return {
     sessionId,
     agentFeed,
-    model: owned ? modelRef.current : NO_MODEL,
+    model,
     version,
-    ended: owned && ended,
+    ended: owned && (ended || atRest),
+    resting: atRest,
     stop,
     check,
   };

@@ -1,16 +1,9 @@
-import type { Page } from "@playwright/test";
-import { expect, runAt, test } from "./harness.ts";
+import { composer, expect, runAt, test } from "./harness.ts";
 
 // The composer in each of its states.
 runAt("c14", "w39");
 
 const KEY = `sk-ant-api03-${"z".repeat(40)}`;
-
-async function composer(page: Page) {
-  // The rail opens on the chat; on a phone it sits under the stage.
-  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
-  return page.getByRole("form", { name: "Message dot" });
-}
 
 test("composer, at rest", async ({ page, ui }) => {
   await ui.open("running");

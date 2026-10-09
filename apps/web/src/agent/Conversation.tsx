@@ -93,6 +93,7 @@ interface ThreadContext {
   pendingAsk: string | null;
   latestWork: string | undefined;
   onReplay?: () => void;
+  replayTask?: (sessionId: string) => void;
 }
 type ItemOf<K extends ThreadKind> = Extract<ThreadItem, { kind: K }>;
 type WorkItem = ItemOf<"work">;
@@ -202,13 +203,22 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
     same: (was, now) => was.question === now.question,
   },
   result: {
-    draw: ({ item, thread }) => (
-      <ResultCard result={item.result} downloads={thread.downloads} onReplay={thread.onReplay} />
-    ),
+    draw: ({ item, thread }) => {
+      const earlier = item.result.sessionId;
+      const replay = thread.replayTask;
+      return (
+        <ResultCard
+          result={item.result}
+          downloads={thread.downloads}
+          onReplay={earlier ? replay && (() => replay(earlier)) : thread.onReplay}
+        />
+      );
+    },
     same: (was, now, then, thread) =>
       was.result === now.result &&
       then.downloads === thread.downloads &&
-      then.onReplay === thread.onReplay,
+      then.onReplay === thread.onReplay &&
+      then.replayTask === thread.replayTask,
   },
   work: {
     draw: ({ item, thread }) => (
@@ -281,6 +291,8 @@ const Row = memo(function Row({ row, fresh, thread }: RowProps) {
 export interface ConversationProps {
   items: readonly ThreadItem[];
   truncated: boolean;
+  // The conversation goes back further than the thread shows.
+  earlierInReplay?: boolean;
   visible?: boolean;
   ownerKey?: string;
   // The latest turn's work while its task has not ended.
@@ -300,12 +312,15 @@ export interface ConversationProps {
   cover?: ReactNode;
   covered?: boolean;
   onReplay?: () => void;
+  // Opens an earlier task of the conversation in Replay.
+  onReplayTask?: (sessionId: string) => void;
   computerReady?: boolean;
 }
 
 export function Conversation({
   items,
   truncated,
+  earlierInReplay = false,
   visible = true,
   ownerKey = "",
   live = null,
@@ -320,6 +335,7 @@ export function Conversation({
   cover,
   covered = false,
   onReplay,
+  onReplayTask,
   computerReady = false,
 }: ConversationProps) {
   // While its task is live, the latest turn's work line sits in the foot, always in view; once the
@@ -354,6 +370,9 @@ export function Conversation({
   const replayNow = useRef(onReplay);
   replayNow.current = onReplay;
   const replay = useCallback(() => replayNow.current?.(), []);
+  const replayTaskNow = useRef(onReplayTask);
+  replayTaskNow.current = onReplayTask;
+  const replayTask = useCallback((id: string) => replayTaskNow.current?.(id), []);
   const rows = useMemo(() => threadRows(page.rows), [page.rows]);
 
   const announced = useRef({ owner: ownerKey, id: "" });
@@ -608,6 +627,7 @@ export function Conversation({
     pendingAsk,
     latestWork: latestWork?.key,
     onReplay: onReplay && replay,
+    replayTask: onReplayTask && replayTask,
   };
   const empty = !shown.length && !liveWork;
   // A suggestion is put in the composer as if typed, so it is read and checked the same way.
@@ -645,8 +665,12 @@ export function Conversation({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users focus the history to scroll it.
             tabIndex={0}
           >
-            {truncated && !page.hasOlder && (
-              <p className="thread-note thread-start">Earlier messages are kept in the task log.</p>
+            {(earlierInReplay || truncated) && !page.hasOlder && (
+              <p className="thread-note thread-start">
+                {earlierInReplay
+                  ? "Earlier messages are in Replay."
+                  : "Earlier messages are kept in the task log."}
+              </p>
             )}
             {page.hasOlder && (
               <p className="thread-note thread-older" ref={edges.older}>

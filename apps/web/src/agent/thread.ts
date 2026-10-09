@@ -1,6 +1,8 @@
 import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
-import type { EntryView } from "./activity.ts";
-import type { AgentMessage, AgentQuestion, AgentResult } from "./model.ts";
+import type { TimelineRow } from "../session/key-uses.ts";
+import type { StepRowView } from "../session/session-view.ts";
+import { activityRows, type EntryView, entryView, foldKeyUses } from "./activity.ts";
+import type { AgentMessage, AgentModel, AgentQuestion, AgentResult } from "./model.ts";
 
 export type Speaker = "user" | "dot";
 export type WorkStep = EntryView & { key: string };
@@ -91,6 +93,16 @@ export function threadItems(
       Number.isNaN(a.order) || Number.isNaN(b.order) ? a.index - b.index : a.order - b.order,
     )
     .map((entry) => entry.item);
+}
+
+// A task's steps, as the work lines of its turns show them.
+export function workSteps(
+  rows: readonly TimelineRow<StepRowView>[],
+  model: AgentModel,
+): WorkStep[] {
+  return foldKeyUses(activityRows(rows, model))
+    .filter((entry) => entry.row.kind === "step")
+    .map((entry) => ({ key: entry.key, ...entryView(entry, model.changes, !!model.ended) }));
 }
 
 // A turn starts at each task or follow-up the user sends; steering a running task stays in its turn.

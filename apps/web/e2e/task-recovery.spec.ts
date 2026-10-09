@@ -172,7 +172,7 @@ for (const width of [1280, 390])
       });
       expect(f.realRunner?.get(f.id)).toBeUndefined();
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
-      await expect(page.getByRole("textbox", { name: "New task", exact: true })).toHaveCount(1);
+      await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveCount(1);
       await expect(page.getByRole("region", { name: "Task recovery" })).toHaveCount(0);
       await proof(page, p.errors, p.external);
     } finally {

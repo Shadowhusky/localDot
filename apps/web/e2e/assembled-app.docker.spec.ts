@@ -316,7 +316,7 @@ for (const pending of ["wait", "shell"] as const)
           await route.abort("failed");
         });
         await replace.click();
-        await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled({
+        await expect(page.getByRole("textbox", { name: /^(New task|Message)$/ })).toBeEnabled({
           timeout: 90000,
         });
         await page.unroute(`${origin}/api/cells/${oldId}/replacement`);
@@ -387,16 +387,16 @@ for (const pending of ["wait", "shell"] as const)
       );
       await showPane("Conversation");
       await expect(page.getByRole("region", { name: "Task recovery", exact: true })).toHaveCount(0);
-      await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled();
+      await expect(page.getByRole("textbox", { name: /^(New task|Message)$/ })).toBeEnabled();
       await page
-        .getByRole("textbox", { name: "New task", exact: true })
+        .getByRole("textbox", { name: /^(New task|Message)$/ })
         .fill("task14 explicitly continue after confirmed Stop: export the sample table.");
       const nextReply = page.waitForResponse(
         (r) =>
           r.request().method() === "POST" &&
           /^\/api\/cells\/[^/]+\/agent$/.test(new URL(r.url()).pathname),
       );
-      await page.getByRole("button", { name: "Start task", exact: true }).click();
+      await page.getByRole("button", { name: /^(Start task|Send)$/ }).click();
       const next = await nextReply;
       expect(next.status(), await next.text()).toBe(202);
       const nextOwner = (await next.json()).sessionId;

@@ -20,6 +20,7 @@ const STATUS: Record<
   takeover: { shape: "task", control: /^Pause$/, label: "Your turn" },
   budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Paused · Limit reached" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
+  continued: { shape: "ready", control: /^Take control$/, label: "Done" },
   reconnecting: {
     shape: "task",
     control: /^Pause$/,

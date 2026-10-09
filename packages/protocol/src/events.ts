@@ -45,6 +45,8 @@ export const SessionStart = event(
     }),
     os: z.enum(["linux", "macos"]),
     title: z.string().max(200).optional(),
+    // The earlier task this one continues, in the same conversation.
+    continues: z.string().regex(ULID_PATTERN).optional(),
   }),
 );
 export const SessionEnd = event(
