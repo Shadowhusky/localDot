@@ -314,9 +314,12 @@ function Library({
               }}
             />
           ) : (
-            <EmptyState className="replay-rail-empty" title="Choose a recording">
-              Its picture, what dot said and the files it made show here.
-            </EmptyState>
+            <div className="replay-rail-empty">
+              {showDot && <PresenceSlot name="dock" className="replay-rail-dot" />}
+              <EmptyState title="Choose a recording">
+                Its picture, what dot said and the files it made show here.
+              </EmptyState>
+            </div>
           )}
         </RailPanel>
       )}
