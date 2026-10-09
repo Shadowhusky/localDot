@@ -16,7 +16,7 @@ export function describeRequestError(err: unknown, action?: "resume"): string {
         "the computer is restarting: resume it once it is ready",
         "the computer is changing state; try again",
       ],
-      503: ["the key layer is offline: start keyd, then resume the computer"],
+      503: ["key protection is off: turn it back on, then resume the computer"],
     };
     return known[err.status]?.includes(err.message)
       ? err.message

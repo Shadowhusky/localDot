@@ -1388,7 +1388,7 @@ export class ActionGateway {
 
   #desktopd(cellId: string): NativeDevice {
     const d = this.deps.registry.for(cellId);
-    if (!d) throw new Cancelled("preflight", `cell ${cellId} has no desktopd endpoint`);
+    if (!d) throw new Cancelled("preflight", "the computer is not connected");
     return d;
   }
 
@@ -1403,7 +1403,8 @@ export class ActionGateway {
   }
 
   #pressT(ctx: ActionContext, d: NativeDevice, pressMono: number): number {
-    if (!d.clocks.sample) throw new Cancelled("preflight", "desktopd clock not synced");
+    if (!d.clocks.sample)
+      throw new Cancelled("preflight", "the computer's clock is not in step yet");
     // The press happened before this call returned; a mapping error of a millisecond must not put
     // it after the event that records it.
     return Math.min(
@@ -1483,7 +1484,7 @@ export class ActionGateway {
     }
     const cell = this.deps.cells.get(ctx.screen?.parentCellId ?? ctx.cellId);
     if (cell?.state !== "ready")
-      throw new Cancelled("preflight", `cell is ${cell?.state ?? "missing"}`);
+      throw new Cancelled("preflight", `the computer is ${cell?.state ?? "gone"}`);
     if (cell.fenced || cell.replacementPending)
       throw new Cancelled(
         "preflight",

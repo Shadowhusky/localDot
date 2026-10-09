@@ -138,7 +138,7 @@ export function resolveRole(
     if (isOpenRouterRouterId(provider.id, model.id))
       throw new BindingError(
         role,
-        `${model.id} picks a model at that model's price, which keyd cannot hold; pick the model itself`,
+        `${model.id} picks a model at that model's price, which localDot cannot track; pick the model itself`,
       );
     if (unpriced(model)) {
       if (!choice.price)
@@ -193,7 +193,7 @@ export function taskSelection(roles: readonly ResolvedRole[]): TaskModelSelectio
 export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): ModelBinding {
   const surrogate = r.keyId && Object.hasOwn(surrogates, r.keyId) ? surrogates[r.keyId] : undefined;
   if (r.keyId && (typeof surrogate !== "string" || !SURROGATE_PATTERN.test(surrogate)))
-    throw new BindingError(r.role, "the session has no valid surrogate for its selected key");
+    throw new BindingError(r.role, "the task's key is not ready to use; choose the key again");
   return immutable({
     route: r.route,
     client: r.client,

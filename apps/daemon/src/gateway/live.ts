@@ -51,7 +51,7 @@ export class LiveSessions {
   ): void {
     if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
     if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
-      throw new Error(`cell ${cellId} already has a live session`);
+      throw new Error("this computer already has a live task");
     if (this.cellOf(sessionId)) throw new Error("session is already live");
     const controller = new AbortController();
     let settle!: () => void;
@@ -125,7 +125,7 @@ export class LiveSessions {
     if (!this.cellOf(sessionId)) throw new Error("session is not live");
     if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
     if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
-      throw new Error("cell identity is already assigned");
+      throw new Error("this computer is already assigned");
     this.#aliases.set(cellId, sessionId);
   }
 
