@@ -35,6 +35,7 @@ import {
   type CodexAccount,
 } from "../../../daemon/src/agent/codex/account.ts";
 import { Conversations } from "../../../daemon/src/agent/conversation.ts";
+import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentError } from "../../../daemon/src/agent/runner.ts";
@@ -980,6 +981,8 @@ const harness = () =>
   chatgptState && chatgptState !== "unavailable"
     ? { available: true as const }
     : { available: false as const, reason: CHATGPT_SWITCHED_OFF };
+// What the user's direct control delivered to the fake computer, in order, with when it arrived.
+const manualInputs: { at: number; input: unknown }[] = [];
 const agent: AgentRoutesDeps = {
   home: HOME,
   settings: settingsStore,
@@ -1098,9 +1101,22 @@ const agent: AgentRoutesDeps = {
     owner === session
       ? {
           screen: { w: 2560, h: 1600 },
-          client,
+          client: {
+            input: (request, signal, onPress) => {
+              manualInputs.push({ at: Date.now(), input: request.input });
+              return client.input(request, signal, onPress);
+            },
+            type: (request, onProgress, signal) => {
+              manualInputs.push({ at: Date.now(), input: { kind: "text", text: request.text } });
+              return client.type(request, onProgress, signal);
+            },
+          },
           prepare: async () => {},
           release: () => {},
+          letGo: async () => {
+            manualInputs.push({ at: Date.now(), input: { kind: "let-go" } });
+            await client.release();
+          },
           check: () => {
             const cell = cells.get(cellId);
             if (
@@ -1155,6 +1171,7 @@ const PORT = (server.address() as AddressInfo).port;
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
+  manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
 ]);
 const routes = createApp({
   token: TOKEN,
@@ -1581,6 +1598,107 @@ function liveDrag(held: boolean): string | undefined {
     0,
   );
 }
+// Clicks, a scroll, typing and a key combo played live, each with its travel and its element, so
+// the stage draws the full action vocabulary: a click on a known cell, a right click, a double
+// click, three wheel notches, a formula typed into a field and Ctrl+S.
+function liveActions(): string | undefined {
+  if (!session) return "no session";
+  const owned = session;
+  const now = () => Math.round(microsToMs(log.toSessionT(owned.id, clock.nowMicros())));
+  const later = (ms: number, act: () => void) => setTimeout(act, ms).unref();
+  const cell = (row: number) => ({ x: 1900, y: 424 + row * 64, w: 320, h: 64 });
+  const centre = (r: { x: number; y: number; w: number; h: number }) => ({
+    x: Math.round(r.x + r.w * 0.62),
+    y: Math.round(r.y + r.h * 0.64),
+  });
+  let cursor: Point = { x: 1280, y: 800 };
+  const act = (
+    at: number,
+    verb: "click" | "scroll" | "type" | "key",
+    label: string,
+    input: Record<string, unknown>,
+    box?: { x: number; y: number; w: number; h: number },
+    progress?: string,
+  ) => {
+    const point = box ? centre(box) : undefined;
+    later(at, () => {
+      const step = ulid();
+      const from = cursor;
+      owned.append("step.start", { kind: "gui", planItem: "calc" }, step);
+      owned.append(
+        "action.intent",
+        {
+          verb,
+          label,
+          risk: "none",
+          ...(point && verb !== "type"
+            ? {
+                point,
+                pointer: {
+                  from,
+                  to: point,
+                  startsAt: now() + 120,
+                  durationMs: 420,
+                  seed: 5,
+                  curve: "minjerk-bow-v1",
+                },
+              }
+            : point
+              ? { point }
+              : {}),
+        },
+        step,
+      );
+      if (point && verb !== "type") cursor = point;
+      if (box)
+        later(60, () =>
+          owned.append(
+            "action.target",
+            { target: { point: point as Point, bbox: box, source: "ax", role: "cell" } },
+            step,
+          ),
+        );
+      later(verb === "type" || verb === "key" ? 150 : 650, () => {
+        const pressT = msToMicros(now());
+        owned.append(
+          "action.dispatch",
+          { input, pressT, ringAt: pressT + 20_000, injector: "xtest" },
+          step,
+        );
+        const chars = [...(progress ?? "")];
+        for (const [i, chunk] of chars.entries())
+          later(35 * (i + 1), () =>
+            owned.append("text.progress", { chunk, count: i + 1, masked: false }, step),
+          );
+        later(400 + 35 * chars.length, () => {
+          owned.append("action.result", { ok: true }, step);
+          owned.append("step.end", { status: "ok" }, step);
+        });
+      });
+    });
+  };
+  const click = (button: "left" | "right", count: 1 | 2, box: ReturnType<typeof cell>) => ({
+    kind: "click",
+    button,
+    count,
+    at: centre(box),
+  });
+  act(0, "click", "Select February's net total", click("left", 1, cell(1)), cell(1));
+  act(1800, "click", "Open the menu on March's net total", click("right", 1, cell(2)), cell(2));
+  act(3600, "click", "Edit April's net total", click("left", 2, cell(3)), cell(3));
+  const wheel = cell(7);
+  act(5400, "scroll", "Scroll down", { kind: "scroll", at: centre(wheel), dx: 0, dy: 3 }, wheel);
+  const total = { x: 1900, y: 1256, w: 320, h: 64 };
+  act(
+    7000,
+    "type",
+    "Type =SUM(F2:F13)",
+    { kind: "type", chars: 12, masked: false },
+    total,
+    "=SUM(F2:F13)",
+  );
+  act(9000, "key", "Save the report", { kind: "key", combo: ["ctrl", "s"] });
+}
 function ask(allowText: boolean): string | undefined {
   if (!session) return "no session";
   void session
@@ -1699,6 +1817,7 @@ routes.post("/__qa/approval", async (c) => {
 routes.post("/__qa/keys", () => reply(keySteps()));
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
+routes.post("/__qa/actions", () => reply(liveActions()));
 routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),
@@ -1862,6 +1981,7 @@ routes.post("/__qa/scenario/:name", async (c) => {
   if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
   return reply(await STEPS[wanted.step]());
 });
+routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
 routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,

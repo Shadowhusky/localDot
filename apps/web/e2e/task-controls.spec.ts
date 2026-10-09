@@ -8,6 +8,7 @@ import { ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { expect, type Page, test } from "@playwright/test";
+import { manualStreamRoute } from "../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../daemon/src/agent/routes.ts";
 import { AgentSession } from "../../daemon/src/agent/session.ts";
@@ -24,6 +25,7 @@ import { FakeDesktopd } from "../../daemon/src/desktopd/testing/fake-desktopd.ts
 import { EventLog } from "../../daemon/src/event-log.ts";
 import { KillSwitch } from "../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../daemon/src/gateway/live.ts";
+import { attachUpgradeRouter } from "../../daemon/src/upgrade-router.ts";
 
 // Actual production page/CSP, authenticated daemon routes, journal, manual lease and kill
 // switch. Docker/keyd/native desktop are isolated stand-ins; no account or model is used.
@@ -223,11 +225,17 @@ async function fixture(edge: StopEdge = "paused") {
   const server: Server = createServer(getRequestListener((request) => app.fetch(request)));
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(Number(process.env.QA_PORT ?? 0), "127.0.0.1", resolve);
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Owned listener missing");
   const origin = `http://127.0.0.1:${address.port}`;
+  attachUpgradeRouter(server, { port: address.port, token: TOKEN }, [
+    manualStreamRoute({
+      session: (key) => (key === id ? session : undefined),
+      manual: agent.manual,
+    }),
+  ]);
   app = createApp({
     token: TOKEN,
     port: address.port,
@@ -309,21 +317,25 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
     external.push("Unexpected external request");
     return route.abort();
   });
-  await page.routeWebSocket("**/*", (ws) => {
-    const url = new URL(ws.url());
-    expect(url.origin.replace(/^ws/, "http")).toBe(f.origin);
-    if (url.pathname === `/api/cells/${f.cellId}/status`) {
-      ws.send(JSON.stringify(f.cells.get(f.cellId)));
-      const unsubscribe = f.cells.subscribe((cell) => ws.send(JSON.stringify(cell)));
-      ws.onClose(unsubscribe);
-    } else if (url.pathname === `/api/sessions/${f.id}/stream`) {
-      for (const event of f.log.read(f.id)) ws.send(JSON.stringify(event));
-      const unsubscribe = f.log.subscribe((id, event) => {
-        if (id === f.id) ws.send(JSON.stringify(event));
-      });
-      ws.onClose(unsubscribe);
-    } else throw new Error("Unexpected owned socket");
-  });
+  // The user's input stream goes to the fixture's own upgrade route; the rest are played here.
+  await page.routeWebSocket(
+    (url) => !url.pathname.includes("/takeover/"),
+    (ws) => {
+      const url = new URL(ws.url());
+      expect(url.origin.replace(/^ws/, "http")).toBe(f.origin);
+      if (url.pathname === `/api/cells/${f.cellId}/status`) {
+        ws.send(JSON.stringify(f.cells.get(f.cellId)));
+        const unsubscribe = f.cells.subscribe((cell) => ws.send(JSON.stringify(cell)));
+        ws.onClose(unsubscribe);
+      } else if (url.pathname === `/api/sessions/${f.id}/stream`) {
+        for (const event of f.log.read(f.id)) ws.send(JSON.stringify(event));
+        const unsubscribe = f.log.subscribe((id, event) => {
+          if (id === f.id) ws.send(JSON.stringify(event));
+        });
+        ws.onClose(unsubscribe);
+      } else throw new Error("Unexpected owned socket");
+    },
+  );
   await page.addInitScript(() => {
     localStorage.setItem("localdot.token", "a".repeat(43));
     Object.defineProperty(window, "controlProof", { value: { csp: [], rejection: false } });
@@ -360,7 +372,7 @@ for (const width of [1280, 390])
       const answer = f.session.ask("Which report format?", ["Markdown", "Plain text"], true, 0);
       await page.setViewportSize({ width, height: 900 });
       const p = await load(page, f);
-      if (width < 1180) await page.getByRole("tab", { name: /^Conversation/ }).click();
+      if (width < 1100) await page.getByRole("tab", { name: /^Conversation/ }).click();
       const askId = f.session.pendingAsk;
       await expect(page.getByRole("form", { name: "Answer dot" })).toBeVisible();
       await page.getByRole("radio", { name: "Markdown", exact: true }).check();
@@ -379,22 +391,23 @@ for (const width of [1280, 390])
         .takeover("login", "Sign in on the sample computer, then return control.")
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
-      if (width < 1180) await page.getByRole("tab", { name: /^Computer/ }).click();
-      await expect(page.getByRole("button", { name: "Type text", exact: true })).toBeEnabled();
+      if (width < 1100) await page.getByRole("tab", { name: /^Computer/ }).click();
+      const keyboard = page.getByLabel("Type on the computer", { exact: true });
+      await expect(keyboard).toBeEnabled();
       await page.reload(); // The held takeover is restored from the daemon, never released by reload.
       await expect(page.getByRole("region", { name: "Manual control" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Type text", exact: true })).toBeEnabled();
+      await expect(keyboard).toBeEnabled();
       await expect
         .poll(async () => Number(await page.locator(".stage-canvas").getAttribute("data-frames")))
         .toBeGreaterThan(0);
       await page.screenshot({ path: info.outputPath(`takeover-${width}.png`), fullPage: true });
-      const surface = page.getByRole("button", { name: "Click on the computer" });
+      const surface = page.locator(".manual-surface");
       const box = await surface.boundingBox();
       if (!box) throw new Error("Owned manual surface missing");
       await page.evaluate(() => {
         const surface = document.querySelector(".manual-surface");
         surface?.addEventListener(
-          "click",
+          "pointerdown",
           (raw) => {
             const event = raw as MouseEvent,
               rect = document.querySelector(".stage-canvas")?.getBoundingClientRect();
@@ -416,7 +429,7 @@ for (const width of [1280, 390])
           { once: true },
         );
       });
-      if (width < 1180) await surface.tap({ position: { x: box.width / 2, y: box.height / 2 } });
+      if (width < 1100) await surface.tap({ position: { x: box.width / 2, y: box.height / 2 } });
       else await surface.click({ position: { x: box.width / 2, y: box.height / 2 } });
       await expect.poll(() => f.native.calls.length).toBe(1);
       const point = await page.evaluate(
@@ -431,14 +444,16 @@ for (const width of [1280, 390])
           holdMs: 0,
         },
       });
-      await page.getByLabel("Text for the computer").fill("synthetic-password 中文🙂");
-      await page.getByRole("button", { name: "Type text", exact: true }).click();
+      await page.getByRole("button", { name: "Paste text", exact: true }).click();
+      const paste = page.getByLabel("Text to type on the computer", { exact: true });
+      await paste.fill("synthetic-password 中文🙂");
+      await paste.press("Enter");
       await expect.poll(() => f.native.calls.length).toBe(2);
       expect(f.native.calls[1]).toMatchObject({
         path: "/type",
         body: { text: "synthetic-password 中文🙂", masked: true },
       });
-      await expect(page.getByLabel("Text for the computer")).toHaveValue("");
+      await expect(paste).toHaveCount(0);
       expect(JSON.stringify(f.log.read(f.id))).not.toContain("synthetic-password");
       expect(f.session.inboxSequence).toBe(0);
       const note = page.getByLabel("Optional note for dot");
@@ -480,8 +495,11 @@ for (const [edge, sheet] of [
       await expect.poll(() => f.session.manualControl).toBe("ready");
       await page.setViewportSize({ width: 390, height: 850 });
       const p = await load(page, f);
-      await expect(page.getByRole("button", { name: "Type text", exact: true })).toBeEnabled();
-      await page.getByLabel("Text for the computer").fill("unsent-synthetic-password");
+      await expect(page.getByLabel("Type on the computer", { exact: true })).toBeEnabled();
+      await page.getByRole("button", { name: "Paste text", exact: true }).click();
+      await page
+        .getByLabel("Text to type on the computer", { exact: true })
+        .fill("unsent-synthetic-password");
       if (sheet === "Keys") await page.getByTestId("keys-button").click();
       else if (sheet) await page.getByRole("button", { name: sheet, exact: true }).click();
       const root = sheet ? page.getByRole("dialog") : page.locator(".task-bar");

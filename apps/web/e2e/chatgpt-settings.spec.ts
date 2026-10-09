@@ -374,7 +374,7 @@ for (const width of [1280, 390])
       });
       await page.screenshot({ path: info.outputPath(`chatgpt-settings-${width}.png`) });
       await sheet.getByRole("button", { name: "Close settings" }).click();
-      if (width < 1180) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+      if (width < 1100) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
       await page.getByLabel("New task").fill("Prepare the synthetic report when I start it.");
       await expect(page.getByRole("button", { name: "Start task", exact: true })).toBeEnabled();
       expect(f.counters.modelStarts).toBe(0);

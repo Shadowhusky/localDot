@@ -263,6 +263,7 @@ export function TaskList({
       >
         {continueTask && menuFor && continuable(menuFor, continueTask) && (
           <MenuItem
+            icon="continue"
             disabledReason={continueTask.reason}
             onSelect={() => continueTask.run(menuFor.id)}
           >

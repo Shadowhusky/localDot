@@ -168,7 +168,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
       test("a nested page slides in with a Back, and Back returns to the row and the scroll it left", async () => {
         const { context, page, seen } = await open(browser, device);
         const sheet = await openSheet(page);
-        const body = page.locator(".ui-sheet-page:not([inert]) > .ui-sheet-body");
+        const body = page.locator(".ui-sheet-page:not([inert]) > .ui-sheet-main > .ui-sheet-body");
         await body.evaluate((element) => element.scrollTo(0, 60));
         const row = sheet.getByRole("button", { name: /^Keys/ });
         // From the keyboard on a desktop, so the row has focus as it opens the page.
@@ -233,7 +233,8 @@ for (const [engine, launch] of Object.entries(ENGINES))
         const { context, page, seen } = await open(browser, device);
         const trigger = page.getByRole("button", { name: "Recording actions" });
         const under = page.getByRole("button", { name: /^Pressed/ });
-        await trigger.scrollIntoViewIfNeeded();
+        // Room below the trigger, so the menu opens down over the counter.
+        await trigger.evaluate((element) => element.scrollIntoView({ block: "start" }));
         await press(trigger);
         const menu = page.getByRole("menu", { name: "Recording actions" });
         await settled(menu);

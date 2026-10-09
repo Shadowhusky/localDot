@@ -521,6 +521,9 @@ export function createAgent(d: AgentWiringDeps) {
         if (!target.clocks.sample) await target.clocks.sync();
       },
       release: unsubscribe,
+      letGo: async () => {
+        await target.client.release();
+      },
     };
   };
   const toolApp = createToolApi({

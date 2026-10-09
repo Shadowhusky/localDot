@@ -23,7 +23,7 @@ export interface NewConversation {
 export function NewConversationButton({ run, reason }: NewConversation) {
   return (
     <IconButton
-      icon="square-pen"
+      icon="compose"
       size={32}
       label="New conversation"
       disabledReason={reason}

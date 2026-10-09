@@ -146,7 +146,7 @@ async function settle(page: Page) {
 
 // The composer, on a phone once its Conversation tab is chosen.
 export async function composer(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1180) {
+  if ((page.viewportSize()?.width ?? 0) < 1100) {
     // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
     const tab = page.getByRole("tab", { name: /^Conversation/ });
     await expect(async () => {
@@ -158,13 +158,10 @@ export async function composer(page: Page) {
   return page.getByRole("form", { name: "Message dot" });
 }
 
-// Screenshot baselines are kept for these projects of the matrix only.
-export function keepBaselinesAt(...projects: string[]) {
+// A spec's flows run at these projects of the matrix only.
+export function runAt(...projects: string[]) {
   test.beforeEach(() => {
-    test.skip(
-      !projects.includes(test.info().project.name),
-      `Baselines are kept at ${projects.join(" and ")}`,
-    );
+    test.skip(!projects.includes(test.info().project.name), `Runs at ${projects.join(" and ")}`);
   });
 }
 

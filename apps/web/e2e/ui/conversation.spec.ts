@@ -13,7 +13,7 @@ const LATEST = /^Summarise the sample sales table/;
 
 // The conversation's column, its tab chosen on a phone.
 async function chat(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1180) {
+  if ((page.viewportSize()?.width ?? 0) < 1100) {
     const tab = page.getByRole("tab", { name: /^Conversation/ });
     await expect(async () => {
       await tab.click();

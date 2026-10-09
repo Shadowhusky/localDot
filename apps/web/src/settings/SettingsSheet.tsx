@@ -325,7 +325,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
               <div className="settings-inline">
                 <p className="settings-note">Your computer</p>
                 <Button
-                  icon="square"
+                  icon="stop"
                   disabledReason={props.stop.enabled ? undefined : "Not available right now"}
                   onClick={() => props.stop?.run()}
                 >

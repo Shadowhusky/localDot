@@ -15,15 +15,16 @@
 
 .keys-section-title {
   font:
-    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
-  letter-spacing: var(--text-title--letter-spacing);
+    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
 }
 
 .keys-note {
   display: flex;
   gap: calc(var(--spacing) * 1.5);
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .keys-note[data-alert] {
@@ -90,7 +91,7 @@
   align-items: center;
   gap: calc(var(--spacing) * 1.5);
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   text-align: end;
 }
 
@@ -114,7 +115,7 @@
   gap: calc(var(--spacing) * 2);
   padding-bottom: calc(var(--spacing) * 3);
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .keys-status-fix {
@@ -131,7 +132,7 @@
 
 .keys-raw {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -156,7 +157,7 @@
   grid-template-rows: 1fr;
   border-top: 1px solid var(--color-hairline);
   transition:
-    grid-template-rows var(--dur-sheet) var(--ease-standard),
+    grid-template-rows var(--dur-default) var(--ease-standard),
     opacity var(--dur-fade) var(--ease-standard),
     border-color var(--dur-fade) var(--ease-standard);
 }
@@ -170,7 +171,7 @@
   border-color: transparent;
   opacity: 0;
   transition:
-    grid-template-rows var(--dur-sheet) var(--ease-standard),
+    grid-template-rows var(--dur-default) var(--ease-standard),
     opacity var(--dur-exit) var(--ease-exit),
     border-color var(--dur-exit) var(--ease-exit);
 }
@@ -207,7 +208,7 @@
   border-radius: inherit;
   background-color: var(--color-state-selected);
   opacity: 0;
-  animation: keys-glow calc(var(--dur-spring) * 2.5) var(--ease-standard);
+  animation: keys-glow calc(var(--dur-snappy) * 2.5) var(--ease-standard);
 }
 
 @keyframes keys-glow {
@@ -267,7 +268,8 @@
   background-color: var(--color-control);
   color: var(--color-fg-1);
   font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
 }
 
 .keys-row-text {
@@ -290,7 +292,7 @@
   column-gap: calc(var(--spacing) * 3);
   overflow: clip;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
 }
 
@@ -334,7 +336,7 @@
   flex: 1;
   min-width: 0;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .keys-form-error {
@@ -343,7 +345,7 @@
   color: var(--color-fg-1);
 }
 
-@media (width < 760px) {
+@media (width < 700px) {
   .keys-pair {
     display: contents;
   }

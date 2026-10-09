@@ -61,18 +61,21 @@ function events() {
   ];
 }
 
-it("never draws another screen's pointer, target or click rings across a switch", () => {
+it("never draws another screen's pointer, target, press or click rings across a switch", () => {
   const model = foldEvents(emptyModel(), events());
   const view = { reducedMotion: true };
   expect(sceneAt(model, 15, view).cursor?.x).toBe(100);
+  expect(sceneAt(model, 15, view).press?.x).toBe(100);
   expect(sceneAt(model, 21, view).cursor).toBeNull();
+  expect(sceneAt(model, 21, view).press).toBeNull();
   expect(sceneAt(model, 21, view).rings).toEqual([]);
   expect(sceneAt(model, 35, view).cursor?.x).toBe(900);
-  expect(sceneAt(model, 35, view).rings.map((r) => r.x)).toEqual([900]);
+  expect(sceneAt(model, 35, view).press?.x).toBe(900);
   expect(sceneAt(model, 41, view).cursor).toBeNull();
-  expect(sceneAt(model, 41, view).rings).toEqual([]);
+  expect(sceneAt(model, 41, view).press).toBeNull();
   expect(sceneAt(model, 55, view).cursor?.x).toBe(300);
-  expect(sceneAt(model, 55, view).rings.map((r) => r.x)).toEqual([300]);
+  // The click's ripple follows its 90 ms hold; the browser click's would have been at 121.
+  expect(sceneAt(model, 145, view).rings.map((r) => r.x)).toEqual([300]);
 });
 
 it("suppresses an event-ahead or video-ahead revision while retaining correct replay history", () => {

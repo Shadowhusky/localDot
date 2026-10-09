@@ -26,6 +26,7 @@ import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
 import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
 import { compareFrames, followRule, type ReplayCommand } from "./replay-view.ts";
+import { SeekGate } from "./seek-gate.ts";
 
 export interface ReplayState {
   sessionId: string | null;
@@ -175,6 +176,18 @@ export function useReplay(
     current.current = { ...current.current, ...patch };
     setValues(current.current);
   };
+  // The page shows a seek as it goes to the worker, so a drag renders Replay once per frame the
+  // worker draws, not once per pointer event; the scrubber's head follows the finger on its own.
+  const sendSeek = (tMs: number, mode: "exact" | "preview") => {
+    const map = current.current.map;
+    if (!map) return;
+    pendingSeekTime.current = tMs;
+    update({ tMs, playing: false, compare: null, idleNow: idleAt(map, tMs) });
+    stage.current?.replay.seek(tMs, mode);
+  };
+  const sending = useRef(sendSeek);
+  sending.current = sendSeek;
+  const [seeks] = useState(() => new SeekGate((tMs, mode) => sending.current(tMs, mode)));
   const setScreen = (next: ScreenName) => {
     if (!ScreenName.safeParse(next).success || next === screen) return;
     screenSeek.current = {
@@ -185,6 +198,7 @@ export function useReplay(
     };
     mediaOwner.current++;
     pendingSeekTime.current = null;
+    seeks.reset();
     stage.current?.replay.close();
     update({
       screen: next,
@@ -200,6 +214,7 @@ export function useReplay(
     const state = current.current;
     if (state.map) {
       pendingSeekTime.current = null;
+      seeks.reset();
       stage.current?.replay.transport({
         playing: state.playing,
         speed: state.speed,
@@ -211,10 +226,7 @@ export function useReplay(
   const seek = (time: number, mode: "exact" | "preview") => {
     const state = current.current;
     if (!state.map || !Number.isFinite(time)) return;
-    const tMs = Math.min(state.map.endMs, Math.max(state.map.startMs, time));
-    pendingSeekTime.current = tMs;
-    update({ tMs, playing: false, compare: null, idleNow: idleAt(state.map, tMs) });
-    stage.current?.replay.seek(tMs, mode);
+    seeks.seek(Math.min(state.map.endMs, Math.max(state.map.startMs, time)), mode);
   };
   const setSpeed = (speed: ReplaySpeed) => {
     if (!REPLAY_SPEEDS.includes(speed)) return;
@@ -339,6 +351,7 @@ export function useReplay(
     });
     lastEventMs.current = 0;
     pendingSeekTime.current = null;
+    seeks.reset();
     handle?.resetSession();
     function notifyModel() {
       if (versionTimer !== undefined) return;
@@ -465,6 +478,7 @@ export function useReplay(
         message.owner !== mediaOwner.current
       )
         return;
+      if (message.type === "replay-status" || message.type === "replay-time") seeks.settled();
       if (message.type === "replay-status") change({ status: message.status.state });
       if (message.type === "replay-time") {
         if (
@@ -536,7 +550,7 @@ export function useReplay(
       seekWaiters.current.clear();
       if (window.__localdot) delete window.__localdot.replay;
     };
-  }, [api, sessionId, stage, screen]);
+  }, [api, sessionId, stage, screen, seeks]);
   return {
     // Until the effect resets for a newly picked session, the held values describe the previous one.
     ...(values.sessionId === sessionId ? values : initialState(sessionId)),

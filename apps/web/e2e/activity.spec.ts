@@ -284,7 +284,7 @@ for (const width of [1280, 390]) {
     test.setTimeout(60_000);
     await page.setViewportSize({ width, height: 800 });
     const proof = await load(page);
-    if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     const rail = page.getByRole("complementary", { name: "Plan and steps" });
     const plan = rail.getByRole("list", { name: "Task plan", exact: true });
     await expect(plan).toContainText("Send externally");

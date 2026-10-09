@@ -56,6 +56,8 @@ export interface ManualLease {
   readonly requestId: string;
   readonly signal: AbortSignal;
   check(): void;
+  // The user typed under this control. The takeover's end says so, never what was typed.
+  typed(): void;
   // A lost dispatch acknowledgment keeps the control fence until Stop contains the desktop.
   finish(uncertain?: boolean): void;
 }
@@ -70,6 +72,7 @@ interface ControlRecord {
   held: boolean;
   returning: boolean;
   manualUnconfirmed: boolean;
+  typed: boolean;
   released: Promise<TakeoverOutcome>;
   resolve(outcome: TakeoverOutcome): void;
   step?: string;
@@ -664,6 +667,9 @@ export class AgentSession {
         )
           throw new ControlHeldError();
       },
+      typed: () => {
+        record.typed = true;
+      },
       finish: (uncertain = false) => {
         if (finished) return;
         finished = true;
@@ -677,6 +683,12 @@ export class AgentSession {
   }
   cancelManual(): void {
     for (const call of this.#manual.values()) call.abort.abort(new ControlHeldError());
+  }
+  // Settles once the user's control under this request ends, by hand-back or Stop, or at once
+  // when it is not the current control.
+  controlReleased(requestId: string): Promise<void> {
+    const record = this.#control;
+    return record?.requestId === requestId ? record.released.then(() => {}) : Promise.resolve();
   }
   append(type: string, data: Record<string, unknown>, step?: string): void {
     this.eventLog.append(this.id, {
@@ -916,6 +928,7 @@ export class AgentSession {
       held: false,
       returning: false,
       manualUnconfirmed: false,
+      typed: false,
       released,
       resolve,
       step,
@@ -1034,7 +1047,12 @@ export class AgentSession {
     if (note) this.post("steer", note);
     this.append(
       "takeover.end",
-      { requestId: record.requestId, ...(note ? { note } : {}), by: "user" },
+      {
+        requestId: record.requestId,
+        ...(note ? { note } : {}),
+        by: "user",
+        ...(record.typed ? { typed: true } : {}),
+      },
       record.step,
     );
     this.#control = undefined;
@@ -1140,7 +1158,11 @@ export class AgentSession {
     if (record) {
       try {
         if (record.held)
-          this.append("takeover.end", { requestId: record.requestId, by: "stop" }, record.step);
+          this.append(
+            "takeover.end",
+            { requestId: record.requestId, by: "stop", ...(record.typed ? { typed: true } : {}) },
+            record.step,
+          );
       } catch {
         // Stop and abort callbacks must still contain the desktop if the journal cannot write.
         console.error("agent takeover end could not be recorded");

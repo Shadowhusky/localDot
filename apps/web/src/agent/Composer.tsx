@@ -771,9 +771,10 @@ export function Composer(props: ComposerProps) {
             {props.stop && (
               <IconButton
                 className="composer-stop"
-                variant="secondary"
+                variant="filled"
+                round
                 size={touch ? 32 : 28}
-                icon="square"
+                icon="stop"
                 label="Stop task"
                 kbd={["Mod", "Shift", "."]}
                 disabledReason={

@@ -18,6 +18,14 @@ const cases: [string, Record<string, unknown>, string, string, string][] = [
   ["takeover.end", { by: "user" }, "handback", "Handed back to dot", "neutral"],
   ["takeover.end", { by: "stop" }, "pause", "Stopped during your control", "attention"],
   [
+    "takeover.end",
+    { by: "user", typed: true },
+    "handback",
+    "You typed, then handed back to dot",
+    "neutral",
+  ],
+  ["takeover.end", { by: "stop", typed: true }, "pause", "You typed, then it stopped", "attention"],
+  [
     "approval.request",
     { title: "Send a message" },
     "approval",

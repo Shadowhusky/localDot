@@ -9,6 +9,12 @@
     color-scheme: dark;
     accent-color: var(--color-fg-1);
     caret-color: var(--color-fg-1);
+    scrollbar-color: var(--color-scrollbar) transparent;
+  }
+
+  /* Every scroller gets the thin themed bar. */
+  * {
+    scrollbar-width: thin;
   }
 
   html,
@@ -21,6 +27,7 @@
     background: var(--color-void);
     color: var(--color-fg-1);
     font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
     font-optical-sizing: auto;
     -webkit-font-smoothing: antialiased;
   }

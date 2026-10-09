@@ -36,6 +36,7 @@ export interface TickCapture {
     crop: CropRect;
     tip: { x: number; y: number };
     press: number;
+    lean: number;
     alpha: number;
     png: string;
   } | null;
@@ -72,8 +73,8 @@ interface KeptFrame {
   presented: number;
 }
 
-// The arrow with its halo and rim spans about x −2…20, y −2…25 CSS px from the tip (geometry.ts,
-// tilted 12°), 48 × 54 canvas px at DPR 2. A cursor shot is 96 px with the tip at (32, 24), so a
+// The arrow with its edge and shadow spans about x −2…16, y −2…25 CSS px from the tip
+// (geometry.ts), 36 × 54 canvas px at DPR 2. A cursor shot is 96 px with the tip at (32, 24), so a
 // 64 px template placed around the tip fits (template origin ≥ 0 and ≤ 32 both ways). The action
 // crop is 96 px centred on the point: the whole 11–21 CSS px ring band (22–42 px at DPR 2) fits.
 const CROP = 96;
@@ -288,6 +289,7 @@ export class OracleCapture {
             crop: shotCrop,
             tip: { x: cursorCanvas.x - shotCrop.x, y: cursorCanvas.y - shotCrop.y },
             press: cursor.press,
+            lean: cursor.lean,
             alpha: cursor.alpha,
             png: "",
           };
@@ -348,8 +350,8 @@ export class OracleCapture {
           dpr: this.dpr,
         } satisfies OracleDump;
       case "template": {
-        // The arrow alone at zoom 1, unsquashed and opaque, the name chip collapsed to its dot:
-        // the sprite the matcher looks for. Overlays keep their CSS size at every zoom (unit =
+        // The arrow alone at zoom 1, unpressed, upright and opaque, without its name chip: the
+        // sprite the matcher looks for. Overlays keep their CSS size at every zoom (unit =
         // dpr / cam.scale), so one template serves zoom 1 and zoom 2.
         const scene: Scene = {
           control: true,
@@ -359,16 +361,17 @@ export class OracleCapture {
             visible: true,
             alpha: 1,
             press: 0,
-            hand: false,
+            lean: 0,
             chipAlpha: 0,
             name: "dot",
-            floating: false,
           },
           target: null,
+          press: null,
           rings: [],
           drag: null,
           typing: null,
           keycaps: null,
+          scroll: null,
           cancel: null,
           hud: { label: "", state: "working", control: true, elapsedMs: 0 },
         };

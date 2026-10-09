@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-// Playwright's own Chromium, not the installed Chrome, which updates itself under the baselines.
+// Playwright's own Chromium, not the installed Chrome, which updates itself under the tests.
 const chromium = { browserName: "chromium" as const };
 const webkit = { browserName: "webkit" as const };
 const desktop = (width: number, height: number) => ({
@@ -20,17 +20,13 @@ export default defineConfig({
   testDir: "e2e/ui",
   testMatch: "*.spec.ts",
   globalSetup: "./e2e/ui/fresh-build.ts",
-  snapshotPathTemplate: "{testDir}/../__screenshots__/{platform}/{projectName}/{arg}{ext}",
   outputDir: "e2e/out/ui",
   fullyParallel: true,
   workers: 4,
   retries: 0,
   reporter: "list",
   timeout: 60_000,
-  expect: {
-    timeout: 15_000,
-    toHaveScreenshot: { maxDiffPixelRatio: 0.002, animations: "disabled", caret: "hide" },
-  },
+  expect: { timeout: 15_000 },
   use: {
     reducedMotion: "reduce",
     colorScheme: "dark",

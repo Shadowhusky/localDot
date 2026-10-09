@@ -177,14 +177,41 @@ for (const [engine, launch] of Object.entries(ENGINES)) {
 
     test("shortens every transition under reduced motion", async () => {
       const { context, page } = await open(browser, "graphite");
-      const durations = ["press", "hover", "fade", "exit", "sheet", "spring"];
+      const durations = [
+        "press",
+        "hover",
+        "fade",
+        "exit",
+        "sheet-exit",
+        "snappy",
+        "default",
+        "gentle",
+      ];
       const read = () =>
         Promise.all(
           durations.map((name) => computed(page, "transition-duration", `var(--dur-${name})`)),
         );
-      expect(await read()).toEqual(["0.08s", "0.12s", "0.15s", "0.18s", "0.28s", "0.36s"]);
+      expect(await read()).toEqual([
+        "0.08s",
+        "0.12s",
+        "0.15s",
+        "0.18s",
+        "0.28s",
+        "0.34s",
+        "0.47s",
+        "0.67s",
+      ]);
       await page.emulateMedia({ reducedMotion: "reduce" });
-      expect(await read()).toEqual(["0.12s", "0.12s", "0.15s", "0.15s", "0.15s", "0.15s"]);
+      expect(await read()).toEqual([
+        "0.12s",
+        "0.12s",
+        "0.15s",
+        "0.15s",
+        "0.15s",
+        "0.15s",
+        "0.15s",
+        "0.15s",
+      ]);
       await context.close();
     });
   });

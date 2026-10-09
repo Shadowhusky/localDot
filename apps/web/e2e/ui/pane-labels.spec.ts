@@ -30,7 +30,7 @@ async function drawn(scope: Locator, text: string) {
 }
 
 test("a pane under its tab leaves its name to the tab", async ({ page, ui }) => {
-  test.skip((page.viewportSize()?.width ?? 0) >= 1180, "Tabs show below 1180 px");
+  test.skip((page.viewportSize()?.width ?? 0) >= 1100, "Tabs show below 1100 px");
   await ui.open("running");
   await expect(page.getByTestId("hud-status")).toHaveText("Select the Net total cell");
   for (const name of PANES) {
@@ -50,7 +50,7 @@ test("each column names itself once, and the task bar doesn't name it again", as
   page,
   ui,
 }) => {
-  test.skip((page.viewportSize()?.width ?? 0) < 1180, "Columns show from 1180 px");
+  test.skip((page.viewportSize()?.width ?? 0) < 1100, "Columns show from 1100 px");
   await ui.open("running");
   await expect(page.getByTestId("hud-status")).toHaveText("Select the Net total cell");
   await expect(page.locator(".thread-row").first()).toBeVisible();
@@ -65,7 +65,7 @@ test("on a phone, New conversation sits in the top bar and opens the fresh conve
   page,
   ui,
 }) => {
-  test.skip((page.viewportSize()?.width ?? 0) >= 1180, "Tabs show below 1180 px");
+  test.skip((page.viewportSize()?.width ?? 0) >= 1100, "Tabs show below 1100 px");
   await ui.open("continued");
   await expect(page.getByTestId("hud-status")).toHaveText("Done");
   await page.getByRole("tab", { name: "Activity", exact: true }).click();

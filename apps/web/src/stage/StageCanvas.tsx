@@ -42,7 +42,7 @@ export interface StageCanvasHandle {
   setClock(clock: StageClock): void;
   setView(view: StageViewPatch): void;
   setTheme(theme: StageTheme): void;
-  manualPoint(point: Point, screen: { w: number; h: number }): Point | null;
+  manualPoint(point: Point, screen: { w: number; h: number }, follow?: boolean): Point | null;
   oracle(command: OracleRequest): Promise<unknown>;
 }
 
@@ -322,9 +322,9 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     setTheme(theme) {
       workerRef.current?.postMessage({ type: "theme", theme } satisfies WorkerIn);
     },
-    manualPoint(point, screen) {
+    manualPoint(point, screen, follow = false) {
       const rect = canvasRef.current?.getBoundingClientRect();
-      return rect ? manualPoint(rect, screen, point, viewport.current) : null;
+      return rect ? manualPoint(rect, screen, point, viewport.current, follow) : null;
     },
     oracle(command) {
       const worker = workerRef.current;

@@ -29,6 +29,7 @@ export class ReplayVideo {
   #next: VideoFrame | null = null;
   #shown: VideoFrame | null = null;
   #shownKeyMs: number | null = null;
+  #keyOnly = false;
   #pending: WantedFrame | null = null;
   #generation = 0;
   #running = false;
@@ -141,6 +142,7 @@ export class ReplayVideo {
       this.#sequential &&
       wanted.mode === "play" &&
       this.#shown !== null &&
+      !this.#keyOnly &&
       wanted.targetMs >= this.#shown.timestamp / 1000;
     const step = sequentialAdvance
       ? this.#next && this.#next.timestamp / 1000 <= wanted.targetMs
@@ -153,6 +155,7 @@ export class ReplayVideo {
           shownKeyMs: this.#shownKeyMs,
           targetKeyMs: keyMs,
           nextMs: this.#next ? this.#next.timestamp / 1000 : null,
+          keyOnly: this.#keyOnly,
         });
     if (step === "hold") return;
     if (step === "seek-exact" || step === "seek-key") {
@@ -169,6 +172,12 @@ export class ReplayVideo {
       }
       this.#shown = this.#frame(sample);
       this.#shownKeyMs = keyMs;
+      // A preview shows the key frame alone: decoding on behind it would waste a second decoder
+      // and a run of frames on every step of a drag.
+      if (wanted.mode === "preview") {
+        this.#keyOnly = true;
+        return;
+      }
       this.#iterator = this.#samples.samples(this.#shown.timestamp / 1_000_000);
       await this.#lookAhead(wanted);
       return;
@@ -231,6 +240,7 @@ export class ReplayVideo {
     this.#shown?.close();
     this.#shown = null;
     this.#shownKeyMs = null;
+    this.#keyOnly = false;
     this.#next?.close();
     this.#next = null;
     const iterator = this.#iterator;

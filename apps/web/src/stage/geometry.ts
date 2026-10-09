@@ -1,20 +1,24 @@
-import { RING_FADE_MS, RING_PX, RING_SCALE_MS } from "@localdot/stage";
+// The macOS arrow of the design-v2 board, tip at the origin, as drawn in its 22 px box.
+const ARROW = [0, 0, 0, 15.6, 4.2, 11.5, 7.1, 18.1, 9.8, 16.9, 7, 10.4, 12.9, 10.4];
+export const ARROW_BOX_PX = 22;
+// The name chip needs room beside the cursor; on a small stage the cursor goes without it.
+export const CHIP_MIN_STAGE_PX = 600;
 
-// The mockup's arrow (c-theatre.html), tip at the origin, 24 px tall at scale 1, tilted 12°.
-const ARROW = [0, 0, 0, 17.6, 4.5, 13.3, 7.5, 20.2, 10.8, 18.8, 7.9, 12.2, 14.2, 12.2];
-export const CURSOR_HEIGHT_PX = 24;
-export const CURSOR_TILT_RAD = (-12 * Math.PI) / 180;
-const ARROW_SCALE = CURSOR_HEIGHT_PX / 20.2;
-
-export function cursorPolygon(scale: number): number[] {
-  return ARROW.map((v) => v * ARROW_SCALE * scale);
+export function cursorPolygon(): number[] {
+  return [...ARROW];
 }
 
-// Research §4.3.3: scale 0.6→1.0 over 225 ms (ease-out), opacity 0.7→0 over 300 ms.
-export function ringRadius(p: number): { outer: number; alpha: number } {
-  const u = Math.min(1, (p * RING_FADE_MS) / RING_SCALE_MS);
-  const eased = 1 - (1 - u) ** 3;
-  return { outer: (RING_PX / 2) * (0.6 + 0.4 * eased), alpha: 0.7 * (1 - p) };
+// The cursor's box height on a stage this many CSS px wide (design-v2 §12).
+export function cursorSizePx(stageWidth: number): number {
+  if (stageWidth >= 800) return 22;
+  if (stageWidth >= 600) return 18;
+  return 16;
+}
+
+// A focus ring's corner on the element's box padded 3, as the board draws it: 9 px, or half its
+// height on a small element.
+export function targetRadius(height: number): number {
+  return Math.min(9, (height + 6) / 2);
 }
 
 export function videoPlacement(

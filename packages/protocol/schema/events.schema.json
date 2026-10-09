@@ -3943,6 +3943,10 @@
                 "user",
                 "stop"
               ]
+            },
+            "typed": {
+              "type": "boolean",
+              "const": true
             }
           },
           "required": [

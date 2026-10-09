@@ -29,7 +29,7 @@ const DECELERATION = 0.998;
 const STILL_MS = 80;
 // The ease a flung sheet leaves on starts at about this multiple of its average speed.
 const EASE_ENTER_SLOPE = 4.35;
-// A flung sheet leaves within the sheet's own exit (--dur-sheet), so it is gone before the surface.
+// A flung sheet leaves within the sheet's own exit (--dur-sheet-exit), so it is gone before the surface.
 const FLING_MS = [160, 280] as const;
 const REST_OF_PRESS = ["pointerup", "mousedown", "mouseup", "click", "auxclick", "contextmenu"];
 const NEXT_GESTURE = ["pointerdown", "pointercancel", "keydown"];
@@ -39,7 +39,7 @@ export type Presentation = "popover" | "sheet";
 // A phone gets a bottom sheet; a desktop, or a tablet with room, gets a popover by the trigger.
 export function presentationNow(): Presentation {
   return typeof matchMedia === "function" &&
-    matchMedia("(width < 760px) and (pointer: coarse)").matches
+    matchMedia("(width < 700px) and (pointer: coarse)").matches
     ? "sheet"
     : "popover";
 }

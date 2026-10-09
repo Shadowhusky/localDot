@@ -137,7 +137,7 @@ export function KeysPanel({
             <div className="keys-inline">
               <p className="keys-note">Your computer</p>
               <Button
-                icon="square"
+                icon="stop"
                 disabledReason={stop.enabled ? undefined : "Not available right now"}
                 onClick={() => stop.run()}
               >
