@@ -1,5 +1,7 @@
 // Command keyd is localDot's key layer: the only process that holds real secrets. It runs as a
 // LaunchAgent, keeps its state in <home>/keyd, and answers the daemon on <home>/keyd/admin.sock.
+// Its signature owns the Keychain items, so it has no subcommand that starts a program a caller
+// names: the daemon's task launcher is the separately signed keyd-native.
 package main
 
 import (
@@ -66,9 +68,6 @@ func run(args []string, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "native-lock" {
 		return nativewatch.RunResourceLock(args[1:], os.NewFile(3, "native-resource-lease"), os.Stdout)
 	}
-	if len(args) > 0 && args[0] == "native-run" {
-		return nativewatch.Run(args[1:], os.NewFile(3, "native-control"), os.NewFile(4, "native-events"), os.Stdin, os.Stdout, os.Stderr, 5)
-	}
 	if len(args) > 0 && args[0] == "canary-run" {
 		return runCanary(args[1:], os.Stdin, os.Stdout)
 	}
@@ -89,6 +88,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "verify-audit" {
 		return verifyAudit(args[1:], stderr)
+	}
+	if len(args) > 0 && args[0] == "self-test" {
+		return selfTest(args[1:], stderr)
 	}
 	fs := flag.NewFlagSet("keyd", flag.ContinueOnError)
 	fs.SetOutput(stderr)

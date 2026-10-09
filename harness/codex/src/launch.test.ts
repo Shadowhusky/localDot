@@ -196,7 +196,7 @@ describe("owned Codex launch composition", () => {
   it("uses the installed supervisor transport with the already-verified sandbox request", async () => {
     const f = fixture();
     vi.spyOn(supervisorLocation, "nativeSupervisor").mockReturnValue(
-      "/private/fixed-release/keyd/bin/keyd",
+      "/private/fixed-release/keyd/bin/keyd-native",
     );
     const legacyFixture = vi.mocked(primitive.spawnCodex).getMockImplementation();
     if (!legacyFixture) throw new Error("missing process fixture");
@@ -208,7 +208,7 @@ describe("owned Codex launch composition", () => {
       .mockImplementation((input) => legacyFixture(input));
     const c = await launchCodex({ roots: f.owned }, f.input);
     expect(transport).toHaveBeenCalledOnce();
-    expect(transport.mock.calls[0]?.[1]).toBe("/private/fixed-release/keyd/bin/keyd");
+    expect(transport.mock.calls[0]?.[1]).toBe("/private/fixed-release/keyd/bin/keyd-native");
     expect(f.verify).toHaveBeenCalledTimes(2);
     expect(f.launches[0]?.input.command).toBe(process.execPath);
     await c.stop();

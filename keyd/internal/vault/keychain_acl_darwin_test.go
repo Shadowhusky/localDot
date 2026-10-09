@@ -37,7 +37,7 @@ func TestNativeACLRequirementPolicy(t *testing.T) {
 // signing-information rule are checked here with stand-in processes.
 func TestNativeIdentityGate(t *testing.T) {
 	log, err := runNativeFixture(t, "testdata/keychain_identity.c")
-	if err != nil || strings.Count(log, "PASS ") != 15 {
+	if err != nil || strings.Count(log, "PASS ") != 38 {
 		t.Fatalf("native identity fixture: %v\n%s", err, log)
 	}
 }

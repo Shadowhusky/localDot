@@ -16,8 +16,9 @@ var accountPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}(\.[0-5])?$`)
 type keychainItemOperation func(operation, service, account string, data []byte) ([]byte, int)
 
 // RunKeychainItem is an internal child protocol, not a public vault CLI. The native operation
-// authenticates both this executable and its actual parent before opening any keychain. A caller
-// cannot obtain secret bytes by invoking the signed executable from an unrelated process.
+// authenticates this executable, its actual parent and the parent's mode before opening any
+// keychain: only signed keyd running as the daemon may drive it. A caller cannot obtain secret
+// bytes by invoking the signed executable from an unrelated process or through a launcher.
 func RunKeychainItem(args []string, in io.Reader, out io.Writer) int {
 	return runKeychainItem(args, in, out, nativeKeychainItem)
 }

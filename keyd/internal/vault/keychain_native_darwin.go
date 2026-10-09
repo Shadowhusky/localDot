@@ -65,15 +65,15 @@ static OSStatus keyd_check_process(pid_t parentPID, SecRequirementRef requiremen
   return status;
 }
 
-static const keyd_identity_checks keyd_process_checks = { getppid, keyd_check_self, keyd_check_process };
+static const keyd_identity_checks keyd_process_checks = { getppid, keyd_check_self, keyd_check_process, keyd_check_mode };
 
 // Identity checks are deliberately before even selecting the default keychain. No PID argument,
 // environment override, development bypass, generic security tool or unsigned fallback exists.
-static OSStatus keyd_authorized(void) {
+static OSStatus keyd_authorized(int checkOnly) {
   CFStringRef text = CFStringCreateWithCString(NULL, keyd_requirement, kCFStringEncodingUTF8);
   SecRequirementRef requirement = NULL;
   OSStatus status = text ? SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement) : errSecAllocate;
-  if (status == errSecSuccess) status = keyd_identity_check(&keyd_process_checks, requirement);
+  if (status == errSecSuccess) status = keyd_identity_check(&keyd_process_checks, requirement, checkOnly);
   if (requirement) CFRelease(requirement);
   if (text) CFRelease(text);
   return status;
@@ -92,7 +92,7 @@ static OSStatus keyd_verify_access(SecKeychainItemRef item) {
 static OSStatus keyd_item(const char *operation, const char *service, const char *account,
                          const void *data, unsigned int length, void **output, unsigned int *outputLength,
                          int *mayHaveChanged) {
-  OSStatus status = keyd_authorized();
+  OSStatus status = keyd_authorized(strcmp(operation, "check") == 0);
   KEYD_TRACE("authorized");
   if (status != errSecSuccess) return status;
   if (strcmp(operation, "check") == 0) return errSecSuccess;
@@ -224,4 +224,4 @@ func nativeExit(status int32, mayHaveChanged bool) int {
 }
 
 // Used by an unsigned test executable to check the denial path without opening any keychain.
-func nativeKeychainAuthorized() bool { return C.keyd_authorized() == C.errSecSuccess }
+func nativeKeychainAuthorized() bool { return C.keyd_authorized(1) == C.errSecSuccess }

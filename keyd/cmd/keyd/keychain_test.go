@@ -10,9 +10,10 @@ import (
 )
 
 // The Keychain vault runs this executable as its item helper; under go test that is the test
-// binary, which would otherwise run every test again in each helper it starts.
+// binary, which would otherwise run every test again in each helper it starts. Tests that start
+// the test binary as keyd itself set KEYD_TEST_RUN.
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == "keychain-item" {
+	if len(os.Args) > 1 && (os.Args[1] == "keychain-item" || os.Getenv("KEYD_TEST_RUN") == "1") {
 		os.Exit(run(os.Args[1:], os.Stderr))
 	}
 	os.Exit(m.Run())
