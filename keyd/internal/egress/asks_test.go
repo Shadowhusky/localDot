@@ -395,3 +395,47 @@ func TestACapturedProgramMaySpeakItsOwnProtocolOn443ButTLSKeepsItsSNI(t *testing
 		t.Fatalf("%d upstream connections", conns.Load())
 	}
 }
+
+func TestACapturedAddressOnTheWebsPortsIsWebTrafficButNeverAPrivateOne(t *testing.T) {
+	w := newWorld(t)
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				io.Copy(c, c)
+				c.Close()
+			}()
+		}
+	}()
+	w.mu.Lock()
+	w.ports["93.184.216.34:443"] = ln.Addr().String()
+	w.allow = append(w.allow, netip.MustParseAddrPort(ln.Addr().String()))
+	w.mu.Unlock()
+	c := w.cell("c1", policy.Desktop)
+	sub, cancel := w.events.Subscribe(8)
+	defer cancel()
+	conn, br := connectAs(t, c, "93.184.216.34:443", testCaptureToken, "")
+	if resp := reply(t, br); resp.StatusCode != http.StatusOK {
+		t.Fatalf("captured address: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	echoes(t, conn, br)
+	noAsk(t, sub)
+	_, br = connectAs(t, c, "10.0.0.5:443", testCaptureToken, "")
+	if resp := reply(t, br); resp.StatusCode != http.StatusForbidden || resp.Header.Get("X-Keyd-Reason") != ReasonAddress {
+		t.Fatalf("private address: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	noAsk(t, sub)
+	// The proxy's own CONNECT to an address still waits for the user.
+	_, br = connectAs(t, c, "93.184.216.34:443", testToken, "")
+	_, a := nextAsk(t, sub)
+	c.Answer(a.ID, false, "")
+	reply(t, br)
+}

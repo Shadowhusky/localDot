@@ -1,6 +1,7 @@
 // Package policy decides where a cell may connect: by role, by port, by name. It works on names;
-// addresses are netguard's job. An IP literal is refused on the web's doors, so no request there
-// skips the names, and waits for the user anywhere else.
+// addresses are netguard's job. An IP literal is refused on the proxy's web doors, so no proxied
+// request skips the names; one the gate captured on the web's ports goes by its address, and
+// anywhere else an address waits for the user.
 package policy
 
 import (
@@ -81,17 +82,21 @@ func (p Policy) Connect(t Target, intercepted map[string]bool) Decision {
 }
 
 // Other decides a CONNECT that Connect refuses for its port, or one to an address from
-// ParseAddress. SMTP and other roles never; a host a secret is bound to only on 443; plain http
-// that the gate captured from a program ignoring the proxy is web traffic; anything else waits for
-// the user. The address itself is netguard's to check, before asking and again at the dial.
+// ParseAddress. SMTP and other roles never; a host a secret is bound to only on 443; what the gate
+// captured on the web's ports from a program ignoring the proxy is web traffic, by name or, when
+// its first bytes named nothing, by address; anything else waits for the user. The address itself
+// is netguard's to check, before asking and again at the dial.
 func (p Policy) Other(t Target, intercepted map[string]bool, captured bool) Decision {
 	_, err := netip.ParseAddr(t.Host)
 	address := err == nil
+	web := t.Port == 80 || t.Port == 443
 	switch {
 	case !p.Web:
 		return Decision{Reason: ReasonNoWeb}
 	case t.Port == 25:
 		return Decision{Reason: ReasonSMTP}
+	case address && captured && web:
+		return Decision{Allow: true}
 	case address:
 		return Decision{Ask: true}
 	case Denied(t.Host):
