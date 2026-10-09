@@ -88,26 +88,37 @@
   width: 100%;
 }
 
+/* A theme's tile: its house with the lit stage in it, as the app itself looks in that theme. */
+.ui-radio-card-preview:has(> .appearance-swatch) {
+  align-self: stretch;
+}
+
 .appearance-swatch {
+  position: relative;
   display: block;
-  width: calc(var(--spacing) * 10);
-  height: calc(var(--spacing) * 7);
-  border-radius: var(--radius-xs);
+  width: 100%;
+  height: calc(var(--spacing) * 16);
+  overflow: hidden;
+  border-radius: var(--radius-row);
   box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
+.appearance-swatch::after {
+  position: absolute;
+  inset: 22% 18%;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(135deg, var(--color-porcelain-top), var(--color-porcelain-bottom));
+  content: "";
+}
+
 .appearance-swatch[data-appearance="graphite"] {
-  background: linear-gradient(
-    to bottom,
-    var(--graphite-raised-2) 0 40%,
-    var(--graphite-void) 40% 100%
-  );
+  background: linear-gradient(180deg, var(--graphite-void), var(--graphite-raised-2));
 }
 
 .appearance-swatch[data-appearance="midnight"] {
-  background: linear-gradient(
-    to bottom,
-    var(--midnight-raised-2) 0 40%,
-    var(--midnight-void) 40% 100%
-  );
+  background: linear-gradient(180deg, var(--midnight-void), var(--midnight-raised-2));
+}
+
+.ui-radio-card:has(.appearance-swatch[data-appearance="midnight"]) {
+  background-color: var(--midnight-raised);
 }

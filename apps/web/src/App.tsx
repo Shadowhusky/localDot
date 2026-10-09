@@ -34,7 +34,6 @@ import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
 import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
-import { KeysSheet } from "./keys/KeysSheet.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
@@ -286,16 +285,7 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
   } = useCell(api);
   const keys = useKeys(api);
-  // Keys shows on its own sheet, or slid over Settings while Settings is open.
-  const [keysIn, setKeysIn] = useState<"sheet" | "settings" | null>(null);
-  const keysOpen = keysIn !== null;
-  const settings = useSettings(api, [], !keysOpen);
-  const settingsOpen = useRef(settings.open);
-  settingsOpen.current = settings.open;
-  const openKeys = useCallback(() => setKeysIn(settingsOpen.current ? "settings" : "sheet"), []);
-  useEffect(() => {
-    if (!settings.open) setKeysIn((now) => (now === "settings" ? null : now));
-  }, [settings.open]);
+  const settings = useSettings(api);
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
@@ -326,55 +316,51 @@ function Theatre({ api }: { api: ApiClient }) {
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
-  const keysOrigin = useRef<HTMLElement | null>(null);
+  const settingsOpen = useRef(settings.open);
+  settingsOpen.current = settings.open;
+  // Where Settings goes, with a count, so a section asked for again is still gone to.
+  const [settingsAt, setSettingsAt] = useState<{ section?: SettingsSection; request: number }>({
+    request: 0,
+  });
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const keyRequest = useRef(0);
   const keyCapture = useRef<{
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
-  const keysDiscard = useRef<((then: () => void) => void) | null>(null);
-  const showSettings = (trigger: HTMLElement, section: SettingsSection = "models") => {
-    const open = () => {
-      settingsOrigin.current = trigger;
-      setSettingsSection(section);
-      if (keysIn === "sheet") {
-        keysOrigin.current = null;
-        setKeysIn(null);
-      }
-      settings.show();
-    };
-    // One sheet at a time: Keys on its own gives way to Settings, after asking if a key is typed.
-    if (keysIn === "sheet" && keysDiscard.current) keysDiscard.current(open);
-    else open();
+  const { show: openSettings } = settings;
+  const goToSettings = useCallback(
+    (trigger: HTMLElement | null, section?: SettingsSection) => {
+      if (!settingsOpen.current) settingsOrigin.current = trigger;
+      setSettingsAt((now) => ({ section, request: now.request + 1 }));
+      openSettings();
+    },
+    [openSettings],
+  );
+  const showSettings = (trigger: HTMLElement, section?: SettingsSection) =>
+    goToSettings(trigger, section);
+  const showKeys = (trigger: HTMLElement | null) => {
+    keyCapture.current = null;
+    setKeyPreset(undefined);
+    goToSettings(trigger, "keys");
   };
   const receiveKey = useCallback<KeyIntake["receive"]>(
     (source, provider) => {
-      keysOrigin.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       keyCapture.current = null;
       flushSync(() => {
         setKeyPreset(undefined);
-        openKeys();
+        goToSettings(
+          document.activeElement instanceof HTMLElement ? document.activeElement : null,
+          "keys",
+        );
       });
       return keysIntake.current?.receive(source, provider) ?? false;
     },
-    [openKeys],
+    [goToSettings],
   );
-  const wasOpen = useRef(false);
-  const closeKeys = useCallback(() => setKeysIn(null), []);
-  useEffect(() => {
-    if (wasOpen.current && !keysOpen) {
-      if (keysOrigin.current?.isConnected && !keysOrigin.current.closest("[inert], [hidden]"))
-        keysOrigin.current.focus();
-      else if (!settings.open) keysButton.current?.focus();
-    }
-    wasOpen.current = keysOpen;
-  }, [keysOpen, settings.open]);
   const wasSettingsOpen = useRef(false);
   useEffect(() => {
-    if (wasSettingsOpen.current && !settings.open && !keysOpen) {
+    if (wasSettingsOpen.current && !settings.open) {
       if (
         settingsOrigin.current?.isConnected &&
         !settingsOrigin.current.closest("[inert], [hidden]")
@@ -383,7 +369,7 @@ function Theatre({ api }: { api: ApiClient }) {
       else settingsButton.current?.focus();
     }
     wasSettingsOpen.current = settings.open;
-  }, [settings.open, keysOpen]);
+  }, [settings.open]);
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
   const conversation = useConversation(api);
@@ -435,7 +421,7 @@ function Theatre({ api }: { api: ApiClient }) {
     cellPending: pending,
     agent,
     feed: session.agentFeed,
-    suspended: keysOpen || settings.open,
+    suspended: settings.open,
     manualVisible: true,
     refreshCell: retry,
   });
@@ -446,7 +432,7 @@ function Theatre({ api }: { api: ApiClient }) {
     feed: session.agentFeed,
     blocked: controls.stopping || controls.fenced,
     replaceBlocked: controls.stopping,
-    visible: !keysOpen && !settings.open,
+    visible: !settings.open,
     selectReady,
   });
   useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
@@ -652,7 +638,6 @@ function Theatre({ api }: { api: ApiClient }) {
       if (use.decision === "allow") counts[use.secretId] = (counts[use.secretId] ?? 0) + 1;
     return counts;
   }, [keyUses]);
-  // One panel, on its own sheet or slid over Settings when Settings is open.
   const keysPanel = {
     keys,
     intakeRef: keysIntake,
@@ -662,8 +647,6 @@ function Theatre({ api }: { api: ApiClient }) {
       const context = keyCapture.current;
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
-    stop: sheetStopControl,
-    taskControls: <StopControl controls={controls} />,
   };
   useEffect(() => {
     document.title = appStatus.title;
@@ -716,12 +699,6 @@ function Theatre({ api }: { api: ApiClient }) {
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
-  const showKeys = (trigger: HTMLElement | null) => {
-    keysOrigin.current = trigger;
-    keyCapture.current = null;
-    setKeyPreset(undefined);
-    openKeys();
-  };
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -786,7 +763,7 @@ function Theatre({ api }: { api: ApiClient }) {
         key={takeover.requestId}
         takeover={takeover}
         controls={{ ...controls, canInput: manualLive }}
-        visible={!replayId && shownView === "takeover" && !keysOpen && !settings.open}
+        visible={!replayId && shownView === "takeover" && !settings.open}
         manualStatus={agent.snapshot?.manualControl}
         receiveKey={receiveKey}
         screen={manualGeometry}
@@ -801,7 +778,7 @@ function Theatre({ api }: { api: ApiClient }) {
     </div>
   );
   const shape = islandShape(appStatus, curtain.up || opening);
-  const sheetsClosed = !keysOpen && !settings.open;
+  const sheetsClosed = !settings.open;
   const decision = replayId
     ? null
     : islandDecision({
@@ -905,7 +882,7 @@ function Theatre({ api }: { api: ApiClient }) {
         replayEnabled={!!(replayId || newestReplayId)}
         onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
         keys={keysState}
-        keysOpen={keysOpen}
+        keysOpen={settings.open && settingsAt.section === "keys"}
         onKeys={() => showKeys(keysButton.current)}
         keysRef={keysButton}
         settingsOpen={settings.open}
@@ -1117,8 +1094,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   <FinishSetup
                     steps={setup.steps}
                     done={setup.done}
-                    onChooseModel={(event) => showSettings(event.currentTarget)}
-                    onContinue={(event) => showSettings(event.currentTarget)}
+                    onChooseModel={(event) => showSettings(event.currentTarget, "models")}
+                    onContinue={(event) => showSettings(event.currentTarget, "models")}
                   />
                 ) : undefined
               }
@@ -1150,7 +1127,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     key={question.askId}
                     question={question}
                     controls={controls}
-                    visible={shownView === "chat" && !keysOpen && !settings.open}
+                    visible={shownView === "chat" && !settings.open}
                     receiveKey={receiveKey}
                   />
                 ) : undefined
@@ -1169,10 +1146,10 @@ function Theatre({ api }: { api: ApiClient }) {
                     !!safety.approval
                   }
                   agent={agent}
-                  keysOpen={keysOpen || settings.open}
+                  keysOpen={settings.open}
                   receiveKey={receiveKey}
                   configured={mainReady}
-                  onSettings={showSettings}
+                  onSettings={(trigger) => showSettings(trigger, "models")}
                   onTaskStarted={session.check}
                   layout={phone ? "pill" : "card"}
                 />
@@ -1204,19 +1181,20 @@ function Theatre({ api }: { api: ApiClient }) {
                 }),
             }}
             exportJob={exportJob}
-            visible={!keysOpen && !settings.open && !safety.approval}
+            visible={!settings.open && !safety.approval}
           />
         </ErrorBoundary>
       )}
       <ErrorBoundary floating>
         <SettingsSheet
-          focusSection={settingsSection}
+          section={settingsAt.section}
+          sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
           taskControls={<StopControl controls={controls} />}
           stop={sheetStopControl}
           open={settings.open}
-          keysPage={keysIn === "settings" ? { ...keysPanel, onBack: closeKeys } : undefined}
+          keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}
           chatgpt={settings.chatgpt}
           subscriptionModels={settings.subscriptionModels}
@@ -1242,10 +1220,7 @@ function Theatre({ api }: { api: ApiClient }) {
           loading={settings.phase === "loading" || !settings.draft}
           error={settings.error}
           validation={settings.validation}
-          onClose={() => {
-            settings.close();
-            setKeysIn(null);
-          }}
+          onClose={settings.close}
           onChange={settings.change}
           onKeys={(role, providerId, trigger) => {
             const provider = providerById(providerId);
@@ -1261,19 +1236,18 @@ function Theatre({ api }: { api: ApiClient }) {
               return;
             const request = ++keyRequest.current;
             keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
-            keysOrigin.current = trigger;
             setKeyPreset({
               requestId: request,
               provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
               ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
             });
-            setKeysIn("settings");
+            goToSettings(trigger, "keys");
           }}
           onRefresh={() => void settings.refresh()}
           onReload={settings.reload}
           save={{
             enabled: settings.saveEnabled && settings.dirty,
-            run: () => void settings.save(),
+            run: settings.save,
           }}
           manualPrices={Object.fromEntries(
             (["main", "fast", "local"] as const)
@@ -1301,14 +1275,7 @@ function Theatre({ api }: { api: ApiClient }) {
               ? { value: settings.draft.checkIns, change: settings.checkIn }
               : undefined
           }
-        />
-      </ErrorBoundary>
-      <ErrorBoundary floating>
-        <KeysSheet
-          {...keysPanel}
-          open={keysIn === "sheet"}
-          onClose={closeKeys}
-          discardRef={keysDiscard}
+          spent={agent.model.spend}
         />
       </ErrorBoundary>
       {phone && approvalView && (

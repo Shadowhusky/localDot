@@ -360,6 +360,19 @@ export const ICONS = {
     ["path", { d: "M12 16v-4.5" }],
     ["path", { d: "M12 8h.01" }],
   ],
+  chart: [
+    ["path", { d: "M3 3v18h18" }],
+    ["path", { d: "M18 17V9" }],
+    ["path", { d: "M13 17V5" }],
+    ["path", { d: "M8 17v-3" }],
+  ],
+  "file-text": [
+    ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }],
+    ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }],
+    ["path", { d: "M16 13H8" }],
+    ["path", { d: "M16 17H8" }],
+    ["path", { d: "M10 9H8" }],
+  ],
 } as const satisfies Record<string, IconNode>;
 
 export type IconName = keyof typeof ICONS;

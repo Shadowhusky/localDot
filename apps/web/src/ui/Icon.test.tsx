@@ -71,6 +71,9 @@ const PLANNED: IconName[] = [
   "trash",
   "chevrons-up-down",
   "info",
+  // Settings: Spending and the audit log (design-v2 §11 I, J).
+  "chart",
+  "file-text",
 ];
 
 describe("Icon", () => {
