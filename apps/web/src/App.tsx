@@ -82,7 +82,7 @@ import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
-import { CHATGPT } from "./settings/chooser.ts";
+import { subscription } from "./settings/chooser.ts";
 import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
 import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
@@ -159,7 +159,7 @@ const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
-const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
+const CONFIRMING_LINE = "Checking that your last input reached the computer…";
 const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
 
 export function App({ fetchImpl }: AppProps) {
@@ -351,6 +351,7 @@ function Theatre({ api }: { api: ApiClient }) {
     cell,
     status,
     pending,
+    streamed,
     error,
     listed,
     reconnects,
@@ -367,29 +368,35 @@ function Theatre({ api }: { api: ApiClient }) {
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
+  const claudeModels = settings.claudeCode.models;
   const modelName = useCallback(
     (provider: string, id: string) =>
       (provider === "chatgpt"
         ? accountModels
-        : providerIndex?.providers.find((row) => row.id === provider)?.models
+        : provider === "claude-code"
+          ? claudeModels
+          : providerIndex?.providers.find((row) => row.id === provider)?.models
       )?.find((model) => model.id === id)?.name,
-    [providerIndex, accountModels],
+    [providerIndex, accountModels, claudeModels],
   );
   const mainChoice = settings.saved?.main;
-  const mainProvider =
-    mainChoice?.provider !== "chatgpt" && mainChoice
-      ? providerById(mainChoice.provider)
+  const mainApp =
+    mainChoice?.provider === "chatgpt" || mainChoice?.provider === "claude-code"
+      ? mainChoice.provider
       : undefined;
+  const mainProvider = !mainApp && mainChoice ? providerById(mainChoice.provider) : undefined;
   const mainReady =
     settings.mainReady &&
     (mainChoice?.provider === "chatgpt"
       ? settings.chatgpt.canStart &&
         settings.chatgpt.models.some((model) => model.id === mainChoice.model)
-      : !!mainProvider &&
-        (mainProvider.local === true ||
-          (keys.metadataReady === true &&
-            keys.health?.online === true &&
-            matchingKeys(mainProvider, keys.keys).some((key) => key.id === mainChoice?.key))));
+      : mainChoice?.provider === "claude-code"
+        ? settings.claudeCode.canStart
+        : !!mainProvider &&
+          (mainProvider.local === true ||
+            (keys.metadataReady === true &&
+              keys.health?.online === true &&
+              matchingKeys(mainProvider, keys.keys).some((key) => key.id === mainChoice?.key))));
   const keysButton = useRef<HTMLButtonElement>(null);
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -494,6 +501,7 @@ function Theatre({ api }: { api: ApiClient }) {
     status,
     pending,
     picture: physicalStageCell === cell ? picture : "none",
+    streamed,
   });
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
@@ -781,7 +789,13 @@ function Theatre({ api }: { api: ApiClient }) {
         : physicalStageCell;
   // The displayed screen owns video visibility. Parent lifecycle controls still
   // use the desktop HUD, even when only the separate browser has a live viewer.
-  const stageHud = hudFor({ cell: stageCell, status, pending, picture });
+  const stageHud = hudFor({
+    cell: stageCell,
+    status,
+    pending,
+    picture,
+    streamed: physicalStageCell === cell && streamed,
+  });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? stageHud
@@ -947,21 +961,20 @@ function Theatre({ api }: { api: ApiClient }) {
     setup: onboarding.open,
     full,
   });
-  const chosenKey =
-    mainChoice?.provider === "chatgpt"
-      ? settings.chatgpt.canStart
-        ? "Signed in"
-        : null
-      : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
-        ? mainChoice.key
-        : null;
+  const chosenKey = mainApp
+    ? (mainApp === "chatgpt" ? settings.chatgpt.canStart : settings.claudeCode.canStart)
+      ? "Signed in"
+      : null
+    : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
+      ? mainChoice.key
+      : null;
   const savedAutonomy = settings.saved?.autonomy;
   const setup = setupSteps({
-    provider: mainChoice?.provider === "chatgpt" ? "chatgpt" : (mainProvider ?? null),
+    provider: mainApp ?? mainProvider ?? null,
     key: chosenKey,
     modelReady: mainReady,
     model: mainChoice
-      ? `${mainProvider?.name ?? "ChatGPT"} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
+      ? `${mainProvider?.name ?? (mainApp === "claude-code" ? "Claude Code" : "ChatGPT")} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
       : null,
     permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
     computer: !!cell || listed.length > 0,
@@ -1138,8 +1151,8 @@ function Theatre({ api }: { api: ApiClient }) {
     blocked: takeBlocked,
     taking: controls.taking,
   });
-  const unconfirmed = agent.snapshot?.manualControl === "unconfirmed";
-  const handBack = useHandBack({ takeover, controls, drained: manual.drained, unconfirmed });
+  const confirming = agent.snapshot?.manualControl === "unconfirmed";
+  const handBack = useHandBack({ takeover, controls, drained: manual.drained });
   const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
   const replacement = safety.replacement?.phase;
   // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
@@ -1148,8 +1161,8 @@ function Theatre({ api }: { api: ApiClient }) {
     ? ""
     : phone && approvalView && approval
       ? decisionWords(approval).line
-      : yours && unconfirmed
-        ? UNCONFIRMED_LINE
+      : yours && confirming
+        ? CONFIRMING_LINE
         : yours && phone
           ? PHONE_CONTROL_LINE
           : !replayId && taskStalled(agent, performance.now())
@@ -1661,6 +1674,7 @@ function Theatre({ api }: { api: ApiClient }) {
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}
           chatgpt={settings.chatgpt}
+          claudeCode={settings.claudeCode}
           subscriptionModels={settings.subscriptionModels}
           providers={settings.index?.providers ?? []}
           keys={settings.index ? pickerKeys(settings.index) : []}
@@ -1718,7 +1732,10 @@ function Theatre({ api }: { api: ApiClient }) {
               .filter(
                 (role) =>
                   needsPrice(settings.draft?.choices[role], settings.index) &&
-                  (role === "main" || settings.draft?.choices.main?.provider !== "chatgpt"),
+                  (role === "main" ||
+                    !["chatgpt", "claude-code"].includes(
+                      settings.draft?.choices.main?.provider ?? "",
+                    )),
               )
               .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
           )}
@@ -1756,7 +1773,9 @@ function Theatre({ api }: { api: ApiClient }) {
                   on: settings.draft.purposeCheck,
                   change: settings.purposeCheck,
                   judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
-                  plan: settings.draft.choices.main?.provider === CHATGPT,
+                  ...(subscription(settings.draft.choices.main?.provider)
+                    ? { plan: settings.draft.choices.main?.provider }
+                    : {}),
                   addJevKey: (trigger) => {
                     keyCapture.current = null;
                     setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
@@ -1855,6 +1874,7 @@ function Theatre({ api }: { api: ApiClient }) {
       {showDot.value && (
         <PresenceLayer
           place={place}
+          provisional={curtain.up && curtain.phase === "checking"}
           feed={
             onboarding.open
               ? {

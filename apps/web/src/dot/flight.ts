@@ -9,27 +9,35 @@ export interface Box {
   size: number;
 }
 
+interface Path {
+  x: SpringParams;
+  y: SpringParams;
+}
+
 // Going down, dot drops first and then slides into its seat; going up retraces the same L-curve.
-const DOWN = { x: spring(1, 0.52), y: spring(1, 0.38) };
-const UP = { x: spring(1, 0.38), y: spring(1, 0.52) };
+const DOWN: Path = { x: spring(1, 0.52), y: spring(1, 0.38) };
+const UP: Path = { x: spring(1, 0.38), y: spring(1, 0.52) };
 // Size leads on the way out and trails on the way in.
 const GROW = spring(1, 0.26);
 const SHRINK = spring(1, 0.5);
-// A place that moves under dot, such as a reflow, is followed rather than flown to.
+// A place that moves under a resting dot, such as a reflow, is followed rather than flown to.
 const FOLLOW = spring(1, 0.3);
+const STILL: Path = { x: FOLLOW, y: FOLLOW };
 // Out of the island's badge slot dot grows first, then travels.
 const BADGE_LEAD_MS = 120;
 const SETTLE_PX = 0.4;
 const SETTLE_SPEED = 8;
 
-// dot's flight between its places as one element, on critically damped X, Y and size springs that
-// start from where it is drawn and keep its velocity, so a new place mid-flight bends the path.
+// dot's flight between its places as one element, on critically damped X, Y and size springs. Every
+// change of place starts from where dot is at that moment and keeps its velocity, so a new place
+// mid-flight bends the path instead of restarting it. at() only reads, so a path can be sampled ahead.
 export class Flight {
   target: Box;
   private readonly x: Channel;
   private readonly y: Channel;
   private readonly size: Channel;
-  private pending: { to: Box; t: number; p: { x: SpringParams; y: SpringParams } } | null = null;
+  private path: Path = STILL;
+  private sizing = FOLLOW;
 
   constructor(at: Box) {
     this.target = at;
@@ -40,49 +48,42 @@ export class Flight {
 
   fly(to: Box, t: number, fromBadge = false): void {
     const now = this.at(t);
-    const p = to.y >= now.y ? DOWN : UP;
+    this.path = to.y >= now.y ? DOWN : UP;
+    this.sizing = to.size >= now.size ? GROW : SHRINK;
+    // Only a dot at rest in the badge grows before it leaves; one already moving just turns.
+    const start = fromBadge && now.settled ? t + BADGE_LEAD_MS : t;
     this.target = to;
-    this.size.set(to.size, t, to.size >= now.size ? GROW : SHRINK);
-    if (fromBadge) {
-      this.pending = { to, t: t + BADGE_LEAD_MS, p };
-      return;
-    }
-    this.pending = null;
-    this.x.set(to.x, t, p.x);
-    this.y.set(to.y, t, p.y);
+    this.size.set(to.size, t, this.sizing);
+    this.x.set(to.x, start, this.path.x);
+    this.y.set(to.y, start, this.path.y);
   }
 
+  // The place moved under dot: a flight keeps its own curve to the new spot.
   follow(to: Box, t: number): void {
-    this.target = to;
-    if (this.pending) {
-      this.pending.to = to;
-      return;
+    if (this.at(t).settled) {
+      this.path = STILL;
+      this.sizing = FOLLOW;
     }
-    this.x.set(to.x, t, FOLLOW);
-    this.y.set(to.y, t, FOLLOW);
-    this.size.set(to.size, t, FOLLOW);
+    this.target = to;
+    this.x.set(to.x, t, this.path.x);
+    this.y.set(to.y, t, this.path.y);
+    this.size.set(to.size, t, this.sizing);
   }
 
   jump(to: Box, t: number): void {
     this.target = to;
-    this.pending = null;
+    this.path = STILL;
+    this.sizing = FOLLOW;
     this.x.jump(to.x, t);
     this.y.jump(to.y, t);
     this.size.jump(to.size, t);
   }
 
   at(t: number): Box & { settled: boolean } {
-    const pending = this.pending;
-    if (pending && t >= pending.t) {
-      this.pending = null;
-      this.x.set(pending.to.x, pending.t, pending.p.x);
-      this.y.set(pending.to.y, pending.t, pending.p.y);
-    }
     const x = this.x.value(t);
     const y = this.y.value(t);
     const size = this.size.value(t);
     const settled =
-      !this.pending &&
       Math.abs(x - this.target.x) < SETTLE_PX &&
       Math.abs(y - this.target.y) < SETTLE_PX &&
       Math.abs(size - this.target.size) < SETTLE_PX &&

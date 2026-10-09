@@ -9,21 +9,29 @@ describe("the purpose check row", () => {
     expect(purposeJudge(false, { main: { provider: "chatgpt", model: "gpt-6-astra" }, fast })).toBe(
       "none",
     );
+    expect(purposeJudge(false, { main: { provider: "claude-code", model: "opus" }, fast })).toBe(
+      "none",
+    );
     expect(purposeJudge(false, { main: fast })).toBe("none");
   });
 
   it("says who checks in the switch's own line, and what is missing when nobody can", () => {
-    expect(purposeDescription({ on: true, judge: "jev", plan: true })).toMatch(/Checked by Jev\.$/);
-    expect(purposeDescription({ on: true, judge: "fast", plan: false })).toMatch(
+    expect(purposeDescription({ on: true, judge: "jev", plan: "chatgpt" })).toMatch(
+      /Checked by Jev\.$/,
+    );
+    expect(purposeDescription({ on: true, judge: "fast" })).toMatch(
       /Checked by your fast model\.$/,
     );
-    expect(purposeDescription({ on: true, judge: "none", plan: true })).toMatch(
+    expect(purposeDescription({ on: true, judge: "none", plan: "chatgpt" })).toMatch(
       /Needs a Jev key with the ChatGPT plan\.$/,
     );
-    expect(purposeDescription({ on: true, judge: "none", plan: false })).toMatch(
+    expect(purposeDescription({ on: true, judge: "none", plan: "claude-code" })).toMatch(
+      /Needs a Jev key with Claude Code\.$/,
+    );
+    expect(purposeDescription({ on: true, judge: "none" })).toMatch(
       /Needs a Jev key or a fast model\.$/,
     );
-    expect(purposeDescription({ on: false, judge: "jev", plan: false })).toBe(
+    expect(purposeDescription({ on: false, judge: "jev" })).toBe(
       "Stops dot sending what it read somewhere unrelated to your request.",
     );
   });

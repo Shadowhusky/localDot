@@ -105,9 +105,9 @@ export interface SrtArgvInput {
   readonly sandbox: SandboxInput;
   readonly profile: OwnedSandboxProfile;
 }
-export function srtArgv(
-  input: SrtArgvInput,
-): Readonly<{ command: string; args: readonly string[] }> {
+// The settings file the sandbox CLI reads: owned, private, single-link and exactly the profile
+// these capabilities build.
+export function verifiedSettingsPath(input: SrtArgvInput): string {
   try {
     const expected = sandboxSettings(input.sandbox),
       profile = input.profile;
@@ -133,13 +133,23 @@ export function srtArgv(
     } finally {
       closeSync(fd);
     }
+    return profile.path;
+  } catch {
+    throw new CodexArgsError();
+  }
+}
+export function srtArgv(
+  input: SrtArgvInput,
+): Readonly<{ command: string; args: readonly string[] }> {
+  try {
+    const settings = verifiedSettingsPath(input);
     // Only builders select options; callers cannot insert a shell command, other CLI, or late flags.
     return Object.freeze({
       command: process.execPath,
       args: Object.freeze([
         srtCli(),
         "--settings",
-        profile.path,
+        settings,
         "--",
         input.sandbox.installed.codexBin,
         "app-server",

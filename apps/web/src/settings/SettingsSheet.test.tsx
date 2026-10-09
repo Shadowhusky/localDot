@@ -377,6 +377,17 @@ describe("settings inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(sheet()).toBeTruthy();
   });
+  it("on a phone, names a plan's model by its own name", () => {
+    onPhone();
+    render(
+      <SettingsSheet
+        {...props()}
+        choices={{ main: { provider: "claude-code", model: "sonnet" } }}
+        subscriptionModels={[{ id: "sonnet", name: "Claude Sonnet" }]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /^Models/ }).textContent).toBe("ModelsClaude Sonnet");
+  });
   it("on a phone, goes to the section asked for and leaves on the page it showed", () => {
     onPhone();
     // Something still moving keeps the closing sheet on the page, as a browser's transitions do.

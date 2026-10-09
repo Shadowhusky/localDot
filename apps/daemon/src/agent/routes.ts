@@ -51,20 +51,23 @@ import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import {
   BindingError,
   CHATGPT,
-  checkChatgptChoice,
+  CLAUDE_CODE,
+  checkPlanChoices,
   pricingOf,
   type ResolvedRole,
   resolveRole,
 } from "./bindings.ts";
 import type { CatalogStore } from "./catalog-store.ts";
+import type { ClaudeCodeSetup } from "./claude-code/setup.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
+import { type ChatgptSetupControl, SANDBOX_REASONS } from "./codex/setup.ts";
 import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
 import { PeopleError, type PeopleStore, type StoredPerson } from "./people.ts";
-import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
+import { AgentError, type AgentRunner, CLAUDE_CODE_OFF, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
@@ -123,7 +126,9 @@ export interface AgentRoutesDeps {
     account: CodexAccount;
     installer: CodexInstaller;
     availability(): HarnessAvailability;
+    setup: ChatgptSetupControl;
   };
+  claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -278,34 +283,47 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       reason: CHATGPT_SWITCHED_OFF,
     };
   if (deps.chatgpt) {
-    const { account, installer } = deps.chatgpt;
+    const { account, installer, setup } = deps.chatgpt;
     const installed = () => {
       if (installer.status().state !== "ready") throw new AccountError(409, CHATGPT_INSTALL_FIRST);
       const availability = harness();
       if (!availability.available)
         throw new AccountError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
+      const sandbox = setup.sandbox();
+      if (sandbox !== "passed") throw new AccountError(409, SANDBOX_REASONS[sandbox]);
     };
+    const progress = () => ({ install: installer.status(), sandbox: setup.sandbox() });
     chatgptRoutes(app, {
       account: {
         status: async (opts) => {
-          const availability = harness(),
-            install = installer.status();
+          const availability = harness();
           if (!availability.available)
             return {
               ...availability,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
-              install,
+              ...progress(),
             };
-          if (install.state !== "ready")
+          if (installer.status().state !== "ready")
             return {
               available: true,
               reason: CHATGPT_INSTALL_FIRST,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
-              install,
+              ...progress(),
             };
-          return { ...(await account.status(opts)), install: installer.status() };
+          // An installation that predates this check, or a check a restart interrupted.
+          if (setup.sandbox() === "unchecked") void setup.check();
+          const sandbox = setup.sandbox();
+          if (sandbox !== "passed")
+            return {
+              available: true,
+              reason: SANDBOX_REASONS[sandbox],
+              codexVersion: CODEX_VERSION,
+              state: "unavailable" as const,
+              ...progress(),
+            };
+          return { ...(await setup.confirm(await account.status(opts))), ...progress() };
         },
         login: async (method) => {
           installed();
@@ -318,7 +336,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         },
         refresh: async () => {
           installed();
-          return { ...(await account.refresh()), install: installer.status() };
+          return { ...(await setup.confirm(await account.refresh())), ...progress() };
         },
       },
     });
@@ -332,10 +350,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
         // Installation is explicitly requested and daemon-owned; a disconnected HTTP caller
         // does not cancel the shared flight. Its separate cancel action remains available.
+        // The sandbox check follows on its own, before any sign-in can start.
         if (!flight) {
           const work = installer.ensureInstalled(new AbortController().signal);
           flight = work;
           void work
+            .then(() => setup.check())
             .catch(() => {})
             .finally(() => {
               if (flight === work) flight = undefined;
@@ -351,6 +371,34 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         check(c.req.raw.signal);
         installer.cancel();
         return c.body(null, 204);
+      }),
+    );
+    app.post(
+      "/api/agent/chatgpt/check",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        const availability = harness();
+        if (!availability.available)
+          throw new RouteError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
+        if (installer.status().state !== "ready") throw new RouteError(409, CHATGPT_INSTALL_FIRST);
+        void setup.check();
+        return c.json({ sandbox: setup.sandbox() }, 202);
+      }),
+    );
+  }
+  const claudeCode = deps.claudeCode;
+  if (claudeCode) {
+    app.get(
+      "/api/agent/claude-code",
+      route(async (c) => c.json(await claudeCode.status())),
+    );
+    app.post(
+      "/api/agent/claude-code/check",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        return c.json(await claudeCode.check());
       }),
     );
   }
@@ -395,7 +443,15 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
-        subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
+        subscriptions: [
+          { id: CHATGPT, name: "ChatGPT plan", ...harness() },
+          {
+            id: CLAUDE_CODE,
+            name: "Claude Code (your plan)",
+            available: !!claudeCode,
+            ...(claudeCode ? {} : { reason: CLAUDE_CODE_OFF }),
+          },
+        ],
         keys: keys
           .filter((key) => key.kind === "llm")
           .map((key) => ({
@@ -454,11 +510,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/settings",
     route(async (c) => {
       const parsed = await json(c.req.raw, AgentSettings);
-      for (const role of ["main", "fast", "local"] as const) {
-        const choice = parsed[role];
-        if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
-      }
-      if (parsed.main?.provider !== CHATGPT) {
+      checkPlanChoices(parsed);
+      if (parsed.main?.provider !== CHATGPT && parsed.main?.provider !== CLAUDE_CODE) {
         const keys = await deps.keyd.secrets();
         check(c.req.raw.signal);
         const catalog = deps.catalog.get();

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AskFieldId, AskFieldValue, MAX_ASK_FIELDS } from "./ask.ts";
+import { CLAUDE_CODE_MODEL } from "./claude-code.ts";
 import { ULID_PATTERN } from "./ids.ts";
 
 const Id = z.string().regex(ULID_PATTERN);
@@ -58,6 +59,10 @@ export const TaskModelSelection = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("chatgpt"),
     model: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
+  }),
+  z.strictObject({
+    kind: z.literal("claude-code"),
+    model: z.string().regex(CLAUDE_CODE_MODEL),
   }),
   z.strictObject({
     kind: z.literal("api"),

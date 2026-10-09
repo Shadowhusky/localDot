@@ -3,8 +3,9 @@ import type { StatusRow } from "../session/status.ts";
 
 // Rows where dot is at work, so its own words can stand in for the status caption.
 const AT_WORK = new Set<StatusRow>(["acting", "working", "thinking", "observing"]);
-// About twelve words: one line beside dot on a laptop.
-const MAX_CHARS = 80;
+// The band clamps the line to its own lines at whatever width it has; this only stops a runaway
+// sentence, at about two lines beside dot on the widest stage.
+const MAX_CHARS = 240;
 const STOP = /[.!?…]["'”’)\]]*$/;
 
 // The band's line while dot works: its own latest sentence for the step at hand, or the status

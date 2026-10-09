@@ -1,16 +1,28 @@
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import {
+  query as claudeQuery,
+  type SDKUserMessage,
+  type SpawnedProcess,
+  type SpawnOptions,
+} from "@anthropic-ai/claude-agent-sdk";
 import { serve } from "@hono/node-server";
 import {
+  CHATGPT_INSTALL_FIRST,
   CHATGPT_SWITCHED_OFF,
   CODEX_VERSION,
   CodexInstallError,
   type CodexInstaller,
-  codexAccepted,
+  checkHost,
+  checkNativeSandbox,
+  codexReleased,
   type HarnessAvailability,
   harnessAvailability,
   type OwnedCodexRoots,
   prepareOwnedCodexRoots,
+  readLocalAcceptance,
+  writeLocalAcceptance,
 } from "@localdot/codex-harness";
 import { type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
 import type { BrowserScope } from "../browser/client.ts";
@@ -35,10 +47,22 @@ import type { KeydMonitor } from "../keyd/monitor.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { ClaudeCodeDriver } from "./claude-code/driver.ts";
+import { claudeCodeInstructions } from "./claude-code/instructions.ts";
+import { localdotServer } from "./claude-code/mcp-server.ts";
+import { claudeCodeOptions } from "./claude-code/options.ts";
+import {
+  type ClaudeCodeLaunch,
+  type ClaudeCodeModel,
+  ClaudeCodeSetup,
+  findClaudeCode,
+  runFile,
+} from "./claude-code/setup.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
+import { ChatgptSetup, SANDBOX_REASONS, SETUP_UNSAVED } from "./codex/setup.ts";
 import { Conversations } from "./conversation.ts";
 import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
@@ -46,12 +70,13 @@ import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
 import { PeopleStore } from "./people.ts";
 import type { ToolPolicy } from "./policy.ts";
+import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
 import { taintMemory } from "./safety/taint.ts";
-import type { AgentSession } from "./session.ts";
+import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
@@ -82,6 +107,7 @@ export interface AgentWiringDeps {
   routines?: RoutineToolPort;
   toolPort?: number;
   codex?: { realHome: string; user: string };
+  claudeCode?: { realHome: string };
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
@@ -90,7 +116,7 @@ export interface AgentWiringDeps {
   notesChanged?(file: string): void;
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
-// The Codex path hands memory to the model here.
+// A native harness hands memory to the model here.
 function tainting<T extends { user: string; memory: string }>(session: AgentSession, memory: T): T {
   taintMemory(session.taint, memory);
   return memory;
@@ -244,12 +270,14 @@ export function createAgent(d: AgentWiringDeps) {
     if (closing) return { available: false, reason: "The ChatGPT account service is closed." };
     return harnessAvailability();
   };
+  // Whether the plan can be chosen and set up here. Tasks also need this Mac's own stamps.
   const harness = (): HarnessAvailability => {
     const availability = platform();
-    return availability.available && !codexAccepted()
+    return availability.available && !codexReleased()
       ? { available: false, reason: CHATGPT_SWITCHED_OFF }
       : availability;
   };
+  let setup: ChatgptSetup | undefined;
   const auth = roots
     ? new CodexAuthOwner({
         roots,
@@ -257,8 +285,19 @@ export function createAgent(d: AgentWiringDeps) {
           [...runner.sessions.values()].filter((session) => runner.isChatgpt(session.id)),
         taskDenyRead: (id) => runner.codexDenyReadOf(id),
         pauseForAuth: (session, generation) => runner.pauseForAuth(session, generation),
+        sandboxReason: () => (setup ? setup.reason() : SANDBOX_REASONS.unchecked),
       })
     : undefined;
+  if (auth && roots) {
+    const owned = roots;
+    setup = new ChatgptSetup({
+      installer: auth.installer,
+      host: checkHost,
+      check: (installed, signal) => checkNativeSandbox({ roots: owned, installed, signal }),
+      read: () => readLocalAcceptance(owned),
+      write: (record) => writeLocalAcceptance(owned, record),
+    });
+  }
   const installWork = new Set<Promise<unknown>>();
   const tracked = <T>(work: Promise<T>): Promise<T> => {
     installWork.add(work);
@@ -307,6 +346,60 @@ export function createAgent(d: AgentWiringDeps) {
       ...(d.routines ? { routines: d.routines } : {}),
     },
   };
+  // A native harness's first look at the task computer: one full screenshot of the selected screen.
+  const observe = async (
+    session: AgentSession,
+    generation: BrainGeneration,
+    signal: AbortSignal,
+  ) => {
+    const lease = session.admit(generation, signal);
+    let screen: ScreenLease | undefined;
+    const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
+    const check = () => {
+      lease.check();
+      screen?.check();
+      const cell = d.cells.get(session.cellId),
+        current = d.cells.endpoints(session.cellId)?.desktopd;
+      if (
+        !ready ||
+        closing ||
+        !d.monitor.health.online ||
+        cell?.state !== "ready" ||
+        cell.paused ||
+        d.killSwitch.isBusy(session.cellId) ||
+        !endpoint ||
+        current?.token !== endpoint.token ||
+        current.baseUrl !== endpoint.baseUrl
+      )
+        throw new AgentError(409, "The task computer changed during observation.");
+    };
+    try {
+      screen = session.screens ? session.screenLease(lease) : undefined;
+      const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
+      if (screen && !binding) throw new AgentError(409, "The selected screen is unavailable.");
+      const observationSignal = screen
+        ? AbortSignal.any([lease.signal, screen.signal])
+        : lease.signal;
+      check();
+      const frame = await d.gateway.observe({
+        sessionId: session.id,
+        cellId: binding?.cellId ?? session.cellId,
+        signal: observationSignal,
+        ...(binding ? { screen: binding } : {}),
+      });
+      check();
+      const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
+      check();
+      session.tainted = true;
+      session.taintScreen(screen?.selection.screen ?? "desktop");
+      session.lastFrameId = frame.frameId;
+      session.freshLook();
+      return { frameId: frame.frameId, full: true as const, png: full };
+    } finally {
+      screen?.finish();
+      lease.finish();
+    }
+  };
   const driver =
     auth && roots
       ? new CodexDriver({
@@ -328,56 +421,7 @@ export function createAgent(d: AgentWiringDeps) {
                   context.signal,
                 ),
             }),
-          observe: async (session, generation, signal) => {
-            const lease = session.admit(generation, signal);
-            let screen: ScreenLease | undefined;
-            const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
-            const check = () => {
-              lease.check();
-              screen?.check();
-              const cell = d.cells.get(session.cellId),
-                current = d.cells.endpoints(session.cellId)?.desktopd;
-              if (
-                !ready ||
-                closing ||
-                !d.monitor.health.online ||
-                cell?.state !== "ready" ||
-                cell.paused ||
-                d.killSwitch.isBusy(session.cellId) ||
-                !endpoint ||
-                current?.token !== endpoint.token ||
-                current.baseUrl !== endpoint.baseUrl
-              )
-                throw new AgentError(409, "The task computer changed during observation.");
-            };
-            try {
-              screen = session.screens ? session.screenLease(lease) : undefined;
-              const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
-              if (screen && !binding)
-                throw new AgentError(409, "The selected screen is unavailable.");
-              const observationSignal = screen
-                ? AbortSignal.any([lease.signal, screen.signal])
-                : lease.signal;
-              check();
-              const frame = await d.gateway.observe({
-                sessionId: session.id,
-                cellId: binding?.cellId ?? session.cellId,
-                signal: observationSignal,
-                ...(binding ? { screen: binding } : {}),
-              });
-              check();
-              const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
-              check();
-              session.tainted = true;
-              session.taintScreen(screen?.selection.screen ?? "desktop");
-              session.lastFrameId = frame.frameId;
-              session.freshLook();
-              return { frameId: frame.frameId, full: true, png: full };
-            } finally {
-              screen?.finish();
-              lease.finish();
-            }
-          },
+          observe,
           instructions: (session) =>
             codexInstructions({
               memory: tainting(session, memory.bootMemory()),
@@ -390,6 +434,91 @@ export function createAgent(d: AgentWiringDeps) {
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
         })
       : undefined;
+  const spawnClaudeCode = (options: SpawnOptions): SpawnedProcess =>
+    spawn(options.command, options.args, {
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  // Starts the user's Claude Code without a prompt, only to read the models it offers.
+  const claudeModels = async (
+    launch: ClaudeCodeLaunch,
+    signal: AbortSignal,
+  ): Promise<ClaudeCodeModel[]> => {
+    const abort = new AbortController();
+    const stop = () => abort.abort();
+    signal.addEventListener("abort", stop, { once: true });
+    const idle: AsyncIterable<SDKUserMessage> = {
+      async *[Symbol.asyncIterator]() {
+        await new Promise((resolve) => abort.signal.addEventListener("abort", resolve));
+      },
+    };
+    const listing = claudeQuery({
+      prompt: idle,
+      options: claudeCodeOptions({
+        launch,
+        instructions: "",
+        server: localdotServer(async () => ({ isError: true, content: [] })),
+        abort,
+        spawn: spawnClaudeCode,
+      }),
+    });
+    const timer = setTimeout(stop, 15_000);
+    try {
+      return (await listing.supportedModels()).map((model) => ({
+        id: model.value,
+        name: model.displayName,
+      }));
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+      listing.close();
+      stop();
+    }
+  };
+  const claudeHome = d.claudeCode?.realHome;
+  const claudeSetup = claudeHome
+    ? new ClaudeCodeSetup({
+        home: claudeHome,
+        workDir: () => new PrivateFiles(d.home).directory("claude-code/work"),
+        find: () => findClaudeCode(claudeHome),
+        run: runFile,
+        env: process.env,
+        listModels: claudeModels,
+      })
+    : undefined;
+  const claudeDriver = claudeSetup
+    ? new ClaudeCodeDriver({
+        query: (params) => claudeQuery(params),
+        launch: () => claudeSetup.launch(),
+        spawn: spawnClaudeCode,
+        dispatch: async (session, generation, name, callId, input, signal) =>
+          (
+            await dispatchTool(
+              dispatch,
+              session,
+              name,
+              callId,
+              input,
+              forText(session),
+              generation,
+              signal,
+            )
+          ).result,
+        observe,
+        transcripts,
+        instructions: (session) =>
+          claudeCodeInstructions({
+            memory: tainting(session, memory.bootMemory()),
+            recent: session.recent,
+            skills: runner.skillsOf(session.id),
+            today: new Date(),
+            ...(session.run ? { run: session.run } : {}),
+          }),
+        redactorFor: (session) => forText(session),
+      })
+    : undefined;
   const runner = new AgentRunner({
     home: d.home,
     installSession: d.sessionScreens?.install.bind(d.sessionScreens),
@@ -411,6 +540,9 @@ export function createAgent(d: AgentWiringDeps) {
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
     stopSession: (id) => d.killSwitch.stopSession(id),
+    ...(claudeDriver && claudeSetup
+      ? { claudeCode: { driver: claudeDriver, status: () => claudeSetup.status() } }
+      : {}),
     jev: (secretId, body, signal) => judgeCell.post(secretId, body, signal),
     ...(driver && auth
       ? {
@@ -419,10 +551,21 @@ export function createAgent(d: AgentWiringDeps) {
             authGeneration: () => auth.authGeneration,
             account: {
               status: async (opts) => {
-                const availability = harness();
-                return availability.available
-                  ? auth.status(opts)
-                  : { ...availability, codexVersion: CODEX_VERSION, state: "unavailable" as const };
+                const availability = harness(),
+                  reason = !availability.available
+                    ? (availability.reason ?? CHATGPT_SWITCHED_OFF)
+                    : auth.installer.status().state !== "ready"
+                      ? CHATGPT_INSTALL_FIRST
+                      : setup?.reason();
+                const off = (why: string) => ({
+                  available: false,
+                  reason: why,
+                  codexVersion: CODEX_VERSION,
+                  state: "unavailable" as const,
+                });
+                if (reason || !setup) return off(reason ?? CHATGPT_SWITCHED_OFF);
+                const status = await setup.confirm(await auth.status(opts));
+                return status.state === "signed_in" && !setup.ready() ? off(SETUP_UNSAVED) : status;
               },
             },
           },
@@ -507,8 +650,7 @@ export function createAgent(d: AgentWiringDeps) {
     const target = browser ? undefined : d.registry.for(session.cellId);
     if (!browser && !target) return undefined;
     const endpoint = target?.client.endpoint;
-    const check = () => {
-      scope.check();
+    const unchanged = () => {
       const current = d.cells.get(session.cellId);
       const now = d.cells.endpoints(session.cellId)?.desktopd;
       if (
@@ -526,6 +668,10 @@ export function createAgent(d: AgentWiringDeps) {
         (!browser && (now?.baseUrl !== endpoint?.baseUrl || now?.token !== endpoint?.token))
       )
         throw new AgentError(409, "manual control changed");
+    };
+    const check = () => {
+      scope.check();
+      unchanged();
     };
     check();
     const unsubscribe = d.cells.subscribe((next) => {
@@ -569,6 +715,13 @@ export function createAgent(d: AgentWiringDeps) {
       release: unsubscribe,
       letGo: async () => {
         await target.client.release();
+      },
+      // desktopd's /release waits for the input requests still sending, and its helper takes one
+      // command at a time, in order: it answers once everything sent before it has landed.
+      confirm: async () => {
+        unchanged();
+        await target.client.release();
+        unchanged();
       },
     };
   };
@@ -627,7 +780,10 @@ export function createAgent(d: AgentWiringDeps) {
     manual,
     home: d.home,
     harness,
-    ...(auth && installer ? { chatgpt: { account: auth, installer, availability: platform } } : {}),
+    ...(auth && installer && setup
+      ? { chatgpt: { account: auth, installer, availability: platform, setup } }
+      : {}),
+    ...(claudeSetup ? { claudeCode: claudeSetup } : {}),
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -672,6 +828,9 @@ export function createAgent(d: AgentWiringDeps) {
             if (!(error instanceof CodexInstallError)) throw error;
           }
           if (closing) throw new Error("agent is closed");
+          // A new pin, macOS build or sandbox runtime is checked again before anything launches.
+          if (setup && harness().available && installer.status().state === "ready")
+            void tracked(setup.check());
         }
         await new Promise<void>((resolve, reject) => {
           server = serve(
@@ -698,6 +857,8 @@ export function createAgent(d: AgentWiringDeps) {
       unsubscribe();
       transfers.close();
       installer?.cancel();
+      claudeSetup?.close();
+      const setupClosed = setup?.close();
       const authClosed = auth?.close();
       const containments = [...runner.sessions.values()].map((session) =>
         runner.contain(session, "shutdown"),
@@ -716,6 +877,7 @@ export function createAgent(d: AgentWiringDeps) {
         const outcomes = await Promise.allSettled([
           closeListener(),
           transfers.settled(),
+          setupClosed,
           authClosed,
           ...[...installWork].map((work) =>
             work.catch((error) => {

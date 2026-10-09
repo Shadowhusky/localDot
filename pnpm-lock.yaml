@@ -53,6 +53,9 @@ importers:
 
   apps/daemon:
     dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.282
+        version: 0.3.282(@anthropic-ai/sdk@0.127.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.31.0(zod@4.6.5))(zod@4.6.5)
       '@hono/node-server':
         specifier: 2.1.3
         version: 2.1.3(hono@4.13.12)
@@ -90,6 +93,9 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
+      '@anthropic-ai/sdk':
+        specifier: 0.127.0
+        version: 0.127.0(zod@4.6.5)
       '@types/ws':
         specifier: 8.18.2
         version: 8.18.2
@@ -441,10 +447,27 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@anthropic-ai/claude-agent-sdk@0.3.282':
+    resolution: {integrity: sha512-6UAerS1udzndLEx+0XW3gQWiICgfu/a+2fx/aLY3gUy+1JUQESbwYkhR40+D6d+yjueCslkLmvkPlZQFZDph6A==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      '@anthropic-ai/sdk': '>=0.93.0'
+      '@modelcontextprotocol/sdk': ^1.29.0
+      zod: ^4.0.0
+
   '@anthropic-ai/sandbox-runtime@0.0.78':
     resolution: {integrity: sha512-YAIcybXTp7MZkBjasnkR1E3yxnf7u6kUkyW0vZrtsAZ9tyJGMaugWETmquPZs0YvW0sR0VnZeMfS0gsN/wQiVQ==}
     engines: {node: '>=20.11.0'}
     hasBin: true
+
+  '@anthropic-ai/sdk@0.127.0':
+    resolution: {integrity: sha512-OKiVbG9LHCxjn4fBJZJFy/Bz3hqE1RYpwaeSEDNheQnvz0XNKmGT/Lhkz2Sf1a27Ldt3vVv+BkU81I0U/8EpoQ==}
+    hasBin: true
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
 
   '@asamuzakjp/css-color@7.1.2':
     resolution: {integrity: sha512-99DHAnXDB5z6EEK+9GMpVI7Mw4oxj97dY5bpOzMnjADQWxI8rN6TvTduuFLUhUMlS7/CfVZ06tcZsus6cltnNw==}
@@ -1111,6 +1134,9 @@ packages:
     resolution: {integrity: sha512-yYQTYQkjkdp69M5f+XGOhX45RvgCwh0cz6r++hGRHi7G/NVPmIK7ISxY73fM5WVerIiYe/ZbVlMu47dDodBP6A==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
+  '@stablelib/base64@1.0.1':
+    resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
+
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -1658,6 +1684,9 @@ packages:
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
+  fast-sha256@1.3.0:
+    resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
+
   fast-uri@3.1.8:
     resolution: {integrity: sha512-GZMtZUTNRpOVIECoXwLNZS5xUGE+mVNbTB8h/7Rwh2TFWcBQiPzTgyZi05BF9UMZKkLJv8XBRJTlU7zg8+ZfMg==}
 
@@ -1789,6 +1818,10 @@ packages:
     peerDependenciesMeta:
       canvas:
         optional: true
+
+  json-schema-to-ts@3.1.1:
+    resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
+    engines: {node: '>=16'}
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
@@ -2189,6 +2222,9 @@ packages:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
+  standardwebhooks@1.1.1:
+    resolution: {integrity: sha512-bCbX9ZEyFkWPsRz7Bl3NuQUJohmwGSev/yhr7vhaGPlc4AfIrspIRa6cPTBuI1ItmrTDJ4d/S2hCsfe4+vQGnQ==}
+
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
@@ -2240,6 +2276,9 @@ packages:
   tr46@6.0.0:
     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
     engines: {node: '>=20'}
+
+  ts-algebra@2.0.0:
+    resolution: {integrity: sha512-FPAhNPFMrkwz76P7cdjdmiShwMynZYN6SgOujD1urY4oNm80Ou9oMdmbR45LotcKOXoy7wSmHkRFE6Mxbrhefw==}
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
@@ -2433,6 +2472,16 @@ packages:
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-darwin-arm64'
+  - '@anthropic-ai/claude-agent-sdk-darwin-x64'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64-musl'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64-musl'
+  - '@anthropic-ai/claude-agent-sdk-win32-arm64'
+  - '@anthropic-ai/claude-agent-sdk-win32-x64'
+
 snapshots:
 
   '@ai-sdk/anthropic@4.0.69(zod@4.6.5)':
@@ -2511,12 +2560,25 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
       zod: 4.6.5
 
+  '@anthropic-ai/claude-agent-sdk@0.3.282(@anthropic-ai/sdk@0.127.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.31.0(zod@4.6.5))(zod@4.6.5)':
+    dependencies:
+      '@anthropic-ai/sdk': 0.127.0(zod@4.6.5)
+      '@modelcontextprotocol/sdk': 1.31.0(zod@4.6.5)
+      zod: 4.6.5
+
   '@anthropic-ai/sandbox-runtime@0.0.78(patch_hash=ca43296255c0b8e728e47f90639bae5b51f8eb26b032aec00a2df48364ac4e66)':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0
       node-forge: 1.4.0
       zod: 3.25.76
+
+  '@anthropic-ai/sdk@0.127.0(zod@4.6.5)':
+    dependencies:
+      json-schema-to-ts: 3.1.1
+      standardwebhooks: 1.1.1
+    optionalDependencies:
+      zod: 4.6.5
 
   '@asamuzakjp/css-color@7.1.2':
     dependencies:
@@ -2966,6 +3028,8 @@ snapshots:
       '@sigstore/bundle': 5.0.0
       '@sigstore/core': 4.0.1
       '@sigstore/protobuf-specs': 0.5.0
+
+  '@stablelib/base64@1.0.1': {}
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -3429,6 +3493,8 @@ snapshots:
 
   fast-deep-equal@3.1.3: {}
 
+  fast-sha256@1.3.0: {}
+
   fast-uri@3.1.8: {}
 
   fdir@6.5.0(picomatch@4.0.7):
@@ -3563,6 +3629,11 @@ snapshots:
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
+
+  json-schema-to-ts@3.1.1:
+    dependencies:
+      '@babel/runtime': 7.29.7
+      ts-algebra: 2.0.0
 
   json-schema-traverse@1.0.0: {}
 
@@ -3949,6 +4020,11 @@ snapshots:
 
   source-map-js@1.2.2: {}
 
+  standardwebhooks@1.1.1:
+    dependencies:
+      '@stablelib/base64': 1.0.1
+      fast-sha256: 1.3.0
+
   statuses@2.0.2: {}
 
   std-env@4.3.0: {}
@@ -3985,6 +4061,8 @@ snapshots:
   tr46@6.0.0:
     dependencies:
       punycode: 2.3.1
+
+  ts-algebra@2.0.0: {}
 
   tslib@2.8.1:
     optional: true

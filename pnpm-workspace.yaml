@@ -11,3 +11,14 @@ patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.78': patches/sandbox-runtime-0.0.78.patch
 
 minimumReleaseAge: 20160
+
+# localDot drives the user's own installed Claude Code, never the SDK's bundled copy.
+ignoredOptionalDependencies:
+  - "@anthropic-ai/claude-agent-sdk-darwin-arm64"
+  - "@anthropic-ai/claude-agent-sdk-darwin-x64"
+  - "@anthropic-ai/claude-agent-sdk-linux-arm64"
+  - "@anthropic-ai/claude-agent-sdk-linux-arm64-musl"
+  - "@anthropic-ai/claude-agent-sdk-linux-x64"
+  - "@anthropic-ai/claude-agent-sdk-linux-x64-musl"
+  - "@anthropic-ai/claude-agent-sdk-win32-arm64"
+  - "@anthropic-ai/claude-agent-sdk-win32-x64"

@@ -13,8 +13,8 @@ export interface SetupStep {
 }
 
 export interface SetupInput {
-  // The main model's provider; "chatgpt" for a ChatGPT plan.
-  provider: ProviderSpec | "chatgpt" | null;
+  // The main model's provider; "chatgpt" or "claude-code" for a plan's own app.
+  provider: ProviderSpec | "chatgpt" | "claude-code" | null;
   // The key the main model uses, or the plan it is signed in to; null while there is none.
   key: string | null;
   // The main model is chosen and can start.
@@ -28,6 +28,7 @@ export interface SetupInput {
 
 function thinks(provider: SetupInput["provider"]): string {
   if (provider === "chatgpt") return "ChatGPT plan";
+  if (provider === "claude-code") return "Claude Code";
   if (!provider) return "Not chosen yet";
   if (provider.local) return "Local model";
   if (provider.plan) return "Coding plan";
@@ -37,15 +38,16 @@ function thinks(provider: SetupInput["provider"]): string {
 
 export function setupSteps(input: SetupInput): { steps: SetupStep[]; done: number } {
   const { provider } = input;
-  const local = provider !== null && provider !== "chatgpt" && !!provider.local;
+  const app = provider === "chatgpt" || provider === "claude-code";
+  const local = provider !== null && typeof provider !== "string" && !!provider.local;
   const steps: SetupStep[] = [
     { id: "thinks", title: "How dot thinks", detail: thinks(provider), done: !!provider },
     local
       ? { id: "key", title: "Key", detail: "Not needed", done: true }
       : {
           id: "key",
-          title: provider === "chatgpt" ? "Sign-in" : "Key",
-          detail: input.key ?? (provider === "chatgpt" ? "Not signed in" : "Not added yet"),
+          title: app ? "Sign-in" : "Key",
+          detail: input.key ?? (app ? "Not signed in" : "Not added yet"),
           done: input.key !== null,
         },
     {

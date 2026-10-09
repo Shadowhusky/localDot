@@ -220,9 +220,10 @@ export function verifyRecord(record, evidence) {
   );
   return true;
 }
-// record.json carries the stamps that open the ChatGPT plan at runtime. The native stamp is bound
-// to the release sources like the offline record; the account stamp needs a person, so it is bound
-// only to the pin and its manifest.
+// record.json is the release evidence the app requires for this pin: its native stamp is bound to
+// the release sources like the offline record. Each Mac then runs its own sandbox check and records
+// the user's first verified sign-in before the ChatGPT plan opens. The account stamp here needs a
+// person, so it is bound only to the pin and its manifest.
 function acceptanceBase(previous, manifest) {
   const base = {
     format: 1,

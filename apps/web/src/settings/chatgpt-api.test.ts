@@ -16,6 +16,7 @@ const installed = () => ({
   codexVersion: "0.154.0",
   state: "signed_out",
   install: { state: "ready", version: "0.154.0" },
+  sandbox: "passed",
 });
 const material = () => ({
   loginId: "test-attempt",
@@ -52,6 +53,7 @@ describe("bounded ChatGPT account transport", () => {
           codexVersion: "0.154.0",
           state: "unavailable",
           install: { state: "not_installed" },
+          sandbox: "unchecked",
         }),
       );
       expect((await readChatgpt(f.api, signal())).available).toBe(available);
@@ -107,6 +109,9 @@ describe("bounded ChatGPT account transport", () => {
       { ...installed(), accessToken: "TEST-CREDENTIAL" },
       { ...installed(), codexVersion: "0.155.0" },
       { ...installed(), install: { state: "not_installed" } },
+      { ...installed(), sandbox: "checking" },
+      { ...installed(), sandbox: "failed" },
+      { ...installed(), sandbox: undefined },
       {
         ...installed(),
         models: [{ id: "account-model", name: "Account", isDefault: true, inputUSDPerMTok: 1 }],

@@ -852,7 +852,7 @@ describe("App HUD", () => {
     render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Connecting…"));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    expect(document.querySelector(".narration")?.getAttribute("aria-live")).toBe("polite");
+    expect(document.querySelector(".narration-text")?.getAttribute("aria-live")).toBe("polite");
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(false);
     expect(document.body.textContent).not.toContain("Offline");
     pushState(summary("ready", "live"));
@@ -868,6 +868,17 @@ describe("App HUD", () => {
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
     pushState(summary("ready", "live"));
     expect(status()).toBe("Ready");
+  });
+
+  it("keeps the last picture lit when a fresh relay connects as the page comes back", async () => {
+    render(<App fetchImpl={daemon(() => json([summary("ready", "live")])).fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Ready"));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    for (const connection of ["none", "connecting"] as const) {
+      pushState(summary("ready", connection));
+      expect(status(), connection).toBe("Reconnecting…");
+      expect(document.querySelector(".stage")?.classList.contains("lit"), connection).toBe(true);
+    }
   });
 });
 

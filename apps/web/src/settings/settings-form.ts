@@ -3,6 +3,7 @@ import {
   AgentSettingsDocument,
   AutonomyPolicy,
   CheckIns,
+  CLAUDE_CODE_MODEL,
   DEFAULT_AUTONOMY,
 } from "@localdot/protocol";
 import { isOpenRouterRouterId, providerById, routeFor } from "@localdot/providers";
@@ -18,6 +19,7 @@ import {
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
+import { subscription as onSubscription } from "./chooser.ts";
 import type { ProviderIndex } from "./settings-api.ts";
 
 export interface PriceDraft {
@@ -129,7 +131,7 @@ export function validateForm(
   const problems: string[] = [];
   if (!draft.choices.main) problems.push("Choose a main provider and model.");
   const document: AgentSettingsDocument = { ...saved };
-  const subscription = draft.choices.main?.provider === "chatgpt";
+  const subscription = onSubscription(draft.choices.main?.provider);
   const accounting = new Map<string, string>();
   for (const role of roles) {
     const value = draft.choices[role];
@@ -145,7 +147,7 @@ export function validateForm(
     if (typeof checked === "string") problems.push(`${ROLE_NAMES[role]}: ${checked}`);
     else document[role] = checked;
   }
-  // Settings shows no limits for a plan or the ChatGPT plan, so those keep what was saved.
+  // Settings shows no limits for a plan or a plan's own app, so those keep what was saved.
   const { spending } = draft;
   if (!subscription && !planOnly(draft.choices)) {
     delete document.taskBudgetUSD;
@@ -216,6 +218,19 @@ function checkRole(
     const unchanged = saved.main?.provider === "chatgpt" && saved.main.model === value.model;
     if (!model && !unchanged)
       return "set up the ChatGPT plan and choose one of its available account models.";
+    return { provider: value.provider, model: value.model };
+  }
+  if (value.provider === "claude-code") {
+    if (
+      role !== "main" ||
+      value.key !== undefined ||
+      value.price !== undefined ||
+      !CLAUDE_CODE_MODEL.test(value.model)
+    )
+      return "Claude Code is available for main only, without an API key or manual price.";
+    const model = subscriptionModels.find((m) => m.id === value.model);
+    const unchanged = saved.main?.provider === "claude-code" && saved.main.model === value.model;
+    if (!model && !unchanged) return "set up Claude Code and choose one of its models.";
     return { provider: value.provider, model: value.model };
   }
   const provider = providerById(value.provider);
