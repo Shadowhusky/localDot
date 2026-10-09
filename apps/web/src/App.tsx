@@ -572,6 +572,21 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     if (pasteRefused) showToast({ title: pasteRefused, tone: "danger" });
   }, [pasteRefused]);
+  const lastScreen = useRef(shownScreen);
+  useEffect(() => {
+    if (replayId || lastScreen.current === shownScreen) return;
+    lastScreen.current = shownScreen;
+    showToast({
+      id: "screen",
+      title:
+        shownScreen === "browser" ? "dot moved to the web browser" : "dot is back on the desktop",
+    });
+  }, [replayId, shownScreen]);
+  const browserProblem =
+    !replayId && shownScreen === "browser" && !browserScreen.cell ? browserScreen.error : undefined;
+  useEffect(() => {
+    if (browserProblem) showToast({ id: "screen", title: browserProblem, tone: "danger" });
+  }, [browserProblem]);
   const shownView: RailView =
     railView === "activity" && (layout === "wide" || phone) ? "chat" : railView;
   const guardStart = () => {
@@ -1196,14 +1211,6 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               }
             >
-              {!replayId && selectedScreen && (
-                <div className="screen-label" role="status">
-                  {selectedScreen.screen === "browser" ? "Web browser" : "Desktop"}
-                  {selectedScreen.screen === "browser" && !browserScreen.cell && (
-                    <span> · {browserScreen.error ?? "Connecting…"}</span>
-                  )}
-                </div>
-              )}
               <Stage
                 ref={stage}
                 mode={replayId ? "replay" : "live"}

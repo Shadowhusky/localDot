@@ -30,10 +30,9 @@
     "type-literal": 5
   },
   "src/app.css": {
-    "radius-literal": 1,
-    "spacing-literal": 6,
+    "spacing-literal": 5,
     "stray-stylesheet": 1,
-    "type-literal": 2
+    "type-literal": 1
   },
   "src/browser/BrowserDownloads.tsx": {
     "native-control": 2,
