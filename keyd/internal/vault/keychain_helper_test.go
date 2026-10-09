@@ -40,12 +40,14 @@ func TestItemHelperRejectsInputBeforeNativeAccess(t *testing.T) {
 		{[]string{"adopt", "localdot-keyd", "weather"}, ""},
 		{[]string{"adopt", "localdot-keyd", "_all"}, "secret"},
 		{[]string{"read", "localdot-keyd", "_all"}, ""},
+		{[]string{"list", "localdot-keyd", "weather"}, ""},
+		{[]string{"list", "localdot-keyd", "_all"}, "secret"},
 	} {
 		var out bytes.Buffer
 		status := runKeychainItem(test.args, session(), strings.NewReader(test.input), &out,
-			func(string, string, string, []byte, []byte) ([]byte, int, int) {
+			func(string, string, string, []byte, []byte) ([]byte, adoption, int) {
 				t.Fatal("native effect for invalid request")
-				return nil, 0, 0
+				return nil, adoption{}, 0
 			})
 		if status != helperUnchanged || out.Len() != 0 {
 			t.Fatal("invalid input was accepted or disclosed")
@@ -67,14 +69,14 @@ func TestItemHelperSeparatesAbsenceFailureAndSecretOutput(t *testing.T) {
 				input = "fake-value"
 			}
 			result := runKeychainItem([]string{op, "localdot-keyd", "weather"}, session(), strings.NewReader(input), &out,
-				func(o, s, a string, data, secret []byte) ([]byte, int, int) {
+				func(o, s, a string, data, secret []byte) ([]byte, adoption, int) {
 					if o != op || s != "localdot-keyd" || a != "weather" || string(data) != input || !bytes.Equal(secret, testSession) {
 						t.Fatal("request changed")
 					}
 					if op == "read" {
-						return []byte("fake-result"), 0, status
+						return []byte("fake-result"), adoption{}, status
 					}
-					return nil, 0, status
+					return nil, adoption{}, status
 				})
 			want := 1
 			if status == 0 {
@@ -107,13 +109,15 @@ func TestItemHelperBoundsAndClearsReadBytes(t *testing.T) {
 		data := bytes.Repeat([]byte("x"), size)
 		var out bytes.Buffer
 		status := runKeychainItem([]string{"read", "localdot-keyd", "weather"}, session(), strings.NewReader(""), &out,
-			func(string, string, string, []byte, []byte) ([]byte, int, int) { return data, 0, 0 })
+			func(string, string, string, []byte, []byte) ([]byte, adoption, int) { return data, adoption{}, 0 })
 		if (size == 1) != (status == 0) || bytes.Count(data, []byte{0}) != size {
 			t.Fatal("unbounded read or uncleared buffer")
 		}
 	}
 	if runKeychainItem([]string{"read", "localdot-keyd", "weather"}, session(), strings.NewReader(""), shortOutput{},
-		func(string, string, string, []byte, []byte) ([]byte, int, int) { return []byte("fake"), 0, 0 }) == 0 {
+		func(string, string, string, []byte, []byte) ([]byte, adoption, int) {
+			return []byte("fake"), adoption{}, 0
+		}) == 0 {
 		t.Fatal("short output accepted")
 	}
 }
@@ -130,9 +134,9 @@ func TestItemHelperReadsTheSessionWhole(t *testing.T) {
 	} {
 		var got []byte
 		runKeychainItem([]string{"check", "localdot-keyd", "status"}, channel, strings.NewReader(""), io.Discard,
-			func(_, _, _ string, _, secret []byte) ([]byte, int, int) {
+			func(_, _, _ string, _, secret []byte) ([]byte, adoption, int) {
 				got = bytes.Clone(secret)
-				return nil, 0, 0
+				return nil, adoption{}, 0
 			})
 		if (name == "whole") != bytes.Equal(got, testSession) || (name != "whole" && got != nil) {
 			t.Fatalf("%s: the helper took %x", name, got)
@@ -140,18 +144,35 @@ func TestItemHelperReadsTheSessionWhole(t *testing.T) {
 	}
 }
 
-// adopt reports how many items it moved; its other output is never echoed.
+// adopt reports how many items it moved and how many it could not; its other output is never echoed.
 func TestItemHelperReportsWhatAdoptMoved(t *testing.T) {
 	var out bytes.Buffer
 	status := runKeychainItem([]string{"adopt", "localdot-keyd", "_all"}, session(), strings.NewReader(""), &out,
-		func(op, _, account string, _, _ []byte) ([]byte, int, int) {
+		func(op, _, account string, _, _ []byte) ([]byte, adoption, int) {
 			if op != "adopt" || account != "_all" {
 				t.Fatal("request changed")
 			}
-			return []byte("fake-result"), 3, 0
+			return []byte("fake-result"), adoption{moved: 3, failed: 2}, 0
 		})
-	if status != 0 || out.String() != "3" {
+	if status != 0 || out.String() != "3 2" {
 		t.Fatalf("adopt exited %d with %q", status, out.String())
+	}
+}
+
+// list names the service's items, an empty list included, and nothing past its bound.
+func TestItemHelperListsTheServicesItems(t *testing.T) {
+	for _, names := range [][]byte{[]byte("deepseek\nweather\n"), {}, bytes.Repeat([]byte("x"), helperListLimit+1)} {
+		var out bytes.Buffer
+		status := runKeychainItem([]string{"list", "localdot-keyd", "_all"}, session(), strings.NewReader(""), &out,
+			func(op, _, account string, _, _ []byte) ([]byte, adoption, int) {
+				if op != "list" || account != "_all" {
+					t.Fatal("request changed")
+				}
+				return bytes.Clone(names), adoption{}, 0
+			})
+		if fits := len(names) <= helperListLimit; (status == 0) != fits || (fits && !bytes.Equal(out.Bytes(), names)) || (!fits && out.Len() != 0) {
+			t.Fatalf("a list of %d bytes exited %d with %d bytes", len(names), status, out.Len())
+		}
 	}
 }
 
@@ -248,6 +269,24 @@ func TestCleanupNativeFixture(t *testing.T) {
 	for _, account := range append([]string{id}, id+".0", id+".1", id+".2", id+".3", id+".4", id+".5") {
 		if _, err := k.find(context.Background(), account); !errors.Is(err, ErrNotFound) {
 			t.Fatal("synthetic item remains: " + account)
+		}
+	}
+}
+
+// Adopt takes the helper's two counts, moved and left behind, and nothing else.
+func TestKeychainAdoptReadsWhatWasMovedAndWhatWasNot(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	script := strings.Replace(fakeSecurity, `run "$@"`, `[ "$2" = adopt ] && { cat "$FAKE_DIR/adopt"; exit 0; }; run "$@"`, 1)
+	if err := os.WriteFile(k.Path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for report, want := range map[string][2]int{"3 2": {3, 2}, "0 0": {0, 0}, "3": {-1}, "3 2 1": {-1}, "-1 0": {-1}, "x 0": {-1}, "": {-1}} {
+		if err := os.WriteFile(filepath.Join(dir, "adopt"), []byte(report), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		moved, failed, err := k.Adopt()
+		if (want[0] < 0) != (err != nil) || (err == nil && (moved != want[0] || failed != want[1])) {
+			t.Fatalf("a report of %q: %d moved, %d failed, %v", report, moved, failed, err)
 		}
 	}
 }

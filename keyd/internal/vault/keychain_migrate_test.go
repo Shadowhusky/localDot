@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -98,13 +99,17 @@ func writeItem(t *testing.T, dir, account, data string) {
 	}
 }
 
-func markerOf(t *testing.T, dir string) (string, []string) {
+func markerOf(t *testing.T, dir string) marker {
 	t.Helper()
-	state, snapshot, ok := parseMarker(readItem(t, dir, markerAccount))
+	mark, ok := parseMarker(readItem(t, dir, markerAccount))
 	if !ok {
 		t.Fatalf("the marker holds %q", readItem(t, dir, markerAccount))
 	}
-	return state, snapshot
+	return mark
+}
+
+func running(records ...Record) string {
+	return marker{state: markerRunning, asked: askedBy(records)}.text()
 }
 
 // stores lists the item writes the helper ran since the log was last cleared.
@@ -183,13 +188,13 @@ func TestMigrationBindsAValueKeydStoredBeforeBindings(t *testing.T) {
 			t.Fatalf("the migration rewrote chunk %s", account)
 		}
 	}
-	if state, snapshot := markerOf(t, dir); state != markerDone || snapshot != nil {
-		t.Fatalf("marker %s with %v", state, snapshot)
+	if mark := markerOf(t, dir); mark.state != markerDone || !maps.Equal(mark.asked, askedBy(legacyRecords)) {
+		t.Fatalf("marker %+v", mark)
 	}
 }
 
-// While it runs, the marker holds the id and binding of every record the index held when the
-// migration began, as digests, and nothing else.
+// While it runs, the marker holds, for every record the index held when the migration began, the
+// digest of its id and of its id and binding, and nothing else.
 func TestMigrationRecordsTheIndexItBeganWith(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
@@ -197,21 +202,23 @@ func TestMigrationRecordsTheIndexItBeganWith(t *testing.T) {
 	if m := openAt(t, k, writeIndex(t, beforeUpgrade, legacyRecords...), beforeUpgrade).MigrateBindings(); m.Done {
 		t.Fatalf("migration = %+v", m)
 	}
-	want := []string{recordDigest("deepseek", bindingOf(deepseekRecord)), recordDigest("weather", bindingOf(weatherRecord))}
-	slices.Sort(want)
-	if state, snapshot := markerOf(t, dir); state != markerRunning || !slices.Equal(snapshot, want) {
-		t.Fatalf("marker %s with %v, want running with %v", state, snapshot, want)
+	want := map[string]string{
+		digest("deepseek"): digest("deepseek", bindingOf(deepseekRecord)),
+		digest("weather"):  digest("weather", bindingOf(weatherRecord)),
 	}
-	if marker := readItem(t, dir, markerAccount); len(want[0]) != 22 || strings.Contains(marker, "deepseek") ||
-		strings.Contains(marker, bindingOf(deepseekRecord)[:16]) {
-		t.Fatalf("the marker names records in the clear: %q", marker)
+	if mark := markerOf(t, dir); mark.state != markerRunning || !maps.Equal(mark.asked, want) {
+		t.Fatalf("marker %+v, want running with %v", mark, want)
+	}
+	if text := readItem(t, dir, markerAccount); len(digest("deepseek")) != 22 || strings.Contains(text, "deepseek") ||
+		strings.Contains(text, bindingOf(deepseekRecord)[:16]) {
+		t.Fatalf("the marker names records in the clear: %q", text)
 	}
 }
 
 // An unbound item keyd cannot prove it wrote for the record stays refused, untouched, and is listed
-// for re-entry: one planted after the migration finished, one under a record the index gained or
-// changed after the migration began, one under a marker that is not keyd's, and every item laid
-// out other than as keyd lays one.
+// for re-entry: one planted after the migration finished, one under a record the index gained after
+// the migration began, one under a marker that is not keyd's, and every item laid out other than as
+// keyd lays one.
 func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
 	value := []byte("sk-planted-value-of-a-key")
 	hexOf := func(s string) string { return hex.EncodeToString([]byte(s)) }
@@ -265,7 +272,7 @@ func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
 
 	t.Run("a record the index gained after the migration began", func(t *testing.T) {
 		k, dir := fakeKeychain(t)
-		writeItem(t, dir, markerAccount, markerText(markerRunning, snapshotOf([]Record{weatherRecord})))
+		writeItem(t, dir, markerAccount, running(weatherRecord))
 		storeLegacy(t, k, "deepseek", value)
 		planted := map[string]string{"deepseek": readItem(t, dir, "deepseek")}
 		v := openAt(t, k, writeIndex(t, beforeUpgrade, deepseekRecord), beforeUpgrade.Add(time.Hour))
@@ -275,42 +282,11 @@ func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
 		assertRefused(t, v, dir, planted)
 	})
 
-	// The index is the user's to write, so its timestamps prove nothing: a record changed while the
-	// migration runs, dated before it began, still binds nothing.
-	t.Run("a record changed while the migration runs", func(t *testing.T) {
-		k, dir := fakeKeychain(t)
-		storeLegacy(t, k, "deepseek", value)
-		storeLegacy(t, k, "weather", longValue(40))
-		index := writeIndex(t, beforeUpgrade, legacyRecords...)
-		lockable(t, k, dir, true)
-		if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); m.Done || !slices.Equal(m.Bound, []string{"weather"}) {
-			t.Fatalf("first migration = %+v", m)
-		}
-		lockable(t, k, dir, false)
-		rewriteIndex(t, index, beforeUpgrade.Add(-time.Hour), movedDeepseek, weatherRecord)
-		planted := map[string]string{"deepseek": readItem(t, dir, "deepseek")}
-		v := openAt(t, k, index, beforeUpgrade.Add(2*time.Hour))
-		if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
-			t.Fatalf("migration after the index changed = %+v", m)
-		}
-		assertRefused(t, v, dir, planted)
-	})
-
-	// Another keyd home, with an index of its own, shares the Keychain and its marker.
-	t.Run("another home's index", func(t *testing.T) {
-		k, dir := fakeKeychain(t)
-		storeLegacy(t, k, "deepseek", value)
-		writeItem(t, dir, markerAccount, markerText(markerRunning, snapshotOf(legacyRecords)))
-		planted := map[string]string{"deepseek": readItem(t, dir, "deepseek")}
-		v := openAt(t, k, writeIndex(t, beforeUpgrade.Add(-time.Hour), movedDeepseek), beforeUpgrade.Add(time.Hour))
-		if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
-			t.Fatalf("migration = %+v", m)
-		}
-		assertRefused(t, v, dir, planted)
-	})
-
 	t.Run("a marker that is not keyd's", func(t *testing.T) {
-		for _, marker := range []string{"keyd-bindings:2:running:soon", "keyd-bindings:1:running:1760000000000000000"} {
+		for _, marker := range []string{
+			"keyd-bindings:3:running:soon", "keyd-bindings:3:done:" + digest("deepseek"),
+			"keyd-bindings:2:running:" + digest("deepseek", bindingOf(deepseekRecord)), "keyd-bindings:1:running:1760000000000000000",
+		} {
 			k, dir := fakeKeychain(t)
 			writeItem(t, dir, markerAccount, marker)
 			storeLegacy(t, k, "deepseek", value)
@@ -328,7 +304,7 @@ func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
 
 	t.Run("a marker item whose access list is not keyd's", func(t *testing.T) {
 		k, dir := fakeKeychain(t)
-		writeItem(t, dir, markerAccount, markerText(markerRunning, snapshotOf(legacyRecords)))
+		writeItem(t, dir, markerAccount, running(legacyRecords...))
 		storeLegacy(t, k, "deepseek", value)
 		planted := map[string]string{"deepseek": readItem(t, dir, "deepseek")}
 		t.Setenv("FAKE_FOREIGN", markerAccount)
@@ -361,10 +337,12 @@ func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
 	})
 }
 
+// assertRefused checks that deepseek's value is refused for re-entry and that the migration left
+// its items as they were, but for retiring a head laid out before bindings.
 func assertRefused(t *testing.T, v *Vault, dir string, items map[string]string) {
 	t.Helper()
 	for account, data := range items {
-		if readItem(t, dir, account) != data {
+		if got := readItem(t, dir, account); got != data && (got != retiredHead || !legacyHeadPattern.MatchString(data)) {
 			t.Fatalf("the migration rewrote %s", account)
 		}
 	}
@@ -373,6 +351,108 @@ func assertRefused(t *testing.T, v *Vault, dir string, items map[string]string) 
 	if got != nil || !errors.As(err, &reentry) || reentry.ID != "deepseek" || v.Attention("deepseek") != Reenter {
 		t.Fatalf("the unproven item reads %q, %v", got, err)
 	}
+}
+
+func assertRebound(t *testing.T, v *Vault) {
+	t.Helper()
+	got, err := v.Value("deepseek")
+	var rebound *ReboundError
+	if got != nil || !errors.As(err, &rebound) || rebound.ID != "deepseek" || errors.Is(err, ErrReenter) ||
+		v.Attention("deepseek") != Rebound {
+		t.Fatalf("a value stored for another destination reads %q, %v, attention %q", got, err, v.Attention("deepseek"))
+	}
+}
+
+// A record the migration began with, whose index entry now names another destination, was changed
+// outside keyd: its value is listed as rebound, never as one to enter again, which would store the
+// real key for the changed destination. That holds while the migration runs, at every start once it
+// is done, and at the value's first use. The index is the user's to write, so its timestamps prove
+// nothing.
+func TestMigrationTellsALegacyRecordChangedOutsideKeydApart(t *testing.T) {
+	value := []byte("sk-legacy-deepseek-value")
+	t.Run("changed while the migration runs", func(t *testing.T) {
+		k, dir := fakeKeychain(t)
+		storeLegacy(t, k, "deepseek", value)
+		storeLegacy(t, k, "weather", longValue(40))
+		index := writeIndex(t, beforeUpgrade, legacyRecords...)
+		lockable(t, k, dir, true)
+		if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); m.Done || !slices.Equal(m.Bound, []string{"weather"}) {
+			t.Fatalf("first migration = %+v", m)
+		}
+		lockable(t, k, dir, false)
+		rewriteIndex(t, index, beforeUpgrade.Add(-time.Hour), movedDeepseek, weatherRecord)
+		for run := range 2 {
+			v := openAt(t, k, index, beforeUpgrade.Add(time.Duration(run+2)*time.Hour))
+			if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter) != 0 || !slices.Equal(m.Rebound, []string{"deepseek"}) || !m.Done {
+				t.Fatalf("start %d after the index changed = %+v", run+2, m)
+			}
+			assertRebound(t, v)
+		}
+		if head := readItem(t, dir, "deepseek"); head != retiredHead {
+			t.Fatalf("the migration left deepseek's head %q", head)
+		}
+	})
+
+	// Another keyd home, with an index of its own, shares the Keychain and its marker.
+	t.Run("another home's index", func(t *testing.T) {
+		k, dir := fakeKeychain(t)
+		storeLegacy(t, k, "deepseek", value)
+		writeItem(t, dir, markerAccount, running(legacyRecords...))
+		v := openAt(t, k, writeIndex(t, beforeUpgrade.Add(-time.Hour), movedDeepseek), beforeUpgrade.Add(time.Hour))
+		if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter) != 0 || !slices.Equal(m.Rebound, []string{"deepseek"}) || !m.Done {
+			t.Fatalf("migration = %+v", m)
+		}
+		assertRebound(t, v)
+	})
+}
+
+// A start that finds no marker begins the migration only when no item of the service is bound or
+// retired, whatever the index names: with the marker removed, an index that names only an unbound
+// record cannot start the migration over and bind that record's value to its destination.
+func TestMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
+		t.Fatal(err)
+	}
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	planted := map[string]string{"deepseek": readItem(t, dir, "deepseek"), "deepseek.0": readItem(t, dir, "deepseek.0")}
+	v := openAt(t, k, writeIndex(t, beforeUpgrade, movedDeepseek), beforeUpgrade.Add(time.Hour))
+	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
+		t.Fatalf("migration = %+v", m)
+	}
+	assertRefused(t, v, dir, planted)
+	if mark := markerOf(t, dir); mark.state != markerDone || len(mark.asked) != 0 {
+		t.Fatalf("marker %+v", mark)
+	}
+}
+
+// Once the migration ends, it retires every unbound head the service holds, under any id, and leaves
+// the chunks as they are: no later migration binds one, even with the marker and every bound item
+// removed and an index that names it.
+func TestMigrationRetiresTheUnboundHeadsItLeaves(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	storeLegacy(t, k, "weather", longValue(40))
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	chunk := readItem(t, dir, "deepseek.0")
+	index := writeIndex(t, beforeUpgrade, weatherRecord)
+	if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); !m.Done || !slices.Equal(m.Bound, []string{"weather"}) {
+		t.Fatalf("first migration = %+v", m)
+	}
+	if readItem(t, dir, "deepseek") != retiredHead || readItem(t, dir, "deepseek.0") != chunk {
+		t.Fatalf("deepseek holds %q and %q", readItem(t, dir, "deepseek"), readItem(t, dir, "deepseek.0"))
+	}
+	if err := os.Remove(filepath.Join(dir, "store", "localdot-keyd-test."+markerAccount)); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Delete("weather"); err != nil {
+		t.Fatal(err)
+	}
+	rewriteIndex(t, index, beforeUpgrade, deepseekRecord)
+	v := openAt(t, k, index, beforeUpgrade.Add(2*time.Hour))
+	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
+		t.Fatalf("migration without its marker = %+v", m)
+	}
+	assertRefused(t, v, dir, map[string]string{"deepseek": retiredHead, "deepseek.0": chunk})
 }
 
 // A finished migration never runs again: a later start writes nothing, and its values still read.
@@ -408,8 +488,8 @@ func TestMigrationRunsOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if state, _ := markerOf(t, dir); state != markerDone {
-		t.Fatalf("marker %s", state)
+	if mark := markerOf(t, dir); mark.state != markerDone {
+		t.Fatalf("marker %+v", mark)
 	}
 }
 
@@ -439,8 +519,8 @@ func TestMigrationCutShortResumes(t *testing.T) {
 			if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); m.Done || len(m.Reenter) != 0 {
 				t.Fatalf("cut migration = %+v", m)
 			}
-			if state, snapshot := markerOf(t, dir); state != markerRunning || !slices.Equal(snapshot, snapshotOf(legacyRecords)) {
-				t.Fatalf("after the cut the marker is %s with %v", state, snapshot)
+			if mark := markerOf(t, dir); mark.state != markerRunning || !maps.Equal(mark.asked, askedBy(legacyRecords)) {
+				t.Fatalf("after the cut the marker is %+v", mark)
 			}
 			t.Setenv("FAKE_FAIL", "")
 			v := openAt(t, k, index, beforeUpgrade.Add(2*time.Hour))
@@ -452,8 +532,8 @@ func TestMigrationCutShortResumes(t *testing.T) {
 					t.Fatalf("%s after resuming: %d bytes, %v", id, len(got), err)
 				}
 			}
-			if state, _ := markerOf(t, dir); state != markerDone {
-				t.Fatalf("the finished marker is %s", state)
+			if mark := markerOf(t, dir); mark.state != markerDone {
+				t.Fatalf("the finished marker is %+v", mark)
 			}
 		})
 	}
@@ -591,8 +671,8 @@ func TestASecretNamedLikeTheMarkerIsAnOrdinaryKey(t *testing.T) {
 	if err := v.Put(named, []byte("sk-stored-again-value")); err != nil {
 		t.Fatal(err)
 	}
-	if state, _ := markerOf(t, dir); state != markerDone || !Writable("keyd-bindings") ||
+	if mark := markerOf(t, dir); mark.state != markerDone || !Writable("keyd-bindings") ||
 		idPattern.MatchString(markerAccount) || idPattern.MatchString(sessionAccount) {
-		t.Fatalf("marker %s", state)
+		t.Fatalf("marker %+v", mark)
 	}
 }

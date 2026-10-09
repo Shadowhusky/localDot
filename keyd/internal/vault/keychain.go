@@ -75,19 +75,45 @@ func (k *Keychain) Claim() error {
 }
 
 // Adopt moves the items an earlier keyd stored, which every earlier keyd can read, to this keyd's
-// own access list, and reports how many it moved. A move cut short carries on at the next Adopt.
-func (k *Keychain) Adopt() (int, error) {
+// own access list. It reports how many it moved and how many it could not, which stay as they are;
+// a move cut short carries on at the next Adopt.
+func (k *Keychain) Adopt() (moved, failed int, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), adoptTimeout)
 	defer cancel()
 	var out keychainOutput
 	if err := k.run(ctx, "adopt", serviceAccount, nil, &out); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	moved, err := strconv.Atoi(out.String())
-	if err != nil || moved < 0 {
-		return 0, errors.New("keychain: adopt: the helper did not say how many items it moved")
+	counts := strings.Fields(out.String())
+	if len(counts) == 2 {
+		moved, err = strconv.Atoi(counts[0])
+		if err == nil {
+			failed, err = strconv.Atoi(counts[1])
+		}
 	}
-	return moved, nil
+	if len(counts) != 2 || err != nil || moved < 0 || failed < 0 {
+		return 0, 0, errors.New("keychain: adopt: the helper did not say how many items it moved")
+	}
+	return moved, failed, nil
+}
+
+// secretItems names every item of the service that holds a secret's head, whoever made it.
+func (k *Keychain) secretItems() ([]string, error) {
+	ctx, cancel := k.deadline()
+	defer cancel()
+	out := keychainOutput{limit: helperListLimit}
+	if err := k.run(ctx, "list", serviceAccount, nil, &out); err != nil {
+		return nil, err
+	}
+	var ids []string
+	for line := range strings.Lines(out.String()) {
+		id := strings.TrimSuffix(line, "\n")
+		if !idPattern.MatchString(id) {
+			return nil, errors.New("keychain: list: the helper named an item that holds no secret")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // Put writes the chunks, then the item that names them, then reads the value back: a write the
@@ -287,14 +313,21 @@ func (k *Keychain) deadline() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), limit)
 }
 
-// A single item is at most one hex chunk plus its generation marker. Bound
+// A single item is at most one hex chunk plus its generation marker; a list has its own limit. Bound
 // stdout independently of time, and never include it in an error.
-type keychainOutput struct{ data bytes.Buffer }
+type keychainOutput struct {
+	data  bytes.Buffer
+	limit int
+}
 
 func (out *keychainOutput) String() string { return out.data.String() }
 
 func (out *keychainOutput) Write(p []byte) (int, error) {
-	if out.data.Len()+len(p) > 2*chunkBytes+128 {
+	limit := out.limit
+	if limit == 0 {
+		limit = 2*chunkBytes + 128
+	}
+	if out.data.Len()+len(p) > limit {
 		return 0, errors.New("keychain output exceeded its limit")
 	}
 	return out.data.Write(p)

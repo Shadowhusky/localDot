@@ -130,6 +130,9 @@ func TestSignedHelperServesOnlyTheDaemonThatClaimedIt(t *testing.T) {
 	if code := runHelper(keyd, "read", "probe", session); code != 44 {
 		t.Fatalf("the claiming daemon's read: %d, want 44 (no such item)", code)
 	}
+	if code := runHelper(keyd, "list", "_all", session); code != 0 {
+		t.Fatalf("the claiming daemon's list: %d", code)
+	}
 	for name, code := range map[string]int{
 		"another secret":                 runHelper(keyd, "read", "probe", other),
 		"no channel":                     runHelper(keyd, "read", "probe", nil),
@@ -137,6 +140,7 @@ func TestSignedHelperServesOnlyTheDaemonThatClaimedIt(t *testing.T) {
 		"another daemon's claim":         probe(t, keyd, false, "claim", "_session", other),
 		"a subcommand parent's claim":    probe(t, keyd, true, "claim", "_session", other),
 		"another daemon's adopt":         probe(t, keyd, false, "adopt", "_all", session),
+		"another daemon's list":          probe(t, keyd, false, "list", "_all", session),
 	} {
 		if code != 45 {
 			t.Errorf("%s was not refused: %d", name, code)

@@ -94,15 +94,21 @@ static OSStatus keyd_keychain(const char *service, SecKeychainRef *keychain) {
 
 static OSStatus keyd_operate(const char *operation, const keyd_items *k, const keyd_session *parent,
                              const char *account, const void *data, unsigned int length,
-                             void **output, unsigned int *outputLength, unsigned int *moved, int *mayHaveChanged) {
+                             void **output, unsigned int *outputLength, unsigned int *moved, unsigned int *failed,
+                             int *mayHaveChanged) {
   if (strcmp(operation, "claim") == 0) return keyd_claim(k, parent, keyd_started, mayHaveChanged);
   OSStatus status = keyd_check_session(k, parent);
   if (status != errSecSuccess) return status;
-  if (strcmp(operation, "adopt") == 0) return keyd_adopt(k, moved, mayHaveChanged);
+  if (strcmp(operation, "adopt") == 0) return keyd_adopt(k, moved, failed, mayHaveChanged);
+  UInt32 size = 0;
+  if (strcmp(operation, "list") == 0) {
+    status = keyd_list(k, output, &size);
+    *outputLength = size;
+    return status;
+  }
   if (strcmp(operation, "store") == 0) return keyd_store(k, k->service, account, data, length, mayHaveChanged);
   if (strcmp(operation, "delete") == 0) return keyd_delete(k, k->service, account, mayHaveChanged);
   if (strcmp(operation, "read") != 0) return errSecParam;
-  UInt32 size = 0;
   status = keyd_read(k, k->service, account, output, &size);
   *outputLength = size;
   return status;
@@ -110,7 +116,8 @@ static OSStatus keyd_operate(const char *operation, const keyd_items *k, const k
 
 static OSStatus keyd_item(const char *operation, const char *service, const char *account,
                          const void *data, unsigned int length, const unsigned char *secret, unsigned int secretLength,
-                         void **output, unsigned int *outputLength, unsigned int *moved, int *mayHaveChanged) {
+                         void **output, unsigned int *outputLength, unsigned int *moved, unsigned int *failed,
+                         int *mayHaveChanged) {
   int checkOnly = strcmp(operation, "check") == 0;
   pid_t parentPID = 0;
   OSStatus status = keyd_authorized(checkOnly, &parentPID);
@@ -125,7 +132,7 @@ static OSStatus keyd_item(const char *operation, const char *service, const char
   // A locked keychain must fail visibly in the caller, never pop a hidden prompt. Nothing here
   // changes an item's access list in place, which only a Keychain prompt can authorize.
   status = SecKeychainSetUserInteractionAllowed(false);
-  keyd_items k = { NULL, service, keyd_requirement, keyd_earlier_requirement, NULL };
+  keyd_items k = { NULL, service, keyd_requirement, keyd_earlier_requirement, NULL, NULL };
   SecTrustedApplicationRef self = NULL;
   CFArrayRef trusted = NULL;
   if (status == errSecSuccess) status = keyd_keychain(service, &k.keychain);
@@ -137,7 +144,8 @@ static OSStatus keyd_item(const char *operation, const char *service, const char
   }
   if (status == errSecSuccess) status = SecAccessCreate(CFSTR("localDot secret — keyd only"), trusted, &k.access);
   if (status == errSecSuccess)
-    status = keyd_operate(operation, &k, &parent, account, data, length, output, outputLength, moved, mayHaveChanged);
+    status = keyd_operate(operation, &k, &parent, account, data, length, output, outputLength, moved, failed,
+                          mayHaveChanged);
   if (k.access) CFRelease(k.access);
   if (trusted) CFRelease(trusted);
   if (self) CFRelease(self);
@@ -149,7 +157,7 @@ import "C"
 
 import "unsafe"
 
-func nativeKeychainItem(operation, service, account string, data, secret []byte) ([]byte, int, int) {
+func nativeKeychainItem(operation, service, account string, data, secret []byte) ([]byte, adoption, int) {
 	op, svc, acct := C.CString(operation), C.CString(service), C.CString(account)
 	defer C.free(unsafe.Pointer(op))
 	defer C.free(unsafe.Pointer(svc))
@@ -162,24 +170,32 @@ func nativeKeychainItem(operation, service, account string, data, secret []byte)
 		session = unsafe.Pointer(&secret[0])
 	}
 	var output unsafe.Pointer
-	var length, moved C.uint
+	var length, moved, failed C.uint
 	var mayHaveChanged C.int
 	status := C.keyd_item(op, svc, acct, input, C.uint(len(data)), (*C.uchar)(session), C.uint(len(secret)),
-		&output, &length, &moved, &mayHaveChanged)
-	defer C.keyd_free(output, C.UInt32(length))
+		&output, &length, &moved, &failed, &mayHaveChanged)
+	limit := helperItemLimit
+	if operation == "list" {
+		// keyd_list allocates the list itself; it names items, and holds no secret to clear.
+		defer C.free(output)
+		limit = helperListLimit
+	} else {
+		defer C.keyd_free(output, C.UInt32(length))
+	}
 	if code := nativeExit(int32(status), mayHaveChanged != 0); code != 0 {
-		return nil, 0, code
+		return nil, adoption{}, code
 	}
-	if length > helperItemLimit {
-		return nil, 0, 1
+	switch {
+	case int(length) > limit:
+		return nil, adoption{}, 1
+	case operation == "list":
+		return C.GoBytes(output, C.int(length)), adoption{}, 0
+	case operation != "read":
+		return nil, adoption{moved: int(moved), failed: int(failed)}, 0
+	case output == nil || length == 0:
+		return nil, adoption{}, 1
 	}
-	if operation != "read" {
-		return nil, int(moved), 0
-	}
-	if output == nil || length == 0 {
-		return nil, 0, 1
-	}
-	return C.GoBytes(output, C.int(length)), 0, 0
+	return C.GoBytes(output, C.int(length)), adoption{}, 0
 }
 
 const (

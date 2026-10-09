@@ -33,8 +33,10 @@ nothing generation 2 stores, and nothing it adopts, is readable by them:
 - At start, after its claim, keyd adopts every item stored under the earlier requirement. keyd
   meets that requirement too, so it reads each value, stages it in an item only it can read,
   deletes the item and makes it again under its own access list. A move cut short is put back at
-  the next start. An item's access list is never changed in place: that would need you at a
-  Keychain prompt for each item.
+  the next start. An item keyd cannot read or move, such as one whose partition list does not name
+  keyd's team, stays as it is and the next start tries it again; every other item still moves, and
+  the audit line counts the items left behind. An item's access list is never changed in place:
+  that would need you at a Keychain prompt for each item.
 - An item whose access list is neither keyd's nor the earlier keyd's is refused as not keyd's, and
   the key is listed as one to enter again; storing or removing the key replaces the item.
 
@@ -79,9 +81,10 @@ point it elsewhere. It works through these steps:
      another daemon's claim and every operation without the claim. The claim probes use a keychain
      the test makes.
    - `internal/vault`: the binding migration runs through the native helper against a keychain the
-     test makes: a proven item, a planted item, a second start and a migration cut short. When
-     the live keyd is from before generation 2, the legacy items get its access list and keyd
-     adopts them first.
+     test makes: a proven item, a planted item, a second start, a migration cut short, a record
+     changed outside keyd and a start without a marker over a bound item. Adopt moves past items
+     it cannot read. When the live keyd is from before generation 2, the legacy items get its
+     access list and keyd adopts them first.
 5. Stages `.keyd.next` and `.keyd-native.next` next to the live keyd and verifies them again.
 6. Keeps the running binaries as `keyd.prev` and `keyd-native.prev`, renames the new ones into
    place and runs `launchctl kickstart -k gui/<uid>/dev.localdot.keyd`. If that fails, it rolls
@@ -99,3 +102,4 @@ point it elsewhere. It works through these steps:
 `--dry-run` stops after step 4 and prints steps 5 to 7. If signing fails with
 `errSecInternalComponent`, the login keychain is locked or the signing key is waiting for your
 approval.
+

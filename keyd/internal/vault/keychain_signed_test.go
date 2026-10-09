@@ -51,11 +51,21 @@ func newSignedKeychain(t *testing.T) signedKeychain {
 // storeEarlier stores value as the keyd before bindings did, then lets keyd adopt it.
 func (k signedKeychain) storeEarlier(t *testing.T, id string, value []byte) {
 	t.Helper()
-	earlier := os.Getenv("KEYD_EARLIER_BIN")
-	if earlier == "" {
+	if os.Getenv("KEYD_EARLIER_BIN") == "" {
 		storeLegacy(t, k.Keychain, id, value)
 		return
 	}
+	items := k.addEarlier(t, id, value)
+	if moved, failed, err := k.Adopt(); err != nil || moved != items || failed != 0 {
+		t.Fatalf("Adopt = %d moved, %d failed, %v; want %d moved", moved, failed, err, items)
+	}
+}
+
+// addEarlier stores value under the access list of the keyd that KEYD_EARLIER_BIN names, as it
+// stored values before bindings, and returns how many items that took.
+func (k signedKeychain) addEarlier(t *testing.T, id string, value []byte) int {
+	t.Helper()
+	earlier := os.Getenv("KEYD_EARLIER_BIN")
 	gen, err := newWriteID()
 	if err != nil {
 		t.Fatal(err)
@@ -67,15 +77,14 @@ func (k signedKeychain) storeEarlier(t *testing.T, id string, value []byte) {
 	}
 	for account, data := range items {
 		tempkeychain.Security(t, "add-generic-password", "-s", k.Service, "-a", account, "-w", data, "-T", earlier, k.path)
+		// The earlier keyd's own items carry its team's partition, as keyd's do.
+		tempkeychain.Security(t, "set-generic-password-partition-list", "-S", "teamid:87FD3FSZBG", "-s", k.Service,
+			"-a", account, "-k", k.password, k.path)
 	}
-	// The earlier keyd's own items carry its team's partition, as keyd's do.
-	tempkeychain.Security(t, "set-generic-password-partition-list", "-S", "teamid:87FD3FSZBG", "-s", k.Service, "-k", k.password, k.path)
 	if _, err := k.find(context.Background(), id); err == nil {
 		t.Fatal("keyd read an item under the earlier keyd's access list before adopting it")
 	}
-	if moved, err := k.Adopt(); err != nil || moved != len(items) {
-		t.Fatalf("Adopt = %d, %v; want %d", moved, err, len(items))
-	}
+	return len(items)
 }
 
 func (k signedKeychain) open(t *testing.T, index string) *Vault {
@@ -115,7 +124,7 @@ func TestSignedMigrationBindsAProvenItem(t *testing.T) {
 			t.Fatalf("%s head %q", rec.ID, k.head(t, rec.ID))
 		}
 	}
-	if state, _, ok := parseMarker(k.head(t, markerAccount)); !ok || state != markerDone {
+	if mark, ok := parseMarker(k.head(t, markerAccount)); !ok || mark.state != markerDone {
 		t.Fatalf("marker %q", k.head(t, markerAccount))
 	}
 }
@@ -167,7 +176,7 @@ func TestSignedMigrationCutShortResumes(t *testing.T) {
 	k.storeEarlier(t, "weather", longValue(40))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := k.add(ctx, markerAccount, markerText(markerRunning, snapshotOf(legacyRecords))); err != nil {
+	if err := k.add(ctx, markerAccount, running(legacyRecords...)); err != nil {
 		t.Fatal(err)
 	}
 	gen, count, _, _ := parseHead(k.head(t, "weather"))
@@ -182,5 +191,80 @@ func TestSignedMigrationCutShortResumes(t *testing.T) {
 		if _, err := v.Value(id); err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
+	}
+}
+
+// A record the migration began with, whose index entry now names another destination, is listed as
+// rebound at every start and at its first use, and its unbound head is retired once the migration
+// ends.
+func TestSignedMigrationTellsARecordChangedOutsideKeydApart(t *testing.T) {
+	k := newSignedKeychain(t)
+	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := k.add(ctx, markerAccount, running(legacyRecords...)); err != nil {
+		t.Fatal(err)
+	}
+	index := writeIndex(t, beforeUpgrade, movedDeepseek)
+	for run := range 2 {
+		v := k.open(t, index)
+		if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter) != 0 || !slices.Equal(m.Rebound, []string{"deepseek"}) || !m.Done {
+			t.Fatalf("start %d = %+v", run+1, m)
+		}
+		assertRebound(t, v)
+	}
+	if head := k.head(t, "deepseek"); head != retiredHead {
+		t.Fatalf("deepseek's head is %q", head)
+	}
+}
+
+// With no marker, the helper's listing finds a bound item the index does not name, so the migration
+// closes instead of beginning for an index that names only an unbound record.
+func TestSignedMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
+	k := newSignedKeychain(t)
+	if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
+		t.Fatal(err)
+	}
+	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	planted := k.head(t, "deepseek")
+	v := k.open(t, writeIndex(t, beforeUpgrade, movedDeepseek))
+	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
+		t.Fatalf("migration = %+v", m)
+	}
+	if head := k.head(t, "deepseek"); head != planted {
+		t.Fatalf("deepseek's head became %q", head)
+	}
+}
+
+// Items the security tool made carry its partition, not keyd's team's, so keyd cannot read them
+// without a prompt: a staged copy and, with an earlier keyd, an item of that keyd's. Adopt counts
+// them, leaves them as they are and still moves the items after them.
+func TestSignedAdoptMovesPastItemsItCannotRead(t *testing.T) {
+	k := newSignedKeychain(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempkeychain.Security(t, "add-generic-password", "-s", k.Service+".moving", "-a", "aaa-unreadable.0", "-w", "9999:6162", "-T", self, k.path)
+	unreadable, moves := 1, 0
+	if earlier := os.Getenv("KEYD_EARLIER_BIN"); earlier != "" {
+		tempkeychain.Security(t, "add-generic-password", "-s", k.Service, "-a", "aaa-unreadable", "-w", "keyd:9999:1", "-T", earlier, k.path)
+		unreadable++
+		moves = k.addEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	}
+	moved, failed, err := k.Adopt()
+	if err != nil || moved != moves || failed != unreadable {
+		t.Fatalf("Adopt = %d moved, %d failed, %v; want %d moved, %d failed", moved, failed, err, moves, unreadable)
+	}
+	if moves > 0 {
+		if head := k.head(t, "deepseek"); !strings.HasPrefix(head, "keyd:") {
+			t.Fatalf("the adopted item holds %q", head)
+		}
+		if _, err := k.find(context.Background(), "aaa-unreadable"); err == nil {
+			t.Fatal("keyd read the item it could not adopt")
+		}
+	}
+	if moved, failed, err := k.Adopt(); err != nil || moved != 0 || failed != unreadable {
+		t.Fatalf("a second Adopt = %d moved, %d failed, %v", moved, failed, err)
 	}
 }

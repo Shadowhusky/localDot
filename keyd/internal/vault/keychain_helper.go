@@ -2,9 +2,9 @@ package vault
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
-	"strconv"
 	"syscall"
 )
 
@@ -15,6 +15,8 @@ const (
 	// keyd's: no keyd made it.
 	helperNotOurs   = 46
 	helperItemLimit = 2*chunkBytes + 128
+	// helperListLimit bounds a list: at most 4096 items, each a secret id and its newline.
+	helperListLimit = 4096 * 65
 	// sessionBytes is the size of the secret a keyd daemon makes at start and hands each helper.
 	sessionBytes = 32
 )
@@ -37,13 +39,16 @@ func validRequest(op, service, account string) bool {
 		return accountPattern.MatchString(account)
 	case "claim":
 		return account == sessionAccount
-	case "adopt":
+	case "adopt", "list":
 		return account == serviceAccount
 	}
 	return false
 }
 
-type keychainItemOperation func(operation, service, account string, data, secret []byte) ([]byte, int, int)
+// adoption is what an adopt moved, and how many items it could not move.
+type adoption struct{ moved, failed int }
+
+type keychainItemOperation func(operation, service, account string, data, secret []byte) ([]byte, adoption, int)
 
 // RunKeychainItem is an internal child protocol, not a public vault CLI. The native operation
 // authenticates this executable, its actual parent and the parent's mode before opening any
@@ -85,7 +90,7 @@ func runKeychainItem(args []string, session, in io.Reader, out io.Writer, operat
 	defer clear(data)
 	secret := readSession(session)
 	defer clear(secret)
-	value, moved, status := operate(args[0], args[1], args[2], data, secret)
+	value, adopted, status := operate(args[0], args[1], args[2], data, secret)
 	defer clear(value)
 	switch {
 	case status == helperNotFound && args[0] != "store":
@@ -96,7 +101,15 @@ func runKeychainItem(args []string, session, in io.Reader, out io.Writer, operat
 		// A native failure may have changed an item. Never claim the old value survived it.
 		return 1
 	case args[0] == "adopt":
-		if _, err := io.WriteString(out, strconv.Itoa(moved)); err != nil {
+		if _, err := fmt.Fprintf(out, "%d %d", adopted.moved, adopted.failed); err != nil {
+			return 1
+		}
+		return 0
+	case args[0] == "list":
+		if len(value) > helperListLimit {
+			return 1
+		}
+		if n, err := out.Write(value); err != nil || n != len(value) {
 			return 1
 		}
 		return 0

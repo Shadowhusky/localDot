@@ -74,7 +74,7 @@ func TestNativeItemsAgainstATemporaryKeychain(t *testing.T) {
 		}
 	}
 	log, err := exec.CommandContext(ctx, now, filepath.Join(dir, "items.keychain"), earlier).CombinedOutput()
-	if err != nil || strings.Count(string(log), "PASS ") != 21 {
+	if err != nil || strings.Count(string(log), "PASS ") != 24 {
 		t.Fatalf("native items fixture: %v\n%s", err, log)
 	}
 }

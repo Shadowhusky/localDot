@@ -346,15 +346,21 @@ func (v *Vault) Value(id string) ([]byte, error) {
 	}
 	v.mu.Unlock()
 	if !reading {
-		r.value, r.err = v.store.Get(id, bindingOf(rec))
-		attention := attentionOf(r.err)
+		value, err := v.store.Get(id, bindingOf(rec))
+		attention := attentionOf(err)
+		v.mu.Lock()
+		// A value the migration found stored for another destination stays that, though the store
+		// reads its unbound item as one to enter again.
+		if attention == Reenter && v.attention[id] == Rebound {
+			attention = Rebound
+		}
+		r.value, r.err = value, err
 		switch attention {
 		case Rebound:
 			r.err = &ReboundError{ID: id}
 		case Reenter:
-			r.err = &ReentryError{ID: id, err: r.err}
+			r.err = &ReentryError{ID: id, err: err}
 		}
-		v.mu.Lock()
 		if v.reads[id] == r {
 			delete(v.reads, id)
 			if r.err == nil {

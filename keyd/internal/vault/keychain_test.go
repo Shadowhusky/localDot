@@ -37,6 +37,11 @@ run() {
       [ "$FAKE_FOREIGN" != "$acct" ] || return 46
       cat "$item" ;;
     delete) [ -f "$item" ] || return 44; rm "$item" ;;
+    list)
+      for item in "$store/$svc".*; do
+        acct=${item#"$store/$svc."}
+        case "$acct" in _*|*.*|'*') ;; *) printf '%s\n' "$acct" ;; esac
+      done ;;
     *) echo "security: unknown command \"$cmd\"" >&2; return 1 ;;
   esac
 }

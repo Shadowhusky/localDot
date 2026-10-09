@@ -283,17 +283,26 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	return err
 }
 
-// adopt moves the items an earlier keyd stored to this keyd's access list. A move that fails leaves
-// them where they are, refused for now, and the next start carries on.
-func (d *Daemon) adopt(keychain *vault.Keychain) error {
-	moved, err := keychain.Adopt()
-	if err == nil && moved == 0 {
+// adopter moves the items an earlier keyd stored to keyd's own access list.
+type adopter interface {
+	Adopt() (moved, failed int, err error)
+}
+
+// adopt moves the items an earlier keyd stored to this keyd's access list. An item it cannot move
+// stays where it is, refused for now, and the next start tries it again.
+func (d *Daemon) adopt(keychain adopter) error {
+	moved, failed, err := keychain.Adopt()
+	if err == nil && moved == 0 && failed == 0 {
 		return nil
 	}
 	line := audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "adopt", Detail: fmt.Sprintf("%d items moved from an earlier keyd", moved)}
-	if err != nil {
+	switch {
+	case err != nil:
 		line.Decision, line.Detail = audit.Deny, "items from an earlier keyd were not all moved"
 		log.Printf("keyd: %v", err)
+	case failed > 0:
+		line.Decision = audit.Deny
+		line.Detail = fmt.Sprintf("%d items moved from an earlier keyd, %d could not be moved", moved, failed)
 	}
 	_, werr := d.log.Write(line)
 	return werr

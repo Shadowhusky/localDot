@@ -3,8 +3,8 @@
 package vault
 
 // Never fall back to a general-purpose executable that would own the Keychain ACL instead.
-func nativeKeychainItem(string, string, string, []byte, []byte) ([]byte, int, int) {
-	return nil, 0, helperUnchanged
+func nativeKeychainItem(string, string, string, []byte, []byte) ([]byte, adoption, int) {
+	return nil, adoption{}, helperUnchanged
 }
 
 // DesignatedRequirement is empty where keyd has no Keychain helper.

@@ -3,13 +3,15 @@
 
 // The item operations behind keyd's Keychain helper, given a keychain, the requirement keyd meets
 // now, the earlier keyd's requirement and the access that new items get. The helper passes keyd's
-// own; a fixture can pass stand-ins without signing as keyd.
+// own; a fixture can pass stand-ins without signing as keyd, and a read that stands in for one the
+// Keychain refuses keyd.
 typedef struct {
   SecKeychainRef keychain;
   const char *service;
   const char *now;
   const char *earlier;
   SecAccessRef access;
+  OSStatus (*copy)(SecKeychainItemRef item, const char *account, void **data, UInt32 *length);
 } keyd_items;
 
 // A refusal that names an item whose access list is neither keyd's nor the earlier keyd's: no keyd
@@ -53,6 +55,11 @@ static OSStatus keyd_create(const keyd_items *k, const char *service, const char
   return status;
 }
 
+static OSStatus keyd_copy(const keyd_items *k, SecKeychainItemRef item, const char *account, void **data, UInt32 *length) {
+  if (k->copy) return k->copy(item, account, data, length);
+  return SecKeychainItemCopyAttributesAndData(item, NULL, NULL, NULL, length, data);
+}
+
 static void keyd_free(void *data, UInt32 length) {
   if (!data) return;
   volatile unsigned char *bytes = (volatile unsigned char *)data;
@@ -68,7 +75,7 @@ static OSStatus keyd_read(const keyd_items *k, const char *service, const char *
   if (status == errSecSuccess) status = keyd_owner(k, item, &owner);
   if (status == errSecSuccess && owner == KEYD_EARLIER) status = errSecAuthFailed;
   else if (status == errSecSuccess && owner == KEYD_FOREIGN) status = KEYD_NOT_OURS;
-  if (status == errSecSuccess) status = SecKeychainItemCopyAttributesAndData(item, NULL, NULL, NULL, length, data);
+  if (status == errSecSuccess) status = keyd_copy(k, item, account, data, length);
   if (item) CFRelease(item);
   return status;
 }
@@ -211,7 +218,7 @@ static OSStatus keyd_unstage(const keyd_items *k, const char *staging, const cha
   OSStatus status = keyd_find(k, staging, account, &staged);
   if (status == errSecSuccess) status = keyd_owner(k, staged, &stagedOwner);
   if (status == errSecSuccess && stagedOwner == KEYD_OURS) {
-    status = SecKeychainItemCopyAttributesAndData(staged, NULL, NULL, NULL, &length, &data);
+    status = keyd_copy(k, staged, account, &data, &length);
     if (status == errSecSuccess) status = keyd_find(k, k->service, account, &item);
     if (status == errSecSuccess) status = keyd_owner(k, item, &owner);
     if (status == errSecItemNotFound || (status == errSecSuccess && owner != KEYD_OURS))
@@ -227,12 +234,36 @@ static OSStatus keyd_unstage(const keyd_items *k, const char *staging, const cha
   return status;
 }
 
+// keyd_move moves one item that only the earlier keyd's access list protects to keyd's own: it reads
+// the value, stages it in an item only keyd can read, deletes the item, makes it again and drops the
+// staged copy. A move cut short leaves the staged copy, which the next adopt puts back first.
+static OSStatus keyd_move(const keyd_items *k, const char *staging, const char *account, unsigned *moved,
+                          int *mayHaveChanged) {
+  SecKeychainItemRef item = NULL;
+  int owner = KEYD_FOREIGN;
+  void *data = NULL;
+  UInt32 length = 0;
+  OSStatus status = keyd_find(k, k->service, account, &item);
+  if (status == errSecSuccess) status = keyd_owner(k, item, &owner);
+  if (status == errSecSuccess && owner == KEYD_EARLIER) {
+    status = keyd_copy(k, item, account, &data, &length);
+    if (status == errSecSuccess) status = keyd_store(k, staging, account, data, length, mayHaveChanged);
+    if (status == errSecSuccess) status = SecKeychainItemDelete(item);
+    if (status == errSecSuccess) status = keyd_create(k, k->service, account, data, length);
+    if (status == errSecSuccess) status = keyd_delete(k, staging, account, mayHaveChanged);
+    if (status == errSecSuccess) (*moved)++;
+  }
+  keyd_free(data, length);
+  if (item) CFRelease(item);
+  return status;
+}
+
 // keyd_adopt moves each item of the service that only the earlier keyd's access list protects to
 // keyd's own. The earlier list trusts every earlier keyd, including any that can run another
-// program as keyd's child; this keyd meets it too, so it reads the value, stages it in an item only
-// it can read, deletes the item, makes it again and drops the staged copy. A move cut short leaves
-// the staged copy, which the next run puts back first.
-static OSStatus keyd_adopt(const keyd_items *k, unsigned *moved, int *mayHaveChanged) {
+// program as keyd's child; this keyd meets it too. Staged copies of moves cut short are put back
+// first. An item keyd cannot read or move, such as one whose partition list does not name it, stays
+// as it is and is counted in failed; every other item still moves.
+static OSStatus keyd_adopt(const keyd_items *k, unsigned *moved, unsigned *failed, int *mayHaveChanged) {
   char staging[96];
   CFArrayRef accounts = NULL;
   if (snprintf(staging, sizeof(staging), "%s.moving", k->service) >= (int)sizeof(staging)) return errSecParam;
@@ -241,32 +272,46 @@ static OSStatus keyd_adopt(const keyd_items *k, unsigned *moved, int *mayHaveCha
     char account[80];
     if (!CFStringGetCString(CFArrayGetValueAtIndex(accounts, i), account, sizeof(account), kCFStringEncodingUTF8) ||
         !keyd_adoptable(account)) continue;
-    status = keyd_unstage(k, staging, account, mayHaveChanged);
+    OSStatus one = keyd_unstage(k, staging, account, mayHaveChanged);
+    if (one != errSecSuccess && one != errSecItemNotFound) (*failed)++;
   }
   if (accounts) CFRelease(accounts);
   accounts = NULL;
   if (status == errSecSuccess) status = keyd_accounts(k, k->service, &accounts);
   for (CFIndex i = 0; status == errSecSuccess && i < CFArrayGetCount(accounts); i++) {
     char account[80];
-    SecKeychainItemRef item = NULL;
-    int owner = KEYD_FOREIGN;
-    void *data = NULL;
-    UInt32 length = 0;
     if (!CFStringGetCString(CFArrayGetValueAtIndex(accounts, i), account, sizeof(account), kCFStringEncodingUTF8) ||
         !keyd_adoptable(account)) continue;
-    status = keyd_find(k, k->service, account, &item);
-    if (status == errSecSuccess) status = keyd_owner(k, item, &owner);
-    if (status == errSecSuccess && owner == KEYD_EARLIER) {
-      status = SecKeychainItemCopyAttributesAndData(item, NULL, NULL, NULL, &length, &data);
-      if (status == errSecSuccess) status = keyd_store(k, staging, account, data, length, mayHaveChanged);
-      if (status == errSecSuccess) status = SecKeychainItemDelete(item);
-      if (status == errSecSuccess) status = keyd_create(k, k->service, account, data, length);
-      if (status == errSecSuccess) status = keyd_delete(k, staging, account, mayHaveChanged);
-      if (status == errSecSuccess) (*moved)++;
-    }
-    keyd_free(data, length);
-    if (item) CFRelease(item);
+    OSStatus one = keyd_move(k, staging, account, moved, mayHaveChanged);
+    if (one != errSecSuccess && one != errSecItemNotFound) (*failed)++;
   }
   if (accounts) CFRelease(accounts);
+  return status;
+}
+
+// keyd_list names each item of the service that holds a secret's head, one account per line, in an
+// allocation the caller frees with free(). Whose items they are is for each read to say.
+static OSStatus keyd_list(const keyd_items *k, void **output, UInt32 *length) {
+  CFArrayRef accounts = NULL;
+  OSStatus status = keyd_accounts(k, k->service, &accounts);
+  char *list = status == errSecSuccess ? malloc((size_t)CFArrayGetCount(accounts) * 66 + 1) : NULL;
+  size_t used = 0;
+  if (status == errSecSuccess && !list) status = errSecAllocate;
+  for (CFIndex i = 0; status == errSecSuccess && i < CFArrayGetCount(accounts); i++) {
+    char account[80];
+    if (!CFStringGetCString(CFArrayGetValueAtIndex(accounts, i), account, sizeof(account), kCFStringEncodingUTF8) ||
+        !keyd_adoptable(account) || account[0] == '_' || strchr(account, '.')) continue;
+    size_t n = strlen(account);
+    memcpy(list + used, account, n);
+    list[used + n] = '\n';
+    used += n + 1;
+  }
+  if (accounts) CFRelease(accounts);
+  if (status != errSecSuccess) {
+    free(list);
+    return status;
+  }
+  *output = list;
+  *length = (UInt32)used;
   return status;
 }

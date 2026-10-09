@@ -17,6 +17,13 @@ static int startedAs(pid_t pid, uint64_t *sec, uint32_t *usec) {
   *sec = 1760000000; *usec = 1; return 1;
 }
 
+// The Keychain refuses keyd an item whose partition list does not name keyd, or one in a keychain the
+// user cannot unlock. This fixture is not signed by a team, so it stands in for that refusal.
+static OSStatus refusing(SecKeychainItemRef item, const char *account, void **data, UInt32 *length) {
+  if (strncmp(account, "aaa-unreadable", 14) == 0) return errSecInteractionNotAllowed;
+  return SecKeychainItemCopyAttributesAndData(item, NULL, NULL, NULL, length, data);
+}
+
 static SecAccessRef accessFor(const char *path) {
   SecTrustedApplicationRef app = NULL;
   SecAccessRef access = NULL;
@@ -68,12 +75,27 @@ static int absent(const keyd_items *k, const char *svc, const char *account) {
   return status == errSecItemNotFound;
 }
 
+// lists reports whether list names exactly these accounts, one per line, in any order.
+static int lists(const char *list, UInt32 length, const char *const *want, size_t count) {
+  size_t lines = 0;
+  for (UInt32 i = 0; i < length; i++) lines += list[i] == '\n';
+  if (lines != count || (length && list[length - 1] != '\n')) return 0;
+  for (size_t i = 0; i < count; i++) {
+    size_t n = strlen(want[i]);
+    int found = 0;
+    for (UInt32 at = 0; !found && at + n < length; at++)
+      found = (at == 0 || list[at - 1] == '\n') && memcmp(list + at, want[i], n) == 0 && list[at + n] == '\n';
+    if (!found) return 0;
+  }
+  return 1;
+}
+
 #define CHECK(cond, name) do { if (!(cond)) { fprintf(stderr, "FAIL %s\n", name); return 1; } printf("PASS %s\n", name); } while (0)
 
 static int run(SecKeychainRef keychain, const char *earlierPath) {
   int changed = 0;
-  unsigned moved = 0;
-  keyd_items k = { keychain, service, now, earlier, accessFor(NULL) };
+  unsigned moved = 0, failed = 0;
+  keyd_items k = { keychain, service, now, earlier, accessFor(NULL), refusing };
   CHECK(k.access, "keyd's access list");
 
   CHECK(keyd_store(&k, service, "weather", "keyd:aaaa:1", 11, &changed) == errSecSuccess &&
@@ -81,6 +103,10 @@ static int run(SecKeychainRef keychain, const char *earlierPath) {
   CHECK(keyd_store(&k, service, "weather", "keyd:bbbb:1", 11, &changed) == errSecSuccess &&
         holds(&k, "weather", "keyd:bbbb:1"), "store rewrites keyd's item in place");
 
+  // An earlier keyd's item and a staged one that keyd cannot read, made first and named to come first.
+  CHECK(put(keychain, service, "aaa-unreadable", "keyd:9999:1", earlierPath) &&
+        keyd_store(&k, staging, "aaa-unreadable.0", "9999:6162", 9, &changed) == errSecSuccess &&
+        owned(&k, service, "aaa-unreadable", KEYD_EARLIER), "items keyd cannot read");
   CHECK(put(keychain, service, "deepseek", "keyd:cccc:2", earlierPath) && put(keychain, service, "deepseek.0", "cccc:6162", earlierPath) &&
         put(keychain, service, "deepseek.1", "cccc:6364", earlierPath) && owned(&k, service, "deepseek", KEYD_EARLIER),
         "items the earlier keyd stored");
@@ -100,7 +126,8 @@ static int run(SecKeychainRef keychain, const char *earlierPath) {
         put(keychain, service, "weather.0", "aaaa:6566", earlierPath) &&
         keyd_store(&k, staging, "gone.0", "gggg:6768", 9, &changed) == errSecSuccess, "moves cut short");
 
-  CHECK(keyd_adopt(&k, &moved, &changed) == errSecSuccess && moved == 3, "adopt moves the earlier keyd's items");
+  CHECK(keyd_adopt(&k, &moved, &failed, &changed) == errSecSuccess && moved == 3 && failed == 2,
+        "adopt moves the earlier keyd's items past those it cannot read, and counts those");
   CHECK(owned(&k, service, "deepseek", KEYD_OURS) && owned(&k, service, "deepseek.0", KEYD_OURS) &&
         owned(&k, service, "deepseek.1", KEYD_OURS) && owned(&k, service, "weather.0", KEYD_OURS) &&
         holds(&k, "deepseek", "keyd:cccc:2") && holds(&k, "deepseek.0", "cccc:6162") && holds(&k, "deepseek.1", "cccc:6364") &&
@@ -108,8 +135,11 @@ static int run(SecKeychainRef keychain, const char *earlierPath) {
   CHECK(holds(&k, "gone.0", "gggg:6768") && absent(&k, staging, "weather.0") && absent(&k, staging, "gone.0") &&
         absent(&k, staging, "deepseek"), "a move cut short is put back and its staged copy dropped");
   CHECK(owned(&k, service, "orphan", KEYD_FOREIGN), "adopt leaves an item no keyd made");
-  moved = 0;
-  CHECK(keyd_adopt(&k, &moved, &changed) == errSecSuccess && moved == 0, "a second adopt moves nothing");
+  CHECK(owned(&k, service, "aaa-unreadable", KEYD_EARLIER) && owned(&k, staging, "aaa-unreadable.0", KEYD_OURS),
+        "an item adopt cannot read stays as it was");
+  moved = failed = 0;
+  CHECK(keyd_adopt(&k, &moved, &failed, &changed) == errSecSuccess && moved == 0 && failed == 2,
+        "a second adopt moves nothing and counts again what it cannot read");
 
   keyd_session a = { .pid = 4242, .sec = 1760000000, .usec = 1 }, b = { .pid = 4343, .sec = 1760000000, .usec = 1 };
   unsigned char secret[KEYD_SESSION_SECRET] = {1};
@@ -132,6 +162,14 @@ static int run(SecKeychainRef keychain, const char *earlierPath) {
         put(keychain, service, KEYD_SESSION_ACCOUNT, "keyd-session:1:4343:1760000000.000001:00", "/usr/bin/false") &&
         keyd_check_session(&k, &b) == errSecAuthFailed && keyd_claim(&k, &a, startedAs, &changed) == errSecSuccess &&
         owned(&k, service, KEYD_SESSION_ACCOUNT, KEYD_OURS), "a claim no keyd made serves nobody and is replaced");
+
+  const char *const heads[] = { "aaa-unreadable", "deepseek", "orphan", "planted", "weather" };
+  void *names = NULL;
+  UInt32 named = 0;
+  CHECK(keyd_store(&k, service, "_bindings", "keyd-bindings", 13, &changed) == errSecSuccess &&
+        keyd_list(&k, &names, &named) == errSecSuccess && lists(names, named, heads, 5),
+        "list names every item that holds a secret's head, whoever made it, and no chunk, claim or marker");
+  free(names);
 
   CHECK(keyd_delete(&k, service, "weather", &changed) == errSecSuccess && absent(&k, service, "weather") &&
         keyd_delete(&k, service, "orphan", &changed) == errSecSuccess && absent(&k, service, "orphan"), "delete removes any item");
