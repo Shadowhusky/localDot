@@ -19,6 +19,7 @@ import { TASK_POSE, taskHud } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { HANDHELD } from "../shell/layout.ts";
 import { NarratorBand } from "../shell/NarratorBand.tsx";
+import { narrationLine } from "../shell/narration.ts";
 import { RailPanel } from "../shell/RailPanel.tsx";
 import { StageFrame } from "../shell/StageFrame.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
@@ -610,7 +611,11 @@ function Player({
   const hud = taskHud(replay.model, replay.tMs);
   // A recording that never loaded has no moment to show: the island and dot say so instead.
   const lost = replay.status === "error" && !replay.map && !replay.model.steps.length;
-  const line = opening ? "" : lost ? LOST_LINE : hud.caption;
+  const line = opening
+    ? ""
+    : lost
+      ? LOST_LINE
+      : narrationLine(hud.row, hud.caption, replay.model, replay.tMs);
   const feed = dotFeed(
     { dotPose: lost ? "error" : TASK_POSE[hud.row], control: hud.control, row: hud.row },
     replay.model,
@@ -630,6 +635,7 @@ function Player({
         status: chapter.status === "blocked" ? "failed" : chapter.status,
         durationMs: chapter.endT - chapter.startT,
         frameId: replay.model.frames.get(chapter.id),
+        ...(chapter.intent ? { intent: chapter.intent } : {}),
       }
     );
   });

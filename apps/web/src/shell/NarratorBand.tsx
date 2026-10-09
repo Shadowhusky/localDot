@@ -3,9 +3,8 @@ import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { useFullLine } from "./FullLine.tsx";
+import { LINE_HOLD_MS } from "./narration.ts";
 
-// Each line stays at least this long, so a quick run of steps never flickers.
-export const LINE_HOLD_MS = 1000;
 const LINE_OUT_MS = 120;
 
 export interface NarratorBandProps {
@@ -76,7 +75,8 @@ function useLine(line: string, reveal: boolean) {
       setRevealed(reveal);
       return;
     }
-    const wait = Math.max(0, since.current + LINE_HOLD_MS - Date.now());
+    // Silence has nothing to read, so the first line after it comes in at once.
+    const wait = text ? Math.max(0, since.current + LINE_HOLD_MS - Date.now()) : 0;
     let swap: ReturnType<typeof setTimeout> | undefined;
     const out = setTimeout(() => {
       setLeaving(true);

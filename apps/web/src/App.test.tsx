@@ -649,7 +649,8 @@ describe("App token states", () => {
     );
     render(<App fetchImpl={d.fetchImpl} />);
     fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
-    expect(await screen.findByText(OFFLINE_SAID)).toBeTruthy();
+    // Each line dot's band shows stays long enough to read before the next.
+    expect(await screen.findByText(OFFLINE_SAID, {}, { timeout: 2000 })).toBeTruthy();
     expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
     expect(d.seen().some((c) => c.endsWith("/start"))).toBe(false);
     act(() => FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(paused) }));
@@ -657,8 +658,7 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
-    // Each line dot's band shows stays for a second before the next.
-    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2000 });
+    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2500 });
   });
 
   it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {

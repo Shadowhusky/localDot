@@ -1172,7 +1172,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   appStatus.row,
                   appStatus.caption.text,
                   // Out of touch, dot's last words are old news; the caption says what is going on.
-                  linkLost ? null : agent.model.said,
+                  linkLost || !session.sessionId ? null : session.model,
+                  now,
                 )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;

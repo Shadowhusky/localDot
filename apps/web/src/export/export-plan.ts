@@ -8,7 +8,6 @@ import {
 import {
   buildPlaybackMap,
   busySpans,
-  chapters,
   mergeSpans,
   playDuration,
   type SessionModel,
@@ -16,6 +15,8 @@ import {
   sessionAt,
 } from "@localdot/stage";
 import { timeLabel } from "../replay/replay-view.ts";
+import { taskHud } from "../session/status.ts";
+import { LINE_HOLD_MS, narrationLine } from "../shell/narration.ts";
 
 export const EXPORT_FRAME_RATES = [10, 15, 24, 30, 50, 60] as const;
 export type ExportFrameRate = (typeof EXPORT_FRAME_RATES)[number];
@@ -130,6 +131,22 @@ function knownEnd(model: SessionModel, activity: ActivitySpan[]): number {
   return endMs;
 }
 
+// The band's line at each frame, each held long enough to read in the video, as the band holds it.
+function heldLines(frames: number, fps: number, lineAt: (frame: number) => string): string[] {
+  const hold = Math.ceil((LINE_HOLD_MS * fps) / 1000);
+  const lines: string[] = [];
+  let since = 0;
+  for (let frame = 0; frame < frames; frame++) {
+    const shown = lines[frame - 1];
+    const line = lineAt(frame);
+    if (shown === undefined || (line !== shown && (!shown || frame - since >= hold))) {
+      lines.push(line);
+      since = frame;
+    } else lines.push(shown);
+  }
+  return lines;
+}
+
 function precedingIndex<T>(
   entries: readonly T[],
   time: number,
@@ -180,7 +197,6 @@ export function planExport(
   const frames = Math.ceil((playDuration(map) * fps) / (1000 * speed));
   let busyMs = 0;
   for (const span of mergeSpans(busy, startMs, endMs)) busyMs += span.to - span.from;
-  const chapterList = chapters(model, endMs);
   const gapSpans = new Map<RecordingGapReason, Span[]>();
   for (const reason of GAP_PRIORITY)
     gapSpans.set(
@@ -196,6 +212,7 @@ export function planExport(
         endMs,
       ),
     );
+  let captionTrack: string[] | undefined;
   const sessionMsAt = (frame: number) => {
     if (!Number.isSafeInteger(frame) || frame < 0 || frame >= frames)
       throw new RangeError("Export frame is outside the chosen range.");
@@ -209,10 +226,14 @@ export function planExport(
     movingS: Math.min(frames / fps, busyMs / (1000 * speed)),
     sessionMsAt,
     captionAt(frame) {
-      const time = sessionMsAt(frame);
+      sessionMsAt(frame);
       if (!captions) return null;
-      const chapter = chapterList[precedingIndex(chapterList, time, (entry) => entry.startT)];
-      return chapter && time < chapter.endT ? chapter.label : null;
+      captionTrack ??= heldLines(frames, fps, (index) => {
+        const time = sessionMsAt(index);
+        const hud = taskHud(model, time);
+        return narrationLine(hud.row, hud.caption, model, time);
+      });
+      return captionTrack[frame] || null;
     },
     gapAt(frame) {
       const time = sessionMsAt(frame);

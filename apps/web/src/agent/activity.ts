@@ -217,11 +217,14 @@ export function entryView(
     (agent?.startedAt !== undefined && agent.endedAt !== undefined
       ? microsToMs(agent.endedAt - agent.startedAt)
       : null);
-  const title =
+  const what =
     computer?.label ||
     agent?.tool?.title ||
     (kind === "file" ? fileTitle(own) : "") ||
     (kind ? KIND_TITLES[kind] : "Step");
+  // dot's own line for the call leads its first row; what it did moves to the meta line.
+  const intent = agent?.intent ?? computer?.intent;
+  const title = intent ?? what;
   const failed = state === "failed" || state === "skipped";
   const reason = failed
     ? (agent?.note ??
@@ -231,8 +234,12 @@ export function entryView(
       ? "The task ended before this step finished."
       : undefined;
   const where = computer
-    ? joined(computer.app, computer.gesture)
-    : joined(kind && KIND_PLACES[kind], diffStat(own.map((change) => change.patch)));
+    ? joined(computer.app, intent ? what : computer.gesture)
+    : joined(
+        kind && KIND_PLACES[kind],
+        intent ? what : undefined,
+        diffStat(own.map((change) => change.patch)),
+      );
   return {
     testId: computer ? "step-row" : "tool-row",
     title,

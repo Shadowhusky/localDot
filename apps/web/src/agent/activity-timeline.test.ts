@@ -156,6 +156,45 @@ describe("the activity timeline", () => {
     ).toMatchObject({ meta: "The target changed before input.", time: "0:01", failed: true });
   });
 
+  it("leads a call's first row with dot's line for it, and keeps what it did in the meta line", () => {
+    const screen: ActivityEntry = {
+      key: "s",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "s",
+        startT: 0,
+        computer: {
+          id: "s",
+          label: "Clicked “Search”",
+          startT: 0,
+          status: "ok",
+          durationMs: 400,
+          app: "Telegram",
+          gesture: "click Search",
+          intent: "Finding your chat with Mum",
+        },
+      },
+    };
+    expect(entryView(screen, [], false)).toMatchObject({
+      title: "Finding your chat with Mum",
+      meta: "Telegram · Clicked “Search”",
+    });
+    const command: ActivityEntry = {
+      key: "c",
+      keys: [],
+      row: stepRow("c", 0, undefined, {
+        intent: "Checking which paint apps are installed",
+        tool: { name: "shell", title: "command -v gimp krita" },
+        status: "ok",
+      }),
+    };
+    expect(entryView(command, [], false)).toMatchObject({
+      title: "Checking which paint apps are installed",
+      meta: "Terminal · command -v gimp krita",
+    });
+  });
+
   it("says in a failed row what dot did next: tried again, made room and tried again, or moved on", () => {
     const view = (title: string, state: EntryView["state"] = "done", meta = ""): EntryView => ({
       testId: "step-row",

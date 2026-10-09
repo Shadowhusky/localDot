@@ -122,14 +122,23 @@ describe("deterministic MP4 export plan", () => {
       expect(() => planExport({ ...request, fromMs, toMs }, model, [], [])).toThrow(RangeError);
   });
 
-  it("gives captions only within chapters and respects half-open gap boundaries", () => {
+  it("burns in the band's line, each held long enough to read, and respects half-open gap boundaries", () => {
     const { model, request } = fixture();
-    model.steps.push({ id: "read", kind: "browser", startT: 1000, endT: 5000, status: "ok" });
+    for (const [id, startT, intent] of [
+      ["open", 1000, "Opening Telegram"],
+      ["find", 1500, "Finding Mum's chat"],
+    ] as const) {
+      model.stepIndex.set(id, model.steps.length);
+      model.steps.push({ id, kind: "gui", startT, endT: startT + 300, status: "ok", intent });
+    }
     const gaps = [{ from: 2_000_000, to: 4_000_000, reason: "user-control" as const }];
     const plan = planExport(request, model, [], gaps);
     expect(plan.captionAt(0)).toBeNull();
-    expect(plan.captionAt(30)).toBe("Reading page");
-    expect(plan.captionAt(150)).toBeNull();
+    expect(plan.captionAt(30)).toBe("Opening Telegram");
+    expect(plan.captionAt(45)).toBe("Opening Telegram");
+    expect(plan.captionAt(74)).toBe("Opening Telegram");
+    expect(plan.captionAt(75)).toBe("Finding Mum's chat");
+    expect(plan.captionAt(150)).toBe("Finding Mum's chat");
     expect(plan.gapAt(59)).toBeNull();
     expect(plan.gapAt(60)).toBe("user-control");
     expect(plan.gapAt(119)).toBe("user-control");

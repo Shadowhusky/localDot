@@ -78,6 +78,15 @@ export interface StepState {
   endT?: number;
   status?: string;
   planItem?: string;
+  // dot's line for the user about the call this step starts.
+  intent?: string;
+}
+// What dot has said to the user, by message: the tail of its words and when they last grew.
+export interface SaidState {
+  id: string;
+  t: number;
+  text: string;
+  final: boolean;
 }
 export interface PlanItemState {
   id: string;
@@ -105,6 +114,9 @@ export interface SessionModel {
   observes: ObserveAt[];
   steps: StepState[];
   plans: PlanSnapshot[];
+  said: SaidState[];
+  // When the user gave dot a task or a follow-up: each starts a turn of work.
+  turns: number[];
   marks: TimelineMark[];
   byStep: Map<string, number>;
   stepIndex: Map<string, number>;
@@ -125,11 +137,16 @@ export function emptyModel(): SessionModel {
     observes: [],
     steps: [],
     plans: [],
+    said: [],
+    turns: [],
     marks: [],
     byStep: new Map(),
     stepIndex: new Map(),
   };
 }
+
+// Only a message's last sentence is ever shown, so only its tail is kept.
+const SAID_TAIL = 600;
 
 // EventLog stamps nondecreasing session times; equal times resolve to the last entry.
 function upperBound<T>(items: T[], t: number, time: (item: T) => number): number {
@@ -194,6 +211,10 @@ export function planAt(model: SessionModel, t: number): PlanItemState[] {
 export function agentStateAt(model: SessionModel, t: number): AgentStateAt | undefined {
   return model.agentStates[upperBound(model.agentStates, t, atTime) - 1];
 }
+// When the turn of work in progress at t began: the user's latest task or follow-up.
+export function turnAt(model: SessionModel, t: number): number {
+  return model.turns[upperBound(model.turns, t, (turn) => turn) - 1] ?? Number.NEGATIVE_INFINITY;
+}
 
 // Mutates and returns `model`; events already folded (seq ≤ lastSeq) are skipped, so a stream
 // that replays its backlog is harmless.
@@ -220,6 +241,7 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
             kind: e.data.kind,
             startT: t,
             ...(e.data.planItem !== undefined ? { planItem: e.data.planItem } : {}),
+            ...(e.data.intent ? { intent: e.data.intent } : {}),
           });
         }
         break;
@@ -235,6 +257,30 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
       case "plan.set":
         model.plans.push({ t, items: e.data.items.map((item) => ({ ...item })) });
         break;
+      case "message.user": {
+        if (e.data.kind !== "steer") model.turns.push(t);
+        const mark = markOf(e);
+        if (mark) model.marks.push(mark);
+        break;
+      }
+      case "message.delta":
+      case "message.assistant": {
+        const said = model.said.findLast((entry) => entry.id === e.data.messageId);
+        if (said?.final) break;
+        const text =
+          e.type === "message.assistant" ? e.data.text : (said?.text ?? "") + e.data.text;
+        const entry = {
+          id: e.data.messageId,
+          t,
+          text: text.slice(-SAID_TAIL),
+          final: e.type === "message.assistant",
+        };
+        if (said) Object.assign(said, entry);
+        else model.said.push(entry);
+        const mark = markOf(e);
+        if (mark) model.marks.push(mark);
+        break;
+      }
       case "plan.update":
         model.plans.push({
           t,
