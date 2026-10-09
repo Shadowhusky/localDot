@@ -10,6 +10,7 @@ import {
   SESSION_PAUSE_REASONS,
   type SkillSummary,
   STALL,
+  type TakeComputerReply,
   type TaskModelSelection,
   type TaskPricing,
   ULID_PATTERN,
@@ -55,6 +56,8 @@ const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
+// What Replay calls the user's own time on the computer.
+const HOLD_TITLE = "You used the computer";
 // The brain checks in only where the user asked it to.
 export function agentLimits(checkIns: CheckIns | undefined): AgentLimits {
   return {
@@ -99,7 +102,8 @@ export interface AgentRunnerDeps {
   catalog(): Catalog | undefined;
   memory: Pick<MemoryStore, "readBoth">;
   transcripts: TranscriptStore;
-  conversations?: Pick<Conversations, "current" | "earlier" | "adopt">;
+  conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
+    Partial<Pick<Conversations, "title">>;
   installSkills(cellId: string, signal: AbortSignal): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
@@ -116,9 +120,11 @@ export interface AgentRunnerDeps {
     authGeneration?(): number;
   };
 }
+// "none": the user's own hold on the computer, which no model works on.
 type ModelSelection =
   | { kind: "api"; roles: readonly ResolvedRole[]; pricing: TaskPricing; initialBudget?: number }
-  | { kind: "chatgpt"; model: string; denyRead: readonly string[] };
+  | { kind: "chatgpt"; model: string; denyRead: readonly string[] }
+  | { kind: "none" };
 interface Runtime {
   session: AgentSession;
   selection: ModelSelection;
@@ -245,7 +251,8 @@ export class AgentRunner {
         const old = this.sessions.get(current);
         if (old?.status !== "idle" || old.controlHeld)
           throw new AgentError(409, "a task is already running on this computer");
-        old.stop();
+        // A hold the user handed back ends by itself.
+        if (!this.holds(current)) old.stop();
         await (signal
           ? abortable(this.deps.live.settled(current), signal)
           : this.deps.live.settled(current));
@@ -369,7 +376,10 @@ export class AgentRunner {
   // whichever conversation is current. A task still at work is left alone and refused.
   async release(signal?: AbortSignal): Promise<void> {
     if (this.#starting.size) throw new AgentError(409, "A task is starting.");
-    const waiting = [...this.#runtime.values()].filter((rt) => !rt.session.stopped);
+    const live = [...this.#runtime.values()].filter((rt) => !rt.session.stopped);
+    if (live.some((rt) => rt.selection.kind === "none" && rt.session.controlHeld))
+      throw new AgentError(409, "Hand back the computer first.");
+    const waiting = live.filter((rt) => rt.selection.kind !== "none");
     if (
       waiting.some((rt) => rt.session.status !== "idle" || rt.session.controlHeld || !rt.idleWait)
     )
@@ -381,6 +391,79 @@ export class AgentRunner {
     const settled = Promise.all(waiting.map((rt) => this.deps.live.settled(rt.session.id)));
     await (signal ? abortable(settled, signal) : settled);
   }
+  // With no task at work, the user's own session holds the computer, in the current conversation,
+  // until they hand it back. A task at work, or at rest, gives the user its own control.
+  async hold(cellId: string, signal?: AbortSignal): Promise<TakeComputerReply> {
+    if (!ULID_PATTERN.test(cellId)) throw new AgentError(400, "invalid computer id");
+    this.#ready(cellId);
+    if (this.#starting.has(cellId)) throw new AgentError(409, "a task is starting");
+    const current = this.deps.live.get(cellId);
+    if (current) {
+      const live = this.sessions.get(current);
+      if (!live || live.stopped) throw new AgentError(409, "the computer is changing hands");
+      if (!this.holds(current) || live.controlHeld)
+        return { sessionId: live.id, requestId: live.takeControl() };
+      // A hold the user handed back is ending: the new one follows it.
+      const settled = this.deps.live.settled(current);
+      await (signal ? abortable(settled, signal) : settled);
+    }
+    const cell = this.#ready(cellId);
+    if (this.#starting.has(cellId) || this.deps.live.get(cellId))
+      throw new AgentError(409, "the computer is changing hands");
+    let continues: string | undefined;
+    let title: string | undefined;
+    try {
+      continues = this.deps.conversations?.current() ?? undefined;
+      title = continues ? this.deps.conversations?.title?.(continues) : undefined;
+    } catch {
+      console.error("the earlier conversation could not be read");
+      continues = undefined;
+      title = undefined;
+    }
+    const id = this.deps.eventLog.createSession(HOLD_TITLE);
+    const session = new AgentSession(id, cellId, "", this.deps.eventLog);
+    const rt: Runtime = {
+      session,
+      selection: { kind: "none" },
+      limits: agentLimits(undefined),
+      skills: [],
+      epoch: 0,
+      initialized: false,
+      serial: Promise.resolve(),
+    };
+    this.sessions.set(id, session);
+    this.#runtime.set(id, rt);
+    let requestId: string;
+    try {
+      this.deps.installSession?.(session, cell);
+      session.append("session.start", {
+        screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
+        os: "linux",
+        ...(title ? { title } : {}),
+        ...(continues ? { continues } : {}),
+      });
+      session.setStatus("idle");
+      // Before its run starts, which ends once the user no longer holds the computer.
+      requestId = session.takeControl();
+      this.deps.live.start(cellId, id, (stop) => this.#run(rt, stop));
+    } catch (error) {
+      session.stop();
+      await session.screensSettled().catch(() => {});
+      this.sessions.delete(id);
+      this.#runtime.delete(id);
+      throw error;
+    }
+    try {
+      this.deps.conversations?.adopt(id);
+    } catch {
+      console.error("the current conversation could not be saved");
+    }
+    return { sessionId: id, requestId };
+  }
+  // The session is the user's own hold on the computer, with no task.
+  holds(id: string): boolean {
+    return this.#runtime.get(id)?.selection.kind === "none";
+  }
   get(id: string): AgentSession | undefined {
     return this.sessions.get(id);
   }
@@ -390,7 +473,8 @@ export class AgentRunner {
   }
   pauseTask(id: string, requestId: string): import("@localdot/protocol").PauseSnapshot {
     const rt = this.#runtime.get(id);
-    if (!rt || rt.session.stopped) throw new AgentError(409, "task not available");
+    if (!rt || rt.session.stopped || rt.selection.kind === "none")
+      throw new AgentError(409, "task not available");
     return this.#safety(rt).request(requestId);
   }
   budgetHoldOf(id: string): "task" | "day" | undefined {
@@ -486,7 +570,7 @@ export class AgentRunner {
   }
   selectionOf(id: string) {
     const selection = this.#runtime.get(id)?.selection;
-    if (!selection) return undefined;
+    if (!selection || selection.kind === "none") return undefined;
     return selection.kind === "chatgpt"
       ? { kind: "chatgpt" as const, model: selection.model }
       : taskSelection(selection.roles);
@@ -532,6 +616,7 @@ export class AgentRunner {
       throw new AgentError(400, "invalid task budget");
     const rt = this.#runtime.get(id);
     if (!rt) throw new AgentError(404, "no such live task");
+    if (rt.selection.kind === "none") throw new AgentError(409, "no task is at work");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
     if (planOnly(rt.selection.roles))
@@ -778,6 +863,7 @@ export class AgentRunner {
     if (liveSignal.aborted) stop();
     let reason: "done" | "stopped" | "error" = "done";
     try {
+      if (rt.selection.kind === "none") return await session.waitForControl();
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
       const skills = await this.deps.installSkills(session.cellId, session.abort.signal);
@@ -840,7 +926,14 @@ export class AgentRunner {
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {
-            if (!(await session.waitForUser(this.deps.idleMs ?? IDLE_MS, idleWait.signal))) break;
+            const idleMs = this.deps.idleMs ?? IDLE_MS;
+            let asked = await session.waitForUser(idleMs, idleWait.signal);
+            // While the user has the computer, a finished task waits for them rather than the clock.
+            while (!asked && session.controlHeld) {
+              await session.waitForControl(idleWait.signal);
+              asked = await session.waitForUser(idleMs, idleWait.signal);
+            }
+            if (!asked) break;
           } catch (error) {
             if (rt.released) break;
             if (!idleWait.signal.aborted || rt.authResumeAfter === undefined) throw error;

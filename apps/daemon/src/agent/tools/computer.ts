@@ -21,12 +21,17 @@ import type { AgentSession } from "../session.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
+const LOOK_AGAIN =
+  "Not done: the user had the computer, so the screen may have changed. Here is the screen now; look again before acting.";
 
+// A full look at the screen: dot owes none once it has one.
 async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolResult> {
   ctx.check();
   const o = await deps.gateway.observe(screenContext(ctx));
   ctx.check();
-  return { ok: true, content: [await frame(deps, ctx, o.frameId)] };
+  const content = [await frame(deps, ctx, o.frameId)];
+  ctx.session.freshLook();
+  return { ok: true, content };
 }
 
 // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
@@ -234,6 +239,11 @@ export async function computerTool(
   }
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
+  // What dot saw before the user had the computer may be gone: it acts on a fresh look.
+  if (action.verb !== "wait" && session.lookOwed) {
+    const now = await screenshot(deps, ctx);
+    return { ok: false, cancelled: "stale", content: [text(LOOK_AGAIN), ...now.content] };
+  }
   // The browser screen presses one key at a time and keeps no button down between actions:
   // refused before approval.
   if (ctx.screen?.selection.screen === "browser") {

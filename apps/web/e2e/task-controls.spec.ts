@@ -392,10 +392,14 @@ for (const width of [1280, 390])
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
       if (width < 1100) await page.getByRole("tab", { name: /^Computer/ }).click();
+      // dot hands the computer over from the island; it is the user's once they take it.
+      await page.getByRole("button", { name: "Take control", exact: true }).click();
+      const handBack = page.getByRole("button", { name: "Hand back", exact: true });
+      await expect(handBack).toBeEnabled();
       const keyboard = page.getByLabel("Type on the computer", { exact: true });
       await expect(keyboard).toBeEnabled();
       await page.reload(); // The held takeover is restored from the daemon, never released by reload.
-      await expect(page.getByRole("region", { name: "Manual control" })).toBeVisible();
+      await expect(handBack).toBeEnabled();
       await expect(keyboard).toBeEnabled();
       await expect
         .poll(async () => Number(await page.locator(".stage-canvas").getAttribute("data-frames")))
@@ -444,7 +448,10 @@ for (const width of [1280, 390])
           holdMs: 0,
         },
       });
-      await page.getByRole("button", { name: "Paste text", exact: true }).click();
+      await page
+        .getByRole("toolbar", { name: "Computer controls", exact: true })
+        .getByRole("button", { name: /^Type text/ })
+        .click();
       const paste = page.getByLabel("Text to type on the computer", { exact: true });
       await paste.fill("synthetic-password 中文🙂");
       await paste.press("Enter");
@@ -456,22 +463,17 @@ for (const width of [1280, 390])
       await expect(paste).toHaveCount(0);
       expect(JSON.stringify(f.log.read(f.id))).not.toContain("synthetic-password");
       expect(f.session.inboxSequence).toBe(0);
-      const note = page.getByLabel("Optional note for dot");
-      await note.fill("已完成，请继续 / Please continue");
-      await expect(note).toHaveValue("已完成，请继续 / Please continue");
       const handbackRequest = page.waitForRequest(
         (request) => request.url().endsWith("/takeover/done") && request.method() === "POST",
       );
-      await page.getByRole("button", { name: "Return control to dot" }).click();
-      expect((await handbackRequest).postDataJSON()).toMatchObject({
-        note: "已完成，请继续 / Please continue",
-      });
+      await handBack.click();
+      expect((await handbackRequest).postDataJSON()).not.toHaveProperty("note");
       expect(await returned).toMatchObject({ by: "user" });
-      await expect(page.getByRole("region", { name: "Manual control" })).toHaveCount(0);
+      await expect(handBack).toHaveCount(0);
       expect(f.session.controlHeld).toBe(false);
       expect(f.log.read(f.id).find((event) => event.type === "takeover.end")?.data).toMatchObject({
         by: "user",
-        note: "已完成，请继续 / Please continue",
+        typed: true,
       });
       await proof(page, p.errors, p.external);
     } finally {
@@ -495,8 +497,12 @@ for (const [edge, sheet] of [
       await expect.poll(() => f.session.manualControl).toBe("ready");
       await page.setViewportSize({ width: 390, height: 850 });
       const p = await load(page, f);
+      await page.getByRole("button", { name: "Take control", exact: true }).click();
       await expect(page.getByLabel("Type on the computer", { exact: true })).toBeEnabled();
-      await page.getByRole("button", { name: "Paste text", exact: true }).click();
+      await page
+        .getByRole("toolbar", { name: "Computer controls", exact: true })
+        .getByRole("button", { name: /^Type text/ })
+        .click();
       await page
         .getByLabel("Text to type on the computer", { exact: true })
         .fill("unsent-synthetic-password");
@@ -521,7 +527,7 @@ for (const [edge, sheet] of [
         );
       await page.screenshot({ path: info.outputPath(`stop-${edge}-390.png`), fullPage: true });
       if (sheet) await root.getByRole("button", { name: /^Close / }).click();
-      await expect(page.getByRole("region", { name: "Manual control" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Hand back", exact: true })).toHaveCount(0);
       await expect(page.getByLabel("Message", { exact: true })).toBeDisabled();
       expect(f.native.calls).toEqual([]);
       expect(JSON.stringify(f.log.read(f.id))).not.toContain("unsent-synthetic-password");

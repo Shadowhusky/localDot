@@ -13,6 +13,22 @@ export interface StepRowView {
   durationMs: number | null;
   delivery?: "proposed" | "delivered";
   reason?: string;
+  // Where it happened and the gesture with what it touched: "Calc", "click F3".
+  app?: string;
+  gesture?: string;
+}
+
+const COUNTS = ["", "", "double-", "triple-"];
+
+function gesture(a: ActionState): string {
+  const input = a.dispatch?.input;
+  const word =
+    input?.kind === "click"
+      ? `${input.button === "right" ? "right-" : input.button === "middle" ? "middle-" : COUNTS[input.count]}click`
+      : a.verb === "key"
+        ? "keys"
+        : a.verb;
+  return a.target?.name ? `${word} ${a.target.name}` : word;
 }
 
 const CANCEL_REASONS: Record<string, string> = {
@@ -60,6 +76,8 @@ export function stepRows(model: SessionModel): StepRowView[] {
       ...(a.target?.bbox ? { target: a.target.bbox } : {}),
       durationMs: done === undefined ? null : Math.round(done - a.intentT),
       delivery: a.dispatch ? "delivered" : "proposed",
+      gesture: gesture(a),
+      ...(a.target?.app ? { app: a.target.app } : {}),
       ...(a.cancel
         ? {
             reason:

@@ -109,8 +109,8 @@ describe("incremental non-executing terminal text", () => {
     expect(shown(row.terminal)).toBe("visibletail");
     expect(shown(row.terminal)).not.toContain("clipboard-sentinel");
   });
-  it("does not fabricate model activity, and bounds actual display-event activity", () => {
-    expect(emptyAgentModel().activity).toBeUndefined();
+  it("does not fabricate dot's words, and keeps only the tail of what it thinks", () => {
+    expect(emptyAgentModel().said).toBeUndefined();
     const model = projectAgentEvent(emptyAgentModel(), {
       v: 1,
       id: "00000000000000000000000000",
@@ -120,6 +120,6 @@ describe("incremental non-executing terminal text", () => {
       type: "thought.delta",
       data: { text: "中".repeat(30_000) },
     } as LocalDotEvent);
-    expect(model.activity).toHaveLength(20_000);
+    expect(model.said?.text).toHaveLength(600);
   });
 });

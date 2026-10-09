@@ -158,7 +158,7 @@ export function LiveWorkLine({
               <li key={step.key} className="thread-work-step">
                 <StatusGlyph state={step.state} />
                 <span className="thread-work-title">{step.title}</span>
-                {step.metric && <span className="thread-work-metric num">{step.metric}</span>}
+                {step.time && <span className="thread-work-time num">{step.time}</span>}
               </li>
             ))}
           </ol>

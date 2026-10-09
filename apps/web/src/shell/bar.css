@@ -50,3 +50,14 @@
 .bar-modes {
   margin-right: calc(var(--spacing) * 2);
 }
+
+/* The island has risen into the centre: it is the island's alone, and the title stops short of it. */
+.bar[data-centre] {
+  grid-template-columns: minmax(0, 1fr) var(--bar-centre) minmax(0, 1fr);
+}
+
+/* Its own width, as in two columns, so the room it leaves the island never changes with it. */
+.bar[data-centre] > .bar-r {
+  grid-column: 3;
+  justify-self: end;
+}

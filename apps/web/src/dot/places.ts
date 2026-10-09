@@ -24,6 +24,11 @@ export function registerPlace(name: PlaceName, element: HTMLElement): () => void
   };
 }
 
+// A place moved without a resize or a transition of its own, as when the stage travels to full screen.
+export function placesMoved(): void {
+  for (const listener of listeners) listener();
+}
+
 export function onPlaces(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);

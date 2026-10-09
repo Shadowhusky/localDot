@@ -89,15 +89,20 @@ export interface Delivery {
   readonly at: number;
   readonly phase: "sending" | "accepted" | "refused" | "uncertain";
 }
+// The user holds the computer with no task: dot hears from them once they hand it back.
+const holding = (props: ComposerProps) =>
+  !!props.agent.snapshot?.holder && !!props.agent.snapshot.pendingTakeover;
 const readyCell = (props: ComposerProps) =>
   props.known &&
   !props.pending &&
   !props.controlBlocked &&
+  !holding(props) &&
   props.cell?.state === "ready" &&
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
 function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageMode {
-  if (!props.agent.sessionId || props.agent.model.ended) return "new";
+  if (!props.agent.sessionId || props.agent.model.ended || props.agent.snapshot?.holder)
+    return "new";
   return props.agent.snapshot?.status === "idle" ? "followup" : selected;
 }
 // Why nothing can be sent to the computer now, in the order someone would fix it.
@@ -111,6 +116,7 @@ function computerReason(props: ComposerProps): string | undefined {
     return "Turn on your computer first.";
   if (props.cell.paused) return "Resume your computer first.";
   if (props.controlBlocked) return "You can send once the task is ready.";
+  if (holding(props)) return "Hand back the computer, then message dot.";
   return undefined;
 }
 // Why nothing can be sent now, as Send says it.
@@ -672,7 +678,7 @@ export function Composer(props: ComposerProps) {
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
       ? "Wait until your message is sent."
-      : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
+      : (reason ?? (takeover ? "Add files once you hand back." : undefined));
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
   const sendLabel = newConversation
@@ -683,15 +689,13 @@ export function Composer(props: ComposerProps) {
         ? "Send follow-up"
         : "Send now";
   const note =
-    mode === "new"
+    mode === "new" || takeover
       ? undefined
-      : takeover
-        ? "You keep control of the computer"
-        : props.agent.snapshot?.status === "paused"
-          ? TRIES_AGAIN.has(props.agent.model.state?.reason)
-            ? "Sending tries the model again"
-            : "Sending won't resume the task"
-          : undefined;
+      : props.agent.snapshot?.status === "paused"
+        ? TRIES_AGAIN.has(props.agent.model.state?.reason)
+          ? "Sending tries the model again"
+          : "Sending won't resume the task"
+        : undefined;
   const notices = [
     problem && { text: problem, alert: true },
     uploads.problem && { text: uploads.problem, alert: true },

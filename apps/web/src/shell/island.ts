@@ -2,15 +2,17 @@ import type { PauseSnapshot, Rect } from "@localdot/protocol";
 import type { Status } from "../session/status.ts";
 
 // The island's fixed shapes; within one, its width never changes. Ready: the computer is on and
-// free. Task: a task holds it, with every slot. Computer: the computer is off, starting or stuck,
-// with the computer's own action until the curtain carries it. Hidden: the curtain covers the
-// stage, or nothing is known yet.
-export type IslandShape = "hidden" | "ready" | "task" | "computer";
+// free. Task: a task holds it, with every slot. Control: the user has the computer, and Hand back
+// stands where Take control was. Computer: the computer is off, starting or stuck, with the
+// computer's own action until the curtain carries it. Hidden: the curtain covers the stage, or
+// nothing is known yet.
+export type IslandShape = "hidden" | "ready" | "task" | "control" | "computer";
 
 const ON = new Set<Status["computer"]>(["live", "connecting", "reconnecting"]);
 
 export function islandShape(status: Status, curtain: boolean): IslandShape {
   if (curtain || status.computer === "checking") return "hidden";
+  if (status.row === "control") return "control";
   if (status.actions.some((action) => action.kind === "stop-task")) return "task";
   return ON.has(status.computer) ? "ready" : "computer";
 }
@@ -60,7 +62,11 @@ export function pauseSlot({
       if (canResume) return { kind: "continue" };
       return {
         kind: "continue",
-        reason: budgetHeld ? "Raise this task's limit first" : "Continue isn't available yet",
+        reason: handedOver
+          ? "You have the computer"
+          : budgetHeld
+            ? "Raise this task's limit first"
+            : "Continue isn't available yet",
       };
   }
 }
@@ -92,15 +98,43 @@ export interface TakeSlot {
   // dot has asked for the user: Take control becomes the island's porcelain action.
   primary: boolean;
   reason?: string;
+  busy?: boolean;
 }
 
-// While dot waits on an approval, Take control answers it: the user does the step themselves.
-export const takeSlot = (status: Status, decision: IslandDecision = null): TakeSlot =>
-  status.row === "takeover"
-    ? { primary: true }
-    : decision === "approval"
-      ? { primary: false }
-      : { primary: false, reason: "dot hands you the computer when it needs you" };
+export interface TakeInput {
+  decision?: IslandDecision;
+  // Why the user can't take the computer just now, or nothing when they can.
+  blocked?: string;
+  // The computer is on its way to the user.
+  taking?: boolean;
+}
+
+export interface TakeReasonInput {
+  // A task is live on the computer, so the user takes its control; otherwise a hold of their own.
+  task: boolean;
+  ready: boolean;
+  pause: PauseSnapshot["phase"] | undefined;
+}
+
+// Why the user can't take the computer just now, or nothing when they can. A Pause that can't be
+// confirmed never settles by itself: only Stop ends it.
+export function takeReason({ task, ready, pause }: TakeReasonInput): string | undefined {
+  if (ready) return undefined;
+  if (!task) return "Wait for the computer to be ready";
+  if (pause === "uncertain") return "Stop the task to take over";
+  if (pause && pause !== "paused") return "Wait for the pause to settle";
+  return "Wait a moment";
+}
+
+// Take control works whatever dot is doing. dot handing the computer over makes it the porcelain
+// action; while dot waits on an approval it answers that approval: the user does the step
+// themselves.
+export function takeSlot(status: Status, { decision = null, blocked, taking }: TakeInput = {}) {
+  if (status.row === "takeover") return { primary: true } satisfies TakeSlot;
+  if (decision === "approval") return { primary: false } satisfies TakeSlot;
+  if (taking) return { primary: false, busy: true } satisfies TakeSlot;
+  return { primary: false, ...(blocked ? { reason: blocked } : {}) } satisfies TakeSlot;
+}
 
 // The space the decision keeps from a ring on a field dot will fill.
 const RING_CLEARANCE_PX = 12;
@@ -130,4 +164,31 @@ export function decisionTop({ hung, size, stageW, rings, floor }: DecisionPlace)
     if (covered) top = ring.y + ring.h + RING_CLEARANCE_PX;
   }
   return Math.max(hung, Math.min(top, floor - size.h));
+}
+
+// A box on the page, as getBoundingClientRect gives it.
+export interface PageBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// While a sheet's scrim is up the island rises over it (design-v2 §5), so Stop and Take control stay
+// in reach, unless a sheet would then sit under the island: where they meet, the sheet comes first.
+export function liftOverScrim(
+  scrim: boolean,
+  island: PageBox,
+  sheets: readonly PageBox[],
+): boolean {
+  return (
+    scrim &&
+    !sheets.some(
+      (sheet) =>
+        sheet.left < island.right &&
+        island.left < sheet.right &&
+        sheet.top < island.bottom &&
+        island.top < sheet.bottom,
+    )
+  );
 }

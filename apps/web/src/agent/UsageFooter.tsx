@@ -3,7 +3,6 @@ import { useRef, useState } from "react";
 import { count, dollars, spendText } from "../copy/format.ts";
 import { providerName } from "../settings/choices.ts";
 import { Button } from "../ui/Button.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { Meter } from "../ui/Meter.tsx";
 import { Popover } from "../ui/Popover.tsx";
 import { pressHandlers } from "../ui/press.ts";
@@ -271,7 +270,6 @@ export function UsageFooter({
       >
         {main && <span className="activity-usage-text">{main}</span>}
         <span className="activity-usage-figures num">{figures}</span>
-        <Icon name="chevron-up" size={12} className="activity-usage-chevron" />
       </button>
       <Popover
         open={open}

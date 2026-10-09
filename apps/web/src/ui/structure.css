@@ -41,7 +41,7 @@
   }
 
   /* Xenon belongs to dot having control, so the turning arc takes it only then. */
-  :where(.app.control) .ui-status-glyph[data-state="doing"] {
+  :where(:root:has(.app.control)) .ui-status-glyph[data-state="doing"] {
     color: var(--color-xenon);
   }
 
