@@ -1,27 +1,35 @@
 import { randomBytes } from "node:crypto";
 import { renameSync, rmSync, writeFileSync } from "node:fs";
-import { fileKind, type JsonPreview, PREVIEW_LIMITS, type PreviewReason } from "@localdot/protocol";
+import {
+  fileKind,
+  type JsonPreview,
+  PREVIEW_LIMITS,
+  type PreviewReason,
+  VIEWER_LIMITS,
+} from "@localdot/protocol";
 import { outputPath } from "../agent/output-store.ts";
 import { boundedJson, tableExcerpt, textExcerpt } from "./excerpt.ts";
 import { PreviewRefused, previewPng } from "./image-preview.ts";
 import { StoredFiles } from "./stored.ts";
 
-// Renders an office document or PDF to a page image somewhere other than the Mac (inside dot's
-// computer), or says why it could not.
-export type Converted = Buffer | "computer_off" | "busy" | "failed";
+// Renders an office document or PDF somewhere other than the Mac (inside dot's computer), or says
+// why it could not: its first page as a picture, or an office document's every page as a PDF.
+export type Converted = Buffer | "computer_off" | "busy" | "failed" | "too_large";
 export interface Converter {
   convert(name: string, bytes: Buffer, signal: AbortSignal): Promise<Converted>;
+  pages(name: string, bytes: Buffer, signal: AbortSignal): Promise<Converted>;
 }
 export type Preview = { png: Buffer; madeBy: "daemon" | "computer" } | { json: string };
-const none = (reason: PreviewReason): Preview => ({
+export type Pages = { pdf: Buffer } | { json: string };
+const none = (reason: PreviewReason): { json: string } => ({
   json: JSON.stringify({ kind: "none", reason } satisfies JsonPreview),
 });
 
-// One preview per stored version; page images are cached beside the task and never change,
-// because a numbered version's bytes never change.
+// One preview per stored version; page images and pages are cached beside the task and never
+// change, because a numbered version's bytes never change.
 export class Previews {
   readonly #files: StoredFiles;
-  readonly #pending = new Map<string, Promise<Preview>>();
+  readonly #pending = new Map<string, Promise<Preview | Pages>>();
   #converting: Promise<unknown> = Promise.resolve();
   constructor(
     home: string,
@@ -35,14 +43,50 @@ export class Previews {
     version: number | null,
     signal: AbortSignal,
   ): Promise<Preview> {
-    const key = `${sessionId}/${name}/${version ?? 0}`;
-    const pending = this.#pending.get(key);
-    if (pending) return pending;
-    const work = this.#make(sessionId, name, version, signal).finally(() =>
-      this.#pending.delete(key),
+    return this.#once(`${sessionId}/${name}/${version ?? 0}`, () =>
+      this.#make(sessionId, name, version, signal),
     );
+  }
+  // An office document's every page as a PDF, made inside dot's computer.
+  pages(
+    sessionId: string,
+    name: string,
+    version: number | null,
+    signal: AbortSignal,
+  ): Promise<Pages> {
+    return this.#once(`${sessionId}/${name}/${version ?? 0}/pages`, () =>
+      this.#makePages(sessionId, name, version, signal),
+    );
+  }
+  #once<T extends Preview | Pages>(key: string, make: () => Promise<T>): Promise<T> {
+    const pending = this.#pending.get(key);
+    if (pending) return pending as Promise<T>;
+    const work = make().finally(() => this.#pending.delete(key));
     this.#pending.set(key, work);
     return work;
+  }
+  async #makePages(
+    sessionId: string,
+    name: string,
+    version: number | null,
+    signal: AbortSignal,
+  ): Promise<Pages> {
+    const rel = outputPath(sessionId, name, version);
+    if (!rel || !this.#files.exists(rel)) return none("missing");
+    if (fileKind(name) !== "office") return none("attachment");
+    // Without a version the bytes are out/<name>, which a later version replaces: never cached.
+    const cache = version === null ? undefined : `sessions/${sessionId}/previews/${name}`;
+    const cached = cache && this.#files.head(`${cache}/${version}.pdf`, VIEWER_LIMITS.pdfBytes);
+    if (cached && cached.size <= VIEWER_LIMITS.pdfBytes) return { pdf: cached.head };
+    const whole = this.#files.head(rel, PREVIEW_LIMITS.convertBytes + 1);
+    if (!whole) return none("missing");
+    if (whole.size > PREVIEW_LIMITS.convertBytes) return none("too_large");
+    const pdf = await this.#oneAtATime(() => this.converter.pages(name, whole.head, signal));
+    if (typeof pdf === "string") return none(pdf);
+    if (pdf.byteLength > VIEWER_LIMITS.pdfBytes) return none("too_large");
+    if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return none("failed");
+    if (cache) this.#store(cache, `${version}.pdf`, pdf);
+    return { pdf };
   }
   async #make(
     sessionId: string,
@@ -95,12 +139,12 @@ export class Previews {
     this.#converting = run.catch(() => {});
     return run;
   }
-  #store(dir: string, file: string, png: Buffer): void {
+  #store(dir: string, file: string, bytes: Buffer): void {
     this.#files.directory(dir);
     const target = this.#files.path(`${dir}/${file}`);
     const temp = `${target}.${randomBytes(6).toString("hex")}.tmp`;
     try {
-      writeFileSync(temp, png, { flag: "wx", mode: 0o600 });
+      writeFileSync(temp, bytes, { flag: "wx", mode: 0o600 });
       renameSync(temp, target);
     } finally {
       rmSync(temp, { force: true });
