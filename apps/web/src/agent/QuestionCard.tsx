@@ -25,7 +25,10 @@ export function QuestionCard({
   const asked = useMemo(() => revealText(question.question), [question.question]);
   return (
     <article className="thread-question" aria-label="Question">
-      <p className="thread-question-text">
+      <p
+        className="thread-question-text"
+        {...(form ? { id: `ask-${question.askId}`, tabIndex: -1 } : {})}
+      >
         <RevealedText text={question.question} />
       </p>
       {asked.hidden && <p className="decision-warning">{hiddenWarning(asked)}</p>}

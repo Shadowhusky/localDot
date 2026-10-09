@@ -55,6 +55,7 @@ import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { listenForSessionLinks } from "./notify/session-link.ts";
 import { useAttention } from "./notify/useAttention.ts";
 import { useAttentionToasts } from "./notify/useAttentionToasts.ts";
+import { useOpenSession } from "./notify/useOpenSession.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
 import { Onboarding } from "./onboarding/Onboarding.tsx";
@@ -822,31 +823,6 @@ function Theatre({ api }: { api: ApiClient }) {
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
   };
-  const live = useRef({
-    sessionId: agent.sessionId,
-    approval: safety.approval,
-    select: selectReplay,
-  });
-  live.current = { sessionId: agent.sessionId, approval: safety.approval, select: selectReplay };
-  // A notification or a toast names a task: the live one opens in Watch at its decision, any other
-  // in Replay.
-  const openSession = useCallback((id: string | null) => {
-    if (!id) return;
-    const now = live.current;
-    if (id !== now.sessionId) return now.select(id);
-    now.select(null);
-    const approval = now.approval?.approvalId;
-    if (approval)
-      requestAnimationFrame(() =>
-        document.getElementById(`approval-${approval}`)?.focus({ preventScroll: true }),
-      );
-  }, []);
-  const attention = useAttention(api, openSession);
-  useEffect(() => listenForSessionLinks(openSession), [openSession]);
-  const viewing = replayId === LIBRARY ? null : (replayId ?? agent.sessionId ?? null);
-  useSeenReporting(api, attention.items, viewing);
-  useAttentionToasts(attention.latest, { viewing, island: !replayId }, openSession);
-  useTabAttention(appStatus, { count: attention.items.length, top: attention.top });
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
@@ -1012,6 +988,23 @@ function Theatre({ api }: { api: ApiClient }) {
       ) : undefined,
     [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
   );
+  const openSession = useOpenSession({
+    known: session.known,
+    sessionId: agent.sessionId,
+    decision:
+      approvalView && approval
+        ? `approval-${approval.approvalId}`
+        : askDraft && askIn
+          ? `ask-${askDraft.question.askId}`
+          : null,
+    select: selectReplay,
+  });
+  const attention = useAttention(api, openSession);
+  useEffect(() => listenForSessionLinks(openSession), [openSession]);
+  const viewing = replayId === LIBRARY ? null : (replayId ?? agent.sessionId ?? null);
+  useSeenReporting(api, attention.items, viewing);
+  useAttentionToasts(attention.latest, { viewing, island: !replayId }, openSession);
+  useTabAttention(appStatus, { count: attention.items.length, top: attention.top });
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
       <AskForm
