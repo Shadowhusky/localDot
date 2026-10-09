@@ -169,6 +169,7 @@ function fixture() {
     },
     create,
     retireReset: cells.retireReset.bind(cells),
+    discardUpdate: cells.discardUpdate.bind(cells),
     inspectReplacement: vi.fn(async (id: string) =>
       store.get(id) ? ("ready" as const) : ("absent" as const),
     ),
@@ -326,6 +327,20 @@ it("refuses an unavailable daemon or invalid source without creating orphan hold
   g.store.remove(old);
   await expect(g.controller.reset(old, confirmation)).rejects.toThrow();
   expect(g.holds.records()).toEqual([]);
+});
+it("refuses while the computer is updating, before it captures anything", async () => {
+  const f = fixture();
+  const cells = {
+    ...f.deps.cells,
+    get: (id: string) => {
+      const row = f.cells.get(id);
+      return row && { ...row, updating: true as const };
+    },
+  };
+  const controller = createComputerResetController({ ...f.deps, cells });
+  await expect(controller.reset(old, confirmation)).rejects.toThrow();
+  expect(f.holds.records()).toEqual([]);
+  expect(f.events).toEqual([]);
 });
 it("does not create a replacement if the daemon begins shutdown during old retirement", async () => {
   const f = fixture();

@@ -35,6 +35,7 @@ export interface ComputerResetControllerDeps {
     | "get"
     | "create"
     | "retireReset"
+    | "discardUpdate"
     | "inspectReplacement"
     | "retireReplacement"
     | "holdReplacement"
@@ -113,6 +114,8 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     inspectFresh,
     oldAbsent,
     retireOld: async (record) => {
+      // An unfinished update's new containers mount the home beside the captured graph.
+      await d.cells.discardUpdate(record.oldCellId);
       // Do not start even the ordinary Stop/browser cleanup path until the captured graph is owned.
       await verifyComputerResetResources(d.docker, record);
       if (!(await d.runner.retireForReset(record.oldCellId))) throw failure();
@@ -159,7 +162,8 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     restoreReady: () => owner.restoreReady(),
     status: (old: string, request: string) => owner.status(old, request),
     reset: (old: string, input: ComputerResetRequest) => {
-      if (!d.available()) return Promise.reject(failure());
+      // An update moves the computer onto new containers after the source below is captured.
+      if (!d.available() || d.cells.get(old)?.updating) return Promise.reject(failure());
       try {
         const request = ComputerResetRequest.parse(input);
         // Invalid/missing source records must not leave new durable holds with no transaction.

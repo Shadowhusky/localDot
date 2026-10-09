@@ -51,7 +51,10 @@ export interface OrchestratorDeps {
   creationAllowed?(): boolean;
   verifyRuntime?(record: CellRecord): Promise<void>;
   diagnosticAdmission?(id: string): { release(): void } | undefined;
-  updates?: Pick<ComputerUpdates, "available" | "pending" | "swap" | "recover">;
+  updates?: Pick<
+    ComputerUpdates,
+    "available" | "pending" | "prepare" | "swap" | "recover" | "discard"
+  >;
   diagnosticProbe?(
     endpoint: CellEndpoints["desktopd"],
     signal: AbortSignal,
@@ -174,6 +177,10 @@ const objectPath = (kind: "containers" | "networks" | "volumes", name: string, a
   `/${kind}/${encodeURIComponent(name)}${action ? `/${action}` : ""}`;
 
 export const UPDATE_UNFINISHED = "The update didn't finish. Turn on your computer to finish it.";
+export const UPDATE_RECORDS_UNREADABLE =
+  "localDot can't read its update records. Restart localDot, then turn on your computer.";
+const UPDATE_UNDONE = "Your computer couldn't be updated. It's back as it was.";
+const UPDATE_STOPPED = "Your computer couldn't be updated. Turn it on to keep using it.";
 
 // Detail that comes from a container or from desktopd is cut to this length before it is shown.
 const MAX_DETAIL = 200;
@@ -633,39 +640,52 @@ export class CellOrchestrator {
   async #update(id: string): Promise<void> {
     const updates = this.deps.updates;
     if (!updates) throw new CellControlConflict("Updates are unavailable.");
+    const record = this.#require(id);
+    await updates.prepare(record);
+    // Checked after the last wait: a reset or replacement holds the computer from its first step.
     if (this.#held(id))
       throw new CellControlConflict(
         "the computer is permanently fenced or awaiting replacement confirmation",
       );
-    const record = this.#require(id);
     this.#updating.add(id);
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
     this.#set(id, stopping);
+    let refusal = UPDATE_UNDONE;
     let next: CellRecord;
     try {
-      if (!(await this.#closeInKeyd(id)))
-        throw new CellControlConflict("The key layer didn't answer. Try again in a moment.");
+      if (!(await this.#closeInKeyd(id))) {
+        refusal = "The key layer didn't answer. Try again in a moment.";
+        throw new CellControlConflict(refusal);
+      }
       for (const name of [record.docker.desktop, record.docker.gate])
         await this.#stopContainer(name);
       next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
     } catch (error) {
+      this.#updating.delete(id);
       if (!this.#current(id, stopping)) throw error;
       if (updates.pending(id)) {
-        this.#set(id, {
-          state: "failed",
-          restarts: 0,
-          stream: NO_STREAM,
-          error: UPDATE_UNFINISHED,
-        });
-        throw new CellControlConflict(UPDATE_UNFINISHED);
+        const unfinished =
+          error instanceof CellControlConflict && error.message === UPDATE_RECORDS_UNREADABLE
+            ? UPDATE_RECORDS_UNREADABLE
+            : UPDATE_UNFINISHED;
+        this.#set(id, { state: "failed", restarts: 0, stream: NO_STREAM, error: unfinished });
+        throw new CellControlConflict(unfinished);
       }
       const old = this.#require(id);
-      if (await this.#startContainers(old, 0).catch(() => false))
-        this.#detach(id, this.#waitReady(old));
-      throw new CellControlConflict("Your computer couldn't be updated. It's back as it was.");
+      const back = await this.#startContainers(old, 0).catch(() => false);
+      if (back) this.#detach(id, this.#waitReady(old));
+      else if (this.#current(id, stopping))
+        this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
+      throw new CellControlConflict(back ? refusal : UPDATE_STOPPED);
     }
     if (!this.#current(id, stopping)) return;
-    if (await this.#startContainers(next, 0)) this.#detach(id, this.#waitReady(next));
+    try {
+      if (await this.#startContainers(next, 0)) this.#detach(id, this.#waitReady(next));
+    } catch (error) {
+      if (this.#current(id, stopping))
+        this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
+      throw error;
+    }
   }
 
   // An update the daemon stopped in the middle is finished, or rolled back, before anything else
@@ -674,6 +694,14 @@ export class CellOrchestrator {
     const updates = this.deps.updates;
     if (!updates?.pending(record.id)) return record;
     return updates.recover(record, (next) => this.#adopt(next));
+  }
+
+  // Clears what an unfinished update left beside a computer about to be reset.
+  discardUpdate(id: string): Promise<void> {
+    return this.#queued(id, async () => {
+      const record = this.#record(id);
+      if (record) await this.deps.updates?.discard(record);
+    });
   }
 
   #adopt(next: CellRecord): void {
@@ -994,7 +1022,7 @@ export class CellOrchestrator {
   }
 
   async #remove(id: string, opts: { purgeHome?: boolean }): Promise<void> {
-    const record = await this.#finishUpdate(this.#require(id));
+    const record = this.#require(id);
     const d = record.docker;
     const ignoreMissing = (err: unknown) => {
       if (!isStatus(err, 404)) throw err;
@@ -1006,6 +1034,7 @@ export class CellOrchestrator {
       for (const name of [d.desktop, d.gate]) {
         await this.#removeContainer(name).catch(ignoreMissing);
       }
+      await this.deps.updates?.discard(record);
       if (!closed)
         throw new Error(
           "keyd closure could not be confirmed; retry Remove when the key layer responds",
@@ -1704,6 +1733,7 @@ export class CellOrchestrator {
       this.#set(id, { state: "stopping", restarts: 0, stream: NO_STREAM });
       const revoked = !!this.#keyd && (await this.#closeInKeyd(id));
       if (!revoked) return { absent: false, revoked: false };
+      if (record) await this.deps.updates?.discard(record);
       await retireExactCell(this.#docker, id, names, record?.ownership, purgeHome);
       this.#retiredPortOwners.add(id);
       this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });

@@ -10,6 +10,7 @@ import {
   CellControlConflict,
   type CellOrchestrator,
   UnknownCellError,
+  UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
@@ -24,12 +25,12 @@ export const UPDATE_LABEL = "localdot.update";
 const ContainerId = z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/);
 const ImageId = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const Id = z.string().regex(ULID_PATTERN);
-const PHASES = ["creating", "retiring", "renaming", "done"] as const;
+const PHASES = ["creating", "retiring", "renaming"] as const;
 
 // New containers are made beside the stopped old ones ("creating"), the old ones are removed
-// ("retiring"), the new ones take the old names and the cell record ("renaming"). Until the old
-// ones go, an interrupted update rolls back; after that it only goes forward. The home volume,
-// networks, addresses, tokens and keyd port are never touched.
+// ("retiring"), the new ones take the old names and the cell record ("renaming"), and the record
+// goes. Until the old ones go, an interrupted update rolls back; after that it only goes forward.
+// The home volume, networks, addresses, tokens and keyd port are never touched.
 export const ComputerUpdateRecord = z.strictObject({
   v: z.literal(1),
   operationId: Id,
@@ -37,12 +38,10 @@ export const ComputerUpdateRecord = z.strictObject({
   previous: z.strictObject({ gate: ContainerId, desktop: ContainerId }),
   images: z.strictObject({ gate: ImageId, desktop: ImageId }),
   candidates: z.strictObject({ gate: ContainerId.nullable(), desktop: ContainerId.nullable() }),
-  phase: z.enum([...PHASES, "rolled-back"]),
+  phase: z.enum(PHASES),
 });
 export type ComputerUpdateRecord = z.infer<typeof ComputerUpdateRecord>;
 
-const settled = (entry: ComputerUpdateRecord) =>
-  entry.phase === "done" || entry.phase === "rolled-back";
 const full = (entry: ComputerUpdateRecord) =>
   entry.candidates.gate !== null && entry.candidates.desktop !== null;
 
@@ -64,30 +63,23 @@ export class ComputerUpdateStore {
   write(input: ComputerUpdateRecord): void {
     const next = ComputerUpdateRecord.parse(input),
       before = this.read(next.cellId);
-    if (!before || before.operationId !== next.operationId) {
+    if (!before) {
       if (
-        (before && !settled(before)) ||
         next.phase !== "creating" ||
         next.candidates.gate !== null ||
         next.candidates.desktop !== null
       )
-        throw new Error("An earlier computer update is unfinished");
+        throw new Error("A computer update starts with no new containers");
     } else {
-      const same = (field: "v" | "cellId" | "previous" | "images") =>
-        equal(before[field], next[field]);
-      const from = PHASES.indexOf(before.phase as (typeof PHASES)[number]);
-      const to = PHASES.indexOf(next.phase as (typeof PHASES)[number]);
-      const forward =
-        next.phase === "rolled-back"
-          ? before.phase === "creating"
-          : from >= 0 && (to === from || to === from + 1);
+      if (before.operationId !== next.operationId)
+        throw new Error("An earlier computer update is unfinished");
+      const from = PHASES.indexOf(before.phase),
+        to = PHASES.indexOf(next.phase);
       if (
-        !same("v") ||
-        !same("cellId") ||
-        !same("previous") ||
-        !same("images") ||
-        !forward ||
-        (next.phase !== "creating" && next.phase !== "rolled-back" && !full(next)) ||
+        !equal(before.previous, next.previous) ||
+        !equal(before.images, next.images) ||
+        (to !== from && to !== from + 1) ||
+        (next.phase !== "creating" && !full(next)) ||
         ROLES.some(
           (role) =>
             before.candidates[role] !== null && before.candidates[role] !== next.candidates[role],
@@ -97,9 +89,13 @@ export class ComputerUpdateStore {
     }
     this.#records.write(next.cellId, next);
   }
+  remove(cellId: string): void {
+    this.#records.remove(cellId);
+  }
 }
 
 const failure = () => new CellControlConflict(UPDATE_UNFINISHED);
+const NOT_HERE = "The new version isn't on this Mac yet.";
 
 export interface ComputerUpdatesDeps {
   home: string;
@@ -127,18 +123,19 @@ export class ComputerUpdates {
     this.#everyMs = deps.everyMs ?? 60_000;
     try {
       const ledger = new ComputerUpdateStore(deps.home);
-      for (const entry of ledger.list()) if (!settled(entry)) this.#unfinished.add(entry.cellId);
+      for (const entry of ledger.list()) this.#unfinished.add(entry.cellId);
       this.#ledger = ledger;
     } catch {
-      // Without its records an interrupted update can't be told apart, so every computer waits.
       console.error("computer update records are unreadable");
     }
   }
 
+  // A new version is ready, or an earlier update is waiting to be finished.
   available(id: string): boolean {
-    return this.#available.get(id) === true || this.pending(id);
+    return this.#available.get(id) === true || this.#unfinished.has(id);
   }
 
+  // Without its records an interrupted update can't be told apart, so every computer waits.
   pending(id: string): boolean {
     return !this.#ledger || this.#unfinished.has(id);
   }
@@ -176,13 +173,21 @@ export class ComputerUpdates {
     return () => clearInterval(timer);
   }
 
+  // Refuses an update that can't go ahead, before anything is stopped. An unfinished one is
+  // finished first, so it is never refused here.
+  async prepare(record: CellRecord): Promise<void> {
+    this.#store();
+    if (this.pending(record.id)) return;
+    ownedContainers(record);
+    if (!(await this.#targets())) throw new CellControlConflict(NOT_HERE);
+  }
+
   // The computer must be stopped. Resolves the record that now owns the new containers.
   async swap(record: CellRecord, save: Save): Promise<CellRecord> {
-    const before = this.#store().read(record.id);
-    if (before && !settled(before)) throw failure();
+    if (this.#store().read(record.id)) throw failure();
     const previous = ownedContainers(record);
     const images = await this.#targets();
-    if (!images) throw new CellControlConflict("The new version isn't on this Mac yet.");
+    if (!images) throw new CellControlConflict(NOT_HERE);
     const old = await Promise.all(ROLES.map((role) => this.#container(previous[role])));
     if (old.some((raw) => raw?.State?.Running !== false))
       throw new CellControlConflict("Your computer has to be off to update.");
@@ -216,8 +221,8 @@ export class ComputerUpdates {
           .catch(() => {
             // A lost reply may still have created it: the name and this update's label tell.
           });
-        const made = await this.#candidate(entry, record, role);
-        if (!made || made.Image !== images[role]) throw failure();
+        const made = await this.#owned(record, role, entry.operationId);
+        if (!made || made.Image !== images[role] || made.State?.Running !== false) throw failure();
         entry = { ...entry, candidates: { ...entry.candidates, [role]: made.Id } };
         this.#write(entry);
       }
@@ -232,6 +237,7 @@ export class ComputerUpdates {
 
   // Finishes or rolls back an interrupted update. The computer must be stopped.
   async recover(record: CellRecord, save: Save): Promise<CellRecord> {
+    this.#store();
     try {
       return await this.#recover(record, save);
     } catch {
@@ -241,7 +247,15 @@ export class ComputerUpdates {
 
   async #recover(record: CellRecord, save: Save): Promise<CellRecord> {
     const entry = this.#store().read(record.id);
-    if (!entry || settled(entry)) return record;
+    if (!entry) {
+      this.#unfinished.delete(record.id);
+      return record;
+    }
+    // Nothing of the new version is left (pruned, or removed by hand): the update is over.
+    if (await this.#candidatesGone(entry, record)) {
+      this.#settle(record.id);
+      return record;
+    }
     const owner = record.ownership;
     const candidates = entry.candidates;
     if (
@@ -257,6 +271,32 @@ export class ComputerUpdates {
       return record;
     }
     return this.#finish(entry, record, save);
+  }
+
+  // Removes what an unfinished update made beside a computer that is being removed or reset, and
+  // forgets the update. The computer's own containers, under its own names, are the caller's.
+  async discard(record: CellRecord): Promise<void> {
+    let entry: ComputerUpdateRecord | undefined;
+    try {
+      entry = this.#ledger?.read(record.id);
+    } catch {
+      // An unreadable record still leaves this update's labels on what it made.
+    }
+    for (const role of ROLES) {
+      const ids = new Set<string>();
+      const known = entry?.candidates[role];
+      if (known && (await this.#container(known))) ids.add(known);
+      const named = await this.#owned(record, role, entry?.operationId);
+      if (named) ids.add(named.Id);
+      if (ids.size)
+        await retireExactContainers(
+          this.#docker,
+          record.id,
+          [...ids].map((id) => ({ role, id })),
+        );
+    }
+    this.#available.delete(record.id);
+    if (entry) this.#settle(record.id);
   }
 
   async #finish(start: ComputerUpdateRecord, record: CellRecord, save: Save) {
@@ -279,14 +319,7 @@ export class ComputerUpdates {
     for (const role of ROLES) {
       const id = entry.candidates[role] as string;
       const raw = await this.#container(id);
-      const labels = raw?.Config?.Labels;
-      if (
-        !raw ||
-        labels?.["localdot.cell"] !== record.id ||
-        labels["localdot.role"] !== role ||
-        labels[UPDATE_LABEL] !== entry.operationId
-      )
-        throw failure();
+      if (!raw || !ours(raw, record.id, role, entry.operationId)) throw failure();
       if (raw.Name === `/${record.docker[role]}`) continue;
       if (raw.Name !== `/${temporary(record, role)}`) throw failure();
       await this.#docker.request({
@@ -297,39 +330,44 @@ export class ComputerUpdates {
     }
     const next: CellRecord = { ...record, ownership: { ...record.ownership, gate, desktop } };
     if (!equal(record.ownership, next.ownership)) save(next);
-    step("done");
+    this.#settle(record.id);
     this.#available.set(record.id, false);
     return next;
   }
 
   async #rollBack(entry: ComputerUpdateRecord, record: CellRecord): Promise<void> {
     for (const role of ROLES) {
-      const id = entry.candidates[role] ?? (await this.#candidate(entry, record, role))?.Id;
+      const id = entry.candidates[role] ?? (await this.#owned(record, role, entry.operationId))?.Id;
       if (id) await retireExactContainers(this.#docker, record.id, [{ role, id }]);
     }
-    this.#write({ ...entry, phase: "rolled-back" });
+    this.#settle(record.id);
+  }
+
+  async #candidatesGone(entry: ComputerUpdateRecord, record: CellRecord): Promise<boolean> {
+    for (const role of ROLES) {
+      const id = entry.candidates[role];
+      if (id && (await this.#container(id))) return false;
+      if (await this.#owned(record, role, entry.operationId)) return false;
+    }
+    return true;
   }
 
   #write(entry: ComputerUpdateRecord): void {
     this.#store().write(entry);
-    if (settled(entry)) this.#unfinished.delete(entry.cellId);
-    else this.#unfinished.add(entry.cellId);
+    this.#unfinished.add(entry.cellId);
   }
 
-  // This update's container under the temporary name. Anything else there is never adopted.
-  async #candidate(entry: ComputerUpdateRecord, record: CellRecord, role: Role) {
+  #settle(cellId: string): void {
+    this.#store().remove(cellId);
+    this.#unfinished.delete(cellId);
+  }
+
+  // The container an update made under the temporary name: this update's when `operationId` is
+  // given, any update's otherwise. Anything else there is never adopted or removed.
+  async #owned(record: CellRecord, role: Role, operationId?: string) {
     const raw = await this.#container(temporary(record, role));
-    if (!raw) return undefined;
-    const labels = raw.Config?.Labels;
-    if (
-      typeof raw.Id !== "string" ||
-      labels?.["localdot.cell"] !== record.id ||
-      labels["localdot.role"] !== role ||
-      labels[UPDATE_LABEL] !== entry.operationId ||
-      (entry.candidates[role] !== null && raw.Id !== entry.candidates[role]) ||
-      raw.State?.Running !== false
-    )
-      throw failure();
+    if (!raw || typeof raw.Id !== "string" || !ours(raw, record.id, role, operationId))
+      return undefined;
     return raw as ContainerInspect & { Id: string };
   }
 
@@ -372,7 +410,7 @@ export class ComputerUpdates {
   }
 
   #store(): ComputerUpdateStore {
-    if (!this.#ledger) throw failure();
+    if (!this.#ledger) throw new CellControlConflict(UPDATE_RECORDS_UNREADABLE);
     return this.#ledger;
   }
 }
@@ -383,6 +421,17 @@ interface ContainerInspect {
   Image?: string;
   State?: { Running?: boolean };
   Config?: { Labels?: Record<string, string> };
+}
+
+function ours(raw: ContainerInspect, cellId: string, role: Role, operationId?: string): boolean {
+  const labels = raw.Config?.Labels;
+  const update = labels?.[UPDATE_LABEL];
+  return (
+    labels?.["localdot.cell"] === cellId &&
+    labels["localdot.role"] === role &&
+    !!update &&
+    (operationId === undefined || update === operationId)
+  );
 }
 
 function temporary(record: CellRecord, role: Role): string {
@@ -400,7 +449,7 @@ export class ComputerUpdateRefused extends CellControlConflict {}
 
 export interface UpdateAdmissionDeps {
   cells: Pick<CellOrchestrator, "get" | "update">;
-  live: Pick<LiveSessions, "get" | "admitIdleOperation">;
+  live: Pick<LiveSessions, "get" | "admitIdleOperation" | "idleOperationPending">;
   runner: {
     holds(sessionId: string): boolean;
     get(sessionId: string): { status: string; controlHeld: boolean } | undefined;
@@ -419,7 +468,9 @@ export async function updateComputer(
   if (!cell) throw new UnknownCellError(id);
   if (cell.fenced || cell.replacementPending)
     throw new ComputerUpdateRefused("This computer can't be updated right now.");
-  if (cell.updating) throw new ComputerUpdateRefused("Your computer is already updating.");
+  // An Update already admitted holds the computer's one idle operation until it is done.
+  if (cell.updating || d.live.idleOperationPending(id))
+    throw new ComputerUpdateRefused("Your computer is already updating.");
   if (!cell.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
   const busy = () => new ComputerUpdateRefused("Wait for dot to finish, or stop the task first.");
   const sessionId = d.live.get(id);

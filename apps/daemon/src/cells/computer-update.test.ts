@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ulid } from "@localdot/protocol";
+import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ComputerUpdateRefused,
@@ -11,7 +11,14 @@ import {
   updateComputer,
 } from "./computer-update.ts";
 import { DockerClient } from "./docker.ts";
-import { CellControlConflict, CellOrchestrator, UPDATE_UNFINISHED } from "./orchestrator.ts";
+import { retireExactContainers } from "./exact-retirement.ts";
+import {
+  CellControlConflict,
+  CellOrchestrator,
+  type OrchestratorDeps,
+  UPDATE_RECORDS_UNREADABLE,
+  UPDATE_UNFINISHED,
+} from "./orchestrator.ts";
 import { desktopSpec, gateSpec } from "./spec.ts";
 import { CellStore } from "./store.ts";
 import { type FakeDocker, startFakeDocker } from "./testing/fake-docker.ts";
@@ -32,7 +39,19 @@ const healthy: DesktopdHealth = {
     windowScalingFactor: 2,
     xftDpi: 96,
   },
+  selftest: {
+    ok: true,
+    ms: 16,
+    checks: SELFTEST_CHECKS.map((c) => ({ ...c, ok: true, detail: "fine" })),
+  },
 };
+const keyd = () => ({
+  wire: async () => {},
+  isWired: async () => true,
+  refresh: async () => [],
+  revoke: async () => 0,
+  close: vi.fn(async (_id: string) => {}),
+});
 
 let fake: FakeDocker;
 const made: CellOrchestrator[] = [];
@@ -50,7 +69,7 @@ const waitUntil = (pred: () => boolean, ms = 2000) =>
     check();
   });
 
-async function setup(deps: { permanentFence?: (id: string) => boolean } = {}) {
+async function setup(deps: Partial<OrchestratorDeps> = {}) {
   fake = await startFakeDocker();
   const home = mkdtempSync(join(tmpdir(), "local dot's update-"));
   homes.push(home);
@@ -175,19 +194,21 @@ describe("CellOrchestrator.update", () => {
   });
 
   it("brings the computer back as it was when a new container can't be made", async () => {
-    const { updates, orchestrator, store, home, id, record } = await setup();
+    const { updates, orchestrator, store, home, changes, id, record } = await setup();
     rebuild();
     await updates.check(record);
     fake.state.failCreate.add(`${record.docker.desktop}-update`);
     await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
     await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    // Turning the old computer back on is not "Updating" any more.
+    expect(changes.filter((c) => c.state === "starting" && c.updating)).toEqual([]);
 
     expect(store.get(id)).toEqual(record);
     expect(containerIds().sort()).toEqual(
       [record.ownership?.desktop, record.ownership?.gate].sort(),
     );
     expect(fake.state.containers.get(record.docker.desktop)?.running).toBe(true);
-    expect(new ComputerUpdateStore(home).read(id)?.phase).toBe("rolled-back");
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
     expect(orchestrator.get(id)?.updateAvailable).toBe(true);
   });
 
@@ -253,7 +274,7 @@ describe("an update interrupted by a daemon restart", () => {
       [record.ownership?.desktop, record.ownership?.gate].sort(),
     );
     expect(fake.state.volumes.has(record.docker.homeVolume)).toBe(true);
-    expect(ledger.read(id)?.phase).toBe("rolled-back");
+    expect(ledger.read(id)).toBeUndefined();
     expect(restarted.updates.pending(id)).toBe(false);
     await restarted.updates.check(record);
     expect(restarted.orchestrator.get(id)?.updateAvailable).toBe(true);
@@ -279,13 +300,335 @@ describe("an update interrupted by a daemon restart", () => {
     expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(next.ownership?.desktop);
     expect(fake.state.containers.get(record.docker.gate)?.id).toBe(next.ownership?.gate);
     expect(fake.state.containers.size).toBe(2);
-    expect(new ComputerUpdateStore(home).read(id)?.phase).toBe("done");
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
     expect(restarted.orchestrator.get(id)?.state).toBe("stopped");
 
     await restarted.orchestrator.start(id);
     await waitUntil(() => restarted.orchestrator.get(id)?.state === "ready");
     expect(fake.state.containers.get(record.docker.desktop)?.image).toBe(NEW_DESKTOP);
     expect(restarted.orchestrator.get(id)).not.toHaveProperty("updateAvailable");
+  });
+});
+
+const interrupt = (request: string) => fake.state.failRequests.add(request);
+const renameOf = (record: CellRecord, role: "gate" | "desktop") =>
+  `POST /containers/id-${record.docker[role]}-update/rename`;
+const mountsHome = (record: CellRecord) =>
+  [...fake.state.containers.values()].filter((c) =>
+    ((c.body.HostConfig.Mounts as { Source?: string }[] | undefined) ?? []).some(
+      (m) => m.Source === record.docker.homeVolume,
+    ),
+  );
+
+describe("refusals before and during the swap", () => {
+  it("says the new version isn't here before anything stops", async () => {
+    const { updates, orchestrator, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    fake.state.images.delete(images.desktop);
+    const before = fake.state.calls.length;
+    await expect(orchestrator.update(id)).rejects.toThrow("The new version isn't on this Mac yet.");
+    expect(fake.state.calls.slice(before).filter((c) => c.method !== "GET")).toEqual([]);
+    expect(orchestrator.get(id)?.state).toBe("ready");
+    expect(orchestrator.get(id)).not.toHaveProperty("updating");
+  });
+
+  it("passes the key layer's silence on once the computer is back", async () => {
+    const wiring = keyd();
+    const { updates, orchestrator, id, record } = await setup({ keyd: wiring });
+    rebuild();
+    await updates.check(record);
+    wiring.close.mockRejectedValueOnce(new Error("timed out"));
+    await expect(orchestrator.update(id)).rejects.toThrow("The key layer didn't answer.");
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(orchestrator.get(id)?.state).toBe("ready");
+    expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(record.ownership?.desktop);
+  });
+
+  it("never swaps a computer that is still on", async () => {
+    const { updates, store, home, id } = await setup();
+    rebuild();
+    await expect(updates.swap(store.get(id) as CellRecord, () => {})).rejects.toThrow(
+      "has to be off",
+    );
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(fake.state.containers.size).toBe(2);
+  });
+
+  it("rolls back a new container that isn't on the new image", async () => {
+    const { updates, orchestrator, store, home, id, record } = await setup();
+    // The tag names the new build, yet what Docker made from it is still the old image.
+    fake.state.imageInspect = (reference, reply) => ({
+      ...reply,
+      Id: reference === images.desktop ? NEW_DESKTOP : NEW_GATE,
+    });
+    await updates.check(record);
+    await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(store.get(id)).toEqual(record);
+    expect(containerIds().sort()).toEqual(
+      [record.ownership?.desktop, record.ownership?.gate].sort(),
+    );
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+  });
+
+  it("leaves a container it didn't make under the temporary name alone", async () => {
+    const { updates, orchestrator, docker, home, id, record } = await setup();
+    const foreign = `${record.docker.desktop}-update`;
+    await docker.request({
+      method: "POST",
+      path: "/containers/create",
+      query: { name: foreign },
+      body: {
+        Image: images.desktop,
+        Labels: { "localdot.cell": id, "localdot.role": "desktop" },
+        HostConfig: {},
+      },
+    });
+    rebuild();
+    await updates.check(record);
+    await expect(orchestrator.update(id)).rejects.toThrow("It's back as it was");
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(fake.state.containers.get(foreign)?.id).toBe(`id-${foreign}`);
+    expect(fake.state.containers.has(`${record.docker.gate}-update`)).toBe(false);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+  });
+
+  it("ends as stopped, not updating, when the computer is fenced as the new version starts", async () => {
+    let fenced = false;
+    const { updates, orchestrator, id, record } = await setup({ permanentFence: () => fenced });
+    rebuild();
+    await updates.check(record);
+    let release = () => {};
+    const rename = renameOf(record, "desktop");
+    fake.state.holds.set(
+      rename,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const done = orchestrator.update(id).catch((error: unknown) => error);
+    await waitUntil(() => fake.state.calls.some((c) => `${c.method} ${c.path}` === rename));
+    fenced = true;
+    release();
+    expect(await done).toBeInstanceOf(CellControlConflict);
+    expect(orchestrator.get(id)?.state).toBe("stopped");
+    expect(orchestrator.get(id)).not.toHaveProperty("updating");
+  });
+
+  it("offers no update while the computer is held", async () => {
+    let fenced = false;
+    const { updates, orchestrator, id, record } = await setup({ permanentFence: () => fenced });
+    rebuild();
+    await updates.check(record);
+    expect(orchestrator.get(id)?.updateAvailable).toBe(true);
+    fenced = true;
+    expect(orchestrator.get(id)).not.toHaveProperty("updateAvailable");
+  });
+});
+
+describe("an update that can't be finished", () => {
+  it("is over when its new containers are gone, and the old computer starts", async () => {
+    const { updates, orchestrator, home, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    interrupt(`DELETE /containers/${record.ownership?.gate}`);
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    expect(new ComputerUpdateStore(home).read(id)?.phase).toBe("retiring");
+    fake.state.failRequests.clear();
+    // Pruned by hand while the computer was off.
+    for (const role of ["gate", "desktop"] as const)
+      fake.state.containers.delete(`${record.docker[role]}-update`);
+
+    await orchestrator.start(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(orchestrator.get(id)?.state).toBe("ready");
+    expect(fake.state.containers.get(record.docker.desktop)?.id).toBe(record.ownership?.desktop);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(updates.pending(id)).toBe(false);
+  });
+
+  it("refuses to finish over a computer that changed, and Remove still clears all of it", async () => {
+    const { updates, orchestrator, boot, store, home, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    interrupt(renameOf(record, "desktop"));
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    fake.state.failRequests.clear();
+    orchestrator.dispose();
+    store.save({
+      ...record,
+      ownership: {
+        ...(record.ownership as NonNullable<CellRecord["ownership"]>),
+        desktop: "f".repeat(64),
+      },
+    });
+
+    const restarted = boot();
+    await expect(restarted.orchestrator.start(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    expect(fake.state.containers.has(`${record.docker.desktop}-update`)).toBe(true);
+
+    await restarted.orchestrator.remove(id, { purgeHome: true });
+    expect(fake.state.containers.size).toBe(0);
+    expect(fake.state.volumes.has(record.docker.homeVolume)).toBe(false);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(restarted.orchestrator.get(id)).toBeUndefined();
+  });
+
+  it("lets Remove through while Docker keeps refusing the last step", async () => {
+    const { updates, orchestrator, home, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    interrupt(renameOf(record, "desktop"));
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    await orchestrator.remove(id);
+    expect(fake.state.containers.size).toBe(0);
+    expect(fake.state.volumes.has(record.docker.homeVolume)).toBe(true);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+  });
+
+  it("is cleared before the computer is replaced or reset", async () => {
+    const { updates, orchestrator, home, id, record } = await setup({ keyd: keyd() });
+    rebuild();
+    await updates.check(record);
+    interrupt(renameOf(record, "desktop"));
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    expect(mountsHome(record).map((c) => c.name)).toEqual([`${record.docker.desktop}-update`]);
+
+    await orchestrator.discardUpdate(id);
+    expect(mountsHome(record)).toEqual([]);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(await orchestrator.retireReplacement(id, true)).toEqual({ absent: true, revoked: true });
+  });
+
+  it("is cleared when a replacement retires the computer", async () => {
+    const { updates, orchestrator, id, record } = await setup({ keyd: keyd() });
+    rebuild();
+    await updates.check(record);
+    interrupt(renameOf(record, "desktop"));
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    expect(await orchestrator.retireReplacement(id, true)).toEqual({ absent: true, revoked: true });
+    expect(fake.state.containers.size).toBe(0);
+  });
+});
+
+describe("unreadable update records", () => {
+  it("say so instead of offering an update, and keep Remove working", async () => {
+    const { orchestrator, boot, home, id, record } = await setup();
+    orchestrator.dispose();
+    chmodSync(join(home, "safety", "computer-image-updates"), 0o755);
+    const restarted = boot();
+    rebuild();
+    await restarted.updates.check(record);
+    expect(restarted.updates.available(id)).toBe(false);
+    await restarted.orchestrator.reconcile();
+    expect(restarted.orchestrator.get(id)).toMatchObject({
+      state: "failed",
+      error: UPDATE_RECORDS_UNREADABLE,
+    });
+    expect(restarted.orchestrator.get(id)).not.toHaveProperty("updateAvailable");
+    await expect(restarted.orchestrator.start(id)).rejects.toThrow(UPDATE_RECORDS_UNREADABLE);
+    await restarted.orchestrator.remove(id, { purgeHome: true });
+    expect(fake.state.containers.size).toBe(0);
+  });
+});
+
+describe("ComputerUpdateStore", () => {
+  const home = () => {
+    const dir = mkdtempSync(join(tmpdir(), "local dot's update store-"));
+    homes.push(dir);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+  const CELL = ulid();
+  const start = () => ({
+    v: 1 as const,
+    operationId: ulid(),
+    cellId: CELL,
+    previous: { gate: "old-gate", desktop: "old-desktop" },
+    images: { gate: NEW_GATE, desktop: NEW_DESKTOP },
+    candidates: { gate: null, desktop: null },
+    phase: "creating" as const,
+  });
+  const both = { gate: "new-gate", desktop: "new-desktop" };
+
+  it("starts an update only from nothing, with no new containers yet", () => {
+    const store = new ComputerUpdateStore(home());
+    expect(() => store.write({ ...start(), phase: "retiring", candidates: both })).toThrow(
+      "starts with no new containers",
+    );
+    expect(() =>
+      store.write({ ...start(), candidates: { gate: "new-gate", desktop: null } }),
+    ).toThrow("starts with no new containers");
+    const entry = start();
+    store.write(entry);
+    expect(() => store.write(start())).toThrow("earlier computer update is unfinished");
+    store.remove(CELL);
+    expect(store.read(CELL)).toBeUndefined();
+    store.write(start());
+  });
+
+  it("moves one phase at a time, only forward, with both new containers past creating", () => {
+    const store = new ComputerUpdateStore(home());
+    const entry = start();
+    store.write(entry);
+    store.write({ ...entry, candidates: { gate: "new-gate", desktop: null } });
+    expect(() =>
+      store.write({ ...entry, phase: "retiring", candidates: { gate: "new-gate", desktop: null } }),
+    ).toThrow("identity or phase changed");
+    expect(() => store.write({ ...entry, phase: "renaming", candidates: both })).toThrow(
+      "identity or phase changed",
+    );
+    store.write({ ...entry, phase: "retiring", candidates: both });
+    expect(() => store.write({ ...entry, phase: "creating", candidates: both })).toThrow(
+      "identity or phase changed",
+    );
+    store.write({ ...entry, phase: "renaming", candidates: both });
+    expect(store.read(CELL)?.phase).toBe("renaming");
+  });
+
+  it("never lets an update change what it replaces, its images or a recorded container", () => {
+    const store = new ComputerUpdateStore(home());
+    const entry = { ...start(), candidates: { gate: "new-gate", desktop: null } };
+    store.write({ ...entry, candidates: { gate: null, desktop: null } });
+    store.write(entry);
+    for (const changed of [
+      { ...entry, previous: { gate: "other", desktop: "old-desktop" } },
+      { ...entry, images: { gate: NEW_DESKTOP, desktop: NEW_DESKTOP } },
+      { ...entry, candidates: { gate: "other-gate", desktop: null } },
+      { ...entry, candidates: { gate: null, desktop: null } },
+    ])
+      expect(() => store.write(changed)).toThrow("identity or phase changed");
+    expect(store.read(CELL)).toEqual(entry);
+  });
+});
+
+describe("retireExactContainers", () => {
+  it("refuses a running, paused or someone else's container and removes nothing", async () => {
+    const { orchestrator, docker, id, record } = await setup();
+    await orchestrator.stop(id);
+    const desktop = fake.state.containers.get(record.docker.desktop);
+    const gate = fake.state.containers.get(record.docker.gate);
+    if (!desktop || !gate) throw new Error("no computer");
+    const pairs = [
+      { role: "gate" as const, id: gate.id as string },
+      { role: "desktop" as const, id: desktop.id as string },
+    ];
+    desktop.running = true;
+    await expect(retireExactContainers(docker, id, pairs)).rejects.toThrow("cannot be confirmed");
+    desktop.paused = true;
+    await expect(retireExactContainers(docker, id, pairs)).rejects.toThrow("cannot be confirmed");
+    desktop.running = false;
+    desktop.paused = false;
+    await expect(retireExactContainers(docker, ulid(), pairs)).rejects.toThrow(
+      "ownership cannot be confirmed",
+    );
+    await expect(
+      retireExactContainers(docker, id, [{ role: "desktop", id: gate.id as string }]),
+    ).rejects.toThrow("ownership cannot be confirmed");
+    expect(fake.state.containers.size).toBe(2);
+    await retireExactContainers(docker, id, pairs);
+    expect(fake.state.containers.size).toBe(0);
   });
 });
 
@@ -303,6 +646,7 @@ describe("updateComputer admission", () => {
   const deps = (
     cell: CellSummary,
     session?: { status: string; controlHeld: boolean; hold?: boolean },
+    opts: { admitted?: boolean; pending?: boolean } = {},
   ) => {
     const release = vi.fn();
     const order: string[] = [];
@@ -318,17 +662,24 @@ describe("updateComputer admission", () => {
         },
         live: {
           get: () => (session ? "01JXYZ0000000000000000SESS" : undefined),
-          admitIdleOperation: () => ({ release }),
+          admitIdleOperation: () => (opts.admitted === false ? undefined : { release }),
+          idleOperationPending: () => opts.pending === true,
         },
         runner: {
           holds: () => session?.hold === true,
           get: () => session,
           release: vi.fn(async () => {
             order.push("follow-up ended");
-          }),
+          }) as ((signal?: AbortSignal) => Promise<void>) | undefined,
         },
       },
     };
+  };
+  const refusal = async (d: ReturnType<typeof deps>["d"]) => {
+    const error = await updateComputer(d, ID).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ComputerUpdateRefused);
+    expect(d.cells.update).not.toHaveBeenCalled();
+    return (error as Error).message;
   };
 
   it("refuses while dot works, while the user holds the computer, or when fenced", async () => {
@@ -336,7 +687,7 @@ describe("updateComputer admission", () => {
       [summary(), { status: "running", controlHeld: false }, "Wait for dot to finish"],
       [summary(), { status: "waiting_user", controlHeld: false }, "Wait for dot to finish"],
       [summary(), { status: "idle", controlHeld: true }, "Hand back the computer first."],
-      [summary(), { status: "idle", controlHeld: true, hold: true }, "Hand back the computer"],
+      [summary(), { status: "idle", controlHeld: false, hold: true }, "Hand back the computer"],
       [summary({ fenced: { revision: 1 } }), undefined, "can't be updated right now"],
       [summary({ updateAvailable: undefined }), undefined, "up to date"],
     ] as const) {
@@ -346,6 +697,28 @@ describe("updateComputer admission", () => {
       expect((refusal as Error).message).toContain(words);
       expect(d.cells.update).not.toHaveBeenCalled();
     }
+  });
+
+  it("answers a second Update while the first one waits its turn", async () => {
+    const { d } = deps(summary(), undefined, { pending: true });
+    expect(await refusal(d)).toBe("Your computer is already updating.");
+  });
+
+  it("refuses when a task slips in between the checks and the update", async () => {
+    const { d } = deps(summary(), undefined, { admitted: false });
+    expect(await refusal(d)).toBe("Wait for dot to finish, or stop the task first.");
+  });
+
+  it("refuses when a finished task's wait can't be ended", async () => {
+    const missing = deps(summary(), { status: "idle", controlHeld: false });
+    missing.d.runner.release = undefined;
+    expect(await refusal(missing.d)).toBe("Wait for dot to finish, or stop the task first.");
+    const failing = deps(summary(), { status: "idle", controlHeld: false });
+    failing.d.runner.release = vi.fn(async () => {
+      throw new Error("task is busy again");
+    });
+    expect(await refusal(failing.d)).toBe("Wait for dot to finish, or stop the task first.");
+    expect(failing.release).not.toHaveBeenCalled();
   });
 
   it("ends a finished task's wait and holds new tasks off until the update is done", async () => {
