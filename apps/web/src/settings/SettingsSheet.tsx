@@ -27,6 +27,7 @@ import {
 import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, SpendingLimits } from "./Limits.tsx";
+import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import {
   autonomyValue,
@@ -92,6 +93,7 @@ export interface SettingsSheetProps {
     value: CheckInsDraft;
     change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
+  purposeCheck?: PurposeCheckControl;
   knowledge?: Knowledge;
   accounts?: AccountsView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
@@ -650,6 +652,7 @@ function SectionContent({
             saved={props.savedAutonomy}
             onChange={props.onAutonomy}
           />
+          {props.purposeCheck && <PurposeCheck control={props.purposeCheck} />}
           {props.checkIns && (
             <CheckIns value={props.checkIns.value} onChange={props.checkIns.change} />
           )}

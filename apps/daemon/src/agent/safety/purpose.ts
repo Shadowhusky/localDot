@@ -135,7 +135,7 @@ export function outboundOf(tool: ToolName, input: unknown, facts: RiskFacts): Ou
 }
 
 const SOURCE_WORDS: Readonly<Record<TaintKind, string>> = {
-  screen: "pages you're signed in to",
+  screen: "pages from your accounts",
   memory: "what it remembers about you",
   files: "your files",
   recall: "your past conversations",

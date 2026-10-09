@@ -1,5 +1,6 @@
 import {
   DEFAULT_AUTONOMY,
+  isJevKey,
   LLM_PROVIDERS,
   type QuestionAnswerRequest,
   SessionIndexPage,
@@ -37,6 +38,7 @@ import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
 import { createExportJob } from "./export/job.ts";
+import { JEV_KEY } from "./keys/binding.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
@@ -1345,6 +1347,24 @@ function Theatre({ api }: { api: ApiClient }) {
           checkIns={
             settings.draft
               ? { value: settings.draft.checkIns, change: settings.checkIn }
+              : undefined
+          }
+          purposeCheck={
+            settings.draft
+              ? {
+                  on: settings.draft.purposeCheck,
+                  change: settings.purposeCheck,
+                  judge: keys.keys.some(isJevKey)
+                    ? "jev"
+                    : settings.draft.choices.fast
+                      ? "fast"
+                      : "none",
+                  addJevKey: (trigger) => {
+                    keyCapture.current = null;
+                    setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
+                    goToSettings(trigger, "keys");
+                  },
+                }
               : undefined
           }
           spent={agent.model.spend}

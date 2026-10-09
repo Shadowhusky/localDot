@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ApiClient, createApi } from "../lib/api.ts";
 import { TopBar } from "../shell/TopBar.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
+import { JEV_KEY } from "./binding.ts";
 import { type KeyField, KeyForm, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { KeysPanel, type KeysPanelProps } from "./KeysPanel.tsx";
@@ -101,6 +102,31 @@ function chooseProvider(text: string) {
 }
 
 describe("Keys", () => {
+  it("opens a Jev key's form as a web API key bound to Jev's host", async () => {
+    const save = vi.fn(async (_binding: unknown, _value: string) => ({ restart: false }));
+    render(
+      <KeysSheet
+        open
+        keys={controller({ save })}
+        onClose={() => {}}
+        preset={{ requestId: 1, web: JEV_KEY }}
+      />,
+    );
+    expect(field("Hosts").value).toBe("api.typesafe.ai");
+    expect(field("Header").value).toBe("Authorization");
+    expect(field(LABEL).value).toBe("jev");
+    type("Key", "fixture-private-value");
+    fireEvent.submit(screen.getByRole("form"));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+    });
+  });
+
   it("does not clear a later preset or select its key from an older sealed save", async () => {
     const held = Promise.withResolvers<{ restart: boolean; key: KeyRecord }>();
     const save = vi.fn(() => held.promise),

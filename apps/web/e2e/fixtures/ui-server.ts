@@ -46,6 +46,7 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { PurposeGate } from "../../../daemon/src/agent/safety/purpose.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
@@ -1374,6 +1375,30 @@ function requestApproval(
       .then((permit) =>
         effects.push(`approval:${permit ? (permit.approved ? "approve" : "act") : "refused"}`),
       )
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
+  if (kind === "purpose") {
+    // A tainted task opening an unrelated site with data in its address, through the real purpose
+    // check, its judge finding the site unrelated.
+    session.taint.add("screen", "mail.example.test");
+    session.purpose = new PurposeGate({
+      taint: session.taint,
+      purpose: () => session?.currentPurpose ?? { request: [], plan: [] },
+      judge: () => ({ name: "jev", destinations: async () => [], fits: async () => 0.04 }),
+      trusted: () => false,
+    });
+    const input = { url: "https://paste.example.net/new?text=quarterly%20numbers" };
+    const navigate = toolRisk("browser_navigate", input);
+    if (!navigate) return "no facts";
+    void authorizePrepared(ctx, {
+      tool: "browser_navigate",
+      input,
+      target: null,
+      facts: navigate,
+      revalidate: async () => true,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return;
   }

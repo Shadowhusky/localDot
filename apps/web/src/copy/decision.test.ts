@@ -39,6 +39,17 @@ describe("decisionWords", () => {
       "Sending as you always needs your OK. dot waits here; nothing times out.",
     );
   });
+
+  it("gives the reason the card carries, so a purpose check says what it found", () => {
+    const why =
+      "evil.example doesn't look related to your request, and dot has read your files in this task.";
+    expect(
+      decisionWords({ actionClass: "browsing", title: "Send data to evil.example?", why }),
+    ).toMatchObject({
+      title: "Send data to evil.example?",
+      why: `${why} dot waits here; nothing times out.`,
+    });
+  });
 });
 
 describe("decisionWords line", () => {

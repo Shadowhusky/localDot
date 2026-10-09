@@ -356,6 +356,19 @@ describe("configuration validation before explicit save", () => {
       document: { main: { provider: "ollama", model: "custom" } },
     });
   });
+  it("has the purpose check on (Auto) unless the user turned it off, and saves only Off", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.purposeCheck).toBe(true);
+    expect(formOf({ main, purposeCheck: "off" }).purposeCheck).toBe(false);
+    expect(validateForm({ ...d, purposeCheck: false }, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, purposeCheck: "off" },
+    });
+    expect(
+      validateForm({ ...d, purposeCheck: true }, { main, purposeCheck: "off" }, providerFixture()),
+    ).toEqual({ ok: true, document: { main } });
+  });
   it("keeps the limits and check-ins the user turned on, and drops ones turned off", () => {
     const saved = {
       main: { provider: "ollama", model: "custom" },
