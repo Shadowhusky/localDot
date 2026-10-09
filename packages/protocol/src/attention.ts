@@ -31,12 +31,14 @@ export const AttentionLevel = schema.enum([
 ]);
 export type AttentionLevel = schema.infer<typeof AttentionLevel>;
 
+const orderRank = (level: Attention) => ATTENTION_ORDER.length - ATTENTION_ORDER.indexOf(level);
+
 export const ATTENTION_RANK: Readonly<Record<AttentionLevel, number>> = Object.freeze({
-  needs_you: 4,
-  blocked: 3,
-  failed: 3,
-  done: 2,
-  working: 1,
+  needs_you: orderRank("needs_you"),
+  blocked: orderRank("blocked"),
+  failed: orderRank("blocked"),
+  done: orderRank("done"),
+  working: orderRank("working"),
   none: 0,
 });
 

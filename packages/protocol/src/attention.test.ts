@@ -53,4 +53,14 @@ describe("the notification attention levels", () => {
     expect(topAttention(["failed", "blocked"])).toBe("failed");
     expect(topAttention(["blocked", "needs_you", "done"])).toBe("needs_you");
   });
+
+  it("agrees with the shared order on every level both know", () => {
+    for (const a of ATTENTION_ORDER)
+      for (const b of ATTENTION_ORDER) {
+        expect(topAttention([a, b])).toBe(mostUrgent([a, b]));
+        expect(Math.sign(compareAttention(a, b))).toBe(
+          Math.sign(ATTENTION_ORDER.indexOf(a) - ATTENTION_ORDER.indexOf(b)),
+        );
+      }
+  });
 });
