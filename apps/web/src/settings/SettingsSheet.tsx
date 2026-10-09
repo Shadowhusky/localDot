@@ -558,8 +558,33 @@ const STREAM_CHOICES = [
   { value: "smooth", label: "Smooth" },
 ] as const;
 
+function StreamChoice({
+  stream,
+  size,
+  className,
+}: {
+  stream: StreamPreferenceControl;
+  size: 24 | 32;
+  className?: string;
+}) {
+  return (
+    <SegmentedControl
+      size={size}
+      className={className}
+      aria-label="Stream quality"
+      value={stream.value}
+      items={STREAM_CHOICES}
+      onValueChange={(next) => {
+        const choice = STREAM_PREFERENCES.find((each) => each === next);
+        if (choice) stream.change(choice);
+      }}
+    />
+  );
+}
+
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
   const { stop, stream } = props;
+  const phone = useMediaQuery(PHONE);
   return (
     <div>
       {(stop || stream) && (
@@ -584,26 +609,19 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
             <GroupRow
               leading={<IconTile icon="monitor" />}
               label="Stream quality"
-              trailing={
-                <SegmentedControl
-                  size={24}
-                  aria-label="Stream quality"
-                  value={stream.value}
-                  items={STREAM_CHOICES}
-                  onValueChange={(next) => {
-                    const choice = STREAM_PREFERENCES.find((each) => each === next);
-                    if (choice) stream.change(choice);
-                  }}
-                />
-              }
-            />
+              trailing={phone ? undefined : <StreamChoice stream={stream} size={24} />}
+            >
+              {phone && (
+                <StreamChoice stream={stream} size={32} className="settings-stream-choice" />
+              )}
+            </GroupRow>
           )}
         </Group>
       )}
       {stream && (
         <GroupNote>
           {stream.saved
-            ? "Auto adjusts to your connection and this device. When things slow down, Sharp keeps text crisp and Smooth keeps motion fluid."
+            ? "Auto follows your connection and this device. When either slows, Sharp keeps text crisp and Smooth keeps motion fluid."
             : "Applied for this visit. This browser couldn't save it."}
         </GroupNote>
       )}
