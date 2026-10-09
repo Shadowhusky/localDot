@@ -1,12 +1,29 @@
+import { existsSync, writeFileSync } from "node:fs";
 import type { KeydStatus, KeydVault, Sealed } from "../../../packages/protocol/src/keyd.ts";
 import { sealPassphrase } from "../../../packages/protocol/src/seal.ts";
 import { KeydError } from "../../daemon/src/keyd/client.ts";
 import type { ConsoleIO } from "./runtime.ts";
 
 export const MIN_PASSPHRASE = 12;
+// keyd takes up to 1024 bytes.
+export const MAX_PASSPHRASE_BYTES = 1024;
 
 export interface PassphrasePrompt {
   read(prompt: string, signal: AbortSignal): Promise<string>;
+}
+
+// Whether this machine's passphrase was chosen or entered with localdot unlock. The first
+// passphrase keyd hears becomes the vault's, from whichever program sends it.
+export interface PassphraseRecord {
+  known(): boolean;
+  remember(): void;
+}
+
+export function passphraseRecord(path: string): PassphraseRecord {
+  return {
+    known: () => existsSync(path),
+    remember: () => writeFileSync(path, `${new Date().toISOString()}\n`, { mode: 0o600 }),
+  };
 }
 
 export interface UnlockKeyd {
@@ -21,6 +38,7 @@ export async function runUnlock(
   io: ConsoleIO,
   keyd: UnlockKeyd,
   prompt: PassphrasePrompt,
+  record: PassphraseRecord,
 ): Promise<number> {
   const status = await keyd.status();
   const vault = status.vault;
@@ -33,6 +51,10 @@ export async function runUnlock(
     return 0;
   }
   const setup = vault.state === "setup";
+  if (!setup && !record.known())
+    io.err(
+      "Your saved keys already have a passphrase that wasn't set with localdot unlock. If you don't know it, something else chose it: see Saved keys in docs/install.md to start over.",
+    );
   const passphrase = await prompt.read(
     setup
       ? `Choose a passphrase for your saved keys (${MIN_PASSPHRASE} or more characters): `
@@ -41,6 +63,12 @@ export async function runUnlock(
   );
   if (passphrase.length < MIN_PASSPHRASE) {
     io.err(`Use at least ${MIN_PASSPHRASE} characters. Nothing changed.`);
+    return 1;
+  }
+  if (Buffer.byteLength(passphrase) > MAX_PASSPHRASE_BYTES) {
+    io.err(
+      `Use at most ${MAX_PASSPHRASE_BYTES} characters, fewer with accented or non-Latin letters. Nothing changed.`,
+    );
     return 1;
   }
   if (setup && (await prompt.read("Type it again: ", signal)) !== passphrase) {
@@ -57,6 +85,7 @@ export async function runUnlock(
     }
     throw error;
   }
+  record.remember();
   io.out(
     setup
       ? "Your saved keys are protected. You'll need this passphrase each time this machine restarts."
@@ -65,18 +94,23 @@ export async function runUnlock(
   return 0;
 }
 
-/** Reads one line from the terminal without showing it; from a pipe, reads one line. */
+/** Reads one line from the terminal without showing it; from a pipe, reads one line. A pipe may
+ * bring both lines of a new passphrase at once, so what follows a line waits for the next read. */
 export function terminalPrompt(
   input: NodeJS.ReadStream = process.stdin,
   output: NodeJS.WritableStream = process.stderr,
 ): PassphrasePrompt {
+  let pending = "";
+  let afterReturn = false;
   return {
     read(prompt, signal) {
       output.write(prompt);
       return new Promise((resolve, reject) => {
         let text = "";
+        let done = false;
         const tty = input.isTTY === true;
         const finish = (error?: Error) => {
+          done = true;
           input.off("data", onData);
           input.off("end", onEnd);
           signal.removeEventListener("abort", onAbort);
@@ -86,21 +120,36 @@ export function terminalPrompt(
           if (error) reject(error);
           else resolve(text);
         };
-        const onAbort = () => finish(new Error("Interrupted."));
-        const onEnd = () => finish();
-        const onData = (chunk: Buffer) => {
-          for (const char of chunk.toString("utf8")) {
-            if (char === "\r" || char === "\n") return finish();
+        const take = (chunk: string) => {
+          const chars = [...chunk];
+          for (const [i, char] of chars.entries()) {
+            if (afterReturn) {
+              afterReturn = false;
+              if (char === "\n") continue;
+            }
+            if (char === "\r" || char === "\n") {
+              afterReturn = char === "\r";
+              pending = chars.slice(i + 1).join("");
+              return finish();
+            }
             if (char === "\u0003") return finish(new Error("Interrupted."));
             if (char === "\u007f" || char === "\b") text = [...text].slice(0, -1).join("");
             else if (char >= " ") text += char;
           }
         };
+        const onAbort = () => finish(new Error("Interrupted."));
+        const onEnd = () => finish();
+        const onData = (chunk: Buffer) => take(chunk.toString("utf8"));
         if (tty) input.setRawMode(true);
         signal.addEventListener("abort", onAbort, { once: true });
         input.on("data", onData);
         input.once("end", onEnd);
-        input.resume();
+        const earlier = pending;
+        pending = "";
+        take(earlier);
+        if (done) return;
+        if (input.readableEnded) finish();
+        else input.resume();
       });
     },
   };

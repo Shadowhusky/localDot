@@ -10,7 +10,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
 
-var vaultModes = []string{"auto", "keychain", "secret-service", "file", "memory"}
+var vaultModes = []string{"auto", "keychain", "secret-service", "file", "passphrase", "memory"}
 
 // defaultVaultMode keeps the Keychain on macOS; elsewhere keyd picks what the machine has.
 func defaultVaultMode(goos string) string {
@@ -69,6 +69,15 @@ func openVaultBackend(mode, dir string, host vaultHost) (vaultBackend, error) {
 		return vaultBackend{store: store, index: index, state: ready("secret-service")}, nil
 	case "file":
 		file, err := vault.OpenFileVault(filepath.Join(dir, "vault.json"), host.creds())
+		if err != nil {
+			return vaultBackend{}, fmt.Errorf("keyd: %w", err)
+		}
+		return vaultBackend{store: file, index: index, state: file.State, unlock: file.Unlock}, nil
+	case "passphrase":
+		// A file only the passphrase opens: unlike the keyring or systemd-creds, no other program
+		// running as this user can read the keys. Its own file, so a vault.json made for
+		// systemd-creds never stops keyd from starting.
+		file, err := vault.OpenFileVault(filepath.Join(dir, "vault-passphrase.json"), nil)
 		if err != nil {
 			return vaultBackend{}, fmt.Errorf("keyd: %w", err)
 		}

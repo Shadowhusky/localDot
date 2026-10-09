@@ -99,7 +99,7 @@ func run(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("keyd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	home := fs.String("home", defaultHome(), "localDot home; keyd keeps its state in <home>/keyd")
-	store := fs.String("vault", defaultVaultMode(runtime.GOOS), "where secret values live: auto, keychain, secret-service, file, or memory for tests")
+	store := fs.String("vault", defaultVaultMode(runtime.GOOS), "where secret values live: auto, keychain, secret-service, file, passphrase, or memory for tests")
 	ports := fs.String("ports", "4760-4789", "the listener ports the daemon may ask for")
 	natpmp := fs.String("natpmp", "on", "ask the router for the public address keyd denies: on or off")
 	stun := fs.String("stun", netguard.DefaultSTUN, "STUN server asked when the router gives no public address, or off")
@@ -108,7 +108,7 @@ func run(args []string, stderr io.Writer) int {
 	}
 	portRange, err := parsePorts(*ports)
 	if err != nil || !slices.Contains(vaultModes, *store) || (*natpmp != "on" && *natpmp != "off") || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault auto, keychain, secret-service, file or memory, -natpmp on or off")
+		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault auto, keychain, secret-service, file, passphrase or memory, -natpmp on or off")
 		return 2
 	}
 	service, err := managedServiceFromEnv(os.LookupEnv)

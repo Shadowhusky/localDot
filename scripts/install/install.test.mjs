@@ -524,6 +524,21 @@ describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
     );
   });
 
+  it("keeps saved keys in a passphrase vault when asked, and remembers it", async () => {
+    const host = await makeHost();
+    expect((await host.run(["--passphrase-vault"])).code).toBe(0);
+    const unit = () => readFileSync(host.unit("localdot-keyd.service"), "utf8");
+    expect(unit()).toContain(
+      `ExecStart="${host.prefix}/bin/keyd" "-home" "${host.home}/.localdot" "-vault" "passphrase"\n`,
+    );
+    expect(readFileSync(join(host.prefix, "install.env"), "utf8")).toContain(
+      'LOCALDOT_VAULT="passphrase"',
+    );
+    host.commit("second");
+    expect((await host.command(["update"])).code).toBe(0);
+    expect(unit()).toContain('"-vault" "passphrase"');
+  });
+
   it("refuses to overwrite a checkout someone changed", async () => {
     const host = await makeHost();
     expect((await host.run()).code).toBe(0);

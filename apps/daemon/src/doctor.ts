@@ -117,17 +117,24 @@ export function vaultCheck(vault: KeydVault): DoctorCheck {
       ok: false,
       detail: "Saved keys are locked since this machine restarted. Unlock them: localdot unlock",
     };
+  if (vault.backend === "memory")
+    return { name, ok: true, detail: "Saved keys are kept in memory only, until keyd stops." };
+  if (vault.key === "passphrase")
+    return {
+      name,
+      ok: true,
+      detail:
+        "Saved keys are kept in an encrypted file that only your passphrase opens, so other users, the computers and other programs can't read them.",
+    };
   const where =
     vault.backend === "secret-service"
       ? "in your desktop keyring"
-      : vault.backend === "memory"
-        ? "in memory only, until keyd stops"
-        : vault.key === "tpm"
-          ? "in an encrypted file only this machine's TPM can open"
-          : vault.key === "host"
-            ? "in an encrypted file only this machine can open"
-            : "in an encrypted file, unlocked with your passphrase";
-  return { name, ok: true, detail: `Saved keys are kept ${where}.` };
+      : `in an encrypted file this machine opens by itself${vault.key === "tpm" ? " (with its TPM)" : ""}`;
+  return {
+    name,
+    ok: true,
+    detail: `Saved keys are kept ${where}: safe from other users and from the computers, but not from programs running as you. A passphrase vault keeps them from those too; see docs/install.md.`,
+  };
 }
 
 // Hairpin NAT: a computer that can reach this network's public address reaches the router's own

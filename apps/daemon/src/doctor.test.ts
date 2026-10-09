@@ -675,12 +675,23 @@ describe("runDoctor on Linux", () => {
 
 describe("vaultCheck", () => {
   it("says where keys live and how to unlock a passphrase vault", () => {
-    expect(vaultCheck({ backend: "secret-service", state: "ready" })).toEqual({
+    expect(vaultCheck({ backend: "secret-service", state: "ready" })).toMatchObject({
       name: "key-vault",
       ok: true,
-      detail: "Saved keys are kept in your desktop keyring.",
+      detail: expect.stringMatching(
+        /^Saved keys are kept in your desktop keyring: safe from other users and from the computers, but not from programs running as you\./,
+      ),
     });
     expect(vaultCheck({ backend: "file", state: "ready", key: "tpm" }).detail).toContain("TPM");
+    expect(vaultCheck({ backend: "file", state: "ready", key: "host" }).detail).toContain(
+      "not from programs running as you",
+    );
+    expect(vaultCheck({ backend: "file", state: "ready", key: "passphrase" }).detail).toContain(
+      "only your passphrase opens",
+    );
+    expect(vaultCheck({ backend: "file", state: "ready", key: "host" }).detail).not.toContain(
+      "only this machine",
+    );
     expect(vaultCheck({ backend: "file", state: "locked", key: "passphrase" })).toMatchObject({
       ok: false,
       detail: expect.stringContaining("localdot unlock"),

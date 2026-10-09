@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ServiceConfiguration } from "../../../packages/protocol/src/install-services.ts";
 import { DockerClient } from "../../daemon/src/cells/docker.ts";
 import { imagesFromEnv } from "../../daemon/src/cells/images.ts";
@@ -16,7 +17,7 @@ import { runStartAtLogin } from "./install/start-at-login.ts";
 import { runUp, type UpOptions } from "./install/up.ts";
 import { runUpdate, type UpdateContext } from "./install/update.ts";
 import { runResetComputer } from "./reset-computer.ts";
-import { runUnlock, terminalPrompt } from "./unlock.ts";
+import { passphraseRecord, runUnlock, terminalPrompt } from "./unlock.ts";
 
 export interface CommandContextInput {
   home: string;
@@ -85,7 +86,13 @@ export const runtime: Runtime = {
   stop: runStop,
   resetComputer: runResetComputer,
   unlock: (context, io) =>
-    runUnlock(context.signal, io, new KeydClient(keydSocketPath(context.home)), terminalPrompt()),
+    runUnlock(
+      context.signal,
+      io,
+      new KeydClient(keydSocketPath(context.home)),
+      terminalPrompt(),
+      passphraseRecord(join(context.home, "passphrase-chosen")),
+    ),
   async doctor(context, io) {
     context.signal.throwIfAborted();
     if (context.installed) return runInstalledDoctor(context, io);

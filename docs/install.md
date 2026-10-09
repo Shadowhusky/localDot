@@ -81,7 +81,7 @@ can't share that hidden folder: install Docker Engine from docs.docker.com inste
 
 ## Saved keys
 
-Your provider keys are kept by the key service:
+Your provider keys are kept by the key service, and the computers only ever see stand-ins:
 
 - **Linux with a desktop keyring** (GNOME Keyring, KWallet): in the keyring.
 - **Linux without one**, such as a server or WSL 2: in an encrypted file. With systemd 256 or
@@ -89,8 +89,21 @@ Your provider keys are kept by the key service:
   passphrase.
 - **macOS**: in an encrypted file with a passphrase. The Keychain needs the signed release.
 
+On Linux, the keyring and systemd-creds keep saved keys safe from other users of the machine and
+from the computers, but not from programs running as you: any of them can read the keyring
+(`secret-tool`) or have systemd-creds open the file's key. A **passphrase vault** is the stronger
+choice: its file opens only with your passphrase, which no program running as you can read. Install
+with `--passphrase-vault` (or run `localdot update --passphrase-vault`) to use one. It starts
+empty, so add your keys again afterwards.
+
 When a passphrase protects your keys, run `localdot unlock` after the computer restarts, or after
 an upgrade that changed the key service. The installer asks for it when you run it in a terminal.
+Until then the app says the keys are locked and keeps them unused.
+
+The first passphrase the key service receives becomes the vault's. If `localdot unlock` says your
+keys already have a passphrase you didn't set, start over: `localdot down`, delete
+`~/.localdot/keyd/vault.json` (or `vault-passphrase.json` for a passphrase vault), `localdot up`,
+run `localdot unlock` to choose your own passphrase, then add your keys again.
 
 ## Upgrade, change settings, uninstall
 

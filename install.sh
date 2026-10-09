@@ -55,6 +55,7 @@ Usage: install.sh [options]
   --prefix <folder>              Where the app is installed (default ~/.local/share/localdot)
   --tailscale                    Reach localDot from your other devices through Tailscale Serve
   --no-tailscale                 Stop serving localDot through Tailscale
+  --passphrase-vault             Linux: keep saved keys in a file only your passphrase opens
   --registry <registry/owner>    Pull published computer images instead of building them.
                                  Only for a registry you trust: they run as published.
   --skip-images                  Use the computer images already in Docker
@@ -257,7 +258,7 @@ check_prerequisites() {
 }
 
 parse_args() {
-  OPT_REF="" OPT_REPO="" OPT_PORT="" OPT_HOME="" OPT_TAILSCALE="" OPT_REGISTRY=""
+  OPT_REF="" OPT_REPO="" OPT_PORT="" OPT_HOME="" OPT_TAILSCALE="" OPT_REGISTRY="" OPT_VAULT=""
   SKIP_IMAGES=0 UNINSTALL=0 AS_COMMAND=0
   COMMAND="" COMMAND_ARGS=()
   PREFIX="${LOCALDOT_PREFIX:-${XDG_DATA_HOME:-$HOME/.local/share}/localdot}"
@@ -277,6 +278,7 @@ parse_args() {
       ;;
     --tailscale) OPT_TAILSCALE=on && shift ;;
     --no-tailscale) OPT_TAILSCALE=off && shift ;;
+    --passphrase-vault) OPT_VAULT=passphrase && shift ;;
     --skip-images) SKIP_IMAGES=1 && shift ;;
     --uninstall) UNINSTALL=1 && shift ;;
     --as-command)
@@ -312,6 +314,7 @@ read_state() {
     LOCALDOT_TAILSCALE) TAILSCALE=$value ;;
     LOCALDOT_PUBLIC_ORIGIN) PUBLIC_ORIGIN=$value ;;
     LOCALDOT_REGISTRY) REGISTRY=$value ;;
+    LOCALDOT_VAULT) VAULT=$value ;;
     LOCALDOT_COMMIT) BUILT_COMMIT=$value ;;
     esac
   done <"$file"
@@ -327,6 +330,7 @@ LOCALDOT_PORT="$PORT"
 LOCALDOT_TAILSCALE="$TAILSCALE"
 LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN"
 LOCALDOT_REGISTRY="$REGISTRY"
+LOCALDOT_VAULT="$VAULT"
 LOCALDOT_COMMIT="$COMMIT"
 EOF
   mv "$PREFIX/install.env.new" "$PREFIX/install.env"
@@ -336,7 +340,7 @@ EOF
 resolve_settings() {
   REPO=$DEFAULT_REPO REF=$DEFAULT_REF
   LD_HOME=${LOCALDOT_HOME:-$HOME/.localdot} PORT=${LOCALDOT_PORT:-4750}
-  TAILSCALE=off PUBLIC_ORIGIN="" REGISTRY="" BUILT_COMMIT="" INSTALLED=0
+  TAILSCALE=off PUBLIC_ORIGIN="" REGISTRY="" VAULT="" BUILT_COMMIT="" INSTALLED=0
   check_path "The install folder" "$PREFIX"
   if read_state; then INSTALLED=1; fi
   WAS_TAILSCALE=$TAILSCALE OLD_PORT=$PORT
@@ -346,6 +350,11 @@ resolve_settings() {
   [ -z "$OPT_PORT" ] || PORT=$OPT_PORT
   [ -z "$OPT_TAILSCALE" ] || TAILSCALE=$OPT_TAILSCALE
   [ -z "$OPT_REGISTRY" ] || REGISTRY=$OPT_REGISTRY
+  [ -z "$OPT_VAULT" ] || VAULT=$OPT_VAULT
+  case "$VAULT" in
+  '' | passphrase) ;;
+  *) die "install.env names an unknown key vault: $VAULT" ;;
+  esac
   check_path "Your home folder" "$HOME"
   check_path "The data folder" "$LD_HOME"
   case "$PORT" in
@@ -627,7 +636,8 @@ daemon_environment() {
 }
 
 systemd_units() {
-  local environment="" line
+  local environment="" line vault=""
+  [ "$VAULT" != passphrase ] || vault=' "-vault" "passphrase"'
   while IFS= read -r line; do environment="$environment"$'\n'"Environment=\"$line\""; done <<EOF
 $(daemon_environment)
 EOF
@@ -637,7 +647,7 @@ Description=localDot key service
 
 [Service]
 Type=exec
-ExecStart=\"$PREFIX/bin/keyd\" \"-home\" \"$LD_HOME\"
+ExecStart=\"$PREFIX/bin/keyd\" \"-home\" \"$LD_HOME\"$vault
 UMask=0077
 Restart=on-failure
 RestartSec=5
