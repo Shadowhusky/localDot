@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Dot } from "../dot/Dot.tsx";
 import { HomeScreenSignIn } from "../notify/HomeScreenSignIn.tsx";
-import { isStandalone } from "../notify/this-device.ts";
+import { isHomeScreenApp } from "../notify/this-device.ts";
 import { CommandChip } from "./CommandChip.tsx";
 import "./sign-in.css";
 
@@ -24,7 +24,7 @@ const HOME_SCREEN =
 // homeScreen: opened from the Home Screen, which keeps its own storage and so signs in by itself.
 export function SignIn({
   state,
-  homeScreen = isStandalone(),
+  homeScreen = isHomeScreenApp(),
 }: {
   state: SignInState;
   homeScreen?: boolean;

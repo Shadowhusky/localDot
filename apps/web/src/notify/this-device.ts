@@ -59,9 +59,18 @@ export function isStandalone(): boolean {
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
-const isAppleTouch = (env: DeviceEnv) =>
-  /iPhone|iPad|iPod/.test(env.userAgent) ||
-  (env.userAgent.includes("Macintosh") && env.maxTouchPoints > 1);
+const isAppleTouch = (device: Pick<Navigator, "userAgent" | "maxTouchPoints">) =>
+  /iPhone|iPad|iPod/.test(device.userAgent) ||
+  (device.userAgent.includes("Macintosh") && device.maxTouchPoints > 1);
+
+// Opened from an iPhone or iPad Home Screen. That app keeps its own storage, so it signs in apart
+// from Safari; an app installed from a browser anywhere else shares the browser's.
+export function isHomeScreenApp(
+  device: Pick<Navigator, "userAgent" | "maxTouchPoints"> = navigator,
+  standalone: boolean = isStandalone(),
+): boolean {
+  return standalone && isAppleTouch(device);
+}
 
 export function deviceLabel(userAgent: string, maxTouchPoints: number): string {
   if (/iPhone/.test(userAgent)) return "iPhone";

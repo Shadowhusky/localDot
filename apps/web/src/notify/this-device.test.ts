@@ -9,6 +9,7 @@ import {
   deviceIdOf,
   deviceLabel,
   deviceState,
+  isHomeScreenApp,
   turnOffThisDevice,
   turnOnThisDevice,
 } from "./this-device.ts";
@@ -135,6 +136,20 @@ describe("this device", () => {
     expect(deviceLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", 5)).toBe("iPad");
     expect(deviceLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", 0)).toBe("Mac");
     expect(deviceLabel("Mozilla/5.0 (Linux; Android 16; Pixel) Mobile", 5)).toBe("Android phone");
+  });
+
+  it("signs in apart only from an iPhone or iPad Home Screen", () => {
+    const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)";
+    expect(isHomeScreenApp({ userAgent: IPHONE, maxTouchPoints: 5 }, true)).toBe(true);
+    expect(isHomeScreenApp({ userAgent: mac, maxTouchPoints: 5 }, true)).toBe(true);
+    expect(isHomeScreenApp({ userAgent: IPHONE, maxTouchPoints: 5 }, false)).toBe(false);
+    expect(isHomeScreenApp({ userAgent: mac, maxTouchPoints: 0 }, true)).toBe(false);
+    expect(
+      isHomeScreenApp(
+        { userAgent: "Mozilla/5.0 (Linux; Android 16; Pixel) Mobile", maxTouchPoints: 5 },
+        true,
+      ),
+    ).toBe(false);
   });
 
   it("computes the same device id as the Mac", async () => {
