@@ -32,15 +32,19 @@ const KINDS: Readonly<Record<string, FileKind>> = Object.freeze({
   doc: "office",
   pptx: "office",
   ppt: "office",
+  pps: "office",
+  ppsx: "office",
   rtf: "office",
   pdf: "pdf",
 });
 // Opened on the Mac with its default app. Everything that can run code, open a browser on a local
 // file or follow a link (scripts, apps, installers, html, svg, webloc) is absent, and so is every
-// format that can carry VBA macros (xlsm/docm, and the legacy binary doc/xls/ppt).
+// format that can carry VBA macros (xlsm/docm, and the legacy binary doc/xls/ppt/pps). Slide shows
+// only preview.
 const OPENABLE = new Set([
   ...Object.keys(KINDS).filter(
-    (ext) => !["json", "yaml", "yml", "toml", "log", "doc", "xls", "ppt"].includes(ext),
+    (ext) =>
+      !["json", "yaml", "yml", "toml", "log", "doc", "xls", "ppt", "pps", "ppsx"].includes(ext),
   ),
   "tif",
   "tiff",
@@ -53,12 +57,67 @@ const OPENABLE = new Set([
   "wav",
 ]);
 
+// Source code shows as text; none of it is ever run or opened on the Mac.
+const CODE = new Set([
+  ..."js mjs cjs jsx ts tsx py rb go rs java kt kts swift c h cc cpp hpp cs php sh bash zsh".split(
+    " ",
+  ),
+  ..."fish ps1 sql css scss less ini cfg conf lua r pl dart scala vue svelte".split(" "),
+]);
+
 export function fileExtension(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot <= 0 || dot === name.length - 1 ? "" : name.slice(dot + 1).toLowerCase();
 }
 export function fileKind(name: string): FileKind {
-  return KINDS[fileExtension(name)] ?? "attachment";
+  const ext = fileExtension(name);
+  return KINDS[ext] ?? (CODE.has(ext) ? "text" : "attachment");
+}
+
+// How the full preview shows a file. Pictures, SVG, PDF, pages and media are drawn by the browser
+// from the file itself; text and tables come from the daemon already masked.
+export type ViewerKind =
+  | "picture"
+  | "svg"
+  | "pdf"
+  | "html"
+  | "text"
+  | "table"
+  | "sheet"
+  | "audio"
+  | "video"
+  | "page"
+  | "details";
+const VIEWERS: Readonly<Record<string, ViewerKind>> = Object.freeze({
+  svg: "svg",
+  html: "html",
+  htm: "html",
+  // Its source only, as text: the card's excerpt leaves it out.
+  xml: "text",
+  xlsx: "sheet",
+  ods: "sheet",
+  ...Object.fromEntries("mp3 m4a wav ogg oga opus flac aac".split(" ").map((e) => [e, "audio"])),
+  ...Object.fromEntries("mp4 m4v mov webm".split(" ").map((e) => [e, "video"])),
+});
+export function viewerKind(name: string): ViewerKind {
+  const known = VIEWERS[fileExtension(name)];
+  if (known) return known;
+  const kind = fileKind(name);
+  if (kind === "image") return "picture";
+  if (kind === "office") return "page";
+  return kind === "attachment" ? "details" : kind;
+}
+export type TextFormat = "plain" | "code" | "markdown" | "json" | "log";
+export function textFormat(name: string): TextFormat {
+  const ext = fileExtension(name);
+  if (ext === "md" || ext === "markdown") return "markdown";
+  if (ext === "json" || ext === "log") return ext;
+  return ext === "txt" ? "plain" : "code";
+}
+const PRESENTATIONS = new Set(["pptx", "ppt", "pps", "ppsx", "odp"]);
+// Shown a slide at a time in the full preview.
+export function isPresentation(name: string): boolean {
+  return PRESENTATIONS.has(fileExtension(name));
 }
 export function canOpenOnMac(name: string): boolean {
   return OPENABLE.has(fileExtension(name));
@@ -107,6 +166,56 @@ export const JsonPreview = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("none"), reason: PreviewReason }),
 ]);
 export type JsonPreview = z.infer<typeof JsonPreview>;
+
+// What the full preview reads or shows of one file. Larger pictures, PDFs, pages and workbooks show
+// "Too large to preview"; longer text and tables show their start (a log its end).
+export const VIEWER_LIMITS = Object.freeze({
+  pictureBytes: 40 * 1024 * 1024,
+  svgBytes: 5 * 1024 * 1024,
+  pdfBytes: 50 * 1024 * 1024,
+  htmlBytes: 5 * 1024 * 1024,
+  sheetBytes: 20 * 1024 * 1024,
+  sheetXmlBytes: 32 * 1024 * 1024,
+  textBytes: 2 * 1024 * 1024,
+  textLines: 20_000,
+  textLineChars: 2_000,
+  tableRows: 500,
+  tableColumns: 64,
+  tableCellChars: 400,
+  tableCountBytes: 16 * 1024 * 1024,
+  tableJsonBytes: 3 * 1024 * 1024,
+  sheets: 64,
+});
+const V = VIEWER_LIMITS;
+const NoPreview = z.strictObject({ kind: z.literal("none"), reason: PreviewReason });
+export const TextFileReply = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("text"),
+    lines: z.array(z.string().max(V.textLineChars)).max(V.textLines),
+    // A log is read from its end.
+    from: z.enum(["start", "end"]),
+    truncated: z.boolean(),
+  }),
+  NoPreview,
+]);
+export type TextFileReply = z.infer<typeof TextFileReply>;
+export const TableFileReply = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("table"),
+    sheets: z.array(z.string().max(200)).max(V.sheets),
+    sheet: z.number().int().min(0),
+    rows: z.array(z.array(z.string().max(V.tableCellChars)).max(V.tableColumns)).max(V.tableRows),
+    // Null when the file is too long to count.
+    totalRows: z.number().int().nonnegative().nullable(),
+    columns: z.number().int().nonnegative(),
+  }),
+  NoPreview,
+]);
+export type TableFileReply = z.infer<typeof TableFileReply>;
+export const PREVIEW_TICKET = /^[A-Za-z0-9_-]{43}$/;
+export const PreviewLinkReply = z.strictObject({
+  base: z.string().regex(/^\/file-previews\/[A-Za-z0-9_-]{43}\/$/),
+});
 
 export const MAX_OUTPUT_VERSION = 10_000;
 const OutputVersion = z.number().int().min(1).max(MAX_OUTPUT_VERSION);

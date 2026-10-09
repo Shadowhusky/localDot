@@ -8,6 +8,7 @@ import { Icon } from "../ui/Icon.tsx";
 import type { ActivityEntry } from "./activity.ts";
 import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentChange } from "./model.ts";
+import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 
 // The observe frame is 1280×800 CSS px; target rects are device px, so they are divided by the scale.
@@ -134,7 +135,9 @@ export function ActivityDetail({
   return (
     <div className="activity-detail">
       {agent?.note && (agent.status === "ok" || !agent.status) && (
-        <p className="activity-detail-note">{agent.note}</p>
+        <div className="activity-detail-note">
+          <SafeMarkdown text={agent.note} compact />
+        </div>
       )}
       {row.computer &&
         (replay ? (

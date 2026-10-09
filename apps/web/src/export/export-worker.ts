@@ -12,10 +12,13 @@ import {
   WebMOutputFormat,
 } from "mediabunny";
 import { Rectangle } from "pixi.js";
+import { recordedPresence } from "../dot/dot-feed.ts";
 import { ObserveBackdrop } from "../replay/backdrop.ts";
 import { replayGeometry, replayView } from "../replay/recording-source.ts";
 import { PixiPresenter } from "../stage/pixi-presenter.ts";
 import { burnInText, ExportBurnIn } from "./burn-in.ts";
+import { dotLayout, dotSeed, pictureHeight } from "./dot-band.ts";
+import { ExportDot, loadDotPlates } from "./export-dot.ts";
 import { frameLook, pickFrames } from "./export-frames.ts";
 import { type ExportPlan, type ExportRequest, planExport } from "./export-plan.ts";
 import type { ExportIn, ExportOut, ExportSourceSample } from "./export-protocol.ts";
@@ -83,6 +86,8 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
     const plan = planExport(request, start.model, start.activity, start.gaps);
     if (request.sessionId !== start.source.sessionId) throw new Error("Mismatched export source.");
     const { w: width, h: height } = request.size;
+    // Under the picture, dot's band takes the video's foot and the picture the rest.
+    const pictureH = pictureHeight(request);
     const canvas = new OffscreenCanvas(width, height);
     presenter = await PixiPresenter.create(canvas, {
       width,
@@ -92,19 +97,43 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
       warn() {},
     });
     cancelled();
+    presenter.overlays.setViewport(width, pictureH);
     const screen = replayGeometry(start.model, start.source);
     presenter.setScreen(screen);
     presenter.setCamera(
       cameraFor({
         stageW: width,
-        stageH: height,
+        stageH: pictureH,
         desktopW: screen?.w ?? 1280,
         desktopH: screen?.h ?? 800,
         zoom: 1,
       }),
     );
-    const burnIn = new ExportBurnIn(start.theme, width, height);
+    const burnIn = new ExportBurnIn(
+      start.theme,
+      width,
+      pictureH,
+      request.dot === "over" ? "head" : "foot",
+    );
     presenter.screen.addChild(burnIn);
+    let dot: ExportDot | null = null;
+    if (request.dot) {
+      const plates = await loadDotPlates(
+        dotLayout(request.size, request.dot).frame.size,
+        cancellation.signal,
+      );
+      cancelled();
+      dot = new ExportDot({
+        theme: start.theme,
+        size: request.size,
+        placement: request.dot,
+        plates,
+        seed: dotSeed(request.sessionId),
+        t: 0,
+        first: recordedPresence(start.model, plan.sessionMsAt(0)),
+      });
+      presenter.app.stage.addChild(dot);
+    }
     backdrop = new ObserveBackdrop(start.source);
     if (start.source.video) video = await ExportVideo.open(start.source, cancellation.signal);
     cancelled();
@@ -171,7 +200,8 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
         const scene = request.overlays ? sceneAt(start.model, time, view) : null;
         const caption = plan.captionAt(index);
         const gap = plan.gapAt(index);
-        const next = frameLook(picture, scene, burnInText(caption, gap));
+        dot?.update((index / plan.fps) * 1000, recordedPresence(start.model, time));
+        const next = frameLook(picture, scene, burnInText(caption, gap), dot ? index : null);
         const changed = next !== look;
         if (!held || changed || index - held.from >= plan.fps) {
           let sample: VideoSample;

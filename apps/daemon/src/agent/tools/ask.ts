@@ -222,12 +222,15 @@ export async function requestTakeoverTool(
   ctx.check();
   const image = await frame(deps, ctx, o.frameId);
   ctx.check();
+  const note = outcome.note ? ` Their note: ${outcome.note}` : "";
   return {
     ok: true,
     content: [
       text(
         ctx.redact(
-          `The user handed the screen back.${outcome.note ? ` Their note: ${outcome.note}` : ""}`,
+          outcome.declined
+            ? `The user said not now: they won't do this on the computer at the moment.${note} Don't hand the screen over again for it right away: find another way, or carry on with the rest and tell them what is left for them.`
+            : `The user handed the screen back.${note}`,
         ),
       ),
       image,

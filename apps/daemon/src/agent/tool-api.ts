@@ -230,7 +230,13 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
           content: [{ type: "text", text: "The task has stopped. Do not retry the operation." }],
         });
       session.check(generation, signal);
-      return c.json(out.result, out.status);
+      const notes = session.connections.takeNotes();
+      return c.json(
+        notes
+          ? { ...out.result, content: [...out.result.content, { type: "text", text: notes }] }
+          : out.result,
+        out.status,
+      );
     } catch {
       return c.json({
         ok: false,

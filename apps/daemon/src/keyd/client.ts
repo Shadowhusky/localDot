@@ -2,6 +2,8 @@ import { lstatSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
 import {
+  type KeydAsk,
+  KeydAsks,
   KeydBudget,
   KeydCellInfo,
   KeydErrorBody,
@@ -17,6 +19,7 @@ import {
   KeydRouteModels,
   KeydSecrets,
   KeydStatus,
+  KeydVault,
   ModelAdmissionSnapshot,
   ModelAdmissionWrite,
   type Sealed,
@@ -76,6 +79,8 @@ export interface OpenCellRequest {
   role: CellRole;
   port: number;
   secrets: string[];
+  // A desktop gate's credential for the connections it captures, kept for the cell's life.
+  captureToken?: string;
 }
 
 interface Schema<T> {
@@ -103,6 +108,12 @@ export class KeydClient {
     return this.#json("GET", "/v1/status", undefined, KeydStatus);
   }
 
+  // The passphrase arrives sealed to keyd, so this daemon never reads it. A new vault takes the
+  // first passphrase it receives as its own.
+  unlockVault(sealed: Sealed): Promise<KeydVault> {
+    return this.#json("POST", "/v1/vault/unlock", { sealed }, KeydVault);
+  }
+
   async secrets(): Promise<KeydRecord[]> {
     return (await this.#json("GET", "/v1/secrets", undefined, KeydSecrets)).secrets ?? [];
   }
@@ -124,6 +135,25 @@ export class KeydClient {
 
   openCell(req: OpenCellRequest): Promise<KeydOpened> {
     return this.#json("POST", "/v1/cells", req, KeydOpened);
+  }
+
+  // The connections the cell's listener holds for the user's answer.
+  async asks(cellId: string): Promise<KeydAsk[]> {
+    return (
+      (await this.#json("GET", `/v1/cells/${segment(cellId)}/asks`, undefined, KeydAsks)).asks ?? []
+    );
+  }
+
+  // A held connection that keyd let go of meanwhile is answered with 404, which is not an error.
+  async answerAsk(
+    cellId: string,
+    askId: string,
+    decision: "allow" | "deny",
+    app?: string,
+  ): Promise<void> {
+    const path = `/v1/cells/${segment(cellId)}/asks/${segment(askId)}`;
+    const reply = await this.#send("POST", path, { decision, ...(app ? { app } : {}) });
+    if (reply.status !== 404) this.#check(reply, path);
   }
 
   async cell(id: string): Promise<KeydCellInfo | undefined> {

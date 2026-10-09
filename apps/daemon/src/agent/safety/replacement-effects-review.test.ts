@@ -241,7 +241,11 @@ describe("review replacement effect gates", () => {
     if (foreign) desktop.body.Labels = { "localdot.cell": ulid(), "localdot.role": "desktop" };
     const before = f.fake.state.calls.filter((call) => call.method === "DELETE").length;
     const response = await f.request(`/api/cells/${f.oldCellId}/replacement`, "POST", f.body());
-    const deletes = f.fake.state.calls.filter((call) => call.method === "DELETE").slice(before);
+    // The fresh computer's one-shot link helper removes itself once it has run.
+    const deletes = f.fake.state.calls
+      .filter((call) => call.method === "DELETE")
+      .slice(before)
+      .filter((call) => !call.path.includes("-link-"));
     expect(deletes.length).toBe(foreign ? 0 : 4);
     expect(ReplacementRecord.parse(await response.json()).phase).toBe(
       foreign ? "blocked" : "ready",

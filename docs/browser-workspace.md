@@ -12,7 +12,9 @@ building on localhost. The label above the live stage identifies the screen rece
 current actions. A browser connection error does not redirect its input to the desktop.
 
 The web browser starts with the computer and stays running between tasks, so switching to it is
-immediate. If it is still starting, dot's switch waits for it rather than failing. A local
+immediate. If it is still starting, dot's switch waits for it rather than failing. A web browser
+that stops answering, or can no longer be controlled, is started again: at once when dot switches
+to it, otherwise within about half a minute. Why a start failed goes to the daemon's log. A local
 address such as localhost opens on the desktop, and the screen switches back to it.
 
 ## Sign in once
@@ -30,12 +32,24 @@ When upgrading, the computer's existing browser profile is copied into the share
 time the web browser starts (or before **Replace computer** would delete it). If several
 computers each had a profile, the current computer's profile is used.
 
+To sign in yourself, open **Settings → Accounts** and use **Sign in to a site**: type a site such
+as google.com, or pick a common one. The web browser opens that site's sign-in page and you are in
+control there; hand the computer back when you are done, and the site appears in the list. dot
+signs in the same way, only ever in the web browser.
+
 **Settings → Accounts** lists the sites with stored sign-ins, grouped by site, with **Sign out**
 for one site (its cookies, including partitioned ones, and the saved data of the hosts they were
 set for) and **Sign out of all sites**, which restarts the web browser with an empty profile and
 deletes the profiles computers kept before sign-ins were shared. A site that keeps a sign-in only
 in the saved data of another subdomain can still remember you after **Sign out**; Settings says
 so when the site is still listed, and **Sign out of all sites** removes everything.
+
+The desktop's own Chromium opens on a page saying sign-ins there aren't kept; only a window opened
+without an address shows it, and a new tab shows Chromium's usual new-tab page. A site typed into
+that page, or a sign-in page you reach there while you hold the computer, brings a notice in
+localDot offering to open the site in the web browser; nothing opens until you choose it, and the
+daemon opens only the named site's sign-in or home page. During a task, the notice says to ask
+dot instead.
 
 Links that a desktop app opens (a link in a document, `xdg-open` in the terminal) still open in
 the desktop's Chromium, which has none of your sign-ins; dot opens such an address again in the

@@ -2,6 +2,7 @@ package egress
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -294,4 +295,71 @@ func openFixtureAdmission(t *testing.T, m *Manager, id string) {
 	if _, err := gate.Resume(snapshot.GenerationID, snapshot.Epoch); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Docker Engine's gates reach a cell through <RelayDir>/<port>.sock, with the same token check.
+func TestARelayDirServesTheCellOnASocket(t *testing.T) {
+	m, w := newManager(t)
+	// macOS caps a socket path at 104 bytes, which a test's TempDir can exceed.
+	relay, err := os.MkdirTemp("/tmp", "keyd-relay-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(relay) })
+	m.d.RelayDir = relay
+	port := freePort(t)
+	m.d.Ports = PortRange{Min: port, Max: port}
+	stale := RelaySocket(relay, port)
+	if err := os.WriteFile(stale, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o, err := m.Open(OpenRequest{CellID: "c1", Role: "brain", Port: port, Secrets: []string{"anthropic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(stale)
+	if err != nil || info.Mode().Type() != os.ModeSocket || info.Mode().Perm() != 0o666 {
+		t.Fatalf("socket %v, %v", info, err)
+	}
+	get := func(token string) (int, error) {
+		proxy := &url.URL{Scheme: "http", User: url.UserPassword("cell", token), Host: "gate"}
+		client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+			Proxy:             http.ProxyURL(proxy),
+			DisableKeepAlives: true,
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", stale)
+			},
+		}}
+		resp, err := client.Get("http://keyd.ldot/health")
+		if err != nil {
+			return 0, err
+		}
+		resp.Body.Close()
+		return resp.StatusCode, nil
+	}
+	if status, err := get(o.ProxyToken); err != nil || status != http.StatusOK {
+		t.Fatalf("with the token: %d, %v", status, err)
+	}
+	if status, err := get("not-the-token-not-the-token-not-the-token"); err != nil || status != http.StatusProxyAuthRequired {
+		t.Fatalf("without the token: %d, %v", status, err)
+	}
+	if _, err := cellClient(w, o).Get("http://keyd.ldot/health"); err != nil {
+		t.Fatalf("the TCP listener stopped answering: %v", err)
+	}
+	if err := m.Close("c1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("socket left after Close: %v", err)
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }

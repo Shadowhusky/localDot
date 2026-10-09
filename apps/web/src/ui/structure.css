@@ -45,9 +45,8 @@
     color: var(--color-xenon);
   }
 
-  .ui-status-arc {
-    transform-box: view-box;
-    transform-origin: 8px 8px;
+  /* The whole glyph turns (its ring is round), so the compositor runs the spin without repainting. */
+  .ui-status-glyph[data-state="doing"] {
     animation: ui-spin var(--loop-turn) linear infinite;
   }
 
@@ -230,6 +229,12 @@
 
   .ui-thumbnail:hover::after {
     background-color: var(--color-state-hover);
+  }
+
+  .ui-thumbnail[aria-current="true"] {
+    box-shadow:
+      var(--shadow-thumbnail),
+      0 0 0 2px var(--color-fg-1);
   }
 
   .ui-thumbnail[data-pressed] {
@@ -684,7 +689,8 @@
   }
 
   .ui-group > .ui-group-row:first-child,
-  .ui-group > :first-child > .ui-group-row:first-child {
+  .ui-group > :first-child > .ui-group-row:first-child,
+  .ui-group > :first-child > li:first-child > .ui-group-row {
     box-shadow: none;
   }
 
@@ -734,20 +740,40 @@
     min-width: 0;
   }
 
+  /* A row's title keeps to one line, so a row never grows out of its place: a longer one
+     ellipsises and the line under it explains. */
   .ui-group-row-label,
   .ui-group-row:is(.ui-choice, .ui-field) :is(.ui-choice-label, .ui-field-label) {
+    min-width: 0;
+    overflow: hidden;
     font-weight: var(--font-weight-medium);
-    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* A detail that will not wrap (a list of sites) ellipsises in its column, never under the
-     row's trailing control. */
+  /* The second line keeps to two lines in its column, never under the row's trailing control. A
+     line that holds a control of its own (a task to open) keeps its reach unclipped. */
   .ui-group-row-detail {
     min-width: 0;
-    color: var(--color-fg-3);
+    color: var(--color-fg-2);
     font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
     font-weight: var(--font-weight-normal);
     overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+
+  .ui-group-row .ui-choice-note {
+    color: var(--color-fg-2);
+    font-weight: var(--font-weight-normal);
+    text-wrap: pretty;
+  }
+
+  :is(.ui-group-row-detail, .ui-group-row .ui-choice-note):not(:has(button, a, input)) {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
   }
 
   .ui-group-row-trailing {
@@ -758,6 +784,7 @@
     max-width: 62%;
     color: var(--color-fg-2);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .ui-group-row-chevron {
@@ -780,8 +807,39 @@
     display: none;
   }
 
-  .ui-group-row .ui-choice-note {
-    font-weight: var(--font-weight-normal);
+  /* An empty state in a group's place, or in one of its rows, at the group's own size. */
+  .ui-group > .ui-empty {
+    padding: calc(var(--spacing) * 5) calc(var(--spacing) * 4);
+  }
+
+  .ui-group-row > .ui-empty[data-layout="start"] .ui-empty-title {
+    color: var(--color-fg-1);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
+  .ui-group-row > .ui-empty[data-layout="start"] .ui-empty-detail {
+    margin-top: 1px;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  }
+
+  /* MiddleTruncate: the start gives way first, so the end stays whole. */
+  .ui-middle {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    white-space: pre;
+  }
+
+  .ui-middle > :first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ui-middle > :nth-child(2) {
+    flex: none;
   }
 
   .ui-tile {
@@ -828,6 +886,7 @@
     color: var(--color-fg-3);
     font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
     font-weight: var(--font-weight-normal);
+    text-wrap: pretty;
   }
 
   @media (--phone) {
@@ -888,6 +947,19 @@
       margin: calc(var(--spacing) * 1.75) calc(var(--spacing) * 4) 0;
       font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
     }
+
+    .ui-group > .ui-empty {
+      padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4);
+    }
+
+    .ui-group-row > .ui-empty[data-layout="start"] .ui-empty-title {
+      font: var(--text-touch) / var(--text-touch--line-height) var(--font-ui);
+      letter-spacing: var(--text-touch--letter-spacing);
+    }
+
+    .ui-group-row > .ui-empty[data-layout="start"] .ui-empty-detail {
+      font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    }
   }
 
   @media (--coarse) {
@@ -905,7 +977,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .ui-status-arc {
+    .ui-status-glyph[data-state="doing"] {
       animation: none;
     }
 

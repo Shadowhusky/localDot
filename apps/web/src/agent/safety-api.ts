@@ -28,15 +28,17 @@ export function answerSafety(api: ApiClient, session: string, body: unknown, sig
   if (!input.success) throw new ControlFailure(false);
   return controlRequest(api, `${path(session)}/approvals/answer`, input.data, 204, signal, empty);
 }
+// A connection's allowance names its destination: undoing it leaves the task's others.
 export function removeAllowance(
   api: ApiClient,
   session: string,
   actionClass: string,
   signal: AbortSignal,
+  destination?: string,
 ) {
   const value = ActionClass.safeParse(actionClass);
   if (!value.success) throw new ControlFailure(false);
-  const target = `${path(session)}/allowances/${value.data}`;
+  const target = `${path(session)}/allowances/${value.data}${destination === undefined ? "" : `?destination=${encodeURIComponent(destination)}`}`;
   return controlRequest(api, target, undefined, 204, signal, empty, "DELETE");
 }
 export function removeRule(api: ApiClient, id: string, signal: AbortSignal) {

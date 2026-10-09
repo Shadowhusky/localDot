@@ -5,11 +5,12 @@ export const WS_TOKEN_PREFIX = "localdot.token.";
 let publicOrigins: URL[] = [];
 
 export function setPublicOrigin(value: string | undefined): void {
-  if (value === undefined) {
-    publicOrigins = [];
-    return;
-  }
-  publicOrigins = value.split(",").map((entry) => parseOrigin(entry.trim()));
+  publicOrigins = parsePublicOrigins(value);
+}
+
+export function parsePublicOrigins(value: string | undefined): URL[] {
+  if (value === undefined) return [];
+  return value.split(",").map((entry) => parseOrigin(entry.trim()));
 }
 
 function parseOrigin(value: string): URL {
@@ -39,6 +40,13 @@ export function isAllowedHost(host: string | undefined, port: number): boolean {
     host === `localhost:${port}` ||
     publicOrigins.some((url) => host === url.host)
   );
+}
+
+// The origin a request reached this daemon at, named by its (already allowed) Host: a loopback
+// address or one of the HTTPS fronts.
+export function requestOrigin(host: string | undefined, port: number): string | undefined {
+  if (host === `127.0.0.1:${port}` || host === `localhost:${port}`) return `http://${host}`;
+  return publicOrigins.find((url) => host === url.host)?.origin;
 }
 
 export function isAllowedOrigin(origin: string | undefined, port: number): boolean {

@@ -9,6 +9,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Meter } from "../ui/Meter.tsx";
+import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { Progress } from "../ui/Progress.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -320,7 +321,7 @@ function SignedIn({ account }: { account: ChatgptControls }) {
         </span>
         <span className="settings-account-text">
           <span className="settings-account-email">
-            {email ? `Signed in as ${email}` : "Signed in"}
+            {email ? <MiddleTruncate text={`Signed in as ${email}`} /> : "Signed in"}
           </span>
           <span className="settings-note">{checkedAt(status.checkedAt)}</span>
         </span>

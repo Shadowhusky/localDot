@@ -169,21 +169,27 @@ function useSettledText(text: string, streaming: boolean): string {
 export const SafeMarkdown = memo(function SafeMarkdown({
   text,
   streaming = false,
+  compact = false,
   announce,
+  shortened = "Message preview shortened.",
 }: {
   text: string;
   // The message is still arriving.
   streaming?: boolean;
+  // Where room is short: headings and spacing keep to the surface's own type.
+  compact?: boolean;
   announce?(text: string): void;
+  // Said under text too long to show whole.
+  shortened?: string;
 }) {
   const settled = useSettledText(text, streaming);
   const parsed = useMemo(() => parseMarkdown(settled), [settled]);
   return (
-    <div className="safe-markdown">
+    <div className="safe-markdown" data-compact={compact || undefined}>
       {parsed.blocks.map((node, index) => (
         <MarkdownBlock key={index} node={node} announce={announce} />
       ))}
-      {parsed.truncated && <p className="thread-note">Message preview shortened.</p>}
+      {parsed.truncated && <p className="thread-note">{shortened}</p>}
     </div>
   );
 });

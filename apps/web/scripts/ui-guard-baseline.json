@@ -28,11 +28,14 @@
   "src/cells/hud-state.ts": {
     "banned-copy": 1
   },
+  "src/deliverables/viewer/viewer.css": {
+    "type-literal": 2
+  },
   "src/dot/dot.css": {
     "raw-colour": 4
   },
-  "src/dot/render/DotView.ts": {
-    "raw-colour": 13
+  "src/dot/render/dot-colours.ts": {
+    "raw-colour": 15
   },
   "src/gallery/gallery.css": {
     "half-pixel": 1,

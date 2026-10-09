@@ -9,6 +9,7 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
+  BannerKind,
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   CLAUDE_CODE_INSTALL,
@@ -55,6 +56,7 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { connectionWhy } from "../../../daemon/src/agent/safety/connections.ts";
 import { PurposeGate } from "../../../daemon/src/agent/safety/purpose.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
@@ -175,7 +177,7 @@ let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
   | "signed_out"
   | "signed_in"
   | undefined;
-let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
+let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard" | "locked";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
@@ -518,7 +520,11 @@ const planItems = (finished: boolean) => [
 ];
 
 // done: end as the real runner does, with agent.state done, which raises a Done notification.
-function finishTask(s: AgentSession, a: Append, done = false) {
+// A summary written as dot writes one when it couldn't finish: a heading, a list and bold words.
+const MARKDOWN_SUMMARY =
+  "## Couldn't print the report\n\nI made **summary.md**, but this computer has no printer, so nothing was printed.\n\n### What I checked\n\n- **Printers:** none are set up on this computer\n- **Drivers:** the `cups` service isn't installed\n- **Your files:** `summary.md` and `totals.csv` are ready to print elsewhere";
+
+function finishTask(s: AgentSession, a: Append, done = false, markdown = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -535,8 +541,9 @@ function finishTask(s: AgentSession, a: Append, done = false) {
     { mode: 0o600 },
   );
   a("task.result", {
-    summary:
-      "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
+    summary: markdown
+      ? MARKDOWN_SUMMARY
+      : "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
     files: [
       { name: "summary.md", path: "summary.md", bytes: 48 },
       { name: "totals.csv", path: "totals.csv", bytes: 32 },
@@ -572,7 +579,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   });
   a("plan.set", { items: planItems(finished) });
   const click = ulid();
-  a("step.start", { kind: "gui", planItem: "open" }, click);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "open", intent: "Opening the monthly report to read the sales table" },
+    click,
+  );
   a(
     "action.intent",
     { verb: "click", label: "Open monthly-report.ods", risk: "none", point: { x: 1280, y: 420 } },
@@ -600,7 +611,11 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "allow",
   });
   const typing = ulid();
-  a("step.start", { kind: "gui", planItem: "calc" }, typing);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "calc", intent: "Adding up the net total for each month" },
+    typing,
+  );
   a(
     "action.intent",
     { verb: "type", label: "Type =SUM(F2:F13)", risk: "low", point: { x: 1900, y: 1300 } },
@@ -621,7 +636,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   observe(typing);
   a("step.end", { status: "ok" }, typing);
   const shell = ulid();
-  a("step.start", { kind: "shell", planItem: "calc" }, shell);
+  a(
+    "step.start",
+    { kind: "shell", planItem: "calc", intent: "Checking the totals against the raw data" },
+    shell,
+  );
   a("tool.start", { tool: "shell", title: "Check totals with csvstat" }, shell);
   a(
     "tool.output",
@@ -649,7 +668,7 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "deny",
   });
   const file = ulid();
-  a("step.start", { kind: "file", planItem: "write" }, file);
+  a("step.start", { kind: "file", planItem: "write", intent: "Writing the short report" }, file);
   a(
     "file.change",
     {
@@ -696,7 +715,15 @@ function seedTask(s: AgentSession, finished: boolean) {
     s.setStatus("running");
     a("agent.state", { state: "acting" });
     liveStep = ulid();
-    a("step.start", { kind: "gui", planItem: "calc" }, liveStep);
+    a(
+      "step.start",
+      {
+        kind: "gui",
+        planItem: "calc",
+        intent: "Checking February's net total against revenue minus returns",
+      },
+      liveStep,
+    );
     a(
       "action.intent",
       {
@@ -888,6 +915,69 @@ function seedLongTask(s: AgentSession) {
     liveStep,
   );
 }
+
+// QA_PAST=1 seeds past conversations, from earlier today back over the last fortnight, each ending
+// its own way, for the list of conversations.
+function backdated<T>(msAgo: number, make: () => T): T {
+  const Before = globalThis.Date;
+  const offset = -msAgo;
+  globalThis.Date = class extends Before {
+    constructor(...given: unknown[]) {
+      super(...((given.length ? given : [Before.now() + offset]) as [number]));
+    }
+    static now() {
+      return Before.now() + offset;
+    }
+  } as DateConstructor;
+  try {
+    return make();
+  } finally {
+    globalThis.Date = Before;
+  }
+}
+const HOUR = 3_600_000;
+const PAST: { ago: number; asks: string[]; ending: "done" | "stopped" | "error" | null }[] = [
+  {
+    ago: 2 * HOUR,
+    asks: ["Compare flights to Lisbon for the first week of May", "Book the 9:40 one"],
+    ending: "done",
+  },
+  {
+    ago: 5 * HOUR,
+    asks: ["Rename the holiday photos by the date they were taken"],
+    ending: "stopped",
+  },
+  {
+    ago: 26 * HOUR,
+    asks: ["Summarise the Q3 board deck into five bullet points"],
+    ending: "error",
+  },
+  { ago: 30 * HOUR, asks: ["Find a plumber near me with good reviews"], ending: "done" },
+  { ago: 80 * HOUR, asks: ["Clean up my Downloads folder", "Also empty the bin"], ending: "done" },
+  { ago: 220 * HOUR, asks: ["Draft a reply to the landlord about the boiler"], ending: null },
+];
+if (env.QA_PAST === "1")
+  for (const { ago, asks, ending } of PAST) {
+    let continues: string | undefined;
+    asks.forEach((ask, n) => {
+      continues = backdated(ago - n * 600_000, () => {
+        const id = log.createSession(asks[0]);
+        const append = (type: string, data: Record<string, unknown>) =>
+          log.append(id, { agent: "main", type, data } as never);
+        append("session.start", {
+          screen: { w: 2560, h: 1600, scale: 2 },
+          os: "linux",
+          title: asks[0],
+          ...(continues ? { continues } : {}),
+        });
+        append("message.user", { messageId: ulid(), kind: "task", text: ask });
+        append("message.assistant", { messageId: ulid(), text: "Done. Here is what I found." });
+        const last = n === asks.length - 1;
+        if (!last || ending) append("session.end", { reason: last ? ending : "done" });
+        return id;
+      });
+    });
+  }
 
 // QA_EARLIER earlier tasks of the same conversation come before the seeded one.
 let earlier: string | undefined;
@@ -1406,6 +1496,7 @@ const routineChanged = (routineId: string) => {
 };
 
 // Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+// QA_BANNER=desktop|none shows Settings as on a Linux desktop or a machine with no screen.
 const pushKey = createECDH("prime256v1");
 pushKey.generateKeys();
 const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
@@ -1426,6 +1517,10 @@ const notify = createNotify({
       notified.mac.push([title, body]);
       return "shown";
     },
+  },
+  banner: {
+    kind: BannerKind.catch("mac").parse(process.env.QA_BANNER ?? "mac"),
+    notifier: { available: false, show: async () => "unavailable" },
   },
 });
 
@@ -1562,6 +1657,14 @@ const routes = createApp({
   },
 });
 deliverableScenarios(routes, deliverablesFixture);
+// QA_SLOW_KEYS=<ms> answers the key layer that much later, as a key layer still waking up does.
+const slowKeys = Number(env.QA_SLOW_KEYS ?? 0);
+if (slowKeys > 0)
+  for (const path of ["/api/keyd", "/api/keys"])
+    routes.use(path, async (_c, next) => {
+      await new Promise((resolve) => setTimeout(resolve, slowKeys));
+      await next();
+    });
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)
@@ -1576,6 +1679,9 @@ routes.get("/api/keyd", (c) =>
             : { state: "active", source: "router", addresses: 1 },
         reenter: keys.filter((k) => k.reenter).length,
         rebound: keys.filter((k) => k.rebound).length,
+        ...(keydMode === "locked"
+          ? { vault: { backend: "file", state: "locked", key: "passphrase" } }
+          : {}),
       }),
 );
 routes.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
@@ -1583,6 +1689,14 @@ routes.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
 routes.post("/api/keys", async (c) => {
+  if (keydMode === "locked")
+    return c.json(
+      {
+        error: "vault-locked",
+        message: "Saved keys are locked. On that computer, run: localdot unlock",
+      },
+      423,
+    );
   const { binding } = (await c.req.json()) as { binding: KeydRecord };
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;
@@ -1675,6 +1789,18 @@ function requestApproval(
   { always = false, repeat = 1, kind = "" } = {},
 ): string | undefined {
   if (!session?.generation) return "no brain";
+  if (kind === "port") {
+    // An app's connection beyond the web, as the daemon asks about one keyd holds.
+    void session.connections
+      .request({
+        app: "WeChat",
+        host: "long.weixin.qq.com",
+        port: 8080,
+        why: async () => connectionWhy("WeChat", undefined, []),
+      })
+      .then((decision) => effects.push(`connection:${decision.allow ? "allow" : "deny"}`));
+    return;
+  }
   const card = computerCard(kind);
   const facts = card?.facts ?? (call && toolRisk(call.tool, call.input));
   call = card ?? call;
@@ -1775,33 +1901,21 @@ function requestApproval(
             decide(facts, session.autonomy),
             (text) => text,
           )
-        : kind === "port"
-          ? ({
-              actionClass: "browsing",
-              risk: "medium",
-              title: "WeChat wants to connect to host:8080",
-              fields: [
-                ["App", "WeChat, on your computer"],
-                ["Destination", "host:8080 · TCP"],
-                ["For the task", "Send “hi” to Henry on WeChat"],
-              ],
-              always: [{ scope: "task", label: "For this task" }],
-            } as never)
-          : ({
-              actionClass: "send",
-              risk,
-              title: "Send this email?",
-              fields: [
-                ["From", "henry.liao@example.test (you)"],
-                ["To", "team@example.test · 4 people"],
-                ["Subject", "Monthly report (sample)"],
-                ["Attached", "summary.md · 2 KB"],
-              ],
-              always: [
-                { scope: "task", label: "For this task" },
-                { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
-              ],
-            } as never),
+        : ({
+            actionClass: "send",
+            risk,
+            title: "Send this email?",
+            fields: [
+              ["From", "henry.liao@example.test (you)"],
+              ["To", "team@example.test · 4 people"],
+              ["Subject", "Monthly report (sample)"],
+              ["Attached", "summary.md · 2 KB"],
+            ],
+            always: [
+              { scope: "task", label: "For this task" },
+              { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
+            ],
+          } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
@@ -2368,13 +2482,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(done = false): string | undefined {
+function finish(done = false, markdown = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append, done);
+  finishTask(owned, append, done, markdown);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -2567,11 +2681,12 @@ routes.post("/__qa/stream", (c) => {
   }, 40);
   return c.json({ ok: true });
 });
-// dot thinks aloud: the narrator band speaks its latest sentence (thoughts are not kept in history).
+// dot thinks: its thoughts are never the band's line, which holds dot's last line for the user.
 routes.post("/__qa/think", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("thought.delta", {
-    text: c.req.query("text") ?? "Checking February's net total against revenue minus returns.",
+    text:
+      c.req.query("text") ?? "The Net column must be revenue minus returns. Let me check row 3.",
   });
   return c.json({ ok: true });
 });
@@ -2604,7 +2719,9 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
+routes.post("/__qa/finish", (c) =>
+  reply(finish(c.req.query("done") === "1", c.req.query("markdown") === "1")),
+);
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
   if (!session || session.stopped) return c.text("no live task", 409);

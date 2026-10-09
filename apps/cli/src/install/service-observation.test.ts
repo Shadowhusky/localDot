@@ -1,9 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { type ServiceLocation, serviceLocation } from "./service-definition.ts";
-import { observeServiceJob, parseServiceList } from "./service-observation.ts";
+import { observeServiceJob, parseServiceList, parseUnitState } from "./service-observation.ts";
 
 const run = vi.hoisted(() => vi.fn());
-vi.mock("./service-command.ts", () => ({ runServiceObservation: run }));
+const unitRun = vi.hoisted(() => vi.fn());
+vi.mock("./service-command.ts", () => ({
+  runServiceObservation: run,
+  runUnitObservation: unitRun,
+}));
 afterEach(() => run.mockReset());
 const result = (stdout: string) => ({ code: 0, stderr: "", stdout });
 const location = serviceLocation(
@@ -93,4 +97,37 @@ it("refuses forged locations and cancellation before dispatch", async () => {
   const controller = new AbortController();
   controller.abort();
   await expect(observeServiceJob(location, controller.signal)).rejects.toThrow();
+});
+
+it("reads a systemd unit as absent, loaded or running, and anything else as unknown", async () => {
+  const unit = serviceLocation(
+    "/private/tmp/state",
+    "/private/tmp/home",
+    process.getuid?.() ?? -1,
+    "a".repeat(32),
+    "b".repeat(64),
+    "systemd",
+  ).daemon;
+  unitRun.mockResolvedValueOnce(result("MainPID=0\nLoadState=not-found\nActiveState=inactive\n"));
+  await expect(observeServiceJob(unit, new AbortController().signal)).resolves.toBeNull();
+  unitRun.mockResolvedValueOnce(result("MainPID=812\nLoadState=loaded\nActiveState=active\n"));
+  await expect(observeServiceJob(unit, new AbortController().signal)).resolves.toEqual({
+    pid: 812,
+  });
+  expect(run).not.toHaveBeenCalled();
+  expect(parseUnitState(result("MainPID=0\nLoadState=loaded\nActiveState=inactive\n"))).toEqual({
+    pid: null,
+  });
+  for (const text of [
+    "MainPID=0\nLoadState=masked\nActiveState=inactive\n",
+    "MainPID=7\nLoadState=not-found\nActiveState=inactive\n",
+    "MainPID=0\nLoadState=loaded\n",
+    "MainPID=0\nLoadState=loaded\nActiveState=active\nActiveState=active\n",
+    "MainPID=0\nLoadState=loaded\nActiveState=active",
+    "MainPID=-1\nLoadState=loaded\nActiveState=active\n",
+  ])
+    expect(() => parseUnitState(result(text))).toThrow();
+  expect(() =>
+    parseUnitState({ code: 1, stdout: "", stderr: "Failed to connect to bus" }),
+  ).toThrow();
 });

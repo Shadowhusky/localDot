@@ -15,10 +15,12 @@ import { Badge } from "../ui/Badge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import type { IconName } from "../ui/icons.ts";
+import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -56,6 +58,7 @@ export interface AutonomyMatrixProps {
 // How often dot stops to ask: a preset as one of a few rows, and every kind of action one level
 // deeper for anyone who wants their own mix.
 export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) {
+  const phone = useMediaQuery(PHONE);
   const parsed = AutonomyPolicy.safeParse(value);
   if (!parsed.success)
     return (
@@ -70,6 +73,7 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
       <div>
         <RadioCards
           aria-label="Start from"
+          roomy={phone}
           value={active?.name ?? ""}
           options={[...AUTONOMY_PRESETS].reverse().map((preset) => ({
             value: preset.name,
@@ -189,7 +193,7 @@ export function AlwaysAllowed({ rules }: { rules: RulesView }) {
       {rules.phase === "error" ? (
         <Group>
           <GroupRow
-            label="Couldn't load this list."
+            label="Couldn't load this list"
             trailing={
               <Button variant="quiet" size="sm" onClick={rules.reload}>
                 Try again
@@ -243,14 +247,17 @@ export function AlwaysAllowed({ rules }: { rules: RulesView }) {
       ) : (
         !rules.unreadable && (
           <Group>
-            <GroupRow label="Nothing yet. Use Always allow on a request to add one." />
+            <EmptyState icon="check-circle" title="Nothing allowed yet">
+              Choose Always allow on a request, and dot stops asking for it.
+            </EmptyState>
           </Group>
         )
       )}
-      <GroupNote>
-        Rules come from Always allow on a request. dot never asks again inside a rule, and removing
-        one takes effect right away.
-      </GroupNote>
+      {rules.rules.length > 0 && (
+        <GroupNote>
+          dot doesn't ask again inside a rule. Removing one takes effect right away.
+        </GroupNote>
+      )}
     </div>
   );
 }

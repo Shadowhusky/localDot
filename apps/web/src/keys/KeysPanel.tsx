@@ -15,15 +15,16 @@ import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { type KeyField, KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
-import type { KeyRecord } from "./keys-api.ts";
+import { type KeydHealth, type KeyRecord, keyHome, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
 import type { KeysController } from "./useKeys.ts";
 import "./keys.css";
 
-export const KEYS_DESCRIPTION =
-  "Your keys stay on this Mac. Apps on your computer get stand-in keys and never see the real ones.";
+export const keysDescription = (health: KeydHealth | null) =>
+  `Your keys stay ${keyHome(health)}. Apps on your computer get stand-in keys and never see the real ones.`;
 
 const HELD = "Keys are held until the audit log works again";
+const LOCKED = "Saved keys are locked until you unlock them on the computer running localDot";
 
 export interface KeysPanelProps {
   active: boolean;
@@ -68,6 +69,7 @@ export function KeysPanel({
   const health = keys.health;
   const offline = health?.online === false;
   const held = health?.online === true && health.audit?.ok === false;
+  const locked = vaultLocked(health);
   // Only the first list waits with a placeholder: a reload keeps the list it had.
   const loading =
     !health ||
@@ -80,7 +82,9 @@ export function KeysPanel({
       ? "Key protection is off"
       : held
         ? HELD
-        : undefined;
+        : locked
+          ? LOCKED
+          : undefined;
 
   // Asked for a key for a provider, Keys opens the form and brings it into view.
   useLayoutEffect(() => {
@@ -187,7 +191,7 @@ export function KeysPanel({
 
   return (
     <div id="keys-sheet" className="keys-body">
-      <p className="settings-lede">{KEYS_DESCRIPTION}</p>
+      <p className="settings-lede">{keysDescription(health)}</p>
       <Protection health={health} />
       <section className="keys-section" aria-labelledby="keys-yours">
         <GroupHead id="keys-yours" title="Your keys" aside={!phone && !formShown && add(false)} />
@@ -208,7 +212,7 @@ export function KeysPanel({
                 <KeyList
                   active={active}
                   keys={keys.keys}
-                  unavailable={held ? HELD : undefined}
+                  unavailable={held ? HELD : locked ? LOCKED : undefined}
                   busy={keys.busy}
                   uses={uses}
                   fresh={fresh}

@@ -4,7 +4,16 @@ import {
   ShellExecutionUncertainError,
 } from "../../desktopd/tools-client.ts";
 import { untrusted } from "../untrusted.ts";
-import { append, contain, fail, type ToolCallContext, type ToolDeps, tail, text } from "./deps.ts";
+import {
+  append,
+  contain,
+  fail,
+  intentOf,
+  type ToolCallContext,
+  type ToolDeps,
+  tail,
+  text,
+} from "./deps.ts";
 
 const LOG_MAX = 256 * 1024,
   MODEL_MAX = 16 * 1024,
@@ -33,7 +42,7 @@ export async function shellTool(
     return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   const desktop = deps.desktop(ctx.session.cellId);
   if (!desktop) return fail("The computer is not running.");
-  append(ctx, "step.start", { kind: "shell" });
+  append(ctx, "step.start", { kind: "shell", ...intentOf(ctx, input) });
   append(ctx, "tool.start", { tool: "shell", title: ctx.redact(input.command).slice(0, 200) });
   let logged = 0,
     outputBytes = 0,
@@ -86,6 +95,7 @@ export async function shellTool(
     flush();
     ctx.session.tainted = true;
     if (model) ctx.session.taint.add("files", "command output", model);
+    ctx.session.connections.checkedThroughProxy(input.command);
     const ok = done.exitCode === 0 && !done.timedOut;
     append(ctx, "tool.end", { ok, ...(done.exitCode !== null ? { exitCode: done.exitCode } : {}) });
     append(ctx, "step.end", { status: ok ? "ok" : "failed" });

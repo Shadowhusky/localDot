@@ -8,7 +8,8 @@
     "./csp": "./src/csp.ts",
     "./guidance": "./src/guidance.ts",
     "./keys": "./src/keys.ts",
-    "./motion": "./src/motion.ts"
+    "./motion": "./src/motion.ts",
+    "./qr": "./src/qr.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",

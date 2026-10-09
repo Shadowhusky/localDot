@@ -17,6 +17,7 @@ import {
   startedCount,
   stepAt,
 } from "@localdot/stage";
+import { markdownToPlain } from "../agent/markdown.ts";
 import { type AgentModel, heldByUser } from "../agent/model.ts";
 import type { ComputerPhase, HudActionKind, HudState } from "../cells/hud-state.ts";
 import type { DotState } from "../dot/engine/states.ts";
@@ -26,6 +27,8 @@ type TakeoverReason = RequestTakeoverInput["reason"];
 // What the live task feed knows beyond the timeline. Replay has only the timeline.
 export interface TaskFacts {
   readonly approval: boolean;
+  // An app's connection waits on a card; dot itself carries on.
+  readonly connection: boolean;
   readonly question: string | null;
   readonly takeover: string | null;
   // The user has the computer: "user" when they asked for it, or the reason dot handed it over once
@@ -79,9 +82,12 @@ export function taskFacts(model: AgentModel): TaskFacts {
   const yours = heldByUser(model);
   return {
     approval: !!model.approval,
-    question: model.pendingAsk ? (model.questions.get(model.pendingAsk)?.question ?? "") : null,
+    connection: !!model.connection,
+    question: model.pendingAsk
+      ? markdownToPlain(model.questions.get(model.pendingAsk)?.question ?? "")
+      : null,
     takeover: model.pendingTakeover
-      ? (model.takeovers.get(model.pendingTakeover)?.note ?? "")
+      ? markdownToPlain(model.takeovers.get(model.pendingTakeover)?.note ?? "")
       : null,
     yours: !yours ? null : yours.by === "user" ? "user" : yours.reason,
     pause: model.safetyPause?.phase ?? null,
@@ -251,6 +257,18 @@ function waitedS(model: SessionModel, row: TaskRow, nowMs: number): number | nul
   return null;
 }
 
+// Captions that only name dot's state. The band never says them: dot's pose and the island do.
+const THINKING = "Thinking…";
+const CHECKING = "Checking the screen.";
+const WORKING_ON = "Working…";
+const STARTING_OUT = "Starting…";
+export const STATE_CAPTIONS: ReadonlySet<string> = new Set([
+  THINKING,
+  CHECKING,
+  WORKING_ON,
+  STARTING_OUT,
+]);
+
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
 // Replay folds the whole recording, so an action's end may still lie ahead of nowMs.
@@ -307,6 +325,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (facts?.yours) return waiting("control", "You're in control", YOUR_TURN[facts.yours]);
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
+  if (facts?.connection)
+    return waiting("approval", "Needs your OK", "Waiting for your OK to connect.", true);
   if (facts?.question != null)
     return waiting(
       "question",
@@ -375,10 +395,9 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     if (done !== current.label && nowMs - current.resultT < PAST_HOLD_MS)
       return running("acting", done, done, control);
   }
-  if (state === "thinking") return running("thinking", "Thinking…", "Thinking…", control);
-  if (state === "observing")
-    return running("observing", "Checking the screen", "Checking the screen.", control);
-  return running("working", "Working", n ? "Working…" : "Starting…", control);
+  if (state === "thinking") return running("thinking", "Thinking…", THINKING, control);
+  if (state === "observing") return running("observing", "Checking the screen", CHECKING, control);
+  return running("working", "Working", n ? WORKING_ON : STARTING_OUT, control);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the

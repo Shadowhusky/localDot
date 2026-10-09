@@ -13,6 +13,38 @@ it("accepts only the exact task identity and current strict status document", ()
   data.status = "ended";
   expect(snapshot.status).toBe("running");
 });
+it("reads an app's connection card beside the task's own decision, and only a connection's", () => {
+  const card = {
+    actionClass: "network",
+    risk: "medium",
+    title: "WeChat wants to connect to long.example.com on port 8080",
+    fields: [["App", "WeChat"]],
+    always: [
+      { scope: "task", label: "For this task", destination: "long.example.com:8080" },
+      {
+        scope: "destination",
+        label: "Always for WeChat on long.example.com",
+        app: "WeChat",
+        destination: "long.example.com:8080",
+      },
+    ],
+    approvalId: sessionId,
+    generation: 1,
+    revision: 1,
+    expiresAt: 9_999_999_999_999,
+  };
+  expect(parseAgentSnapshot({ ...valid, connection: card }, sessionId, cellId).connection).toEqual(
+    card,
+  );
+  expect(() =>
+    parseAgentSnapshot(
+      { ...valid, connection: { ...card, actionClass: "send" } },
+      sessionId,
+      cellId,
+    ),
+  ).toThrow(AgentResponseError);
+});
+
 it("reads the user's own hold on the computer", () => {
   expect(parseAgentSnapshot({ ...valid, holder: true }, sessionId, cellId).holder).toBe(true);
 });

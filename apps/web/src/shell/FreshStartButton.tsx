@@ -2,10 +2,14 @@ import { useRef, useState } from "react";
 import { Button, type ButtonProps } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 
-export type FreshStartButtonProps = Omit<ButtonProps, "onClick" | "children"> & { run(): void };
+export type FreshStartButtonProps = Omit<ButtonProps, "onClick"> & { run(): void };
 
 // Start fresh erases the computer, so it asks first.
-export function FreshStartButton({ run, ...button }: FreshStartButtonProps) {
+export function FreshStartButton({
+  run,
+  children = "Start fresh",
+  ...button
+}: FreshStartButtonProps) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLElement | null>(null);
   return (
@@ -17,7 +21,7 @@ export function FreshStartButton({ run, ...button }: FreshStartButtonProps) {
           setOpen(true);
         }}
       >
-        Start fresh
+        {children}
       </Button>
       <Dialog
         open={open}

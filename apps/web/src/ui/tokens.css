@@ -90,6 +90,15 @@
   --color-quote-bar: rgba(255, 255, 255, 0.2);
   --color-link-line: rgba(255, 255, 255, 0.35);
   --color-table-head: rgba(255, 255, 255, 0.03);
+  /* Code's tints in a file's preview (design-v2 §10.22); comments are fg-3. */
+  --color-code-keyword: #c6b8f4;
+  --color-code-string: #acd3a4;
+  --color-code-number: #9fcbea;
+  /* Behind a picture's transparent parts, and the paper a page or PDF is drawn on. */
+  --color-checker-light: #2a2b2f;
+  --color-checker-dark: #1e1f23;
+  --color-paper: #ffffff;
+  --color-paper-selection: rgba(0, 99, 225, 0.24);
   /* Replay's scrubber: its track, and a tick at each step. */
   --color-scrubber-track: rgba(255, 255, 255, 0.16);
   --color-step-tick: rgba(255, 255, 255, 0.5);
@@ -182,10 +191,12 @@
   --rim-you-glow:
     0 0 0 1px rgba(242, 243, 245, 0.3), 0 0 28px var(--color-you-glow),
     0 0 90px rgba(242, 243, 245, 0.06);
-  --spill: radial-gradient(ellipse 50% 70% at 50% 0, rgba(220, 228, 238, 0.07), transparent 70%);
+  --color-spill: rgba(220, 228, 238, 0.07);
+  --color-spill-xenon: rgba(63, 181, 222, 0.11);
+  --spill: radial-gradient(ellipse 50% 70% at 50% 0, var(--color-spill), transparent 70%);
   --spill-xenon: radial-gradient(
     ellipse 50% 70% at 50% 0,
-    rgba(63, 181, 222, 0.11),
+    var(--color-spill-xenon),
     transparent 70%
   );
   --spill-you: radial-gradient(

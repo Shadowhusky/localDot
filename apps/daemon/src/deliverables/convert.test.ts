@@ -13,7 +13,7 @@ const done = (extra: Partial<ShellDone> = {}): ShellDone => ({
   ...extra,
 });
 function fakeComputer(
-  opts: { png?: Buffer; shell?: (req: ShellRequest) => Promise<ShellDone> } = {},
+  opts: { png?: Buffer; pdf?: Buffer; shell?: (req: ShellRequest) => Promise<ShellDone> } = {},
 ) {
   const files = new Map<string, Buffer>();
   const commands: string[] = [];
@@ -33,7 +33,10 @@ function fakeComputer(
         commands.push(req.command);
         if (opts.shell) return opts.shell(req);
         const dir = /\$HOME\/(\.cache\/localdot-preview\/[0-9a-f]{24})/.exec(req.command)?.[1];
-        if (dir && opts.png && !req.command.startsWith("rm ")) files.set(`${dir}/in.png`, opts.png);
+        if (dir && !req.command.startsWith("rm ")) {
+          if (opts.png) files.set(`${dir}/in.png`, opts.png);
+          if (opts.pdf) files.set(`${dir}/in.pdf`, opts.pdf);
+        }
         return done();
       },
       fetchFile: async (path) => {
@@ -54,14 +57,21 @@ const signal = () => new AbortController().signal;
 describe("conversion inside dot's computer", () => {
   it("builds a fixed command from a random folder and an allowlisted extension only", () => {
     const dir = `.cache/localdot-preview/${"a".repeat(24)}`;
-    expect(conversionCommand(dir, "ods", false)).toContain(
+    expect(conversionCommand(dir, "ods", "picture")).toContain(
       `-env:UserInstallation=file://$HOME/${dir}/profile`,
     );
-    expect(conversionCommand(dir, "pdf", true)).toMatch(
+    expect(conversionCommand(dir, "pdf", "picture")).toMatch(
       /pdftoppm -png .* -scale-to 1024 -singlefile in\.pdf in$/,
     );
-    expect(() => conversionCommand(".cache/localdot-preview/$(id)", "ods", false)).toThrow();
-    expect(() => conversionCommand(dir, "ods;rm", false)).toThrow();
+    expect(() => conversionCommand(".cache/localdot-preview/$(id)", "ods", "picture")).toThrow();
+    expect(() => conversionCommand(dir, "ods;rm", "picture")).toThrow();
+    expect(() => conversionCommand(dir, "pdf", "pages")).toThrow();
+  });
+  it("makes every page as a PDF in bounded time, file size and priority", () => {
+    const dir = `.cache/localdot-preview/${"b".repeat(24)}`;
+    expect(conversionCommand(dir, "pptx", "pages")).toBe(
+      `cd "$HOME/${dir}" && ulimit -f 131072 && timeout -k 5 90 nice -n 10 soffice -env:UserInstallation=file://$HOME/${dir}/profile --headless --norestore --nolockcheck --convert-to pdf --outdir . in.pptx`,
+    );
   });
   it("copies the bytes in, converts, fetches the page image and removes the folder", async () => {
     const c = fakeComputer({ png: Buffer.from("png") });
@@ -113,6 +123,28 @@ describe("conversion inside dot's computer", () => {
     expect(await converter(empty.access).convert("a.pptx", Buffer.from("x"), signal())).toBe(
       "failed",
     );
+  });
+  it("hands back a deck's pages as a PDF, and nothing that is not one or is too large", async () => {
+    const pdf = Buffer.from("%PDF-1.7 pages");
+    const c = fakeComputer({ pdf });
+    expect(await converter(c.access).pages("deck.pptx", Buffer.from("pptx"), signal())).toEqual(
+      pdf,
+    );
+    expect(c.commands[0]).toMatch(/--convert-to pdf --outdir \. in\.pptx$/);
+    expect(c.commands.at(-1)).toMatch(/^rm -rf /);
+    expect(c.released).toHaveBeenCalledOnce();
+    const fake = fakeComputer({ pdf: Buffer.from("<html>") });
+    expect(await converter(fake.access).pages("a.docx", Buffer.from("x"), signal())).toBe("failed");
+    const huge = fakeComputer({ pdf: Buffer.alloc(50 * 1024 * 1024 + 1, 0x25) });
+    expect(await converter(huge.access).pages("a.docx", Buffer.from("x"), signal())).toBe(
+      "too_large",
+    );
+    expect(huge.commands.at(-1)).toMatch(/^rm -rf /);
+    const pdfIn = fakeComputer({ pdf });
+    expect(await converter(pdfIn.access).pages("scan.pdf", Buffer.from("x"), signal())).toBe(
+      "failed",
+    );
+    expect(pdfIn.commands).toEqual([]);
   });
   it("refuses kinds it does not convert and inputs over 25 MiB", async () => {
     const c = fakeComputer({ png: Buffer.from("png") });

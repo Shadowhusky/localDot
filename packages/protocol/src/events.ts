@@ -17,6 +17,7 @@ import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
+import { INTENT_CHARS } from "./tools.ts";
 
 const envelope = {
   v: z.literal(1),
@@ -117,6 +118,8 @@ export const StepStart = event(
   z.object({
     kind: z.enum(["gui", "shell", "file", "browser", "ask", "think"]),
     planItem: z.string().optional(),
+    // The model's own line for the user about the call this step starts, as plain text.
+    intent: boundedText(INTENT_CHARS).optional(),
   }),
 );
 export const StepEnd = event(
@@ -254,7 +257,7 @@ export const RuleChange = z
   })
   .refine(
     ({ actionClass, id, ...option }) => AlwaysOption.safeParse(option).success,
-    "a site or app goes only with its own scope",
+    "a site, app or destination goes only with its own scope",
   );
 export type RuleChange = z.infer<typeof RuleChange>;
 export const RuleCreated = event("rule.created", RuleChange);
@@ -412,6 +415,8 @@ export const TakeoverEnd = event(
     by: z.enum(["user", "stop"]),
     // The user typed on the computer while they had it. What they typed is never recorded.
     typed: z.literal(true).optional(),
+    // The user said "Not now" to dot's hand-off.
+    declined: z.literal(true).optional(),
   }),
 );
 export const TaskResult = event(

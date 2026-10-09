@@ -16,7 +16,7 @@ const RISK_RANK = { none: 0, medium: 1, high: 2 } as const;
 
 function mode(actionClass: ActionClass, policy: AutonomyPolicy): AutonomyMode {
   if (actionClass === "credentials") return "handoff";
-  if (actionClass === "unknown") return "ask";
+  if (actionClass === "unknown" || actionClass === "network") return "ask";
   if (actionClass === "upload") return policy.send === "handoff" ? "handoff" : "ask";
   return policy[actionClass];
 }

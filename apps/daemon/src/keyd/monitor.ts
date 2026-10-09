@@ -1,4 +1,4 @@
-import type { HairpinGuard } from "@localdot/protocol";
+import type { HairpinGuard, KeydVault } from "@localdot/protocol";
 import type { KeydClient } from "./client.ts";
 
 export interface KeydHealth {
@@ -14,6 +14,8 @@ export interface KeydHealth {
   reenter?: number;
   // How many keys were changed outside localDot after their values were stored.
   rebound?: number;
+  // Off macOS: where saved keys live, and whether they wait for localdot unlock.
+  vault?: KeydVault;
   error?: string;
 }
 
@@ -63,6 +65,7 @@ export class KeydMonitor {
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
         reenter: s.reenter ?? 0,
         rebound: s.rebound ?? 0,
+        ...(s.vault ? { vault: s.vault } : {}),
       };
     } catch (err) {
       next = { online: false, error: err instanceof Error ? err.message : String(err) };

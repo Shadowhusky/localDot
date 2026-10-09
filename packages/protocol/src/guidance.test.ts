@@ -44,11 +44,32 @@ describe("dot's working rules", () => {
       "Prefer a password or code to a QR code",
       "Use request_takeover only for a CAPTCHA, a device approval",
       "then wait for them to hand control back",
-      "a link a desktop app opens there has none of the user's sign-ins, so open it with browser_navigate",
-      "never get around it with tunnels, proxies or port forwards",
+      "keeps no sign-ins",
+      "Reopen links that apps open there with browser_navigate",
+      "browser_navigate opens sites there; switch_screen moves between it and the desktop",
       "never name tools or localDot's internal parts",
     ])
       expect(rules, rule).toContain(rule);
+  });
+
+  it("say what the network allows and never work around it", () => {
+    const rules = workingRules("batch");
+    for (const rule of [
+      "Apps reach websites; other ports need the user's OK.",
+      "If something is blocked, tell the user; never bypass it with tunnels, proxies or port forwards.",
+    ])
+      expect(rules, rule).toContain(rule);
+  });
+
+  it("ask for a line for the user on every call that acts, said in a message for a native screen tool", () => {
+    expect(workingRules("batch")).toContain(
+      "Give every computer, browser_act and shell call its intent, in that voice.",
+    );
+    expect(workingRules("calls")).toContain(
+      "Give every browser_act and shell call its intent, in that voice, and say such a line before computer actions.",
+    );
+    expect(workingRules("none")).toContain("Give every browser_act and shell call its intent");
+    expect(workingRules("none")).not.toContain("computer actions");
   });
 
   it("stay short and never name localDot's own parts", () => {

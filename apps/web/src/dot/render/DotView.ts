@@ -1,15 +1,21 @@
-import { DotEngine, type EyePose, type Point } from "../engine/engine.ts";
-import { clamp, smoothstep } from "../engine/math.ts";
+import { parseCssColor } from "../../stage/theme.ts";
+import { DotEngine, type DotPose, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
+import type { DotTool } from "../engine/tools.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
+import { canvasColour, GLOSS_STOPS, PEARL_STOPS, PROP, SHEEN_STOPS, VOID } from "./dot-colours.ts";
+import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
-import { addView, type Frameable, now, removeView } from "./scheduler.ts";
+import { type PropLayer, paintProps } from "./prop-paint.ts";
+import { addView, type Frameable, kick, now, removeView } from "./scheduler.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
 // A view left unrendered this long (off screen, hidden tab) jumps ahead instead of replaying it.
 const RESYNC_MS = 10_000;
 // Below this activity nothing moves fast enough to need every frame.
 const CALM = 2;
+// A prop's slow loops draw at half the display rate.
+const LOOP_GAP_MS = 33;
 let uid = 0;
 
 const num = (v: number) => (Math.abs(v) < 1e-4 ? "0" : v.toFixed(3));
@@ -27,18 +33,8 @@ function svg<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
-function stops(gradient: Element, list: [offset: number, color: string, opacity?: number][]): void {
-  for (const [offset, color, opacity] of list) {
-    svg(
-      "stop",
-      {
-        offset,
-        "stop-color": color,
-        ...(opacity === undefined ? {} : { "stop-opacity": opacity }),
-      },
-      gradient,
-    );
-  }
+function stops(gradient: Element, list: [offset: number, color: string][]): void {
+  for (const [offset, color] of list) svg("stop", { offset, "stop-color": color }, gradient);
 }
 
 interface Eye {
@@ -80,6 +76,10 @@ export class DotView implements Frameable {
   private readonly svgDim: SVGCircleElement;
   private readonly eyes: [Eye, Eye];
   private readonly listeners = new AbortController();
+  // The props' two layers, made the first time dot picks up a tool.
+  private props: Record<PropLayer, HTMLCanvasElement> | null = null;
+  private propsOut = false;
+  private xenonColour: string | null = null;
 
   constructor(root: HTMLElement, o: DotViewOptions) {
     this.root = root;
@@ -150,25 +150,13 @@ export class DotView implements Frameable {
     ] as const) {
       svg("stop", { offset, class: `dot-stop-${name}` }, eyeFill);
     }
-    stops(svg("radialGradient", { id: `dot${this.id}-gloss` }, defs), [
-      [0, "#ffffff", 0.75],
-      [0.55, "#ffffff", 0.22],
-      [1, "#ffffff", 0],
-    ]);
-    stops(svg("radialGradient", { id: `dot${this.id}-pearl`, cx: 0.37, cy: 0.3, r: 0.78 }, defs), [
-      [0, "#f6f7f8"],
-      [0.36, "#eceef0"],
-      [0.68, "#d3d6db"],
-      [0.9, "#a9adb5"],
-      [1, "#8d929a"],
-    ]);
+    stops(svg("radialGradient", { id: `dot${this.id}-gloss` }, defs), GLOSS_STOPS);
+    stops(
+      svg("radialGradient", { id: `dot${this.id}-pearl`, cx: 0.37, cy: 0.3, r: 0.78 }, defs),
+      PEARL_STOPS,
+    );
     const edge = { cx: 0.3, cy: 0.62, r: 0.95, fx: 0.3, fy: 0.62 };
-    stops(svg("radialGradient", { id: `dot${this.id}-sheen`, ...edge }, defs), [
-      [0, "#ffffff", 0],
-      [0.86, "#ffffff", 0],
-      [0.97, "#ffffff", 0.55],
-      [1, "#ffffff", 0],
-    ]);
+    stops(svg("radialGradient", { id: `dot${this.id}-sheen`, ...edge }, defs), SHEEN_STOPS);
     const xenon = svg("radialGradient", { id: `dot${this.id}-xenon`, ...edge }, defs);
     for (const [offset, opacity] of [
       [0, 0],
@@ -184,7 +172,7 @@ export class DotView implements Frameable {
     svg("circle", { ...disc, class: "dot-pearl", fill: ref("pearl") }, svgBody);
     svg("circle", { ...disc, class: "dot-pearl", fill: ref("sheen") }, svgBody);
     this.svgXenon = svg("circle", { ...disc, fill: ref("xenon"), opacity: 0 }, svgBody);
-    this.svgDim = svg("circle", { ...disc, fill: "#0a0b0d", opacity: 0 }, svgBody);
+    this.svgDim = svg("circle", { ...disc, fill: VOID, opacity: 0 }, svgBody);
 
     const eyes = svg("g", { "clip-path": ref("body") }, face);
     const eye = (side: "L" | "R"): Eye => {
@@ -211,38 +199,57 @@ export class DotView implements Frameable {
 
   setState(state: DotState): void {
     this.engine.setState(state, now());
+    kick();
   }
 
   setControl(on: boolean): void {
     this.engine.setControl(on, now());
+    kick();
   }
 
   setReducedMotion(on: boolean): void {
     this.engine.setReducedMotion(on, now());
+    kick();
   }
 
   react(name: Reaction): void {
     this.engine.react(name, now());
+    kick();
   }
 
   setFocus(p: Point | null): void {
     this.engine.setFocus(p, now());
+    kick();
   }
 
   setBias(b: Point): void {
     this.engine.setBias(b, now());
+    kick();
   }
 
   setPlaces(places: Partial<{ composer: Point; card: Point }>): void {
     this.engine.setPlaces(places, now());
+    kick();
   }
 
   say(ms: number): void {
     this.engine.say(now(), ms);
+    kick();
   }
 
   hop(): void {
     this.engine.hop(now());
+    kick();
+  }
+
+  setTool(tool: DotTool | null): void {
+    this.engine.setTool(tool, now());
+    kick();
+  }
+
+  beat(key: string, n: number): void {
+    this.engine.beat(key, n, now());
+    kick();
   }
 
   setSize(size: number): void {
@@ -269,11 +276,18 @@ export class DotView implements Frameable {
     delete this.root.dataset.skin;
   }
 
-  frame(t: number): void {
+  frame(t: number): number {
     if (t - this.lastFrame > RESYNC_MS) this.engine.skipTo(t);
     this.lastFrame = t;
-    if (this.engine.activity(t) < CALM && t - this.lastRender < this.detail.calmGapMs) return;
-    this.render(t);
+    if (this.engine.activity(t) >= CALM) {
+      this.render(t);
+      return 0;
+    }
+    const gap = this.engine.looping(t)
+      ? Math.min(LOOP_GAP_MS, this.detail.calmGapMs)
+      : this.detail.calmGapMs;
+    if (t - this.lastRender >= gap) this.render(t);
+    return Math.max(0, Math.min(this.lastRender + gap, this.engine.nextEventAt()) - t);
   }
 
   private image(className: string, parent: Element): HTMLImageElement {
@@ -322,11 +336,12 @@ export class DotView implements Frameable {
     );
     if (this.detail.shadow) {
       const s = p.shadow.s;
+      const sx = (p.shadow.x * k).toFixed(2);
       this.style(
         this.shadow,
         "shadow",
         "transform",
-        `scale(${(s * p.body.sx).toFixed(3)}, ${s.toFixed(3)})`,
+        `translate(${sx}px, 0) scale(${(s * p.body.sx).toFixed(3)}, ${s.toFixed(3)})`,
       );
       this.style(this.shadow, "shadowOpacity", "opacity", p.shadow.o.toFixed(3));
     }
@@ -341,6 +356,59 @@ export class DotView implements Frameable {
     const devPerUnit = k * dpr;
     this.renderEye(this.eyes[0], p.eyes[0], devPerUnit);
     this.renderEye(this.eyes[1], p.eyes[1], devPerUnit);
+    this.renderProps(p, dpr);
+  }
+
+  // The props paint on two canvases, behind and in front of the body, with the exporter's painter.
+  // A canvas is resized only when dot is, so a frame never touches layout.
+  private renderProps(p: DotPose, dpr: number): void {
+    const out = p.props.length > 0;
+    if (!out && !this.propsOut) return;
+    this.propsOut = out;
+    const layers = this.props ?? this.makeProps();
+    const px = Math.max(1, Math.round(this.size * dpr));
+    const xenon = this.xenon();
+    for (const layer of ["back", "front"] as const) {
+      const canvas = layers[layer];
+      if (canvas.width !== px) {
+        canvas.width = px;
+        canvas.height = px;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, px, px);
+      if (!out) continue;
+      ctx.setTransform(px / 64, 0, 0, px / 64, 0, 0);
+      paintProps(ctx, p, layer, xenon);
+    }
+  }
+
+  private makeProps(): Record<PropLayer, HTMLCanvasElement> {
+    const canvas = (layer: PropLayer) => {
+      const node = document.createElement("canvas");
+      node.className = `dot-props dot-props-${layer}`;
+      return node;
+    };
+    const layers = { back: canvas("back"), front: canvas("front") };
+    this.root.insertBefore(layers.back, this.body);
+    this.body.after(layers.front);
+    this.props = layers;
+    return layers;
+  }
+
+  // The accent warms to the xenon token; without one it stays porcelain.
+  private xenon(): string {
+    if (this.xenonColour === null) {
+      const value = getComputedStyle(this.root).getPropertyValue("--color-xenon").trim();
+      try {
+        this.xenonColour = canvasColour(parseCssColor(value));
+      } catch {
+        this.xenonColour = PROP.accentRest;
+      }
+    }
+    return this.xenonColour;
   }
 
   private attr(node: Element, cache: Cache, key: string, name: string, value: string): void {
@@ -351,47 +419,16 @@ export class DotView implements Frameable {
 
   private renderEye(e: Eye, s: EyePose, devPerUnit: number): void {
     const c = e.cache;
-    const d = this.detail;
-    const f = s.frame;
-    let ex = 32 + f.cx;
-    let ey = 32 + f.cy;
-    if (d.snap) {
-      ex = Math.round(ex * devPerUnit * 2) / (devPerUnit * 2);
-      ey = Math.round(ey * devPerUnit * 2) / (devPerUnit * 2);
-    }
+    const g = eyeGeometry(s, this.detail, devPerUnit);
     this.attr(
       e.g,
       c,
       "m",
       "transform",
-      `matrix(${num(f.a)} ${num(f.b)} ${num(f.c)} ${num(f.d)} ${num(ex)} ${num(ey)})`,
+      `matrix(${num(g.a)} ${num(g.b)} ${num(g.c)} ${num(g.d)} ${num(g.ex)} ${num(g.ey)})`,
     );
-    this.attr(e.g, c, "o", "opacity", s.opacity.toFixed(3));
-
-    const scale = s.scale * d.eyeScale;
-    const w = 5.4 * scale;
-    const h = 10 * scale * s.sy;
-    const hw = w / 2;
-    const hh = h / 2;
-    const { happy, closed } = s;
-    let up = Math.max(s.up, closed * 0.93);
-    let lo = Math.max(s.lo, happy * 0.86);
-    const dip = closed * 0.22 * h + Math.min(up, 0.6) * 0.09 * h;
-    const arch = happy * 0.3 * h + s.loArch * h;
-    // A blink never closes below one device pixel, so it still reads at the badge size.
-    const minOpen = 1 / devPerUnit;
-    if (Math.max(1 - up - lo, 0) * h < minOpen && happy < 0.5 && closed < 0.5) {
-      const keep = clamp(1 - minOpen / h, 0, 1);
-      const total = up + lo || 1;
-      up = keep * (up / total);
-      lo = keep * (lo / total);
-    }
-    // The visible eye is the capsule between the upper lid (level, tilt, a slight dip as it lowers)
-    // and the lower lid (level, arch).
-    const W = hw + 2.5;
-    const top = -hh + up * h;
-    const bottom = hh - lo * h;
-    const slope = Math.tan((s.tilt * d.tiltGain * Math.PI) / 180);
+    this.attr(e.g, c, "o", "opacity", g.opacity.toFixed(3));
+    const { W, top, bottom, slope, dip, arch } = g.lid;
     this.attr(
       e.lid,
       c,
@@ -400,54 +437,41 @@ export class DotView implements Frameable {
       `M${num(-W)} ${num(top - slope * W)} Q0 ${num(top + 2 * dip)} ${num(W)} ${num(top + slope * W)} ` +
         `L${num(W)} ${num(bottom)} Q0 ${num(bottom - 2 * arch)} ${num(-W)} ${num(bottom)} Z`,
     );
-    const capsule = (1 - smoothstep(0.7, 1, happy)) * (1 - smoothstep(0.78, 1, closed));
-    this.attr(e.shape, c, "x", "x", num(-hw));
-    this.attr(e.shape, c, "y", "y", num(-hh));
-    this.attr(e.shape, c, "w", "width", num(w));
-    this.attr(e.shape, c, "h", "height", num(h));
-    this.attr(e.shape, c, "rx", "rx", num(hw));
-    this.attr(e.shape, c, "ro", "opacity", capsule.toFixed(3));
-    const fill = d.gloss ? `url(#dot${this.id}-eye)` : "";
+    this.attr(e.shape, c, "x", "x", num(-g.hw));
+    this.attr(e.shape, c, "y", "y", num(-g.hh));
+    this.attr(e.shape, c, "w", "width", num(2 * g.hw));
+    this.attr(e.shape, c, "h", "height", num(2 * g.hh));
+    this.attr(e.shape, c, "rx", "rx", num(g.hw));
+    this.attr(e.shape, c, "ro", "opacity", g.capsule.toFixed(3));
+    const fill = this.detail.gloss ? `url(#dot${this.id}-eye)` : "";
     if (c.fill !== fill) {
       c.fill = fill;
       e.shape.style.setProperty("fill", fill);
     }
-    if (d.gloss && capsule > 0.01) {
-      // A soft reflection of the key softbox (upper left), not a cartoon sparkle.
-      this.attr(e.gloss, c, "gx", "cx", num(-0.85 * scale));
-      this.attr(e.gloss, c, "gy", "cy", num(-hh + 2.7 * scale));
-      this.attr(e.gloss, c, "grx", "rx", num(1.05 * scale));
-      this.attr(e.gloss, c, "gry", "ry", num(2.1 * scale));
-      this.attr(e.gloss, c, "go", "opacity", (0.5 * capsule).toFixed(3));
+    if (g.gloss) {
+      this.attr(e.gloss, c, "gx", "cx", num(g.gloss.cx));
+      this.attr(e.gloss, c, "gy", "cy", num(g.gloss.cy));
+      this.attr(e.gloss, c, "grx", "rx", num(g.gloss.rx));
+      this.attr(e.gloss, c, "gry", "ry", num(g.gloss.ry));
+      this.attr(e.gloss, c, "go", "opacity", g.gloss.opacity.toFixed(3));
     } else {
       this.attr(e.gloss, c, "go", "opacity", "0");
     }
-    // Happy and sleeping arcs morph in as the lids close instead of swapping sprites.
-    const ha = smoothstep(0.45, 0.92, happy);
-    if (ha > 0.001) {
-      const aw = hw + 0.75 * scale;
+    this.arc(e.happy, c, "h", g.happy);
+    this.arc(e.closed, c, "c", g.closed);
+  }
+
+  private arc(node: SVGPathElement, c: Cache, key: string, a: Arc): void {
+    if (a.opacity > 0.001) {
       this.attr(
-        e.happy,
+        node,
         c,
-        "hd",
+        `${key}d`,
         "d",
-        `M${num(-aw)} ${num(1.1 * scale)} Q0 ${num(-4.1 * scale)} ${num(aw)} ${num(1.1 * scale)}`,
+        `M${num(-a.aw)} ${num(a.y)} Q0 ${num(a.peak)} ${num(a.aw)} ${num(a.y)}`,
       );
-      this.attr(e.happy, c, "hw", "stroke-width", num(2.1 * scale));
+      this.attr(node, c, `${key}w`, "stroke-width", num(a.stroke));
     }
-    this.attr(e.happy, c, "ho", "opacity", ha.toFixed(3));
-    const ca = smoothstep(0.5, 0.95, closed);
-    if (ca > 0.001) {
-      const aw = hw + 0.45 * scale;
-      this.attr(
-        e.closed,
-        c,
-        "cd",
-        "d",
-        `M${num(-aw)} ${num(1.9 * scale)} Q0 ${num(4.9 * scale)} ${num(aw)} ${num(1.9 * scale)}`,
-      );
-      this.attr(e.closed, c, "cw", "stroke-width", num(1.9 * scale));
-    }
-    this.attr(e.closed, c, "co", "opacity", ca.toFixed(3));
+    this.attr(node, c, `${key}o`, "opacity", a.opacity.toFixed(3));
   }
 }

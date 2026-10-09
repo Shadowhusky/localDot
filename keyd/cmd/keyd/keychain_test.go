@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,11 @@ func TestPrivateKeychainCommandRejectsInvalidService(t *testing.T) {
 func TestKeychainStartupRequiresSignedNativeHelper(t *testing.T) {
 	home := t.TempDir()
 	started := time.Now()
-	if d, err := start(Config{Home: home, Vault: "keychain"}); err == nil || d != nil || !strings.Contains(err.Error(), "signed native keyd") {
+	want := "signed native keyd"
+	if runtime.GOOS != "darwin" {
+		want = "only on macOS"
+	}
+	if d, err := start(Config{Home: home, Vault: "keychain"}); err == nil || d != nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("unsigned startup: daemon=%v, error=%v", d, err)
 	}
 	// The unsigned helper refuses at once; a check that runs out the helper's deadline ran

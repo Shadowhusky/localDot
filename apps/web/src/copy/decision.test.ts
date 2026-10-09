@@ -30,7 +30,7 @@ describe("decisionWords", () => {
   });
 
   it("says why in one plain sentence that promises no timeout", () => {
-    for (const actionClass of ActionClass.options) {
+    for (const actionClass of ActionClass.options.filter((c) => c !== "network")) {
       const words = decisionWords({ actionClass, title: "" });
       expect(words.why, actionClass).toMatch(/nothing times out\.$/);
       expect(bannedWords(Object.values(words).join(" "), true), actionClass).toEqual([]);
@@ -70,6 +70,40 @@ describe("decisionWords line", () => {
       decisionWords({ actionClass: "browsing", title: "WeChat wants to connect to host:8080" })
         .line,
     ).toBe("WeChat wants to connect to host:8080");
+  });
+});
+
+describe("a connection's card", () => {
+  const card = {
+    actionClass: "network" as const,
+    title: "WeChat wants to connect to long.example.com on port 8080",
+    why: "WeChat hasn't used this destination before. It looks related to your task.",
+    fields: [
+      ["App", "WeChat"],
+      ["Destination", "long.example.com · port 8080"],
+      ["For the task", "Message Henry"],
+    ] as [string, string][],
+  };
+  it("asks Allow or Don't allow with its own reason, and dot names the app aloud", () => {
+    expect(decisionWords(card)).toEqual({
+      title: card.title,
+      primary: "Allow",
+      secondary: "Don't allow",
+      why: card.why,
+      line: "WeChat is trying to reach a new server.",
+    });
+    expect(decisionWords({ ...card, why: undefined }).why).toBe(
+      "Apps reach websites on their own; anything else waits for your OK.",
+    );
+    const unnamed = { ...card, fields: [["App", "Not known"]] as [string, string][] };
+    expect(decisionWords(unnamed).line).toBe("An app is trying to reach a new server.");
+  });
+
+  it("defaults to this task, so the app's retries in the task never ask again", () => {
+    const always = [
+      { scope: "task" as const, label: "For this task", destination: "long.example.com:8080" },
+    ];
+    expect(defaultScope({ actionClass: "network", always })).toBe("task");
   });
 });
 

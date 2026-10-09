@@ -667,6 +667,56 @@ describe("Agent", () => {
     ).toBe(true);
   });
 
+  it("gives a short line said just before a native computer call to that call, not the conversation", async () => {
+    const before = (text: string, toolName: string, input: unknown): Turn => [
+      ...(say(text) as Record<string, unknown>[]).slice(0, 3),
+      ...(call(toolName, input) as Record<string, unknown>[]),
+    ];
+    const long = `I found the report. ${"It has a sales table for every month of the year. ".repeat(3)}`;
+    const t = agent([
+      before("Saving the report to your Documents folder.", "computer", {
+        action: "key",
+        text: "ctrl+s",
+      }),
+      before("Checking the saved copy.", "shell", { command: "ls ~/Documents" }),
+      before(long, "computer", { action: "key", text: "Return" }),
+      call("done", { summary: "Saved" }),
+    ]);
+    expect(await t.run()).toBe("done");
+    const keys = t.f.toolCalls
+      .map((c) => c.input as { action?: string })
+      .filter((input) => input.action === "key");
+    expect(keys[0]).toMatchObject({ intent: "Saving the report to your Documents folder." });
+    expect(keys[1]).not.toHaveProperty("intent");
+    const said = t.events.flatMap((e) => (e.type === "message.assistant" ? [e.data.text] : []));
+    expect(said).toEqual(["Checking the saved copy.", long]);
+    expect(JSON.stringify(t.events)).not.toContain("Saving the report");
+    expect(JSON.stringify(t.main.prompts.at(-1))).toContain(
+      "Saving the report to your Documents folder.",
+    );
+  });
+
+  it("streams words to the user as usual with a model that gives each call its line", async () => {
+    const t = agent(
+      [
+        [
+          ...(say("Saving the report.") as Record<string, unknown>[]).slice(0, 3),
+          ...(call("computer", {
+            action: "key",
+            text: "ctrl+s",
+            intent: "Saving the report",
+          }) as Record<string, unknown>[]),
+        ],
+        call("done", { summary: "Saved" }),
+      ],
+      { boot: { models: { main: binding({ computer: "generic" }) } } },
+    );
+    expect(await t.run()).toBe("done");
+    expect(
+      t.events.some((e) => e.type === "message.assistant" && e.data.text === "Saving the report."),
+    ).toBe(true);
+  });
+
   it("keeps only the latest three screenshots in the prompt", async () => {
     const shots = Array.from({ length: 5 }, () => call("computer", { action: "screenshot" }));
     const t = agent([...shots, call("done", { summary: "x" })]);

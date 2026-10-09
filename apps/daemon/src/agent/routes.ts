@@ -43,6 +43,13 @@ import {
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
+import {
+  type DesktopSignIn,
+  desktopSignIn,
+  SignInRequest,
+  signInSite,
+  signInUrl,
+} from "../../../../packages/protocol/src/accounts.ts";
 import type { BrowserScope } from "../browser/client.ts";
 import { type QuarantineRoutesDeps, quarantineRoutes } from "../browser/quarantine-routes.ts";
 import { DesktopdError } from "../desktopd/client.ts";
@@ -95,9 +102,10 @@ export interface AgentRoutesDeps {
         | "release"
         | "hold"
         | "holds"
+        | "signIn"
       >
     >;
-  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
+  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has" | "list">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
@@ -117,6 +125,8 @@ export interface AgentRoutesDeps {
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
   desktop(cellId: string, requestSignal: AbortSignal): UploadAccess | undefined;
   manual?(session: AgentSession, scope: BrowserScope): ManualDesktop | undefined;
+  // The address of the page the desktop's own browser shows, if it is open.
+  desktopPage?(cellId: string, signal: AbortSignal): Promise<string | undefined>;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
   appendTo(sessionId: string, type: "memory.change", data: Record<string, unknown>): void;
   home: string;
@@ -563,6 +573,10 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       "/api/conversation",
       route((c) => c.json(conversations.snapshot())),
     );
+    app.get(
+      "/api/conversations",
+      route((c) => c.json({ conversations: conversations.list() })),
+    );
     app.post(
       "/api/conversation/new",
       route(async (c) => {
@@ -603,6 +617,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         autonomy: s.autonomy,
         ...(s.screens ? { screen: s.screens.selection } : {}),
         ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
+        ...(s.connections.pending ? { connection: s.connections.pending } : {}),
         ...(s.safetyPause ? { pause: s.safetyPause } : {}),
         ...(budgetHold ? { budgetHold } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
@@ -632,9 +647,14 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const s = active(c.req.param("id") ?? "");
       const generation = s.generation;
-      if (!generation || s.controlHeld) throw new RouteError(409, "approval is not waiting");
       const parsed = await json(c.req.raw, ApprovalAnswer);
       check(c.req.raw.signal);
+      // A connection's card is no step of the agent's: it is answered whatever the brain is doing.
+      if (s.connections.owns(parsed.approvalId))
+        return s.connections.answer(parsed)
+          ? c.body(null, 204)
+          : c.text("approval is not waiting", 409);
+      if (!generation || s.controlHeld) throw new RouteError(409, "approval is not waiting");
       if (!s.isCurrent(generation) || s.controlHeld)
         throw new RouteError(409, "approval owner changed");
       return s.answerApproval(parsed) ? c.body(null, 204) : c.text("approval is not waiting", 409);
@@ -676,7 +696,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!actionClass.success) throw new RouteError(400, "invalid action class");
       await empty(c.req.raw);
       check(c.req.raw.signal);
-      const change = s.taskAutonomy.revoke(actionClass.data);
+      const change = s.taskAutonomy.revoke(actionClass.data, c.req.query("destination"));
       if (!change) throw new RouteError(404, "nothing is allowed for that in this task");
       s.append("rule.removed", change);
       return c.body(null, 204);
@@ -743,6 +763,31 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json(reply satisfies TakeComputerReply, 202);
     }),
   );
+  // Settings > Accounts: the web browser opens the site's sign-in page and the user takes it there.
+  app.post(
+    "/api/cells/:id/accounts/sign-in",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      const host = signInSite((await json(c.req.raw, SignInRequest)).site);
+      check(c.req.raw.signal);
+      if (!host) throw new RouteError(400, "that isn't a site the web browser can open");
+      if (!deps.runner.signIn) throw new RouteError(503, "signing in is unavailable");
+      const reply = await deps.runner.signIn(cellId, host, signInUrl(host), c.req.raw.signal);
+      return c.json(reply satisfies TakeComputerReply, 202);
+    }),
+  );
+  // The site whose sign-in the desktop's own browser shows, which isn't kept there.
+  app.get(
+    "/api/cells/:id/desktop-sign-in",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      const url = await deps.desktopPage?.(cellId, c.req.raw.signal).catch(() => undefined);
+      check(c.req.raw.signal);
+      return c.json({ site: (url && desktopSignIn(url)) || null } satisfies DesktopSignIn);
+    }),
+  );
   app.post(
     "/api/agent/sessions/:id/takeover/done",
     route(async (c) => {
@@ -753,6 +798,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         parsed.requestId,
         parsed.note === undefined ? undefined : redact(parsed.note, s.id, s.cellId, 1000),
         c.req.raw.signal,
+        parsed.declined === true,
       );
       return ok ? c.body(null, 204) : c.text("the screen is not handed over", 409);
     }),

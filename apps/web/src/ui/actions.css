@@ -448,6 +448,16 @@
     .ui-button::after {
       inset: -1px;
     }
+
+    /* The island is one short line, and so is a line of text with a button set in it: such a
+       button keeps its drawn size, as the island's glyphs do, and reaches 44 px past it. */
+    .ui-button:is([data-variant="glass"], [data-inline]) {
+      min-height: 0;
+    }
+
+    .ui-button:is([data-variant="glass"], [data-inline])::after {
+      inset: calc(var(--spacing) * -2) calc(var(--spacing) * -1.5);
+    }
   }
 
   .ui-kbd {

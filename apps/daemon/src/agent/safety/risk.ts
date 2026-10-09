@@ -139,6 +139,7 @@ const titles: Record<ActionClass, string> = {
   upload: "Upload your files",
   credentials: "Enter a password or code yourself",
   unknown: "Unclear step",
+  network: "Connect beyond websites",
 };
 // Acting as the user, and a step dot can't read, always ask; anything else asks only because the
 // user's settings say so.
@@ -166,6 +167,7 @@ const WORK: Readonly<Record<ActionClass, string>> = {
   upload: "uploading files",
   credentials: "using passwords",
   unknown: "unclear steps",
+  network: "connections beyond websites",
 };
 export function askWhy(actionClass: ActionClass, facts: Pick<RiskFacts, "operation">): string {
   if (actionClass === "unknown" && facts.operation === "navigate")

@@ -79,7 +79,17 @@ export function useAgentSession(
       try {
         const snapshot = await loadAgentSnapshot(api, sessionId, cellId, abort.signal);
         if (matches() && epoch === feed.read().epoch)
-          setView({ api, cellId, sessionId, epoch, snapshot, availability: "ready", error: null });
+          // The same answer again changes nothing, so the app does not render for it.
+          setView((old) =>
+            old?.api === api &&
+            old.cellId === cellId &&
+            old.sessionId === sessionId &&
+            old.epoch === epoch &&
+            old.availability === "ready" &&
+            JSON.stringify(old.snapshot) === JSON.stringify(snapshot)
+              ? old
+              : { api, cellId, sessionId, epoch, snapshot, availability: "ready", error: null },
+          );
         else if (matches()) queued = true;
       } catch (error) {
         if (matches() && epoch === feed.read().epoch) {
@@ -167,6 +177,8 @@ export function useAgentSession(
     (snapshot?.pendingAsk ?? null) === current.model.pendingAsk &&
     (snapshot?.pendingTakeover ?? null) === current.model.pendingTakeover &&
     JSON.stringify(snapshot?.approval ?? null) === JSON.stringify(current.model.approval ?? null) &&
+    JSON.stringify(snapshot?.connection ?? null) ===
+      JSON.stringify(current.model.connection ?? null) &&
     JSON.stringify(snapshot?.pause ?? null) === JSON.stringify(current.model.safetyPause ?? null);
   const readFresh = Boolean(
     matches &&

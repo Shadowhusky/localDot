@@ -13,12 +13,14 @@ import { DeliverableFile } from "../deliverables/DeliverableFile.tsx";
 import { ProofStrip, proofOf } from "../deliverables/ProofStrip.tsx";
 import { useProof } from "../deliverables/useProof.ts";
 import { opensAtFirst } from "../deliverables/versions.ts";
+import { FileViewerScope, type ViewerEntry } from "../deliverables/viewer/scope.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card, FileRow } from "../ui/Card.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
+import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
 type ResultFile = AgentResult["files"][number];
 // The stored version a download fetches, by the task that handed it over and its number.
@@ -255,6 +257,28 @@ export function FileName({ name }: { name: string }) {
   );
 }
 
+// A list's files open the full preview once the list knows its task.
+function ViewerScope({
+  api,
+  entries,
+  downloads,
+  onMac,
+  children,
+}: {
+  api: ApiClient | null;
+  entries: ViewerEntry[];
+  downloads: ResultDownloads;
+  onMac: boolean;
+  children: ReactNode;
+}) {
+  if (!api || entries.length === 0) return children;
+  return (
+    <FileViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
+      {children}
+    </FileViewerScope>
+  );
+}
+
 export interface ResultCardProps {
   result: AgentResult;
   downloads: ResultDownloads;
@@ -279,6 +303,13 @@ export function ResultCard({
   const files = result.files;
   const api = downloads.api;
   const task = result.sessionId ?? downloads.sessionId;
+  const entries = useMemo<ViewerEntry[]>(
+    () =>
+      task
+        ? files.filter(valid).map((file) => ({ resultId: result.id, file, sessionId: task }))
+        : [],
+    [files, result.id, task],
+  );
   const all = async () => {
     for (const file of files)
       if (valid(file) && !(await downloads.request(result.id, file))) return;
@@ -308,7 +339,11 @@ export function ResultCard({
   );
   return (
     <section className="result-card" aria-label="Task result">
-      <p className="result-summary">{result.summary}</p>
+      {result.summary && (
+        <div className="result-summary">
+          <SafeMarkdown text={result.summary} />
+        </div>
+      )}
       {files.length > 0 && (
         <Card variant="file" className="result-files">
           {downloadAll && (
@@ -317,47 +352,49 @@ export function ResultCard({
               {downloadAll}
             </div>
           )}
-          <ul className="deliverables" aria-label={`Files in result ${result.id}`}>
-            {files.map((file, index) =>
-              valid(file) && api && task ? (
-                <DeliverableFile
-                  key={`${file.name}/${file.version ?? 0}`}
-                  api={api}
-                  sessionId={task}
-                  resultId={result.id}
-                  file={file}
-                  downloads={downloads}
-                  refresh={refresh}
-                  defaultOpen={opensAtFirst(
-                    files.map((f) => f.name),
-                    index,
-                  )}
-                  onMac={onMac}
-                  revisable={revisable}
-                />
-              ) : valid(file) ? (
-                // Without its task the file is still listed, with nothing it can do.
-                <li key={file.name} className="deliverable">
-                  <FileRow
-                    name={file.name}
-                    meta={bytes(file.bytes)}
-                    actions={
-                      <IconButton
-                        icon="download"
-                        label={`Download ${file.name}`}
-                        disabledReason="This task is no longer available."
-                      />
-                    }
+          <ViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
+            <ul className="deliverables" aria-label={`Files in result ${result.id}`}>
+              {files.map((file, index) =>
+                valid(file) && api && task ? (
+                  <DeliverableFile
+                    key={`${file.name}/${file.version ?? 0}`}
+                    api={api}
+                    sessionId={task}
+                    resultId={result.id}
+                    file={file}
+                    downloads={downloads}
+                    refresh={refresh}
+                    defaultOpen={opensAtFirst(
+                      files.map((f) => f.name),
+                      index,
+                    )}
+                    onMac={onMac}
+                    revisable={revisable}
                   />
-                </li>
-              ) : (
-                // biome-ignore lint/suspicious/noArrayIndexKey: an unsafe name is never shown or used as a key.
-                <li key={index} className="deliverable">
-                  <FileRow name="Unavailable file" meta="Can't be downloaded" />
-                </li>
-              ),
-            )}
-          </ul>
+                ) : valid(file) ? (
+                  // Without its task the file is still listed, with nothing it can do.
+                  <li key={file.name} className="deliverable">
+                    <FileRow
+                      name={file.name}
+                      meta={bytes(file.bytes)}
+                      actions={
+                        <IconButton
+                          icon="download"
+                          label={`Download ${file.name}`}
+                          disabledReason="This task is no longer available."
+                        />
+                      }
+                    />
+                  </li>
+                ) : (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: an unsafe name is never shown or used as a key.
+                  <li key={index} className="deliverable">
+                    <FileRow name="Unavailable file" meta="Can't be downloaded" />
+                  </li>
+                ),
+              )}
+            </ul>
+          </ViewerScope>
         </Card>
       )}
       {api && task ? (

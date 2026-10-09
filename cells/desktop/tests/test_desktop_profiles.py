@@ -222,5 +222,24 @@ class ProfilesTest(unittest.TestCase):
                 self.owner.launch([arg])
 
 
+
+class StartPageTest(unittest.TestCase):
+    def test_a_window_without_a_page_opens_on_the_notice(self):
+        self.assertEqual(m.with_start_page([]), [m.NOTICE])
+        self.assertEqual(m.with_start_page(["--new-window"]), ["--new-window", m.NOTICE])
+
+    def test_a_page_asked_for_opens_as_asked(self):
+        self.assertEqual(m.with_start_page(["about:blank"]), ["about:blank"])
+        self.assertEqual(m.with_start_page(["--new-window", "https://example.com/"]),
+                         ["--new-window", "https://example.com/"])
+        self.assertEqual(m.with_start_page(["/config/Downloads/page.html"]),
+                         ["/config/Downloads/page.html"])
+
+    def test_the_notice_passes_the_launch_rules(self):
+        self.assertTrue(m.NOTICE.startswith("file:///opt/localdot/"))
+        root = Path(__file__).parent.parent / "root"
+        self.assertTrue((root / m.NOTICE.removeprefix("file:///")).is_file())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,0 +1,953 @@
+/* The full preview (design-v2 §10.10, §10.8): the file large on the dark well of a wide sheet, one
+   bar of its own controls above it, moving between files and getting the file in the footer. Each
+   kind of file is one scroller of its own; the sheet itself never scrolls. */
+@custom-media --phone (width < 700px);
+
+.viewer {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+.viewer-pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  transition:
+    transform var(--dur-default) var(--ease-spring),
+    opacity var(--dur-fade) var(--ease-enter);
+}
+
+.viewer-pane[data-dragging] {
+  transition: none;
+}
+
+@starting-style {
+  .viewer-pane[data-from="right"] {
+    opacity: 0;
+    transform: translateX(calc(var(--spacing) * 12));
+  }
+
+  .viewer-pane[data-from="left"] {
+    opacity: 0;
+    transform: translateX(calc(var(--spacing) * -12));
+  }
+}
+
+/* The bar: what this kind of file can do on the left, a quiet fact about it on the right. */
+.viewer-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  height: calc(var(--spacing) * 12);
+  padding: 0 calc(var(--spacing) * 6);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.viewer-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.viewer-bar-end {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.viewer-bar-note {
+  flex-shrink: 0;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.viewer-zoom {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 0.5);
+}
+
+.viewer-zoom-value {
+  min-width: calc(var(--spacing) * 11);
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  text-align: center;
+}
+
+.viewer-sheets {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Every stage is a well; a page or a document lies on its own paper. */
+.viewer-stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--color-well);
+}
+
+.viewer-stage[hidden] {
+  display: none;
+}
+
+.viewer-center {
+  display: grid;
+  flex: 1 1 auto;
+  place-content: center;
+  justify-items: center;
+  min-height: 0;
+  padding: calc(var(--spacing) * 6);
+  background-color: var(--color-well);
+}
+
+.viewer-progress {
+  width: 160px;
+}
+
+.viewer-loading-note {
+  margin-top: calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+}
+
+.viewer-message {
+  display: grid;
+  justify-items: center;
+  gap: calc(var(--spacing) * 2);
+  max-width: 320px;
+  text-align: center;
+}
+
+.viewer-message > .ui-button {
+  margin-top: calc(var(--spacing) * 2);
+}
+
+.viewer-tile {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: calc(var(--spacing) * 2);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised-2);
+  box-shadow: var(--shadow-edge);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.viewer-tile-large {
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-xl);
+}
+
+.viewer-message-title {
+  color: var(--color-fg-1);
+  font:
+    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+}
+
+.viewer-message-detail {
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  text-wrap: pretty;
+}
+
+/* A picture: drawn at its scale from its top-left corner, a checkerboard showing through what it
+   leaves transparent. The squares keep their size at any zoom. */
+.viewer-picture {
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer-picture[data-zoomed] {
+  cursor: grab;
+}
+
+.viewer-picture[data-zoomed]:active {
+  cursor: grabbing;
+}
+
+.viewer-canvas {
+  --_checker: 16px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  background:
+    repeating-conic-gradient(var(--color-checker-light) 0% 25%, var(--color-checker-dark) 0% 50%) 0
+    0 / var(--_checker) var(--_checker);
+  box-shadow: var(--shadow-raised);
+  transform-origin: 0 0;
+  transition: opacity var(--dur-fade) var(--ease-enter);
+}
+
+.viewer-canvas[data-ready] {
+  opacity: 1;
+}
+
+.viewer-canvas[data-settling] {
+  transition:
+    transform var(--dur-default) var(--ease-spring),
+    opacity var(--dur-fade) var(--ease-enter);
+}
+
+.viewer-canvas img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.viewer-canvas[data-pixels] img {
+  image-rendering: pixelated;
+}
+
+.viewer-caption {
+  position: absolute;
+  bottom: calc(var(--spacing) * 3);
+  left: 50%;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass-solid);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  translate: -50% 0;
+  pointer-events: none;
+}
+
+/* A document's pages: thumbnails down the left on a wide screen, then the pages on their paper in
+   one scroll, only those near the view drawn. */
+.viewer-pdf {
+  flex-direction: row;
+}
+
+.viewer-thumbs {
+  flex-shrink: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-thumbs[data-axis="y"] {
+  width: 136px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-hairline);
+}
+
+.viewer-thumbs[data-axis="x"] {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: calc(var(--spacing) * 3) 0;
+  border-top: 1px solid var(--color-hairline);
+  scrollbar-width: none;
+}
+
+.viewer-thumbs-run {
+  position: relative;
+}
+
+.viewer-thumb {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.viewer-thumbs[data-axis="y"] .viewer-thumb {
+  left: calc(var(--spacing) * 5);
+}
+
+.viewer-thumbs[data-axis="x"] .viewer-thumb {
+  top: 0;
+}
+
+.viewer-thumb .ui-thumbnail {
+  background-color: var(--color-paper);
+}
+
+/* Paper is as light as the ring, so the ring stands off it by a line of the well. */
+.viewer-thumb .ui-thumbnail[aria-current="true"] {
+  box-shadow:
+    0 0 0 2px var(--color-well),
+    0 0 0 4px var(--color-fg-1);
+}
+
+.viewer-thumb-number {
+  color: var(--color-fg-3);
+  font:
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.viewer-thumb:has([aria-current="true"]) .viewer-thumb-number {
+  color: var(--color-fg-1);
+}
+
+.viewer-pages {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-pages:focus-visible {
+  outline: none;
+}
+
+.viewer-pages-run {
+  position: relative;
+  transition: transform var(--dur-default) var(--ease-spring);
+}
+
+.viewer-pages-run[data-dragging] {
+  transition: none;
+}
+
+.viewer-paper {
+  position: absolute;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-paper);
+  box-shadow: var(--shadow-raised);
+}
+
+.viewer-page-art {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background-color: var(--color-paper);
+}
+
+.viewer-page-canvas,
+.viewer-page-canvas canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The counter: "Page 12 of 300" between the arrows, the number a field to type another into. */
+.viewer-pager {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 0.5);
+}
+
+.viewer-page-count {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  padding: 0 calc(var(--spacing) * 1);
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  white-space: nowrap;
+}
+
+.viewer-page-field > .ui-text-field {
+  width: calc(var(--_digits) * 1ch + var(--spacing) * 8);
+  min-width: calc(var(--spacing) * 10);
+  padding: 0 calc(var(--spacing) * 2);
+}
+
+.viewer-page-field .ui-input {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* A deck: the slide whole and centred on the well, its neighbours a stage's width away, the strip
+   of slides under it. */
+.viewer-slides {
+  overflow: hidden;
+}
+
+.viewer-slide-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer-slide {
+  position: absolute;
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  background-color: var(--color-paper);
+  box-shadow: var(--shadow-overlay);
+  will-change: transform;
+}
+
+.viewer-slides .viewer-thumbs[data-axis="x"] {
+  background-color: var(--color-well);
+}
+
+/* On a phone the counter and its tools sit at the bottom, under the thumb. */
+.viewer-pager-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  height: calc(var(--spacing) * 14);
+  padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 1);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.viewer-pager-tools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1);
+}
+
+/* Presenting: the deck alone on black, filling the screen, its controls a glass pill that fades
+   once the pointer rests. */
+.viewer-present {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  background-color: var(--color-void);
+  outline: none;
+  animation: viewer-present-in var(--dur-default) var(--ease-spring);
+}
+
+.viewer-present:not([data-controls]) {
+  cursor: none;
+}
+
+.viewer-present .viewer-slide {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.viewer-present-bar {
+  position: absolute;
+  bottom: calc(var(--spacing) * 6 + env(safe-area-inset-bottom));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1);
+  height: calc(var(--spacing) * 12);
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  translate: -50% 0;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    translate var(--dur-default) var(--ease-spring);
+}
+
+.viewer-present:not([data-controls]) .viewer-present-bar {
+  opacity: 0;
+  translate: -50% calc(var(--spacing) * 2);
+  pointer-events: none;
+}
+
+/* A phone held upright shows a wide slide small; the hint goes with the controls. */
+.viewer-present-hint {
+  position: absolute;
+  bottom: calc(var(--spacing) * 21 + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  display: none;
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  text-align: center;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+  pointer-events: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .viewer-present-hint {
+    display: block;
+  }
+}
+
+.viewer-present:not([data-controls]) .viewer-present-hint {
+  opacity: 0;
+}
+
+.viewer-present-count {
+  min-width: calc(var(--spacing) * 14);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-align: center;
+}
+
+.viewer-present-rule {
+  width: 1px;
+  height: calc(var(--spacing) * 5);
+  margin: 0 calc(var(--spacing) * 1);
+  background-color: var(--color-glass-line);
+}
+
+@keyframes viewer-present-in {
+  from {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+/* pdf.js places each run of text over the page, transparent, so it can be selected and copied. The
+   unit leading and the per-run size are pdf.js's own contract (its text layer sets --font-height,
+   --scale-x and --rotate on each run), not type: the guard's baseline holds these two. */
+.viewer-pdf-text {
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --total-scale-factor: 1;
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: var(--min-font-size);
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+}
+
+.viewer-pdf-text :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.viewer-pdf-text > :not(.markedContent),
+.viewer-pdf-text .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  z-index: 1;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.viewer-pdf-text .markedContent {
+  display: contents;
+}
+
+.viewer-pdf-text ::selection {
+  background-color: var(--color-paper-selection);
+  color: transparent;
+}
+
+.viewer-pdf-text br::selection {
+  background-color: transparent;
+}
+
+.viewer-pdf-text .endOfContent {
+  position: absolute;
+  inset: 100% 0 0;
+  display: block;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* A web page on its paper, the frame filling the stage. */
+.viewer-web {
+  background-color: var(--color-paper);
+}
+
+.viewer-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background-color: var(--color-paper);
+}
+
+/* Text and code: numbered lines in the code well; the numbers stay put as a wide line scrolls. */
+.viewer-text {
+  overflow: hidden;
+}
+
+.viewer-code {
+  --_digits: 2;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 6);
+  color: var(--color-code-text);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-code:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.viewer-code-chunk {
+  width: max-content;
+  min-width: 100%;
+}
+
+.viewer-code[data-wrap] .viewer-code-chunk {
+  width: auto;
+}
+
+.viewer-code-chunk[data-pending] {
+  --_lines: 1;
+  height: calc(var(--_lines) * var(--text-mono--line-height));
+}
+
+.viewer-code-line {
+  display: flex;
+}
+
+.viewer-code-number {
+  position: sticky;
+  left: 0;
+  flex-shrink: 0;
+  width: calc(var(--_digits) * 1ch + var(--spacing) * 10);
+  padding-right: calc(var(--spacing) * 4);
+  background-color: var(--color-well);
+  color: var(--color-fg-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewer-code:not([data-numbered]) .viewer-code-number {
+  width: calc(var(--spacing) * 6);
+  padding-right: 0;
+  color: transparent;
+}
+
+.viewer-code-text {
+  padding-right: calc(var(--spacing) * 6);
+  white-space: pre;
+}
+
+.viewer-code[data-wrap] .viewer-code-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.tok-k {
+  color: var(--color-code-keyword);
+}
+
+.tok-s {
+  color: var(--color-code-string);
+}
+
+.tok-n {
+  color: var(--color-code-number);
+}
+
+.tok-c {
+  color: var(--color-fg-3);
+}
+
+/* JSON as a folding tree in the same well and type. */
+.viewer-json {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 4) calc(var(--spacing) * 6) calc(var(--spacing) * 6);
+  color: var(--color-code-text);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-json-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(var(--spacing) * 1.5);
+  min-height: calc(var(--spacing) * 6);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+}
+
+div.viewer-json-row {
+  display: flex;
+  padding-left: calc(var(--spacing) * 4);
+}
+
+.viewer-json-key {
+  color: var(--color-fg-1);
+}
+
+.viewer-json-colon,
+.viewer-json-punct {
+  color: var(--color-fg-3);
+}
+
+.viewer-json-children {
+  display: grid;
+  justify-items: start;
+  padding-left: calc(var(--spacing) * 5);
+  border-left: 1px solid var(--color-hairline);
+  margin-left: calc(var(--spacing) * 1.5);
+}
+
+.viewer-json-close {
+  padding-left: calc(var(--spacing) * 4);
+}
+
+.viewer-json-branch {
+  display: grid;
+}
+
+/* A table: its first row held at the top, row numbers held at the left, one scroll both ways. */
+.viewer-table {
+  overflow: hidden;
+}
+
+.viewer-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-table-scroll:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.viewer-table-scroll table {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-table-scroll :is(th, td) {
+  max-width: 320px;
+  height: calc(var(--spacing) * 7.5);
+  overflow: hidden;
+  padding: 0 calc(var(--spacing) * 3);
+  border-right: 1px solid var(--color-separator);
+  border-bottom: 1px solid var(--color-separator);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--color-raised);
+  color: var(--color-fg-2);
+  font-weight: var(--font-weight-semibold);
+}
+
+.viewer-table-scroll [data-numeric] {
+  text-align: right;
+}
+
+.viewer-table-scroll .viewer-row-number {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: calc(var(--spacing) * 12);
+  background-color: var(--color-raised);
+  color: var(--color-fg-3);
+  font-weight: var(--font-weight-normal);
+  text-align: right;
+}
+
+.viewer-table-scroll thead .viewer-row-number {
+  z-index: 2;
+}
+
+/* Markdown, formatted as dot's messages are, on the sheet's own surface. */
+.viewer-doc {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background-color: var(--color-overlay);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.viewer-doc-page {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: calc(var(--spacing) * 8) calc(var(--spacing) * 6) calc(var(--spacing) * 12);
+  color: var(--color-fg-1);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
+}
+
+/* Sound and video: the browser's own player on the well. */
+.viewer-media {
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--spacing) * 6);
+}
+
+.viewer-video {
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-void);
+  box-shadow: var(--shadow-raised);
+}
+
+.viewer-audio {
+  display: grid;
+  justify-items: center;
+  gap: calc(var(--spacing) * 3);
+  width: min(100%, 420px);
+}
+
+.viewer-audio-name {
+  color: var(--color-fg-1);
+  font:
+    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+}
+
+.viewer-audio audio {
+  width: 100%;
+}
+
+/* The footer: between files on the left, getting the file on the right. */
+.viewer-footer {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+}
+
+.viewer-nav,
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.viewer-count {
+  min-width: calc(var(--spacing) * 14);
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  text-align: center;
+}
+
+.viewer-wrap {
+  flex-shrink: 0;
+}
+
+@media (--phone) {
+  .viewer-bar {
+    padding-inline: calc(var(--spacing) * 4);
+  }
+
+  /* A phone zooms a picture with two fingers; its bar keeps Fit and Actual size. */
+  .viewer-pane:is([data-kind="picture"], [data-kind="svg"], [data-kind="page"])
+  :is(.viewer-zoom, .viewer-bar-note) {
+    display: none;
+  }
+
+  .viewer-page-count {
+    font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+  }
+
+  .viewer-doc-page {
+    padding: calc(var(--spacing) * 5) calc(var(--spacing) * 4) calc(var(--spacing) * 10);
+  }
+
+  .viewer-media {
+    padding: calc(var(--spacing) * 4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer-pane,
+  .viewer-canvas[data-settling],
+  .viewer-pages-run {
+    transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+
+  .viewer-present {
+    animation-name: viewer-fade-in;
+  }
+
+  @starting-style {
+    .viewer-slide {
+      opacity: 0;
+    }
+  }
+
+  .viewer-slide {
+    transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+}
+
+@keyframes viewer-fade-in {
+  from {
+    opacity: 0;
+  }
+}

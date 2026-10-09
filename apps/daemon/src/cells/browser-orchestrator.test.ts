@@ -169,6 +169,37 @@ describe("persistent browser lifecycle", () => {
     expect(f.controller.endpoints(f.parent.id)?.browserd.token).not.toBe("changed");
   });
 
+  it("tells whether the running browser still answers as ready", async () => {
+    const f = fixture();
+    expect(await f.controller.health(f.parent.id)).toBeUndefined();
+    const ready = await f.controller.start(f.parent.id);
+    expect(await f.controller.health(f.parent.id)).toBe("ready");
+    const probe = vi.mocked(f.deps.probe);
+    if (!probe) throw new Error("the probe is missing");
+    probe.mockResolvedValueOnce({
+      browserCellId: ready.browserCellId,
+      parentCellId: ready.parentCellId,
+      instance: ready.instance,
+      ready: false,
+      holder: "user",
+      width: 1280,
+      height: 800,
+    });
+    expect(await f.controller.health(f.parent.id)).toBe("unready");
+    probe.mockResolvedValueOnce({
+      browserCellId: ready.browserCellId,
+      parentCellId: ready.parentCellId,
+      instance: randomUUID(),
+      ready: true,
+      holder: "user",
+      width: 1280,
+      height: 800,
+    });
+    expect(await f.controller.health(f.parent.id)).toBe("unready");
+    probe.mockRejectedValueOnce(new Error("connection refused"));
+    expect(await f.controller.health(f.parent.id)).toBe("silent");
+  });
+
   it("serializes concurrent starts into one profile and one running browser", async () => {
     const f = fixture();
     const [first, second] = await Promise.all([
@@ -540,6 +571,23 @@ describe("persistent browser lifecycle", () => {
     const opted = fixture();
     await new BrowserOrchestrator({ ...opted.deps, streamFullcolor: true }).start(opted.parent.id);
     expect(browserEnv(opted)).toContain("LOCALDOT_STREAM_FULLCOLOR=1");
+  });
+
+  it("gives the gate keyd's socket on Docker Engine", async () => {
+    const f = fixture();
+    const relay = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" } as const;
+    await new BrowserOrchestrator({ ...f.deps, relay: async () => relay }).start(f.parent.id);
+    const gate = f.docker.requests
+      .filter((request) => request.path === "/containers/create")
+      .map((request) => request.body as { Image?: string; Env?: string[]; HostConfig?: object })
+      .find((spec) => spec.Image === "test/gate:dev");
+    expect(gate?.Env).toContain("LD_KEYD_SOCKET=/run/localdot/keyd/4762.sock");
+    expect(gate?.Env?.filter((entry) => entry.startsWith("LD_TOOL_SOCKET="))).toEqual([]);
+    expect(gate?.HostConfig).toMatchObject({
+      Mounts: [
+        { Type: "bind", Source: "/h/keyd/relay", Target: "/run/localdot/keyd", ReadOnly: true },
+      ],
+    });
   });
 
   it("retains and wipes the private handoff buffer when Stop occurs during delivery", async () => {

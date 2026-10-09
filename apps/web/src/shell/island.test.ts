@@ -126,10 +126,10 @@ describe("pauseSlot", () => {
   });
 });
 
-it("makes Take control the porcelain action when dot hands the computer over", () => {
-  expect(takeSlot(statusFor({ computer: live, task: task("takeover", "waiting") }))).toEqual({
-    primary: true,
-  });
+it("makes Take control the porcelain action when dot hands the computer over, busy as the page takes it", () => {
+  const handed = statusFor({ computer: live, task: task("takeover", "waiting") });
+  expect(takeSlot(handed)).toEqual({ primary: true });
+  expect(takeSlot(handed, { taking: true })).toEqual({ primary: true, busy: true });
 });
 
 it("offers Take control whatever dot is doing, and says why only when it can't be had", () => {
@@ -179,6 +179,13 @@ describe("islandDecision", () => {
     for (const shape of ["hidden", "ready", "computer"] as const)
       expect(islandDecision({ ...base, shape, approval: true, chatShown: false })).toBeNull();
     expect(islandDecision(base)).toBeNull();
+  });
+
+  it("grows only an app's connection card while the user holds the computer", () => {
+    const control = { ...base, shape: "control" as const };
+    expect(islandDecision({ ...control, approval: true, connection: true })).toBe("approval");
+    expect(islandDecision({ ...control, approval: true })).toBeNull();
+    expect(islandDecision({ ...control, question: true, chatShown: false })).toBeNull();
   });
 });
 

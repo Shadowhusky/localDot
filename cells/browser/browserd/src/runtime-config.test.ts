@@ -111,6 +111,7 @@ describe("browser runtime bootstrap confinement", () => {
     expect(chromium.args).toContain("--remote-debugging-pipe");
     expect(chromium.args).toContain("--proxy-server=http://127.0.0.1:3129");
     expect(chromium.args).toContain("--proxy-bypass-list=<-loopback>");
+    expect(chromium.args).toContain("--hide-crash-restore-bubble");
     expect(
       chromium.args.some((argument) =>
         /(?:no-sandbox|disable-setuid-sandbox|remote-debugging-port|ignore-certificate-errors)/u.test(

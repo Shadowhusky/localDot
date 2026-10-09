@@ -40,6 +40,17 @@
   text-overflow: ellipsis;
 }
 
+/* A new title comes in over the old one's place rather than replacing it in one frame. */
+:is(.bar-title, .bar-sep) {
+  transition: opacity var(--dur-text-in) var(--ease-standard);
+}
+
+@starting-style {
+  :is(.bar-title, .bar-sep) {
+    opacity: 0;
+  }
+}
+
 .bar-r {
   display: flex;
   align-items: center;

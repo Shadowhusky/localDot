@@ -48,6 +48,12 @@ export function acquireDaemonLock(file: string): () => void {
   };
 }
 
+// The live process holding the lock, if any.
+export function lockHolder(file: string): number | undefined {
+  const pid = readPid(file);
+  return pid !== undefined && isAlive(pid) ? pid : undefined;
+}
+
 function linkIfAbsent(temp: string, file: string): boolean {
   try {
     linkSync(temp, file);

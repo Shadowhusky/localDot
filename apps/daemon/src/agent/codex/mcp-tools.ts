@@ -71,7 +71,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Find the desktop's controls whose names contain text (role optional, such as push button, menu item or " +
     "check box), in every window top first. Returns each one's role, name, window and the point to click.",
   switch_screen:
-    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. When a site needs the user to sign in, ask for the details with ask_user fields. Request a fresh screenshot after switching; shell and files remain on the desktop.",
+    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields. Request a fresh screenshot after switching; shell and files remain on the desktop.",
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:
@@ -91,7 +91,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   request_takeover:
     "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
     "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +
-    "the note what they need to do. For passwords and codes, ask with ask_user fields instead.",
+    "the note what they need to do. For passwords and codes, ask with ask_user fields instead. Hand over a " +
+    "sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
   remember:
     'Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping), or append to today\'s daily notes (file "notes"), which are searchable but not loaded into later tasks.',
   recall:

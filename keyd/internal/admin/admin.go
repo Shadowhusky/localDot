@@ -42,6 +42,10 @@ type Server struct {
 	Hairpin  *netguard.Public
 	Service  *ServiceProcessIdentity
 	Push     Pusher
+	// Where secret values live; the zero value reports nothing.
+	VaultState func() vault.VaultState
+	// Unlock takes the file vault's passphrase; nil when the vault has none.
+	Unlock func(passphrase []byte) error
 }
 
 func (s *Server) Handler() http.Handler {
@@ -56,6 +60,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/cells/{id}", s.closeCell)
 	mux.HandleFunc("POST /v1/cells/{id}/revoke", s.revoke)
 	mux.HandleFunc("POST /v1/cells/{id}/surrogates", s.mint)
+	mux.HandleFunc("GET /v1/cells/{id}/asks", s.listAsks)
+	mux.HandleFunc("POST /v1/cells/{id}/asks/{ask}", s.answerAsk)
 	mux.HandleFunc("PUT /v1/cells/{id}/task", s.beginTask)
 	mux.HandleFunc("DELETE /v1/cells/{id}/task", s.endTask)
 	mux.HandleFunc("GET /v1/cells/{id}/model-admission", s.getModelAdmission)
@@ -67,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/events", s.events)
 	mux.HandleFunc("GET /v1/push/key", s.pushKey)
 	mux.HandleFunc("POST /v1/push/send", s.pushSend)
+	mux.HandleFunc("POST /v1/vault/unlock", s.unlockVault)
 	return mux
 }
 
@@ -91,6 +98,9 @@ func Listen(path string) (net.Listener, error) {
 		ln.Close()
 		return nil, err
 	}
+	// keyd removes its socket itself while it still holds the home lock. A listener closed late,
+	// after a new keyd has made its own socket at this path, must not unlink that one.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	return ln, nil
 }
 
@@ -113,7 +123,51 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"day":     map[string]any{"date": date, "spentUSD": spent},
 		"audit":   auditState,
 		"hairpin": s.hairpin(),
+		"vault":   s.vaultState(),
+		// A desktop cell takes its gate's capture token on open; an older keyd refuses that field.
+		"capture": true,
 	})
+}
+
+func (s *Server) vaultState() any {
+	if s.VaultState == nil {
+		return nil
+	}
+	return s.VaultState()
+}
+
+// unlockVault takes the file vault's passphrase sealed to keyd, so the daemon relaying it never
+// reads it. The first passphrase a new vault receives becomes its passphrase.
+func (s *Server) unlockVault(w http.ResponseWriter, r *http.Request) {
+	if s.Unlock == nil {
+		fail(w, http.StatusConflict, "no-passphrase", "this key vault is not unlocked with a passphrase")
+		return
+	}
+	var body struct {
+		Sealed vault.Sealed `json:"sealed"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	passphrase, err := s.Opener.OpenPassphrase(body.Sealed)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "bad-seal", err.Error())
+		return
+	}
+	defer clear(passphrase)
+	if err := s.Unlock(passphrase); err != nil {
+		if _, aerr := s.Audit.Write(audit.Line{Kind: audit.KindAdmin, Decision: audit.Deny, Reason: "vault-unlock"}); aerr != nil {
+			log.Printf("keyd: audit write failed: %v", aerr)
+		}
+		if errors.Is(err, vault.ErrPassphrase) {
+			fail(w, http.StatusForbidden, "wrong-passphrase", "that passphrase does not unlock the key vault")
+			return
+		}
+		fail(w, http.StatusBadRequest, "bad-passphrase", err.Error())
+		return
+	}
+	s.admin("vault-unlock", "", "")
+	reply(w, http.StatusOK, s.vaultState())
 }
 
 func (s *Server) hairpin() any {
@@ -194,6 +248,10 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	revoked, err := s.Manager.PutSecret(rec, value)
+	if errors.Is(err, vault.ErrLocked) {
+		failLocked(w)
+		return
+	}
 	if err != nil {
 		log.Printf("keyd: storing secret %s failed", id)
 		fail(w, http.StatusInternalServerError, "vault", "the secret could not be stored")
@@ -210,6 +268,10 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, vault.ErrNotFound) {
 			fail(w, http.StatusNotFound, "not-found", "no such secret")
+			return
+		}
+		if errors.Is(err, vault.ErrLocked) {
+			failLocked(w)
 			return
 		}
 		fail(w, http.StatusInternalServerError, "vault", "the secret could not be deleted")
@@ -275,6 +337,45 @@ func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, map[string]any{"surrogates": out})
+}
+
+func (s *Server) listAsks(w http.ResponseWriter, r *http.Request) {
+	asks, err := s.Manager.Asks(r.PathValue("id"))
+	if err != nil {
+		managerFailure(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"asks": asks})
+}
+
+// answerAsk is the daemon's answer for one held connection. app is the program the daemon found
+// behind it, kept in the audit line only.
+func (s *Server) answerAsk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Decision string `json:"decision"`
+		App      string `json:"app"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if (body.Decision != "allow" && body.Decision != "deny") || len(body.App) > 128 || !printable(body.App) {
+		fail(w, http.StatusBadRequest, "bad-request", "decision is allow or deny; app is at most 128 printable characters")
+		return
+	}
+	if err := s.Manager.AnswerAsk(r.PathValue("id"), r.PathValue("ask"), body.Decision == "allow", body.App); err != nil {
+		managerFailure(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func printable(text string) bool {
+	for _, r := range text {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) beginTask(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +517,7 @@ func managerFailure(w http.ResponseWriter, err error) {
 		fail(w, http.StatusConflict, "task-pricing-conflict", "task pricing is immutable")
 	case errors.Is(err, llm.ErrTaskChanged):
 		fail(w, http.StatusConflict, "conflict", "task attachment changed")
-	case errors.Is(err, egress.ErrUnknownCell):
+	case errors.Is(err, egress.ErrUnknownCell), errors.Is(err, egress.ErrUnknownAsk):
 		fail(w, http.StatusNotFound, "not-found", err.Error())
 	case errors.Is(err, egress.ErrCellExists), errors.Is(err, egress.ErrPortInUse), errors.Is(err, egress.ErrCellChanged):
 		fail(w, http.StatusConflict, "conflict", err.Error())
@@ -433,6 +534,11 @@ func reply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// failLocked: the file vault waits for its passphrase, which only localdot unlock can give it.
+func failLocked(w http.ResponseWriter) {
+	fail(w, http.StatusLocked, "vault-locked", "saved keys are locked until localdot unlock is run on this machine")
 }
 
 func fail(w http.ResponseWriter, status int, code, message string) {

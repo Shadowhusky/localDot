@@ -121,6 +121,8 @@ func (c *Cell) refuseSecret(w http.ResponseWriter, l audit.Line, err error) {
 	switch {
 	case errors.Is(err, errNoAudit):
 		c.deny(w, l, http.StatusServiceUnavailable, ReasonNoAudit)
+	case errors.Is(err, vault.ErrLocked):
+		c.deny(w, l, http.StatusLocked, ReasonVaultLocked)
 	case errors.As(err, &reentry):
 		c.refuseNamed(w, l, ReasonReenter, reentry.ID, "re-enter "+reentry.ID,
 			"enter the key "+reentry.ID+" again in localDot's Keys")

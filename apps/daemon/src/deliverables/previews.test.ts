@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { JsonPreview } from "@localdot/protocol";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Converter } from "./previews.ts";
+import { type Converted, type Converter, Previews } from "./previews.ts";
 import { cleanFixtures, deliverablesFixture } from "./testing/fixture.ts";
 
 afterEach(cleanFixtures);
@@ -99,6 +99,14 @@ describe("previews", () => {
     expect(preview.kind === "table" && preview.rows[1]?.[1]).toBe("quoted, 0");
     expect(preview.kind === "table" && preview.truncated).toBe(true);
   });
+  it("excerpts source code on its card as plain text, keys masked", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    f.result(id, { "clean.py": `KEY = "sk-proj-${"Q".repeat(40)}"\nprint(KEY)\n` });
+    const card = await json(await f.get(`/api/agent/sessions/${id}/files/clean.py/preview?v=1`));
+    expect(card).toMatchObject({ kind: "text", format: "plain" });
+    expect(card.kind === "text" && card.lines.slice(0, 2)).toEqual(['KEY = "••••"', "print(KEY)"]);
+  });
   it("keeps v1's bytes for v1 after v2 replaced out/<name>", async () => {
     const f = deliverablesFixture();
     const id = f.task();
@@ -136,7 +144,7 @@ describe("previews", () => {
       .png()
       .toBuffer();
     const convert = vi.fn<Converter["convert"]>(async () => page);
-    const f = deliverablesFixture({ converter: { convert } });
+    const f = deliverablesFixture({ converter: { convert, pages: async () => "failed" } });
     const id = f.task();
     f.result(id, { "report.ods": "ods-bytes", "brief.docx": "docx-bytes", "scan.pdf": "%PDF-1.7" });
     for (const name of ["report.ods", "brief.docx", "scan.pdf"]) {
@@ -161,6 +169,91 @@ describe("previews", () => {
     });
     expect(existsSync(join(f.home, "sessions", id, "previews", "report.ods", "1.png"))).toBe(false);
   });
+  it("pages an office file as a PDF made on the computer, once per version", async () => {
+    const deck = Buffer.from("%PDF-1.7 24 slides");
+    const pages = vi.fn<Converter["pages"]>(async () => deck);
+    const f = deliverablesFixture({
+      converter: { convert: async () => "failed", pages },
+    });
+    const id = f.task();
+    f.result(id, { "deck.pptx": "pptx-bytes" });
+    for (const round of [1, 2]) {
+      const res = await f.get(`/api/agent/sessions/${id}/files/deck.pptx/pages?v=1`);
+      expect(res.headers.get("content-type"), `round ${round}`).toBe("application/pdf");
+      expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+      expect(Buffer.from(await res.arrayBuffer()).equals(deck)).toBe(true);
+    }
+    expect(pages).toHaveBeenCalledOnce();
+    expect(pages.mock.calls[0]?.[1]).toEqual(Buffer.from("pptx-bytes"));
+    expect(existsSync(join(f.home, "sessions", id, "previews", "deck.pptx", "1.pdf"))).toBe(true);
+    f.result(id, { "deck.pptx": "pptx-bytes v2" });
+    await f.get(`/api/agent/sessions/${id}/files/deck.pptx/pages?v=2`);
+    expect(pages).toHaveBeenCalledTimes(2);
+  });
+  it("keeps no pages it could not make, and makes none for a PDF or a picture", async () => {
+    const answers: Awaited<ReturnType<Converter["pages"]>>[] = [
+      "computer_off",
+      "too_large",
+      Buffer.from("<html>not a pdf"),
+    ];
+    const pages = vi.fn<Converter["pages"]>(async () => answers.shift() ?? "failed");
+    const f = deliverablesFixture({ converter: { convert: async () => "failed", pages } });
+    const id = f.task();
+    f.result(id, { "brief.docx": "docx", "scan.pdf": "%PDF-1.7", "chart.png": "png" });
+    const reason = async (name: string) =>
+      json(await f.get(`/api/agent/sessions/${id}/files/${name}/pages?v=1`));
+    expect(await reason("brief.docx")).toEqual({ kind: "none", reason: "computer_off" });
+    expect(await reason("brief.docx")).toEqual({ kind: "none", reason: "too_large" });
+    expect(await reason("brief.docx")).toEqual({ kind: "none", reason: "failed" });
+    expect(existsSync(join(f.home, "sessions", id, "previews", "brief.docx", "1.pdf"))).toBe(false);
+    expect(await reason("scan.pdf")).toEqual({ kind: "none", reason: "attachment" });
+    expect(await reason("chart.png")).toEqual({ kind: "none", reason: "attachment" });
+    expect(pages).toHaveBeenCalledTimes(3);
+  });
+  it("refuses to page an office file over 25 MiB without converting it", async () => {
+    const pages = vi.fn<Converter["pages"]>(async () => Buffer.from("%PDF-1.7"));
+    const f = deliverablesFixture({ converter: { convert: async () => "failed", pages } });
+    const id = f.task();
+    f.result(id, { "big.pptx": Buffer.alloc(25 * 1024 * 1024 + 1) });
+    expect(await json(await f.get(`/api/agent/sessions/${id}/files/big.pptx/pages?v=1`))).toEqual({
+      kind: "none",
+      reason: "too_large",
+    });
+    expect(pages).not.toHaveBeenCalled();
+  });
+  it("makes the pages again for a preview reopened after the first was closed", async () => {
+    const { previews, made, id, deck } = slowPages();
+    const first = new AbortController();
+    const closed = previews.pages(id, "deck.pptx", 1, first.signal);
+    await vi.waitFor(() => expect(made).toHaveLength(1));
+    first.abort();
+    const reopened = previews.pages(id, "deck.pptx", 1, new AbortController().signal);
+    await vi.waitFor(() => expect(made).toHaveLength(2));
+    made[1]?.finish(deck);
+    expect(await reopened).toEqual({ pdf: deck });
+    expect(made[0]?.signal.aborted).toBe(true);
+    await closed;
+  });
+  it("shares one making of the pages, and stops it only once every request has gone", async () => {
+    const { previews, made, id, deck } = slowPages();
+    const leaving = new AbortController();
+    const staying = new AbortController();
+    const left = previews.pages(id, "deck.pptx", 1, leaving.signal);
+    const stayed = previews.pages(id, "deck.pptx", 1, staying.signal);
+    await vi.waitFor(() => expect(made).toHaveLength(1));
+    leaving.abort();
+    expect(made[0]?.signal.aborted).toBe(false);
+    made[0]?.finish(deck);
+    expect(await stayed).toEqual({ pdf: deck });
+    expect(await left).toEqual({ pdf: deck });
+    const closing = [new AbortController(), new AbortController()];
+    const gone = closing.map((c) => previews.pages(id, "deck.pptx", 2, c.signal));
+    await vi.waitFor(() => expect(made).toHaveLength(2));
+    for (const c of closing) c.abort();
+    expect(made[1]?.signal.aborted).toBe(true);
+    await Promise.all(gone);
+    expect(made).toHaveLength(2);
+  });
   it("answers a missing version and a malformed one", async () => {
     const f = deliverablesFixture();
     const id = f.task();
@@ -172,3 +265,20 @@ describe("previews", () => {
     expect((await f.get(`/api/agent/sessions/${id}/files/a.txt/preview?v=0`)).status).toBe(400);
   });
 });
+
+// Pages that take as long as the test says, or end the moment their making is stopped.
+function slowPages() {
+  const made: { signal: AbortSignal; finish(answer: Converted): void }[] = [];
+  const pages = (_name: string, _bytes: Buffer, signal: AbortSignal) =>
+    new Promise<Converted>((resolve) => {
+      made.push({ signal, finish: resolve });
+      if (signal.aborted) resolve("busy");
+      signal.addEventListener("abort", () => resolve("busy"), { once: true });
+    });
+  const f = deliverablesFixture();
+  const id = f.task();
+  f.result(id, { "deck.pptx": "pptx" });
+  f.result(id, { "deck.pptx": "pptx v2" });
+  const previews = new Previews(f.home, { convert: async () => "failed", pages });
+  return { previews, made, id, deck: Buffer.from("%PDF-1.7 deck") };
+}

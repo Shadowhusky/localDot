@@ -106,6 +106,27 @@ describe("CellKeydWiring.refresh", () => {
     expect(cell.valid.size).toBe(0);
   });
 
+  it("gives keyd the gate's capture token only when keyd says it takes one", async () => {
+    const record = sampleRecord("01JXYZ0000000000000000ABCD");
+    record.tokens.capture = "c".repeat(43);
+    const dockerClient = new DockerClient(docker.socketPath);
+    vi.spyOn(dockerClient, "request").mockResolvedValue({ State: { Running: false } });
+    vi.spyOn(dockerClient, "putArchive").mockResolvedValue();
+    const wiring = new CellKeydWiring({
+      keyd: new KeydClient(keyd.socketPath, 1000),
+      docker: dockerClient,
+    });
+    const opened = () =>
+      keyd.calls.filter((c) => c.method === "POST" && c.path === "/v1/cells").at(-1)?.body;
+    keyd.capture = false;
+    await wiring.wire(record);
+    expect(keyd.cells.has(record.id)).toBe(true);
+    expect(opened()).not.toHaveProperty("captureToken");
+    keyd.capture = true;
+    await wiring.wire(record);
+    expect(opened()).toMatchObject({ captureToken: record.tokens.capture });
+  });
+
   it("rejects a mismatched open result before writing and refuses wiring a running desktop", async () => {
     const record = sampleRecord("01JXYZ0000000000000000ABCD");
     const client = new KeydClient(keyd.socketPath, 1000);

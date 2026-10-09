@@ -7,6 +7,8 @@ import { ALWAYS_SCOPES, type Place, type RulesStore, ruleChange } from "./rules.
 export class TaskAutonomy {
   #desktopSignedIn = false;
   readonly #allowed = new Map<ActionClass, RuleChange>();
+  // Connections allowed for this task, by destination: one yes never opens every port.
+  readonly #destinations = new Map<string, RuleChange>();
   constructor(
     private readonly rules?: Pick<RulesStore, "matches" | "add"> &
       Partial<Pick<RulesStore, "trusts">>,
@@ -22,8 +24,12 @@ export class TaskAutonomy {
   }
   relaxes(actionClass: ActionClass, place: Place): boolean {
     const scopes = ALWAYS_SCOPES[actionClass];
+    const forTask =
+      actionClass === "network"
+        ? place.destination !== undefined && this.#destinations.has(place.destination)
+        : this.#allowed.has(actionClass);
     return (
-      (scopes.includes("task") && this.#allowed.has(actionClass)) ||
+      (scopes.includes("task") && forTask) ||
       (scopes.some((scope) => scope !== "task") && this.rules?.matches(actionClass, place) === true)
     );
   }
@@ -33,6 +39,18 @@ export class TaskAutonomy {
     approvalId: string,
   ): RuleChange | undefined {
     if (!ALWAYS_SCOPES[actionClass].includes(option.scope)) return undefined;
+    if (option.scope === "task" && actionClass === "network") {
+      if (option.destination === undefined || this.#destinations.has(option.destination))
+        return undefined;
+      const change = {
+        scope: option.scope,
+        actionClass,
+        label: option.label,
+        destination: option.destination,
+      };
+      this.#destinations.set(option.destination, change);
+      return change;
+    }
     if (option.scope === "task") {
       if (this.#allowed.has(actionClass)) return undefined;
       const change = { scope: option.scope, actionClass, label: option.label };
@@ -42,7 +60,13 @@ export class TaskAutonomy {
     const rule = this.rules?.add(actionClass, option, approvalId);
     return rule && ruleChange(rule);
   }
-  revoke(actionClass: ActionClass): RuleChange | undefined {
+  // A connection's allowance ends for its own destination only.
+  revoke(actionClass: ActionClass, destination?: string): RuleChange | undefined {
+    if (actionClass === "network") {
+      const change = destination === undefined ? undefined : this.#destinations.get(destination);
+      if (change && destination !== undefined) this.#destinations.delete(destination);
+      return change;
+    }
     const change = this.#allowed.get(actionClass);
     this.#allowed.delete(actionClass);
     return change;

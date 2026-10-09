@@ -59,6 +59,7 @@ export function ChatThread({
   more = false,
   pending = false,
   start,
+  reveal,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -88,6 +89,8 @@ export function ChatThread({
   pending?: boolean;
   // In place of the empty thread's suggestions.
   start?: ReactNode;
+  // Counts the conversations the user chose.
+  reveal?: number;
 }) {
   const model = agent?.model;
   const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
@@ -152,6 +155,7 @@ export function ChatThread({
       cover={cover}
       covered={covered}
       start={start}
+      reveal={reveal}
     />
   );
 }

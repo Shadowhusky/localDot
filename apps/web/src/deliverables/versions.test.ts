@@ -37,5 +37,7 @@ describe("file versions on a card", () => {
     expect([0, 1].map((i) => opensAtFirst(["a.png", "b.svg"], i))).toEqual([true, true]);
     const many = ["diagram.svg", "chart.png", "totals.csv", "notes.md", "page.html"];
     expect(many.map((_, i) => opensAtFirst(many, i))).toEqual([false, true, false, false, false]);
+    const code = ["archive.zip", "clean.py", "chart.png", "notes.md"];
+    expect(code.map((_, i) => opensAtFirst(code, i))).toEqual([false, true, false, false]);
   });
 });

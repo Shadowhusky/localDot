@@ -249,6 +249,13 @@ describe("key routes", () => {
     expect(await bad.json()).toMatchObject({ error: "bad-binding" });
     keyd.failures.set("PUT /v1/secrets/", { status: 500, code: "vault" });
     expect((await post({ binding, sealed })).status).toBe(502);
+    keyd.failures.set("PUT /v1/secrets/", { status: 423, code: "vault-locked" });
+    const locked = await post({ binding, sealed });
+    expect(locked.status).toBe(423);
+    expect(await locked.json()).toEqual({
+      error: "vault-locked",
+      message: "Saved keys are locked. On that computer, run: localdot unlock",
+    });
   });
 
   it("refuse a name whose variable another key's stand-in already has", async () => {

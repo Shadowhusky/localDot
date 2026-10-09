@@ -38,7 +38,13 @@ export function pickFrames(
 }
 
 // What a frame shows, as text: two frames with the same look are one picture, rendered once. The
-// HUD's clock is left out because nothing on the picture shows it.
-export function frameLook(picture: string | null, scene: Scene | null, text: string | null) {
-  return JSON.stringify([picture, scene && { ...scene, hud: null }, text]);
+// HUD's clock is left out because nothing on the picture shows it. dot, when shown, is alive in
+// every frame, so its frame number stands for its look.
+export function frameLook(
+  picture: string | null,
+  scene: Scene | null,
+  text: string | null,
+  dot: number | null = null,
+) {
+  return JSON.stringify([picture, scene && { ...scene, hud: null }, text, dot]);
 }

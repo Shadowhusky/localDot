@@ -21,6 +21,7 @@ export interface AgentSnapshot {
   readonly models?: TaskModelSelection;
   readonly autonomy?: AutonomyPolicy;
   readonly approval?: ApprovalCard;
+  readonly connection?: ApprovalCard;
   readonly pause?: PauseSnapshot;
   // The spending limit that holds the task: its own budget, or the daily limit all tasks share.
   readonly budgetHold?: "task" | "day";
@@ -48,6 +49,7 @@ const fields = new Set([
   "models",
   "autonomy",
   "approval",
+  "connection",
   "pause",
   "budgetHold",
   "screen",
@@ -103,10 +105,12 @@ export function parseAgentSnapshot(
     return fail();
   const autonomy = Object.hasOwn(v, "autonomy") ? AutonomyPolicy.safeParse(v.autonomy) : null;
   const approval = Object.hasOwn(v, "approval") ? ApprovalCard.safeParse(v.approval) : null;
+  const connection = Object.hasOwn(v, "connection") ? ApprovalCard.safeParse(v.connection) : null;
   const pause = Object.hasOwn(v, "pause") ? PauseSnapshot.safeParse(v.pause) : null;
   if (
     (autonomy && !autonomy.success) ||
     (approval && !approval.success) ||
+    (connection && (!connection.success || connection.data.actionClass !== "network")) ||
     (pause && !pause.success) ||
     (Object.hasOwn(v, "budgetHold") && v.budgetHold !== "task" && v.budgetHold !== "day") ||
     (Object.hasOwn(v, "holder") && v.holder !== true)
@@ -129,6 +133,7 @@ export function parseAgentSnapshot(
     ...(models?.success ? { models: models.data } : {}),
     ...(autonomy?.success ? { autonomy: autonomy.data } : {}),
     ...(approval?.success ? { approval: approval.data } : {}),
+    ...(connection?.success ? { connection: connection.data } : {}),
     ...(pause?.success ? { pause: pause.data } : {}),
     ...(Object.hasOwn(v, "budgetHold") ? { budgetHold: v.budgetHold as "task" | "day" } : {}),
     ...(Object.hasOwn(v, "brainCellId") ? { brainCellId: v.brainCellId as string } : {}),

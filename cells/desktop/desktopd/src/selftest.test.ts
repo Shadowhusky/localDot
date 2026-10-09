@@ -85,8 +85,10 @@ describe("runSelfTest", () => {
   });
 
   it("fails on every way out of the cell, naming the check", async () => {
-    const open = (target: string) => async (host: string, port: number) =>
-      `${host}:${port}` === target ? "connected" : "ENETUNREACH";
+    const open =
+      (target: string, result = "open") =>
+      async (host: string, port: number) =>
+        `${host}:${port}` === target ? result : "ENETUNREACH";
     const files = sealedCell();
     expect(
       await failed(
@@ -95,7 +97,10 @@ describe("runSelfTest", () => {
         }),
       ),
     ).toEqual(["route"]);
-    expect(await failed(sealedCell({ tcpConnect: open("1.1.1.1:443") }))).toEqual(["direct-ipv4"]);
+    expect(await failed(sealedCell({ tcpConnect: open("1.1.1.1:25") }))).toEqual(["direct-ipv4"]);
+    expect(await failed(sealedCell({ tcpConnect: open("1.1.1.1:25", "answered") }))).toEqual([
+      "direct-ipv4",
+    ]);
     expect(await failed(sealedCell({ tcpConnect: open("2606:4700:4700::1111:443") }))).toEqual([
       "direct-ipv6",
     ]);
@@ -118,11 +123,50 @@ describe("runSelfTest", () => {
     ).toEqual(["host"]);
   });
 
+  it("passes a computer whose traffic crosses to its gate, where keyd refuses the probes", async () => {
+    const link = `${ROUTE_ISOLATED}ld0\t00000000\t010000C0\t0003\t0\t0\t0\t00000000\nld0\t010000C0\t00000000\t0005\t0\t0\t0\tFFFFFFFF\n`;
+    const base = sealedCell();
+    const captured = (over: Partial<Probes> = {}) =>
+      sealedCell({
+        readFile: async (p) => (p === "/proc/net/route" ? link : base.readFile(p)),
+        tcpConnect: async (host) => (host === "172.24.0.1" ? "EHOSTUNREACH" : "closed"),
+        resolve: async (name) => (name === "example.com" ? ["198.18.0.7"] : "ENOTFOUND"),
+        ...over,
+      });
+    const report = await runSelfTest(cfg, captured());
+    expect(report.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(report.checks.find((c) => c.id === "route")?.detail).toBe(
+      "default route through the gate's link only",
+    );
+    const example = (found: string[]) => async (name: string) =>
+      name === "example.com" ? found : "ENOTFOUND";
+    expect(await failed(captured({ resolve: example(["198.20.0.7"]) }))).toEqual(["dns"]);
+    expect(await failed(captured({ resolve: example(["198.18.0.7", "93.184.215.14"]) }))).toEqual([
+      "dns",
+    ]);
+    expect(await failed(captured({ resolve: example([]) }))).toEqual(["dns"]);
+    const around = `${link}eth0\t00000000\t010018AC\t0003\t0\t0\t0\t00000000\n`;
+    expect(
+      await failed(
+        captured({ readFile: async (p) => (p === "/proc/net/route" ? around : base.readFile(p)) }),
+      ),
+    ).toEqual(["route"]);
+    const elsewhere = link.replace("010000C0\t0003", "020000C0\t0003");
+    expect(
+      await failed(
+        captured({
+          readFile: async (p) => (p === "/proc/net/route" ? elsewhere : base.readFile(p)),
+        }),
+      ),
+    ).toEqual(["route"]);
+  });
+
   it("fails when the network's gateway address answers, even with a refusal", async () => {
     const answer = (result: string) => async (host: string, port: number) =>
       `${host}:${port}` === "172.24.0.1:53" ? result : "EHOSTUNREACH";
     expect(await failed(sealedCell({ tcpConnect: answer("ECONNREFUSED") }))).toEqual(["gateway"]);
-    expect(await failed(sealedCell({ tcpConnect: answer("connected") }))).toEqual(["gateway"]);
+    expect(await failed(sealedCell({ tcpConnect: answer("open") }))).toEqual(["gateway"]);
+    expect(await failed(sealedCell({ tcpConnect: answer("closed") }))).toEqual(["gateway"]);
     const quiet = await runSelfTest(cfg, sealedCell({ tcpConnect: answer("timeout") }));
     expect(quiet.checks.find((c) => c.id === "gateway")).toMatchObject({
       ok: true,
@@ -392,14 +436,32 @@ describe("cachedSelfTest", () => {
 describe("nodeProbes", () => {
   const probes = nodeProbes();
 
-  it("tells a refused or unroutable connection from a connected one", async () => {
+  it("tells a refusal, a connection the peer ends, answers or leaves open apart", async () => {
     const server = createServer((s) => s.end()).listen(0, "127.0.0.1");
     await once(server, "listening");
     const { port } = server.address() as AddressInfo;
-    expect(await probes.tcpConnect("127.0.0.1", port, 1000)).toBe("connected");
+    expect(await probes.tcpConnect("127.0.0.1", port, 1000)).toBe("closed");
     server.close();
     await once(server, "close");
     expect(await probes.tcpConnect("127.0.0.1", port, 1000)).toBe("ECONNREFUSED");
+    const reset = createServer((s) => s.resetAndDestroy()).listen(0, "127.0.0.1");
+    await once(reset, "listening");
+    expect(await probes.tcpConnect("127.0.0.1", (reset.address() as AddressInfo).port, 1000)).toBe(
+      "closed",
+    );
+    reset.close();
+    const banner = createServer((s) => s.write("220 ready\r\n")).listen(0, "127.0.0.1");
+    await once(banner, "listening");
+    expect(await probes.tcpConnect("127.0.0.1", (banner.address() as AddressInfo).port, 1000)).toBe(
+      "answered",
+    );
+    banner.close();
+    const quiet = createServer(() => {}).listen(0, "127.0.0.1");
+    await once(quiet, "listening");
+    expect(await probes.tcpConnect("127.0.0.1", (quiet.address() as AddressInfo).port, 100)).toBe(
+      "open",
+    );
+    quiet.close();
   });
 
   it("asks a proxy for an absolute URL, with and without credentials", async () => {

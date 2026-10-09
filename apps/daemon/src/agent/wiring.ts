@@ -7,7 +7,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
-import { serve } from "@hono/node-server";
+import { createAdaptorServer, serve } from "@hono/node-server";
 import {
   CHATGPT_INSTALL_FIRST,
   CHATGPT_SWITCHED_OFF,
@@ -34,7 +34,9 @@ import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
+import { type GateRelay, listenOnSocket } from "../cells/relay.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
+import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
 import type { EventLog } from "../event-log.ts";
@@ -76,6 +78,8 @@ import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
+import { ConnectionApprovals } from "./safety/connections.ts";
+import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
@@ -107,9 +111,12 @@ export interface AgentWiringDeps {
   policy?: ToolPolicy;
   routines?: RoutineToolPort;
   toolPort?: number;
+  // Also serves the tool API here, for brain gates on Docker Engine (cells/relay.ts).
+  toolSocket?: string;
+  relay?: () => Promise<GateRelay>;
   codex?: { realHome: string; user: string };
   claudeCode?: { realHome: string };
-  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
+  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser">;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
@@ -226,6 +233,7 @@ export function createAgent(d: AgentWiringDeps) {
     range: d.keydPorts,
     desktopPorts: () => d.cells.reservedKeydPorts(),
     ...(d.toolPort === undefined ? {} : { toolPort: d.toolPort }),
+    ...(d.relay ? { relay: d.relay } : {}),
   });
   const judgeCell = new JudgeCell({
     keyd: d.keyd,
@@ -523,6 +531,7 @@ export function createAgent(d: AgentWiringDeps) {
   const runner = new AgentRunner({
     home: d.home,
     installSession: d.sessionScreens?.install.bind(d.sessionScreens),
+    startBrowser: d.sessionScreens?.startBrowser.bind(d.sessionScreens),
     fences: d.fences,
     eventLog: d.eventLog,
     live: d.live,
@@ -779,6 +788,11 @@ export function createAgent(d: AgentWiringDeps) {
       !d.killSwitch.isBusy(session.cellId),
     desktop: upload,
     manual,
+    desktopPage: async (cellId, signal) => {
+      const cell = d.cells.get(cellId);
+      if (!ready || closing || cell?.state !== "ready" || cell.paused) return undefined;
+      return desktop(cellId)?.browserPage(signal);
+    },
     home: d.home,
     harness,
     ...(auth && installer && setup
@@ -794,6 +808,24 @@ export function createAgent(d: AgentWiringDeps) {
       d.eventLog.append(id, { type, agent: "main", data } as never);
     },
   };
+  const connections = new ConnectionApprovals({
+    keyd: d.keyd,
+    task: (cellId) => {
+      const live = d.live.get(cellId);
+      const session = live ? runner.get(live) : undefined;
+      return session && !session.stopped ? session : undefined;
+    },
+    rules: new RulesStore(d.home),
+    owner: async (cellId, port) => {
+      const endpoint = d.cells.endpoints(cellId)?.desktopd;
+      return endpoint ? new DesktopdClient(endpoint).connectionOwner(port) : undefined;
+    },
+    cells: () =>
+      d.cells
+        .list()
+        .filter((cell) => cell.state === "ready")
+        .map((cell) => cell.id),
+  });
   // A computer for one daemon-initiated job (file previews), admitted like a user upload: refused
   // while the user holds control or Stop is running, and aborted by Stop.
   const computerAccess = (
@@ -815,11 +847,13 @@ export function createAgent(d: AgentWiringDeps) {
     return { tools, signal: access.signal, check: access.check, release: access.release };
   };
   let server: ReturnType<typeof serve> | undefined,
+    socketServer: ReturnType<typeof createAdaptorServer> | undefined,
     startPromise: Promise<void> | undefined,
     closePromise: Promise<void> | undefined;
   return {
     runner,
     routes,
+    connections,
     computerAccess,
     // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.
     // Unlike agent tasks, they have no AgentSession whose runner can contain a lost reply.
@@ -864,8 +898,13 @@ export function createAgent(d: AgentWiringDeps) {
           );
           server.once("error", reject);
         });
+        if (d.toolSocket) {
+          socketServer = createAdaptorServer({ fetch: toolApp.fetch });
+          await listenOnSocket(socketServer, d.toolSocket);
+        }
         if (closing) {
           server?.close();
+          socketServer?.close();
           throw new Error("agent is closed");
         }
         ready = true;
@@ -891,10 +930,11 @@ export function createAgent(d: AgentWiringDeps) {
         const closeListener = async () => {
           // A sweep/listen already in flight still belongs to this lifecycle.
           await startPromise?.catch(() => {});
-          if (server?.listening)
-            await new Promise<void>((resolve, reject) => {
-              server?.close((error) => (error ? reject(error) : resolve()));
-            });
+          for (const listener of [server, socketServer])
+            if (listener?.listening)
+              await new Promise<void>((resolve, reject) => {
+                listener.close((error) => (error ? reject(error) : resolve()));
+              });
         };
         const outcomes = await Promise.allSettled([
           closeListener(),

@@ -26,10 +26,18 @@ TASK = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 GENERATION = re.compile(r"^[0-9a-f]{32}$")
 # A new profile draws Chromium's frame from the GTK theme, so its window buttons are the desktop's.
 PREFERENCES = b'{"browser":{"custom_chrome_frame":true},"extensions":{"theme":{"system_theme":1}}}'
+# A window opened without a page says that sign-ins here aren't kept (packages/protocol accounts.ts).
+NOTICE = "file:///opt/localdot/desktop-browser.html"
 
 
 class Refused(Exception):
     pass
+
+
+def with_start_page(arguments):
+    if any(not arg.startswith("--") for arg in arguments):
+        return list(arguments)
+    return [*arguments, NOTICE]
 
 
 def require(value):
@@ -250,6 +258,7 @@ class Profiles:
             return {"taskId": task_id, "generation": generation}
 
     def launch(self, arguments, command=("/usr/bin/chromium",)):
+        arguments = with_start_page(arguments)
         require(len(arguments) <= 32 and sum(len(a.encode("utf-8")) for a in arguments) <= 8192)
         for arg in arguments:
             require(not any(ord(c) < 32 or ord(c) == 127 for c in arg))

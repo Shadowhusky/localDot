@@ -66,7 +66,9 @@ export const TopBar = memo(function TopBar({
         {title && (
           <>
             <span className="bar-sep" aria-hidden="true" />
-            <span className="bar-title">{title}</span>
+            <span key={title} className="bar-title">
+              {title}
+            </span>
           </>
         )}
         {note && <span className="title-note">{note}</span>}
@@ -97,7 +99,7 @@ export const TopBar = memo(function TopBar({
           size={32}
           icon="key-round"
           label={keys.spoken ?? keys.label}
-          attention={["offline", "audit", "reenter", "guard"].includes(keys.state)}
+          attention={keys.state !== "ok" && keys.state !== "unknown"}
           aria-haspopup="dialog"
           aria-expanded={keysOpen}
           aria-controls="keys-sheet"

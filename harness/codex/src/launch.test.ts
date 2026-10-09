@@ -852,8 +852,17 @@ describe("owned Codex launch composition", () => {
 });
 describe("harness availability", () => {
   it("is a readonly fixed-platform preflight with safe missing-file reasons", () => {
-    expect(harnessAvailability("linux", "x64").available).toBe(false);
-    expect(harnessAvailability("darwin", "x64").available).toBe(false);
+    expect(harnessAvailability("linux", "x64")).toEqual({
+      available: false,
+      reason: "ChatGPT plan isn't available on Linux yet.",
+    });
+    expect(harnessAvailability("darwin", "x64")).toEqual({
+      available: false,
+      reason: "ChatGPT plan needs a Mac with Apple silicon.",
+    });
+    expect(harnessAvailability("win32", "x64").reason).toBe(
+      "ChatGPT plan isn't available on this computer.",
+    );
     expect(harnessAvailability("darwin", "arm64", "/not-a-cert/fake-auth-secret")).toEqual({
       available: false,
       reason: "The system certificate bundle is unavailable.",

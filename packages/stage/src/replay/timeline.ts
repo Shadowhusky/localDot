@@ -7,6 +7,7 @@ export interface Chapter {
   startT: number;
   endT: number;
   status: ChapterStatus;
+  intent?: string;
 }
 // Movement is a valid protocol input and must remain visible on the timeline.
 export type TickKind =
@@ -60,6 +61,7 @@ export function chapters(model: SessionModel, endMs: number): Chapter[] {
         step.status !== undefined && statuses.has(step.status)
           ? (step.status as ChapterStatus)
           : "doing",
+      ...(step.intent ? { intent: step.intent } : {}),
     };
   });
 }

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { LINE_HOLD_MS, NarratorBand } from "./NarratorBand.tsx";
+import { NarratorBand } from "./NarratorBand.tsx";
+import { LINE_HOLD_MS } from "./narration.ts";
 
 afterEach(() => {
   cleanup();
@@ -11,7 +12,7 @@ afterEach(() => {
 
 const line = () => document.querySelector(".narration-line");
 
-it("holds each line for a second, then fades it out before the next comes in", () => {
+it("holds each line long enough to read, then fades it out before the next comes in", () => {
   vi.useFakeTimers();
   const band = render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
   band.rerender(<NarratorBand line="Selecting February's net total" speaker="dot" showDot />);
@@ -23,6 +24,36 @@ it("holds each line for a second, then fades it out before the next comes in", (
   act(() => vi.advanceTimersByTime(120));
   expect(line()?.textContent).toBe("dot: Selecting February's net total");
   expect(line()?.hasAttribute("data-leaving")).toBe(false);
+});
+
+it("never flips back and forth: a line that returns within its hold keeps the band still", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="Opening Telegram" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Clicked “Search”" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(LINE_HOLD_MS / 2));
+  band.rerender(<NarratorBand line="Opening Telegram" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(LINE_HOLD_MS * 2));
+  expect(line()?.textContent).toBe("dot: Opening Telegram");
+  expect(line()?.hasAttribute("data-leaving")).toBe(false);
+});
+
+it("brings the first line after a silence in at once", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Opening Telegram" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(1));
+  expect(line()?.textContent).toBe("dot: Opening Telegram");
+});
+
+it("brings a line for the user in at once, without waiting out the last line's hold", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Which report?" speaker="dot" showDot forUser />);
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Which report?");
+  band.rerender(<NarratorBand line="Sign in to your bank" speaker="dot" showDot reveal />);
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Sign in to your bank");
 });
 
 it("names its speaker on screen only when dot isn't beside it", () => {
@@ -100,4 +131,44 @@ it("leaves a line that fits as plain text", () => {
   expect(line()?.hasAttribute("title")).toBe(false);
   expect(line()?.hasAttribute("role")).toBe(false);
   expect(screen.queryByRole("button", { name: "Show the whole line" })).toBeNull();
+});
+
+it("gives a tip its one step, outside the live region, and the step leaves with its line", () => {
+  vi.useFakeTimers();
+  const run = vi.fn();
+  const band = render(
+    <NarratorBand
+      line="Replay keeps every task."
+      speaker="dot"
+      showDot
+      idle
+      forUser
+      action={{ label: "Open", run }}
+    />,
+  );
+  const step = screen.getByRole("button", { name: "Open" });
+  const live = document.querySelector('[aria-live="polite"]') as HTMLElement;
+  expect(live.contains(step)).toBe(false);
+  expect(live.textContent).toBe("dot: Replay keeps every task.");
+  expect(document.querySelector(".narration")?.hasAttribute("data-idle")).toBe(true);
+  act(() => step.click());
+  expect(run).toHaveBeenCalledWith(step);
+  band.rerender(<NarratorBand line="Press / to type." speaker="dot" showDot idle forUser />);
+  expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Press / to type.");
+  expect(screen.queryByRole("button", { name: "Open" })).toBeNull();
+  band.rerender(<NarratorBand line="Opening the report" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(LINE_HOLD_MS + 120));
+  expect(document.querySelector(".narration")?.hasAttribute("data-idle")).toBe(false);
+});
+
+it("says when the pointer is over the band", () => {
+  const onHover = vi.fn();
+  render(<NarratorBand line="Morning." speaker="dot" showDot idle onHover={onHover} />);
+  const narrator = document.querySelector(".narrator") as HTMLElement;
+  fireEvent.pointerEnter(narrator);
+  expect(onHover).toHaveBeenLastCalledWith(true);
+  fireEvent.pointerLeave(narrator);
+  expect(onHover).toHaveBeenLastCalledWith(false);
 });

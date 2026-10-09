@@ -6,6 +6,7 @@ export interface ThemeColor {
 export interface StageTheme {
   font: string;
   xenon: ThemeColor;
+  attention: ThemeColor;
   cursorFill: ThemeColor;
   cursorRim: ThemeColor;
   hudSolid: ThemeColor;
@@ -20,12 +21,15 @@ export interface StageTheme {
   glyphLight: ThemeColor;
   glyphMid: ThemeColor;
   glyphShade: ThemeColor;
+  spill: ThemeColor;
+  spillXenon: ThemeColor;
 }
 
 type ColorKey = Exclude<keyof StageTheme, "font">;
 
 const TOKENS: Record<ColorKey, string> = {
   xenon: "--color-xenon",
+  attention: "--color-attention",
   cursorFill: "--color-cursor-fill",
   cursorRim: "--color-cursor-rim",
   hudSolid: "--color-glass-solid",
@@ -40,6 +44,8 @@ const TOKENS: Record<ColorKey, string> = {
   glyphLight: "--color-glyph-light",
   glyphMid: "--color-glyph-mid",
   glyphShade: "--color-glyph-shade",
+  spill: "--color-spill",
+  spillXenon: "--color-spill-xenon",
 };
 
 export function parseCssColor(value: string): ThemeColor {

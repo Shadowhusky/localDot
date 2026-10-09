@@ -25,6 +25,7 @@ import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
 import { CellOrchestrator } from "./cells/orchestrator.ts";
 import { parsePortRange } from "./cells/ports.ts";
 import { probeDesktopd, probeStream } from "./cells/readiness.ts";
+import { gateRelaySource, relayDirs, TOOL_SOCKET } from "./cells/relay.ts";
 import { createComputerResetController } from "./cells/reset-controller.ts";
 import { ComputerResetHolds } from "./cells/reset-holds.ts";
 import { verifyDesktopRuntimeImages } from "./cells/runtime-image-check.ts";
@@ -133,6 +134,7 @@ const runtimeAdmission = new RuntimeUpdateAdmission(home);
 const runtimeImages = serviceIdentity ? RuntimeImages.parse(imagesFromEnv()) : undefined;
 const fences = new ComputerFences(home, (id) => resetHolds.oldHeld(id));
 const docker = new DockerClient(findDockerSocket().path);
+const relay = gateRelaySource(docker, home);
 const keyd = new KeydClient(keydSocketPath(home));
 serviceReadiness = serviceIdentity
   ? new ManagedServiceReadiness(
@@ -147,7 +149,7 @@ let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
 const stream = streamOptions(process.env);
 const images = imagesFromEnv();
-const updates = new ComputerUpdates({ home, docker, images, stream });
+const updates = new ComputerUpdates({ home, docker, images, stream, relay });
 const orchestrator = new CellOrchestrator({
   updates,
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
@@ -175,6 +177,7 @@ const orchestrator = new CellOrchestrator({
   keyd: keydWiring,
   store,
   images,
+  relay,
   streamFullcolor: stream.fullcolor,
   probeDesktopd,
   probeStream,
@@ -206,6 +209,7 @@ browser = new BrowserOrchestrator({
   docker,
   keyd,
   images: browserImagesFromEnv(),
+  relay,
   streamFullcolor: stream.fullcolor,
   parentAvailable: browserAvailable,
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
@@ -215,6 +219,7 @@ const browserWarmer = new BrowserWarmer({
   cells: orchestrator,
   browser,
   available: browserAvailable,
+  report: (message) => console.error(message),
 });
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
@@ -353,6 +358,7 @@ agent = createAgent({
     registry,
     downloads,
     pendingStop: (sessionId) => killSwitch.pendingStop(sessionId),
+    report: (message) => console.error(message),
     now: () => clock.nowMicros(),
   }),
   home,
@@ -369,6 +375,10 @@ agent = createAgent({
   monitor: keydMonitor,
   killSwitch,
   keydPorts,
+  relay,
+  ...(process.platform === "linux"
+    ? { toolSocket: join(relayDirs(home).toolDir, TOOL_SOCKET) }
+    : {}),
   codex: { realHome: userInfo().homedir, user: userInfo().username },
   claudeCode: { realHome: userInfo().homedir },
   recall: (query, limit, exclude) => recallHits(searchIndex, query, limit, exclude),
@@ -463,8 +473,18 @@ void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
     const records = () => orchestrator.list().flatMap((cell) => orchestrator.record(cell.id) ?? []);
     shutdown.unshift(updates.watch(records, (id) => orchestrator.notify(id)));
   });
-const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
+const keydEvents = new KeydEventRouter({
+  keyd,
+  live,
+  eventLog,
+  ask: (cellId, held) => void agent.connections.ask(cellId, held),
+  asksMissed: () => void agent.connections.sweep(),
+});
+// keyd holds a connection for two minutes; a missed event is picked up well within that.
+const sweepAsks = setInterval(() => void agent.connections.sweep(), 15_000);
+sweepAsks.unref();
 shutdown.push(
+  () => clearInterval(sweepAsks),
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
   () => browserWarmer.dispose(),

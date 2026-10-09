@@ -58,3 +58,21 @@ it("gives a full screen stage the screen under the island's strip", () => {
   );
   expect(frame).toMatch(/width: min\(100vw, \(100dvh - var\(--_strip\)\) \* 1\.6\);/);
 });
+
+it("floats full screen's control strip over the picture's input surface, as the island is", () => {
+  const surface = Number(/\.stage > \.manual-surface \{[^}]*z-index: (\d+);/.exec(frame)?.[1]);
+  const island = Number(/--layer-island: (\d+);/.exec(tokens)?.[1]);
+  expect(surface).toBeGreaterThan(0);
+  expect(frame).toMatch(
+    /\.app\[data-full\] \.control-strip \{[^}]*z-index: var\(--layer-island\);/,
+  );
+  expect(island).toBeGreaterThan(surface);
+});
+
+it("keeps full screen's faded controls under the pointer, so a tap on one lands on it", () => {
+  const faded = [...rules(hud), ...rules(frame)].filter(([selector]) =>
+    selector?.includes("[data-still]"),
+  );
+  expect(faded.length).toBeGreaterThan(0);
+  expect(faded.filter(([, body]) => /pointer-events:\s*none/.test(body ?? ""))).toEqual([]);
+});

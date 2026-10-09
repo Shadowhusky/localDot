@@ -1,11 +1,11 @@
 import { microsToMs, type SessionCard, type SessionVerdict } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
-import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { RecordingFiles } from "../deliverables/RecordingFiles.tsx";
 import { exportRequest, withinRecording } from "../deliverables/replay-link.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
-import { type DotFeed, dotFeed } from "../dot/dot-feed.ts";
+import { type DotFeed, recordedPresence } from "../dot/dot-feed.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
@@ -19,7 +19,7 @@ import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { type StepRowView, stepRows } from "../session/session-view.ts";
-import { TASK_POSE, taskHud } from "../session/status.ts";
+import { taskHud } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { HANDHELD } from "../shell/layout.ts";
 import { NarratorBand } from "../shell/NarratorBand.tsx";
@@ -67,6 +67,7 @@ import "./replay.css";
 // Wide enough for the chosen recording beside the list.
 export const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
+const CONTINUE_LABEL = "Continue working";
 const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.
 const TRANSPORT_STILL_MS = 2000;
@@ -406,7 +407,7 @@ function RecordingPreview({
               disabledReason={continuable(card, continueTask) ? continueTask.reason : undefined}
               onClick={() => continueTask.run(card.id)}
             >
-              {card.verdict === "live" ? "Watch it live" : "Continue this conversation"}
+              {card.verdict === "live" ? "Watch it live" : CONTINUE_LABEL}
             </Button>
           )}
           <Button size="lg" icon="play" onClick={onWatch}>
@@ -449,7 +450,15 @@ function RecordingPreview({
 // The island over a recording: what dot was doing at the playhead and when; no controls.
 const LOST_LINE = "I couldn't open this recording. Shall I try again?";
 
-function ReplayIsland({ label, time }: { label: string; time: string }) {
+function ReplayIsland({
+  label,
+  time,
+  action,
+}: {
+  label: string;
+  time: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="island-anchor">
       <div className="island" data-shape="replay">
@@ -460,6 +469,12 @@ function ReplayIsland({ label, time }: { label: string; time: string }) {
             <span className="island-label-text">{label}</span>
           </span>
           <span className="island-elapsed num">{time}</span>
+          {action && (
+            <>
+              <span className="island-divider" aria-hidden="true" />
+              {action}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -627,12 +642,9 @@ function Player({
   const hud = taskHud(replay.model, replay.tMs);
   // A recording that never loaded has no moment to show: the island and dot say so instead.
   const lost = replay.status === "error" && !replay.map && !replay.model.steps.length;
-  const line = opening ? "" : lost ? LOST_LINE : hud.caption;
-  const feed = dotFeed(
-    { dotPose: lost ? "error" : TASK_POSE[hud.row], control: hud.control, row: hud.row },
-    replay.model,
-    replay.tMs,
-  );
+  const recorded = recordedPresence(replay.model, replay.tMs, hud);
+  const line = opening ? "" : lost ? LOST_LINE : recorded.line;
+  const feed: DotFeed = lost ? { ...recorded.feed, state: "error" } : recorded.feed;
   useEffect(() => setReplayPresence({ feed, line }));
   const support = exportSupport();
   // A link from a result asks for its part of the recording: Export opens on it once the recording
@@ -671,6 +683,7 @@ function Player({
         status: chapter.status === "blocked" ? "failed" : chapter.status,
         durationMs: chapter.endT - chapter.startT,
         frameId: replay.model.frames.get(chapter.id),
+        ...(chapter.intent ? { intent: chapter.intent } : {}),
       }
     );
   });
@@ -712,10 +725,29 @@ function Player({
               <ReplayIsland
                 label={opening ? "Opening…" : lost ? "Couldn't load" : hud.label}
                 time={opening || lost ? "" : timeLabel(replay.tMs)}
+                action={
+                  continueTask && (
+                    <Button
+                      className="island-action"
+                      variant="primary"
+                      round
+                      size="md"
+                      icon="continue"
+                      disabledReason={
+                        named && continuable(named, continueTask) ? continueTask.reason : undefined
+                      }
+                      onClick={() => continueTask.run(sessionId)}
+                    >
+                      {named?.verdict === "live" ? "Watch it live" : CONTINUE_LABEL}
+                    </Button>
+                  )
+                }
               />
             )
           }
-          band={<NarratorBand line={line} speaker="dot" showDot={showDot} />}
+          band={
+            <NarratorBand line={line} speaker="dot" showDot={showDot} forUser={recorded.forUser} />
+          }
         >
           <Stage
             key={sessionId}
@@ -825,7 +857,7 @@ function Player({
                 }
                 onClick={() => continueTask.run(sessionId)}
               >
-                {named?.verdict === "live" ? "Watch it live" : "Continue this conversation"}
+                {named?.verdict === "live" ? "Watch it live" : CONTINUE_LABEL}
               </Button>
             </div>
           )}

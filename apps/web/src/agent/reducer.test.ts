@@ -37,35 +37,18 @@ describe("bounded agent projection", () => {
     expect(events.reduce(projectAgentEvent, model)).toBe(model);
     expect(events[0]?.data).toEqual({ messageId: message, text: "pre" });
   });
-  it("keeps dot's latest words for the step at hand, until that step ends", () => {
-    const thinking = reduce([
-      ev(0, "thought.delta", { text: "Opening the " }),
-      ev(1, "thought.delta", { text: "sheet." }),
+  it("keeps the line dot gave a call on the step it starts", () => {
+    const model = reduce([
+      ev(
+        0,
+        "step.start",
+        { kind: "shell", intent: "Checking which paint apps are installed" },
+        "one",
+      ),
+      ev(1, "step.start", { kind: "gui" }, "two"),
     ]);
-    expect(thinking.said).toEqual({ from: "thought", text: "Opening the sheet.", open: true });
-    const said = reduce([
-      ev(0, "thought.delta", { text: "Opening the sheet." }),
-      ev(1, "message.delta", { messageId: message, text: "I'll check " }),
-      ev(2, "message.delta", { messageId: message, text: "the totals." }),
-    ]).said;
-    expect(said).toEqual({
-      from: "message",
-      messageId: message,
-      text: "I'll check the totals.",
-      open: true,
-    });
-    const acting = [
-      ev(0, "thought.delta", { text: "Selecting F3" }),
-      ev(1, "step.start", { kind: "gui" }, "one"),
-    ];
-    expect(reduce(acting).said).toMatchObject({ text: "Selecting F3", open: false });
-    const after = [
-      ...acting,
-      ev(2, "thought.delta", { text: " and more" }),
-      ev(3, "step.end", { status: "ok" }, "one"),
-    ];
-    expect(reduce(after.slice(0, 3)).said).toMatchObject({ text: " and more", open: true });
-    expect(reduce(after).said).toBeNull();
+    expect(model.steps.get("one")?.intent).toBe("Checking which paint apps are installed");
+    expect(model.steps.get("two")).not.toHaveProperty("intent");
   });
   it("retains two legitimately identical user messages with their distinct IDs", () => {
     const model = reduce([
@@ -211,6 +194,39 @@ describe("bounded agent projection", () => {
     expect(model.changes[0]?.patch).toHaveLength(L.patchText);
     expect(model.changes[0]?.truncated).toBe(true);
     expect(model.historyTruncated).toBe(true);
+  });
+  it("holds a connection's card beside the task's own decision and clears each by its own answer", () => {
+    const card = (seq: number, approvalId: string, actionClass: string, title: string) =>
+      ev(seq, "approval.request", {
+        approvalId,
+        generation: 1,
+        revision: 1,
+        expiresAt: 9_000_000,
+        actionClass,
+        risk: actionClass === "network" ? "medium" : "high",
+        title,
+        kind: "permission",
+        preview: { fields: [["Destination", "chat.example.com:5222"]] },
+      });
+    const connection = id(31000),
+      approval = id(31001);
+    const both = reduce([
+      card(0, connection, "network", "wechat wants to connect to chat.example.com:5222"),
+      card(1, approval, "send", "Send as you"),
+    ]);
+    expect(both.connection?.approvalId).toBe(connection);
+    expect(both.approval?.approvalId).toBe(approval);
+    const answered = projectAgentEvent(
+      both,
+      ev(2, "approval.resolve", { approvalId: connection, decision: "approve", by: "user" }),
+    );
+    expect(answered.connection).toBeNull();
+    expect(answered.approval?.approvalId).toBe(approval);
+    expect(answered.approvalOutcome).toEqual({
+      approvalId: connection,
+      decision: "approve",
+      actionClass: "network",
+    });
   });
   it("keeps the last decision's note and the Always allow choice it saved, until removed", () => {
     const approval = id(30000),

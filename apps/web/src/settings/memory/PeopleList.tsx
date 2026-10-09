@@ -1,6 +1,7 @@
 import { keyLikePresent, type Person } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
+import { EmptyState } from "../../ui/EmptyState.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, Monogram } from "../../ui/Group.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../../ui/Menu.tsx";
@@ -138,6 +139,7 @@ function PersonRow({
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const source = sourceLine({ source: person.source, at: null });
+  const contact = [personLine(person), person.note].filter(Boolean).join(" · ");
   if (editing)
     return (
       <li>
@@ -183,8 +185,9 @@ function PersonRow({
         label={person.name}
         detail={
           <>
-            {personLine(person)}
-            {person.note && <span className="memory-person-note">{person.note}</span>}
+            <span className="memory-person-line" title={contact}>
+              {contact}
+            </span>
             {source.sessionId && onOpenTask && <SourceLink {...source} onOpenTask={onOpenTask} />}
           </>
         }
@@ -258,10 +261,9 @@ export function PeopleList({
           </div>
         ) : known.people.length === 0 ? (
           !adding && (
-            <GroupRow
-              label="No one yet."
-              detail="When dot messages, calls or emails someone for you, it notes how to reach them here."
-            />
+            <EmptyState icon="message-circle" title="No one yet">
+              When dot messages, calls or emails someone for you, it notes how to reach them here.
+            </EmptyState>
           )
         ) : (
           <ul className="memory-list" aria-label="People">

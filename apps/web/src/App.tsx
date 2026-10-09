@@ -15,6 +15,7 @@ import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
+import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -23,6 +24,7 @@ import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
 import { useHandBack } from "./agent/useHandBack.ts";
+import { useHandOff } from "./agent/useHandOff.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -38,9 +40,12 @@ import { useFreshStart } from "./cells/useFreshStart.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
+import { restingBand, useIdleLine, usePageHidden } from "./dot/idle-line.ts";
 import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
+import type { TipAction } from "./dot/tips.ts";
+import { hasExported } from "./export/export-estimate.ts";
 import { createHostExports } from "./export/host-exports.ts";
 import { createExportJob } from "./export/job.ts";
 import { useExportToast } from "./export/useExportToast.tsx";
@@ -90,15 +95,18 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
+import { useSignIn } from "./settings/useSignIn.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
+import { ConversationList, ConversationsButton } from "./shell/ConversationList.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
-import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
+import { ApprovalDecision, DecisionSheetPresence } from "./shell/DecisionIsland.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
 import { useEdgeStill, useFullScreen, useFullScreenKeys } from "./shell/fullscreen.ts";
@@ -114,7 +122,7 @@ import {
 import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
-import { narrationLine } from "./shell/narration.ts";
+import { atWork, narrationLine } from "./shell/narration.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -127,13 +135,12 @@ import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
-import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 import { isApple } from "./ui/Kbd.tsx";
 import { MenuItem, MenuSeparator } from "./ui/Menu.tsx";
-import { useMediaQuery } from "./ui/media.ts";
+import { TOUCH, useMediaQuery } from "./ui/media.ts";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
@@ -160,6 +167,13 @@ const LIBRARY = "library";
 const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
+const LIST_DETENTS = ["large"] as const;
+// A chosen conversation that never comes on show once the daemon has taken the choice (another
+// task holds the computer) stops waiting.
+const SWITCH_MAX_MS = 3000;
+const ALREADY_NEW = "This is a new conversation";
+const NEW_TITLE = "New conversation";
+const NO_SESSIONS: readonly string[] = [];
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const CONFIRMING_LINE = "Checking that your last input reached the computer…";
 const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
@@ -297,9 +311,11 @@ function Theatre({ api }: { api: ApiClient }) {
     replayAddress(new URLSearchParams(window.location.search).get("replay")),
   );
   const playing = replayId === LIBRARY ? null : replayId;
-  const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  // undefined until the recordings are read: Replay is offered meanwhile rather than dimmed.
+  const [newestReplayId, setNewestReplayId] = useState<string | null | undefined>(undefined);
   // The recordings couldn't be listed: Replay opens anyway and says so, with Try again.
   const [replayUnlisted, setReplayUnlisted] = useState(false);
+  const hasRecordings = !!replayId || newestReplayId !== null || replayUnlisted;
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
   // An export keeps going when Replay closes or moves to another task.
@@ -408,6 +424,23 @@ function Theatre({ api }: { api: ApiClient }) {
             (keys.metadataReady === true &&
               keys.health?.online === true &&
               matchingKeys(mainProvider, keys.keys).some((key) => key.id === mainChoice?.key))));
+  // Whether a task can start on the chosen model is unknown, not no, until settings, the account
+  // and the key layer have answered, so nothing that depends on it shows and then goes. A read
+  // again (Settings opening, the key layer restarting) keeps the last answer meanwhile.
+  const mainKnown =
+    !!settings.saved &&
+    !!settings.index &&
+    settings.phase === "ready" &&
+    (!mainChoice ||
+      (mainChoice.provider === "chatgpt"
+        ? settings.chatgpt.summary !== null || !!settings.chatgpt.error
+        : mainChoice.provider === "claude-code"
+          ? settings.claudeCode.status !== null || !!settings.claudeCode.error
+          : mainProvider?.local === true ||
+            (keys.health?.online === true && keys.metadataReady === true)));
+  const [setupSeen, setSetupSeen] = useState<boolean | undefined>(undefined);
+  if (mainKnown && setupSeen !== mainReady) setSetupSeen(mainReady);
+  const setupDone = mainKnown ? mainReady : setupSeen;
   const keysButton = useRef<HTMLButtonElement>(null);
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -511,6 +544,39 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  // The conversation the user just chose: its thread clears at once and stays clear until the
+  // chosen conversation is the one on show, so the one left behind never draws again.
+  const [switching, setSwitching] = useState<{ to: string | null } | null>(null);
+  const [reveal, setReveal] = useState(0);
+  if (
+    switching &&
+    !conversation.busy &&
+    (conversation.sessions.at(-1) ?? null) === switching.to &&
+    (session.sessionId ?? null) === switching.to
+  )
+    setSwitching(null);
+  const choosing = conversation.busy;
+  useEffect(() => {
+    if (!switching || choosing) return;
+    const timer = setTimeout(() => setSwitching(null), SWITCH_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [switching, choosing]);
+  const choices = useRef(0);
+  const { startNew, continueFrom } = conversation;
+  const choose = useCallback(
+    async (to: string | null) => {
+      const request = ++choices.current;
+      setSwitching({ to });
+      setReveal((value) => value + 1);
+      const done = await (to ? continueFrom(to) : startNew());
+      if (!done && request === choices.current) {
+        setSwitching(null);
+        setReveal((value) => value + 1);
+      }
+      return done;
+    },
+    [startNew, continueFrom],
+  );
   const selectedScreen = agent.model.screen ?? agent.snapshot?.screen;
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
@@ -532,6 +598,8 @@ function Theatre({ api }: { api: ApiClient }) {
   const [routinesOpen, setRoutinesOpen] = useState(false);
   if (routinesOpen && !phone) setRoutinesOpen(false);
   const [routineTarget, setRoutineTarget] = useState<RoutineTarget | null>(null);
+  // Read once dot first rests, so its tips know whether there are routines and Open at login.
+  const [tipsRead, setTipsRead] = useState(false);
   const routines = useRoutines(
     api,
     railView === "routines" ||
@@ -539,7 +607,7 @@ function Theatre({ api }: { api: ApiClient }) {
       routineTarget !== null ||
       agent.model.routineProposals.size > 0
       ? "live"
-      : settings.open
+      : settings.open || tipsRead
         ? "read"
         : "off",
   );
@@ -662,6 +730,14 @@ function Theatre({ api }: { api: ApiClient }) {
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
   const yours = !!takeover && takeover === heldByUser(agent.model);
+  useHandOff({
+    sessionId: agent.sessionId,
+    fresh: agent.fresh,
+    offered: yours ? undefined : takeover,
+    shown: !replayId && !settings.open,
+    canTake: controls.canTake,
+    take: controls.take,
+  });
   const askDraft = useAskDraft(question);
   const answer = useRef(controls.answer);
   answer.current = controls.answer;
@@ -823,11 +899,18 @@ function Theatre({ api }: { api: ApiClient }) {
     status === "listing" ||
     !conversation.known ||
     (status === "known" && conversation.sessions.length > 0 && !session.sessionId);
-  // On opening, what the task is doing is unknown until its history is in: the island waits rather
-  // than say "Working" for a task that is done. Later tasks start from nothing, so never wait.
+  // On opening, the page waits on everything it shows that could still change its mind: the
+  // computer, setup, the conversation and its task's history. Meanwhile only dot wakes on the
+  // curtain; then everything comes in at once (the curtain lifts, the rail slides in, dot flies to
+  // its dock and the island fades in). Later tasks start from nothing, so never wait.
   const [opened, setOpened] = useState(false);
-  const opening = !opened && (threadPending || (!!session.sessionId && agent.history === false));
-  if (!opened && !opening && status !== "listing") setOpened(true);
+  const opening =
+    !opened &&
+    (status === "listing" ||
+      setupDone === undefined ||
+      threadPending ||
+      (!!session.sessionId && agent.history === false));
+  if (!opened && !opening) setOpened(true);
   useEffect(() => {
     if (opened) return;
     const timer = setTimeout(() => setOpened(true), OPENING_MAX_MS);
@@ -838,6 +921,18 @@ function Theatre({ api }: { api: ApiClient }) {
   const ownHold =
     agent.snapshot?.holder === true ||
     (session.ended && agent.history === true && agent.model.messages.size === 0);
+  // Sign-ins go to the web browser, where they are kept: from Settings, or from the desktop's own
+  // browser while the user holds the computer with no task.
+  const signIn = useSignIn(api, askCell, () => {
+    if (settings.open) settings.close();
+    session.check();
+  });
+  useDesktopSignIn({
+    api,
+    cellId: askCell,
+    watching: manualLive && shownScreen === "desktop" && !settings.open && !replayId,
+    offer: ownHold ? (site, failed) => void signIn.start(site, failed) : undefined,
+  });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {
     if (!shownTask) return false;
@@ -914,6 +1009,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const stopNote = stopped ? { line: stopped.title, details: stopped.details } : undefined;
   const sheetStopControl = sheetStop && {
     label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
+    task: sheetStop.kind === "stop-task",
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
@@ -940,14 +1036,16 @@ function Theatre({ api }: { api: ApiClient }) {
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
   };
+  const fresh =
+    conversation.known && !conversation.sessions.length && !session.sessionId && !switching;
   const newConversation: NewConversation = {
     run: () => {
-      void conversation.startNew();
+      void choose(null);
       setRailView("chat");
     },
-    reason: conversationReason,
+    reason: conversationReason ?? (fresh ? ALREADY_NEW : undefined),
   };
-  const curtain = useCurtain(appStatus.computer, !!replayId);
+  const curtain = useCurtain(opening ? "checking" : appStatus.computer, !!replayId);
   useStopToast(controls.stopStatus, controls.recheck, curtain.up);
   const stageBox = useRef<HTMLDivElement>(null);
   const fullScreen = useFullScreen({
@@ -1059,15 +1157,18 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const shape = islandShape(appStatus, curtain.up || opening);
   const sheetsClosed = !settings.open;
+  const approval = safety.approval;
+  // The card shown is the task's own step, not an app's connection.
+  const stepApproval = !!approval && !!agent.snapshot?.approval;
   const decision = replayId
     ? null
     : islandDecision({
         shape,
-        approval: !!safety.approval && sheetsClosed,
+        approval: !!approval && sheetsClosed,
+        connection: !!approval && !stepApproval,
         question: !!question && !agent.model.ended && sheetsClosed,
         chatShown: shownView === "chat" || wide || phone,
       });
-  const approval = safety.approval;
   const approvalView = approval && decision === "approval" && (
     <ApprovalDecision
       key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
@@ -1121,6 +1222,38 @@ function Theatre({ api }: { api: ApiClient }) {
   useSeenReporting(api, attention.items, viewing);
   useAttentionToasts(attention.latest, { viewing, island: !replayId }, openSession);
   useTabAttention(appStatus, { count: attention.items.length, top: attention.top });
+  const [conversationsOpen, setConversationsOpen] = useState(false);
+  if (conversationsOpen && !phone) setConversationsOpen(false);
+  const needsYou = useMemo(
+    () =>
+      new Set(
+        attention.items.flatMap((item) =>
+          item.level === "needs_you" && item.sessionId ? [item.sessionId] : [],
+        ),
+      ),
+    [attention.items],
+  );
+  const liveFacts = useMemo(
+    () => ({
+      live: session.sessionId && !session.ended ? session.sessionId : null,
+      idle: taskStatus === "idle",
+      needsYou,
+    }),
+    [session.sessionId, session.ended, taskStatus, needsYou],
+  );
+  const currentTask = conversation.sessions.at(-1) ?? null;
+  const pickConversation = (id: string) => {
+    setRailView("chat");
+    if (id !== currentTask) void choose(id);
+  };
+  const conversationList = {
+    api,
+    current: currentTask,
+    facts: liveFacts,
+    reason: conversationReason,
+    onPick: pickConversation,
+    onReplay: () => selectReplay(LIBRARY),
+  };
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
       <AskForm
@@ -1145,9 +1278,11 @@ function Theatre({ api }: { api: ApiClient }) {
   // starts.
   const liveTask = !!agent.sessionId && !session.ended && !ownHold;
   // Take control works whatever dot is doing: it does an approval's step instead of dot, takes the
-  // computer dot handed over, or takes it from dot at work, at rest or paused.
+  // computer dot handed over, or takes it from dot at work, at rest or paused. An app's connection
+  // card is no step to do instead of dot: it waits while the user takes the computer.
+  const stepDecision = decision === "approval" && !stepApproval ? null : decision;
   const take = () => {
-    if (decision === "approval" && approval) {
+    if (stepDecision === "approval" && approval) {
       if (!safety.canApprove || safety.pending) return;
       void safety.answerApproval({
         approvalId: approval.approvalId,
@@ -1166,7 +1301,7 @@ function Theatre({ api }: { api: ApiClient }) {
     pause: safety.pause?.phase,
   });
   const takeState = takeSlot(appStatus, {
-    decision,
+    decision: stepDecision,
     blocked: takeBlocked,
     taking: controls.taking,
   });
@@ -1191,13 +1326,58 @@ function Theatre({ api }: { api: ApiClient }) {
                   appStatus.row,
                   appStatus.caption.text,
                   // Out of touch, dot's last words are old news; the caption says what is going on.
-                  linkLost ? null : agent.model.said,
+                  linkLost || !session.sessionId ? null : session.model,
+                  now,
                 )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
-  const asked = agent.model.pendingAsk
+  const resting = restingBand({
+    row: appStatus.row,
+    computer: appStatus.computer,
+    attention: appStatus.attention,
+    line: narration,
+    covered: curtain.up || !!replayId || onboarding.open || yours || !!error,
+  });
+  useEffect(() => {
+    if (resting) setTipsRead(true);
+  }, [resting]);
+  const [overBand, setOverBand] = useState(false);
+  const pageHidden = usePageHidden();
+  const touch = useMediaQuery(TOUCH);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again each time dot comes to rest
+  const exported = useMemo(() => hasExported(), [resting]);
+  const idle = useIdleLine({
+    resting,
+    held: pageHidden || overBand || settings.open,
+    signals: {
+      touch: touch || phone,
+      apple: isApple(),
+      recordings: !!newestReplayId,
+      routines: routines.reply?.routines.length,
+      exported,
+      purposeCheck: settings.draft?.purposeCheck,
+      openAtLogin: routines.reply?.startAtLogin,
+      update: computerUpdate.available,
+      freshStart: freshStart.available,
+    },
+  });
+  const openTip = (action: TipAction, trigger: HTMLElement) => {
+    switch (action.opens) {
+      case "settings":
+        return goToSettings(trigger, action.section);
+      case "replay":
+        return selectReplay(LIBRARY);
+      case "routine":
+        return newRoutine(trigger);
+    }
+  };
+  const tipAction = idle?.action;
+  const bandLine = idle ? idle.text : narration;
+  const bandSpeaker = idle ? "dot" : speaker;
+  const pendingQuestion = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
+  const asked = pendingQuestion && markdownToPlain(pendingQuestion);
   const pause = pauseSlot({
     pause: safety.pause,
     canPause: safety.canPause,
@@ -1212,7 +1392,9 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const touchStill = useStill(focus);
   const edgeStill = useEdgeStill(full);
-  const still = (touchStill || edgeStill) && !islandAttention(appStatus);
+  // A decision grown out of the island fades with it, so the island stays while one is out: an
+  // app's connection card while the user holds the computer has no attention of its own.
+  const still = (touchStill || edgeStill) && !islandAttention(appStatus) && !grown;
   useFullScreenKeys({
     enabled: !phone && !curtain.up && !replayId,
     apple: isApple(),
@@ -1230,10 +1412,23 @@ function Theatre({ api }: { api: ApiClient }) {
     current: conversation.sessions.at(-1) ?? null,
     reason: conversationReason,
     run: (id: string) =>
-      void conversation.continueFrom(id).then((done) => {
+      void choose(id).then((done) => {
         if (done) selectReplay(null);
       }),
   };
+  // Until the shown task's history is in, its title is unknown, not new.
+  const watchTitle =
+    opening ||
+    switching?.to ||
+    (!switching &&
+      !session.model.title &&
+      ((curtain.up && !agent.sessionId && conversation.sessions.length === 0) ||
+        threadPending ||
+        (!!session.sessionId && agent.history !== true)))
+      ? undefined
+      : switching
+        ? NEW_TITLE
+        : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
   useKeyboardFit(page, keyboard);
   return (
@@ -1247,6 +1442,7 @@ function Theatre({ api }: { api: ApiClient }) {
       data-still={still ? "" : undefined}
       data-keyboard={keyboard ? "" : undefined}
       data-setup={onboarding.open ? "" : undefined}
+      data-entering={opening ? "" : undefined}
     >
       <TopBar
         title={
@@ -1254,40 +1450,11 @@ function Theatre({ api }: { api: ApiClient }) {
             ? "Replay"
             : replayId
               ? (shownRecording?.title ?? RECORDED_TASK)
-              : (session.model.title ??
-                ((curtain.up && !agent.sessionId && conversation.sessions.length === 0) ||
-                // Until the shown task's history is in, its title is unknown, not new.
-                threadPending ||
-                (!!session.sessionId && agent.history !== true)
-                  ? undefined
-                  : "New conversation"))
+              : watchTitle
         }
         note={
           shownRecording?.note ??
           (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
-        }
-        lead={
-          shownRecording && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon="continue"
-              disabledReason={
-                shownRecording.verdict !== "live" &&
-                shownRecording.sessionId !== conversation.sessions.at(-1)
-                  ? conversationReason
-                  : undefined
-              }
-              onClick={() =>
-                shownRecording.verdict === "live" ||
-                shownRecording.sessionId === conversation.sessions.at(-1)
-                  ? selectReplay(null)
-                  : replayContinue.run(shownRecording.sessionId)
-              }
-            >
-              Continue
-            </Button>
-          )
         }
         mode={replayId ? "replay" : "watch"}
         watchAttention={
@@ -1297,7 +1464,7 @@ function Theatre({ api }: { api: ApiClient }) {
               (item) => item.level === "needs_you" && item.sessionId === agent.sessionId,
             ))
         }
-        replayEnabled={!!(replayId || newestReplayId || replayUnlisted)}
+        replayEnabled={hasRecordings}
         onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
         onModeAgain={() => {
           if (playing) selectReplay(LIBRARY);
@@ -1363,11 +1530,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     pause={pause}
                     take={takeState}
                     handBack={handBack.slot}
+                    decline={handBack.declinable ? handBack.declineSlot : undefined}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStopTask={taskStop}
                     onTake={take}
                     onHandBack={() => void handBack.run()}
+                    onDecline={() => void handBack.decline()}
                     onComputer={onComputer}
                     decision={grown}
                     full={full}
@@ -1382,11 +1551,20 @@ function Theatre({ api }: { api: ApiClient }) {
               band={
                 <>
                   <NarratorBand
-                    line={narration}
-                    speaker={speaker}
+                    line={bandLine}
+                    speaker={bandSpeaker}
                     reveal={!!asked && narration === asked}
+                    forUser={!atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
+                    idle={!!idle}
+                    action={
+                      tipAction && {
+                        label: tipAction.label,
+                        run: (trigger) => openTip(tipAction, trigger),
+                      }
+                    }
+                    onHover={setOverBand}
                   />
                   {yours && !phone && (
                     <ControlStrip
@@ -1424,6 +1602,12 @@ function Theatre({ api }: { api: ApiClient }) {
                           onRightClick={(on) => setPointerMode(on ? "right" : "click")}
                           handBack={handBack.slot}
                           onHandBack={() => void handBack.run()}
+                          {...(handBack.declinable
+                            ? {
+                                decline: handBack.declineSlot,
+                                onDecline: () => void handBack.decline(),
+                              }
+                            : {})}
                         />
                       ) : undefined
                     }
@@ -1483,14 +1667,22 @@ function Theatre({ api }: { api: ApiClient }) {
           views={views}
           view={shownView}
           onView={(view) => setRailView(view as RailView)}
-          end={!phone && agent.sessionId && <NewConversationButton {...newConversation} />}
+          end={
+            !phone && (
+              <span className="rail-actions">
+                <ConversationsButton {...conversationList} />
+                <NewConversationButton {...newConversation} />
+              </span>
+            )
+          }
         >
           <ErrorBoundary>
             <ChatThread
               visible={shownView === "chat"}
-              agent={agent}
+              agent={switching ? undefined : agent}
               api={api}
               rows={rows}
+              reveal={reveal}
               computerReady={cell?.state === "ready" && !cell.paused}
               computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
@@ -1500,9 +1692,9 @@ function Theatre({ api }: { api: ApiClient }) {
                   : undefined
               }
               onReplayTask={selectReplay}
-              sessions={conversation.sessions}
-              more={conversation.more}
-              pending={threadPending}
+              sessions={switching ? NO_SESSIONS : conversation.sessions}
+              more={!switching && conversation.more}
+              pending={switching ? switching.to !== null : threadPending}
               pinned={phone}
               lead={
                 phone && (
@@ -1520,24 +1712,22 @@ function Theatre({ api }: { api: ApiClient }) {
                 phone && (
                   <MoreMenu
                     items={[
-                      ...(agent.sessionId
-                        ? [
-                            {
-                              label: "New conversation",
-                              icon: "compose" as const,
-                              disabledReason: newConversation.reason,
-                              run: newConversation.run,
-                            },
-                          ]
-                        : []),
+                      {
+                        label: "New conversation",
+                        icon: "compose",
+                        disabledReason: newConversation.reason,
+                        run: newConversation.run,
+                      },
+                      {
+                        label: "Conversations",
+                        icon: "message-circle",
+                        run: () => setConversationsOpen(true),
+                      },
                       {
                         label: "Replay",
                         icon: "history",
                         startsGroup: true,
-                        disabledReason:
-                          replayId || newestReplayId || replayUnlisted
-                            ? undefined
-                            : "No recordings yet",
+                        disabledReason: hasRecordings ? undefined : "No recordings yet",
                         run: () => selectReplay(LIBRARY),
                       },
                       {
@@ -1570,7 +1760,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               }
               start={
-                setupKnown && !mainReady ? (
+                setupDone === false ? (
                   <FinishSetup
                     steps={setup.steps}
                     done={setup.done}
@@ -1617,16 +1807,18 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               }
               recovery={
-                <TaskRecovery
-                  agent={agent}
-                  controls={controls}
-                  onSettings={showSettings}
-                  onReenterKey={reenterKey}
-                  onContinue={continueTask}
-                  onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
-                />
+                !switching && (
+                  <TaskRecovery
+                    agent={agent}
+                    controls={controls}
+                    onSettings={showSettings}
+                    onReenterKey={reenterKey}
+                    onContinue={continueTask}
+                    onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
+                  />
+                )
               }
-              ask={askThread}
+              ask={switching ? undefined : askThread}
               composer={
                 <Composer
                   api={api}
@@ -1643,7 +1835,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   agent={agent}
                   keysOpen={settings.open}
                   receiveKey={receiveKey}
-                  configured={mainReady}
+                  configured={setupDone}
                   onSettings={(trigger) => showSettings(trigger, "models")}
                   onTaskStarted={session.check}
                   layout={phone ? "pill" : "card"}
@@ -1777,6 +1969,7 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
           notifications={settingsNotifications}
           accounts={settingsAccounts}
+          signIn={signIn}
           rules={rules}
           spending={
             settings.draft
@@ -1812,11 +2005,15 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
         />
       </ErrorBoundary>
-      {phone && (approvalView || askIn === "sheet") && (
+      {phone && (
         <ErrorBoundary floating>
-          <DecisionSheet label={appStatus.label} elapsedS={appStatus.elapsedS}>
+          <DecisionSheetPresence
+            show={!!approvalView || askIn === "sheet"}
+            label={appStatus.label}
+            elapsedS={appStatus.elapsedS}
+          >
             {approvalView || askOver("sheet")}
-          </DecisionSheet>
+          </DecisionSheetPresence>
         </ErrorBoundary>
       )}
       {phone && (
@@ -1861,6 +2058,29 @@ function Theatre({ api }: { api: ApiClient }) {
       </ErrorBoundary>
       {phone && (
         <Sheet
+          open={conversationsOpen}
+          onClose={() => setConversationsOpen(false)}
+          title="Conversations"
+          doneLabel="Done"
+          detents={LIST_DETENTS}
+          className="conversations-sheet"
+        >
+          <ConversationList
+            {...conversationList}
+            open={conversationsOpen}
+            onPick={(id) => {
+              setConversationsOpen(false);
+              conversationList.onPick(id);
+            }}
+            onReplay={() => {
+              setConversationsOpen(false);
+              conversationList.onReplay();
+            }}
+          />
+        </Sheet>
+      )}
+      {phone && (
+        <Sheet
           open={activityOpen}
           onClose={() => setActivityOpen(false)}
           title="Activity"
@@ -1895,7 +2115,6 @@ function Theatre({ api }: { api: ApiClient }) {
       {showDot.value && (
         <PresenceLayer
           place={place}
-          provisional={curtain.up && curtain.phase === "checking"}
           feed={
             onboarding.open
               ? {
@@ -1909,7 +2128,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
               : dotFeed(appStatus, session.sessionId ? session.model : null, now)
           }
-          line={onboarding.open || speaker !== "dot" ? "" : narration}
+          line={onboarding.open || bandSpeaker !== "dot" ? "" : bandLine}
         />
       )}
       <Announcer />

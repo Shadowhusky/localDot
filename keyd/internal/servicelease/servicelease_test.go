@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -120,7 +121,7 @@ func TestRoleLeaseAndDerivedLaunch(t *testing.T) {
 			if strings.Contains(strings.Join(l.Environment, "\n"), "NODE_OPTIONS") {
 				t.Fatal("loader environment inherited")
 			}
-			if role == "keyd" && (l.Program != f.helper || strings.Join(l.Arguments[1:], " ") != "-home "+f.scope.Home+" -vault keychain -ports 4760-4789") {
+			if role == "keyd" && (l.Program != f.helper || strings.Join(l.Arguments[1:], " ") != "-home "+f.scope.Home+" -vault "+vaultMode(runtime.GOOS)+" -ports 4760-4789") {
 				t.Fatal("keyd defaults changed")
 			}
 			if role == "daemon" && (l.Program != "/usr/bin/true" || !strings.HasSuffix(l.Arguments[1], "/app/dist/daemon.mjs")) {
@@ -350,4 +351,10 @@ console.log('ready:'+process.pid+':'+child.pid);setInterval(()=>{},1000);`
 		t.Fatal("child inherited lifetime lease")
 	}
 	other.Close()
+}
+
+func TestKeydStartsWithThePlatformVault(t *testing.T) {
+	if vaultMode("darwin") != "keychain" || vaultMode("linux") != "auto" {
+		t.Fatal("installed keyd would start with the wrong vault")
+	}
 }

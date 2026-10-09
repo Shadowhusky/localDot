@@ -20,6 +20,16 @@ import {
   SUCCESS_GAP_MS,
   spring,
 } from "./states.ts";
+import {
+  DEFAULT_ANGLE,
+  type DotTool,
+  PAUSES,
+  type PropPose,
+  TOOL_GAP_MS,
+  TOOL_HOLD_MS,
+  TOOL_LOOK,
+  toolMotion,
+} from "./tools.ts";
 
 type Motion = "gx" | "gy" | "mx" | "my" | "squash" | "lift" | "shake" | "eyeSY" | "rim";
 type BlinkTiming = readonly [close: number, hold: number, open: number];
@@ -27,6 +37,14 @@ type LookKind = "saccade" | "drift" | "pursuit";
 export interface Point {
   x: number;
   y: number;
+}
+interface Track {
+  amount: Channel;
+  since: number;
+  beats: { t: number; k: number }[];
+  scroll: Channel;
+  lines: number;
+  seed: number;
 }
 interface Scheduled {
   t: number;
@@ -42,6 +60,11 @@ const BIAS: Point = { x: 0.25 * GAZE_MAX.x, y: 0.12 * GAZE_MAX.y };
 const COMPOSER: Point = { x: -3.5, y: 4.5 };
 const CARD: Point = { x: 4.5, y: 3.5 };
 const ANNOYED_WINDOW_MS = 60_000;
+// Beats older than this no longer show; a fast typist keeps at most this many in hand.
+const BEAT_MS = 2000;
+const BEAT_CAP = 32;
+const MAX_TAPS = 14;
+const TAP_GAP_MS = 85;
 // How far one unit of each channel moves something on screen, in frame units, so activity() can
 // compare them: lids and eye shapes by the eye's height, a body scale by its height, tilt and roll
 // by how far a degree swings a lid corner or an eye, and a full fade counts as a 20-unit move.
@@ -103,9 +126,13 @@ export interface DotPose {
   state: DotState;
   // Body offset in frame units and its scale; the origin is the body's bottom.
   body: { x: number; y: number; sx: number; sy: number };
-  shadow: { s: number; o: number };
+  shadow: { x: number; s: number; o: number };
   // Crossfade weights of the dim and xenon body plates.
   plate: { dim: number; rim: number };
+  // The props out with dot, in the order they came out; empty where the body does not animate.
+  props: PropPose[];
+  // Fine props: full keyboards and page detail, where dot is big enough to show them.
+  fine: boolean;
   eyes: [EyePose, EyePose];
   blink: number;
   talk: number;
@@ -146,6 +173,16 @@ export class DotEngine {
   private focus: Point | null = null;
   private bias: Point = BIAS;
   private places = { composer: COMPOSER, card: CARD };
+  // Tools: the props dot has used, the one shown, the one asked for, and progress on it.
+  private readonly tracks = new Map<DotTool, Track>();
+  private tool: DotTool | null = null;
+  private wanted: DotTool | null = null;
+  private toolSince = Number.NEGATIVE_INFINITY;
+  private toolToken = 0;
+  private draws = 0;
+  private beatKey: string | null = null;
+  private beatN = 0;
+  private readonly aim: { x: Channel; y: Channel };
 
   constructor(o: DotEngineOptions) {
     this.seed = o.seed;
@@ -165,6 +202,10 @@ export class DotEngine {
     ch.eyeSY = new Channel(1, SPRINGS.snap);
     ch.rim = new Channel(this.control ? 1 : 0, SPRINGS.body);
     this.ch = ch;
+    this.aim = {
+      x: new Channel(Math.cos(DEFAULT_ANGLE), SPRINGS.body),
+      y: new Channel(Math.sin(DEFAULT_ANGLE), SPRINGS.body),
+    };
     this.current = o.state ?? "idle";
     this.since = o.t;
     this.breath = { phase: 0, t0: o.t, period: STATES[this.current].period };
@@ -194,6 +235,9 @@ export class DotEngine {
   setFocus(p: Point | null, t: number): void {
     this.advance(t);
     this.focus = p;
+    const [ax, ay] = aimOf(p);
+    this.aim.x.set(ax, t, this.sp(SPRINGS.body));
+    this.aim.y.set(ay, t, this.sp(SPRINGS.body));
     if (p && (this.current === "acting" || this.current === "watching")) {
       this.blinkBlockUntil = t + 700;
       this.look(p.x, p.y, t, "saccade");
@@ -224,6 +268,39 @@ export class DotEngine {
   hop(t: number): void {
     this.advance(t);
     this.hopAt(t);
+  }
+
+  // The tool dot is using, or none. A prop shows for at least TOOL_HOLD_MS; a pause waits
+  // TOOL_GAP_MS before it replaces work; the latest request wins and superseded ones never show.
+  setTool(next: DotTool | null, t: number): void {
+    this.advance(t);
+    const gap = this.tool !== null && PAUSES.has(next) ? TOOL_GAP_MS : 0;
+    this.requestTool(next, t, gap);
+  }
+
+  // Progress on the current tool, as a count that grows within one key: characters typed into an
+  // action, lines of a command's output. A new key starts counting from zero.
+  beat(key: string, n: number, t: number): void {
+    this.advance(t);
+    const d = key === this.beatKey ? n - this.beatN : n;
+    this.beatKey = key;
+    this.beatN = n;
+    const tool = this.wanted ?? this.tool;
+    if (d <= 0 || !tool) return;
+    const track = this.track(tool, t);
+    if (tool === "typing") {
+      const taps = Math.min(d, MAX_TAPS);
+      for (let i = 0; i < taps; i++) {
+        const jitter = (this.draw() - 0.5) * 30;
+        this.pushBeat(track, t + i * TAP_GAP_MS + (i ? jitter : 0));
+      }
+      return;
+    }
+    if (tool === "terminal" || tool === "browsing") {
+      track.lines += Math.min(d, 3);
+      track.scroll.set(track.lines, t, this.sp(SPRINGS.scroll));
+    }
+    this.pushBeat(track, t);
   }
 
   setControl(on: boolean, t: number): void {
@@ -261,6 +338,13 @@ export class DotEngine {
     }
     this.ch.eyeSY.jump(1, t);
     this.ch.rim.jump(this.control ? 1 : 0, t);
+    if (this.wanted !== this.tool) this.showTool(this.wanted, t);
+    for (const [tool, track] of this.tracks) {
+      track.amount.jump(tool === this.tool ? 1 : 0, t);
+      track.scroll.jump(track.lines, t);
+    }
+    this.aim.x.jump(this.aim.x.to, t);
+    this.aim.y.jump(this.aim.y.to, t);
     this.enter(next, t, null, true);
   }
 
@@ -268,22 +352,26 @@ export class DotEngine {
     this.advance(t);
     const v = (k: keyof Pose | Motion) => this.ch[k].value(t);
     const rich = this.rich && !this.reduced;
+    const fine = this.lod === "glance" || this.lod === "hero";
+    const props = this.props(t);
+    const tool = blend(props, fine);
+    const body = this.rich ? 1 : 0;
     const b = rich ? v("breath") * this.breathValue(t) : 0;
     // Like breath, the talk-bob shows only where the body animates.
     const talk = this.rich ? this.talk(t) * (this.reduced ? 0.5 : 1) : 0;
     const cap = SQUASH_CAP[this.lod];
     const squash = rich ? clamp(v("squash"), -cap, cap) : 0;
-    const size = v("size");
+    const size = v("size") * (1 + body * tool.s);
     const sy = (1 + squash) * (1 + 0.015 * b) * (1 + 0.025 * talk) * size;
     const sx = (1 / (1 + squash)) * (1 - 0.007 * b) * size;
-    const bodyX = v("bodyX") + (rich ? v("shake") : 0);
-    const bodyY = v("bodyY") + (rich ? v("lift") : 0) - 0.4 * b;
+    const bodyX = v("bodyX") + (rich ? v("shake") : 0) + body * tool.x;
+    const bodyY = v("bodyY") + (rich ? v("lift") : 0) - 0.4 * b + body * tool.y;
     const blink = this.blinkAmount(t);
-    const gx = v("gx") + (rich ? v("mx") : 0);
-    const gy = v("gy") + (rich ? v("my") : 0);
-    const roll = v("roll");
+    const gx = (v("gx") + (rich ? v("mx") : 0)) * (1 - tool.gaze) + tool.gx;
+    const gy = (v("gy") + (rich ? v("my") : 0)) * (1 - tool.gaze) + tool.gy;
+    const roll = v("roll") + body * tool.roll;
     const eye = (i: 0 | 1): EyePose => {
-      const up = v(i === 0 ? "upL" : "upR");
+      const up = clamp(v(i === 0 ? "upL" : "upR") + tool.up, 0, 0.9);
       const lo = v("lo");
       const open = Math.max(0, 1 - up - lo);
       return {
@@ -292,7 +380,7 @@ export class DotEngine {
         lo: lo + open * blink * 0.14,
         loArch: v("loArch"),
         tilt: v(i === 0 ? "tiltL" : "tiltR") * (i === 0 ? 1 : -1),
-        scale: v("eyeScale"),
+        scale: v("eyeScale") * (i === 1 ? 1 + 0.3 * body * tool.lens : 1),
         sy: v("eyeSY") * (1 - 0.08 * talk),
         happy: clamp(v("happy"), 0, 1),
         closed: clamp(v("closed"), 0, 1),
@@ -304,10 +392,15 @@ export class DotEngine {
       state: this.current,
       body: { x: bodyX, y: bodyY, sx, sy },
       shadow: {
-        s: clamp(1 + 0.035 * Math.min(0, bodyY) + 0.02 * Math.max(0, bodyY), 0.8, 1.1),
+        x: body * tool.x,
+        s:
+          clamp(1 + 0.035 * Math.min(0, bodyY) + 0.02 * Math.max(0, bodyY), 0.8, 1.1) *
+          (1 + body * tool.s),
         o: clamp(1 + 0.08 * Math.min(0, bodyY), 0.5, 1),
       },
       plate: { dim: clamp(v("dim"), 0, 1), rim: clamp(v("rim"), 0, 1) },
+      props: this.rich ? props : [],
+      fine,
       eyes: [eye(0), eye(1)],
       blink,
       talk,
@@ -317,6 +410,11 @@ export class DotEngine {
 
   // An upper bound on how fast anything visible is moving, in frame units per second; a renderer
   // slows down while it is calm. Breathing and the talk-bob render at the calm frame rate.
+  // When the next scheduled move (a blink, a glance) starts.
+  nextEventAt(): number {
+    return this.queue[0]?.t ?? Number.POSITIVE_INFINITY;
+  }
+
   activity(t: number): number {
     this.advance(t);
     const rich = this.rich && !this.reduced;
@@ -324,7 +422,15 @@ export class DotEngine {
     for (const k of SPEED_KEYS) {
       if (rich || !RICH_ONLY.has(k)) m = Math.max(m, this.ch[k].speed(t) * SPEED_UNITS[k]);
     }
+    for (const track of this.tracks.values()) m = Math.max(m, track.amount.speed(t) * FADE);
     return m + this.blinkAmount(t) * 50;
+  }
+
+  // A prop is out and its loops (a caret, a sweep, an orbit) keep it moving.
+  looping(t: number): boolean {
+    if (!this.rich || this.reduced) return false;
+    for (const track of this.tracks.values()) if (track.amount.value(t) > 0.001) return true;
+    return false;
   }
 
   private get rich(): boolean {
@@ -337,6 +443,91 @@ export class DotEngine {
 
   private rand(a: number, b: number): number {
     return a + (b - a) * this.rng();
+  }
+
+  // Draws for the tools come from their own stream, so the rest of dot moves as it did before.
+  private draw(): number {
+    return hash01(this.seed, ++this.draws);
+  }
+
+  private track(tool: DotTool, t: number): Track {
+    let track = this.tracks.get(tool);
+    if (!track) {
+      track = {
+        amount: new Channel(0, SPRINGS.propIn),
+        since: t,
+        beats: [],
+        scroll: new Channel(0, SPRINGS.scroll),
+        lines: 0,
+        seed: this.draw(),
+      };
+      this.tracks.set(tool, track);
+    }
+    return track;
+  }
+
+  private pushBeat(track: Track, t: number): void {
+    track.beats.push({ t, k: this.draw() });
+    if (track.beats.length > BEAT_CAP) track.beats.shift();
+  }
+
+  private requestTool(next: DotTool | null, t: number, gap: number): void {
+    const token = ++this.toolToken;
+    this.wanted = next;
+    if (next === this.tool) return;
+    const at = Math.max(this.tool === null ? t : this.toolSince + TOOL_HOLD_MS, t + gap);
+    if (at <= t) {
+      this.showTool(next, t);
+      return;
+    }
+    this.at(
+      at,
+      (tt) => {
+        if (token === this.toolToken) this.showTool(next, tt);
+      },
+      true,
+    );
+  }
+
+  // The old prop tucks back into dot as the new one comes out, each from where it is now: a prop
+  // called back while it leaves turns around mid-way and keeps its clock.
+  private showTool(next: DotTool | null, t: number): void {
+    const prev = this.tool;
+    this.tool = next;
+    this.toolSince = t;
+    if (prev) this.track(prev, t).amount.set(0, t, this.sp(SPRINGS.propOut));
+    if (!next) return;
+    const track = this.track(next, t);
+    if (track.amount.value(t) < 0.02) {
+      track.since = t;
+      track.seed = this.draw();
+      track.lines = 0;
+      track.scroll.jump(0, t);
+    }
+    track.amount.set(1, t, this.sp(SPRINGS.propIn));
+  }
+
+  private props(t: number): PropPose[] {
+    const out: PropPose[] = [];
+    const angle = Math.atan2(this.aim.y.value(t), this.aim.x.value(t));
+    for (const [tool, track] of this.tracks) {
+      while (track.beats.length && t - (track.beats[0] as { t: number }).t > BEAT_MS)
+        track.beats.shift();
+      const amount = clamp(track.amount.value(t), 0, 1);
+      if (amount < 0.001) continue;
+      out.push({
+        tool,
+        amount,
+        clock: this.reduced ? 0 : t - track.since,
+        beats: track.beats.map((b) => ({ age: t - b.t, k: b.k })),
+        scroll: track.scroll.value(t),
+        lines: track.lines,
+        angle,
+        seed: track.seed,
+        still: this.reduced,
+      });
+    }
+    return out;
   }
 
   private at(t: number, run: (t: number) => void, keep = false): void {
@@ -778,7 +969,9 @@ export class DotEngine {
 
   private reactAt(name: Reaction, t: number): void {
     switch (name) {
-      case "dispatch":
+      case "dispatch": {
+        const tool = this.wanted ?? this.tool;
+        if (tool === "pointing" || tool === "dragging") this.pushBeat(this.track(tool, t), t);
         // The action nod.
         if (this.reduced) return;
         this.ch.lift.set(-0.35, t, SPRINGS.snap);
@@ -790,6 +983,17 @@ export class DotEngine {
           },
           true,
         );
+        return;
+      }
+      case "wince":
+        // An action that failed: a quick squeeze and a flinch, then back to work.
+        if (this.reduced) {
+          this.blink(t);
+          return;
+        }
+        this.ch.eyeSY.set(0.4, t, spring(1, 0.09));
+        this.at(t + 90, (tt) => this.ch.eyeSY.set(1, tt, spring(1, 0.3)), true);
+        if (this.rich) this.ch.shake.kick(1.2, t, SPRINGS.shake);
         return;
       case "live":
         // Back from sleep: two quick blinks, a stretch, then a look at the user.
@@ -829,6 +1033,8 @@ export class DotEngine {
   private reactSuccess(t: number): void {
     if (t - this.lastSuccess < SUCCESS_GAP_MS) return;
     this.lastSuccess = t;
+    // Work is over: whatever dot holds tucks away for the celebration, without waiting for a gap.
+    this.requestTool(null, t, 0);
     const hold = this.reduced ? 600 : 700;
     this.ch.happy.set(1, t, this.sp(spring(1, 0.16)));
     this.at(t + hold + 80, (tt) => this.ch.happy.set(0, tt, this.sp(spring(1, 0.24))), true);
@@ -855,4 +1061,50 @@ export class DotEngine {
       true,
     );
   }
+}
+
+// Where the pointer sits on dot's edge: toward the action point, or down and right.
+function aimOf(p: Point | null): [number, number] {
+  if (!p) return [Math.cos(DEFAULT_ANGLE), Math.sin(DEFAULT_ANGLE)];
+  const x = p.x / GAZE_MAX.x;
+  const y = p.y / GAZE_MAX.y;
+  const n = Math.hypot(x, y);
+  if (n < 0.15) return [Math.cos(DEFAULT_ANGLE), Math.sin(DEFAULT_ANGLE)];
+  return [x / n, y / n];
+}
+
+interface ToolBlend {
+  x: number;
+  y: number;
+  s: number;
+  roll: number;
+  up: number;
+  // The share of the gaze the tools hold, and their weighted gaze.
+  gaze: number;
+  gx: number;
+  gy: number;
+  lens: number;
+}
+
+// The props' looks mixed by how far out each one is, so the body and eyes move continuously from
+// one tool to the next and back to the state's own pose.
+function blend(props: readonly PropPose[], fine: boolean): ToolBlend {
+  const out: ToolBlend = { x: 0, y: 0, s: 0, roll: 0, up: 0, gaze: 0, gx: 0, gy: 0, lens: 0 };
+  const total = props.reduce((sum, p) => sum + p.amount, 0);
+  const norm = total > 1 ? 1 / total : 1;
+  for (const p of props) {
+    const w = p.amount * norm;
+    const look = TOOL_LOOK[p.tool];
+    const m = toolMotion(p, fine);
+    out.x += w * (look.x + m.x);
+    out.y += w * (look.y + m.y);
+    out.s += w * (look.s - 1);
+    out.roll += w * m.roll;
+    out.up += w * look.up;
+    out.gaze += w * look.gaze;
+    out.gx += w * look.gaze * m.gx;
+    out.gy += w * look.gaze * m.gy;
+    if (p.tool === "looking") out.lens += w;
+  }
+  return out;
 }

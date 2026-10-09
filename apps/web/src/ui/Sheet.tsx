@@ -18,7 +18,7 @@ import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import type { IconName } from "./icons.ts";
-import { LayerPortal, useBehind, useExit, useLayer } from "./LayerStack.tsx";
+import { LayerPortal, useBehind, useExit, useLayer, useLeaving } from "./LayerStack.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "./media.ts";
 import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
@@ -82,6 +82,10 @@ export interface SheetProps {
   sidebar?: ReactNode;
   // A bottom sheet closes with this word at its trailing edge, its title centred, instead of ×.
   doneLabel?: string;
+  // Wide holds one large thing, such as a file's preview, in an inspector up to 1120 px.
+  size?: "regular" | "wide";
+  // The body has no padding or scroll of its own: what it holds fills it and scrolls itself.
+  flush?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -99,7 +103,8 @@ interface PageView {
 export function Sheet(props: SheetProps) {
   const root = useRef<HTMLDivElement>(null);
   const { mounted, closing } = useExit(props.open, root);
-  return mounted ? <SheetLayer {...props} root={root} closing={closing} /> : null;
+  const shown = useLeaving(props, closing);
+  return mounted ? <SheetLayer {...shown} root={root} closing={closing} /> : null;
 }
 
 function SheetLayer({
@@ -117,6 +122,8 @@ function SheetLayer({
   detents = FIT,
   sidebar,
   doneLabel,
+  size = "regular",
+  flush = false,
   className,
   children,
   root,
@@ -371,6 +378,8 @@ function SheetLayer({
         inert={closing}
         className={clsx("ui-sheet", className)}
         data-side={placement}
+        data-size={size === "wide" ? size : undefined}
+        data-flush={flush ? "" : undefined}
         data-detents={placement === "bottom" ? detents.join(" ") : undefined}
         data-detent={placement === "bottom" ? detent : undefined}
         data-modal={modal ? "" : undefined}

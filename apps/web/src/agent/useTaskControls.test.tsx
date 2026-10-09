@@ -184,7 +184,7 @@ it("retires a pending operation on API replacement and ignores its late reply", 
     f = fixture(oldFetch, true);
   let work: Promise<boolean> | undefined;
   act(() => {
-    work = f.result.current.handback(ID, "synthetic note");
+    work = f.result.current.handback(ID, { note: "synthetic note" });
   });
   expect(f.result.current.canInput).toBe(false);
   f.update({
@@ -304,6 +304,18 @@ it("lets the user hand back while dot checks that their last input reached the c
   });
   expect(sent).toBe(true);
   expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/\/takeover\/done$/);
+});
+it("says Not now to dot's hand-off through the hand-back", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const f = fixture(fetchImpl, true);
+  await act(async () => {
+    expect(await f.result.current.handback(ID, { declined: true })).toBe(true);
+  });
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/\/takeover\/done$/);
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+    requestId: ID,
+    declined: true,
+  });
 });
 it.each(["modal", "pane", "feed"])("closes direct control on %s", (reason) => {
   const f = fixture(vi.fn<typeof fetch>(), true);

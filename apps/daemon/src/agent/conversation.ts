@@ -1,7 +1,17 @@
-import { closeSync, constants, existsSync, openSync, readFileSync, readSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+} from "node:fs";
 import {
   type AskFieldRecord,
+  CONVERSATION_LIST,
   CONVERSATION_TASKS,
+  type ConversationEntry,
   type ConversationSnapshot,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
@@ -9,6 +19,7 @@ import {
   EARLIER_TURNS,
   type LocalDotEvent,
   ULID_PATTERN,
+  ulidTime,
 } from "@localdot/protocol";
 import { z } from "zod";
 import { parseLine } from "../event-file.ts";
@@ -29,12 +40,30 @@ const LOOK_BACK = 20;
 const KEPT_TASKS = 64;
 const TURN_TYPES =
   /"type":"(?:message\.user|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end)"/;
+// The list of conversations reads through this many of the newest sessions.
+const LIST_SCAN = 200;
+// A task's session.end is among the last lines of its log.
+const TAIL_BYTES = 4 * 1024;
+const SESSION_END = /"type":"session\.end"/;
+// What a task's first lines say never changes once its first message is in, so they are kept.
+const KEPT_HEADS = 512;
 const ENDINGS: Record<string, string> = {
   stopped: "(That task was stopped.)",
   error: "(That task ended with an error.)",
 };
 
 export type ConversationLog = Pick<EventLog, "hasSession" | "logFile" | "listSessions">;
+
+interface TaskHead {
+  continues: string | undefined;
+  title: string | null;
+  said: string | null;
+}
+
+const firstLine = (text: string) => {
+  const line = text.trim().split("\n")[0]?.trim() ?? "";
+  return line ? (line.length > 200 ? `${line.slice(0, 199)}…` : line) : null;
+};
 
 const clip = (text: string) =>
   text.length > EARLIER_TURN_CHARS ? `${text.slice(0, EARLIER_TURN_CHARS)}…` : text;
@@ -54,6 +83,7 @@ const fieldText = (value: AskFieldRecord) =>
 export class Conversations {
   readonly #files: PrivateFiles;
   readonly #said = new Map<string, string[]>();
+  readonly #heads = new Map<string, TaskHead>();
   constructor(
     home: string,
     private readonly log: ConversationLog,
@@ -241,6 +271,87 @@ export class Conversations {
     for (const session of this.log.listSessions().slice(0, LOOK_BACK))
       if (this.#isTask(session.id)) return session.id;
     return null;
+  }
+
+  // The recent conversations, newest first: each task joins the conversation of the newer task that
+  // continues it. The latest task's title names it, as the app's title does, and the oldest task
+  // read says what was first asked.
+  list(max = CONVERSATION_LIST): ConversationEntry[] {
+    const listed: ConversationEntry[] = [];
+    const continuedBy = new Map<string, ConversationEntry>();
+    for (const session of this.log.listSessions().slice(0, LIST_SCAN)) {
+      const head = this.#facts(session.id);
+      if (!head) continue;
+      let entry = continuedBy.get(session.id);
+      continuedBy.delete(session.id);
+      if (entry) {
+        if (entry.sessions.length < CONVERSATION_TASKS) entry.sessions.push(session.id);
+        entry.title ??= head.title;
+        entry.said = head.said ?? entry.said;
+      } else if (listed.length < max) {
+        const started = Date.parse(session.startedAt);
+        entry = {
+          sessionId: session.id,
+          sessions: [session.id],
+          title: head.title,
+          said: head.said,
+          startedAt: new Date(
+            Number.isFinite(started) ? started : ulidTime(session.id),
+          ).toISOString(),
+          ended: this.#ending(session.id),
+        };
+        listed.push(entry);
+      }
+      if (entry && head.continues) continuedBy.set(head.continues, entry);
+    }
+    return listed;
+  }
+
+  // A task's chain link, title and first message; null for a session that is not a task.
+  #facts(sessionId: string): TaskHead | null {
+    const kept = this.#heads.get(sessionId);
+    if (kept) return kept;
+    const head = this.#head(sessionId);
+    const asked = head.find((event) => event.type === "message.user");
+    if (!asked) return null;
+    const start = head.find((event) => event.type === "session.start");
+    const facts: TaskHead = {
+      continues: start?.data.continues,
+      title: start?.data.title?.trim().slice(0, 200) || null,
+      said: firstLine(asked.data.text),
+    };
+    this.#heads.set(sessionId, facts);
+    for (const old of this.#heads.keys()) {
+      if (this.#heads.size <= KEPT_HEADS) break;
+      this.#heads.delete(old);
+    }
+    return facts;
+  }
+
+  #ending(sessionId: string): ConversationEntry["ended"] {
+    let fd: number | undefined;
+    try {
+      fd = openSync(
+        this.log.logFile(sessionId),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      const size = fstatSync(fd).size;
+      const from = Math.max(0, size - TAIL_BYTES);
+      const bytes = Buffer.alloc(size - from);
+      const read = readSync(fd, bytes, 0, bytes.length, from);
+      const lines = bytes.subarray(0, read).toString("utf8").split("\n");
+      for (let at = lines.length - 1; at >= 0; at--) {
+        const line = lines[at] ?? "";
+        if (!SESSION_END.test(line)) continue;
+        const event = parseLine(line);
+        if (event?.type === "session.end") return event.data.reason;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
   }
 
   // undefined: nothing chosen yet. A file that cannot be read counts as nothing chosen.

@@ -282,6 +282,58 @@ describe("the user takes the computer while dot works", () => {
     expect(h.events().some((event) => event.type === "control.change")).toBe(false);
   });
 
+  it("keeps dot off the computer while the user holds the one it handed over", async () => {
+    const h = setup();
+    const asked = h.call("request_takeover", { reason: "login", note: "Sign in" });
+    await until(() => h.session.manualControl === "ready");
+    const requestId = h.session.takeControl();
+    for (const input of [CLICK, { action: "type", text: "x" }, { action: "screenshot" }])
+      expect((await h.call("computer", input)).result.ok).toBe(false);
+    expect(h.actions).toEqual([]);
+    const lease = h.session.admitManual(requestId, new AbortController().signal);
+    lease.typed();
+    lease.finish();
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    const { result } = await asked;
+    expect(result.ok).toBe(true);
+    expect(result.content.some((part) => part.type === "image")).toBe(true);
+    expect(h.events().find((event) => event.type === "takeover.end")?.data).toEqual({
+      requestId,
+      by: "user",
+      typed: true,
+    });
+  });
+
+  it("hands dot's hand-off back on Not now, telling dot to find another way, with a fresh look", async () => {
+    const h = setup();
+    const asked = h.call("request_takeover", { reason: "login", note: "Sign in" });
+    await until(() => h.session.manualControl === "ready");
+    const requestId = h.session.takeControl();
+    expect(await h.session.handback(requestId, undefined, undefined, true)).toBe(true);
+    expect(h.events().find((event) => event.type === "takeover.end")?.data).toEqual({
+      requestId,
+      by: "user",
+      declined: true,
+    });
+    const { result } = await asked;
+    expect(result.ok).toBe(true);
+    const words = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
+    expect(words.join(" ")).toMatch(/said not now.*find another way/);
+    expect(result.content.some((part) => part.type === "image")).toBe(true);
+    expect(h.events().some((event) => event.type === "message.user")).toBe(false);
+  });
+
+  it("has nothing to decline in control the user took themselves", async () => {
+    const h = setup();
+    const requestId = h.session.takeControl();
+    await until(() => h.session.manualControl === "ready");
+    expect(await h.session.handback(requestId, undefined, undefined, true)).toBe(true);
+    expect(h.events().find((event) => event.type === "takeover.end")?.data).toEqual({
+      requestId,
+      by: "user",
+    });
+  });
+
   it("waits for a Pause that is still settling", () => {
     const h = setup();
     h.session.requestSafetyPause(ulid());
@@ -387,6 +439,19 @@ describe("the take control route", () => {
     expect(message.status).toBe(409);
     expect((await f.take()).status).toBe(409);
     expect(f.session.controlHeld).toBe(false);
+  });
+
+  it("hands dot's hand-off back on Not now", async () => {
+    const f = routes();
+    const asked = f.session.takeover("login", "Sign in");
+    await until(() => f.session.manualControl === "ready");
+    const requestId = required(f.session.pendingTakeover);
+    const reply = await f.post(`/api/agent/sessions/${f.session.id}/takeover/done`, {
+      requestId,
+      declined: true,
+    });
+    expect(reply.status).toBe(204);
+    expect(await asked).toEqual({ by: "user", declined: true });
   });
 
   it("refuses while a Pause is settling or the task has stopped", async () => {

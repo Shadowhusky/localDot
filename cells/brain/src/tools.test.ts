@@ -1,5 +1,6 @@
 import { GenericComputerInput } from "@localdot/protocol";
 import { workingRules } from "@localdot/protocol/guidance";
+import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
 import { systemPrompt } from "./prompt.ts";
@@ -132,6 +133,24 @@ describe("the model's advertised tools and instructions", () => {
     expect(imagesInToolResults(binding({ client: "google" }))).toBe(false);
     expect(imagesInToolResults(binding({ client: "anthropic-compatible" }))).toBe(false);
   });
+  it("asks for a line for the user on every call that acts, in a message for Anthropic's screen tool", async () => {
+    const today = new Date("2026-10-09T00:00:00Z");
+    const generic = binding({ computer: "generic" });
+    expect(systemPrompt(bootConfig(), generic, [], today)).toContain(
+      "Give every computer, browser_act and shell call its intent, in that voice.",
+    );
+    for (const computer of ["anthropic-toolset", "anthropic-legacy"] as const)
+      expect(systemPrompt(bootConfig(), binding({ computer }), [], today)).toContain(
+        "say such a line before computer actions",
+      );
+    const tools = toolSet(generic);
+    // What the provider is sent: the field and its description.
+    for (const name of ["computer", "browser_act", "shell"] as const) {
+      const schema = await asSchema(tools[name]?.inputSchema).jsonSchema;
+      expect(JSON.stringify(schema)).toContain("at most 12 words");
+    }
+  });
+
   it("works inside its computer without asking, and asks or hands over only when blocked", () => {
     const prompt = systemPrompt(bootConfig(), binding(), [], new Date("2026-10-08T00:00:00Z"));
     for (const rule of [
@@ -153,6 +172,16 @@ describe("the model's advertised tools and instructions", () => {
     expect(tools.ask_user?.description).toContain("you only learn that it was provided");
     expect(tools.request_takeover?.description).toContain(
       "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
+    );
+  });
+
+  it("keeps every sign-in in the web browser", () => {
+    const tools = toolSet(binding());
+    expect(tools.switch_screen?.description).toContain(
+      "Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields.",
+    );
+    expect(tools.request_takeover?.description).toContain(
+      "Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
     );
   });
 });

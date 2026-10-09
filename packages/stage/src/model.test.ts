@@ -1,6 +1,14 @@
 import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { emptyModel, foldEvents, observeAt, planAt, startedCount, stepAt } from "./model.ts";
+import {
+  emptyModel,
+  foldEvents,
+  observeAt,
+  planAt,
+  startedCount,
+  stepAt,
+  turnAt,
+} from "./model.ts";
 
 let seq = 0;
 const ev = (
@@ -187,6 +195,65 @@ describe("foldEvents", () => {
       ev("action.cancel", 50, { reason: "timeout", detail: "no press" }),
     ]);
     expect(m.actions[0]?.cancel).toEqual({ t: 50, reason: "timeout" });
+  });
+});
+
+describe("what dot says", () => {
+  const MESSAGE = "01J9ZQ3V8Y7X6W5T4S3R2Q1P1A";
+  it("keeps each call's line on its step, and the tail of each message with when each sentence ended", () => {
+    const model = foldEvents(emptyModel(), [
+      ev("step.start", 10, { kind: "shell", intent: "Checking which apps are installed" }, "s1"),
+      ev("step.start", 20, { kind: "gui" }, "s2"),
+      ev("message.delta", 30, { messageId: MESSAGE, text: `${"x".repeat(700)}. Found the ` }),
+      ev("message.delta", 40, { messageId: MESSAGE, text: "report." }),
+      ev("message.delta", 45, { messageId: MESSAGE, text: " Opening it now." }),
+    ]);
+    expect(model.steps.map((step) => step.intent)).toEqual([
+      "Checking which apps are installed",
+      undefined,
+    ]);
+    expect(model.said).toHaveLength(1);
+    expect(model.said[0]).toMatchObject({ id: MESSAGE, final: false });
+    expect(model.said[0]?.text).toHaveLength(600);
+    expect(model.said[0]?.text.endsWith(" Opening it now.")).toBe(true);
+    expect(model.said[0]?.lines.slice(1)).toEqual([
+      { t: 40, text: "Found the report." },
+      { t: 45, text: "Opening it now." },
+    ]);
+    foldEvents(model, [
+      ev("message.assistant", 50, { messageId: MESSAGE, text: "Opened it." }),
+      ev("message.delta", 60, { messageId: MESSAGE, text: " late" }),
+    ]);
+    expect(model.said[0]).toMatchObject({ text: "Opened it.", final: true });
+    expect(model.said[0]?.lines.at(-1)).toEqual({ t: 50, text: "Opened it." });
+    expect(model.said[0]?.lines).toHaveLength(4);
+  });
+
+  it("starts a turn at each task or follow-up, not at a steer", () => {
+    const model = foldEvents(emptyModel(), [
+      ev("message.user", 5, { messageId: MESSAGE, text: "Text Mum", kind: "task" }),
+      ev("message.user", 50, { messageId: MESSAGE, text: "and Dad", kind: "steer" }),
+      ev("message.user", 90, { messageId: MESSAGE, text: "Now Gran", kind: "followup" }),
+    ]);
+    expect(turnAt(model, 4)).toBe(Number.NEGATIVE_INFINITY);
+    expect(turnAt(model, 60)).toBe(5);
+    expect(turnAt(model, 90)).toBe(90);
+    expect(model.marks.filter((mark) => mark.type === "message.user")).toHaveLength(3);
+  });
+});
+
+describe("tool steps", () => {
+  it("keeps the step's tool and title, and when its output arrived, coalesced", () => {
+    const m = foldEvents(emptyModel(), [
+      ev("step.start", 10, { kind: "shell" }, "s1"),
+      ev("tool.start", 11, { tool: "shell", title: "npm test" }, "s1"),
+      ...[20, 60, 200, 210, 400].map((t) =>
+        ev("tool.output", t, { stream: "stdout", chunk: "." }, "s1"),
+      ),
+      ev("tool.end", 500, { ok: true }, "s1"),
+    ]);
+    expect(m.steps[0]).toMatchObject({ tool: "shell", title: "npm test", outputs: [20, 200, 400] });
+    expect(m.marks.map((mark) => mark.label)).toContain("npm test");
   });
 });
 

@@ -1,11 +1,12 @@
 import { microsToMs } from "@localdot/protocol";
-import type { KeyUseState } from "@localdot/stage";
+import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
 import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { past } from "../session/status.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
+import { markdownToPlain } from "./markdown.ts";
 import type { AgentChange, AgentModel, AgentStep } from "./model.ts";
 
 export type ActivityFilter = "all" | "screen" | "tools";
@@ -217,22 +218,30 @@ export function entryView(
     (agent?.startedAt !== undefined && agent.endedAt !== undefined
       ? microsToMs(agent.endedAt - agent.startedAt)
       : null);
-  const title =
+  const what =
     computer?.label ||
     agent?.tool?.title ||
     (kind === "file" ? fileTitle(own) : "") ||
     (kind ? KIND_TITLES[kind] : "Step");
+  // dot's own line for the call leads its first row; what it did moves to the meta line.
+  const given = agent?.intent ?? computer?.intent;
+  const intent = (given && plainText(given)) || undefined;
+  const title = intent ?? what;
   const failed = state === "failed" || state === "skipped";
   const reason = failed
-    ? (agent?.note ??
+    ? ((agent?.note && markdownToPlain(agent.note)) ??
       computer?.reason ??
       (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
     : state === "todo"
       ? "The task ended before this step finished."
       : undefined;
   const where = computer
-    ? joined(computer.app, computer.gesture)
-    : joined(kind && KIND_PLACES[kind], diffStat(own.map((change) => change.patch)));
+    ? joined(computer.app, intent ? what : computer.gesture)
+    : joined(
+        kind && KIND_PLACES[kind],
+        intent ? what : undefined,
+        diffStat(own.map((change) => change.patch)),
+      );
   return {
     testId: computer ? "step-row" : "tool-row",
     title,

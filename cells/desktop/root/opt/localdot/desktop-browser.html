@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign-ins here aren't kept</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --line: rgba(10, 11, 13, 0.1);
+    --field-line: #8a8d93;
+    --fg-1: #111215;
+    --fg-2: #4d5056;
+    --fg-3: #6b6e75;
+    --button: #111215;
+    --button-fg: #f5f6f8;
+    --xenon: #3fb5de;
+    --shadow: 0 1px 2px rgba(10, 11, 13, 0.06), 0 12px 32px rgba(10, 11, 13, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0b0d;
+      --card: #18191c;
+      --line: rgba(255, 255, 255, 0.08);
+      --field-line: #6b6e75;
+      --fg-1: #eeeff1;
+      --fg-2: #a8abb0;
+      --fg-3: #83868b;
+      --button: #f5f6f8;
+      --button-fg: #0b0c0f;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+    background: var(--bg);
+    color: var(--fg-1);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    width: min(100%, 460px);
+    padding: 32px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+  }
+  .mark {
+    width: 28px;
+    height: 28px;
+    margin-bottom: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ffffff 0%, #eef0f3 45%, #c9ccd2 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(10, 11, 13, 0.12),
+      0 0 0 2px var(--card),
+      0 0 0 3.5px var(--xenon),
+      0 4px 10px rgba(10, 11, 13, 0.16);
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    line-height: 28px;
+    font-weight: 600;
+    letter-spacing: -0.019em;
+  }
+  p { margin: 0; color: var(--fg-2); text-wrap: pretty; }
+  form { display: flex; gap: 8px; margin-top: 24px; }
+  label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--field-line);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--fg-1);
+    font: inherit;
+  }
+  input::placeholder { color: var(--fg-3); }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
+  button {
+    flex: none;
+    height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--button);
+    color: var(--button-fg);
+    font: 600 14px/1 system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+    cursor: pointer;
+    transition: transform 100ms ease-out, opacity 100ms ease-out;
+  }
+  button:active { transform: scale(0.97); opacity: 0.9; }
+  .note { margin-top: 12px; color: var(--fg-3); font-size: 13px; line-height: 18px; }
+  .asked { margin-top: 16px; color: var(--fg-1); font-size: 14px; line-height: 20px; }
+  .asked[hidden] { display: none; }
+  @media (max-width: 420px) {
+    main { padding: 24px 20px; }
+    form { flex-direction: column; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark" aria-hidden="true"></div>
+  <h1>Sign-ins here aren't kept</h1>
+  <p>This is your computer's own browser. It forgets sign-ins when it closes, so dot can't use them later. Sign in to sites in localDot's web browser instead, where they stay.</p>
+  <form method="get">
+    <label for="site">Site</label>
+    <input id="site" name="site" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="google.com" required maxlength="253">
+    <button type="submit">Open in web browser</button>
+  </form>
+  <p class="asked" id="asked" role="status" hidden></p>
+  <p class="note">You can also open Settings › Accounts in localDot and choose Sign in to a site.</p>
+</main>
+<script>
+  const site = new URLSearchParams(location.search).get("site");
+  if (site) {
+    const asked = document.getElementById("asked");
+    asked.textContent = "localDot shows what to do next.";
+    asked.hidden = false;
+    document.getElementById("site").value = site;
+  }
+</script>
+</body>
+</html>

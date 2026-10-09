@@ -720,8 +720,9 @@
     letter-spacing: var(--text-body--letter-spacing);
   }
 
+  /* A row that needs the room can draw its segments closer through --_segment-pad. */
   .ui-segmented[data-size="24"] > .ui-segment {
-    padding: 0 calc(var(--spacing) * 2);
+    padding: 0 var(--_segment-pad, calc(var(--spacing) * 2));
     font-size: var(--text-footnote);
     line-height: var(--text-footnote--line-height);
   }

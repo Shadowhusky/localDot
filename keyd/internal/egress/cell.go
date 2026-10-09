@@ -1,5 +1,5 @@
-// Package egress is a cell's door to the outside: one explicit HTTP proxy per cell on 127.0.0.1,
-// guarded by the cell's proxy token. It refuses what policy refuses, terminates TLS only for the
+// Package egress is a cell's door to the outside: one explicit HTTP proxy per cell on 127.0.0.1
+// (and, for Docker Engine, on a Unix socket), guarded by the cell's proxy token. It refuses what policy refuses, terminates TLS only for the
 // hosts the cell's surrogates are bound to, swaps surrogates there and scrubs what comes back,
 // and passes every other allowed host through after checking its SNI.
 package egress
@@ -10,10 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"maps"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +50,7 @@ const (
 	ReasonSecret        = "secret-unavailable"
 	ReasonReenter       = "secret-reenter"
 	ReasonRebound       = "secret-rebound"
+	ReasonVaultLocked   = "vault-locked"
 	ReasonNoAudit       = "audit-unavailable"
 	ReasonConnectionCap = "connection-cap"
 )
@@ -68,11 +72,13 @@ type Cell struct {
 	cfg            Config
 	deps           Deps
 	ln             net.Listener
+	unix           net.Listener
 	srv            *http.Server
 	connect        *goproxy.ProxyHttpServer
 	intercepted    map[string]bool
 	authLog        rateLog
 	connectionLog  rateLog
+	asks           askBook
 	mu             sync.Mutex
 	gen            *generation
 	closed         bool
@@ -96,7 +102,16 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 			c.intercepted[host] = true
 		}
 	}
-	c.ln = &limitedListener{Listener: ln, slots: make(chan struct{}, maxCellConnections), refused: c.refuseConnection}
+	slots := make(chan struct{}, maxCellConnections)
+	c.ln = &limitedListener{Listener: ln, slots: slots, refused: c.refuseConnection}
+	if cfg.RelayDir != "" {
+		unix, err := listenRelay(RelaySocket(cfg.RelayDir, c.Port()))
+		if err != nil {
+			ln.Close()
+			return nil, err
+		}
+		c.unix = &limitedListener{Listener: unix, slots: slots, refused: c.refuseConnection}
+	}
 	c.connect = c.newConnectProxy()
 	c.srv = &http.Server{
 		Handler:           c,
@@ -108,7 +123,33 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		DisableGeneralOptionsHandler: true,
 	}
 	go c.srv.Serve(c.ln)
+	if c.unix != nil {
+		go c.srv.Serve(c.unix)
+	}
 	return c, nil
+}
+
+// RelaySocket is the cell's socket in dir, named after its port.
+func RelaySocket(dir string, port int) string {
+	return filepath.Join(dir, strconv.Itoa(port)+".sock")
+}
+
+func listenRelay(path string) (net.Listener, error) {
+	// The port is this cell's now, so a socket already there was left by a cell that is gone.
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	// Gates connect as nobody. The relay folder sits in keyd's private folder, which only the
+	// gates' mount opens, and the token guards the rest, as on the TCP port.
+	if err := os.Chmod(path, 0o666); err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return ln, nil
 }
 
 func (c *Cell) ID() string { return c.cfg.CellID }
@@ -126,6 +167,10 @@ func (c *Cell) Close() error {
 	g := c.gen
 	c.mu.Unlock()
 	err := c.srv.Close()
+	if c.unix != nil {
+		// Unlinks the socket now: a cell opened next on this port makes a new one at the same path.
+		c.unix.Close()
+	}
 	g.stop()
 	return err
 }
@@ -147,15 +192,18 @@ func (c *Cell) Revoke() {
 }
 
 func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if reason := c.authorize(r.Header.Values("Proxy-Authorization")); reason != "" {
+	via, reason := c.authorize(r.Header.Values("Proxy-Authorization"))
+	if reason != "" {
 		c.refuseAuth(w, r, reason)
 		return
 	}
 	r.Header.Del("Proxy-Authorization")
 	line := audit.Line{Kind: audit.KindRequest, Method: r.Method, Host: r.URL.Hostname(), Path: r.URL.Path}
 	switch {
+	case via == ViaCapture && r.Method != http.MethodConnect:
+		c.deny(w, line, http.StatusBadRequest, ReasonCaptureUse)
 	case r.Method == http.MethodConnect:
-		c.connect.ServeHTTP(w, r)
+		c.connect.ServeHTTP(w, withVia(r, via))
 	case !r.URL.IsAbs() || r.URL.Scheme != "http":
 		c.deny(w, line, http.StatusBadRequest, ReasonBadRequest)
 	case isInternal(r.URL):
@@ -167,24 +215,30 @@ func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// authorize accepts only Basic credentials whose password is the cell's token.
-func (c *Cell) authorize(values []string) string {
+// authorize accepts only Basic credentials whose password is the cell's token, or the gate's
+// capture token, and says which of the two came.
+func (c *Cell) authorize(values []string) (string, string) {
 	if len(values) == 0 {
-		return ReasonAuthMissing
+		return "", ReasonAuthMissing
 	}
 	scheme, encoded, ok := strings.Cut(values[0], " ")
 	if len(values) > 1 || !ok || !strings.EqualFold(scheme, "Basic") {
-		return ReasonAuthInvalid
+		return "", ReasonAuthInvalid
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil {
-		return ReasonAuthInvalid
+		return "", ReasonAuthInvalid
 	}
 	_, pass, ok := strings.Cut(string(raw), ":")
-	if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(c.cfg.Token)) != 1 {
-		return ReasonAuthInvalid
+	switch {
+	case !ok:
+		return "", ReasonAuthInvalid
+	case subtle.ConstantTimeCompare([]byte(pass), []byte(c.cfg.Token)) == 1:
+		return ViaProxy, ""
+	case c.cfg.CaptureToken != "" && subtle.ConstantTimeCompare([]byte(pass), []byte(c.cfg.CaptureToken)) == 1:
+		return ViaCapture, ""
 	}
-	return ""
+	return "", ReasonAuthInvalid
 }
 
 // refuseAuth answers 407. Any container with egress can reach the listener, so refusals are

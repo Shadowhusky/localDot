@@ -21,3 +21,14 @@ export function imagesFromEnv(env: NodeJS.ProcessEnv = process.env): Images {
     gate: env.LOCALDOT_GATE_IMAGE || "localdot/gate:dev",
   };
 }
+
+// A gate image that takes a desktop's traffic (cells/gate/gate.sh, link.sh) carries this label; an
+// older one only relays, and its computers reach out through the proxy alone.
+export const CAPTURE_LABEL = "localdot.capture";
+
+export interface ImageInspect {
+  Config?: { Labels?: Record<string, string> | null } | null;
+}
+
+export const gateCaptures = (image: ImageInspect | undefined) =>
+  image?.Config?.Labels?.[CAPTURE_LABEL] === "1";

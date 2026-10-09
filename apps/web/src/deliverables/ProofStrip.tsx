@@ -1,5 +1,6 @@
 import type { ProofFrame, ResultProof } from "@localdot/protocol";
 import type { ReactNode } from "react";
+import { markdownToPlain } from "../agent/markdown.ts";
 import { clock } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
@@ -51,6 +52,7 @@ export function ProofStrip({
     !!entry &&
     entry.endMs - entry.startMs >= 1000;
   const frames = entry?.frames ?? [];
+  const checked = entry?.checked && markdownToPlain(entry.checked);
   // Nothing is held for frames until the answer says there are some: most results have none.
   return (
     <section className="proof" aria-label="Proof">
@@ -71,10 +73,10 @@ export function ProofStrip({
           ))}
         </ol>
       )}
-      {entry?.checked && (
-        <p className="proof-checked" title={`Checked: ${entry.checked}`}>
+      {checked && (
+        <p className="proof-checked" title={`Checked: ${checked}`}>
           <Icon name="check-circle" size={14} className="proof-checked-icon" />
-          <span className="proof-checked-text">Checked: {entry.checked}</span>
+          <span className="proof-checked-text">Checked: {checked}</span>
         </p>
       )}
       {(entry || end) && (

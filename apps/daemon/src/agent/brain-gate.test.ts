@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const script = fileURLToPath(new URL("../../../../cells/gate/relay.sh", import.meta.url));
 // Execute the actual shell entry point with inert ip/socat stand-ins. No sockets,
 // Docker containers or long-lived processes are opened by this fixture.
-function run(role: string | undefined, toolPort?: string) {
+function run(role: string | undefined, toolPort?: string, extra: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "localdot-brain-gate-"));
   try {
     const log = join(dir, "calls");
@@ -32,6 +32,7 @@ function run(role: string | undefined, toolPort?: string) {
         LD_KEYD_PORT: "4791",
         ...(role === undefined ? {} : { LD_ROLE: role }),
         ...(toolPort === undefined ? {} : { LD_TOOL_PORT: toolPort }),
+        ...extra,
       },
       timeout: 4000,
       encoding: "utf8",
@@ -61,6 +62,21 @@ describe("gate role boundary", () => {
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
       "TCP4-LISTEN:3128,bind=172.30.4.10,fork,reuseaddr TCP4:host.docker.internal:4791",
+      "TCP4-LISTEN:8081,bind=172.30.5.10,fork,reuseaddr TCP4:172.30.4.11:7700",
+      "TCP4-LISTEN:8082,bind=172.30.5.10,fork,reuseaddr TCP4:172.30.4.11:3000",
+    ]);
+  });
+  it("relays out through the mounted sockets on Docker Engine", () => {
+    const sockets = {
+      LD_KEYD_SOCKET: "/run/localdot/keyd/4791.sock",
+      LD_TOOL_SOCKET: "/run/localdot/tool/tool.sock",
+    };
+    expect(run("brain", "4999", sockets).calls).toEqual([
+      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,reuseaddr UNIX-CONNECT:/run/localdot/keyd/4791.sock",
+      "TCP4-LISTEN:4751,bind=172.30.4.10,fork,reuseaddr UNIX-CONNECT:/run/localdot/tool/tool.sock",
+    ]);
+    expect(run(undefined, undefined, sockets).calls).toEqual([
+      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,reuseaddr UNIX-CONNECT:/run/localdot/keyd/4791.sock",
       "TCP4-LISTEN:8081,bind=172.30.5.10,fork,reuseaddr TCP4:172.30.4.11:7700",
       "TCP4-LISTEN:8082,bind=172.30.5.10,fork,reuseaddr TCP4:172.30.4.11:3000",
     ]);

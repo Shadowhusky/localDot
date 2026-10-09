@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,10 +41,16 @@ func (c *Cell) newConnectProxy() *goproxy.ProxyHttpServer {
 }
 
 func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-	line := audit.Line{Kind: audit.KindConnect, Method: http.MethodConnect, Host: hostport}
+	via := viaOf(ctx.Req)
+	line := audit.Line{Kind: audit.KindConnect, Method: http.MethodConnect, Host: hostport, Via: via}
 	// Inspect holds the authority to the destination's host, so it gets the parsed one; a host that
 	// does not parse keeps its own reason unless a surrogate was found.
 	t, reason := policy.ParseHostPort(hostport, 0)
+	address := false
+	if reason == policy.ReasonIPLiteral {
+		t, reason = policy.ParseAddress(hostport)
+		address = reason == ""
+	}
 	if v := c.deps.Registry.Inspect(keys.Dest{Cell: c.cfg.CellID, Scheme: "connect", Host: t.Host}, http.MethodConnect, ctx.Req.URL, ctx.Req.Header); !v.Allow && (reason == "" || v.SurrogateID != "") {
 		line.SecretID, line.SurrogateID = v.SecretID, v.SurrogateID
 		return c.refuseConnect(ctx, line, v.Reason)
@@ -52,7 +59,13 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 		return c.refuseConnect(ctx, line, reason)
 	}
 	line.Host = t.Host
-	d := c.cfg.Policy.Connect(t, c.interceptedHosts())
+	var d policy.Decision
+	if !address {
+		d = c.cfg.Policy.Connect(t, c.interceptedHosts())
+	}
+	if address || d.Reason == policy.ReasonPort {
+		return c.handleOther(ctx, t, via, line)
+	}
 	if !d.Allow {
 		return c.refuseConnect(ctx, line, d.Reason)
 	}
@@ -65,6 +78,33 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 		return c.refuseConnect(ctx, line, ReasonInterceptionUnavailable)
 	}
 	return c.hijack(func(client net.Conn) { c.passthrough(client, t, line) }), hostport
+}
+
+// handleOther is every CONNECT but the web's 443: it is tunnelled as raw TCP when policy allows it
+// outright, or once the daemon answers yes for the user.
+func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, line audit.Line) (*goproxy.ConnectAction, string) {
+	line.DestPort = t.Port
+	g := c.current()
+	d := c.cfg.Policy.Other(t, c.interceptedHosts())
+	if !d.Allow && !d.Ask {
+		return c.refuseConnect(ctx, line, d.Reason)
+	}
+	// Keys go only to their own hosts over 443, where keyd terminates them; nothing else may carry
+	// a bound host's answers past the scrubber.
+	if len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
+		return c.refuseConnect(ctx, line, policy.ReasonBoundPort)
+	}
+	if reason := c.guard(g, t); reason != "" {
+		return c.refuseConnect(ctx, line, reason)
+	}
+	if d.Ask {
+		app, reason := c.ask(ctx.Req, g, t, via)
+		line.App = app
+		if reason != "" {
+			return c.refuseConnect(ctx, line, reason)
+		}
+	}
+	return c.hijack(func(client net.Conn) { c.tunnel(client, g, t, line) }), net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
 }
 
 func (c *Cell) hijack(fn func(client net.Conn)) *goproxy.ConnectAction {
@@ -101,6 +141,21 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		finish(audit.Error, ReasonClientGone, err)
 		return
 	}
+	// A program that ignores the proxy may speak its own protocol on 443. That is no more than its
+	// captured port 80 may do, so it is relayed raw; anything that starts as TLS is still held to
+	// its SNI.
+	if line.Via == ViaCapture {
+		first, err := readStart(client, 10*time.Second)
+		if err != nil {
+			finish(audit.Deny, ReasonNotTLS, err)
+			return
+		}
+		client = &replayConn{Conn: client, pending: first}
+		if !looksTLS(first) {
+			c.raw(client, g, t, line, start)
+			return
+		}
+	}
 	sni, hello, err := peekSNI(client, 10*time.Second)
 	if err != nil {
 		finish(audit.Deny, ReasonNotTLS, err)
@@ -131,6 +186,61 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		return
 	}
 	finish(audit.Allow, "", nil)
+}
+
+// raw relays a captured connection to its named host as it is, with what was read already.
+func (c *Cell) raw(client net.Conn, g *generation, t policy.Target, line audit.Line, start time.Time) {
+	line.Mode = "raw"
+	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", absolute(net.JoinHostPort(t.Host, strconv.Itoa(t.Port))))
+	if err != nil {
+		line.Decision, line.Reason = dialOutcome(err)
+		line.Detail, line.DurationMs = err.Error(), msSince(start)
+		c.record(line)
+		return
+	}
+	defer up.Close()
+	defer g.track(up)()
+	line.BytesIn, line.BytesOut = splice(client, up)
+	line.Status, line.DurationMs = http.StatusOK, msSince(start)
+	line.Decision = audit.Allow
+	if g.ctx.Err() != nil {
+		line.Decision, line.Reason = audit.Error, ReasonRevoked
+	}
+	c.record(line)
+}
+
+// readStart reads the first bytes a program sends, at least the two that tell TLS apart.
+func readStart(conn net.Conn, timeout time.Duration) ([]byte, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, err
+	}
+	defer conn.SetReadDeadline(time.Time{})
+	buf := make([]byte, 4096)
+	n, err := io.ReadAtLeast(conn, buf, 2)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+// looksTLS reports whether a stream starts with a TLS handshake record (type 22, version 3.x).
+func looksTLS(start []byte) bool {
+	return len(start) >= 2 && start[0] == 0x16 && start[1] == 0x03
+}
+
+// replayConn reads what was already read from Conn before reading Conn again.
+type replayConn struct {
+	net.Conn
+	pending []byte
+}
+
+func (c *replayConn) Read(p []byte) (int, error) {
+	if len(c.pending) > 0 {
+		n := copy(p, c.pending)
+		c.pending = c.pending[n:]
+		return n, nil
+	}
+	return c.Conn.Read(p)
 }
 
 // sameHost compares in ASCII only: strings.EqualFold also folds Unicode, which would take U+212A

@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
+import { Button } from "../ui/Button.tsx";
 import { useFullLine } from "./FullLine.tsx";
+import { LINE_HOLD_MS, LINE_OUT_MS } from "./narration.ts";
 
-// Each line stays at least this long, so a quick run of steps never flickers.
-export const LINE_HOLD_MS = 1000;
-const LINE_OUT_MS = 120;
+export interface LineAction {
+  label: string;
+  run(trigger: HTMLElement): void;
+}
 
 export interface NarratorBandProps {
   line: string;
@@ -17,44 +20,90 @@ export interface NarratorBandProps {
   note?: string;
   // The line is dot's question, right above where the answer goes: nothing in it may hide.
   reveal?: boolean;
+  // Not a line about dot's work but one for the user (a question, an approval, a problem, a stop):
+  // it comes in at once.
+  forUser?: boolean;
+  // dot's greeting or tip while nothing goes on: under reduced motion it changes without a fade.
+  idle?: boolean;
+  // One small step after the line, which goes with it.
+  action?: LineAction;
+  onHover?(over: boolean): void;
 }
 
 // The band under the stage (design-v2 §10.17, §11 D): dot docked at the stage's corner and its line
 // beside it, two lines at most, crossfading one line to the next.
-export function NarratorBand({ line, speaker, showDot, note, reveal = false }: NarratorBandProps) {
-  const { text, revealed, leaving } = useLine(line, reveal);
+export function NarratorBand({
+  line,
+  speaker,
+  showDot,
+  note,
+  reveal = false,
+  forUser = false,
+  idle = false,
+  action,
+  onHover,
+}: NarratorBandProps) {
+  const {
+    text,
+    revealed,
+    leaving,
+    with: kept,
+  } = useLine(line, reveal, reveal || forUser, {
+    idle,
+    action,
+  });
   const warning = useMemo(
     () => (revealed ? hiddenWarning(revealText(text)) : undefined),
     [revealed, text],
   );
   const content = revealed ? <RevealedText text={text} /> : text;
   const whole = useFullLine(text, content);
+  const act = text ? kept.action : undefined;
   return (
-    <div className="narrator" data-dot={showDot ? "" : undefined}>
+    <div
+      className="narrator"
+      data-dot={showDot ? "" : undefined}
+      onPointerEnter={onHover && (() => onHover(true))}
+      onPointerLeave={onHover && (() => onHover(false))}
+    >
       {showDot && <PresenceSlot name="dock" className="narrator-dock" />}
-      <div className="narration" data-speaker={speaker}>
-        <p className="narration-text" aria-live="polite">
-          {text && (
-            <span
-              ref={whole.ref}
-              className="narration-line"
-              key={text}
-              data-leaving={leaving || undefined}
-            >
-              {speaker === "dot" && (
-                <span className={showDot ? "ui-visually-hidden" : "narration-speaker"}>
-                  {showDot ? "dot: " : "dot"}
-                </span>
-              )}
-              {content}
+      <div
+        className="narration"
+        data-speaker={speaker}
+        data-idle={kept.idle || undefined}
+        data-act={act ? "" : undefined}
+      >
+        <div className="narration-flow">
+          <p className="narration-text" aria-live="polite">
+            {text && (
+              <span
+                ref={whole.ref}
+                className="narration-line"
+                key={text}
+                data-leaving={leaving || undefined}
+              >
+                {speaker === "dot" && (
+                  <span className={showDot ? "ui-visually-hidden" : "narration-speaker"}>
+                    {showDot ? "dot: " : "dot"}
+                  </span>
+                )}
+                {content}
+              </span>
+            )}
+            {text && warning && (
+              <span className="narration-warning" data-leaving={leaving || undefined}>
+                {warning}
+              </span>
+            )}
+          </p>
+          {act && (
+            <span className="narration-act" key={text} data-leaving={leaving || undefined}>
+              <Button size="sm" data-inline="" onClick={(event) => act.run(event.currentTarget)}>
+                {act.label}
+              </Button>
             </span>
           )}
-          {text && warning && (
-            <span className="narration-warning" data-leaving={leaving || undefined}>
-              {warning}
-            </span>
-          )}
-        </p>
+        </div>
         {whole.opener}
       </div>
       {note && <p className="narrator-note num">{note}</p>}
@@ -63,20 +112,29 @@ export function NarratorBand({ line, speaker, showDot, note, reveal = false }: N
   );
 }
 
-// The line on show: a new one waits until the last has had its moment, fades the last out, then in.
-// Whether a line is revealed goes with the line.
-function useLine(line: string, reveal: boolean) {
+interface Extra {
+  idle: boolean;
+  action: LineAction | undefined;
+}
+
+// The line on show: a new one waits until the last has had its moment, unless it is urgent, fades
+// the last out, then in. Whether a line is revealed, and what goes with it, goes with the line.
+function useLine(line: string, reveal: boolean, urgent: boolean, extra: Extra) {
   const [text, setText] = useState(line);
   const [revealed, setRevealed] = useState(reveal);
+  const [kept, setKept] = useState(extra);
   const [leaving, setLeaving] = useState(false);
   const since = useRef(Date.now());
+  const latest = useRef(extra);
+  latest.current = extra;
   useEffect(() => {
     if (line === text) {
       setLeaving(false);
       setRevealed(reveal);
       return;
     }
-    const wait = Math.max(0, since.current + LINE_HOLD_MS - Date.now());
+    // Silence has nothing to read, so the first line after it comes in at once.
+    const wait = text && !urgent ? Math.max(0, since.current + LINE_HOLD_MS - Date.now()) : 0;
     let swap: ReturnType<typeof setTimeout> | undefined;
     const out = setTimeout(() => {
       setLeaving(true);
@@ -85,6 +143,7 @@ function useLine(line: string, reveal: boolean) {
           since.current = Date.now();
           setText(line);
           setRevealed(reveal);
+          setKept(latest.current);
           setLeaving(false);
         },
         text ? LINE_OUT_MS : 0,
@@ -94,6 +153,11 @@ function useLine(line: string, reveal: boolean) {
       clearTimeout(out);
       clearTimeout(swap);
     };
-  }, [line, text, reveal]);
-  return { text, revealed: revealed || (reveal && line === text), leaving };
+  }, [line, text, reveal, urgent]);
+  return {
+    text,
+    revealed: revealed || (reveal && line === text),
+    leaving,
+    with: line === text ? extra : kept,
+  };
 }

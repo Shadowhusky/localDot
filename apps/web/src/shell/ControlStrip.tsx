@@ -209,6 +209,8 @@ export function ControlTools({
   onRightClick,
   handBack,
   onHandBack,
+  decline,
+  onDecline,
   onFullScreen,
   compact = false,
 }: {
@@ -222,6 +224,9 @@ export function ControlTools({
   onRightClick(on: boolean): void;
   handBack: { reason?: string; busy?: boolean };
   onHandBack(): void;
+  // Before Hand back while the computer is one dot handed over: the user won't do it now.
+  decline?: { reason?: string; busy?: boolean };
+  onDecline?(): void;
   onFullScreen?(): void;
   compact?: boolean;
 }) {
@@ -282,6 +287,18 @@ export function ControlTools({
           icon="expand"
           label="Full screen"
           onClick={onFullScreen}
+        />
+      )}
+      {decline && (
+        <IconButton
+          size={44}
+          round
+          variant="filled"
+          icon="x"
+          label="Not now"
+          aria-busy={decline.busy || undefined}
+          disabledReason={decline.reason}
+          onClick={decline.busy ? undefined : onDecline}
         />
       )}
       {compact ? (

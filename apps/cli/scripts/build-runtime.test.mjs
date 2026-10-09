@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "esbuild";
 import { afterEach, expect, it } from "vitest";
-import { runtimeBuildOptions, WORKSPACE } from "./build-options.mjs";
+import { assertRuntimeImports, runtimeBuildOptions, WORKSPACE } from "./build-options.mjs";
 import { buildRuntime } from "./build-runtime.mjs";
 
 const roots = [];
@@ -114,6 +114,41 @@ it("fails to load the browser specification when the installed security policy i
   const result = f.run();
   expect(result.status).not.toBe(0);
   expect(result.stdout).toBe("");
+});
+it("quiets a page in the worker bundled beside the relocated daemon", async () => {
+  const root = await mkdtemp(join(tmpdir(), "localdot-page-worker-"));
+  roots.push(root);
+  const payload = join(root, "built payload");
+  const quieter = JSON.stringify(join(WORKSPACE, "apps/daemon/src/deliverables/page-quieter.ts"));
+  const daemon = await build({
+    ...runtimeBuildOptions("0.0.0-rc.0"),
+    stdin: {
+      contents: `import {PageQuieter} from ${quieter};
+console.log(JSON.stringify(await new PageQuieter().page('<a href=x target=_blank>x</a>', new AbortController().signal)));`,
+      resolveDir: WORKSPACE,
+      loader: "js",
+    },
+    outfile: join(payload, "dist/daemon.mjs"),
+  });
+  const worker = await build({
+    ...runtimeBuildOptions("0.0.0-rc.0"),
+    entryPoints: [join(WORKSPACE, "apps/daemon/src/deliverables/quiet-page-worker.ts")],
+    outfile: join(payload, "dist/quiet-page-worker.mjs"),
+  });
+  assertRuntimeImports(daemon.metafile);
+  assertRuntimeImports(worker.metafile);
+  const relocated = join(root, "installed app's #directory%value");
+  await rename(payload, relocated);
+  const result = spawnSync(process.execPath, [join(relocated, "dist/daemon.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 10_000,
+    env: { PATH: process.env.PATH, HOME: root },
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual({
+    body: '<html><head></head><body><a href="x">x</a></body></html>',
+  });
 });
 it("does not overwrite an existing payload directory", async () => {
   const root = await mkdtemp(join(tmpdir(), "localdot-existing-payload-"));

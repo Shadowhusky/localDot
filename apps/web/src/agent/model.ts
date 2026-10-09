@@ -41,6 +41,8 @@ export interface AgentStep {
   readonly firstSeenAt?: number;
   readonly kind?: EventOf<"step.start">["data"]["kind"];
   readonly planItem?: string;
+  // dot's line for the user about the call this step starts.
+  readonly intent?: string;
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly status?: EventOf<"step.end">["data"]["status"];
@@ -146,6 +148,8 @@ export interface AgentModel {
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
   readonly approval?: ApprovalCard | null;
+  // A connection's card, which waits for the user beside the task's own decisions.
+  readonly connection?: ApprovalCard | null;
   readonly approvalOutcome?: ApprovalOutcome;
   readonly safetyPaused?: { readonly paused: boolean; readonly atStepBoundary: boolean };
   readonly safetyPause?: EventOf<"safety.pause">["data"]["pause"];
@@ -168,17 +172,6 @@ export interface AgentModel {
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
-  readonly said?: Said | null;
-}
-// dot's latest words for the step at hand, said or thought before it acts. A step's end clears
-// them, so the next step starts quiet.
-export interface Said {
-  readonly from: "thought" | "message";
-  readonly messageId?: string;
-  // The tail of the words: only the last sentence is ever shown.
-  readonly text: string;
-  // Still streaming: words without a full stop may yet go on.
-  readonly open: boolean;
 }
 // The hand-over the user holds the computer under: one they asked for, or dot's once they took it.
 export function heldByUser(model: AgentModel): AgentTakeover | undefined {

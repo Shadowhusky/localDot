@@ -2,7 +2,8 @@ import type { AppEvents } from "../app-events.ts";
 import type { EventLog } from "../event-log.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { AttentionLedger } from "./attention.ts";
-import { type MacNotifier, macNotifier } from "./mac.ts";
+import { type HostBanner, liveHostBanner } from "./banner.ts";
+import type { MacNotifier } from "./mac.ts";
 import { isRoutineRun, Notifier } from "./notifier.ts";
 import { PresenceBoard } from "./presence.ts";
 import type { NotifyRoutesDeps } from "./routes.ts";
@@ -15,6 +16,8 @@ export interface NotifyWiringDeps {
   keyd: Pick<KeydClient, "pushKey" | "pushSend">;
   events: Pick<AppEvents, "publish" | "subscribe">;
   mac?: MacNotifier;
+  // How this computer shows banners; detected when absent. mac replaces only its notifier.
+  banner?: HostBanner;
   now?: () => Date;
   timeZone?: () => string;
   settleMs?: number;
@@ -31,13 +34,15 @@ export interface NotifyWiring {
 
 export function createNotify(d: NotifyWiringDeps): NotifyWiring {
   const now = d.now ?? (() => new Date());
+  const fixed = d.banner;
+  const banner = fixed ? { kind: () => fixed.kind, notifier: fixed.notifier } : liveHostBanner();
   const store = new NotifyStore(d.home, now);
   const ledger = new AttentionLedger(() => now().getTime());
   const presence = new PresenceBoard();
   const notifier = new Notifier({
     ledger,
     store,
-    mac: d.mac ?? macNotifier(),
+    mac: d.mac ?? banner.notifier,
     push: new WebPushSender({ keyd: d.keyd, store }),
     presence,
     publish: (event) => d.events.publish(event),
@@ -56,7 +61,7 @@ export function createNotify(d: NotifyWiringDeps): NotifyWiring {
     ledger,
     presence,
     notifier,
-    routes: { store, keyd: d.keyd, ledger, notifier },
+    routes: { store, keyd: d.keyd, ledger, notifier, banner: banner.kind },
     close() {
       stop();
       unobserve();

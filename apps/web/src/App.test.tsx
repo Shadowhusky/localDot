@@ -6,7 +6,9 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
+import { GREETINGS } from "./dot/tips.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
+import { ONBOARDING_KEY } from "./onboarding/wizard.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
@@ -449,7 +451,9 @@ describe("App token states", () => {
     expect(keys.getAttribute("aria-modal")).toBe("true");
     fireEvent.click(within(keys).getByRole("button", { name: "Settings" }));
     const sheet = screen.getByRole("dialog", { name: "Settings" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Shut down" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: /^Your computer/ }));
+    const computer = screen.getByRole("dialog", { name: "Your computer" });
+    fireEvent.click(within(computer).getByRole("button", { name: "Shut down" }));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
         true,
@@ -650,7 +654,8 @@ describe("App token states", () => {
     );
     render(<App fetchImpl={d.fetchImpl} />);
     fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
-    expect(await screen.findByText(OFFLINE_SAID)).toBeTruthy();
+    // Each line dot's band shows stays long enough to read before the next.
+    expect(await screen.findByText(OFFLINE_SAID, {}, { timeout: 2000 })).toBeTruthy();
     expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
     expect(d.seen().some((c) => c.endsWith("/start"))).toBe(false);
     act(() => FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(paused) }));
@@ -658,8 +663,7 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
-    // Each line dot's band shows stays for a second before the next.
-    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2000 });
+    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2500 });
   });
 
   it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {
@@ -858,6 +862,22 @@ describe("App HUD", () => {
     expect(document.body.textContent).not.toContain("Offline");
     pushState(summary("ready", "live"));
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
+  });
+
+  it("has dot greet the user beside a live computer with nothing to do", async () => {
+    window.localStorage.setItem(
+      ONBOARDING_KEY,
+      JSON.stringify({ step: "welcome", dismissed: true }),
+    );
+    render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(document.querySelector(".narration-line")).toBeNull();
+    pushState(summary("ready", "live"));
+    await waitFor(() =>
+      expect(Object.values(GREETINGS).flat()).toContain(
+        document.querySelector(".narration-line")?.textContent?.replace(/^dot: /, ""),
+      ),
+    );
   });
 
   it("keeps the stage lit while the stream reconnects, and says so in the island", async () => {

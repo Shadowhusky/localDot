@@ -39,6 +39,7 @@ async function fixture() {
     "bin/localdot.mjs": "#!/usr/bin/env node\nexport {};\n",
     "dist/cli.mjs": "export {};\n",
     "dist/daemon.mjs": "export {};\n",
+    "dist/quiet-page-worker.mjs": "export {};\n",
     "dist/release-verification-worker.mjs": "export {};\n",
     "dist/browser-seccomp.json": "{}\n",
     "dist/canary-scan.py": "# fixture\n",
