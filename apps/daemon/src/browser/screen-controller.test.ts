@@ -6,9 +6,11 @@ import type { BrowserDownloadBinding } from "../../../../packages/protocol/src/b
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClientError, type BrowserScope } from "./client.ts";
 import {
+  ScreenControlError,
   ScreenController,
   type ScreenControllerDeps,
   type ScreenScope,
+  ScreenUnavailableError,
 } from "./screen-controller.ts";
 
 async function until(check: () => boolean) {
@@ -166,9 +168,12 @@ describe("screen-owned download lifecycle", () => {
       stop() {},
     }));
     try {
-      await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow();
+      await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(
+        ScreenUnavailableError,
+      );
       expect(f.deps.publish).not.toHaveBeenCalled();
-      expect(f.deps.contain).toHaveBeenCalledOnce();
+      expect(f.holder()).toBe("user");
+      expect(f.deps.contain).not.toHaveBeenCalled();
       expect(f.controller.selection.screen).toBe("desktop");
     } finally {
       await f.controller.close();
@@ -374,14 +379,15 @@ describe("session screen coordinator", () => {
     await f.controller.close();
   });
 
-  it("contains the session when no tab has unambiguous foreground geometry", async () => {
+  it("revokes the grant and fails only the call when no tab has unambiguous foreground geometry", async () => {
     const f = fixture();
     f.client.clock.mockRejectedValue(new BrowserClientError("unavailable"));
-    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow();
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(ScreenUnavailableError);
     expect(f.deps.attachRecording).not.toHaveBeenCalled();
     expect(f.deps.publish).not.toHaveBeenCalled();
-    expect(f.deps.fenceSession).toHaveBeenCalledOnce();
-    expect(f.deps.contain).toHaveBeenCalledOnce();
+    expect(f.holder()).toBe("user");
+    expect(f.deps.fenceSession).not.toHaveBeenCalled();
+    expect(f.deps.contain).not.toHaveBeenCalled();
     await f.controller.close();
   });
 
@@ -390,10 +396,14 @@ describe("session screen coordinator", () => {
     f.deps.attachRecording.mockImplementationOnce(async () => {
       f.client.clock.mockRejectedValue(new BrowserClientError("unavailable"));
     });
-    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow();
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(ScreenUnavailableError);
     expect(f.deps.publish).not.toHaveBeenCalled();
-    expect(f.deps.contain).toHaveBeenCalledOnce();
-    expect(() => f.controller.lease(f.scope)).toThrow();
+    expect(f.holder()).toBe("user");
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    const lease = f.controller.lease(f.scope);
+    expect(lease.selection.screen).toBe("desktop");
+    expect(() => f.controller.browserAccess(lease)).toThrow();
+    lease.finish();
     await f.controller.close();
   });
 
@@ -411,12 +421,15 @@ describe("session screen coordinator", () => {
             );
           }),
       );
-      const pending = expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow();
+      const pending = expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(
+        ScreenUnavailableError,
+      );
       await vi.advanceTimersByTimeAsync(6001);
       await pending;
       expect(f.client.clock).toHaveBeenCalledOnce();
       expect(f.deps.publish).not.toHaveBeenCalled();
-      expect(f.deps.contain).toHaveBeenCalledOnce();
+      expect(f.holder()).toBe("user");
+      expect(f.deps.contain).not.toHaveBeenCalled();
       await f.controller.close();
     } finally {
       vi.useRealTimers();
@@ -599,6 +612,80 @@ describe("session screen coordinator", () => {
     expect(f.deps.contain).toHaveBeenCalledTimes(1);
     expect(() => f.controller.lease(f.scope)).toThrow();
   });
+
+  it("fails only the call when the browser cannot start, before requesting any agent grant", async () => {
+    const f = fixture();
+    f.deps.browser.start.mockRejectedValueOnce(new Error("browser cell stopped"));
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(ScreenUnavailableError);
+    expect(f.client.control).not.toHaveBeenCalled();
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(f.deps.fenceSession).not.toHaveBeenCalled();
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    const lease = f.controller.lease(f.scope);
+    expect(lease.selection.screen).toBe("desktop");
+    lease.finish();
+    expect((await f.controller.switchTo("browser", f.scope)).screen).toBe("browser");
+  });
+
+  it("fails only the call when the desktop is not ready", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    f.deps.desktopReady.mockReturnValue(false);
+    await expect(f.controller.switchTo("desktop", f.scope)).rejects.toThrow(ScreenUnavailableError);
+    expect(f.holder()).toBe("user");
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    f.deps.desktopReady.mockReturnValue(true);
+    expect((await f.controller.switchTo("desktop", f.scope)).screen).toBe("desktop");
+  });
+
+  it("physically retires a browser whose grant cannot be revoked before publishing the desktop", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    f.client.control.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    const retired = Promise.withResolvers<void>();
+    f.deps.browser.stop.mockImplementationOnce(() => retired.promise);
+    const switching = f.controller.switchTo("desktop", f.scope);
+    await until(() => f.deps.browser.stop.mock.calls.length === 1);
+    expect(f.deps.attachRecording).toHaveBeenCalledTimes(1);
+    expect(f.deps.publish).toHaveBeenCalledTimes(1);
+    retired.resolve();
+    expect((await switching).screen).toBe("desktop");
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.deps.parentCellId);
+    expect(f.client.close).toHaveBeenCalled();
+    expect(f.deps.fenceSession).not.toHaveBeenCalled();
+    expect(f.deps.contain).not.toHaveBeenCalled();
+  });
+
+  it("physically retires a browser whose new grant cannot be revoked after a failed switch", async () => {
+    const f = fixture();
+    f.client.clock.mockRejectedValue(new BrowserClientError("unavailable"));
+    f.controlBarrier.mockImplementation(async (request) => {
+      if (request.holder === "user") throw new BrowserClientError("unavailable");
+    });
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(ScreenUnavailableError);
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.deps.parentCellId);
+    expect(f.deps.publish).not.toHaveBeenCalled();
+    expect(f.deps.contain).not.toHaveBeenCalled();
+  });
+
+  it.each(["previous", "requested"] as const)(
+    "contains the session when a %s browser grant can be neither revoked nor physically retired",
+    async (grant) => {
+      const f = fixture();
+      if (grant === "previous") await f.controller.switchTo("browser", f.scope);
+      else f.client.clock.mockRejectedValue(new BrowserClientError("unavailable"));
+      f.controlBarrier.mockImplementation(async (request) => {
+        if (request.holder === "user") throw new BrowserClientError("unavailable");
+      });
+      f.deps.browser.stop.mockRejectedValueOnce(new Error("shutdown unconfirmed"));
+      await expect(
+        f.controller.switchTo(grant === "previous" ? "desktop" : "browser", f.scope),
+      ).rejects.toThrow(ScreenControlError);
+      expect(f.deps.fenceSession).toHaveBeenCalledOnce();
+      expect(f.deps.contain).toHaveBeenCalledOnce();
+      expect(() => f.controller.lease(f.scope)).toThrow();
+    },
+  );
 
   it("failed handback also contains uncertainty instead of silently leaving a grant", async () => {
     const f = fixture();
