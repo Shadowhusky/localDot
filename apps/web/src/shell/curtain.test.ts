@@ -28,7 +28,7 @@ describe("the curtain", () => {
       { initialProps: { phase: "starting" as ComputerPhase } },
     );
     rerender({ phase: "live" });
-    expect(result.current).toEqual({ up: true, phase: "starting" });
+    expect(result.current).toEqual({ up: true, phase: "starting", lifting: true });
     act(() => vi.advanceTimersByTime(LIVE_HOLD_MS - 1));
     expect(result.current.up).toBe(true);
     act(() => vi.advanceTimersByTime(1));

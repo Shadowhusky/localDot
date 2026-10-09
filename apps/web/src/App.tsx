@@ -406,6 +406,7 @@ function Theatre({ api }: { api: ApiClient }) {
     error,
     listed,
     reconnects,
+    operation,
     start,
     stop,
     resume,
@@ -1640,6 +1641,8 @@ function Theatre({ api }: { api: ApiClient }) {
                         : undefined
                     }
                     freshStart={freshStart.curtain}
+                    operation={operation}
+                    ready={curtain.lifting}
                     showDot={showDot.value}
                   />
                 </Presence>

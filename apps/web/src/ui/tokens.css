@@ -405,8 +405,8 @@
   --dur-dim: 200ms;
   /* The curtain lifting off the stage, or falling back over it. */
   --dur-curtain: 320ms;
-  /* About as long as a computer's first start, which the curtain's progress eases toward. */
-  --dur-first-start: 60s;
+  /* A clock's second: a progress bar that moves on each one glides through it. */
+  --dur-tick: 1s;
   /* Loops, which reduced motion stops rather than shortens. */
   --loop-sweep: 1400ms;
   --loop-shimmer: 1800ms;

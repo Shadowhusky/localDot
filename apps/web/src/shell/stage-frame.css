@@ -723,24 +723,20 @@
   background-color: var(--color-progress-track);
 }
 
-/* Eases toward 90 % over about a minute, the first start's length; it never claims to finish. */
+/* How far the computer's operation has come: it moves on each second and glides through it. */
 .curtain-progress > i {
   display: block;
   height: 100%;
   border-radius: inherit;
   background-color: var(--color-progress-fill);
   transform-origin: 0 50%;
-  animation: curtain-progress var(--dur-first-start) var(--ease-enter) both;
+  scale: var(--progress) 1;
+  transition: scale var(--dur-tick) linear;
 }
 
-@keyframes curtain-progress {
-  from {
-    scale: 0.04 1;
-  }
-
-  to {
-    scale: 0.9 1;
-  }
+/* The computer is up: the rest fills before the curtain lifts. */
+.curtain-progress > i[data-done] {
+  transition: scale var(--dur-snappy) var(--ease-standard);
 }
 
 /* The action and the progress that replaces it share one box, so neither moves the column. */
@@ -801,8 +797,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .curtain-progress > i {
-    animation: none;
-    scale: 0.38 1;
+    transition: none;
   }
 }
 

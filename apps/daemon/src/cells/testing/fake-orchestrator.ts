@@ -17,11 +17,12 @@ export class FakeOrchestrator implements CellApi {
   failWith: Error | undefined;
 
   list(): CellSummary[] {
-    return [...this.cells.values()];
+    return [...this.cells.values()].map(fresh);
   }
 
   get(id: string): CellSummary | undefined {
-    return this.cells.get(id);
+    const cell = this.cells.get(id);
+    return cell && fresh(cell);
   }
 
   endpoints(id: string): CellEndpoints | undefined {
@@ -35,7 +36,7 @@ export class FakeOrchestrator implements CellApi {
 
   emit(cell: CellSummary): void {
     this.cells.set(cell.id, cell);
-    for (const listener of this.listeners) listener(cell);
+    for (const listener of this.listeners) listener(fresh(cell));
   }
 
   updateStream(id: string, patch: Partial<StreamState>): void {
@@ -77,4 +78,15 @@ export class FakeOrchestrator implements CellApi {
     if (!cell) throw new UnknownCellError(id);
     return cell;
   }
+}
+
+// Like the daemon, an operation says how long it has run when its summary goes out.
+function fresh(cell: CellSummary): CellSummary {
+  const { operation } = cell;
+  return operation
+    ? {
+        ...cell,
+        operation: { ...operation, elapsedMs: Math.max(0, Date.now() - operation.startedAt) },
+      }
+    : cell;
 }

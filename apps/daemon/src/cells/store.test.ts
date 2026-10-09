@@ -288,4 +288,41 @@ describe("CellStore", () => {
       error.mockRestore();
     }
   });
+
+  it("keeps how long a computer's operations took beside its record, 0600, until it goes", () => {
+    const dir = home();
+    const store = new CellStore(dir);
+    const record = sampleRecord();
+    store.save(record);
+    expect(store.timings(record.id)).toEqual({});
+    store.saveTimings(record.id, { start: 8200, stop: 2100 });
+    const file = join(dir, "cells", record.id, "timings.json");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(new CellStore(dir).timings(record.id)).toEqual({ start: 8200, stop: 2100 });
+    expect(store.list().map((r) => r.id)).toEqual([record.id]);
+    store.remove(record.id);
+    expect(store.timings(record.id)).toEqual({});
+  });
+
+  it("starts a computer's timings afresh when the file can't be used", () => {
+    const dir = home();
+    const store = new CellStore(dir);
+    const record = sampleRecord();
+    store.save(record);
+    const file = join(dir, "cells", record.id, "timings.json");
+    for (const text of ["{not json", '{"v":1,"lastMs":{"start":-5}}', '{"v":2,"lastMs":{}}']) {
+      writeFileSync(file, text);
+      expect(store.timings(record.id), text).toEqual({});
+    }
+    expect(() => store.saveTimings(record.id, { start: 0 })).toThrow();
+  });
+
+  it("never makes a folder for the timings of a computer whose record is gone", () => {
+    const dir = home();
+    const store = new CellStore(dir);
+    const id = ulid();
+    store.saveTimings(id, { start: 8200 });
+    expect(existsSync(join(dir, "cells", id))).toBe(false);
+    expect(store.inventory().skipped).toEqual([]);
+  });
 });

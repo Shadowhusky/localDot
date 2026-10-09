@@ -4,6 +4,7 @@ export * from "./ask.ts";
 export * from "./attention.ts";
 export * from "./brand-tokens.ts";
 export * from "./claude-code.ts";
+export * from "./computer-operation.ts";
 export * from "./computer-reset.ts";
 export * from "./connectors.ts";
 export * from "./conversation.ts";

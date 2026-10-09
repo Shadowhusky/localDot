@@ -18,7 +18,7 @@
       --dur-text-out: 120ms;
       --dur-dim: 150ms;
       --dur-curtain: 150ms;
-      --dur-first-start: 150ms;
+      --dur-tick: 150ms;
     }
   }
 }
