@@ -108,7 +108,7 @@ export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
       },
       settle: () => settle(page),
       async still() {
-        await page.locator(".welcome-hero .dot, .sign-in .dot").evaluateAll((dots) => {
+        await page.locator(".presence .dot, .sign-in .dot").evaluateAll((dots) => {
           for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
         });
       },

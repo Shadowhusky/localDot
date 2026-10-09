@@ -35,35 +35,30 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(page.getByRole("heading", { name: "Starting localDot" })).toBeVisible();
     const link = f.issue();
     f.channel.finish("ready", link);
-    await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
     await expect(page).toHaveURL(`${f.origin}/`);
-    const setupBounds = await page.locator(".welcome-setup").boundingBox();
-    // Inside the stage on a wide screen; over the whole computer pane on a phone.
-    const host = (page.viewportSize()?.width ?? 0) < 760 ? ".stage-col" : ".stage";
-    expect(setupBounds).toEqual(await page.locator(host).first().boundingBox());
+    const curtainBounds = await page.locator(".curtain").boundingBox();
+    // Over the stage on a wide screen; over the stage and the band under it on a phone.
+    const host = (page.viewportSize()?.width ?? 0) < 700 ? ".stage-frame" : ".stage";
+    expect(curtainBounds).toEqual(await page.locator(host).first().boundingBox());
     await page.screenshot({ path: info.outputPath("first-run-setup.png") });
     expect(f.requests.filter((r) => r.path === "/auth/exchange-code")).toHaveLength(1);
     expect(f.requests.filter((r) => r.method !== "GET").map((r) => r.path)).toEqual([
       "/auth/exchange-code",
     ]);
     expect(f.requests.every((r) => r.referrer === null)).toBe(true);
-    await page.getByRole("radio", { name: "Midnight" }).check();
-    await expect(page.locator("html")).toHaveAttribute("data-appearance", "midnight");
-    const review = page.locator(".welcome-setup").getByRole("button", { name: "Review" });
+    const review = page
+      .getByRole("region", { name: "Finish setting up" })
+      .getByRole("button", { name: "Continue setup" });
     await review.click();
     const settings = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(settings).toBeVisible();
-    await expect(
-      settings
-        .getByRole("radiogroup", { name: "Start from" })
-        .getByRole("radio", { name: "Balanced" }),
-    ).toBeFocused();
     expect(await settings.evaluate((sheet) => sheet.scrollTop), "the header stays in place").toBe(
       0,
     );
     await settings.getByRole("button", { name: "Close settings" }).click();
     await expect(review).toBeFocused();
-    const start = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });
+    const start = page.locator(".curtain").getByRole("button", { name: "Turn on" });
     await start.scrollIntoViewIfNeeded();
     await expect(start).toBeEnabled();
     const bounds = await start.boundingBox();
@@ -77,8 +72,7 @@ test("installer progress hands off once to first-run setup and settings", async 
     );
     await page.screenshot({ path: info.outputPath("first-run-footer.png") });
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
-    await expect(page.locator("html")).toHaveAttribute("data-appearance", "midnight");
+    await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
     expect(f.requests.filter((r) => r.path === "/auth/exchange-code")).toHaveLength(1);
     const replay = await page.request.post(`${f.origin}/auth/exchange-code`, {
       headers: { origin: f.origin },

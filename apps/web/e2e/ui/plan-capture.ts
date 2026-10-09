@@ -113,7 +113,7 @@ async function run(engine: BrowserType, engineName: string) {
       f.channel.starting();
       await page.waitForTimeout(1000);
       await page.goto(f.issue());
-      await page.getByRole("heading", { name: "Set up localDot" }).waitFor({ timeout: 15000 });
+      await page.getByRole("heading", { name: "Your computer is off" }).waitFor({ timeout: 15000 });
       await shot(page, `${tag}-03-first-run`);
       await probeControls(page, `${tag} first-run`);
       if (size.mobile) {

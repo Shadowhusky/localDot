@@ -7,7 +7,8 @@ import "./bar.css";
 export type Mode = "watch" | "replay";
 
 export interface TopBarProps {
-  title: string;
+  // Left out before there is anything to name, as on a first run.
+  title?: string;
   // Said after the title, quieter: where a recording comes from.
   note?: string;
   mode: Mode;
@@ -50,8 +51,12 @@ export const TopBar = memo(function TopBar({
     <header className="bar">
       <div className="bar-l">
         <span className="bar-wordmark">localDot</span>
-        <span className="bar-sep" aria-hidden="true" />
-        <span className="bar-title">{title}</span>
+        {title && (
+          <>
+            <span className="bar-sep" aria-hidden="true" />
+            <span className="bar-title">{title}</span>
+          </>
+        )}
         {note && <span className="title-note">{note}</span>}
       </div>
       <div className="bar-r">

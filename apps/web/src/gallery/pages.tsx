@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import { Dot } from "../dot/Dot.tsx";
 import type { DotState } from "../dot/engine/states.ts";
 import { Glyph } from "../dot/Glyph.tsx";
-import { Caption } from "../shell/Caption.tsx";
+import { NarratorBand } from "../shell/NarratorBand.tsx";
 import { StageFrame } from "../shell/StageFrame.tsx";
 import { FeedbackPage } from "../ui/gallery/FeedbackPage.tsx";
 import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
@@ -71,7 +71,7 @@ function StagePage() {
             live
             frozen={paused}
             light={control ? "dot" : "none"}
-            band={<Caption text={caption} speaker="dot" />}
+            band={<NarratorBand line={caption} speaker="dot" showDot={false} />}
           >
             <StillFrame />
           </StageFrame>

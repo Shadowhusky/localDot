@@ -1,6 +1,7 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
+import type { ShowDotControl } from "../dot/show-dot.ts";
 import {
   KEYS_DESCRIPTION,
   KEYS_TITLE,
@@ -18,6 +19,7 @@ import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
+import { Switch } from "../ui/Switch.tsx";
 import { AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import {
@@ -50,6 +52,7 @@ export interface SettingsSheetProps {
   keysPage?: KeysPage;
   focusSection?: SettingsSection;
   appearance?: AppearanceControl;
+  showDot?: ShowDotControl;
   choices: Partial<Record<ModelRole, RoleChoice>>;
   providers: readonly ProviderModels[];
   keys: readonly PickerKey[];
@@ -415,7 +418,7 @@ function SettingsSections(props: SettingsSheetProps) {
 
       {props.appearance && (
         <Section id="settings-appearance" title="Appearance">
-          <Appearance appearance={props.appearance} />
+          <Appearance appearance={props.appearance} showDot={props.showDot} />
         </Section>
       )}
     </>
@@ -470,17 +473,37 @@ function Spending({ budget }: { budget: NonNullable<SettingsSheetProps["budget"]
   );
 }
 
-function Appearance({ appearance }: { appearance: AppearanceControl }) {
+function Appearance({
+  appearance,
+  showDot,
+}: {
+  appearance: AppearanceControl;
+  showDot?: ShowDotControl;
+}) {
   return (
-    <Field
-      label="Theme"
-      description={
-        appearance.saved
-          ? "Applies to this browser."
-          : "Applied for this visit. This browser couldn't save it."
-      }
-    >
-      <AppearancePicker appearance={appearance} />
-    </Field>
+    <>
+      <Field
+        label="Theme"
+        description={
+          appearance.saved
+            ? "Applies to this browser."
+            : "Applied for this visit. This browser couldn't save it."
+        }
+      >
+        <AppearancePicker appearance={appearance} />
+      </Field>
+      {showDot && (
+        <Switch
+          label="Show dot"
+          description={
+            showDot.saved
+              ? "dot's face on the curtain and beside the stage. Status and its words stay."
+              : "Applied for this visit. This browser couldn't save it."
+          }
+          checked={showDot.value}
+          onCheckedChange={(checked) => showDot.change(checked)}
+        />
+      )}
+    </>
   );
 }

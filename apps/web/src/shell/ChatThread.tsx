@@ -48,6 +48,7 @@ export function ChatThread({
   computerReady = false,
   sessions = NO_SESSIONS,
   more = false,
+  start,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -66,6 +67,8 @@ export function ChatThread({
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
   more?: boolean;
+  // In place of the empty thread's suggestions.
+  start?: ReactNode;
 }) {
   const model = agent?.model;
   const ended = model?.ended?.reason;
@@ -111,6 +114,7 @@ export function ChatThread({
       answer={answer}
       cover={cover}
       covered={covered}
+      start={start}
     />
   );
 }

@@ -74,10 +74,19 @@ const keyReply = (path: string): Response | undefined => {
   if (path === "/api/keys") return json({ keys: [] });
   return undefined;
 };
-const hudButton = () =>
-  within(screen.getByTestId("hud-status").closest(".island") as HTMLElement).getAllByRole(
-    "button",
-  )[0] as HTMLElement;
+// The computer's own action: on the curtain while it is up, else in the island.
+const computerButton = () =>
+  within(
+    (document.querySelector(".curtain-act") ??
+      screen.getByTestId("hud-status").closest(".island")) as HTMLElement,
+  ).getAllByRole("button")[0] as HTMLElement;
+const settingsShutDown = () => {
+  const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
+  fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+  return within(screen.getByRole("dialog", { name: "Settings" })).getByRole("button", {
+    name: "Shut down",
+  });
+};
 const noCells = async (input: RequestInfo | URL) =>
   keyReply(new URL(String(input)).pathname) ?? json([]);
 const unauthorized = async () => new Response("unauthorized", { status: 401 });
@@ -368,7 +377,8 @@ describe("App token states", () => {
     const keys = screen.getByRole("dialog", { name: "Keys" });
     const value = within(keys).getByRole("textbox", { name: "Key" }) as HTMLInputElement;
     fireEvent.change(value, { target: { value: "sk-typed-but-not-saved" } });
-    const review = screen.getByRole("button", { name: "Review when dot checks with you" });
+    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
+    const review = within(bar).getByRole("button", { name: "Settings" });
     fireEvent.click(review);
     const prompt = within(keys).getByRole("group", { name: "Discard unsaved changes?" });
     expect(prompt.hasAttribute("data-shown")).toBe(true);
@@ -556,7 +566,7 @@ describe("App token states", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("shuts the computer down from Settings, turns it on from the island and says why it refused", async () => {
+  it("shuts the computer down from Settings, turns it on from the curtain and says why it refused", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -581,9 +591,9 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("stopped")) }),
     );
-    await waitFor(() => expect(hudButton().getAttribute("aria-disabled")).toBeNull());
-    expect(hudButton().textContent).toBe("Turn on");
-    hudButton().click();
+    await waitFor(() => expect(computerButton().getAttribute("aria-disabled")).toBeNull());
+    expect(computerButton().textContent).toBe("Turn on");
+    computerButton().click();
     expect(await screen.findByText(DOCKER_DOWN_CAPTION)).toBeTruthy();
     expect(document.body.textContent).not.toContain("ENOENT");
     expect(calls.filter((call) => call.includes("/api/cells") && !call.endsWith("/live"))).toEqual([
@@ -638,7 +648,8 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
-    expect(screen.queryByText(offline)).toBeNull();
+    // Each line dot's band shows stays for a second before the next.
+    await waitFor(() => expect(screen.queryByText(offline)).toBeNull(), { timeout: 2000 });
   });
 
   it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {
@@ -700,8 +711,11 @@ describe("App HUD", () => {
   afterEach(cleanup);
 
   const status = () => screen.getByTestId("hud-status").textContent;
-  const button = () => hudButton();
-  const caption = () => document.querySelector(".narration")?.textContent ?? "";
+  const button = () => computerButton();
+  // The curtain speaks while it is up; the band under the stage otherwise.
+  const caption = () =>
+    (document.querySelector(".curtain-sub") ?? document.querySelector(".narration"))?.textContent ??
+    "";
   const pushState = (cell: CellSummary) =>
     act(() => FakeWebSocket.instances.at(-1)?.onmessage?.({ data: JSON.stringify(cell) }));
 
@@ -721,7 +735,7 @@ describe("App HUD", () => {
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/cells"]);
   });
 
-  it("keeps the one Turn on disabled while the create is out, then offers Shut down", async () => {
+  it("keeps the one Turn on disabled while the create is out, then offers Shut down in Settings", async () => {
     const created = deferred<Response>();
     const d = daemon(({ method }) => (method === "POST" ? created.promise : json([])));
     render(<App fetchImpl={d.fetchImpl} />);
@@ -733,8 +747,8 @@ describe("App HUD", () => {
     start.click();
     expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells"]);
     created.resolve(json(summary("starting"), 202));
-    await waitFor(() => expect(button().textContent).toBe("Shut down"));
-    expect(button().getAttribute("aria-disabled")).toBeNull();
+    await waitFor(() => expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells"]));
+    await waitFor(() => expect(settingsShutDown().getAttribute("aria-disabled")).toBeNull());
   });
 
   it("stops a computer that is still starting", async () => {
@@ -743,7 +757,8 @@ describe("App HUD", () => {
     );
     render(<App fetchImpl={d.fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Starting…"));
-    screen.getByRole("button", { name: "Shut down" }).click();
+    expect(screen.queryByRole("button", { name: "Shut down" })).toBeNull();
+    settingsShutDown().click();
     await waitFor(() => expect(d.seen()).toContain(`POST /api/cells/${CELL_ID}/stop`));
   });
 
@@ -776,7 +791,7 @@ describe("App HUD", () => {
       expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells", "GET /api/cells"]),
     );
     await waitFor(() => expect(status()).toBe("Starting…"));
-    expect(screen.getByRole("button", { name: "Shut down" })).toBeTruthy();
+    expect(settingsShutDown()).toBeTruthy();
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
   });
 
