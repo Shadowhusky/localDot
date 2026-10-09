@@ -16,26 +16,45 @@ import {
   type Span,
   sessionAt,
 } from "@localdot/stage";
-import { speedLabel, timeLabel } from "../replay/replay-view.ts";
+import { timeLabel } from "../replay/replay-view.ts";
 
-export const EXPORT_FPS = 30;
-export const EXPORT_SIZES = [
-  { w: 1280, h: 800, label: "720p" },
-  { w: 1920, h: 1200, label: "1080p" },
-] as const;
-export type ExportSpeed = 1 | 2 | 4 | 8;
+export const EXPORT_FRAME_RATES = [10, 15, 24, 30, 50, 60] as const;
+export type ExportFrameRate = (typeof EXPORT_FRAME_RATES)[number];
+export const EXPORT_QUALITIES = ["low", "medium", "high"] as const;
+export type ExportQuality = (typeof EXPORT_QUALITIES)[number];
+export const EXPORT_FORMATS = ["mp4", "webm"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+export const SPEED_LIMITS = { min: 0.25, max: 16 } as const;
+// The largest picture an export makes: the computer's own screen.
+export const MAX_EXPORT_SIZE = { w: 2560, h: 1600 } as const;
+
+export interface ExportSize {
+  w: number;
+  h: number;
+}
+
 export interface ExportRequest {
   sessionId: string;
   fromMs: number;
   toMs: number;
-  speed: ExportSpeed;
+  // Session time per second of video: 2 plays twice as fast, 0.5 at half speed.
+  speed: number;
   skipIdle: boolean;
-  size: { w: number; h: number };
   captions: boolean;
+  // dot's pointer, clicks and typing drawn over the picture.
+  overlays: boolean;
+  size: ExportSize;
+  fps: ExportFrameRate;
+  quality: ExportQuality;
+  format: ExportFormat;
 }
 export interface ExportPlan {
   frames: number;
+  fps: ExportFrameRate;
   durationS: number;
+  bitrate: number;
+  // Seconds of the video in which something moves; the rest is a still picture, encoded once.
+  movingS: number;
   sessionMsAt(frame: number): number;
   labelAt(frame: number): string | null;
   captionAt(frame: number): string | null;
@@ -44,12 +63,40 @@ export interface ExportPlan {
 export const PRIVACY_NOTE =
   "This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.";
 
-// The encoder's rate for its high quality level (mediabunny's QUALITY_HIGH for H.264), so the size
-// shown before an export is close to the file it writes.
-export function estimateBytes(size: { w: number; h: number }, durationS: number): number {
-  const bitrate =
-    3_000_000 * ((size.w * size.h) / (1920 * 1080)) ** 0.95 * 0.3 * Math.exp(2.5538 * 0.75);
-  return (bitrate / 8) * durationS;
+export function validSpeed(speed: number): boolean {
+  return Number.isFinite(speed) && speed >= SPEED_LIMITS.min && speed <= SPEED_LIMITS.max;
+}
+
+export function validSize(size: ExportSize): boolean {
+  return (
+    Number.isSafeInteger(size.w) &&
+    Number.isSafeInteger(size.h) &&
+    size.w % 2 === 0 &&
+    size.h % 2 === 0 &&
+    size.w >= 16 &&
+    size.h >= 16 &&
+    Math.max(size.w, size.h) <= MAX_EXPORT_SIZE.w &&
+    size.w * size.h <= MAX_EXPORT_SIZE.w * MAX_EXPORT_SIZE.h
+  );
+}
+
+export function speedText(speed: number): string {
+  return `${Number(speed.toFixed(2))}×`;
+}
+
+export function exportSpeedLabel(speed: number, idleNow: boolean): string | null {
+  if (speed === 1) return idleNow ? "Idle skipped" : null;
+  return `Playing at ${speedText(speed)}${idleNow ? " · idle skipped" : ""}`;
+}
+
+// Bits per pixel of each frame the encoder is asked for, at 30 fps. A screen changes little from one
+// frame to the next, so a higher frame rate costs less than its share: the rate grows by fps^0.6.
+const BITS_PER_PIXEL: Record<ExportQuality, number> = { low: 0.022, medium: 0.04, high: 0.065 };
+const MIN_BITRATE = 200_000;
+
+export function exportBitrate(size: ExportSize, fps: number, quality: ExportQuality): number {
+  const frames = 30 * (fps / 30) ** 0.6;
+  return Math.max(MIN_BITRATE, Math.round(BITS_PER_PIXEL[quality] * size.w * size.h * frames));
 }
 
 export function fileSize(bytes: number): string {
@@ -122,8 +169,11 @@ export function planExport(
 ): ExportPlan {
   if (
     !ULID_PATTERN.test(request.sessionId) ||
-    ![1, 2, 4, 8].includes(request.speed) ||
-    !EXPORT_SIZES.some((size) => size.w === request.size.w && size.h === request.size.h) ||
+    !validSpeed(request.speed) ||
+    !validSize(request.size) ||
+    !EXPORT_FRAME_RATES.includes(request.fps) ||
+    !EXPORT_QUALITIES.includes(request.quality) ||
+    !EXPORT_FORMATS.includes(request.format) ||
     !Number.isFinite(request.fromMs) ||
     !Number.isFinite(request.toMs)
   )
@@ -131,10 +181,12 @@ export function planExport(
   const startMs = Math.max(model.startT ?? 0, request.fromMs);
   const endMs = Math.min(knownEnd(model, activity), request.toMs);
   if (endMs <= startMs) throw new RangeError("Choose a nonempty recorded range to export.");
-  const speed = request.speed;
-  const captions = request.captions;
-  const map = buildPlaybackMap(startMs, endMs, busySpans(model, activity, endMs), request.skipIdle);
-  const frames = Math.ceil((playDuration(map) * EXPORT_FPS) / (1000 * speed));
+  const { speed, captions, fps } = request;
+  const busy = busySpans(model, activity, endMs);
+  const map = buildPlaybackMap(startMs, endMs, busy, request.skipIdle);
+  const frames = Math.ceil((playDuration(map) * fps) / (1000 * speed));
+  let busyMs = 0;
+  for (const span of mergeSpans(busy, startMs, endMs)) busyMs += span.to - span.from;
   const chapterList = chapters(model, endMs);
   const gapSpans = new Map<RecordingGapReason, Span[]>();
   for (const reason of GAP_PRIORITY)
@@ -154,15 +206,18 @@ export function planExport(
   const sessionMsAt = (frame: number) => {
     if (!Number.isSafeInteger(frame) || frame < 0 || frame >= frames)
       throw new RangeError("Export frame is outside the chosen range.");
-    return sessionAt(map, (frame / EXPORT_FPS) * 1000 * speed);
+    return sessionAt(map, (frame / fps) * 1000 * speed);
   };
   return {
     frames,
-    durationS: frames / EXPORT_FPS,
+    fps,
+    durationS: frames / fps,
+    bitrate: exportBitrate(request.size, fps, request.quality),
+    movingS: Math.min(frames / fps, busyMs / (1000 * speed)),
     sessionMsAt,
     labelAt(frame) {
       const time = sessionMsAt(frame);
-      return captions ? speedLabel(speed, idleAt(map, time)) : null;
+      return captions ? exportSpeedLabel(speed, idleAt(map, time)) : null;
     },
     captionAt(frame) {
       const time = sessionMsAt(frame);

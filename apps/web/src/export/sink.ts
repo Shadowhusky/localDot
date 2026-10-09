@@ -1,3 +1,5 @@
+import type { ExportFormat } from "./export-plan.ts";
+
 export interface ExportSink {
   write(position: number, data: Uint8Array): Promise<void>;
   close(): Promise<void>;
@@ -74,15 +76,26 @@ export function exportSupport(): ExportSupport {
   return { ok: true, save: typeof picker() === "function" ? "picker" : "download" };
 }
 
+const FILE_TYPES: Record<ExportFormat, { description: string; type: string; extension: string }> = {
+  mp4: { description: "MP4 video", type: "video/mp4", extension: ".mp4" },
+  webm: { description: "WebM video", type: "video/webm", extension: ".webm" },
+};
+
+export function exportFileName(base: string, format: ExportFormat): string {
+  return base.replace(/\.mp4$/, FILE_TYPES[format].extension);
+}
+
 export async function pickFileSink(
   suggestedName: string,
+  format: ExportFormat = "mp4",
 ): Promise<(ExportSink & { name: string }) | null> {
   const save = picker();
   if (!save) throw new Error("Saving an export is not supported in this browser.");
+  const file = FILE_TYPES[format];
   try {
     const handle = await save.call(globalThis, {
       suggestedName,
-      types: [{ description: "MP4 video", accept: { "video/mp4": [".mp4"] } }],
+      types: [{ description: file.description, accept: { [file.type]: [file.extension] } }],
     });
     return { ...fileSink(await handle.createWritable()), name: handle.name || suggestedName };
   } catch (error) {
@@ -97,7 +110,7 @@ export interface MemorySink extends ExportSink {
 }
 
 // Holds the file in fixed blocks, so a write back into its start (the MP4 header) costs no copy.
-export function memorySink(limit = DOWNLOAD_LIMIT): MemorySink {
+export function memorySink(limit = DOWNLOAD_LIMIT, format: ExportFormat = "mp4"): MemorySink {
   let blocks: Uint8Array<ArrayBuffer>[] = [];
   let size = 0;
   let state: "open" | "closed" | "aborted" = "open";
@@ -140,7 +153,7 @@ export function memorySink(limit = DOWNLOAD_LIMIT): MemorySink {
           ),
         );
       blocks = [];
-      return new Blob(parts, { type: "video/mp4" });
+      return new Blob(parts, { type: FILE_TYPES[format].type });
     },
   };
 }

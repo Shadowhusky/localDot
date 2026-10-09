@@ -1,18 +1,59 @@
-/* Export: a popover above Export in Replay's transport, a bottom sheet on a phone. The choices and
-   the progress share one cell, so the panel keeps its size from the first choice to the saved file. */
+/* Export: a sheet from Replay's transport, beside the stage on a wide screen and from the bottom on a
+   phone. The choices and the progress share one cell, so the sheet keeps its size from the first
+   choice to the saved file, and every estimate sits in a slot of its own size. */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
+
 .export-body {
   display: grid;
-  gap: calc(var(--spacing) * 3);
   min-width: 0;
+}
+
+.export-views {
+  display: grid;
+}
+
+.export-options,
+.export-status {
+  grid-area: 1 / 1;
+  min-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    visibility var(--dur-exit);
+}
+
+.export-options[data-shown],
+.export-status[data-shown] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    visibility 0s;
+}
+
+.export-options {
+  display: grid;
+  align-content: start;
+  gap: calc(var(--spacing) * 4);
+}
+
+/* What is exported: the picture at the playhead and the stretch of the recording. */
+.export-recording {
+  display: grid;
+  grid-template-columns: calc(var(--spacing) * 36) minmax(0, 1fr);
+  align-items: center;
+  gap: calc(var(--spacing) * 4);
 }
 
 .export-preview {
   position: relative;
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background-color: var(--color-well);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  box-shadow: inset 0 0 0 0.5px var(--color-hairline);
 }
 
 .export-preview > :is(img, .replay-image-empty) {
@@ -25,18 +66,15 @@
 /* Where the burned-in caption sits in the video, on the same material. */
 .export-preview-caption {
   position: absolute;
-  bottom: calc(var(--spacing) * 2);
+  bottom: var(--spacing);
   left: 50%;
-  max-width: calc(100% - var(--spacing) * 6);
+  max-width: calc(100% - var(--spacing) * 3);
   overflow: hidden;
-  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 2);
-  border-radius: var(--radius-sm);
+  padding: 1px calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-xs);
   background-color: color-mix(in oklab, var(--color-glass-solid) 92%, transparent);
   color: var(--color-fg-1);
-  font:
-    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-footnote--letter-spacing);
+  font: var(--font-weight-medium) 0.5625rem / 0.75rem var(--font-ui);
   white-space: nowrap;
   text-overflow: ellipsis;
   opacity: 0;
@@ -50,7 +88,21 @@
 
 .export-range {
   display: grid;
-  gap: calc(var(--spacing) * 1.5);
+  gap: 2px;
+  min-width: 0;
+}
+
+.export-range-label {
+  color: var(--color-fg-1);
+  font:
+    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+}
+
+.export-range-meta {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 /* The chosen range, bracketed on the whole recording the way the scrubber marks a selection. The
@@ -58,6 +110,7 @@
 .export-range-track {
   position: relative;
   height: calc(var(--spacing) * 3);
+  margin-top: calc(var(--spacing) * 2);
   overflow: clip;
 }
 
@@ -113,66 +166,63 @@
   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 }
 
-.export-range-label,
-.export-progress-line,
-.export-details-text,
-.export-file-meta,
-.export-privacy,
-.export-summary {
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-.export-views {
+/* Each preset's size and wait, in a fixed column so a changing estimate moves nothing. */
+.export-estimate {
   display: grid;
+  justify-items: end;
+  gap: 2px;
+  width: calc(var(--spacing) * 22);
+  white-space: nowrap;
 }
 
-.export-options,
-.export-status {
-  grid-area: 1 / 1;
-  min-width: 0;
-  opacity: 0;
+.export-estimate[data-hidden] {
   visibility: hidden;
-  transition:
-    opacity var(--dur-exit) var(--ease-exit),
-    visibility var(--dur-exit);
 }
 
-.export-options[data-shown],
-.export-status[data-shown] {
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity var(--dur-fade) var(--ease-enter),
-    visibility 0s;
+.export-estimate-size {
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
-.export-options {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
+.export-estimate-time {
+  color: var(--color-fg-3);
 }
 
-.export-row {
-  grid-template-columns: calc(var(--spacing) * 14) minmax(0, 1fr);
-  align-items: center;
-  column-gap: calc(var(--spacing) * 3);
+.export-presets .ui-choice-note {
+  font-variant-numeric: tabular-nums;
 }
 
 .export-row .ui-segmented {
-  width: 100%;
+  flex: none;
 }
 
-.export-switches {
-  display: grid;
+.export-stepper {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
 }
 
-.export-privacy {
-  padding-top: var(--spacing);
+.export-speed-field {
+  width: calc(var(--spacing) * 17);
+}
+
+.export-speed-field input {
+  text-align: end;
+}
+
+.export-more {
+  margin-top: calc(var(--spacing) * -2);
+}
+
+.export-advanced {
+  margin-top: calc(var(--spacing) * 2);
 }
 
 .export-status {
   display: grid;
-  align-content: center;
+  align-content: start;
+  padding-top: calc(var(--spacing) * 12);
 }
 
 .export-progress,
@@ -183,7 +233,18 @@
 
 .export-status-title {
   color: var(--color-fg-1);
-  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font:
+    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+}
+
+.export-progress-line,
+.export-details-text,
+.export-file-meta,
+.export-summary {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .export-result {
@@ -195,9 +256,9 @@
 .export-result-mark {
   display: grid;
   place-items: center;
-  width: calc(var(--spacing) * 8);
-  height: calc(var(--spacing) * 8);
-  margin-bottom: var(--spacing);
+  width: calc(var(--spacing) * 10);
+  height: calc(var(--spacing) * 10);
+  margin-bottom: calc(var(--spacing) * 2);
   border-radius: var(--radius-full);
   background-color: var(--color-control);
   color: var(--color-fg-1);
@@ -217,11 +278,6 @@
   min-width: 0;
 }
 
-.export-popover .export-footer {
-  padding-top: calc(var(--spacing) * 3);
-  border-top: 1px solid var(--color-hairline);
-}
-
 .ui-sheet-footer > .export-footer {
   flex: 1;
 }
@@ -236,6 +292,13 @@
   flex: none;
   gap: calc(var(--spacing) * 2);
   margin-left: auto;
+}
+
+@media (--phone) {
+  .export-recording {
+    grid-template-columns: calc(var(--spacing) * 28) minmax(0, 1fr);
+    gap: calc(var(--spacing) * 3);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
