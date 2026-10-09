@@ -51,10 +51,12 @@ export interface ReplayState {
   setSpeed(speed: ReplaySpeed): void;
   setSkipIdle(on: boolean): void;
   selectStep(stepId: string): void;
+  // Loads the recording again from the start, after it failed to load.
+  retry(): void;
 }
 type ReplayValues = Omit<
   ReplayState,
-  "run" | "seek" | "setSpeed" | "setSkipIdle" | "selectStep" | "setScreen"
+  "run" | "seek" | "setSpeed" | "setSkipIdle" | "selectStep" | "setScreen" | "retry"
 >;
 
 function initialState(sessionId: string | null): ReplayValues {
@@ -173,6 +175,7 @@ export function useReplay(
     screen: "desktop",
   });
   const screen = choice.sessionId === sessionId ? choice.screen : "desktop";
+  const [attempt, setAttempt] = useState(0);
   const screenSeek = useRef<{
     sessionId: string | null;
     tMs: number;
@@ -342,6 +345,7 @@ export function useReplay(
   const controls = useRef({ seek, setSpeed, setSkipIdle, run });
   controls.current = { seek, setSpeed, setSkipIdle, run };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new attempt loads the recording again
   useEffect(() => {
     const controller = new AbortController();
     const handle = stage.current;
@@ -570,7 +574,7 @@ export function useReplay(
       seekWaiters.current.clear();
       if (window.__localdot) delete window.__localdot.replay;
     };
-  }, [api, sessionId, stage, screen, seeks]);
+  }, [api, sessionId, stage, screen, seeks, attempt]);
   return {
     // Until the effect resets for a newly picked session, the held values describe the previous one.
     ...(values.sessionId === sessionId ? values : initialState(sessionId)),
@@ -579,6 +583,7 @@ export function useReplay(
     seek,
     setSpeed,
     setSkipIdle,
+    retry: () => setAttempt((count) => count + 1),
     selectStep: (stepId) => {
       const index = current.current.model.stepIndex.get(stepId);
       const step = index === undefined ? undefined : current.current.model.steps[index];

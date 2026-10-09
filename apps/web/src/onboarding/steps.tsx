@@ -1,6 +1,7 @@
 import { providerById } from "@localdot/providers";
 import { type RefObject, useRef, useState } from "react";
 import { AUTONOMY_PRESETS } from "../copy/autonomy.ts";
+import { DoctorCommand } from "../keys/Protection.tsx";
 import { modelAllowed, type PickerModel, type SubscriptionModel } from "../settings/choices.ts";
 import { modelItems } from "../settings/chooser.ts";
 import { Badge } from "../ui/Badge.tsx";
@@ -142,35 +143,42 @@ function SecretField({
   busy,
 }: SecretProps & { label: string; hint?: string }) {
   return (
-    <Field
-      label={label}
-      description={hint}
-      disabledReason={unavailable}
-      className="onboarding-secret"
-    >
-      {/* Drawn as dots, as a text field: Chrome offers to save a password field's value. */}
-      <TextField
-        ref={secret}
-        {...PLAIN}
-        size="lg"
-        className="onboarding-secret-field"
-        placeholder={saved ? "Paste a new key to replace it" : "Paste your key"}
-        readOnly={busy}
-        enterKeyHint="done"
-        suffix={
-          busy ? (
-            <Spinner size={14} />
-          ) : saved ? (
-            <span className="onboarding-saved">
-              <Icon name="check-circle" size={16} />
-              Saved
-            </span>
-          ) : undefined
-        }
-        onChange={(event) => onTyped(event.currentTarget.value.trim().length > 0)}
-        onPaste={onPaste}
-      />
-    </Field>
+    <>
+      <Field
+        label={label}
+        description={hint}
+        disabledReason={unavailable}
+        className="onboarding-secret"
+      >
+        {/* Drawn as dots, as a text field: Chrome offers to save a password field's value. */}
+        <TextField
+          ref={secret}
+          {...PLAIN}
+          size="lg"
+          className="onboarding-secret-field"
+          placeholder={saved ? "Paste a new key to replace it" : "Paste your key"}
+          readOnly={busy}
+          enterKeyHint="done"
+          suffix={
+            busy ? (
+              <Spinner size={14} />
+            ) : saved ? (
+              <span className="onboarding-saved">
+                <Icon name="check-circle" size={16} />
+                Saved
+              </span>
+            ) : undefined
+          }
+          onChange={(event) => onTyped(event.currentTarget.value.trim().length > 0)}
+          onPaste={onPaste}
+        />
+      </Field>
+      {unavailable && (
+        <div className="onboarding-fix">
+          <DoctorCommand />
+        </div>
+      )}
+    </>
   );
 }
 
