@@ -1,12 +1,13 @@
 import { isIP } from "node:net";
 import { ULID_PATTERN } from "@localdot/protocol";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   type SignInSite,
   SignInSites,
   SignOutRequest,
 } from "../../../../packages/protocol/src/accounts.ts";
+import { abortable } from "../agent/session.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import type { CellApi } from "../cells/orchestrator.ts";
 import { BrowserClient, type BrowserScope } from "./client.ts";
@@ -66,6 +67,8 @@ export function signInSites(domains: { domain: string; count: number }[]): SignI
   }).sites;
 }
 
+class StartFailed extends Error {}
+
 export interface AccountsDeps {
   cells: Pick<CellApi, "get">;
   browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "clearAccounts">;
@@ -82,7 +85,13 @@ export function accountsRoutes(app: Hono, deps: AccountsDeps): void {
       scope: BrowserScope,
     ) => Promise<T>,
   ): Promise<T> => {
-    const endpoint = await deps.browser.start(parent, signal);
+    // The start outlives the request: Settings closing or the request timing out only stops
+    // the wait.
+    const starting = deps.browser.start(parent);
+    starting.catch(() => {});
+    const endpoint = await abortable(starting, signal).catch((error: unknown) => {
+      throw signal.aborted ? error : new StartFailed();
+    });
     const client = deps.client?.(endpoint) ?? new BrowserClient(endpoint);
     try {
       return await work(client, {
@@ -96,6 +105,10 @@ export function accountsRoutes(app: Hono, deps: AccountsDeps): void {
       client.close();
     }
   };
+  const unavailable = (c: Context, error: unknown) =>
+    error instanceof StartFailed
+      ? c.text("the web browser couldn't start", 502)
+      : c.text("the web browser is not ready yet", 503);
   const computerOn = (id: string) => {
     const cell = deps.cells.get(id);
     return cell?.state === "ready" && !cell.paused && !cell.fenced && !cell.replacementPending;
@@ -110,8 +123,8 @@ export function accountsRoutes(app: Hono, deps: AccountsDeps): void {
         client.cookieDomains(scope),
       );
       return c.json({ sites: signInSites(domains) });
-    } catch {
-      return c.text("the web browser is not ready yet", 503);
+    } catch (error) {
+      return unavailable(c, error);
     }
   });
 
@@ -129,8 +142,8 @@ export function accountsRoutes(app: Hono, deps: AccountsDeps): void {
         return signInSites(await client.cookieDomains(scope));
       });
       return sites ? c.json({ sites }) : c.text("no sign-ins for that site", 404);
-    } catch {
-      return c.text("the web browser is not ready yet", 503);
+    } catch (error) {
+      return unavailable(c, error);
     }
   });
 

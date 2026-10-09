@@ -66,8 +66,36 @@ describe("Settings > Accounts", () => {
         { site: "telegram.org", hosts: ["web.telegram.org"], cookies: 1 },
       ],
     });
-    expect(f.deps.browser.start).toHaveBeenCalledWith(parent, expect.any(AbortSignal));
+    expect(f.deps.browser.start).toHaveBeenCalledWith(parent);
     expect(f.client.close).toHaveBeenCalled();
+  });
+
+  it("keeps starting the browser after the request that asked for it goes away", async () => {
+    const f = fixture();
+    const started = Promise.withResolvers<ReadyBrowser>();
+    let startSignal: AbortSignal | undefined;
+    vi.mocked(f.deps.browser.start).mockImplementationOnce((_parent, signal) => {
+      startSignal = signal;
+      return started.promise;
+    });
+    const request = new AbortController();
+    const reply = Promise.resolve(
+      f.app.request(`/api/cells/${parent}/accounts`, { signal: request.signal }),
+    );
+    await vi.waitFor(() => expect(f.deps.browser.start).toHaveBeenCalled());
+    request.abort();
+    await reply.catch(() => {});
+    expect(startSignal?.aborted).not.toBe(true);
+    started.resolve(endpoint);
+    expect(f.client.cookieDomains).not.toHaveBeenCalled();
+  });
+
+  it("tells a browser that could not start apart from one still starting", async () => {
+    const f = fixture();
+    vi.mocked(f.deps.browser.start).mockRejectedValueOnce(new Error("Saved sign-ins are in use"));
+    expect((await f.app.request(`/api/cells/${parent}/accounts`)).status).toBe(502);
+    f.client.cookieDomains.mockRejectedValueOnce(new Error("browserd is not answering"));
+    expect((await f.app.request(`/api/cells/${parent}/accounts`)).status).toBe(503);
   });
 
   it("signs out of a listed site only, and answers with what is left", async () => {
