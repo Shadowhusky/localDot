@@ -85,32 +85,50 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 		c.deny(w, line, http.StatusForbidden, v.Reason)
 		return
 	}
-	if status, reason := c.swap(r.Header, v.Swaps); reason != "" {
-		c.deny(w, line, status, reason)
+	if err := c.swap(r.Header, v.Swaps); err != nil {
+		c.refuseSecret(w, line, err)
 		return
 	}
 	line.Swapped = len(v.Swaps) > 0
 	scrubber, err := c.scrubberFor(c.boundTo(rt.dest))
 	if err != nil {
-		c.deny(w, line, http.StatusBadGateway, ReasonSecret)
+		c.refuseSecret(w, line, err)
 		return
 	}
 	c.relay(w, r, rt, scrubber, line)
 }
 
-// swap puts the real values in. While the audit log cannot be written it refuses: the use of a
-// secret is never left unrecorded.
-func (c *Cell) swap(h http.Header, swaps []keys.Entry) (int, string) {
+// errNoAudit refuses a swap while the audit log cannot be written: the use of a secret is never
+// left unrecorded.
+var errNoAudit = errors.New("the audit log cannot be written")
+
+// swap puts the real values in.
+func (c *Cell) swap(h http.Header, swaps []keys.Entry) error {
 	if len(swaps) == 0 {
-		return 0, ""
+		return nil
 	}
 	if c.deps.Audit.Err() != nil {
-		return http.StatusServiceUnavailable, ReasonNoAudit
+		return errNoAudit
 	}
-	if err := keys.ApplySwaps(h, swaps, c.deps.Vault.Value); err != nil {
-		return http.StatusBadGateway, ReasonSecret
+	return keys.ApplySwaps(h, swaps, c.deps.Vault.Value)
+}
+
+// refuseSecret answers a request keyd could not put a secret into, or could not scrub for. A secret
+// whose value the user has to enter again is named, so whoever made the request can say which.
+func (c *Cell) refuseSecret(w http.ResponseWriter, l audit.Line, err error) {
+	var reentry *vault.ReentryError
+	switch {
+	case errors.Is(err, errNoAudit):
+		c.deny(w, l, http.StatusServiceUnavailable, ReasonNoAudit)
+	case errors.As(err, &reentry):
+		l.Decision, l.Reason, l.Status, l.Detail = audit.Deny, ReasonReenter, http.StatusBadGateway, "re-enter "+reentry.ID
+		c.record(l)
+		w.Header().Set("X-Keyd-Reason", ReasonReenter)
+		w.Header().Set("X-Keyd-Secret", reentry.ID)
+		http.Error(w, "keyd: "+ReasonReenter+": enter the key "+reentry.ID+" again in localDot's Keys", http.StatusBadGateway)
+	default:
+		c.deny(w, l, http.StatusBadGateway, ReasonSecret)
 	}
-	return 0, ""
 }
 
 // relay sends the request with the generation's transport: verified upstream TLS, guarded dials,

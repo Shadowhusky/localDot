@@ -193,14 +193,14 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 			r.Header.Del(h)
 		}
 	}
-	if status, reason := c.swap(r.Header, v.Swaps); reason != "" {
-		c.deny(w, line, status, reason)
+	if err := c.swap(r.Header, v.Swaps); err != nil {
+		c.refuseSecret(w, line, err)
 		return
 	}
 	line.Swapped = len(v.Swaps) > 0
 	scrubber, err := c.scrubberFor(c.boundTo(dest))
 	if err != nil {
-		c.deny(w, line, http.StatusBadGateway, ReasonSecret)
+		c.refuseSecret(w, line, err)
 		return
 	}
 	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))

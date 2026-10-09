@@ -58,8 +58,8 @@ func TestARequestInspectedBeforeKeyRotationNeverOffersTheReplacementKey(t *testi
 	// Resume the request exactly between its original inspection and value read.
 	// The final admission gate must reject its old generation synchronously,
 	// before handing any headers to a transport, even if a callback has not run.
-	if _, reason := cell.swap(r.Header, v.Swaps); reason != "" {
-		t.Fatal(reason)
+	if err := cell.swap(r.Header, v.Swaps); err != nil {
+		t.Fatal(err)
 	}
 	cleaner, err := scrub.New()
 	if err != nil {

@@ -119,7 +119,8 @@ func (k *Keychain) Get(id, binding string) ([]byte, error) {
 }
 
 // get refuses a value stored for another binding before reading any of it. An item written before
-// keyd stored bindings is refused too, since whichever keyd read it first would pick its binding.
+// keyd stored bindings is refused too, since whichever keyd read it first would pick its binding;
+// only MigrateBindings, once, binds one keyd can prove it wrote.
 func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) {
 	head, err := k.find(ctx, id)
 	if err != nil {
@@ -128,9 +129,9 @@ func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) 
 	gen, count, bound, ok := parseHead(head)
 	switch {
 	case !ok:
-		return nil, fmt.Errorf("keychain: item %s is not keyd's", id)
+		return nil, fmt.Errorf("keychain: item %s is not keyd's; %w", id, ErrReenter)
 	case bound == "":
-		return nil, fmt.Errorf("keychain: item %s was stored without its binding; store it again", id)
+		return nil, fmt.Errorf("keychain: item %s was stored without its binding; %w", id, ErrReenter)
 	case bound != binding:
 		return nil, fmt.Errorf("keychain: item %s: %w", id, errRebound)
 	}
@@ -143,7 +144,7 @@ func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) 
 		g, encoded, _ := strings.Cut(data, ":")
 		part, derr := hex.DecodeString(encoded)
 		if err != nil || g != gen || derr != nil {
-			return nil, fmt.Errorf("keychain: item %s was torn by an interrupted write; store it again", id)
+			return nil, fmt.Errorf("keychain: item %s was torn by an interrupted write; %w", id, ErrReenter)
 		}
 		value = append(value, part...)
 	}

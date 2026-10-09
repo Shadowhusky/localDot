@@ -153,6 +153,39 @@ func TestSecretsArriveSealedAndNeverLeave(t *testing.T) {
 	}
 }
 
+// A key whose stored value is gone is listed, and counted in the status, as one to enter again,
+// until it is stored again.
+func TestAKeyToEnterAgainIsListedUntilItIsStored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	store := vault.NewMemory()
+	warm, _ := vault.Open(store, path)
+	if err := warm.Put(record("weather", weather()), []byte(fakeKey)); err != nil {
+		t.Fatal(err)
+	}
+	store.Delete("weather")
+	cold, _ := vault.Open(store, path)
+	f := newFixtureWithDeps(t, func(d *egress.Deps) { d.Vault = cold })
+	if _, err := cold.Value("weather"); !errors.Is(err, vault.ErrNotFound) {
+		t.Fatalf("Value = %v", err)
+	}
+	listed := func() (bool, float64) {
+		_, list := f.call(t, "GET", "/v1/secrets", nil)
+		_, status := f.call(t, "GET", "/v1/status", nil)
+		secrets, _ := list["secrets"].([]any)
+		first, _ := secrets[0].(map[string]any)
+		return first["reenter"] == true, status["reenter"].(float64)
+	}
+	if reenter, count := listed(); !reenter || count != 1 {
+		t.Fatalf("before: reenter %v, count %v", reenter, count)
+	}
+	if code, _ := f.sealedPut(t, "weather", weather(), fakeKey); code != 200 {
+		t.Fatalf("put %d", code)
+	}
+	if reenter, count := listed(); reenter || count != 0 {
+		t.Fatalf("after: reenter %v, count %v", reenter, count)
+	}
+}
+
 func TestSecretPutRefusals(t *testing.T) {
 	f := newFixture(t)
 	wrongID, _ := vault.Seal(f.s.Opener.PublicKey(), record("other", weather()), []byte(fakeKey))

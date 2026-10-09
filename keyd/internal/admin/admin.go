@@ -107,6 +107,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"sealKey": s.Opener.PublicKey(),
 		"cells":   len(s.Manager.Cells()),
 		"secrets": len(s.Vault.Records()),
+		"reenter": s.reentries(),
 		"limits":  s.Settings.Limits(),
 		"day":     map[string]any{"date": date, "spentUSD": spent},
 		"audit":   auditState,
@@ -121,8 +122,30 @@ func (s *Server) hairpin() any {
 	return s.Hairpin.Status()
 }
 
+// listedSecret is a record as the admin API lists it: Reenter says the stored value is gone or can
+// never be read as it is stored, so the user enters it again.
+type listedSecret struct {
+	vault.Record
+	Reenter bool `json:"reenter,omitempty"`
+}
+
 func (s *Server) listSecrets(w http.ResponseWriter, _ *http.Request) {
-	reply(w, http.StatusOK, map[string]any{"secrets": s.Vault.Records()})
+	records := s.Vault.Records()
+	listed := make([]listedSecret, len(records))
+	for i, rec := range records {
+		listed[i] = listedSecret{Record: rec, Reenter: s.Vault.NeedsReentry(rec.ID)}
+	}
+	reply(w, http.StatusOK, map[string]any{"secrets": listed})
+}
+
+func (s *Server) reentries() int {
+	n := 0
+	for _, rec := range s.Vault.Records() {
+		if s.Vault.NeedsReentry(rec.ID) {
+			n++
+		}
+	}
+	return n
 }
 
 type putSecretBody struct {

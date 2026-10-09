@@ -60,8 +60,8 @@ func TestAnIndexKeydDidNotWriteCannotSendAStoredSecretElsewhere(t *testing.T) {
 	if leaked.Load() {
 		t.Fatal("the stored value reached the host a forged index bound it to")
 	}
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status %d, want 502", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway || resp.Header.Get("X-Keyd-Secret") != "anthropic" {
+		t.Fatalf("status %d naming %q, want 502 naming the key to enter again", resp.StatusCode, resp.Header.Get("X-Keyd-Secret"))
 	}
-	w.waitLine(reasonIs(ReasonSecret))
+	w.waitLine(reasonIs(ReasonReenter))
 }

@@ -13,9 +13,31 @@ var ErrNotFound = errors.New("vault: secret not found")
 // errUnchanged, wrapped in a Put's error, means the Put wrote nothing: the old value is still whole.
 var errUnchanged = errors.New("nothing was written")
 
+// ErrReenter, wrapped in a Get's error, means the stored value can never be read as it is stored:
+// only storing it again makes it usable.
+var ErrReenter = errors.New("store it again")
+
 // errRebound means the value was stored for another binding than the one asked for: the index
 // that names the binding was rewritten after keyd stored the value.
-var errRebound = errors.New("the value was stored for another destination; store it again")
+var errRebound = fmt.Errorf("the value was stored for another destination; %w", ErrReenter)
+
+// ReentryError is Value's error for a secret whose record stands but whose stored value is gone or
+// can never be read as it is stored: the user enters the value again.
+type ReentryError struct {
+	ID  string
+	err error
+}
+
+func (e *ReentryError) Error() string {
+	return "vault: secret " + e.ID + " needs re-entering: " + e.err.Error()
+}
+
+func (e *ReentryError) Unwrap() error { return e.err }
+
+// needsReentry reports whether a store's Get error means only storing the value again helps.
+func needsReentry(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, ErrReenter)
+}
 
 // Store keeps secret values by id, each with the binding it was stored for; the Keychain in
 // production, Memory in tests. Get returns a value only for the binding it was stored with.

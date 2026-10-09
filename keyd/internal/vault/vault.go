@@ -68,7 +68,7 @@ const PushKeyID = "webpush-vapid"
 
 // Writable reports whether a user secret may be stored under id.
 func Writable(id string) bool {
-	return ValidID(id) && id != PushKeyID
+	return ValidID(id) && id != PushKeyID && id != BindingsMarkerID
 }
 
 // ValidID reports whether id can name a secret.
@@ -111,6 +111,8 @@ type Vault struct {
 	cache   map[string][]byte
 	reads   map[string]*read
 	failed  map[string]failure
+	// reentry holds the records whose stored values are gone or can never be read as stored.
+	reentry map[string]bool
 }
 
 // read is a store read that every caller of Value for the secret waits on.
@@ -136,6 +138,7 @@ func Open(store Store, path string) (*Vault, error) {
 	v := &Vault{
 		store: store, path: path, now: time.Now, write: writeFileAtomic,
 		records: map[string]Record{}, cache: map[string][]byte{}, reads: map[string]*read{}, failed: map[string]failure{},
+		reentry: map[string]bool{},
 	}
 	if path == "" {
 		return v, nil
@@ -242,6 +245,9 @@ func (v *Vault) restore(id string, old Record, prev []byte) {
 	if prev == nil && deleted != nil && !errors.Is(deleted, ErrNotFound) {
 		delete(v.records, id)
 	}
+	if _, kept := v.records[id]; kept && prev == nil {
+		v.reentry[id] = true
+	}
 }
 
 // settleLocked records what the store holds for id after a change: value, or nil for the next
@@ -249,6 +255,7 @@ func (v *Vault) restore(id string, old Record, prev []byte) {
 func (v *Vault) settleLocked(id string, value []byte) {
 	delete(v.reads, id)
 	delete(v.failed, id)
+	delete(v.reentry, id)
 	if value == nil {
 		delete(v.cache, id)
 	} else {
@@ -318,6 +325,9 @@ func (v *Vault) Value(id string) ([]byte, error) {
 	v.mu.Unlock()
 	if !reading {
 		r.value, r.err = v.store.Get(id, bindingOf(rec))
+		if needsReentry(r.err) {
+			r.err = &ReentryError{ID: id, err: r.err}
+		}
 		v.mu.Lock()
 		if v.reads[id] == r {
 			delete(v.reads, id)
@@ -325,6 +335,9 @@ func (v *Vault) Value(id string) ([]byte, error) {
 				v.cache[id] = r.value
 			} else {
 				v.failed[id] = failure{err: r.err, until: v.now().Add(failureHold)}
+				if needsReentry(r.err) {
+					v.reentry[id] = true
+				}
 			}
 		}
 		v.mu.Unlock()
@@ -335,6 +348,36 @@ func (v *Vault) Value(id string) ([]byte, error) {
 		return nil, r.err
 	}
 	return slices.Clone(r.value), nil
+}
+
+// MigrateBindings runs the store's binding migration, if it has one, over every record, and keeps
+// which records need their values entered again. keyd runs it once at start, before serving.
+func (v *Vault) MigrateBindings() Migration {
+	store, ok := v.store.(interface {
+		MigrateBindings(records []Record, now time.Time) Migration
+	})
+	if !ok {
+		return Migration{Done: true}
+	}
+	v.change.Lock()
+	defer v.change.Unlock()
+	m := store.MigrateBindings(v.Records(), v.now())
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for _, id := range m.Reenter {
+		if _, ok := v.records[id]; ok {
+			v.reentry[id] = true
+		}
+	}
+	return m
+}
+
+// NeedsReentry reports whether id's stored value is known to be gone or unreadable as it is stored,
+// until a Put stores it again.
+func (v *Vault) NeedsReentry(id string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.reentry[id]
 }
 
 func (v *Vault) saveLocked() error {

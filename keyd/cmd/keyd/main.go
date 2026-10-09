@@ -198,6 +198,12 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter) > 0 || !m.Done {
+		detail := fmt.Sprintf("%d bound, %d to re-enter, done %v", len(m.Bound), len(m.Reenter), m.Done)
+		if _, err := d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "bindings", Detail: detail}); err != nil {
+			return err
+		}
+	}
 	opener, err := vault.NewOpener()
 	if err != nil {
 		return err
