@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { TaskList, TasksSearch, useTaskIndex } from "./TasksLibrary.tsx";
+import { type ContinueTask, TaskList, TasksSearch, useTaskIndex } from "./TasksLibrary.tsx";
 
 afterEach(() => {
   cleanup();
@@ -49,11 +49,13 @@ function Library({
   selected = null,
   onSelect = () => {},
   onDeleted = () => {},
+  continueTask,
 }: {
   api: ReturnType<typeof createApi>;
   selected?: string | null;
   onSelect?(id: string): void;
   onDeleted?(id: string): void;
+  continueTask?: ContinueTask;
 }) {
   const index = useTaskIndex(api);
   const [search, setSearch] = useState("");
@@ -67,6 +69,7 @@ function Library({
         selectedId={selected}
         onSelect={onSelect}
         onDeleted={onDeleted}
+        continueTask={continueTask}
       />
     </>
   );
@@ -220,4 +223,31 @@ it("keeps the delete confirmation open while the recording is being deleted", as
   expect(screen.getByRole("alertdialog", { name: "Delete this task's recording?" })).toBe(confirm);
   await act(async () => finish());
   await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+});
+
+it("continues an ended task's conversation from its menu, but not the current or a running one", async () => {
+  const run = vi.fn();
+  const current = card("Book the hotel", 0);
+  const running = card("Still running", 0, "live");
+  const older = card("Plan the trip", DAY);
+  const { api } = daemon([[current, running, older]]);
+  const view = render(<Library api={api} continueTask={{ current: current.id, run }} />);
+  for (const title of ["Book the hotel", "Still running"]) {
+    fireEvent.click(await screen.findByRole("button", { name: `More for ${title}` }));
+    await screen.findByRole("menuitem", { name: /^Delete recording/ });
+    expect(screen.queryByRole("menuitem", { name: "Continue conversation" })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "More for Plan the trip" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Continue conversation" }));
+  expect(run).toHaveBeenCalledExactlyOnceWith(older.id);
+
+  view.rerender(
+    <Library api={api} continueTask={{ current: current.id, run, reason: "Finish first." }} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "More for Plan the trip" }));
+  const item = await screen.findByRole("menuitem", { name: "Continue conversation" });
+  expect(item.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(item);
+  expect(run).toHaveBeenCalledTimes(1);
 });

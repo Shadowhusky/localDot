@@ -44,8 +44,10 @@ declare global {
 
 // Each test gets a page that fails it on a page error, a CSP violation or any request that leaves
 // the fixture's origin, which is aborted.
-export const test = base.extend<{ ui: Harness }>({
-  ui: async ({ page }, use) => {
+export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
+  // The page's clock stands still; a test of real frames and timers turns it off.
+  fixedClock: [true, { option: true }],
+  ui: async ({ page, fixedClock }, use) => {
     const probe: Probe = { errors: [], csp: [], external: [] };
     let fixture: UiFixture | undefined;
     let paused = false;
@@ -68,7 +70,7 @@ export const test = base.extend<{ ui: Harness }>({
       probe.external.push(url.href);
       return route.abort();
     });
-    await page.clock.setFixedTime(PAGE_NOW);
+    if (fixedClock) await page.clock.setFixedTime(PAGE_NOW);
     const boot = async (scenario: UiScenarioName) => {
       fixture = await startUiFixture(
         { QA_SCENARIO: scenario, QA_NOW: FIXTURE_START },
@@ -140,6 +142,20 @@ async function settle(page: Page) {
     );
     for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
   });
+}
+
+// The composer, on a phone once its Conversation tab is chosen.
+export async function composer(page: Page) {
+  if ((page.viewportSize()?.width ?? 0) < 1100) {
+    // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
+    const tab = page.getByRole("tab", { name: /^Conversation/ });
+    await expect(async () => {
+      await tab.click();
+      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
+    }).toPass();
+    await expect(page.locator(".thread-row").first()).toBeVisible();
+  }
+  return page.getByRole("form", { name: "Message dot" });
 }
 
 // A spec's flows run at these projects of the matrix only.

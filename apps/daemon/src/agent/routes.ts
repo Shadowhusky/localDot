@@ -10,6 +10,7 @@ import {
   ApprovalAnswer,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
+  ContinueConversation,
   HandbackRequest,
   type KeydRecord,
   PauseRequest,
@@ -38,6 +39,7 @@ import {
 import type { CatalogStore } from "./catalog-store.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
+import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
@@ -58,9 +60,16 @@ export interface AgentRoutesDeps {
     Partial<
       Pick<
         AgentRunner,
-        "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "budgetHoldOf" | "sessions"
+        | "selectionOf"
+        | "terminalOf"
+        | "pauseTask"
+        | "resumeSafety"
+        | "budgetHoldOf"
+        | "sessions"
+        | "release"
       >
     >;
+  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
@@ -454,6 +463,44 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({ sessionId: result.id }, 202);
     }),
   );
+  const conversations = deps.conversations;
+  if (conversations) {
+    // A finished task waiting for a follow-up ends, so the next message starts the chosen one.
+    const release = async (signal: AbortSignal) => {
+      try {
+        await deps.runner.release?.(signal);
+      } catch (error) {
+        if (error instanceof AgentError) throw new RouteError(409, error.message);
+        throw error;
+      }
+      check(signal);
+    };
+    app.get(
+      "/api/conversation",
+      route((c) => c.json(conversations.snapshot())),
+    );
+    app.post(
+      "/api/conversation/new",
+      route(async (c) => {
+        await empty(c.req.raw);
+        await release(c.req.raw.signal);
+        conversations.begin();
+        return c.json(conversations.snapshot());
+      }),
+    );
+    app.post(
+      "/api/conversation/continue",
+      route(async (c) => {
+        const { sessionId } = await json(c.req.raw, ContinueConversation);
+        if (!conversations.has(sessionId)) throw new RouteError(404, "no such task");
+        if (conversations.current() !== sessionId) {
+          await release(c.req.raw.signal);
+          if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
+        }
+        return c.json(conversations.snapshot());
+      }),
+    );
+  }
   app.get(
     "/api/agent/sessions/:id",
     route((c) => {

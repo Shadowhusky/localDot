@@ -14,6 +14,7 @@ import { StopControl } from "./agent/StopControl.tsx";
 import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
+import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -49,7 +50,11 @@ import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
-import { ConversationRail } from "./shell/ConversationRail.tsx";
+import {
+  ConversationRail,
+  type NewConversation,
+  NewConversationButton,
+} from "./shell/ConversationRail.tsx";
 import { Hud } from "./shell/Hud.tsx";
 import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
@@ -349,7 +354,21 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [settings.open, keysOpen]);
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
-  const session = useLiveSession(api, cell, stage);
+  const conversation = useConversation(api);
+  const session = useLiveSession(
+    api,
+    cell,
+    stage,
+    status === "known" && conversation.known ? (conversation.sessions.at(-1) ?? null) : undefined,
+    conversation.choice,
+  );
+  const seen = useRef<string | null>(null);
+  const { reload: rereadConversation } = conversation;
+  useEffect(() => {
+    const now = `${session.sessionId}:${session.ended}`;
+    if (seen.current !== null && seen.current !== now) rereadConversation();
+    seen.current = now;
+  }, [session.sessionId, session.ended, rereadConversation]);
   useEffect(() => {
     if (session.sessionId && !session.ended) {
       setNewestReplayId(session.sessionId);
@@ -499,6 +518,15 @@ function Theatre({ api }: { api: ApiClient }) {
     (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
   );
   const task = session.sessionId ? taskHud(session.model, now, facts) : null;
+  // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
+  // the daemon says which, the choice is offered and the daemon has the last word.
+  const taskStatus = agent.snapshot?.status;
+  const conversationReason =
+    !session.ended && taskStatus && taskStatus !== "idle" && taskStatus !== "ended"
+      ? FINISH_FIRST
+      : conversation.busy
+        ? "Just a moment…"
+        : undefined;
   const computer = error ? { ...containedHud, caption: error } : containedHud;
   const appStatus = statusFor({
     computer: {
@@ -571,6 +599,30 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     document.title = appStatus.title;
   }, [appStatus.title]);
+  const newConversation: NewConversation = {
+    run: () => {
+      void conversation.startNew();
+      setPane("conversation");
+    },
+    reason: conversationReason,
+  };
+  // Only what needs saying: the Activity column already names itself.
+  const taskNote =
+    !task || session.ended
+      ? null
+      : agent.error
+        ? "Activity unavailable"
+        : agent.connection === "lost"
+          ? "Connection lost"
+          : agent.connection === "connecting"
+            ? "Connecting…"
+            : task.phase === "finished"
+              ? "Ready for follow-up"
+              : task.row === "takeover"
+                ? "Your turn"
+                : task.phase === "waiting"
+                  ? "Waiting for you"
+                  : null;
   // On a phone it covers the computer pane, over a stage that stays where the computer appears.
   const welcome = (
     <Presence show={!replayId && status === "known" && !cell && listed.length === 0}>
@@ -615,6 +667,14 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
           keysRef={keysButton}
           settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
+          actions={
+            narrow && (
+              // Where tabs name the panes, New conversation joins the bar's other app-wide controls.
+              <Presence show={!replayId && !!agent.sessionId}>
+                <NewConversationButton {...newConversation} />
+              </Presence>
+            )
+          }
         />
         <div className="task-controls-area">
           <div className="task-bar" hidden={!!replayId}>
@@ -626,23 +686,7 @@ function Theatre({ api }: { api: ApiClient }) {
               onStopSession={taskStop}
               onRetry={retry}
             />
-            {task && !session.ended && (
-              <span className="task-connection">
-                {agent.error
-                  ? "Activity unavailable"
-                  : agent.connection === "lost"
-                    ? "Connection lost"
-                    : agent.connection === "connecting"
-                      ? "Connecting…"
-                      : task.phase === "finished"
-                        ? "Ready for follow-up"
-                        : task.row === "takeover"
-                          ? "Your turn"
-                          : task.phase === "waiting"
-                            ? "Waiting for you"
-                            : "Task activity"}
-              </span>
-            )}
+            {taskNote && <span className="task-connection">{taskNote}</span>}
           </div>
           <StopControl controls={controls} />
           <SafetyControls
@@ -671,7 +715,7 @@ function Theatre({ api }: { api: ApiClient }) {
               className="pane pane-conversation"
               id="pane-conversation"
               role="tabpanel"
-              aria-label="Conversation"
+              aria-labelledby="tab-conversation"
               data-selected={pane === "conversation"}
               inert={narrow && pane !== "conversation"}
               onFocusCapture={() => {
@@ -690,6 +734,11 @@ function Theatre({ api }: { api: ApiClient }) {
                     ? () => selectReplay(agent.sessionId)
                     : undefined
                 }
+                onReplayTask={selectReplay}
+                sessions={conversation.sessions}
+                more={conversation.more}
+                titled={!narrow}
+                newConversation={narrow ? undefined : newConversation}
                 recovery={
                   <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
                 }
@@ -746,7 +795,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }
               id="pane-computer"
               role="tabpanel"
-              aria-label="Computer"
+              aria-labelledby="tab-computer"
               data-selected={pane === "computer"}
               inert={narrow && pane !== "computer"}
               onFocusCapture={() => {
@@ -820,7 +869,7 @@ function Theatre({ api }: { api: ApiClient }) {
               className="pane pane-activity"
               id="pane-activity"
               role="tabpanel"
-              aria-label="Activity"
+              aria-labelledby="tab-activity"
               data-selected={pane === "activity"}
               inert={narrow && pane !== "activity"}
               onFocusCapture={() => {
@@ -828,6 +877,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }}
             >
               <ActivityRail
+                titled={!narrow}
                 cellId={cell?.id}
                 releaseReady={
                   cell?.state === "ready" &&
@@ -886,6 +936,14 @@ function Theatre({ api }: { api: ApiClient }) {
               if (id === replayId) selectReplay(null, "replace");
             }}
             onTitle={setRecorded}
+            continueTask={{
+              current: conversation.sessions.at(-1) ?? null,
+              reason: conversationReason,
+              run: (id) =>
+                void conversation.continueFrom(id).then((done) => {
+                  if (done) selectReplay(null);
+                }),
+            }}
             exportJob={exportJob}
             visible={!keysOpen && !settings.open && !safety.approval}
           />

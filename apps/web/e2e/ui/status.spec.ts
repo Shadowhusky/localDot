@@ -17,6 +17,7 @@ const STATUS: Record<UiScenarioName, { control: string; label: string; pose: str
     takeover: { control: "Stop", label: "Your turn", pose: "your-turn" },
     budget: { control: "Stop", label: "Paused · Limit reached", pose: "resting" },
     done: { control: "Stop computer", label: "Done", pose: "idle" },
+    continued: { control: "Stop computer", label: "Done", pose: "idle" },
     reconnecting: {
       control: "Stop",
       label: "Select the Net total cell",

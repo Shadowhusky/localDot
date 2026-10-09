@@ -247,6 +247,12 @@
   min-width: 0;
 }
 
+/* The task's name gives way to Continue conversation beside it. */
+.replay-library-slot {
+  display: flex;
+  min-width: 0;
+}
+
 .replay-library-trigger {
   max-width: 100%;
 }
@@ -256,6 +262,7 @@
 }
 
 .replay-library-trigger-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -804,7 +811,9 @@
     padding-top: 0;
   }
 
+  /* Watch is a tap away in the bar above, so Back keeps only its chevron and the task its room. */
   .replay-export-text,
+  .replay-back-text,
   .replay-library-trigger-text[data-phone="hidden"] {
     display: none;
   }

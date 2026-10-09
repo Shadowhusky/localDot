@@ -352,3 +352,9 @@ it("says earlier history lives in the task log when the projection dropped it", 
   render(<Conversation items={items([message("one")])} truncated />);
   expect(screen.getByText("Earlier messages are kept in the task log.")).toBeTruthy();
 });
+
+it("says the conversation's older tasks are in Replay", () => {
+  render(<Conversation items={items([message("one")])} truncated earlierInReplay />);
+  expect(screen.getByText("Earlier messages are in Replay.")).toBeTruthy();
+  expect(screen.queryByText("Earlier messages are kept in the task log.")).toBeNull();
+});

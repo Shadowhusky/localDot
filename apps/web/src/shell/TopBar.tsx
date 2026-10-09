@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import type { KeyStatus } from "../keys/useKeys.ts";
 import { Mascot } from "./Mascot.tsx";
 
@@ -15,6 +15,8 @@ export interface TopBarProps {
   replayEnabled?: boolean;
   onMode?(mode: "watch" | "replay"): void;
   settings?: { open: boolean; run(trigger: HTMLButtonElement): void; ref?: Ref<HTMLButtonElement> };
+  // Shown first among the bar's controls, so their coming and going leaves the rest in place.
+  actions?: ReactNode;
 }
 
 export function TopBar({
@@ -29,6 +31,7 @@ export function TopBar({
   mode = "watch",
   replayEnabled = false,
   onMode,
+  actions,
 }: TopBarProps) {
   const alert = keys.state === "offline" || keys.state === "audit" || keys.state === "guard";
   return (
@@ -62,6 +65,7 @@ export function TopBar({
         </button>
       </nav>
       <div className="bar-r">
+        {actions}
         {settings && (
           <button
             ref={settings.ref}
