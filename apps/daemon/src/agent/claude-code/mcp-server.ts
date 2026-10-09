@@ -32,13 +32,14 @@ export function localdotTools(research = false): McpToolDescriptor[] {
 export function localdotServer(
   call: LocaldotCall,
   research = false,
+  more: () => McpToolDescriptor[] = () => [],
 ): McpSdkServerConfigWithInstance {
   const instance = new McpServer(
     { name: LOCALDOT_SERVER, version: "1.0.0" },
     { capabilities: { tools: {} } },
   );
   instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: localdotTools(research),
+    tools: [...localdotTools(research), ...more()],
   }));
   instance.server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
     call(request.params.name, request.params.arguments ?? {}, extra.signal),

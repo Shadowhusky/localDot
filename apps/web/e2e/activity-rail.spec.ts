@@ -66,14 +66,13 @@ for (const [engine, size, options] of MATRIX) {
     await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
     await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
     expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
-    await expect(rail.locator(".activity-group, .ui-disclosure")).toHaveCount(0);
-    // The plan header stays in view, as a strip of the plan's progress once the list scrolls away.
-    await expect(rail.locator(".plan-head")).toHaveAttribute("data-stuck");
-    expect(
-      await rail
-        .locator(".plan-progress > span")
-        .evaluateAll((parts) => parts.map((part) => part.getAttribute("data-state"))),
-    ).toEqual(["done", "done", "done", "doing", "todo", "skipped"]);
+    await expect(rail.locator(".activity-group, .activity-timeline .ui-disclosure")).toHaveCount(0);
+    // The plan stays pinned over the steps as one strip: its progress, the item dot is on and the next.
+    await expect(rail.locator(".plan-strip-count")).toHaveText("3 of 6");
+    expect(await rail.locator(".plan-strip-text").allTextContents()).toEqual([
+      "Colour the dog in",
+      "Save it as dog.png in Pictures",
+    ]);
     // Every model call uses a key; those fold into their step. Only the blocked use is a row.
     await expect(rail.getByTestId("key-use")).toHaveCount(1);
     await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");

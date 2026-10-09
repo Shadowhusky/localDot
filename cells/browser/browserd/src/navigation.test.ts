@@ -249,18 +249,43 @@ describe("owned root navigation", () => {
         fixture.event("Page.frameNavigated", {
           frame: { id: "root", loaderId: "foreign-loader", url: destination },
         });
-      else {
+      else if (kind === "second-root") {
         fixture.cross();
-        if (kind === "second-root") fixture.cross();
-        else
-          fixture.event("Page.navigatedWithinDocument", {
-            frameId: "root",
-            url: `${destination}#foreign`,
-          });
+        fixture.cross();
+      } else {
+        // The old document's own history change, before the requested one commits.
+        fixture.event("Page.navigatedWithinDocument", {
+          frameId: "root",
+          url: `${initialFrame.url}#foreign`,
+        });
+        fixture.cross();
       }
       fixture.load();
       await refused;
       expect(fixture.fatal).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  // Sign-in pages (Google, Microsoft, GitHub) rewrite their own URL with history.replaceState
+  // before they finish loading. The document is still the one this navigation committed.
+  it.each(["events-first", "ack-first"])(
+    "keeps the loading document's own history changes (%s)",
+    async (order) => {
+      const fixture = await setup();
+      const replaced = `${destination}?flow=signin`;
+      const result = fixture.targets.navigate(fixture.tabId, destination);
+      await settle();
+      if (order === "ack-first")
+        fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+      fixture.cross();
+      fixture.event("Page.navigatedWithinDocument", { frameId: "root", url: replaced });
+      fixture.event("Page.navigatedWithinDocument", { frameId: "root", url: `${replaced}#step` });
+      fixture.setFrame({ id: "root", loaderId: "new-loader", url: replaced });
+      fixture.load();
+      if (order === "events-first")
+        fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+      await expect(result).resolves.toBeUndefined();
+      expect(fixture.fatal).not.toHaveBeenCalled();
     },
   );
 

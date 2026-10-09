@@ -143,7 +143,10 @@ export async function navigateOwnedDocument(options: OwnedNavigationOptions): Pr
         .parse(params);
       if (event.frameId !== initial?.id) return;
       count();
-      if (withinDocument !== undefined || navigated) return refuse("stale");
+      // The committed document may rewrite its own URL with the history API before it loads, as
+      // sign-in pages do; the final frame check still requires that same document.
+      if (navigated) return;
+      if (withinDocument !== undefined) return refuse("stale");
       withinDocument = new URL(event.url).href;
     });
     listen("Page.lifecycleEvent", (params) => {

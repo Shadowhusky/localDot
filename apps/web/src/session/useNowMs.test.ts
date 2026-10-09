@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { emptyModel, foldEvents } from "@localdot/stage";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import type { SessionClock } from "./clock-sync.ts";
 import { useNowMs } from "./useNowMs.ts";
 
 let seq = 0;
@@ -69,4 +70,65 @@ it("ticks only while the task is running", () => {
   expect(vi.getTimerCount()).toBe(1);
   rerender({ running: false });
   expect(vi.getTimerCount()).toBe(0);
+});
+
+// A synced clock that puts the daemon's session time at `sessionMs` now.
+const clockAt = (sessionMs: number): SessionClock => ({
+  offsetMicros: 0,
+  originMicros: msToMicros(performance.timeOrigin + performance.now() - sessionMs),
+});
+
+it("runs on the daemon's clock while no events arrive", () => {
+  const { result } = renderHook(() => useNowMs(model(), 0, () => false, clockAt(40_000)));
+  expect(result.current).toBeGreaterThanOrEqual(40_000);
+  expect(result.current).toBeLessThan(41_000);
+});
+
+it("never runs backwards for one task when the clock is lost or a late event re-anchors", () => {
+  const m = model();
+  const { result, rerender } = renderHook(
+    ({ version, clock }) => useNowMs(m, version, () => false, clock),
+    { initialProps: { version: 0, clock: clockAt(50_000) as SessionClock | null } },
+  );
+  expect(result.current).toBeGreaterThanOrEqual(50_000);
+  rerender({ version: 1, clock: null });
+  expect(result.current).toBeGreaterThanOrEqual(50_000);
+});
+
+it("starts afresh for another task", () => {
+  const { result, rerender } = renderHook(({ m, clock }) => useNowMs(m, 0, () => false, clock), {
+    initialProps: { m: model(), clock: clockAt(50_000) as SessionClock | null },
+  });
+  expect(result.current).toBeGreaterThanOrEqual(50_000);
+  rerender({ m: model(), clock: null });
+  expect(result.current).toBeLessThan(50_000);
+});
+
+it("re-reads on the task's next whole second", () => {
+  vi.useFakeTimers();
+  const timeout = vi.spyOn(globalThis, "setTimeout");
+  renderHook(() => useNowMs(model(), 0, () => true, clockAt(30_400)));
+  const delay = timeout.mock.calls.at(-1)?.[1] ?? 0;
+  expect(delay).toBeGreaterThan(550);
+  expect(delay).toBeLessThan(650);
+  timeout.mockRestore();
+});
+
+it("re-reads at once when the page is shown again", () => {
+  let renders = 0;
+  renderHook(() => {
+    renders++;
+    return useNowMs(model(), 0, () => true);
+  });
+  const before = renders;
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(renders).toBeGreaterThan(before);
+});
+
+it("ignores a clock that could not be read", () => {
+  const broken = { offsetMicros: Number.NaN, originMicros: 0 };
+  const { result } = renderHook(() => useNowMs(model(), 0, () => false, broken));
+  expect(result.current).toBeGreaterThanOrEqual(21_010);
 });

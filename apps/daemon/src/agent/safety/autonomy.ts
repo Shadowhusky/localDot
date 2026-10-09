@@ -62,6 +62,7 @@ function siteOf(value: string | undefined): string | undefined {
 // the agent can change, so a command never names a site. The browser screen names no app: its
 // "Chromium" is also the desktop browser's name.
 export function placeOf(facts: RiskFacts): Place {
+  if (facts.operation === "connector") return { tool: facts.connector?.exposed ?? "" };
   const target = facts.target;
   const site = facts.operation === "shell" ? undefined : siteOf(target?.url ?? facts.destination);
   return {
@@ -77,6 +78,11 @@ export function alwaysOptions(
   facts: RiskFacts,
   redact: (text: string) => string,
 ): AlwaysOption[] {
+  // A yes for an app's tool lasts this task and covers that tool only.
+  if (facts.operation === "connector")
+    return ALWAYS_SCOPES[actionClass].includes("task") && facts.connector
+      ? [{ scope: "task", label: "For this task", tool: facts.connector.exposed }]
+      : [];
   const { site, app } = placeOf(facts);
   const shown = (value: string | undefined): value is string =>
     value !== undefined && redact(value) === value;

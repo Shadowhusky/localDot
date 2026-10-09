@@ -23,15 +23,18 @@ export type OutboundShape =
   | "web_address_with_parameters"
   | "text"
   | "command"
-  | "connection";
+  | "connection"
+  | "app_arguments";
 // What the judge is told about an action. Never the outbound text itself, nor anything read. The
 // destination is the name its owner holds, and the names below it only when they can't be data.
 export interface JudgeAction {
-  readonly kind: "open_page" | "enter_text" | "run_command" | "connect";
+  readonly kind: "open_page" | "enter_text" | "run_command" | "connect" | "use_app";
   readonly destination: string;
+  // A connected app the user set up, by the name they gave it.
+  readonly app?: string;
   // A program's own connection beyond the web's ports names its port.
   readonly port?: number;
-  readonly method: "GET" | "typed" | "command" | "connect";
+  readonly method: "GET" | "typed" | "command" | "connect" | "app";
   readonly bytes: number;
   readonly shape: OutboundShape;
   readonly overlapsPrivateText: boolean;
@@ -49,6 +52,7 @@ export interface PurposeJudge {
 export interface Outbound {
   readonly kind: Exclude<JudgeAction["kind"], "connect">;
   readonly destination?: string;
+  readonly app?: string;
   readonly text: string;
 }
 export type PurposeVerdict =
@@ -273,8 +277,18 @@ function pastes(combo: unknown): boolean {
 
 // What an action would carry to a host, if anything. Opening a site's front page carries nothing;
 // typing into a desktop app or a field whose page is unknown carries nothing to a host either.
-export function outboundOf(tool: ToolName, input: unknown, facts: RiskFacts): Outbound[] {
+export function outboundOf(tool: ToolName | string, input: unknown, facts: RiskFacts): Outbound[] {
   const object = (input ?? {}) as Record<string, unknown>;
+  // A connected app's tool carries all its arguments to the app.
+  if (facts.operation === "connector" && facts.connector)
+    return [
+      {
+        kind: "use_app",
+        ...(facts.connector.host ? { destination: facts.connector.host } : {}),
+        app: facts.connector.app,
+        text: JSON.stringify(object),
+      },
+    ];
   // A PDF research reads is fetched by its address, as a page is opened.
   const opens = tool === "browser_navigate" || (tool === "research" && object.op === "pdf");
   if (opens && typeof object.url === "string") {
@@ -551,6 +565,7 @@ const SOURCE_WORDS: Readonly<Record<TaintKind, string>> = {
   memory: "what it remembers about you",
   files: "your files",
   recall: "your past conversations",
+  app: "your connected apps",
 };
 
 function listed(kinds: readonly TaintKind[]): string {
@@ -622,11 +637,13 @@ const METHOD: Readonly<Record<Outbound["kind"], JudgeAction["method"]>> = {
   open_page: "GET",
   enter_text: "typed",
   run_command: "command",
+  use_app: "app",
 };
 
 function shapeOf(outbound: Outbound): OutboundShape {
   if (outbound.kind === "run_command") return "command";
   if (outbound.kind === "enter_text") return "text";
+  if (outbound.kind === "use_app") return "app_arguments";
   return outbound.text.includes("?") ? "web_address_with_parameters" : "web_address";
 }
 
@@ -787,7 +804,7 @@ export class PurposeGate {
       for (const [site, fits] of this.#judged) if (!fits) this.#judged.delete(site);
     // Data may go back to the one host all of it came from.
     const back = taint.sources.every(
-      (source) => source.kind === "screen" && source.origin === host,
+      (source) => (source.kind === "screen" || source.kind === "app") && source.origin === host,
     );
     if (back || mentionedHosts(purpose.request).some((named) => covers(named, host)))
       return undefined;
@@ -809,6 +826,7 @@ export class PurposeGate {
             {
               kind: outbound.kind,
               destination: judgedName(host, purpose),
+              ...(outbound.app ? { app: outbound.app } : {}),
               method: METHOD[outbound.kind],
               bytes: Buffer.byteLength(outbound.text),
               shape: shapeOf(outbound),

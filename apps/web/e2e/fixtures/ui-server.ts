@@ -77,6 +77,10 @@ import { StreamTuning } from "../../../daemon/src/cells/stream-tuning.ts";
 import { FakeOrchestrator } from "../../../daemon/src/cells/testing/fake-orchestrator.ts";
 import type { CellRecord, CellSummary } from "../../../daemon/src/cells/types.ts";
 import { monotonicClock } from "../../../daemon/src/clock.ts";
+import { ConnectorHub, type ConnectorLinks } from "../../../daemon/src/connectors/hub.ts";
+import { ConnectorSignIn } from "../../../daemon/src/connectors/oauth.ts";
+import { ConnectorStore } from "../../../daemon/src/connectors/store.ts";
+import { type FakeTool, fakeApp } from "../../../daemon/src/connectors/testing/fake-app.ts";
 import {
   deliverableScenarios,
   deliverablesDeps,
@@ -1676,10 +1680,66 @@ const accounts: AccountsDeps = {
     close: () => {},
   }),
 };
+// Connected apps: each answers in memory with its own tools. POST /__qa/connectors adds GitHub
+// (ready, its key saved), Linear (waiting for a sign-in) and Brave Search (needing its key).
+const CONNECTOR_TOOLS: Record<string, FakeTool[]> = {
+  github: [
+    {
+      name: "list_issues",
+      description: "List issues in a repository, newest first.",
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "search_code",
+      description: "Search code across your repositories.",
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "get_pull_request",
+      description: "Get a pull request's details, checks and reviews.",
+      annotations: { readOnlyHint: true },
+    },
+    { name: "create_issue", description: "Create an issue in a repository." },
+    { name: "add_issue_comment", description: "Comment on an issue or pull request." },
+    { name: "merge_pull_request", description: "Merge a pull request." },
+    {
+      name: "delete_branch",
+      description: "Delete a branch.",
+      annotations: { destructiveHint: true },
+    },
+  ],
+};
+const connectorLinks: ConnectorLinks = {
+  open: (config, signal) => fakeApp(CONNECTOR_TOOLS[config.id] ?? []).links.open(config, signal),
+};
+const connectorHub = new ConnectorHub({
+  store: new ConnectorStore(HOME),
+  links: connectorLinks,
+  keys: async () => keys,
+});
+const connectorSignIn = new ConnectorSignIn({
+  hub: connectorHub,
+  keyd: { status: async () => ({ sealKey }) as never, putSecret: async () => ({}) as never },
+  fetchFor: async () => ({
+    fetch: async () => new Response("", { status: 404 }),
+    close: async () => {},
+  }),
+});
 const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
+  connectors: {
+    hub: connectorHub,
+    keyd: {
+      secrets: async () => keys,
+      deleteSecret: async (id) => {
+        keys = keys.filter((k) => k.id !== id);
+        return true;
+      },
+    },
+    signIn: connectorSignIn,
+  },
   cells: { cells, tickets, update: updateCell },
   desktop: realDesktop,
   accounts,
@@ -2635,6 +2695,58 @@ routes.post("/__qa/export/:step", async (c) => {
   return reply("unknown step");
 });
 routes.post("/__qa/keys", () => reply(keySteps()));
+routes.post("/__qa/connectors", async (c) => {
+  const at = new Date().toISOString();
+  keys = [
+    ...keys.filter((k) => k.id !== "connector-github"),
+    {
+      id: "connector-github",
+      kind: "http",
+      hosts: ["api.githubcopilot.com"],
+      header: "authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    },
+  ];
+  for (const id of connectorHub.configs().map((config) => config.id)) await connectorHub.remove(id);
+  const github = connectorHub.add({
+    id: "github",
+    name: "GitHub",
+    catalog: "github",
+    server: {
+      kind: "remote",
+      url: "https://api.githubcopilot.com/mcp/",
+      transport: "http",
+      auth: { kind: "key", secret: "connector-github" },
+    },
+  });
+  await connectorHub.refresh(github.id);
+  await connectorHub.update(github.id, { tools: { delete_branch: { enabled: false } } });
+  connectorHub.add({
+    id: "linear",
+    name: "Linear",
+    catalog: "linear",
+    server: {
+      kind: "remote",
+      url: "https://mcp.linear.app/mcp",
+      transport: "http",
+      auth: { kind: "oauth" },
+    },
+  });
+  connectorHub.add({
+    id: "brave",
+    name: "Brave Search",
+    catalog: "brave",
+    server: {
+      kind: "local",
+      command: "npx",
+      args: ["-y", "@brave/brave-search-mcp-server"],
+      env: [{ name: "BRAVE_API_KEY", secret: "connector-brave" }],
+    },
+  });
+  return c.json({ connectors: await connectorHub.views() });
+});
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/actions", () => reply(liveActions()));

@@ -106,6 +106,7 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useConnectors } from "./settings/useConnectors.ts";
 import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
@@ -134,7 +135,9 @@ import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
+import { ACTIVITY_WIDTH, CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
+import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
@@ -737,6 +740,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const settingsKnowledge = useKnowledge(api, null, settings.open);
   const whatDotKnows = useWhatDotKnows(api, settings.open);
   const settingsNotifications = useNotifications(api, settings.open);
+  const settingsConnectors = useConnectors(api, settings.open);
   const settingsAccounts = useAccounts(
     api,
     cell?.state === "ready" && !cell.paused ? cell.id : null,
@@ -972,11 +976,16 @@ function Theatre({ api }: { api: ApiClient }) {
     offer: ownHold ? (site, failed) => void signIn.start(site, failed) : undefined,
   });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
-  const now = useNowMs(session.model, session.version, (t) => {
-    if (!shownTask) return false;
-    const hud = taskHud(session.model, t, facts);
-    return hud.phase === "running" || hud.elapsedS !== null;
-  });
+  const now = useNowMs(
+    session.model,
+    session.version,
+    (t) => {
+      if (!shownTask) return false;
+      const hud = taskHud(session.model, t, facts);
+      return hud.phase === "running" || hud.elapsedS !== null;
+    },
+    session.clock,
+  );
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
   // The daemon refuses an Update in these cases too; the button says so before it is pressed.
@@ -1267,6 +1276,7 @@ function Theatre({ api }: { api: ApiClient }) {
       scale={cell?.scale ?? 2}
       api={api}
       nowMs={now}
+      historyLoaded={agent.history === true}
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
@@ -1777,6 +1787,22 @@ function Theatre({ api }: { api: ApiClient }) {
             <ErrorBoundary>{activity}</ErrorBoundary>
           </RailPanel>
         )}
+        {wide && (
+          <ResizeHandle
+            panel={ACTIVITY_WIDTH}
+            property="--activity-w"
+            label="Activity width"
+            className="rail-resize-activity"
+          />
+        )}
+        {(wide || layout === "laptop") && (
+          <ResizeHandle
+            panel={CHAT_WIDTH}
+            property="--rail-w"
+            label="Conversation width"
+            className="rail-resize-chat"
+          />
+        )}
         <RailPanel
           label="Conversation"
           className="rail-chat"
@@ -2143,6 +2169,7 @@ function Theatre({ api }: { api: ApiClient }) {
           notifications={settingsNotifications}
           accounts={settingsAccounts}
           signIn={signIn}
+          connectors={settingsConnectors}
           rules={rules}
           spending={
             settings.draft

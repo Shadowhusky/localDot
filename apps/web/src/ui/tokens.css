@@ -430,6 +430,7 @@
      is kept for the island whether it shows or not: 4, the island, then the gap over the picture. */
   --bar-h: 52px;
   --rail-w: 368px;
+  --activity-w: 320px;
   --rail-inset: 8px;
   --gutter: 20px;
   --stage-top: 104px;

@@ -15,6 +15,7 @@ export type SettingsSection =
   | "notifications"
   | "knowledge"
   | "accounts"
+  | "connectors"
   | "keys"
   | "computer";
 
@@ -35,6 +36,7 @@ export const SECTIONS: readonly SectionInfo[] = [
   { id: "notifications", title: "Notifications", icon: "bell" },
   { id: "knowledge", title: "What dot knows", icon: "book" },
   { id: "accounts", title: "Accounts", icon: "globe" },
+  { id: "connectors", title: "Connectors", icon: "plug" },
   { id: "keys", title: "Keys", icon: "key-round" },
   { id: "computer", title: "Your computer", icon: "power" },
 ];

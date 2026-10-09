@@ -131,6 +131,7 @@ const KIND_TITLES: Record<NonNullable<AgentStep["kind"]>, string> = {
   browser: "Browser step",
   ask: "Asked you a question",
   think: "Thinking",
+  app: "Used a connected app",
 };
 
 // Where a step that dot took without the screen happened, in the place of a screen step's app.
@@ -141,6 +142,7 @@ const KIND_PLACES: Record<NonNullable<AgentStep["kind"]>, string> = {
   browser: "Browser",
   ask: "",
   think: "",
+  app: "App",
 };
 
 // One flat row (design-v2 §10.20): what dot did, where and how, and how long it took. A failure's

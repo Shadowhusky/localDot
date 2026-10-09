@@ -65,7 +65,9 @@ export function ResearchSources({
   return (
     <section className="activity-section research" aria-labelledby={`${id}-head`}>
       <div className="activity-section-head">
-        <h3 id={`${id}-head`}>Sources</h3>
+        <h3 id={`${id}-head`} className="ui-visually-hidden">
+          Sources
+        </h3>
         <span className="activity-section-meta num">{researchMeta(research, nowMs)}</span>
       </div>
       <div

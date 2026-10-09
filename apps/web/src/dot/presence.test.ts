@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerPlace } from "./places.ts";
+import { placeElement, registerPlace } from "./places.ts";
 import { Presence } from "./presence.ts";
 
 interface Run {
@@ -151,6 +151,21 @@ describe("dot's presence", () => {
     expect(run.cancelled).toBe(true);
     expect(frame.dataset.flying).toBeUndefined();
     expect(parse(frame.style.transform)).toEqual({ x: 8, y: 716, k: 1 });
+  });
+
+  it("comes back to its place once the place has a box again", () => {
+    const { p, frame } = presence();
+    p.goTo("dock");
+    const dock = placeElement("dock") as HTMLElement;
+    const measure = dock.getBoundingClientRect;
+    dock.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0 }) as DOMRect;
+    p.goTo("dock");
+    expect(frame.dataset.shown).toBeUndefined();
+    dock.getBoundingClientRect = measure;
+    p.follow(false);
+    expect(frame.dataset.shown).toBe("");
+    expect(parse(frame.style.transform)).toEqual({ x: 8, y: 716, k: 1 });
+    expect(runs).toHaveLength(0);
   });
 
   it("fades instead of flying under reduced motion", () => {
