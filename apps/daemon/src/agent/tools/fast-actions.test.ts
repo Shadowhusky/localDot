@@ -145,7 +145,26 @@ async function setup() {
   session.lastFrameId = basis;
   const inputs = () => fake.calls.filter((c) => c.path === "/input" || c.path === "/type");
   const steps = () => log.read(sessionId).filter((e) => e.type === "step.start");
-  return { fake, ctx, deps, session, asks, basis, setFrames, inputs, steps };
+  // The web browser's screen showing `tabId`, its input going to this desktop.
+  const onTab = (tabId: string) => {
+    vi.spyOn(session, "screens", "get").mockReturnValue({
+      browserAccess: () => ({ tabId }),
+    } as unknown as AgentSession["screens"]);
+    Object.assign(ctx, {
+      screen: { selection: { screen: "browser" } },
+      nativeScreen: {
+        cellId,
+        parentCellId: cellId,
+        scale: 1,
+        device: registry.for(cellId),
+        signal,
+        check() {},
+        stream: () => ({ ...NO_STREAM, connection: "none", viewers: 0 }),
+        subscribe: () => () => {},
+      },
+    });
+  };
+  return { fake, ctx, deps, session, asks, basis, setFrames, inputs, steps, onTab };
 }
 
 const images = (content: { type: string }[]) => content.filter((c) => c.type === "image");
@@ -338,6 +357,24 @@ describe("browser_act", () => {
     const result = await browserActTool(s.deps, s.ctx, { action: "click", ref: "e42" });
     expect(result.ok).toBe(false);
     expect(texts(result.content)).toContain("Read the page again");
+    expect(s.inputs()).toHaveLength(0);
+  });
+
+  it("never acts on a ref read on another tab", async () => {
+    const s = await setup();
+    s.session.pageRefs = {
+      cellId: s.session.cellId,
+      tabId: "tab-a",
+      url: "https://mail.example/inbox",
+      elements: new Map([[send.ref, send]]),
+    };
+    s.onTab("tab-b");
+    findSend(s, { x: 700, y: 450 });
+    s.fake.script.hitTest = (p) => hit(web(p, "Send"));
+    const result = await browserActTool(s.deps, s.ctx, { action: "click", ref: "e42" });
+    expect(result.ok).toBe(false);
+    expect(texts(result.content)).toContain("e42 is not in this screen's last page read");
+    expect(s.asks).not.toHaveBeenCalled();
     expect(s.inputs()).toHaveLength(0);
   });
 
