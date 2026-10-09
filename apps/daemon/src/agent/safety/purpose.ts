@@ -671,16 +671,16 @@ export class PurposeGate {
   get #now(): number {
     return this.deps.now?.() ?? Date.now();
   }
-  // Whether the request needs a program to connect to this host and port; undefined when nothing
-  // can judge. The judge sees the destination only, so it asks whether or not the task read
-  // private data. Each destination is judged once per request.
+  // Whether the request needs a program to connect to this host and port: null when the check is
+  // off, undefined when the judge couldn't tell. The judge sees the destination only, so it asks
+  // whether or not the task read private data. Each destination is judged once per request.
   async fitsConnection(
     host: string,
     port: number,
     signal: AbortSignal,
-  ): Promise<boolean | undefined> {
+  ): Promise<boolean | null | undefined> {
     const judge = this.deps.judge();
-    if (!judge) return undefined;
+    if (!judge) return null;
     const purpose = this.deps.purpose();
     const key = digest(purpose);
     if (this.#connectionsKey !== key) {

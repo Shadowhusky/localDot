@@ -25,10 +25,14 @@ import {
 } from "./testing/docker-cli.ts";
 import type { CellSummary } from "./types.ts";
 
-const PREFIX = "localdot-test-";
+const PREFIX = process.env.LOCALDOT_ORCH_TEST_PREFIX || "localdot-test-";
+const [LABEL_KEY, LABEL_VALUE] = (process.env.LOCALDOT_ORCH_TEST_LABEL ?? "").split("=");
 // Docker Desktop's address for the Mac (host.docker.internal), and an address on the internet.
 const DESKTOP_HOST_ADDRESS = "192.168.65.254";
 const PUBLIC_ADDRESS = "1.1.1.1";
+// curl reached the gate, which refused the connection for keyd: refused, an empty reply or a reset,
+// but never an answer and never a timeout (a connection held for the user).
+const REFUSED = [7, 52, 55, 56];
 const BOUNDED_LOGS = { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } };
 
 // A probe counts only with the exit status it is expected to have: a missing tool also exits
@@ -37,6 +41,11 @@ function probe(container: string, status: number, ...cmd: string[]): string {
   const r = dockerExec(container, ...cmd);
   expect(r.status, `${cmd.join(" ")}: ${r.out}`).toBe(status);
   return r.out;
+}
+
+function refused(container: string, url: string) {
+  const r = dockerExec(container, "curl", "--noproxy", "*", "-sS", "-m", "5", url);
+  expect(REFUSED, `${url}: ${r.status} ${r.out}`).toContain(r.status);
 }
 
 describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => {
@@ -80,6 +89,7 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
       probeDesktopd,
       probeStream,
       namePrefix: PREFIX,
+      ...(LABEL_KEY && LABEL_VALUE ? { labels: { [LABEL_KEY]: LABEL_VALUE } } : {}),
     });
     orchestrator.subscribe((c) => seen.add(c.id));
   });
@@ -119,7 +129,7 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     await keyd?.stop();
   });
 
-  it("creates a ready cell whose desktop reaches nothing but its gate", async () => {
+  it("creates a ready cell whose desktop reaches out only through its gate", async () => {
     cell = await orchestrator.create({ scale: 2 });
     const id = cell.id;
     await readyAgain(id);
@@ -128,8 +138,9 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     const { desktop, gate } = record.docker;
     expect(desktop).toBe(`${PREFIX}desktop-${id}`);
 
-    // 6: no DNS for outside names, 2: getent found nothing; the gate's keyd relay still answers.
-    probe(desktop, 6, "curl", "--noproxy", "*", "-sS", "-m", "5", "https://example.com");
+    // Names resolve to the gate's placeholders, which only keyd turns into addresses; the Mac's
+    // own names resolve to nothing, and the gate's keyd relay still answers.
+    expect(probe(desktop, 0, "getent", "hosts", "example.com")).toMatch(/^198\.1[89]\./);
     probe(
       desktop,
       6,
@@ -141,12 +152,11 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
       "5",
       "http://host.docker.internal:4750/",
     );
-    probe(desktop, 2, "sh", "-c", "getent hosts example.com");
-    // By address too, DNS aside: no gateway on the subnet, no route to the Mac or the internet (7).
+    // By address too: the subnet's gateway slot, the Mac and SMTP are refused at the gate.
     const gatewaySlot = hostAddress(subnetOf(record.docker.internalNetwork), 1);
-    for (const address of [gatewaySlot, DESKTOP_HOST_ADDRESS, PUBLIC_ADDRESS]) {
-      probe(desktop, 7, "curl", "--noproxy", "*", "-sS", "-m", "5", `http://${address}:4750/`);
-    }
+    for (const address of [gatewaySlot, DESKTOP_HOST_ADDRESS])
+      refused(desktop, `http://${address}:4750/`);
+    refused(desktop, `telnet://${PUBLIC_ADDRESS}:25`);
     probe(
       desktop,
       0,
@@ -179,15 +189,18 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     expect(docker("inspect", "-f", "{{.HostConfig.RestartPolicy.Name}}", desktop)).toMatch(
       /^(no)?$/,
     );
+    // The gate starts as root only to take the desktop's traffic, then runs as nobody with nothing.
     expect(
       docker(
         "inspect",
         "-f",
-        "{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}} {{.Config.User}}",
+        "{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}} {{.Config.User}}",
         gate,
       ),
-    ).toBe("true [ALL] [no-new-privileges] 64 nobody");
-    expect(probe(gate, 0, "id", "-u").trim()).toBe("65534");
+    ).toBe("true [ALL] [NET_ADMIN SETUID SETGID SETPCAP] [no-new-privileges] 64 root");
+    const status = probe(gate, 0, "grep", "-E", "^(Uid|CapEff)", "/proc/1/status");
+    expect(status).toMatch(/^Uid:\s+65534\s+65534\s+65534\s+65534$/m);
+    expect(status).toMatch(/^CapEff:\s+0+$/m);
     for (const name of [gate, desktop]) {
       expect(JSON.parse(docker("inspect", "-f", "{{json .HostConfig.LogConfig}}", name))).toEqual(
         BOUNDED_LOGS,

@@ -109,7 +109,7 @@ describe("connections that wait for the user", () => {
     expect(card).toMatchObject({
       actionClass: "network",
       title: "wechat wants to connect to chat.example.com on port 5222",
-      why: "wechat hasn't used this destination before, and the purpose check couldn't tell whether it fits your task.",
+      why: "wechat hasn't used this destination before. Apps reach websites on their own; anything else waits for your OK.",
       always: [
         { scope: "task", label: "For this task", destination: "chat.example.com:5222" },
         {

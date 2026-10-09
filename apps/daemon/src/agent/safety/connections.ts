@@ -53,13 +53,16 @@ const SOURCES: Readonly<Record<TaintKind, string>> = {
   recall: "your past conversations",
 };
 
-// Why a connection asks, in the purpose check's words when it could judge the destination.
+// Why a connection asks, in the purpose check's words when it could judge the destination; null
+// when the check is off.
 export function connectionWhy(
   app: string | undefined,
-  fits: boolean | undefined,
+  fits: boolean | null | undefined,
   read: readonly TaintKind[],
 ): string {
   const who = app ?? "This app";
+  if (fits === null)
+    return `${who} hasn't used this destination before. Apps reach websites on their own; anything else waits for your OK.`;
   if (fits === true)
     return `${who} hasn't used this destination before. It looks related to your task.`;
   if (fits === false) {
@@ -314,9 +317,11 @@ export class ConnectionApprovals {
     const once = `${cellId}\0${app ?? ""}\0${destination}`;
     if (this.#once.has(once)) return true;
     if (!task) return false;
-    const fits = await task.purpose
-      ?.fitsConnection(held.host, held.port, AbortSignal.timeout(JUDGE_WAIT_MS))
-      .catch(() => undefined);
+    const fits = task.purpose
+      ? await task.purpose
+          .fitsConnection(held.host, held.port, AbortSignal.timeout(JUDGE_WAIT_MS))
+          .catch(() => undefined)
+      : null;
     const decision = await task.connections.request({
       ...(app ? { app } : {}),
       host: held.host,
