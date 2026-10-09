@@ -18,7 +18,7 @@ export const MAX_PACKAGE_FILES = 4096;
 export const PACK_ALLOWLIST = [
   /^(package\.json|README\.md|LICENSE|THIRD-PARTY\.md|release\.json|npm-shrinkwrap\.json)$/,
   /^bin\/localdot\.mjs$/,
-  /^dist\/(cli|daemon|release-verification-worker)\.mjs$/,
+  /^dist\/(cli|daemon|quiet-page-worker|release-verification-worker)\.mjs$/,
   /^dist\/browser-seccomp\.json$/,
   /^dist\/sandbox-runtime\/(package\.json|LICENSE|NOTICE\.md|PATCH\.txt)$/,
   /^dist\/sandbox-runtime\/dist\/cli\.mjs$/,
@@ -49,6 +49,7 @@ const REQUIRED = [
   "bin/localdot.mjs",
   "dist/cli.mjs",
   "dist/daemon.mjs",
+  "dist/quiet-page-worker.mjs",
   "dist/release-verification-worker.mjs",
   "dist/browser-seccomp.json",
   "dist/canary-scan.py",

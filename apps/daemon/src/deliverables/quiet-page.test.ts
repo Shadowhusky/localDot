@@ -111,8 +111,8 @@ describe("a page as the preview serves it", () => {
 
   it("serves nothing nested deeper than it can check", () => {
     const nest = (n: number) => `${"<div>".repeat(n)}x${"</div>".repeat(n)}`;
-    expect(quietPage(nest(200))).toContain("x");
-    expect(quietPage(nest(300))).toBe(undefined);
+    expect(quietPage(nest(120))).toContain("x");
+    expect(quietPage(nest(140))).toBe(undefined);
   });
 
   it("serves nothing that builds far more elements than it is written with", () => {

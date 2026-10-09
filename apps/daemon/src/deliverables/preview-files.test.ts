@@ -50,14 +50,40 @@ function setup() {
       headers: { authorization: `Bearer ${TOKEN}`, host: `127.0.0.1:${PORT}`, ...init.headers },
     });
   // Loads by preview link carry no token, as a frame, picture or player does.
-  const load = (path: string, headers: Record<string, string> = {}) =>
-    app.request(`${ORIGIN}${path}`, { headers: { host: `127.0.0.1:${PORT}`, ...headers } });
+  const load = (path: string, headers: Record<string, string> = {}, init: RequestInit = {}) =>
+    app.request(`${ORIGIN}${path}`, {
+      ...init,
+      headers: { host: `127.0.0.1:${PORT}`, ...headers },
+    });
   const link = async (session = task) => {
     const reply = await call(`/api/agent/sessions/${session}/preview-link`, { method: "POST" });
     expect(reply.status).toBe(200);
     return PreviewLinkReply.parse(await reply.json()).base;
   };
   return { task, other, save, call, load, link };
+}
+
+// Pages parse5 spends seconds on without nesting deep or building much: each attribute of a tag is
+// checked against every one before it, and each <html> tag's against all those merged so far.
+const attributes = (count: number) =>
+  `<p ${Array.from({ length: count }, (_, i) => `a${i}`).join(" ")}>x</p>`;
+const roots = (count: number) => Array.from({ length: count }, (_, i) => `<html a${i}>`).join("");
+
+// The longest the event loop went without a turn while the work ran.
+async function stalled<T>(work: () => T | Promise<T>): Promise<[T, number]> {
+  let last = performance.now();
+  let most = 0;
+  const tick = setInterval(() => {
+    const now = performance.now();
+    most = Math.max(most, now - last);
+    last = now;
+  }, 10);
+  try {
+    const done = await work();
+    return [done, Math.max(most, performance.now() - last)];
+  } finally {
+    clearInterval(tick);
+  }
 }
 
 const directives = (policy: string | null) =>
@@ -184,6 +210,48 @@ describe("the preview route", () => {
     expect((await load(`${base}lists.html`)).status).toBe(415);
     expect(performance.now() - started).toBeLessThan(500);
   });
+
+  it("turns a page away once reading it takes too long, and never holds the daemon meanwhile", async () => {
+    const { save, load, link } = setup();
+    save("attributes.html", attributes(60_000));
+    save("roots.html", roots(34_000));
+    save("plain.html", "<p>A plain page</p>");
+    const base = await link();
+    for (const name of ["attributes.html", "roots.html"]) {
+      const started = performance.now();
+      const [reply, stall] = await stalled(() => load(`${base}${name}`));
+      expect(reply.status, name).toBe(415);
+      expect(await reply.text(), name).toBe("too complex to preview");
+      expect(performance.now() - started, name).toBeLessThan(3000);
+      expect(stall, name).toBeLessThan(500);
+    }
+    expect(await (await load(`${base}plain.html`)).text()).toContain("<p>A plain page</p>");
+  }, 15_000);
+
+  it("reads a page once for HEAD and every later opening", async () => {
+    const { save, load, link } = setup();
+    save("attributes.html", attributes(60_000));
+    const base = await link();
+    const path = `${base}attributes.html`;
+    expect((await load(path)).status).toBe(415);
+    for (const method of ["HEAD", "GET", "GET"]) {
+      const started = performance.now();
+      expect((await load(path, {}, { method })).status, method).toBe(415);
+      expect(performance.now() - started, method).toBeLessThan(250);
+    }
+  }, 15_000);
+
+  it("stops reading a page once its request is gone", async () => {
+    const { save, load, link } = setup();
+    save("attributes.html", attributes(60_000));
+    const base = await link();
+    const gone = new AbortController();
+    setTimeout(() => gone.abort(), 300);
+    const started = performance.now();
+    const reply = await load(`${base}attributes.html`, {}, { signal: gone.signal });
+    expect(reply.status).not.toBe(200);
+    expect(performance.now() - started).toBeLessThan(1500);
+  }, 15_000);
 
   it("serves an SVG as an inert picture, never as a document that runs", async () => {
     const { save, load, link } = setup();

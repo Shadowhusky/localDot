@@ -5,8 +5,8 @@ import { outputNameProblem, outputPath } from "../agent/output-store.ts";
 import { requestOrigin } from "../guard.ts";
 import { decodeHead, maskText } from "./excerpt.ts";
 import { rasterType } from "./image-preview.ts";
+import { PageQuieter, type Quieted } from "./page-quieter.ts";
 import type { PreviewLinks } from "./preview-links.ts";
-import { quietPage } from "./quiet-page.ts";
 import { StoredFiles } from "./stored.ts";
 
 const V = VIEWER_LIMITS;
@@ -57,8 +57,16 @@ interface Served {
   policy: string;
   cap?: number;
   // Text is read whole and served as this makes it, or not at all; anything else streams as stored.
-  text?: (text: string) => string | undefined;
+  text?: (text: string, signal: AbortSignal) => Quieted | Promise<Quieted>;
 }
+
+const REFUSED = {
+  "not shown": [415, "not shown"],
+  "too complex": [415, "too complex to preview"],
+  busy: [503, "busy"],
+  stopped: [503, "stopped"],
+} as const;
+const masked = (text: string): Quieted => ({ body: maskText(text) });
 
 // One task's files by preview link, for the full preview's frame, pictures and players. Only the
 // kinds it shows are served, each with its own type and policy; a picture's type comes from its
@@ -68,7 +76,8 @@ export function previewFileRoutes(
   deps: { home: string; port: number; links: Pick<PreviewLinks, "resolve"> },
 ): void {
   const stored = new StoredFiles(deps.home);
-  app.on(["GET", "HEAD"], "/file-previews/:ticket/:name", (c) => {
+  const quieter = new PageQuieter();
+  app.on(["GET", "HEAD"], "/file-previews/:ticket/:name", async (c) => {
     const ticket = c.req.param("ticket");
     const sessionId = deps.links.resolve(ticket);
     const name = c.req.param("name");
@@ -79,7 +88,7 @@ export function previewFileRoutes(
     if (version === undefined) return c.text("invalid version", 400, BASE);
     const origin = requestOrigin(c.req.header("host"), deps.port);
     if (!origin) return c.text("forbidden host", 403, BASE);
-    const served = servedAs(name, origin, `/file-previews/${ticket}/`);
+    const served = servedAs(name, origin, `/file-previews/${ticket}/`, quieter);
     const rel = served && outputPath(sessionId, name, version);
     const opened = rel ? stored.open(rel) : undefined;
     if (!served || !opened) return c.text("not found", 404, BASE);
@@ -91,10 +100,18 @@ export function previewFileRoutes(
       const head = c.req.method === "HEAD";
       if (served.text) {
         const text = decodeHead(read(fd, 0, size), true);
-        const body = text === undefined ? undefined : served.text(text.replace(/\r\n?/g, "\n"));
-        if (body === undefined) return c.text("not shown", 415, BASE);
+        closeSync(fd);
+        owned = false;
+        const shown =
+          text === undefined
+            ? ({ refused: "not shown" } as const)
+            : await served.text(text.replace(/\r\n?/g, "\n"), c.req.raw.signal);
+        if ("refused" in shown) {
+          const [status, why] = REFUSED[shown.refused];
+          return c.text(why, status, BASE);
+        }
         headers["content-type"] = served.type;
-        return new Response(head ? null : body, { status: 200, headers });
+        return new Response(head ? null : shown.body, { status: 200, headers });
       }
       let type = served.type;
       if (type === "picture") {
@@ -123,19 +140,24 @@ export function previewFileRoutes(
   });
 }
 
-function servedAs(name: string, origin: string, base: string): Served | undefined {
+function servedAs(
+  name: string,
+  origin: string,
+  base: string,
+  quieter: PageQuieter,
+): Served | undefined {
   const kind = viewerKind(name);
   const ext = fileExtension(name);
   if (kind === "picture") return { type: "picture", policy: INERT_POLICY, cap: V.pictureBytes };
   if (kind === "svg")
-    return { type: "image/svg+xml", policy: SVG_POLICY, cap: V.svgBytes, text: maskText };
+    return { type: "image/svg+xml", policy: SVG_POLICY, cap: V.svgBytes, text: masked };
   if (kind === "pdf") return { type: "application/pdf", policy: INERT_POLICY, cap: V.pdfBytes };
   if (kind === "html")
     return {
       type: "text/html; charset=utf-8",
       policy: htmlPolicy(origin, base),
       cap: V.htmlBytes,
-      text: quietPage,
+      text: (text, signal) => quieter.page(text, signal),
     };
   // A page's own stylesheet.
   if (ext === "css")
@@ -143,7 +165,7 @@ function servedAs(name: string, origin: string, base: string): Served | undefine
       type: "text/css; charset=utf-8",
       policy: INERT_POLICY,
       cap: V.htmlBytes,
-      text: maskText,
+      text: masked,
     };
   const media = MEDIA[ext];
   return media ? { type: media, policy: INERT_POLICY } : undefined;

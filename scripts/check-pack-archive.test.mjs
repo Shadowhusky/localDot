@@ -56,6 +56,7 @@ function fixture(extra = {}) {
     "bin/localdot.mjs": "#!/usr/bin/env node\nexport {};\n",
     "dist/cli.mjs": "export {};\n",
     "dist/daemon.mjs": "export {};\n",
+    "dist/quiet-page-worker.mjs": "export {};\n",
     "dist/release-verification-worker.mjs": "export {};\n",
     "dist/canary-scan.py": "# fixture scanner\n",
     "dist/canary-worker.py": "# fixture worker\n",
