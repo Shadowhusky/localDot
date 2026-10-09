@@ -863,6 +863,16 @@ describe("drags, and moves, scrolls and releases while a button is down", () => 
     expect(classify({ ...signedIn, ...drag(file("report.txt"), zone) })).not.toContain("upload");
   });
 
+  it.each([
+    ["the downloads page", "chrome://downloads/"],
+    ["a local file tab", "file:///config/Downloads/report.pdf"],
+  ])("uploads what is dragged from %s onto a web page", (_name, url) => {
+    const start: NativeTargetFacts = { ...dom("report.pdf", "link"), url };
+    expect(
+      decide({ ...desktop, ...drag(start, dom("Attach files", "button")) }, BALANCED_AUTONOMY),
+    ).toMatchObject({ actionClass: "upload", mode: "ask" });
+  });
+
   it("uploads what is carried onto a page no lookup could name, from a start no lookup could name", () => {
     const zone = dom("Attach files", "button");
     // desktopd's page lookup ran past its budget: only the browser window is known.

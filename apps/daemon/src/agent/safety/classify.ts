@@ -214,14 +214,15 @@ function targetFacts(target: Target): NativeTargetFacts {
 // A drag acts at both ends: where it picks up and where it lets go. A drop with no element known
 // there is a press on nothing, which runs in the computer and is unclear on a signed-in screen.
 // Something carried onto a web page from outside any page, such as a file from the file manager,
-// is uploaded to it. A start not known to be on a page is off it. A drop in a browser window may
+// is uploaded to it. A start not known to be on a web page, such as chrome://downloads or a file:
+// tab, is off it. A drop in a browser window may
 // be on one, and so may a drop whose lookup ran out of time anywhere but another app's window.
 function drag({ target, drop, targetUnknown, dropUnknown, ...facts }: RiskFacts): ActionClass[] {
   const classes = new Set([
     ...input({ ...facts, ...(target ? { target } : {}) }),
     ...input({ ...facts, ...(drop ? { target: drop } : {}) }),
   ]);
-  const fromPage = target !== undefined && !targetUnknown && onPage(target);
+  const fromPage = target !== undefined && !targetUnknown && target.fresh && isWebUrl(target.url);
   const toPage =
     (drop && (onPage(drop) || PATTERNS.browserApp.test(drop.app ?? ""))) ||
     (dropUnknown && !drop?.app);
