@@ -1662,7 +1662,7 @@ function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
   if (next) cells.emit(next);
 }
-const STEPS: Record<ScenarioStep, () => string | undefined> = {
+const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | undefined>> = {
   approval: () => requestApproval("high"),
   ask: () => ask(true),
   takeover: () => takeover(),
@@ -1673,7 +1673,11 @@ const STEPS: Record<ScenarioStep, () => string | undefined> = {
   "cell/live": () => setCell("live"),
   "cell/reconnecting": () => setCell("reconnecting"),
   "cell/paused": () => setCell("paused"),
-  "cell/stopped": () => setCell("stopped"),
+  // A computer turned off ends the task it ran, as the daemon does.
+  "cell/stopped": async () => {
+    await endLive(session?.status === "idle" ? "done" : undefined);
+    return setCell("stopped");
+  },
   "cell/failed": () => setCell("failed"),
   "cell/fenced": () => setCell("fenced"),
 };
@@ -1851,12 +1855,12 @@ routes.get("/__qa/scenarios", (c) =>
     })),
   ),
 );
-routes.post("/__qa/scenario/:name", (c) => {
+routes.post("/__qa/scenario/:name", async (c) => {
   const name = c.req.param("name");
   const wanted = (UI_SCENARIOS as Record<string, UiScenario>)[name];
   if (!wanted) return c.text("unknown scenario", 404);
   if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
-  return reply(STEPS[wanted.step]());
+  return reply(await STEPS[wanted.step]());
 });
 routes.get("/__qa/state", (c) =>
   c.json({
@@ -1882,7 +1886,7 @@ routes.get("/gallery/*", (c) => {
 
 const atBoot = bootStep(scenario);
 if (atBoot) {
-  const problem = STEPS[atBoot]();
+  const problem = await STEPS[atBoot]();
   if (problem) throw new Error(`${scenarioName}: ${problem}`);
 }
 app = routes;

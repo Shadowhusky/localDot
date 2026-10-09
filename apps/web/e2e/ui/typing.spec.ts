@@ -17,16 +17,24 @@ interface Typing {
   typing: number[];
 }
 
-// From each key press to the frame that shows its character, laid out, less the time the page sat
-// idle waiting for that frame. Chrome holds other tasks until that frame; elsewhere a ping chain
-// counts what runs in between.
+// From each key press, as the system stamped it before it waited behind the page's other work, to
+// the frame that shows its character, laid out, less the time the page sat idle waiting for that
+// frame. Chrome holds other tasks until that frame; elsewhere a ping chain counts what runs in
+// between.
 function trackTyping() {
   const typing: number[] = [];
   (window as unknown as Typing).typing = typing;
+  let pressed = 0;
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      pressed = event.timeStamp;
+    },
+    true,
+  );
   window.addEventListener("input", (event) => {
     const field = event.target;
     if (!(field instanceof HTMLTextAreaElement)) return;
-    const pressed = event.timeStamp;
     queueMicrotask(() => {
       const handled = performance.now();
       let last = handled;

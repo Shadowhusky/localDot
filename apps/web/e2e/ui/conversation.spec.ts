@@ -32,7 +32,7 @@ async function refresh(page: Page) {
 async function send(page: Page, text: string) {
   const form = (await chat(page)).getByRole("form", { name: "Message dot" });
   await form.getByRole("textbox", { name: /^(New task|Message)$/ }).fill(text);
-  await form.getByRole("button", { name: /^(Start task|Send follow-up)$/ }).click();
+  await form.getByRole("button", { name: /^(Start task|Send|Send follow-up)$/ }).click();
 }
 
 // The task the computer runs now, and the one its session.start says it continues.
@@ -82,7 +82,7 @@ test("after Stop and Resume, the next message continues the conversation", async
   await page.getByRole("button", { name: "Resume computer" }).click();
   await expect(page.getByTestId("hud-status")).toHaveText("Task stopped");
   const rail = await chat(page);
-  await expect(rail.getByRole("textbox", { name: "New task" })).toHaveAttribute(
+  await expect(rail.getByRole("textbox", { name: "Message" })).toHaveAttribute(
     "placeholder",
     "Message dot…",
   );
@@ -96,8 +96,10 @@ test("after Stop and Resume, the next message continues the conversation", async
 test("the conversation stays while the computer is off and after it is turned on", async ({
   page,
   ui,
+  request,
 }) => {
-  await ui.open("continued");
+  const fixture = await ui.open("continued");
+  const done = await shownTask(request, fixture.origin);
   await expect(page.getByTestId("hud-status")).toHaveText("Done");
   await ui.step("off");
   await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
@@ -109,6 +111,7 @@ test("the conversation stays while the computer is off and after it is turned on
   await expect(page.getByTestId("hud-status")).toHaveText("Done");
   rail = await chat(page);
   await send(page, "And add a chart");
+  expect((await latestTask(request, fixture.origin, done)).continues).toBe(done);
   await expect(rail.getByText("And add a chart")).toBeVisible();
   await expect(rail.getByText(EARLIER)).toBeVisible();
 });
@@ -176,8 +179,13 @@ test("Continue on an older task in Replay makes its conversation current", async
       sessionId: string;
     }
   ).sessionId;
+  await page.waitForLoadState("networkidle");
+  const known = page.waitForResponse(
+    (reply) => new URL(reply.url()).pathname === "/api/conversation" && reply.ok(),
+  );
   await page.goto(`${fixture.origin}/?replay=${older}#token=${TOKEN}`);
-  const proceed = page.getByRole("button", { name: "Continue this conversation" });
+  await known;
+  const proceed = page.getByRole("button", { name: "Continue conversation" });
   await expect(proceed).not.toHaveAttribute("aria-disabled", "true");
   await proceed.click();
   await expect(page).not.toHaveURL(/replay=/);
