@@ -12,7 +12,8 @@ building on localhost. The label above the live stage identifies the screen rece
 current actions. A browser connection error does not redirect its input to the desktop.
 
 The web browser starts with the computer and stays running between tasks, so switching to it is
-immediate. If it is still starting, dot's switch waits for it rather than failing.
+immediate. If it is still starting, dot's switch waits for it rather than failing. A local
+address such as localhost opens on the desktop, and the screen switches back to it.
 
 ## Sign in once
 
@@ -21,21 +22,26 @@ browser or the computer restarts, between tasks and conversations, after the dae
 after **Replace computer**. Only one web browser at a time opens it. The desktop never sees it:
 the profile is a separate Docker volume that only the browser cell mounts, the browser's
 DevTools connection is a private pipe inside its own container, and the two cells share no
-network. Programs dot runs on the desktop cannot read its cookies or site data.
+network. Programs dot runs on the desktop cannot read its cookies or site data. The volume is
+named after the daemon's home folder, so a second localDot install on the same Docker engine
+gets its own.
 
 When upgrading, the computer's existing browser profile is copied into the shared one the first
 time the web browser starts (or before **Replace computer** would delete it). If several
 computers each had a profile, the current computer's profile is used.
 
 **Settings → Accounts** lists the sites with stored sign-ins, grouped by site, with **Sign out**
-for one site (its cookies and site data) and **Sign out of all sites**, which restarts the web
-browser with an empty profile.
+for one site (its cookies, including partitioned ones, and the saved data of the hosts they were
+set for) and **Sign out of all sites**, which restarts the web browser with an empty profile and
+deletes the profiles computers kept before sign-ins were shared. A site that keeps a sign-in only
+in the saved data of another subdomain can still remember you after **Sign out**; Settings says
+so when the site is still listed, and **Sign out of all sites** removes everything.
 
 Links that a desktop app opens (a link in a document, `xdg-open` in the terminal) still open in
 the desktop's Chromium, which has none of your sign-ins; dot opens such an address again in the
 web browser when it needs them. They are not moved to the web browser automatically, because any
-program on the desktop could then steer your signed-in browser, and switching screens while dot
-works could send its next click to the wrong screen.
+program on the desktop could then steer the web browser that holds your sign-ins, and switching
+screens while dot works could send its next click to the wrong screen.
 
 ## Signing in and returning control
 
