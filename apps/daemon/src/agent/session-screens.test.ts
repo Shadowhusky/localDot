@@ -22,8 +22,8 @@ import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
-import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
-import { AgentSession } from "./session.ts";
+import { sendManualInput } from "./manual-input.ts";
+import { AgentSession, ControlHeldError } from "./session.ts";
 import { toolHarness } from "./testing/harness.ts";
 import { dispatchTool } from "./tools/index.ts";
 import { Transfers } from "./transfers.ts";
@@ -529,7 +529,7 @@ describe("session-owned screen authority", () => {
     await taking;
   });
 
-  it("cancels late manual typing and refuses agent handback when completion is uncertain", async () => {
+  it("lets typing already on its way land before the browser goes back to dot", async () => {
     const f = fixture();
     await f.browser();
     const taking = f.session.takeover("login", "fixture login").catch(() => {});
@@ -552,17 +552,17 @@ describe("session-owned screen authority", () => {
       new AbortController().signal,
       f.factory.manual.bind(f.factory),
     );
-    const failed = expect(running).rejects.toBeInstanceOf(ManualInputUncertain);
+    const landed = expect(running).rejects.toBeInstanceOf(ControlHeldError);
     await until(() => !!active);
     const returning = f.session.handback(requestId, undefined);
-    await until(() => active?.aborted === true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(active?.aborted).toBe(false);
     expect(f.holder()).toBe("user");
+    expect(f.session.manualControl).toBe("returning");
     release.resolve();
-    await failed;
-    expect(await returning).toBe(false);
-    expect(f.holder()).toBe("user");
-    expect(f.session.manualControl).toBe("unconfirmed");
-    f.session.stop();
+    await landed;
+    expect(await returning).toBe(true);
+    expect(f.holder()).toBe("agent");
     await taking;
   });
   function tools(f: ReturnType<typeof fixture>) {
@@ -1386,7 +1386,8 @@ describe("session-owned screen authority", () => {
       request.holder === "agent" ? barrier.promise : Promise.resolve(),
     );
     const returning = f.session.handback(requestId, "ready");
-    expect(manual.signal.aborted).toBe(true);
+    expect(manual.returning.aborted).toBe(true);
+    expect(manual.signal.aborted).toBe(false);
     expect(f.holder()).toBe("user");
     manual.finish();
     await until(() => f.grant.mock.calls.at(-1)?.[0].holder === "agent");

@@ -42,14 +42,18 @@ describe("the narrator's line", () => {
     expect(lastSentence("Checking `F3`\nagainst the _total_.", true)).toBe("against the total.");
   });
 
-  it("cuts a long sentence at a word, with an ellipsis", () => {
+  it("keeps a long sentence whole, for the band to fit to the width it has", () => {
+    const sentence =
+      "I'm going to compare every month's net figure against revenue minus returns, starting with February and working down the sheet.";
+    expect(lastSentence(sentence, true)).toBe(sentence);
+  });
+
+  it("cuts only a runaway sentence, at a word, with an ellipsis", () => {
     const line = lastSentence(
-      "I'm going to compare every month's net figure against revenue minus returns, starting with February and working down the sheet.",
+      `I'm going to compare every month's net figure against revenue minus returns, ${"then the next month, ".repeat(12)}and so on down the sheet.`,
       true,
     );
-    expect(line).toBe(
-      "I'm going to compare every month's net figure against revenue minus returns…",
-    );
-    expect(line.length).toBeLessThanOrEqual(81);
+    expect(line).toMatch(/^I'm going to compare every month's net figure .* then the next…$/);
+    expect(line.length).toBeLessThanOrEqual(241);
   });
 });

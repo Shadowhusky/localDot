@@ -24,7 +24,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-function mount(takeover: boolean) {
+function mount(takeover: boolean, manualControl: "ready" | "unconfirmed" = "ready") {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
   const api = createApi("fixture", { origin: "https://owned.invalid", fetchImpl });
   const question: AgentQuestion = {
@@ -64,7 +64,7 @@ function mount(takeover: boolean) {
       cellId: CELL,
       status: "waiting_user",
       toolCalls: 0,
-      ...(takeover ? { pendingTakeover: ID, manualControl: "ready" as const } : { pendingAsk: ID }),
+      ...(takeover ? { pendingTakeover: ID, manualControl } : { pendingAsk: ID }),
     },
     availability: "ready",
     fresh: true,
@@ -107,7 +107,7 @@ function mount(takeover: boolean) {
       manualVisible: visible,
       refreshCell: () => {},
     });
-    const handBack = useHandBack({ takeover: control, controls, drained, unconfirmed: false });
+    const handBack = useHandBack({ takeover: control, controls, drained });
     return takeover ? (
       <ControlTools
         send={send}
@@ -206,6 +206,14 @@ it("lets typed input reach the computer before control goes back to dot", async 
   expect(f.drained).toHaveBeenCalledOnce();
   expect(f.fetchImpl).not.toHaveBeenCalled();
   await act(async () => drained.resolve(true));
+  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
+  expect(String(f.fetchImpl.mock.calls[0]?.[0])).toContain("/takeover/done");
+});
+it("hands back while the computer is still confirming the user's last input", async () => {
+  const f = mount(true, "unconfirmed");
+  const handBack = screen.getByRole("button", { name: "Hand back" });
+  expect(handBack.hasAttribute("aria-disabled")).toBe(false);
+  fireEvent.click(handBack);
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
   expect(String(f.fetchImpl.mock.calls[0]?.[0])).toContain("/takeover/done");
 });

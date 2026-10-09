@@ -172,7 +172,7 @@ describe("daemon-owned manual input", () => {
     await drain;
     expect(f.session.stopped).toBe(true);
   });
-  it("cancels admitted typing but retains the fence when its completion cannot be verified", async () => {
+  it("lets admitted typing land before hand-back, and keeps the fence when nothing can confirm it", async () => {
     const f = await setup(),
       done = deferred(),
       entered = deferred();
@@ -189,7 +189,7 @@ describe("daemon-owned manual input", () => {
     );
     await entered.promise;
     const handback = f.session.handback(f.requestId, undefined);
-    expect(signal?.aborted).toBe(true);
+    expect(signal?.aborted).toBe(false);
     done.resolve();
     expect(await active).toBeInstanceOf(ManualInputUncertain);
     expect(await handback).toBe(false);
@@ -198,6 +198,92 @@ describe("daemon-owned manual input", () => {
     expect(() => f.session.beginBrain()).toThrow(ControlHeldError);
     await expect(f.send(click)).rejects.toBeInstanceOf(ControlHeldError);
     expect(f.session.endTakeover(f.requestId, "bypass")).toBe(false);
+  });
+  it("lifts the fence once the computer confirms what landed, then hands back", async () => {
+    const f = await setup(),
+      answer = deferred();
+    f.access.confirm = vi.fn(async () => answer.promise);
+    f.type.mockResolvedValueOnce({
+      done: true,
+      count: 1,
+      firstPressMono: 1,
+      injector: "xtest",
+      armedMono: 0,
+    });
+    await expect(f.send({ kind: "text", text: "partly typed" })).rejects.toBeInstanceOf(
+      ManualInputUncertain,
+    );
+    expect(f.session.manualControl).toBe("unconfirmed");
+    expect(f.access.confirm).toHaveBeenCalledOnce();
+    answer.resolve();
+    await vi.waitFor(() => expect(f.session.manualControl).toBe("ready"));
+    await f.send(click);
+    expect(await f.session.handback(f.requestId, undefined)).toBe(true);
+    expect(await f.outcome).toEqual({ by: "user" });
+    expect(f.access.confirm).toHaveBeenCalledOnce();
+  });
+  it("never lifts a later input's fence with an earlier screen's confirmation", async () => {
+    const f = await setup();
+    const confirm = vi.fn(async () => {});
+    f.access.confirm = confirm;
+    f.input.mockRejectedValueOnce(new Error("synthetic press not seen"));
+    await expect(f.send(click)).rejects.toBeInstanceOf(ManualInputUncertain);
+    await vi.waitFor(() => expect(f.session.manualControl).toBe("ready"));
+    // The next input goes to a screen that cannot confirm what landed.
+    const unconfirmable: ManualDesktop = { ...f.access, confirm: undefined };
+    f.input.mockRejectedValueOnce(new Error("synthetic press not seen"));
+    await expect(
+      sendManualInput(
+        f.session,
+        { requestId: f.requestId, input: click },
+        new AbortController().signal,
+        () => unconfirmable,
+      ),
+    ).rejects.toBeInstanceOf(ManualInputUncertain);
+    expect(await f.session.handback(f.requestId, undefined)).toBe(false);
+    expect(f.session.manualControl).toBe("unconfirmed");
+    expect(confirm).toHaveBeenCalledOnce();
+  });
+  it("asks the computer again until it confirms, and hand-back asks too", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = await setup();
+      let answers = 0;
+      f.access.confirm = vi.fn(async () => {
+        answers++;
+        if (answers < 4) throw new Error("synthetic desktop not answering");
+      });
+      f.input.mockRejectedValueOnce(new Error("synthetic press not seen"));
+      await expect(f.send(click)).rejects.toBeInstanceOf(ManualInputUncertain);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(answers).toBe(2);
+      expect(f.session.manualControl).toBe("unconfirmed");
+      // Hand-back asks at once rather than waiting for the next try.
+      expect(await f.session.handback(f.requestId, undefined)).toBe(false);
+      expect(answers).toBe(3);
+      expect(f.session.manualControl).toBe("unconfirmed");
+      await vi.advanceTimersByTimeAsync(500);
+      expect(answers).toBe(4);
+      expect(f.session.manualControl).toBe("ready");
+      expect(await f.session.handback(f.requestId, undefined)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("leaves the user in control to try again when a hand-back cannot finish", async () => {
+    const f = await setup(),
+      before = deferred(),
+      caller = new AbortController();
+    f.access.prepare = () => before.promise;
+    const active = f.send(click).catch(() => undefined);
+    const handback = f.session.handback(f.requestId, undefined, caller.signal);
+    expect(f.session.manualControl).toBe("returning");
+    caller.abort();
+    expect(await handback).toBe(false);
+    before.resolve();
+    await active;
+    expect(f.session.manualControl).toBe("ready");
+    expect(await f.session.handback(f.requestId, undefined)).toBe(true);
   });
   it("rejects changed endpoint/readiness after preflight before any injection", async () => {
     const f = await setup(),

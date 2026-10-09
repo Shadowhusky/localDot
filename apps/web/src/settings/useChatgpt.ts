@@ -7,6 +7,7 @@ import {
   type ChatgptSummary,
   cancelChatgpt,
   chatgptSummary,
+  checkChatgpt,
   installChatgpt,
   loginChatgpt,
   logoutChatgpt,
@@ -14,11 +15,23 @@ import {
   refreshChatgpt,
 } from "./chatgpt-api.ts";
 
-type Action = "install" | "login" | "cancel_install" | "cancel_login" | "logout" | "refresh";
+type Action =
+  | "install"
+  | "check"
+  | "login"
+  | "cancel_install"
+  | "cancel_login"
+  | "logout"
+  | "refresh";
 type Command = { action: Action; abort: AbortController; epoch: number };
 const LOGIN_MS = 10 * 60 * 1000;
 const INSTALL_MS = 15 * 60 * 1000;
 const away = () => document.hidden || navigator.onLine === false;
+// Installed, with this Mac's safety check still to finish: the daemon runs it by itself.
+const preparing = (status: Pick<ChatgptSummary, "available" | "install" | "sandbox">) =>
+  status.available &&
+  status.install.state === "ready" &&
+  (status.sandbox === "unchecked" || status.sandbox === "checking");
 export function useChatgpt(api: ApiClient, visible: boolean) {
   const [summary, setSummary] = useState<ChatgptSummary | null>(null);
   const [verified, setVerified] = useState(false);
@@ -133,7 +146,11 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
         loginDeadline.current = null;
         setExpired(false);
       }
-      if (["ready", "failed"].includes(response.install.state)) {
+      if (preparing(response)) {
+        watchingInstall.current = false;
+        setInstallWatching(false);
+        installDeadline.current ??= Date.now() + INSTALL_MS;
+      } else if (["ready", "failed"].includes(response.install.state)) {
         watchingInstall.current = false;
         setInstallWatching(false);
         installDeadline.current = null;
@@ -293,7 +310,9 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
   useEffect(() => {
     if (!visible || blocked || busy || checking || !summary || expired || !usable()) return;
     const installing =
-      installWatching || ["downloading", "verifying"].includes(summary.install.state);
+      installWatching ||
+      ["downloading", "verifying"].includes(summary.install.state) ||
+      preparing(summary);
     if (!installing && summary.state !== "signing_in") return;
     const until = installing
       ? (installDeadline.current ?? Date.now() + INSTALL_MS)
@@ -330,6 +349,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
     if (command.current && (!cancelling || command.current.action.startsWith("cancel_"))) return;
     const status = currentStatus.current;
     const ready = known.current && status?.available && status.install.state === "ready";
+    const checked = ready && status?.sandbox === "passed";
     if (
       action === "install" &&
       (watchingInstall.current ||
@@ -339,9 +359,14 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
         (status.install.state === "failed" && status.install.code === "unsupported_platform"))
     )
       return;
-    if (action === "login" && (!ready || !["signed_out", "expired"].includes(status?.state ?? "")))
+    if (action === "check" && (!ready || !["unchecked", "failed"].includes(status?.sandbox ?? "")))
       return;
-    if (["refresh", "logout"].includes(action) && (!ready || status?.state === "signing_in"))
+    if (
+      action === "login" &&
+      (!checked || !["signed_out", "expired"].includes(status?.state ?? ""))
+    )
+      return;
+    if (["refresh", "logout"].includes(action) && (!checked || status?.state === "signing_in"))
       return;
     if (cancelling) {
       const kind = action === "cancel_install" ? "install" : "login";
@@ -383,6 +408,14 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
         setSummary(next);
         if (["downloading", "verifying"].includes(install.state))
           installDeadline.current = Date.now() + INSTALL_MS;
+        await read(false, operation);
+      } else if (action === "check") {
+        const sandbox = await checkChatgpt(api, operation.abort.signal);
+        if (!live() || !status) return;
+        const next = { ...status, sandbox };
+        currentStatus.current = next;
+        setSummary(next);
+        installDeadline.current = Date.now() + INSTALL_MS;
         await read(false, operation);
       } else if (action === "login") {
         const material = await loginChatgpt(api, operation.abort.signal);
@@ -475,6 +508,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
       owner.current.api === api &&
       summary?.available === true &&
       summary.install.state === "ready" &&
+      summary.sandbox === "passed" &&
       summary.state === "signed_in",
     canCancelInstall:
       watchingInstall.current ||
@@ -483,6 +517,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
     canCancelLogin: pendingKind.current === "login" || summary?.state === "signing_in",
     isMutating: () => command.current !== null,
     install: () => run("install"),
+    checkSandbox: () => run("check"),
     login: () => run("login"),
     cancelInstall: () => run("cancel_install"),
     cancelLogin: () => run("cancel_login"),

@@ -366,6 +366,7 @@ agent = createAgent({
   killSwitch,
   keydPorts,
   codex: { realHome: userInfo().homedir, user: userInfo().username },
+  claudeCode: { realHome: userInfo().homedir },
   recall: (query, limit, exclude) => recallHits(searchIndex, query, limit, exclude),
   notesChanged: (file) => searchFeed.reindexNotes(file),
   policy: routinePolicy({ runOf: (id) => agent?.runner.get(id)?.run, expired: expiredRuns }),

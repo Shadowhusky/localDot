@@ -44,7 +44,7 @@ const HEALTHY = {
   hairpin: { state: "active" as const, source: "nat-pmp", addresses: 1 },
 };
 const PLAN_REFUSAL =
-  "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+  "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";
 
 function controller(over: Partial<KeysController> = {}): KeysController {
   return {

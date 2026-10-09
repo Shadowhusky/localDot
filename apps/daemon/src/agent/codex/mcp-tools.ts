@@ -26,26 +26,29 @@ export const CodexBrowserActInput = BrowserAction.omit({ basedOn: true });
 const W = MODEL_SCREEN.width;
 const H = MODEL_SCREEN.height;
 
+// The computer tool for every harness; each adds how its actions are checked against the screen.
+export const COMPUTER_DESCRIPTION =
+  `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: screenshot (returns the screen), ` +
+  `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}, or where the cursor is without one; ` +
+  'button left/right/middle; count 1-3; mods: modifier keys held during the click, such as ["shift"] or ' +
+  '["ctrl"]), drag (path: 2 to 64 points {x, y} to follow, start first, such as a stroke when drawing; ' +
+  `button; mods; ms up to ${MAX_DRAG_MS} for the motion; one approval covers the whole path), move (point: ` +
+  "hovers, or drags while a button is down), mouse_down (point optional, button, mods: the button stays " +
+  "down until mouse_up, at most 60 s; a move, a scroll and the mouse_up while it is down drag from where " +
+  "it went down, and a drop on a send, post or delete control on a web page, or a file carried " +
+  "onto a web page, asks first), " +
+  "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
+  "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
+  "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
+  "(region {x, y, w, h}, returns that part enlarged), cursor_position, batch (steps: up to " +
+  `${MAX_BATCH_STEPS} of the actions above but screenshot, zoom and cursor_position, run in order with one ` +
+  "screenshot at the end; for predictable sequences such as click a field, type, press Tab, type, press " +
+  "Return; it stops at a step that fails, whose target changed, or that needs the user's approval, and " +
+  "says which). Each action can return a new screenshot; when the screen did not change, it says so " +
+  "instead of sending the same image. Use zoom to read small details.";
+
 export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
-  computer:
-    `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: screenshot (returns the screen), ` +
-    `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}, or where the cursor is without one; ` +
-    'button left/right/middle; count 1-3; mods: modifier keys held during the click, such as ["shift"] or ' +
-    '["ctrl"]), drag (path: 2 to 64 points {x, y} to follow, start first, such as a stroke when drawing; ' +
-    `button; mods; ms up to ${MAX_DRAG_MS} for the motion; one approval covers the whole path), move (point: ` +
-    "hovers, or drags while a button is down), mouse_down (point optional, button, mods: the button stays " +
-    "down until mouse_up, at most 60 s; a move, a scroll and the mouse_up while it is down drag from where " +
-    "it went down, and a drop on a send, post or delete control on a web page, or a file carried " +
-    "onto a web page, asks first), " +
-    "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
-    "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
-    "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
-    "(region {x, y, w, h}, returns that part enlarged), cursor_position, batch (steps: up to " +
-    `${MAX_BATCH_STEPS} of the actions above but screenshot, zoom and cursor_position, run in order with one ` +
-    "screenshot at the end; for predictable sequences such as click a field, type, press Tab, type, press " +
-    "Return; it stops at a step that fails, whose target changed, or that needs the user's approval, and " +
-    "says which). Each action can return a new screenshot; when the screen did not change, it says so " +
-    "instead of sending the same image. Use zoom to read small details. Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.",
+  computer: `${COMPUTER_DESCRIPTION} Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.`,
   shell:
     "Run one bash command in the virtual computer's terminal, as its user, in their home. Returns the " +
     "exit status and the end of the output.",
@@ -111,10 +114,12 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   return rest;
 }
 
-export function codexTools(): McpToolDescriptor[] {
+export function codexTools(
+  descriptions: Record<ToolName, string> = CODEX_TOOL_DESCRIPTIONS,
+): McpToolDescriptor[] {
   return TOOL_NAMES.map((name) => ({
     name,
-    description: CODEX_TOOL_DESCRIPTIONS[name],
+    description: descriptions[name],
     inputSchema: jsonSchema(
       name === "computer"
         ? CodexComputerInput

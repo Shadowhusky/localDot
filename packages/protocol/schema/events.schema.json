@@ -4786,7 +4786,10 @@
           "properties": {
             "provider": {
               "type": "string",
-              "const": "chatgpt"
+              "enum": [
+                "chatgpt",
+                "claude-code"
+              ]
             },
             "plan": {
               "type": "string",

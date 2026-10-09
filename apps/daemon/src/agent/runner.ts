@@ -5,6 +5,7 @@ import {
   type AutonomyPolicy,
   BootConfig,
   type CheckIns,
+  type ClaudeCodeStatus,
   DEFAULT_AGENT_LIMITS,
   freezeAutonomy,
   isJevKey,
@@ -34,7 +35,8 @@ import {
   BindingError,
   bindingOf,
   CHATGPT,
-  checkChatgptChoice,
+  CLAUDE_CODE,
+  checkPlanChoices,
   planOnly,
   pricingOf,
   type ResolvedRole,
@@ -43,6 +45,7 @@ import {
   taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
+import { ClaudeCodeCleanupError, type ClaudeCodeDriver } from "./claude-code/driver.ts";
 import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
@@ -68,6 +71,7 @@ const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
+export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
 // What Replay calls the user's own time on the computer.
 const HOLD_TITLE = "You used the computer";
 // The brain checks in only where the user asked it to.
@@ -148,11 +152,19 @@ export interface AgentRunnerDeps {
     ended?(sessionId: string): void | Promise<void>;
     authGeneration?(): number;
   };
+  claudeCode?: {
+    driver: Pick<ClaudeCodeDriver, "run"> &
+      Partial<
+        Pick<ClaudeCodeDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">
+      >;
+    status(): Promise<Pick<ClaudeCodeStatus, "state" | "reason">>;
+  };
 }
 // "none": the user's own hold on the computer, which no model works on.
 type ModelSelection =
   | { kind: "api"; roles: readonly ResolvedRole[]; pricing: TaskPricing; initialBudget?: number }
   | { kind: "chatgpt"; model: string; denyRead: readonly string[] }
+  | { kind: "claude-code"; model: string }
   | { kind: "none" };
 interface Runtime {
   session: AgentSession;
@@ -181,6 +193,7 @@ function uncertain(error: unknown): boolean {
   return (
     error instanceof BrainCleanupError ||
     error instanceof CodexCleanupError ||
+    error instanceof ClaudeCodeCleanupError ||
     error instanceof CleanupUncertain ||
     (error instanceof AggregateError && error.errors.some(uncertain))
   );
@@ -188,6 +201,9 @@ function uncertain(error: unknown): boolean {
 const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal });
 const budgetHold = (rt: Runtime) =>
   rt.pause === "budget" ? (rt.budgetScope ?? "task") : undefined;
+// A plan's own app does the model's work outside localDot's brain cell and key layer.
+const native = (selection: ModelSelection) =>
+  selection.kind === "chatgpt" || selection.kind === "claude-code";
 
 // One serialized lifecycle owns each task. Generation retirement is synchronous; Docker and
 // keyd settlement happen afterward, before a replacement can be admitted.
@@ -326,18 +342,21 @@ export class AgentRunner {
       let selection: ModelSelection;
       // Undefined when the saved keys couldn't be read.
       let keys: KeydRecord[] | undefined = [];
-      if (settings.main?.provider === CHATGPT) {
-        for (const role of ["main", "fast", "local"] as const) {
-          const choice = settings[role];
-          if (choice?.provider === CHATGPT) {
-            try {
-              checkChatgptChoice(role, choice);
-            } catch (error) {
-              if (error instanceof BindingError) throw new AgentError(400, error.message);
-              throw error;
-            }
-          }
-        }
+      try {
+        checkPlanChoices(settings);
+      } catch (error) {
+        if (error instanceof BindingError) throw new AgentError(400, error.message);
+        throw error;
+      }
+      if (settings.main?.provider === CLAUDE_CODE) {
+        const claude = this.deps.claudeCode;
+        if (!claude) throw new AgentError(400, CLAUDE_CODE_OFF);
+        const status = await claude.status();
+        signal?.throwIfAborted();
+        if (status.state !== "signed_in")
+          throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
+        selection = { kind: "claude-code", model: settings.main.model };
+      } else if (settings.main?.provider === CHATGPT) {
         const codex = this.deps.codex;
         if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
         if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
@@ -352,14 +371,6 @@ export class AgentRunner {
           model: settings.main.model,
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
-        // The plan's own models need no key; only a Jev key can check where data goes. Keys that
-        // can't be read leave the check unable to answer, never off.
-        if (settings.purposeCheck !== "off")
-          keys = await this.deps.keyd.secrets().then(
-            (all) => all.filter(isJevKey),
-            () => undefined,
-          );
-        signal?.throwIfAborted();
       } else {
         keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
@@ -378,6 +389,13 @@ export class AgentRunner {
             : { initialBudget: budget ?? settings.taskBudgetUSD }),
         };
       }
+      // A plan's own models need no key; only a Jev key can check where data goes. Keys that
+      // can't be read leave the check unable to answer, never off.
+      if (native(selection) && settings.purposeCheck !== "off")
+        keys = await this.deps.keyd.secrets().then(
+          (all) => all.filter(isJevKey),
+          () => undefined,
+        );
       signal?.throwIfAborted();
       const cell = this.#ready(cellId);
       if (this.deps.live.get(cellId))
@@ -670,13 +688,13 @@ export class AgentRunner {
         ),
       sleep: this.deps.sleep ?? sleep,
       mode: rt.selection.kind === "api" ? "api" : "native",
-      ...(rt.selection.kind === "chatgpt"
+      ...(native(rt.selection)
         ? {
             native: {
               pause: (
                 pause: Pick<import("@localdot/protocol").PauseSnapshot, "requestId" | "revision">,
               ) => {
-                const driver = this.deps.codex?.driver;
+                const driver = this.#nativeDriver(rt);
                 if (!driver?.pauseAtBoundary)
                   throw new Error("native Pause receipt is unavailable");
                 return driver.pauseAtBoundary(rt.session, pause);
@@ -685,7 +703,7 @@ export class AgentRunner {
                 pause: Pick<import("@localdot/protocol").PauseSnapshot, "requestId" | "revision">,
                 receipt: import("./codex/native-pause.ts").NativePauseReceipt,
               ) => {
-                const driver = this.deps.codex?.driver;
+                const driver = this.#nativeDriver(rt);
                 if (!driver?.resumeAtBoundary)
                   throw new Error("native Resume receipt is unavailable");
                 return driver.resumeAtBoundary(rt.session, pause, receipt);
@@ -696,6 +714,13 @@ export class AgentRunner {
         : {}),
     });
     return rt.safety;
+  }
+  #nativeDriver(rt: Runtime) {
+    return rt.selection.kind === "chatgpt"
+      ? this.deps.codex?.driver
+      : rt.selection.kind === "claude-code"
+        ? this.deps.claudeCode?.driver
+        : undefined;
   }
   isChatgpt(id: string): boolean {
     return this.#runtime.get(id)?.selection.kind === "chatgpt";
@@ -710,8 +735,8 @@ export class AgentRunner {
   selectionOf(id: string) {
     const selection = this.#runtime.get(id)?.selection;
     if (!selection || selection.kind === "none") return undefined;
-    return selection.kind === "chatgpt"
-      ? { kind: "chatgpt" as const, model: selection.model }
+    return selection.kind === "chatgpt" || selection.kind === "claude-code"
+      ? { kind: selection.kind, model: selection.model }
       : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
@@ -758,6 +783,8 @@ export class AgentRunner {
     if (rt.selection.kind === "none") throw new AgentError(409, "no task is at work");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
+    if (rt.selection.kind === "claude-code")
+      throw new AgentError(409, "A Claude Code task uses your plan's limits, not a budget.");
     if (planOnly(rt.selection.roles))
       throw new AgentError(409, "This task uses your plan's limits.");
     await this.#exclusive(rt, async () => {
@@ -825,7 +852,7 @@ export class AgentRunner {
     this.deps.fences?.capture(
       session.cellId,
       session.id,
-      rt?.selection.kind === "chatgpt" ? "native" : "api",
+      rt && native(rt.selection) ? "native" : "api",
     );
     if (rt?.containment) return rt.containment;
     const work = Promise.resolve()
@@ -895,11 +922,7 @@ export class AgentRunner {
     if (this.#starting.has(cellId) || this.deps.live.idleOperationPending(cellId)) return false;
     const tasks = [...this.#runtime.values()].filter((rt) => rt.session.cellId === cellId);
     for (const rt of tasks) {
-      this.deps.fences.capture(
-        cellId,
-        rt.session.id,
-        rt.selection.kind === "chatgpt" ? "native" : "api",
-      );
+      this.deps.fences.capture(cellId, rt.session.id, native(rt.selection) ? "native" : "api");
       rt.session.stop();
     }
     const retirement = (async () => {
@@ -1027,7 +1050,12 @@ export class AgentRunner {
           code =
             rt.selection.kind === "chatgpt"
               ? await this.deps.codex?.driver.run(session, { model: rt.selection.model, resume })
-              : await this.#brainRun(rt, skills, resume);
+              : rt.selection.kind === "claude-code"
+                ? await this.deps.claudeCode?.driver.run(session, {
+                    model: rt.selection.model,
+                    resume,
+                  })
+                : await this.#brainRun(rt, skills, resume);
         } catch (error) {
           if (uncertain(error)) throw error;
           if (session.stopped) break;
@@ -1088,7 +1116,9 @@ export class AgentRunner {
               reason:
                 rt.selection.kind === "chatgpt"
                   ? "The ChatGPT task kept stopping."
-                  : "the brain kept crashing",
+                  : rt.selection.kind === "claude-code"
+                    ? "Claude Code kept stopping."
+                    : "the brain kept crashing",
             });
             break;
           }
@@ -1097,7 +1127,9 @@ export class AgentRunner {
             reason:
               rt.selection.kind === "chatgpt"
                 ? `Codex stopped (exit ${code ?? "unknown"}); restarting`
-                : "the brain stopped; restarting from saved history",
+                : rt.selection.kind === "claude-code"
+                  ? "Claude Code stopped; restarting from saved history"
+                  : "the brain stopped; restarting from saved history",
           });
           const interrupted = new AbortController();
           rt.backoff = interrupted;
@@ -1138,8 +1170,8 @@ export class AgentRunner {
         }
       }
       if (
-        rt.selection.kind === "chatgpt" &&
-        this.deps.codex?.driver.retirementConfirmed?.(session.id) === true
+        native(rt.selection) &&
+        this.#nativeDriver(rt)?.retirementConfirmed?.(session.id) === true
       )
         this.deps.fences?.confirmNativeRetirement(session.cellId, session.id);
       if (session.stopped && reason === "done") reason = "stopped";

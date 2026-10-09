@@ -1,5 +1,6 @@
 import {
   CHATGPT_DEVICE_CODE_OFF,
+  ChatgptSandbox,
   CodexInstallState,
   SubscriptionUsageData,
 } from "@localdot/protocol";
@@ -34,6 +35,7 @@ const status = z
     codexVersion: z.literal("0.154.0"),
     state: z.enum(["unavailable", "signed_out", "signing_in", "signed_in", "expired"]),
     install: CodexInstallState,
+    sandbox: ChatgptSandbox,
     reason: text(512).optional(),
     lastError: text(512).optional(),
     account: z
@@ -60,7 +62,8 @@ const status = z
   .superRefine((value, ctx) => {
     if (
       (value.state === "signed_in" && (!value.available || !value.account)) ||
-      (value.state !== "unavailable" && value.install.state !== "ready") ||
+      (value.state !== "unavailable" &&
+        (value.install.state !== "ready" || value.sandbox !== "passed")) ||
       (value.login && value.state !== "signing_in") ||
       (!value.available && value.state !== "unavailable")
     )
@@ -78,6 +81,7 @@ export function chatgptSummary(value: ChatgptResponse): ChatgptSummary {
     codexVersion: value.codexVersion,
     state: value.state,
     install: value.install,
+    sandbox: value.sandbox,
     ...(value.reason ? { reason: value.reason } : {}),
     ...(value.account ? { account: value.account } : {}),
     ...(value.usage ? { usage: value.usage } : {}),
@@ -234,6 +238,13 @@ export async function installChatgpt(
     await request(api, "POST", "/api/agent/chatgpt/install", 202, signal),
     true,
   );
+}
+export async function checkChatgpt(api: ApiClient, signal: AbortSignal): Promise<ChatgptSandbox> {
+  return checked(
+    z.strictObject({ sandbox: ChatgptSandbox }),
+    await request(api, "POST", "/api/agent/chatgpt/check", 202, signal),
+    true,
+  ).sandbox;
 }
 export async function loginChatgpt(
   api: ApiClient,

@@ -9,7 +9,7 @@ import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { BrainCellsDeps } from "./brain-cell.ts";
-import { sendManualInput } from "./manual-input.ts";
+import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { AgentSession } from "./session.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
 
@@ -213,6 +213,67 @@ describe("production agent ownership wiring", () => {
       }
     },
   );
+  it("settles input whose landing was unknown only with the desktop that took it", async () => {
+    const h = setup();
+    await h.agent.start();
+    const id = h.log.createSession("manual sample"),
+      session = new AgentSession(id, h.cellId, "manual sample", h.log);
+    h.agent.runner.sessions.set(id, session);
+    session.beginBrain();
+    let finish!: () => void;
+    h.live.start(
+      h.cellId,
+      id,
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const outcome = session
+      .takeover("login", "Synthetic login")
+      .catch(() => ({ by: "stop" as const }));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    const requestId = required(session.pendingTakeover),
+      fake = new FakeDesktopd({
+        input: () => ({ status: 504, body: "1 press(es) not seen" }),
+        releaseMs: 30,
+      }),
+      client = new DesktopdClient(
+        required(h.deps.cells.endpoints(h.cellId)).desktopd,
+        fake.fetchImpl,
+      ),
+      clocks = new ClockMap(
+        async () => 1,
+        () => 1000,
+      );
+    h.deps.registry.for = () => ({ client, clocks });
+    const tab = () =>
+      sendManualInput(
+        session,
+        { requestId, input: { kind: "key", combo: ["tab"] } },
+        new AbortController().signal,
+        h.agent.routes.manual,
+      );
+    try {
+      await expect(tab()).rejects.toBeInstanceOf(ManualInputUncertain);
+      await vi.waitFor(() => expect(session.manualControl).toBe("ready"));
+      expect(fake.calls.map((call) => call.path)).toEqual(["/input", "/release"]);
+      // The desktop is replaced while it answers: what the old one says settles nothing.
+      await expect(tab()).rejects.toBeInstanceOf(ManualInputUncertain);
+      h.change({}, "r".repeat(43));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(session.manualControl).toBe("unconfirmed");
+      expect(await session.handback(requestId, undefined)).toBe(false);
+      expect(session.controlHeld).toBe(true);
+    } finally {
+      session.stop();
+      await outcome;
+      h.agent.runner.sessions.delete(id);
+      finish();
+      await h.live.settled(id);
+      clocks.stop();
+    }
+  });
   it("blocks allocation before successful startup sweep and includes pending desktop ports", async () => {
     const h = setup();
     expect(() => h.agent.reservedPorts()).toThrow("cleanup");

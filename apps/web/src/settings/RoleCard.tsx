@@ -17,7 +17,7 @@ import {
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
-import { CHATGPT } from "./chooser.ts";
+import { subscription } from "./chooser.ts";
 import { ModelChooser, modelNote, providerNote } from "./ModelChooser.tsx";
 
 const ROLE: Record<ModelRole, { title: string; description: string }> = {
@@ -46,8 +46,8 @@ export interface RoleCardProps {
   keys: readonly PickerKey[];
   keyLayer: "online" | "offline" | "unknown";
   subscriptionModels?: readonly SubscriptionModel[];
-  // Off while the main model uses the ChatGPT plan.
-  inactive?: boolean;
+  // Why the role is off: the main model runs on a plan's own app, which brings its own models.
+  inactive?: string;
   manualPrice?: { input: string; output: string };
   onChange(value: RoleChoice | undefined): void;
   onKeys(role: ModelRole, provider: string, trigger: HTMLButtonElement): void;
@@ -100,7 +100,7 @@ export function RoleCard({
             modelNote(value, providers),
           provider && !provider.notOffered && !provider.local && keyNote(provider),
           manualPrice &&
-            value.provider !== CHATGPT &&
+            !subscription(value.provider) &&
             "Prices are US dollars per million tokens, from 0 to 10,000; one may be 0. Used to set aside a task's spending. It isn't your bill.",
         ].filter((note): note is string => Boolean(note))
       : [];
@@ -150,9 +150,7 @@ export function RoleCard({
             label={<span id={titleId}>{title}</span>}
             description={inactive ? undefined : description}
             checked={!!value && !inactive}
-            disabledReason={
-              inactive ? "Off while the main model uses the ChatGPT plan." : undefined
-            }
+            disabledReason={inactive}
             onCheckedChange={(checked) =>
               onChange(checked ? { provider: "", model: "" } : undefined)
             }
@@ -247,7 +245,7 @@ function RoleDetails({
         </div>
       )}
       {provider.custom && <CustomEndpoint value={value} onChange={onChange} />}
-      {manualPrice && value.provider !== CHATGPT && (
+      {manualPrice && !subscription(value.provider) && (
         <ManualPrice value={manualPrice} onPrice={onPrice} />
       )}
     </>

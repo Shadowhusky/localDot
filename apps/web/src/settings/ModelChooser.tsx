@@ -10,7 +10,7 @@ import {
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
-import { CHATGPT, modelItems, providerGroups } from "./chooser.ts";
+import { CHATGPT, CLAUDE_CODE, modelItems, providerGroups, subscription } from "./chooser.ts";
 
 export interface ModelChooserProps {
   modelRole: ModelRole;
@@ -22,12 +22,13 @@ export interface ModelChooserProps {
 
 export function providerNote(id: string): string | undefined {
   if (id === CHATGPT) return "Uses your ChatGPT account. No key or price needed.";
+  if (id === CLAUDE_CODE) return "No key or price needed.";
   const provider = providerById(id);
   if (!provider) return id ? "This provider is no longer offered. Choose another." : undefined;
   if (provider.notOffered) return provider.notOffered;
   if (provider.plan) return ["Uses your plan's limits.", provider.rule].filter(Boolean).join(" ");
   if (provider.id === "anthropic")
-    return "Uses API keys only; Claude plan sign-ins aren't allowed for other apps.";
+    return "Uses API keys. To use your Claude plan, choose Claude Code (your plan).";
   return undefined;
 }
 
@@ -55,11 +56,14 @@ export function ModelChooser({
   const provider = providerById(value.provider);
   const models = providers.find((row) => row.id === value.provider)?.models ?? [];
   const typed = !!provider && customModelAllowed(provider);
-  const chatgpt = value.provider === CHATGPT;
+  const plan = subscription(value.provider);
   const items = modelItems(role, provider, value.provider, models, subscriptionModels, value.model);
-  const empty = chatgpt
-    ? "Sign in and check the account to load its models."
-    : "No models in the list yet. Refresh the model list.";
+  const empty =
+    value.provider === CHATGPT
+      ? "Sign in and check the account to load its models."
+      : value.provider === CLAUDE_CODE
+        ? "Set up Claude Code to load its models."
+        : "No models in the list yet. Refresh the model list.";
   const idProblem = value.model ? modelIdProblem(value.model) : null;
   return (
     <>
@@ -73,7 +77,7 @@ export function ModelChooser({
           onValueChange={(id) => onChange({ provider: id, model: "" })}
         />
       </Field>
-      {(chatgpt || (provider && !provider.notOffered)) &&
+      {(plan || (provider && !provider.notOffered)) &&
         (typed && !models.length ? (
           <Field label="Model ID" inline className="ui-group-row" error={idProblem ?? undefined}>
             <TextField

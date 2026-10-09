@@ -125,7 +125,7 @@ describe("independent key safeguard at all four daemon text ingresses", () => {
         const refusal = await response.text();
         expect(refusal).toContain(
           /^sk-ant-(?:oat|ort|sid)/.test(key)
-            ? "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead."
+            ? "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key."
             : "Recognised API keys belong in Keys",
         );
         expect(refusal).not.toContain(key);

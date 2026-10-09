@@ -31,6 +31,7 @@ export interface ManualStreamPeer {
 // The user's input while they hold control, delivered strictly in order through the same lease,
 // checks and redaction as a single input. A burst of input holds one lease, and so does a button
 // the user keeps down: hand-back and Stop wait for the stream to let go before control moves on.
+// A hand-back lets the input already on its way land; a dropped socket does too.
 export class ManualStream {
   readonly #session: AgentSession;
   readonly #requestId: string;
@@ -95,7 +96,7 @@ export class ManualStream {
         const work = this.#take(!!access.letGo);
         if (!work) {
           if (!this.#held.size || this.#ended) break;
-          await this.#idle(lease.signal);
+          await this.#idle(lease.returning);
           continue;
         }
         if (work.input) await this.#deliver(lease, access, work.input);
@@ -121,7 +122,7 @@ export class ManualStream {
       } catch {
         uncertain = true;
       }
-      lease?.finish(uncertain);
+      lease?.finish(uncertain, access?.confirm?.bind(access));
       if (uncertain) this.end(MANUAL_STREAM_CLOSE.uncertain, "input unconfirmed");
       this.#pumping = false;
     }
@@ -166,12 +167,13 @@ export class ManualStream {
 
   async #deliver(lease: ManualLease, access: ManualDesktop, input: ManualStreamInput) {
     if (input.kind === "down") this.#held.add(input.button);
+    // A pointer moving with nothing held changes nothing on the computer, wherever it stopped: a
+    // hand-back need not wait for it.
+    const idle = input.kind === "move" && !this.#held.size;
     try {
-      await deliverManualInput(lease, access, input);
+      await deliverManualInput(lease, access, input, idle ? lease.returning : lease.signal);
     } catch (error) {
-      // A pointer moving with nothing held changes nothing on the computer, wherever it stopped.
-      if (input.kind === "move" && !this.#held.size && lease.signal.aborted)
-        throw new ControlHeldError();
+      if (idle && lease.returning.aborted) throw new ControlHeldError();
       if (
         !(error instanceof ManualInputRejected) &&
         !(error instanceof AgentError && error.status === 400)

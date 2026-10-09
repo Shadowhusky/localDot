@@ -1,7 +1,7 @@
 import type { SessionRun } from "./routines.ts";
 
-// How dot works, for every harness that runs it: the brain's system prompt and the ChatGPT plan's
-// instructions. Every line is paid for on every model call, so it stays short.
+// How dot works, for every harness that runs it: the brain's system prompt and the plans' (ChatGPT,
+// Claude Code) instructions. Every line is paid for on every model call, so it stays short.
 
 // How the model works the screen: inputs batched in one computer call, several computer calls in
 // one turn (tools without batches), or no computer at all.

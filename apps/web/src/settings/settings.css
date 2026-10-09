@@ -186,9 +186,11 @@
   overflow-wrap: anywhere;
 }
 
-/* The ChatGPT account: one raised card above the roles it stands in for. */
-.settings-chatgpt {
+/* A plan's own app (ChatGPT, Claude Code): one raised card above the roles it stands in for. */
+.settings-chatgpt,
+.settings-claude-code {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: calc(var(--spacing) * 3);
   min-width: 0;
   padding: calc(var(--spacing) * 3.5);
@@ -236,13 +238,15 @@
 
 .settings-hint {
   display: flex;
-  gap: calc(var(--spacing) * 1.5);
+  gap: calc(var(--spacing) * 3);
   color: var(--color-fg-2);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
+/* The alert mark sits in the steps' glyph column, so the hint lines up with the step text. */
 .settings-hint > .ui-icon {
   flex: none;
+  width: 16px;
   margin-top: calc(var(--spacing) * 0.5);
   color: var(--color-danger-fg);
   visibility: hidden;
@@ -256,7 +260,64 @@
   visibility: visible;
 }
 
-.settings-download,
+.settings-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-step {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 44px;
+  padding: calc(var(--spacing) * 1.5) 0;
+}
+
+.settings-step + .settings-step {
+  box-shadow: inset 0 1px 0 var(--color-separator);
+}
+
+.settings-step-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-step-name {
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.settings-step[data-state="todo"] .settings-step-name {
+  color: var(--color-fg-2);
+}
+
+.settings-step-detail {
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-step[data-state="failed"] .settings-step-detail {
+  color: var(--color-fg-2);
+  white-space: normal;
+}
+
+.settings-claude-todo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+}
+
 .settings-account,
 .settings-signin {
   display: grid;
