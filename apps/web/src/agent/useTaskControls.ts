@@ -347,7 +347,11 @@ export function useTaskControls(props: Props) {
       record,
     );
   };
-  const handback = (requestId: string, note?: string): Promise<boolean> => {
+  // `declined`: the user says "Not now" to dot's hand-off.
+  const handback = (
+    requestId: string,
+    { note, declined }: { note?: string; declined?: true } = {},
+  ): Promise<boolean> => {
     const now = current.current;
     if (
       !available() ||
@@ -360,7 +364,7 @@ export function useTaskControls(props: Props) {
       returnControl(
         record.api,
         record.sessionId,
-        { requestId, ...(note ? { note } : {}) },
+        { requestId, ...(note ? { note } : {}), ...(declined ? { declined } : {}) },
         record.abort.signal,
       ),
     );
