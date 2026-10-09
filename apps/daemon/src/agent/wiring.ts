@@ -540,8 +540,8 @@ export function createAgent(d: AgentWiringDeps) {
       letGo: async () => {
         await target.client.release();
       },
-      // desktopd's input helper takes one command at a time, in order: it answers this one once
-      // everything sent before it has landed.
+      // desktopd's /release waits for the input requests still sending, and its helper takes one
+      // command at a time, in order: it answers once everything sent before it has landed.
       confirm: async () => {
         unchanged();
         await target.client.release();
