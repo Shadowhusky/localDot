@@ -526,7 +526,9 @@
   display: none;
 }
 
+/* Over the picture's own layers, its input surface among them, as the island is. */
 .app[data-full] .control-strip {
+  z-index: var(--layer-island);
   top: auto;
   right: auto;
   bottom: calc(var(--spacing) * 4);
