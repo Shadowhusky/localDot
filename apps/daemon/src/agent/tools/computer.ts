@@ -21,6 +21,8 @@ import type { AgentSession } from "../session.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
+const LOOK_AGAIN =
+  "Not done: the user had the computer, so the screen may have changed. Here is the screen now; look again before acting.";
 
 async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolResult> {
   ctx.check();
@@ -214,6 +216,7 @@ export async function computerTool(
   if (a.action === "screenshot") {
     if (!ctx.permit?.consume(a, null))
       return { ok: false, content: [text("This screenshot was not authorized.")] };
+    session.freshLook();
     return screenshot(deps, ctx);
   }
   if (a.action === "cursor_position") {
@@ -234,6 +237,11 @@ export async function computerTool(
   }
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
+  // What dot saw before the user had the computer may be gone: it acts on a fresh look.
+  if (action.verb !== "wait" && session.freshLook()) {
+    const now = await screenshot(deps, ctx);
+    return { ok: false, cancelled: "stale", content: [text(LOOK_AGAIN), ...now.content] };
+  }
   // The browser screen presses one key at a time and keeps no button down between actions:
   // refused before approval.
   if (ctx.screen?.selection.screen === "browser") {

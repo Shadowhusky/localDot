@@ -840,7 +840,14 @@ export class AgentRunner {
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {
-            if (!(await session.waitForUser(this.deps.idleMs ?? IDLE_MS, idleWait.signal))) break;
+            const idleMs = this.deps.idleMs ?? IDLE_MS;
+            let asked = await session.waitForUser(idleMs, idleWait.signal);
+            // While the user has the computer, a finished task waits for them rather than the clock.
+            while (!asked && session.controlHeld) {
+              await session.waitForControl(idleWait.signal);
+              asked = await session.waitForUser(idleMs, idleWait.signal);
+            }
+            if (!asked) break;
           } catch (error) {
             if (rt.released) break;
             if (!idleWait.signal.aborted || rt.authResumeAfter === undefined) throw error;

@@ -367,6 +367,51 @@ describe("ChatGPT runner lifecycle", () => {
     }
   });
 
+  it("retires dot's brain when the user takes the computer and starts it again on hand-back with a note", async () => {
+    const f = setup();
+    const inboxes: string[][] = [];
+    f.run.mockImplementationOnce(async (session) => {
+      const generation = session.beginBrain();
+      session.setStatus("running");
+      await new Promise((resolve) => generation.signal.addEventListener("abort", resolve));
+      return 0;
+    });
+    f.run.mockImplementationOnce(async (session, input) => {
+      const generation = session.beginBrain();
+      const inbox = await session.inbox(0, 0, generation.signal, generation);
+      inboxes.push([String(input.resume), ...inbox.items.map((item) => item.kind)]);
+      session.retireBrain(generation);
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "running" && !!session.generation);
+    const requestId = session.takeControl();
+    await until(() => session.manualControl === "ready");
+    expect(session.generation).toBeUndefined();
+    expect(f.run).toHaveBeenCalledOnce();
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
+    expect(inboxes).toEqual([["true", "steer"]]);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
+  it("keeps a finished task waiting while the user has the computer, past its idle time", async () => {
+    const f = setup(20);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    const requestId = session.takeControl();
+    await until(() => session.manualControl === "ready");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(session.stopped).toBe(false);
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(session.id);
+    expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+    expect(f.run).toHaveBeenCalledOnce();
+  });
+
   it("prepares the desktop browser before skills or model execution, once per task", async () => {
     const f = setup();
     const pending = deferred<void>();

@@ -17,6 +17,7 @@ import {
   QuestionAnswerRequest,
   ResumeSafetyRequest,
   scanKeyLike,
+  type TakeControlReply,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -45,6 +46,7 @@ import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./man
 import { MemoryError, type MemoryStore } from "./memory.ts";
 import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
+import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
@@ -216,6 +218,8 @@ function fail(error: unknown): Response {
     return new Response("the selected models or keys are unavailable", { status: 400 });
   if (error instanceof SessionStoppedError || error instanceof ControlHeldError)
     return new Response("task control changed", { status: 409 });
+  if (error instanceof PausedStepError)
+    return new Response("Pause is changing; try again in a moment", { status: 409 });
   if (error instanceof DesktopdError)
     return new Response("the computer transfer failed", {
       status: error.status === 413 || error.status === 409 ? error.status : 502,
@@ -615,6 +619,18 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
       );
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // The user takes the computer whatever dot is doing; the reply names the control to hand back.
+  app.post(
+    "/api/agent/sessions/:id/takeover",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (s.stopped || deps.taskMutationReady?.(s) === false)
+        throw new RouteError(409, "the computer is not ready to hand over");
+      return c.json({ requestId: s.takeControl() } satisfies TakeControlReply, 202);
     }),
   );
   app.post(

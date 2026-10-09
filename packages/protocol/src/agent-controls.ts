@@ -24,6 +24,9 @@ export const QuestionAnswerRequest = z
 export type QuestionAnswerRequest = z.infer<typeof QuestionAnswerRequest>;
 export const HandbackRequest = z.strictObject({ requestId: Id, note: Text(1000).optional() });
 export type HandbackRequest = z.infer<typeof HandbackRequest>;
+// The user took the computer themselves: the control their input and hand-back name.
+export const TakeControlReply = z.strictObject({ requestId: Id });
+export type TakeControlReply = z.infer<typeof TakeControlReply>;
 export const BudgetRaiseRequest = z.strictObject({
   budgetUSD: z
     .number()
