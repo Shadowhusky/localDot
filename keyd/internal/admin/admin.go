@@ -42,6 +42,10 @@ type Server struct {
 	Hairpin  *netguard.Public
 	Service  *ServiceProcessIdentity
 	Push     Pusher
+	// Where secret values live; the zero value reports nothing.
+	VaultState func() vault.VaultState
+	// Unlock takes the file vault's passphrase; nil when the vault has none.
+	Unlock func(passphrase []byte) error
 }
 
 func (s *Server) Handler() http.Handler {
@@ -67,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/events", s.events)
 	mux.HandleFunc("GET /v1/push/key", s.pushKey)
 	mux.HandleFunc("POST /v1/push/send", s.pushSend)
+	mux.HandleFunc("POST /v1/vault/unlock", s.unlockVault)
 	return mux
 }
 
@@ -111,7 +116,49 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"day":     map[string]any{"date": date, "spentUSD": spent},
 		"audit":   auditState,
 		"hairpin": s.hairpin(),
+		"vault":   s.vaultState(),
 	})
+}
+
+func (s *Server) vaultState() any {
+	if s.VaultState == nil {
+		return nil
+	}
+	return s.VaultState()
+}
+
+// unlockVault takes the file vault's passphrase sealed to keyd, so the daemon relaying it never
+// reads it. The first passphrase a new vault receives becomes its passphrase.
+func (s *Server) unlockVault(w http.ResponseWriter, r *http.Request) {
+	if s.Unlock == nil {
+		fail(w, http.StatusConflict, "no-passphrase", "this key vault is not unlocked with a passphrase")
+		return
+	}
+	var body struct {
+		Sealed vault.Sealed `json:"sealed"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	passphrase, err := s.Opener.OpenPassphrase(body.Sealed)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "bad-seal", err.Error())
+		return
+	}
+	defer clear(passphrase)
+	if err := s.Unlock(passphrase); err != nil {
+		if _, aerr := s.Audit.Write(audit.Line{Kind: audit.KindAdmin, Decision: audit.Deny, Reason: "vault-unlock"}); aerr != nil {
+			log.Printf("keyd: audit write failed: %v", aerr)
+		}
+		if errors.Is(err, vault.ErrPassphrase) {
+			fail(w, http.StatusForbidden, "wrong-passphrase", "that passphrase does not unlock the key vault")
+			return
+		}
+		fail(w, http.StatusBadRequest, "bad-passphrase", err.Error())
+		return
+	}
+	s.admin("vault-unlock", "", "")
+	reply(w, http.StatusOK, s.vaultState())
 }
 
 func (s *Server) hairpin() any {
