@@ -1,6 +1,8 @@
 #!/bin/bash
 # Plank keeps its settings in dconf and its launchers on the home volume; the dock's look and its
-# items are pinned before every start.
+# items are pinned before every start. It floats and reserves no screen edge: it hides while a
+# window overlaps it and comes back when the pointer reaches the bottom edge (pressure reveal
+# needs relative motion, which the stream's absolute pointer never makes).
 dock="net.launchpad.plank.dock.settings:/net/launchpad/plank/docks/dock1/"
 launchers="${HOME}/.config/plank/dock1/launchers"
 mkdir -p "$launchers"
@@ -15,8 +17,15 @@ for app in thunar chromium xfce4-terminal codium org.xfce.mousepad \
   items+=("'$app.dockitem'")
 done
 gsettings set "$dock" dock-items "[$(IFS=,; echo "${items[*]}")]"
-gsettings set "$dock" theme "'WhiteSur-Light'"
+gsettings set "$dock" theme "'localdot-glass'"
 gsettings set "$dock" position "'bottom'"
-gsettings set "$dock" hide-mode "'none'"
+gsettings set "$dock" alignment "'center'"
+gsettings set "$dock" hide-mode "'window-dodge'"
+gsettings set "$dock" hide-delay 300
+gsettings set "$dock" unhide-delay 0
+gsettings set "$dock" pressure-reveal false
 gsettings set "$dock" icon-size 48
+gsettings set "$dock" zoom-enabled false
+gsettings set "$dock" lock-items true
+gsettings set "$dock" show-dock-item false
 exec plank

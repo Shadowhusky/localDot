@@ -1,0 +1,15 @@
+<!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
+  "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
+<Menu>
+  <Name>System</Name>
+  <AppDir>/usr/share/localdot/menu/applications</AppDir>
+  <Include>
+    <Filename>localdot-about.desktop</Filename>
+    <Filename>localdot-settings.desktop</Filename>
+  </Include>
+  <Layout>
+    <Filename>localdot-about.desktop</Filename>
+    <Separator/>
+    <Filename>localdot-settings.desktop</Filename>
+  </Layout>
+</Menu>

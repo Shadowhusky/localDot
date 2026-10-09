@@ -1,0 +1,109 @@
+/* The Super+Space launcher. Sizes are in pt; startwm.sh writes them out as pixels for the scale.
+   The header sits inside the input bar because rofi sizes the window from the input bar and the
+   list alone. Rofi picks a 32-bit visual the compositor treats as opaque, so the glass is drawn
+   over a screenshot of what is behind it, a little denser than the design's blurred glass. */
+configuration {
+  modi: "drun,filebrowser";
+  show-icons: true;
+  icon-theme: "WhiteSur-light";
+  display-drun: "Applications";
+  display-filebrowser: "Documents";
+  drun-display-format: "{name}";
+  matching: "normal";
+  drun-match-fields: "name,generic,keywords";
+  sort: true;
+  kb-cancel: "Escape,Super+space";
+  filebrowser {
+    directory: "~/Documents";
+  }
+}
+
+* {
+  font: "Inter 14pt";
+  background-color: transparent;
+  text-color: #1d1d1f;
+  border-color: rgba(0, 0, 0, 0.10);
+}
+
+window {
+  transparency: "screenshot";
+  location: north;
+  anchor: north;
+  y-offset: 168pt;
+  width: 660pt;
+  border: 0;
+  border-radius: 24pt;
+  background-color: rgba(246, 246, 248, 0.92);
+}
+
+mainbox {
+  children: [ inputbar, listview ];
+  spacing: 0;
+}
+
+inputbar {
+  orientation: vertical;
+  children: [ query, prompt ];
+}
+
+query {
+  orientation: horizontal;
+  children: [ icon-search, entry ];
+  spacing: 12pt;
+  padding: 15pt 20pt;
+  border: 0 0 1px;
+}
+
+icon-search {
+  expand: false;
+  filename: "/usr/share/icons/hicolor/scalable/apps/localdot-spotlight-search.svg";
+  size: 22pt;
+  vertical-align: 0.5;
+}
+
+entry {
+  font: "Inter 22pt";
+  placeholder: "Search";
+  placeholder-color: #8a8a8f;
+  cursor-color: #0a6cff;
+  cursor-width: 2pt;
+  vertical-align: 0.5;
+}
+
+prompt {
+  font: "Inter Semi-Bold 11.5pt";
+  text-color: #8a8a8f;
+  padding: 14pt 18pt 4pt;
+}
+
+listview {
+  lines: 6;
+  dynamic: true;
+  fixed-height: false;
+  scrollbar: false;
+  spacing: 0;
+  padding: 0 6pt 6pt;
+}
+
+element {
+  children: [ element-icon, element-text ];
+  spacing: 12pt;
+  padding: 6pt 12pt;
+  border-radius: 10pt;
+}
+
+element selected.normal, element selected.active {
+  background-color: rgba(10, 108, 255, 0.92);
+  text-color: #ffffff;
+}
+
+element-icon {
+  size: 32pt;
+  vertical-align: 0.5;
+}
+
+element-text {
+  text-color: inherit;
+  highlight: none;
+  vertical-align: 0.5;
+}
