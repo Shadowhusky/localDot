@@ -226,6 +226,139 @@
     var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
+/* Research: a hairline of how much of the budget is used, then the sources by number, each a
+   flat row that opens the page. */
+.research-track {
+  position: relative;
+  height: 2px;
+  margin-bottom: calc(var(--spacing) * 1.5);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-track);
+}
+
+.research-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-fg-2);
+  transform: scaleX(var(--_used, 0));
+  transform-origin: left;
+  transition: transform var(--dur-default) var(--ease-spring);
+}
+
+.research-sources {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.research-source {
+  margin-inline: calc(var(--spacing) * -2);
+  border-radius: var(--radius-md);
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    translate var(--dur-default) var(--ease-spring);
+}
+
+@starting-style {
+  .research-source {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+.research-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: calc(var(--spacing) * 2);
+  align-items: baseline;
+  min-height: 40px;
+  padding: var(--spacing) calc(var(--spacing) * 2);
+  border-radius: inherit;
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  a.research-row:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+a.research-row:active {
+  background-color: var(--color-state-pressed);
+  transition-duration: var(--dur-press);
+}
+
+a.research-row:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.research-number {
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-body--line-height) var(--font-ui);
+  text-align: end;
+}
+
+.research-source[data-cited] .research-number {
+  color: var(--color-fg-1);
+}
+
+.research-text {
+  display: grid;
+  min-width: 0;
+}
+
+.research-title,
+.research-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.research-meta {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  letter-spacing: 0;
+}
+
+/* Its words line up with the titles: past the 20 px number and its 8 px gap, less the button's own
+   12 px padding. */
+.research-all {
+  align-self: flex-start;
+  margin-block: calc(var(--spacing) * 0.5);
+  margin-inline-start: calc(var(--spacing) * 4);
+}
+
+/* The user's word on the budget, on one 40 px row that keeps its height whatever it says. */
+.research-foot {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 40px;
+}
+
+.research-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+.research-foot > .ui-button {
+  flex-shrink: 0;
+}
+
 .activity-timeline {
   display: flex;
   flex-direction: column;
@@ -726,6 +859,7 @@ button.activity-usage-trigger:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .research-source,
   .activity-row,
   .plan-progress,
   .plan-roll > span {

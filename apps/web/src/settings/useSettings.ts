@@ -24,6 +24,7 @@ import {
   formOf,
   type PriceDraft,
   pickerKeys,
+  type ResearchDraft,
   type SettingsDraft,
   type SpendingDraft,
   sameDraft,
@@ -260,6 +261,10 @@ export function useSettings(
     const d = current.current.draft;
     if (d) edit({ ...d, checkIns: { ...d.checkIns, [key]: next } });
   };
+  const research = (next: ResearchDraft) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, research: next });
+  };
   const purposeCheck = (on: boolean) => {
     const d = current.current.draft;
     if (d) edit({ ...d, purposeCheck: on });
@@ -472,6 +477,7 @@ export function useSettings(
     },
     spending,
     checkIn,
+    research,
     purposeCheck,
     recentActivity,
     save,

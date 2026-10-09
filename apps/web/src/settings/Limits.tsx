@@ -4,7 +4,7 @@ import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
-import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
+import type { CheckInKey, CheckInsDraft, ResearchDraft, SpendingDraft } from "./settings-form.ts";
 
 const CHECK_INS: readonly {
   key: CheckInKey;
@@ -82,6 +82,50 @@ export function CheckIns({
       </Group>
       <GroupNote>
         Off unless you turn them on. Each count starts again when you send a message.
+      </GroupNote>
+    </div>
+  );
+}
+
+// How far a research task reads before it writes: a soft stop, with what it has.
+export function ResearchLimits({
+  value,
+  onChange,
+}: {
+  value: ResearchDraft;
+  onChange(next: ResearchDraft): void;
+}) {
+  const digits = (raw: string) => raw.replace(/\D/g, "");
+  return (
+    <div>
+      <GroupHead title="Research" />
+      <Group>
+        <Field label="Read up to" inline className="ui-group-row">
+          <TextField
+            size="sm"
+            inputMode="numeric"
+            maxLength={3}
+            autoComplete="off"
+            suffix="sources"
+            value={value.sources}
+            onChange={(event) => onChange({ ...value, sources: digits(event.target.value) })}
+          />
+        </Field>
+        <Field label="Take up to" inline className="ui-group-row">
+          <TextField
+            size="sm"
+            inputMode="numeric"
+            maxLength={3}
+            autoComplete="off"
+            suffix="minutes"
+            value={value.minutes}
+            onChange={(event) => onChange({ ...value, minutes: digits(event.target.value) })}
+          />
+        </Field>
+      </Group>
+      <GroupNote>
+        Where dot stops reading and writes its report with what it has. While it works you can wrap
+        up sooner or let it keep going.
       </GroupNote>
     </div>
   );

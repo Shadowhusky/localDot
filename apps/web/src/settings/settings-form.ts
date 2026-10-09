@@ -5,6 +5,8 @@ import {
   CheckIns,
   CLAUDE_CODE_MODEL,
   DEFAULT_AUTONOMY,
+  DEFAULT_RESEARCH_BUDGET,
+  ResearchBudget,
 } from "@localdot/protocol";
 import { isOpenRouterRouterId, providerById, routeFor } from "@localdot/providers";
 import {
@@ -36,11 +38,17 @@ export type CheckInKey = keyof CheckIns;
 export type CheckInsDraft = Record<CheckInKey, { on: boolean; value: string }>;
 // What a check-in starts at when the user turns it on.
 export const CHECK_IN_START: Record<CheckInKey, number> = { steps: 150, failures: 5, actions: 400 };
+// How far a research task reads before it writes, as typed.
+export interface ResearchDraft {
+  sources: string;
+  minutes: string;
+}
 export interface SettingsDraft {
   choices: Partial<Record<ModelRole, RoleChoice>>;
   prices: Partial<Record<ModelRole, PriceDraft>>;
   spending: SpendingDraft;
   checkIns: CheckInsDraft;
+  research: ResearchDraft;
   autonomy?: AutonomyPolicy;
   // On is Auto.
   purposeCheck: boolean;
@@ -77,6 +85,10 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
         return [key, { on: value !== undefined, value: String(value ?? CHECK_IN_START[key]) }];
       }),
     ) as CheckInsDraft,
+    research: {
+      sources: String((settings.research ?? DEFAULT_RESEARCH_BUDGET).sources),
+      minutes: String((settings.research ?? DEFAULT_RESEARCH_BUDGET).minutes),
+    },
     purposeCheck: settings.purposeCheck !== "off",
     recentActivity: settings.recentActivity !== "off",
   };
@@ -176,6 +188,19 @@ export function validateForm(
   }
   if (Object.keys(checkIns).length) document.checkIns = checkIns;
   else delete document.checkIns;
+  const whole = (raw: string) => (/^\d+$/.test(raw) ? Number(raw) : Number.NaN);
+  const research = ResearchBudget.safeParse({
+    sources: whole(draft.research.sources),
+    minutes: whole(draft.research.minutes),
+  });
+  if (!research.success)
+    problems.push("Research reads 3 to 100 sources for 2 to 120 minutes, in whole numbers.");
+  else if (
+    research.data.sources === DEFAULT_RESEARCH_BUDGET.sources &&
+    research.data.minutes === DEFAULT_RESEARCH_BUDGET.minutes
+  )
+    delete document.research;
+  else document.research = research.data;
   if (draft.purposeCheck) delete document.purposeCheck;
   else document.purposeCheck = "off";
   if (draft.recentActivity) delete document.recentActivity;

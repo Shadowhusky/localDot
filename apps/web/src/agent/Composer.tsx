@@ -38,7 +38,9 @@ import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
+import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
+import { looksLikeResearch, onResearchRequest, researchWait } from "./research.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
@@ -58,6 +60,8 @@ const TOUCH = "(hover: none) and (pointer: coarse)";
 const NEAR = 7000;
 // An accepted message holds its place in the thread this long at most while its own row arrives.
 const LANDING_MS = 10_000;
+// dot weighs whether a message needs research once typing pauses, never on each keystroke.
+const SUGGEST_MS = 600;
 
 export interface ComposerProps {
   api: ApiClient;
@@ -227,6 +231,12 @@ export function Composer(props: ComposerProps) {
   const problemShown = useRef(problem);
   const [menu, setMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Research mode for the next task, and dot's suggestion to turn it on.
+  const [research, setResearch] = useState(false);
+  const researchNow = useRef(research);
+  researchNow.current = research;
+  const [suggested, setSuggested] = useState(false);
+  const suggestion = useRef(0);
   const form = useRef<HTMLFormElement>(null);
   const more = useRef<HTMLButtonElement>(null);
   const drags = useRef(0);
@@ -305,6 +315,18 @@ export function Composer(props: ComposerProps) {
     if (wasKeysOpen.current && !props.keysOpen) guardOwner.current.cancel();
     wasKeysOpen.current = props.keysOpen;
   }, [props.keysOpen]);
+  useEffect(() => () => window.clearTimeout(suggestion.current), []);
+  // From a phone's More menu: research the message, with the field ready for it.
+  useEffect(
+    () =>
+      onResearchRequest(() => {
+        const input = form.current?.querySelector("textarea");
+        if (!input || input.readOnly || researchWait(current.current.agent)) return;
+        setResearch(true);
+        input.focus();
+      }),
+    [],
+  );
   useEffect(() => {
     mounted.current = true;
     const changed = () => setOnline(navigator.onLine);
@@ -372,6 +394,13 @@ export function Composer(props: ComposerProps) {
     shown.current = next;
     setText(next);
   }, []);
+  const weigh = useCallback((input: HTMLTextAreaElement) => {
+    window.clearTimeout(suggestion.current);
+    suggestion.current = window.setTimeout(
+      () => setSuggested(looksLikeResearch(input.value)),
+      SUGGEST_MS,
+    );
+  }, []);
   // Revise on a file fills the message with the file's name, keeps what was typed and focuses it.
   useEffect(
     () =>
@@ -396,13 +425,24 @@ export function Composer(props: ComposerProps) {
   }, [guard.notice, measure]);
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
-    announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
+    announce(
+      "composer",
+      record.request.research
+        ? "Research started."
+        : record.request.mode === "new"
+          ? "Task started."
+          : "Sent to dot.",
+    );
+    // Research is for the task it starts; the next message is an ordinary one again.
+    if (record.request.research) setResearch(false);
     if (record.revising === revisingNow.current) setRevising(null);
     uploads.acknowledge(record.attachmentIDs);
     const input = field();
     if (revision.current === record.revision && input && input.value === record.draftText) {
       input.value = "";
       measure(input);
+      window.clearTimeout(suggestion.current);
+      setSuggested(false);
     }
   };
   // An accepted message's stand-in gives way in the same frame its own row arrives in the thread.
@@ -508,7 +548,10 @@ export function Composer(props: ComposerProps) {
       return;
     }
     const now = current.current;
-    const chosen = modeFor(now, later ? "followup" : "steer");
+    // Research starts a task of its own; at rest, a conversation's next task continues it.
+    const resting = now.agent.snapshot?.status === "idle" && !later;
+    const asked = modeFor(now, later ? "followup" : "steer");
+    const chosen = researchNow.current && asked === "followup" && resting ? "new" : asked;
     if (chosen === "new" && now.configured === false) {
       now.onSettings?.(input);
       return;
@@ -600,6 +643,7 @@ export function Composer(props: ComposerProps) {
         mode: chosen,
         text: sent,
         ...(revise ? { revise } : {}),
+        ...(chosen === "new" && !revise && researchNow.current ? { research: true as const } : {}),
       },
       revision.current,
       {
@@ -681,6 +725,7 @@ export function Composer(props: ComposerProps) {
         revision.current += 1;
         guardOwner.current.input(event.currentTarget, event.nativeEvent);
         measure(event.currentTarget);
+        weigh(event.currentTarget);
         if (problemShown.current !== null) setProblem(null);
       },
       onPaste: (event) => {
@@ -697,6 +742,7 @@ export function Composer(props: ComposerProps) {
         revision.current += 1;
         guardOwner.current.check(input);
         measure(input);
+        weigh(input);
         if (problemShown.current !== null) setProblem(null);
       },
       onKeyDown: (event) => {
@@ -717,7 +763,7 @@ export function Composer(props: ComposerProps) {
         if (event.currentTarget.value.trim()) submit(event.altKey);
       },
     }),
-    [measure],
+    [measure, weigh],
   );
   const connect = mode === "new" && props.configured === false;
   const near = text.length > NEAR && text.length <= LIMIT;
@@ -744,13 +790,22 @@ export function Composer(props: ComposerProps) {
       : (reason ?? (takeover ? "Add files once you hand back." : undefined));
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
-  const sendLabel = newConversation
-    ? "Start task"
-    : mode === "new"
-      ? "Send"
-      : mode === "followup"
-        ? "Send follow-up"
-        : "Send now";
+  const researchReason =
+    researchWait(props.agent) ?? (props.reply ? "Answer dot's question first." : undefined);
+  const researching = research && !researchReason;
+  // On a phone the line over the field folds away still saying what it last said.
+  const researchLine = !researchReason && (research || suggested);
+  const shownResearch = useRef(research);
+  if (researchLine) shownResearch.current = research;
+  const sendLabel = researching
+    ? "Start research"
+    : newConversation
+      ? "Start task"
+      : mode === "new"
+        ? "Send"
+        : mode === "followup"
+          ? "Send follow-up"
+          : "Send now";
   const note =
     mode === "new" || takeover
       ? undefined
@@ -847,14 +902,27 @@ export function Composer(props: ComposerProps) {
         <Collapse open={rows.length > 0} className="composer-files">
           <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
         </Collapse>
+        {pill && (
+          <Collapse open={researchLine} className="composer-files">
+            <ResearchLine
+              on={shownResearch.current}
+              onToggle={() => {
+                setResearch((on) => !on);
+                field()?.focus();
+              }}
+            />
+          </Collapse>
+        )}
         <ComposerField
           label={newConversation ? "New task" : "Message"}
           placeholder={
-            newConversation && !pill
-              ? "Ask dot to do something"
-              : props.reply
-                ? "Answer dot"
-                : "Message dot"
+            researching
+              ? "What should dot research?"
+              : newConversation && !pill
+                ? "Ask dot to do something"
+                : props.reply
+                  ? "Answer dot"
+                  : "Message dot"
           }
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
@@ -870,6 +938,14 @@ export function Composer(props: ComposerProps) {
             onFiles={(files) => uploads.select(files)}
             disabledReason={attachReason}
           />
+          {!pill && (
+            <ResearchToggle
+              on={research}
+              suggested={suggested}
+              disabledReason={researchReason}
+              onToggle={() => setResearch((on) => !on)}
+            />
+          )}
           <div className="composer-hint">
             {note && <span className="composer-note">{note}</span>}
           </div>
