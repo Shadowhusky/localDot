@@ -1,12 +1,13 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: Wide code and tables scroll sideways, so keyboard users can focus them.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Immutable parsed text has no child state; source position identifies each text span.
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Icon } from "../ui/Icon.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { type Block, type Inline, type List, parseMarkdown } from "./markdown.ts";
 
-// While a message streams in, its text is read again at most this often.
-const STREAM_PARSE_MS = 100;
+// While a message streams in, its text is read again at most this often: under the thread's own
+// tenth of a second, so each update of the thread reads its text in the same render.
+const STREAM_PARSE_MS = 80;
 
 export function linkHost(href: string): string {
   return new URL(href).hostname.replace(/^www\./, "");
@@ -147,23 +148,23 @@ const MarkdownBlock = memo(
     was.announce === now.announce,
 );
 
-// Text that is still arriving is read again at most every STREAM_PARSE_MS; finished text at once.
+// Text that is still arriving is read again at most every STREAM_PARSE_MS, in the render that
+// brings it when it may, so new words cost no render of their own; finished text at once.
 function useSettledText(text: string, streaming: boolean): string {
-  const [shown, setShown] = useState(text);
-  const last = useRef(0);
+  const [shown, setShown] = useState(() => ({ text, at: performance.now() }));
+  const now = performance.now();
+  const due = streaming && text !== shown.text && now - shown.at >= STREAM_PARSE_MS;
+  if (due) setShown({ text, at: now });
+  const behind = streaming && !due && text !== shown.text;
   useEffect(() => {
-    if (!streaming) {
-      setShown(text);
-      return;
-    }
-    const wait = Math.max(0, last.current + STREAM_PARSE_MS - performance.now());
-    const timer = setTimeout(() => {
-      last.current = performance.now();
-      setShown(text);
-    }, wait);
+    if (!behind) return;
+    const timer = setTimeout(
+      () => setShown({ text, at: performance.now() }),
+      shown.at + STREAM_PARSE_MS - performance.now(),
+    );
     return () => clearTimeout(timer);
-  }, [text, streaming]);
-  return streaming ? shown : text;
+  }, [behind, text, shown]);
+  return !streaming || due ? text : shown.text;
 }
 
 export const SafeMarkdown = memo(function SafeMarkdown({

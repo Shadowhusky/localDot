@@ -2,7 +2,7 @@ import { type ReactNode, useMemo } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
 import { useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
-import type { SpendCall } from "../agent/model.ts";
+import type { AgentWords, SpendCall } from "../agent/model.ts";
 import { threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
 import { billedPerCall } from "../agent/UsageFooter.tsx";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
@@ -60,6 +60,7 @@ export function ChatThread({
   pending = false,
   start,
   reveal,
+  words,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -91,6 +92,8 @@ export function ChatThread({
   start?: ReactNode;
   // Counts the conversations the user chose.
   reveal?: number;
+  // A streaming message's new words, which redraw only that message.
+  words?: AgentWords;
 }) {
   const model = agent?.model;
   const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
@@ -156,6 +159,7 @@ export function ChatThread({
       covered={covered}
       start={start}
       reveal={reveal}
+      words={words}
     />
   );
 }

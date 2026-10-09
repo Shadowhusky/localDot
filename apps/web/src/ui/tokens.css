@@ -409,6 +409,7 @@
   --dur-first-start: 60s;
   /* Loops, which reduced motion stops rather than shortens. */
   --loop-sweep: 1400ms;
+  --loop-shimmer: 1800ms;
   --loop-turn: 1200ms;
   --default-transition-duration: var(--dur-fade);
   --default-transition-timing-function: var(--ease-standard);

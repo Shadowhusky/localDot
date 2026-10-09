@@ -85,7 +85,7 @@ function probing(inner: Presenter): Presenter {
     present(frame) {
       const at = wallNow();
       const p = probe;
-      const presented = (presenter?.presented ?? 0) + 1;
+      const presented = (presenter?.received ?? 0) + 1;
       if (p) {
         // copyTo is async and the presenter closes the frame, so the probe reads a clone.
         const copy = frame.clone();
@@ -146,10 +146,11 @@ function tick(): void {
         // Uploading a texture does not make it visible. Manual admission acknowledges only
         // a successful canvas render, and a retired pump cannot publish its pending stats.
         if (pendingStats?.generation === sourceGeneration) {
+          // The counts are of painted frames, which the stage keeps across a reconnect's fresh pump.
           scope.postMessage({
             type: "stats",
             sourceId: pendingStats.sourceId,
-            stats: pendingStats.stats,
+            stats: { ...pendingStats.stats, presented: presenter.presented, fps: presenter.fps },
           });
           pendingStats = undefined;
         }
@@ -167,13 +168,17 @@ function tick(): void {
   else animationFrame = requestAnimationFrame(tick);
 }
 
+// These reach the picture only through the scene key, so they wake the stage to look without
+// forcing a render: a still stage stays still while dot streams its words.
+const LOOK_ONLY = new Set<WorkerIn["type"]>(["events", "clock", "probe"]);
+
 let queue = Promise.resolve();
 scope.onmessage = (e) => {
   queue = queue.then(async () => {
     await handle(e.data);
     // A frame wakes the stage when the pump hands it over.
     if (e.data.type === "frame") return;
-    gate.invalidate();
+    if (!LOOK_ONLY.has(e.data.type)) gate.invalidate();
     if (presenter) wake();
   });
 };
@@ -341,13 +346,7 @@ async function handle(m: WorkerIn): Promise<void> {
             probing(presenter),
             (stats) => {
               if (generation !== sourceGeneration) return;
-              pendingStats = {
-                generation,
-                sourceId: m.sourceId,
-                // The stage outlives its taps. Keep its delivered-frame counter monotonic
-                // when a reconnect starts a fresh pump with its own local counter.
-                stats: { ...stats, presented: presenter?.presented ?? stats.presented },
-              };
+              pendingStats = { generation, sourceId: m.sourceId, stats };
             },
             { first: m.first, onError: report },
           );

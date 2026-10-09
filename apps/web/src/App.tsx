@@ -1680,6 +1680,7 @@ function Theatre({ api }: { api: ApiClient }) {
             <ChatThread
               visible={shownView === "chat"}
               agent={switching ? undefined : agent}
+              words={switching ? undefined : session.agentFeed}
               api={api}
               rows={rows}
               reveal={reveal}
