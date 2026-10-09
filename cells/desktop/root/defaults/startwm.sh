@@ -13,8 +13,8 @@ if [ ! -f "$lo/registrymodifications.xcu" ]; then
   mkdir -p "$lo"
   cp /defaults/localdot/registrymodifications.xcu "$lo"/
 fi
-# The two files below are rewritten on every start: a theme change made inside the desktop does
-# not survive a restart, on purpose (the look is localDot's, not the agent's).
+# The look below is rewritten on every start: a theme, panel or wallpaper change made inside the
+# desktop does not survive a restart, on purpose (the look is localDot's, not the agent's).
 scale="${LOCALDOT_SCALE:-2}"
 case "$scale" in
   1) theme=WhiteSur-Light ;;
@@ -31,8 +31,26 @@ for _ in $(seq 50); do
 done
 pkill -KILL -u "$uid" -x xfconfd || true
 # Written whole, then renamed into place: an xfconfd re-activated meanwhile never reads half a file.
-sed "s/@SCALE@/$scale/g" /defaults/localdot/xsettings.xml.in > "$conf/xsettings.xml.new"
-mv -f "$conf/xsettings.xml.new" "$conf/xsettings.xml"
-sed "s/@THEME@/$theme/g" /defaults/localdot/xfwm4.xml.in > "$conf/xfwm4.xml.new"
-mv -f "$conf/xfwm4.xml.new" "$conf/xfwm4.xml"
+put() {
+  cat > "$conf/$1.new"
+  mv -f "$conf/$1.new" "$conf/$1"
+}
+sed "s/@SCALE@/$scale/g" /defaults/localdot/xsettings.xml.in | put xsettings.xml
+sed "s/@THEME@/$theme/g" /defaults/localdot/xfwm4.xml.in | put xfwm4.xml
+put xfce4-panel.xml < /defaults/localdot/xfce4-panel.xml
+put xfce4-desktop.xml < /defaults/localdot/xfce4-desktop.xml
+panel="${HOME}/.config/xfce4/panel"
+rm -rf "$panel"/launcher-*
+mkdir -p "$panel"/launcher-4 "$panel"/launcher-5
+cp /defaults/localdot/panel/spotlight.desktop "$panel"/launcher-4/
+cp /defaults/localdot/panel/controls.desktop "$panel"/launcher-5/
+mkdir -p "${HOME}/.config/gtk-3.0" "${HOME}/.config/rofi"
+cp /defaults/localdot/gtk.css "${HOME}/.config/gtk-3.0/gtk.css"
+perl -pe "s/(\d+(?:\.\d+)?)pt\b/\$1 * $scale . 'px'/ge" /defaults/localdot/spotlight.rasi \
+  > "${HOME}/.config/rofi/localdot-spotlight.rasi"
+# A home whose shortcuts xfsettingsd has already copied out of the defaults gets the launcher key.
+shortcuts="$conf/xfce4-keyboard-shortcuts.xml"
+if [ -f "$shortcuts" ]; then
+  python3 /defaults/localdot/add-shortcut.py "$shortcuts" "<Super>space" localdot-spotlight
+fi
 exec /usr/bin/xfce4-session

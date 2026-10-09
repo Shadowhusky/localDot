@@ -173,10 +173,10 @@ const PLANK_DOCK = "net.launchpad.plank.dock.settings:/net/launchpad/plank/docks
 const COMPOSITOR_RUNNING = `from Xlib import X, display
 d = display.Display()
 print(d.get_selection_owner(d.intern_atom("_NET_WM_CM_S0")) != X.NONE)`;
-const WALLPAPER = "/usr/share/backgrounds/localdot/mojave-nord-light.png";
-// Flat colours of the wallpaper itself, so a drawn pixel shows which image xfdesktop uses.
-const SKY = "srgb(164,173,189)";
-const DUNE = "srgb(86,53,38)";
+const WALLPAPER = "/usr/share/backgrounds/localdot/daylight.png";
+// Colours of the wallpaper itself at fixed points, so a drawn pixel shows which image xfdesktop uses.
+const SKY = { 2: "srgb(176,212,240)", 1: "srgb(177,213,241)" };
+const FIELD = { 2: "srgb(198,221,234)", 1: "srgb(199,222,235)" };
 
 const screenPixel = (name: string, x: number, y: number) =>
   outputAs(
@@ -311,19 +311,20 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(reply).toContain(`string "${address}"`);
   });
 
-  it("renders HiDPI XFCE at 2x: window scaling 2, Xft/DPI 96, xhdpi theme, doubled panel", () => {
+  it("renders HiDPI XFCE at 2x: window scaling 2, Xft/DPI 96, xhdpi theme, doubled menu bar", () => {
     expect(xfconf(C2, "xsettings", "/Gdk/WindowScalingFactor")).toBe("2");
     expect(xfconf(C2, "xsettings", "/Xft/DPI")).toBe("96");
     expect(xfconf(C2, "xfwm4", "/general/theme")).toBe("WhiteSur-Light-xhdpi");
     expect(outputAs(C2, "abc", "xdpyinfo")).toMatch(/dimensions:\s+2560x1600/);
-    // The panel's window is one pixel taller than its xfconf size of 26: 27 at 1x, 54 at 2x.
+    // The menu bar is 24 pt: 24 px at 1x, 48 at 2x. It is the only edge a maximized window gives up.
     expect(dockWindow(C2, "xfce4-panel")).toEqual({
       x: 0,
       y: 0,
       width: 2560,
-      height: 54,
-      strut: "0, 0, 54, 0, 0, 0, 0, 0, 0, 2558, 0, 0",
+      height: 48,
+      strut: "0, 0, 48, 0, 0, 0, 0, 0, 0, 2558, 0, 0",
     });
+    expect(outputAs(C2, "abc", "xprop", "-root", "_NET_WORKAREA")).toContain("= 0, 48, 2560, 1552");
   });
 
   // xfwm4's default vblank mode syncs through XPresent, which doubled input-to-frame latency in S8.
@@ -438,7 +439,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     });
   });
 
-  it("wears the WhiteSur light look with a dock and a menu-bar panel", () => {
+  it("wears the light look with a floating dock and a glass menu bar", () => {
     expect(xfconf(C2, "xsettings", "/Net/ThemeName")).toBe("WhiteSur-Light");
     const icons = xfconf(C2, "xsettings", "/Net/IconThemeName");
     expect(icons).toBe("WhiteSur-light");
@@ -463,12 +464,13 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       "/usr/share/themes/WhiteSur-Light-xhdpi/xfwm4/themerc",
       "/usr/share/icons/WhiteSur/index.theme",
       "/usr/share/icons/WhiteSur-light/index.theme",
-      "/usr/share/plank/themes/WhiteSur-Light/dock.theme",
+      "/usr/share/plank/themes/localdot-glass/dock.theme",
       "/usr/share/doc/localdot-themes/WhiteSur-gtk-theme.COPYING",
       "/usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING",
-      "/usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE",
       "/usr/share/doc/localdot-themes/THIRD-PARTY.md",
       "/usr/share/doc/plank/copyright",
+      "/usr/share/doc/xfce4-appmenu-plugin/copyright",
+      "/usr/share/doc/rofi/copyright",
     );
     const closeButton = (theme: string) =>
       outputOf(
@@ -481,28 +483,31 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(closeButton("WhiteSur-Light")).toBe("24x28");
     expect(closeButton("WhiteSur-Light-xhdpi")).toBe("48x56");
     const plugins = outputAs(C2, "abc", "xfconf-query", "-c", "xfce4-panel", "-l", "-v");
-    expect(plugins).toContain("applicationsmenu");
+    for (const plugin of ["applicationsmenu", "appmenu", "launcher", "clock"]) {
+      expect(plugins).toContain(plugin);
+    }
     expect(plugins).not.toContain("tasklist");
+    expect(plugins).not.toContain("systray");
     // No session menu: the cell has no logind, and a log-out would end the agent's session.
     expect(plugins).not.toContain("actions");
-    // A name the icon theme lacks draws GTK's red "missing image" sign on the menu button.
+    // A name no icon theme has draws GTK's red "missing image" sign on the menu button.
     const menuIcon = /button-icon\s+(\S+)/.exec(plugins)?.[1];
-    expect(
-      outputOf(C2, "find", "-L", `/usr/share/icons/${icons}/`, "-name", `${menuIcon}.svg`),
-    ).not.toBe("");
-    // The menu bar renders light whatever the wallpaper, and Plank's translucent dock needs the
+    outputOf(C2, "test", "-f", `/usr/share/icons/hicolor/scalable/apps/${menuIcon}.svg`);
+    // The menu bar is translucent over the wallpaper, and Plank's translucent dock needs the
     // compositor (without one it draws an opaque grey block).
-    expect(screenPixel(C2, 1280, 10)).toBe("srgb(241,241,241)");
+    expect(screenPixel(C2, 1280, 10)).toBe("srgb(238,240,246)");
     expect(outputAs(C2, "abc", "python3", "-c", COMPOSITOR_RUNNING).trim()).toBe("True");
     expect(dockerExecAs(C2, "abc", "pgrep", "-x", "plank").status).toBe(0);
     expect(outputAs(C2, "abc", "gsettings", "get", PLANK_DOCK, "theme").trim()).toBe(
-      "'WhiteSur-Light'",
+      "'localdot-glass'",
     );
-    // The dock reserves a band for its 48 px icons (96 device px at 2x) at the bottom edge. With
-    // the compositor its window is taller than that band (room for the icons to bounce).
+    expect(outputAs(C2, "abc", "gsettings", "get", PLANK_DOCK, "hide-mode").trim()).toBe(
+      "'window-dodge'",
+    );
+    // The dock floats: it reserves no screen edge, so a maximized window reaches the bottom.
     const dock = dockWindow(C2, "plank");
     expect(dock.y + dock.height).toBe(1600);
-    expect(dock.strut).toBe("0, 0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 2559");
+    expect(dock.strut).toBe("0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0");
     const launchers = outputAs(
       C2,
       "abc",
@@ -555,12 +560,12 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(appleLogos).toBe("");
   });
 
-  it("draws WhiteSur's light dune wallpaper from a new home's xfdesktop settings", () => {
+  it("draws the Daylight wallpaper from a new home's xfdesktop settings", () => {
     expect(wallpaper(C2)).toBe(WALLPAPER);
-    expect(screenPixel(C2, 2400, 200)).toBe(SKY);
-    expect(screenPixel(C2, 2000, 1200)).toBe(DUNE);
+    expect(screenPixel(C2, 2400, 200)).toBe(SKY[2]);
+    expect(screenPixel(C2, 2000, 1200)).toBe(FIELD[2]);
     // A dock shadow would draw a band across the screen above Plank's tall, transparent window.
-    expect(screenPixel(C2, 2000, dockWindow(C2, "plank").y - 6)).toBe(DUNE);
+    expect(screenPixel(C2, 2000, dockWindow(C2, "plank").y - 6)).toBe("srgb(185,216,231)");
   });
 
   it("saves a 2x screenshot of the themed desktop for the executor to look at", () => {
@@ -618,16 +623,16 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       x: 0,
       y: 0,
       width: 1280,
-      height: 27,
-      strut: "0, 0, 27, 0, 0, 0, 0, 0, 0, 1279, 0, 0",
+      height: 24,
+      strut: "0, 0, 24, 0, 0, 0, 0, 0, 0, 1279, 0, 0",
     });
     const dock = dockWindow(C1, "plank");
     expect(dock.y + dock.height).toBe(800);
-    expect(dock.strut).toBe("0, 0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 1279");
+    expect(dock.strut).toBe("0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0");
     expect(xfconf(C1, "xsettings", "/Net/ThemeName")).toBe("WhiteSur-Light");
     expect(wallpaper(C1)).toBe(WALLPAPER);
-    expect(screenPixel(C1, 1200, 100)).toBe(SKY);
-    expect(screenPixel(C1, 1000, 600)).toBe(DUNE);
+    expect(screenPixel(C1, 1200, 100)).toBe(SKY[1]);
+    expect(screenPixel(C1, 1000, 600)).toBe(FIELD[1]);
     saveLook(C1, "look-1x.png", "1280x800");
   });
 });

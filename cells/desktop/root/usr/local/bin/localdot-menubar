@@ -1,0 +1,11 @@
+#!/bin/bash
+# The menu bar's menus live in a panel plugin's own window, which never has the keyboard, so GTK
+# draws every menu title with its keyboard underline until the first click. One Alt press and
+# release sent to that window clears them, as a Mac shows none.
+for _ in $(seq 120); do
+  plug="$(xdotool search --onlyvisible --classname '^wrapper-2\.0$' 2>/dev/null | head -n 1)"
+  if [ -n "$plug" ]; then
+    exec xdotool key --window "$plug" Alt_L
+  fi
+  sleep 0.5
+done

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=About this computer
+Exec=xfce4-about
+Icon=help-about
+Terminal=false
