@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { webcrypto } from "node:crypto";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeviceEnv } from "../notify/this-device.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
 import { notifyDaemonFixture } from "./testing.ts";
@@ -19,14 +19,34 @@ const thisMac: DeviceEnv = {
   subtle: webcrypto.subtle as unknown as SubtleCrypto,
 };
 
-function Harness({ d }: { d: ReturnType<typeof notifyDaemonFixture> }) {
-  const view = useNotifications(d.api, true, { env: thisMac, toast: () => {} });
+// Safari on an iPhone, signed in over the tailnet, before localDot is on its Home Screen.
+const iPhoneSafari: DeviceEnv = {
+  ...thisMac,
+  hostname: "mac.example.ts.net",
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+  maxTouchPoints: 5,
+};
+
+function Harness({
+  d,
+  env,
+  clipboard,
+}: {
+  d: ReturnType<typeof notifyDaemonFixture>;
+  env: DeviceEnv;
+  clipboard?: Pick<Clipboard, "writeText">;
+}) {
+  const view = useNotifications(d.api, true, {
+    env,
+    toast: () => {},
+    ...(clipboard ? { clipboard } : {}),
+  });
   return <NotificationsSection view={view} />;
 }
 
-function setup() {
+function setup(env = thisMac, clipboard?: Pick<Clipboard, "writeText">) {
   const d = notifyDaemonFixture();
-  render(<Harness d={d} />);
+  render(<Harness d={d} env={env} clipboard={clipboard} />);
   return d;
 }
 
@@ -64,6 +84,23 @@ describe("Settings › Notifications", () => {
     fireEvent.blur(from);
     await waitFor(() => expect(d.current().quietHours.start).toBe("23:30"));
     expect(screen.queryByText("Pick two different times.")).toBeNull();
+    const saved = screen.getByLabelText("From") as HTMLInputElement;
+    fireEvent.change(saved, { target: { value: "" } });
+    fireEvent.blur(saved);
+    expect(await screen.findByText("Pick a time.")).toBeTruthy();
+    expect(d.current().quietHours.start).toBe("23:30");
+  });
+
+  it("shows a sign-in link the clipboard refused, to copy by hand", async () => {
+    const writeText = vi.fn(async () => {
+      throw new DOMException("Not allowed", "NotAllowedError");
+    });
+    setup(iPhoneSafari, { writeText });
+    fireEvent.click(await screen.findByRole("button", { name: "Copy sign-in link" }));
+    const link = (await screen.findByLabelText("Sign-in link")) as HTMLInputElement;
+    expect(link.value).toBe(`${window.location.origin}/#code=${"C".repeat(43)}`);
+    expect(link.readOnly).toBe(true);
+    expect(screen.queryByText("Notifications weren't allowed on this device.")).toBeNull();
   });
 
   it("sends a test and says where it went", async () => {

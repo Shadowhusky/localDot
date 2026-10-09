@@ -1,7 +1,11 @@
 import type { NotifySettings, PushDevice } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
-import { copyHomeScreenLink } from "../notify/home-screen-link.ts";
+import {
+  copyHomeScreenLink,
+  type LinkClipboard,
+  LinkNotCopied,
+} from "../notify/home-screen-link.ts";
 import { notifyApi } from "../notify/notify-api.ts";
 import {
   browserEnv,
@@ -32,6 +36,8 @@ export interface NotificationsView {
   removing: string | null;
   // What the last test reached, in one plain line.
   result: { line: string; failed: boolean } | null;
+  // A sign-in link the clipboard refused, to copy by hand until it expires.
+  link: string | null;
   save(next: NotifySettings): void;
   retry(): void;
   turnOn(): void;
@@ -44,7 +50,7 @@ export interface NotificationsView {
 
 export interface NotificationsOptions {
   env?: DeviceEnv;
-  clipboard?: Pick<Clipboard, "writeText">;
+  clipboard?: LinkClipboard;
   toast?(options: ToastOptions): void;
 }
 
@@ -76,6 +82,7 @@ export function useNotifications(
   const [busy, setBusy] = useState<NotificationsView["busy"]>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [result, setResult] = useState<NotificationsView["result"]>(null);
+  const [link, setLink] = useState<{ text: string; expiresAt: number } | null>(null);
   const [reads, setReads] = useState(0);
   const saving = useRef(0);
 
@@ -114,6 +121,12 @@ export function useNotifications(
     };
   }, [active, notify, refresh, env, reads]);
 
+  useEffect(() => {
+    if (!link) return;
+    const timer = setTimeout(() => setLink(null), Math.max(0, link.expiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [link]);
+
   const run = (kind: NonNullable<NotificationsView["busy"]>, work: () => Promise<void>) => {
     setBusy(kind);
     work()
@@ -136,6 +149,7 @@ export function useNotifications(
     busy,
     removing,
     result,
+    link: link?.text ?? null,
     save(next) {
       const before = settings;
       const mine = ++saving.current;
@@ -189,9 +203,17 @@ export function useNotifications(
       run("tab", async () => {
         setTab((await env().notification?.request()) ?? "unsupported");
       }),
+    // Straight from the click: Safari copies only within the tap.
     copyLink: () =>
       run("link", async () => {
-        await copyHomeScreenLink(api, opts.clipboard ?? navigator.clipboard);
+        setLink(null);
+        try {
+          await copyHomeScreenLink(api, opts.clipboard ?? navigator.clipboard);
+        } catch (failure) {
+          if (!(failure instanceof LinkNotCopied)) throw failure;
+          setLink({ text: failure.link, expiresAt: failure.expiresAt });
+          return;
+        }
         toast.current({
           title: "Sign-in link copied",
           description: "Paste it in the Home Screen app within a minute. It works once.",

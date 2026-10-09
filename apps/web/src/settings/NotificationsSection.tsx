@@ -72,7 +72,22 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
               </Button>
             ) : undefined
           }
-        />
+        >
+          {view.link && copy.action === "copy-link" && (
+            <Field
+              label="Sign-in link"
+              description="It couldn't be copied. Touch and hold it to copy. It works once, for one minute."
+              className="settings-notify-link"
+            >
+              <TextField
+                size="sm"
+                readOnly
+                value={view.link}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </Field>
+          )}
+        </GroupRow>
         {view.device.kind === "this-mac" && view.tab === "default" && (
           <GroupRow
             leading={<IconTile icon="bell" />}
@@ -222,7 +237,7 @@ function QuietTimes({ value, onChange }: { value: QuietHours; onChange(next: Qui
     if (time === value[which]) return setError(null);
     const other = which === "start" ? value.end : value.start;
     if (!TIME.test(time) || time === other) {
-      setError({ which, text: "Pick two different times." });
+      setError({ which, text: time ? "Pick two different times." : "Pick a time." });
       return;
     }
     setError(null);

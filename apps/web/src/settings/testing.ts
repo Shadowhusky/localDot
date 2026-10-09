@@ -61,7 +61,8 @@ export function notifyDaemonFixture(failSave = false) {
     if (path === "/api/notify/settings") return Response.json(settings);
     if (path === "/api/notify/subscriptions") return Response.json({ devices: [] });
     if (path === "/api/notify/test") return Response.json({ mac: "shown", phones: [] });
-    if (path === "/api/install-code") return Response.json({ code: "C".repeat(43), expiresAt: 1 });
+    if (path === "/api/install-code")
+      return Response.json({ code: "C".repeat(43), expiresAt: Date.now() + 60_000 });
     return new Response("not found", { status: 404 });
   };
   const api = createApi("t".repeat(43), {

@@ -414,6 +414,15 @@
   vertical-align: -1px;
 }
 
+/* A link the clipboard refused, under its row and in line with the row's text. */
+.settings-notify-link {
+  margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 1.5) calc(var(--spacing) * 10);
+}
+
+.settings-body .ui-group-row .settings-notify-link .ui-text-field {
+  width: auto;
+}
+
 @media (width < 700px) {
   .settings-body {
     gap: calc(var(--spacing) * 6.5);
