@@ -77,6 +77,8 @@ export interface ComposerProps {
   configured?: boolean;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
+  // A message is on its way (true) or failed to arrive (false), before the task says anything.
+  onSending?(on: boolean): void;
   // While dot waits on a question: a message answers it, or turns it down so dot reads the message
   // and its files.
   reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
@@ -524,6 +526,7 @@ export function Composer(props: ComposerProps) {
     setDelivery(record);
     setProblem(null);
     outbox?.show();
+    current.current.onSending?.(true);
     const owns = (acceptedSession?: string) =>
       mounted.current &&
       pending.current === record &&
@@ -560,6 +563,7 @@ export function Composer(props: ComposerProps) {
       const failure = error instanceof DeliveryFailure ? error : new DeliveryFailure(true);
       const phase = failure.uncertain ? "uncertain" : "refused";
       setDelivery({ ...record, phase });
+      current.current.onSending?.(false);
       announce("composer", failure.uncertain ? "Not sure dot got that." : "Not sent.");
       if (failure.uncertain) pending.current = { ...record, phase };
     } finally {
