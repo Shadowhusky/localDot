@@ -174,19 +174,50 @@ it("a Reset candidate reaches Ready under its hold but stays withheld until the 
     await fake.close();
   }
 });
-it("requires the exact durable Ready record and restores candidate holds on restart", () => {
+it("requires the exact durable Ready record and keeps a published candidate released on restart", () => {
   const f = fixture();
   f.holds.hold(old, fresh, requestId);
   expect(() => f.holds.publish({ ...f.record, phase: "ready" })).toThrow();
   const ready = f.ready();
+  expect(new ComputerResetHolds(f.home).candidateHeld(fresh)).toBe(true);
   f.holds.publish(ready);
   expect(f.holds.oldHeld(old)).toBe(true);
   expect(f.holds.candidateHeld(fresh)).toBe(false);
   const reopened = new ComputerResetHolds(f.home);
   expect(reopened.oldHeld(old)).toBe(true);
-  expect(reopened.candidateHeld(fresh)).toBe(true);
-  reopened.publish(ready);
   expect(reopened.candidateHeld(fresh)).toBe(false);
+  expect(reopened.finalised(fresh)).toBe(true);
+  reopened.hold(old, fresh, requestId);
+  expect(reopened.candidateHeld(fresh)).toBe(false);
+});
+it.each(["changed-binding", "missing-ready-record"])(
+  "closes all reset admission when a release receipt has %s",
+  (fault) => {
+    const f = fixture();
+    f.holds.hold(old, fresh, requestId);
+    f.holds.publish(f.ready());
+    const receipt = join(f.home, "safety/computer-reset-releases", `${requestId}.json`);
+    if (fault === "changed-binding")
+      writeFileSync(receipt, JSON.stringify({ requestId, oldCellId: old, newCellId: other }), {
+        mode: 0o600,
+      });
+    else unlinkSync(join(f.home, "safety/computer-resets", `${requestId}.json`));
+    const reopened = new ComputerResetHolds(f.home);
+    expect(reopened.candidateHeld(fresh)).toBe(true);
+    expect(reopened.finalised(fresh)).toBe(false);
+    expect(reopened.oldHeld(other)).toBe(true);
+  },
+);
+it("a later reset of a finalised computer holds it as the old computer again", () => {
+  const f = fixture();
+  f.holds.hold(old, fresh, requestId);
+  f.holds.publish(f.ready());
+  const reopened = new ComputerResetHolds(f.home);
+  reopened.hold(fresh, other, "01JXYZ00000000000000000005");
+  expect(reopened.finalised(fresh)).toBe(false);
+  expect(reopened.oldHeld(fresh)).toBe(true);
+  expect(reopened.candidateHeld(fresh)).toBe(true);
+  expect(new ComputerResetHolds(f.home).candidateHeld(fresh)).toBe(true);
 });
 it("never releases an identity that a later reset uses as its old computer", () => {
   const f = fixture();
@@ -277,6 +308,8 @@ it("fails closed after restart when a reset intent write was lost after its inde
     createFresh: vi.fn(),
     retireFresh: vi.fn(),
     publish: (record) => reopened.publish(record),
+    finalised: (record) => reopened.finalised(record.newCellId),
+    thawFresh: vi.fn(),
   });
   expect(close).toHaveBeenCalledOnce();
   await expect(owner.reset(old, { requestId, eraseComputer: true })).rejects.toThrow();
@@ -303,6 +336,8 @@ it("restores a completed candidate through the coordinator only after fresh phys
     createFresh: create,
     retireFresh: retire,
     publish: (record) => reopened.publish(record),
+    finalised: (record) => reopened.finalised(record.newCellId),
+    thawFresh: vi.fn(),
   });
   expect(reopened.candidateHeld(fresh)).toBe(true);
   await owner.restoreReady();

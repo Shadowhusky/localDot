@@ -155,10 +155,11 @@ const orchestrator = new CellOrchestrator({
 });
 // Restore reset candidate holds before browser/agent recovery or ordinary cell reconciliation.
 // The reset controller will release a candidate only after durable and freshly verified Ready.
+// A candidate published in an earlier run carries a release receipt and is not held again.
 const holdResetComputers = (binding: { oldCellId: string; newCellId: string }) => {
   tickets.revoke(binding.oldCellId);
   tickets.revoke(binding.newCellId);
-  orchestrator.holdReplacement(binding.newCellId);
+  if (resetHolds.candidateHeld(binding.newCellId)) orchestrator.holdReplacement(binding.newCellId);
   orchestrator.updateStream(binding.oldCellId, {
     connection: "none",
     viewers: 0,

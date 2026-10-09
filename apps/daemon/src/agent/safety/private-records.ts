@@ -27,6 +27,7 @@ export class PrivateRecords<T> {
       | "replacements"
       | "computer-resets"
       | "computer-reset-holds"
+      | "computer-reset-releases"
       | "computer-updates",
     private readonly parse: (value: unknown, id: string) => T,
   ) {

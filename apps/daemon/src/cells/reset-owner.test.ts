@@ -48,6 +48,8 @@ function fixture(initial: ComputerResetRecord[] = []) {
     }),
     oldAbsent: vi.fn(async () => true),
     inspectFresh: vi.fn(async () => state),
+    finalised: vi.fn(() => false),
+    thawFresh: vi.fn(async () => {}),
     createFresh: vi.fn(async () => {
       events.push("create");
       state = "ready";
@@ -262,3 +264,40 @@ it("keeps only a ready candidate that fails restart verification held and republ
   expect(f.host.retireFresh).not.toHaveBeenCalled();
   expect(f.host.createFresh).not.toHaveBeenCalled();
 });
+it("never re-confirms a reset whose candidate was already published", async () => {
+  const f = fixture([record("ready")]);
+  vi.mocked(f.host.finalised).mockReturnValue(true);
+  f.setState("owned");
+  await f.owner.restoreReady();
+  expect((await f.owner.reset(old, request)).phase).toBe("ready");
+  expect(f.host.inspectFresh).not.toHaveBeenCalled();
+  expect(f.host.thawFresh).not.toHaveBeenCalled();
+  expect(f.host.publish).not.toHaveBeenCalled();
+});
+it("thaws a frozen unconfirmed candidate, then publishes only after the same confirmation", async () => {
+  const f = fixture([record("ready")]);
+  f.setState("owned");
+  vi.mocked(f.host.thawFresh).mockImplementation(async () => {
+    f.events.push("thaw");
+    f.setState("ready");
+  });
+  await f.owner.restoreReady();
+  expect(f.events).toEqual(["hold", "thaw", "publish"]);
+  expect(f.host.oldAbsent).toHaveBeenCalledTimes(2);
+  expect(f.host.inspectFresh).toHaveBeenCalledTimes(2);
+});
+it.each(["thaw-refused", "still-not-ready", "old-reappeared"])(
+  "keeps a frozen candidate held when %s",
+  async (fault) => {
+    const f = fixture([record("ready")]);
+    f.setState("owned");
+    vi.mocked(f.host.thawFresh).mockImplementation(async () => {
+      if (fault === "thaw-refused") throw new Error("not exactly owned");
+      if (fault === "old-reappeared") vi.mocked(f.host.oldAbsent).mockResolvedValue(false);
+      if (fault !== "still-not-ready") f.setState("ready");
+    });
+    await expect(f.owner.restoreReady()).rejects.toThrow(`could not re-verify ${fresh}`);
+    expect(f.host.publish).not.toHaveBeenCalled();
+    expect(f.host.retireFresh).not.toHaveBeenCalled();
+  },
+);
