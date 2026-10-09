@@ -33,7 +33,8 @@ const SEQUENCES: Record<Exclude<ScreenHands, "none">, string> = {
 };
 
 // Each call's line for the user, shown beside dot while it acts; the field's own description says
-// how it reads. A native computer tool has no such field, so its line is said in a message.
+// how it reads. A native computer tool has no such field, so its line is said just before the call,
+// and the brain gives it to the call.
 const INTENT_RULE: Record<ScreenHands, string> = {
   batch: "Give every computer, browser_act and shell call its intent, in that voice.",
   calls:
