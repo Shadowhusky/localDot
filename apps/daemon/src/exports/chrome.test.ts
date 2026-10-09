@@ -4,7 +4,7 @@ import { type ExportHostCheck, type HostExport, ulid } from "@localdot/protocol"
 import { describe, expect, it, vi } from "vitest";
 import { CdpPipe } from "./cdp.ts";
 import { type Browser, browserCandidates, ChromeRenderer } from "./chrome.ts";
-import { ExportFailure, type RenderIo } from "./jobs.ts";
+import { BrowserLost, ExportFailure, type RenderIo } from "./jobs.ts";
 import { ABLE } from "./testing/fake-renderer.ts";
 
 type Emit = (method: string, params: Record<string, unknown>) => void;
@@ -100,6 +100,13 @@ function fakeBrowser(page: FakePage) {
       exit();
     },
   };
+}
+
+// A browser that started but never answers on its pipe.
+function silentBrowser() {
+  const cdp = new CdpPipe(new PassThrough(), new PassThrough());
+  const browser: Browser = { cdp, exited: new Promise(() => {}), close: vi.fn(async () => {}) };
+  return browser;
 }
 
 function job(): HostExport {
@@ -219,6 +226,39 @@ describe("ChromeRenderer.check", () => {
     expect(able.expressions).toEqual(["window.__localdotExportHost.check()"]);
   });
 
+  it("gives up on a browser that never answers, closes it, and tries the next", async () => {
+    const silent = silentBrowser();
+    const able = fakeBrowser({ check: ABLE });
+    const renderer = new ChromeRenderer({
+      origin: "http://127.0.0.1:4750",
+      token: "a".repeat(43),
+      candidates: () => ["/silent", "/chrome"],
+      launch: async (path) => (path === "/silent" ? silent : able.browser),
+      checkMs: 50,
+    });
+    expect(await renderer.check()).toEqual(ABLE);
+    expect(renderer.browser).toBe("/chrome");
+    expect(silent.close).toHaveBeenCalled();
+  });
+
+  it("gives up on a check the page never answers, and on a launch that never returns", async () => {
+    const stuck = fakeBrowser({ check: ABLE });
+    const evaluate = stuck.browser.cdp.send.bind(stuck.browser.cdp);
+    stuck.browser.cdp.send = (method, params, sessionId) =>
+      method === "Runtime.evaluate" ? new Promise(() => {}) : evaluate(method, params, sessionId);
+    const renderer = new ChromeRenderer({
+      origin: "http://127.0.0.1:4750",
+      token: "a".repeat(43),
+      candidates: () => ["/hanging", "/stuck"],
+      launch: (path) =>
+        path === "/hanging" ? new Promise(() => {}) : Promise.resolve(stuck.browser),
+      checkMs: 50,
+    });
+    expect(await renderer.check()).toBeNull();
+    expect(renderer.browser).toBeNull();
+    expect(stuck.browser.close).toHaveBeenCalled();
+  });
+
   it("reports no renderer when no browser can make videos", async () => {
     const renderer = new ChromeRenderer({
       origin: "http://127.0.0.1:4750",
@@ -335,6 +375,53 @@ describe("ChromeRenderer.render", () => {
     });
     await expect(renderer.render(job(), recorder().io, abort.signal)).rejects.toThrow("cancelled");
     expect(made.browser.close).toHaveBeenCalled();
+  });
+
+  it("says the browser is lost when it can no longer be started", async () => {
+    let launches = 0;
+    const renderer = new ChromeRenderer({
+      origin: "http://127.0.0.1:4750",
+      token: "a".repeat(43),
+      candidates: () => ["/chrome"],
+      launch: async () => {
+        if (launches++) throw new Error("ENOENT");
+        return fakeBrowser({ check: ABLE }).browser;
+      },
+    });
+    await renderer.check();
+    await expect(
+      renderer.render(job(), recorder().io, new AbortController().signal),
+    ).rejects.toThrow(BrowserLost);
+  });
+
+  it("says the browser is lost when it never opens the export page", async () => {
+    const silent = silentBrowser();
+    let first = true;
+    const renderer = new ChromeRenderer({
+      origin: "http://127.0.0.1:4750",
+      token: "a".repeat(43),
+      candidates: () => ["/chrome"],
+      launch: async () => {
+        if (!first) return silent;
+        first = false;
+        return fakeBrowser({ check: ABLE }).browser;
+      },
+      stallMs: 50,
+    });
+    await renderer.check();
+    await expect(
+      renderer.render(job(), recorder().io, new AbortController().signal),
+    ).rejects.toThrow(BrowserLost);
+    expect(silent.close).toHaveBeenCalled();
+  });
+
+  it("does not blame the browser for a page that stops talking once open", async () => {
+    const { renderer } = await rendererFor({ run() {} }, 50);
+    const error = await renderer
+      .render(job(), recorder().io, new AbortController().signal)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ExportFailure);
+    expect(error).not.toBeInstanceOf(BrowserLost);
   });
 
   it("refuses a malformed message", async () => {

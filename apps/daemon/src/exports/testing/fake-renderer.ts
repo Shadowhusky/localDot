@@ -13,7 +13,7 @@ export interface Rendering {
   signal: AbortSignal;
   settled: boolean;
   finish(frames: number): void;
-  fail(message?: string): void;
+  fail(reason?: string | Error): void;
 }
 
 // A renderer a test (or the UI fixture) drives by hand: each render waits until it is told to
@@ -48,9 +48,15 @@ export class FakeRenderer implements ExportRenderer {
           settle();
           resolve({ frames });
         },
-        fail: (message) => {
+        fail: (reason) => {
           settle();
-          reject(message ? new ExportFailure(message) : new Error("broken"));
+          reject(
+            reason instanceof Error
+              ? reason
+              : reason
+                ? new ExportFailure(reason)
+                : new Error("broken"),
+          );
         },
       };
       signal.addEventListener("abort", stop, { once: true });

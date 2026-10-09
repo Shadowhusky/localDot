@@ -11,6 +11,7 @@ import {
 } from "@localdot/protocol";
 import { CdpPipe } from "./cdp.ts";
 import {
+  BrowserLost,
   ExportFailure,
   type ExportRenderer,
   NO_RENDERER,
@@ -21,6 +22,8 @@ import {
 export const EXPORT_PAGE = "/export.html";
 const BINDING = "localdotExport";
 const LOAD_MS = 30_000;
+// A browser that starts but never answers (a system prompt, a wedged GPU process) is given up on.
+const CHECK_MS = 40_000;
 // A page that sends nothing for this long has stopped.
 const STALL_MS = 120_000;
 const STALLED = "The video stopped being made. Try again.";
@@ -242,6 +245,7 @@ export interface ChromeRendererOptions {
   candidates?: () => string[];
   launch?: LaunchBrowser;
   stallMs?: number;
+  checkMs?: number;
 }
 
 // Makes each video in a headless browser on this computer, running the same export code a viewer's
@@ -260,34 +264,58 @@ export class ChromeRenderer implements ExportRenderer {
   }
 
   async check() {
-    const launch = this.#options.launch ?? launchBrowser;
     for (const path of (this.#options.candidates ?? browserCandidates)()) {
-      let browser: Browser | undefined;
-      try {
-        browser = await launch(path);
-        const page = await openExportPage(browser.cdp, `${this.#options.origin}${EXPORT_PAGE}`);
-        const found = ExportHostCheck.parse(
-          await page.evaluate("window.__localdotExportHost.check()"),
-        );
-        if (found.decodes && found.graphics !== null && found.maxPixels.mp4 > 0) {
-          this.#chosen = path;
-          return found;
-        }
-      } catch {
-        // The next browser is tried.
-      } finally {
-        await browser?.close();
+      const found = await this.#probe(path);
+      if (found) {
+        this.#chosen = path;
+        return found;
       }
     }
     this.#chosen = null;
     return null;
   }
 
+  async #probe(path: string): Promise<ExportHostCheck | null> {
+    const launching = (this.#options.launch ?? launchBrowser)(path);
+    let browser: Browser | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        (async () => {
+          browser = await launching;
+          const page = await openExportPage(browser.cdp, `${this.#options.origin}${EXPORT_PAGE}`);
+          const found = ExportHostCheck.parse(
+            await page.evaluate("window.__localdotExportHost.check()"),
+          );
+          return found.decodes && found.graphics !== null && found.maxPixels.mp4 > 0 ? found : null;
+        })(),
+        new Promise<null>((resolve) => {
+          deadline = setTimeout(() => resolve(null), this.#options.checkMs ?? CHECK_MS);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(deadline);
+      // A launch still under way at the deadline closes its browser whenever it arrives.
+      const closing = launching.then(
+        (started) => started.close(),
+        () => {},
+      );
+      if (browser) await closing;
+    }
+  }
+
   async render(job: HostExport, io: RenderIo, signal: AbortSignal): Promise<RenderResult> {
     const path = this.#chosen;
     if (!path) throw new ExportFailure(NO_RENDERER);
     signal.throwIfAborted();
-    const browser = await (this.#options.launch ?? launchBrowser)(path);
+    let browser: Browser;
+    try {
+      browser = await (this.#options.launch ?? launchBrowser)(path);
+    } catch {
+      throw new BrowserLost(FAILED);
+    }
     let stall: ReturnType<typeof setTimeout> | undefined;
     try {
       return await new Promise<RenderResult>((resolve, reject) => {
@@ -301,15 +329,15 @@ export class ChromeRenderer implements ExportRenderer {
           if (result) resolve(result);
           else reject(error);
         };
+        let page: ExportPage | undefined;
+        // Until the page is open, a failure says the browser itself no longer works.
+        const failure = (message: string) =>
+          page ? new ExportFailure(message) : new BrowserLost(message);
         const watch = () => {
           clearTimeout(stall);
-          stall = setTimeout(
-            () => finish(new ExportFailure(STALLED)),
-            this.#options.stallMs ?? STALL_MS,
-          );
+          stall = setTimeout(() => finish(failure(STALLED)), this.#options.stallMs ?? STALL_MS);
         };
         signal.addEventListener("abort", abort, { once: true });
-        let page: ExportPage | undefined;
         let queue = Promise.resolve();
         const handle = async (message: ExportPageMessage) => {
           if (message.type === "progress") io.progress(message.done, message.total);
@@ -333,7 +361,7 @@ export class ChromeRenderer implements ExportRenderer {
           queue = queue.then(() => (settled ? undefined : handle(message))).catch(finish);
         };
         watch();
-        void browser.exited.then(() => finish(new ExportFailure(FAILED)));
+        void browser.exited.then(() => finish(failure(FAILED)));
         openExportPage(browser.cdp, `${this.#options.origin}${EXPORT_PAGE}`, receive)
           .then((opened) => {
             page = opened;
@@ -345,7 +373,7 @@ export class ChromeRenderer implements ExportRenderer {
             };
             return opened.evaluate(`window.__localdotExportHost.run(${JSON.stringify(spec)})`);
           })
-          .catch(() => finish(new ExportFailure(FAILED)));
+          .catch(() => finish(failure(FAILED)));
       });
     } finally {
       clearTimeout(stall);

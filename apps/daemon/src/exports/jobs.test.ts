@@ -3,9 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ExportRequest, type ExportsState, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ExportJobs, ExportRefused, exportName, NO_RENDERER } from "./jobs.ts";
+import {
+  BrowserLost,
+  ExportJobs,
+  ExportRefused,
+  type ExportRenderer,
+  exportName,
+  NO_RENDERER,
+} from "./jobs.ts";
 import { DEFAULT_EXPORT_LIMITS, ExportStore, INTERRUPTED } from "./store.ts";
-import { FakeRenderer } from "./testing/fake-renderer.ts";
+import { ABLE, FakeRenderer } from "./testing/fake-renderer.ts";
 
 const homes: string[] = [];
 afterEach(() => {
@@ -226,6 +233,97 @@ describe("ExportJobs", () => {
     jobs.close();
     await until(() => phase(jobs, job.id) === "failed");
     expect(jobs.state().exports[0]?.error).toBe(INTERRUPTED);
+  });
+
+  it("waits on shutdown until the video being made has stopped", async () => {
+    const home = mkdtempSync(join(tmpdir(), "exports-"));
+    homes.push(home);
+    let release = () => {};
+    let rendering = false;
+    // Like a browser that takes a moment to close after it is told to stop.
+    const renderer: ExportRenderer = {
+      check: async () => ABLE,
+      render: (_job, _io, signal) =>
+        new Promise((_resolve, reject) => {
+          rendering = true;
+          signal.addEventListener("abort", () => {
+            release = () => reject(signal.reason);
+          });
+        }),
+    };
+    const jobs = new ExportJobs({ store: new ExportStore(home), renderer });
+    await jobs.check();
+    const job = jobs.start({ request: request(), screen: "desktop" });
+    await until(() => rendering);
+    let closed = false;
+    const closing = jobs.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    expect(phase(jobs, job.id)).toBe("failed");
+  });
+
+  it("asks the host again when its browser is lost, and fails the waiting videos if none works", async () => {
+    const { jobs, renderer, states } = await fixture();
+    const first = jobs.start({ request: request(), screen: "desktop" });
+    const waiting = jobs.start({ request: request(), screen: "desktop" });
+    const rendering = await renderer.next();
+    renderer.able = null;
+    rendering.fail(new BrowserLost("The video couldn't be made. Try again."));
+    await until(() => jobs.state().host.state === "unavailable");
+    expect(states.map((state) => state.host.state)).toContain("checking");
+    expect(renderer.checks).toBe(2);
+    expect(phase(jobs, first.id)).toBe("failed");
+    expect(jobs.state().exports.find((entry) => entry.id === waiting.id)).toMatchObject({
+      phase: "failed",
+      error: NO_RENDERER,
+    });
+  });
+
+  it("tries a failed video again only when there is room for it", async () => {
+    const { jobs, renderer } = await fixture();
+    const failed = jobs.start({ request: request(), screen: "desktop" });
+    (await renderer.next()).fail();
+    await until(() => phase(jobs, failed.id) === "failed");
+    for (let n = 0; n < 5; n++) jobs.start({ request: request(), screen: "desktop" });
+    expect(() => jobs.retry(failed.id)).toThrow(/Several videos are waiting/);
+    expect(phase(jobs, failed.id)).toBe("failed");
+  });
+
+  it("tries a failed video again only when the host can still make it that large", async () => {
+    const first = await fixture();
+    const job = first.jobs.start({
+      request: request({ size: { w: 2560, h: 1600 } }),
+      screen: "desktop",
+    });
+    await first.renderer.next();
+    const home = first.home;
+    const renderer = new FakeRenderer();
+    renderer.able = { ...ABLE, maxPixels: { mp4: 1280 * 800, webm: 1280 * 800 } };
+    const jobs = new ExportJobs({ store: new ExportStore(home), renderer });
+    await jobs.check();
+    expect(() => jobs.retry(job.id)).toThrow(/can't make video that large/);
+    expect(phase(jobs, job.id)).toBe("failed");
+  });
+
+  it("lets go of old videos while the daemon stays up", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const { jobs, renderer, states, tick } = await fixture();
+      const job = jobs.start({ request: request(), screen: "desktop" });
+      (await renderer.next()).finish(1);
+      await until(() => phase(jobs, job.id) === "done");
+      tick(DEFAULT_EXPORT_LIMITS.maxAgeMs + 1);
+      vi.advanceTimersByTime(60 * 60 * 1000);
+      expect(jobs.state().exports).toEqual([]);
+      expect(states.at(-1)?.exports).toEqual([]);
+      void jobs.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("removes a finished video and its file", async () => {

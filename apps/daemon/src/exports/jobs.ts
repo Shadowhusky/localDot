@@ -28,6 +28,9 @@ export interface ExportRenderer {
 // A reason in plain words, shown to the person as it is.
 export class ExportFailure extends Error {}
 
+// The browser that made videos could not be started or stopped answering: the host is asked again.
+export class BrowserLost extends ExportFailure {}
+
 export class ExportRefused extends Error {
   constructor(
     readonly status: 404 | 409 | 503,
@@ -43,6 +46,8 @@ const TOO_BIG = "The video grew past the space kept for exports.";
 const MAX_WAITING = 4;
 // A host that couldn't make videos is asked again after this long, in case a browser was installed.
 const RECHECK_MS = 10 * 60 * 1000;
+// Videos past their age go even while nothing is being made.
+const SWEEP_MS = 60 * 60 * 1000;
 // Progress reaches viewers at most this often; changes of phase go at once.
 const PROGRESS_MS = 250;
 // Time left is guessed once this many frames and this much time have gone by.
@@ -76,9 +81,11 @@ export class ExportJobs {
   #checked = Number.NEGATIVE_INFINITY;
   #checking: Promise<void> | null = null;
   #running: Running | null = null;
+  #made: Promise<void> = Promise.resolve();
   #closed = false;
   #listeners = new Set<(state: ExportsState) => void>();
   #progressTimer: ReturnType<typeof setTimeout> | undefined;
+  readonly #sweepTimer: ReturnType<typeof setInterval>;
 
   constructor(options: {
     store: ExportStore;
@@ -91,6 +98,10 @@ export class ExportJobs {
     this.#now = options.now ?? Date.now;
     this.#clock = options.clock ?? (() => performance.now());
     this.#sweep();
+    this.#sweepTimer = setInterval(() => {
+      if (this.#sweep()) this.#emit();
+    }, SWEEP_MS);
+    this.#sweepTimer.unref?.();
   }
 
   state(): ExportsState {
@@ -125,6 +136,7 @@ export class ExportJobs {
       this.#host = found
         ? { state: "ready", maxPixels: found.maxPixels }
         : { state: "unavailable", maxPixels: { mp4: 0, webm: 0 } };
+      if (!found) this.#failWaiting();
       this.#checking = null;
       this.#emit();
       this.#pump();
@@ -134,15 +146,7 @@ export class ExportJobs {
   }
 
   start({ request, screen }: ExportStart): HostExport {
-    if (this.#closed || this.#host.state !== "ready") throw new ExportRefused(503, NO_RENDERER);
-    if (this.#store.list().filter((record) => record.phase === "queued").length >= MAX_WAITING)
-      throw new ExportRefused(
-        409,
-        "Several videos are waiting already. Try again when one is done.",
-      );
-    const pixels = request.size.w * request.size.h;
-    if (pixels > this.#host.maxPixels[request.format])
-      throw new ExportRefused(409, "This computer can't make video that large in this format.");
+    this.#admit(request);
     const now = this.#now();
     const record: HostExport = {
       id: ulid(now),
@@ -192,7 +196,7 @@ export class ExportJobs {
     if (!record) throw new ExportRefused(404, "That video is gone.");
     if (record.phase !== "failed")
       throw new ExportRefused(409, "Only a video that failed can be tried again.");
-    if (this.#closed || this.#host.state !== "ready") throw new ExportRefused(503, NO_RENDERER);
+    this.#admit(record.request);
     const again: HostExport = {
       ...record,
       phase: "queued",
@@ -229,10 +233,31 @@ export class ExportJobs {
     return record?.phase === "done" ? { record, path: this.#store.file(record) } : undefined;
   }
 
-  close(): void {
+  // Resolves once the video being made has stopped and its browser has closed.
+  async close(): Promise<void> {
     this.#closed = true;
     clearTimeout(this.#progressTimer);
+    clearInterval(this.#sweepTimer);
     this.#running?.abort.abort();
+    await this.#made;
+  }
+
+  #admit(request: HostExport["request"]): void {
+    if (this.#closed || this.#host.state !== "ready") throw new ExportRefused(503, NO_RENDERER);
+    if (this.#store.list().filter((record) => record.phase === "queued").length >= MAX_WAITING)
+      throw new ExportRefused(
+        409,
+        "Several videos are waiting already. Try again when one is done.",
+      );
+    if (request.size.w * request.size.h > this.#host.maxPixels[request.format])
+      throw new ExportRefused(409, "This computer can't make video that large in this format.");
+  }
+
+  #failWaiting(): void {
+    const waiting = this.#store.list().filter((record) => record.phase === "queued");
+    for (const record of waiting)
+      this.#store.set({ ...record, phase: "failed", leftMs: null, error: NO_RENDERER });
+    if (waiting.length) this.#store.save();
   }
 
   #timed(record: HostExport, running: Running): HostExport {
@@ -246,11 +271,12 @@ export class ExportJobs {
     };
   }
 
-  #sweep(): void {
+  #sweep(): boolean {
     try {
-      this.#store.sweep(this.#now());
+      return this.#store.sweep(this.#now()).length > 0;
     } catch {
       console.error("exports: old videos could not be cleared");
+      return false;
     }
   }
 
@@ -282,7 +308,7 @@ export class ExportJobs {
     this.#store.set({ ...next, phase: "making" });
     this.#store.save();
     this.#emit();
-    void this.#make(next, running)
+    this.#made = this.#make(next, running)
       .catch(() => console.error("exports: a video could not be put away"))
       .finally(() => {
         this.#running = null;
@@ -297,6 +323,7 @@ export class ExportJobs {
     let handle: FileHandle | undefined;
     let size = 0;
     let failure: string | null = null;
+    let lost = false;
     let frames = 0;
     try {
       handle = await open(part, "w", 0o600);
@@ -327,6 +354,7 @@ export class ExportJobs {
       handle = undefined;
       await rename(part, this.#store.file(job));
     } catch (error) {
+      lost = error instanceof BrowserLost;
       if (!running.cancelled)
         failure ??= this.#closed
           ? INTERRUPTED
@@ -358,5 +386,9 @@ export class ExportJobs {
       });
     }
     this.#store.save();
+    if (lost && !this.#closed) {
+      this.#host = { state: "checking", maxPixels: { mp4: 0, webm: 0 } };
+      void this.check();
+    }
   }
 }
