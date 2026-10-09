@@ -13,7 +13,8 @@ export const FULL_QUALITY: StreamQuality = { framerate: 60, crf: 25 };
 const APPLY_GAP_MS = 2000;
 const RETRY_MS = { min: 1000, max: 15_000 };
 // Selkies refuses a connection from an address that connected less than 500 ms before, and every
-// socket of the daemon's comes from one address: the tuner keeps clear of a viewer's.
+// socket of the daemon's comes from one address: the tuner never connects this soon after a
+// viewer's upgrade, however its own timers fall.
 const JOIN_GAP_MS = 700;
 
 export interface ViewerWish {
@@ -104,7 +105,7 @@ export class StreamTuning {
     }
     const owner = cell;
     owner.endpoint = endpoint;
-    owner.joinedAt = Date.now();
+    owner.upgraded();
     const wish: ViewerWish = { paused: false };
     owner.viewers.add(wish);
     let left = false;
@@ -133,6 +134,11 @@ export class StreamTuning {
     };
   }
 
+  // A viewer of the computer is about to connect to its Selkies.
+  upgrading(cellId: string): void {
+    this.#cells.get(cellId)?.upgraded();
+  }
+
   // The computer left ready: its Selkies, and the tuner's socket with it, are going.
   drop(cellId: string): void {
     this.#cells.get(cellId)?.close();
@@ -148,7 +154,6 @@ export class StreamTuning {
 class CellTuning {
   readonly viewers = new Set<ViewerWish>();
   endpoint: () => StreamEndpoint | undefined = () => undefined;
-  joinedAt = Number.NEGATIVE_INFINITY;
   readonly #id: string;
   readonly #opts: TuningOptions;
   #socket: WebSocket | undefined;
@@ -161,17 +166,21 @@ class CellTuning {
   #retry: ReturnType<typeof setTimeout> | undefined;
   #failures = 0;
   #closed = false;
+  #upgradedAt = Number.NEGATIVE_INFINITY;
 
   constructor(id: string, opts: TuningOptions) {
     this.#id = id;
     this.#opts = opts;
   }
 
+  upgraded(): void {
+    this.#upgradedAt = Date.now();
+  }
+
   update(): void {
     if (this.#closed) return;
     const wanted = sharedQuality(this.viewers);
-    if (!this.#socket && !this.#retry && !same(wanted, FULL_QUALITY))
-      this.#connectAfter(this.joinedAt + this.#opts.joinGapMs - Date.now());
+    if (!this.#socket && !this.#retry && !same(wanted, FULL_QUALITY)) this.#connectAfter(0);
     this.#schedule();
   }
 
@@ -262,15 +271,17 @@ class CellTuning {
     this.#connectAfter(Math.min(max, min * 2 ** Math.max(0, this.#failures - 1)));
   }
 
+  // A timer that falls too soon after a viewer's upgrade waits again.
   #connectAfter(wait: number): void {
-    if (wait <= 0) {
+    const delay = Math.max(wait, this.#upgradedAt + this.#opts.joinGapMs - Date.now());
+    if (delay <= 0) {
       this.#connect();
       return;
     }
     this.#retry = setTimeout(() => {
       this.#retry = undefined;
-      if (!this.#closed && !this.#socket) this.#connect();
-    }, wait);
+      if (!this.#closed && !this.#socket) this.#connectAfter(0);
+    }, delay);
   }
 }
 

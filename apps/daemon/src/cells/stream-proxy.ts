@@ -206,6 +206,7 @@ function relay(
   opts: RelayOptions,
 ): void {
   const { id, deps, streams } = opts;
+  deps.tuning?.upgrading(id);
   // Theatre clients only receive the desktop. Selkies' controller role would let one
   // tab claim the other's primary display; this fixed role also caps input at the server.
   const upstream = new WebSocket(

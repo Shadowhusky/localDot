@@ -143,6 +143,25 @@ describe("StreamTuning", () => {
     expect(Date.now() - joined).toBeGreaterThanOrEqual(140);
   });
 
+  it("waits again for each viewer that connects before it does, and before each retry", async () => {
+    const selkies = await fakeSelkies();
+    const { tuner } = tuning({ joinGapMs: 150 });
+    tuner
+      .join("cell", () => selkies.endpoint)
+      .consume(qualityMessage({ visible: true, framerate: 30, crf: 25 }));
+    await new Promise((r) => setTimeout(r, 100));
+    tuner.join("cell", () => selkies.endpoint);
+    const joined = Date.now();
+    await until("the tuner", () => selkies.sockets.length === 1);
+    expect(Date.now() - joined).toBeGreaterThanOrEqual(140);
+    await until("its settings", () => selkies.got().length === 3);
+    selkies.sockets[0]?.ws.terminate();
+    tuner.upgrading("cell");
+    const upgrading = Date.now();
+    await until("a second tuner", () => selkies.sockets.length === 2);
+    expect(Date.now() - upgrading).toBeGreaterThanOrEqual(140);
+  });
+
   it("spaces its changes however often the viewers change their minds", async () => {
     const selkies = await fakeSelkies();
     const { tuner, applied } = tuning({ applyGapMs: 150 });
