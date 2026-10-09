@@ -36,6 +36,7 @@ import {
   type ThreadKind,
   type ThreadRow,
   threadRows,
+  timeLabel,
   type WorkStep,
 } from "./thread.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
@@ -163,7 +164,7 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
           step.key === other.key &&
           step.state === other.state &&
           step.title === other.title &&
-          step.metric === other.metric &&
+          step.time === other.time &&
           step.startT === other.startT &&
           step.endT === other.endT
         );
@@ -215,6 +216,17 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       then.downloads === thread.downloads &&
       then.onReplay === thread.onReplay &&
       then.replayTask === thread.replayTask,
+  },
+  control: {
+    draw: ({ item }) => (
+      <p className="thread-divider">
+        <span>
+          {item.took ? "You took control" : "You handed back"}
+          {item.at !== undefined && <time className="num"> · {timeLabel(item.at)}</time>}
+        </span>
+      </p>
+    ),
+    same: (was, now) => was.took === now.took && was.at === now.at,
   },
   work: {
     draw: ({ item, thread }) => (
@@ -308,6 +320,8 @@ export interface ConversationProps {
   // Beside the composer, as a phone's toolbar holds it: before it and after it.
   lead?: ReactNode;
   trail?: ReactNode;
+  // In the toolbar's place, the composer and what is beside it hidden but kept, so a draft survives.
+  tools?: ReactNode;
   // The composer stays at the foot however short the column gets, as a phone's toolbar does.
   pinned?: boolean;
   // Another view of the task (Activity) laid over the thread, above the foot, so the composer
@@ -341,6 +355,7 @@ export function Conversation({
   ask,
   lead,
   trail,
+  tools,
   pinned = false,
   cover,
   covered = false,
@@ -798,9 +813,12 @@ export function Conversation({
             )}
           </Collapse>
           <div className="thread-toolbar">
-            {lead}
-            <div className="thread-composer">{composer}</div>
-            {trail}
+            {!tools && lead}
+            <div className="thread-composer" hidden={!!tools}>
+              {composer}
+            </div>
+            {!tools && trail}
+            {tools}
           </div>
         </Outbox.Provider>,
         dockHost,

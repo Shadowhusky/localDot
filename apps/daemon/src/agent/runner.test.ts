@@ -14,8 +14,9 @@ import { checkChatgptChoice } from "./bindings.ts";
 import type { ChatgptStatus } from "./codex/account.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexCleanupError } from "./codex/driver.ts";
+import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -178,6 +179,79 @@ function setup(idleMs = 60_000) {
     },
   };
 }
+
+describe("the user's own hold on the computer", () => {
+  it("holds the computer for the user with no task, in the conversation, until they hand back", async () => {
+    const f = setup();
+    const conversations = new Conversations(f.home, f.log);
+    f.deps.conversations = conversations;
+    const earlier = f.log.createSession("Plan the trip");
+    f.log.append(earlier, {
+      type: "session.start",
+      agent: "main",
+      data: { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: "Plan the trip" },
+    });
+    conversations.adopt(earlier);
+    const { sessionId, requestId } = await f.runner.hold(f.cellId);
+    const session = f.runner.get(sessionId);
+    if (!session) throw new Error("fixture missing hold");
+    await until(() => session.manualControl === "ready");
+    expect(f.live.get(f.cellId)).toBe(sessionId);
+    expect(session.pendingTakeover).toBe(requestId);
+    expect(session.status).toBe("idle");
+    expect(f.runner.holds(sessionId)).toBe(true);
+    expect(f.runner.selectionOf(sessionId)).toBeUndefined();
+    expect(conversations.current()).toBe(sessionId);
+    const events = f.log.read(sessionId);
+    expect(events.find((event) => event.type === "session.start")?.data).toMatchObject({
+      title: "Plan the trip",
+      continues: earlier,
+    });
+    expect(events.some((event) => event.type === "message.user")).toBe(false);
+    expect(() => f.runner.pauseTask(sessionId, ulid())).toThrow(AgentError);
+    await expect(f.runner.release()).rejects.toThrow("Hand back the computer first.");
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(sessionId);
+    expect(f.log.read(sessionId).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+    expect(f.runner.get(sessionId)).toBeUndefined();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.installSkills).not.toHaveBeenCalled();
+  });
+
+  it("gives the user the control of a task live on the computer instead", async () => {
+    const f = setup();
+    const task = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => task.status === "idle");
+    const reply = await f.runner.hold(f.cellId);
+    expect(reply).toEqual({ sessionId: task.id, requestId: task.pendingTakeover });
+    expect(f.runner.holds(task.id)).toBe(false);
+    task.stop();
+    await f.live.settled(task.id);
+  });
+
+  it("follows a hold the user handed back with a new one", async () => {
+    const f = setup();
+    const first = await f.runner.hold(f.cellId);
+    const session = f.runner.get(first.sessionId);
+    if (!session) throw new Error("fixture missing hold");
+    await until(() => session.manualControl === "ready");
+    expect(await session.handback(first.requestId, undefined)).toBe(true);
+    const next = await f.runner.hold(f.cellId);
+    expect(next.sessionId).not.toBe(first.sessionId);
+    expect(f.live.get(f.cellId)).toBe(next.sessionId);
+    f.runner.get(next.sessionId)?.stop();
+    await f.live.settled(next.sessionId);
+  });
+
+  it("refuses while the computer is paused", async () => {
+    const f = setup();
+    f.state.paused = true;
+    await expect(f.runner.hold(f.cellId)).rejects.toThrow(AgentError);
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+});
 
 describe("reset task retirement", () => {
   function resetFixture() {
@@ -365,6 +439,51 @@ describe("ChatGPT runner lifecycle", () => {
     } finally {
       streams.dispose();
     }
+  });
+
+  it("retires dot's brain when the user takes the computer and starts it again on hand-back with a note", async () => {
+    const f = setup();
+    const inboxes: string[][] = [];
+    f.run.mockImplementationOnce(async (session) => {
+      const generation = session.beginBrain();
+      session.setStatus("running");
+      await new Promise((resolve) => generation.signal.addEventListener("abort", resolve));
+      return 0;
+    });
+    f.run.mockImplementationOnce(async (session, input) => {
+      const generation = session.beginBrain();
+      const inbox = await session.inbox(0, 0, generation.signal, generation);
+      inboxes.push([String(input.resume), ...inbox.items.map((item) => item.kind)]);
+      session.retireBrain(generation);
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "running" && !!session.generation);
+    const requestId = session.takeControl();
+    await until(() => session.manualControl === "ready");
+    expect(session.generation).toBeUndefined();
+    expect(f.run).toHaveBeenCalledOnce();
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
+    expect(inboxes).toEqual([["true", "steer"]]);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
+  it("keeps a finished task waiting while the user has the computer, past its idle time", async () => {
+    const f = setup(20);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    const requestId = session.takeControl();
+    await until(() => session.manualControl === "ready");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(session.stopped).toBe(false);
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(session.id);
+    expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+    expect(f.run).toHaveBeenCalledOnce();
   });
 
   it("prepares the desktop browser before skills or model execution, once per task", async () => {

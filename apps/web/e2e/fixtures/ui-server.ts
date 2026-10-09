@@ -312,6 +312,8 @@ const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
 let session: AgentSession | undefined;
+// The user's own hold on the computer, with no task, while it is the live session.
+let holder: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
 let liveStep: string | undefined;
 // A plan task resolves through the daemon's own bindings, frozen at start as the runner does.
@@ -1055,6 +1057,37 @@ const agent: AgentRoutesDeps = {
         throw new AgentError(409, "Finish or stop the current task first.");
       await endLive("done");
     },
+    // As the daemon does: a live task's control, or a hold of the user's own that ends at hand-back.
+    hold: async (key) => {
+      if (key !== cellId) throw new Error("unknown cell");
+      if (session && !session.stopped && (session !== holder || session.controlHeld))
+        return { sessionId: session.id, requestId: session.takeControl() };
+      await endLive("done");
+      const continues = conversations.current() ?? undefined;
+      const title = continues ? conversations.title(continues) : undefined;
+      const owned = new AgentSession(log.createSession("You used the computer"), cellId, "", log);
+      log.append(owned.id, {
+        agent: "main",
+        type: "session.start",
+        data: {
+          screen: { w: 2560, h: 1600, scale: 2 },
+          os: "linux",
+          ...(title ? { title } : {}),
+          ...(continues ? { continues } : {}),
+        },
+      });
+      session = owned;
+      holder = owned;
+      conversations.adopt(owned.id);
+      owned.setStatus("idle");
+      const requestId = owned.takeControl();
+      attachLive(owned);
+      void owned.controlReleased(requestId).then(() => {
+        if (session === owned && !owned.stopped) void endLive("done");
+      });
+      return { sessionId: owned.id, requestId };
+    },
+    holds: (key) => !!holder && key === holder.id,
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
         ? { kind: "chatgpt", model: "sample-plan-model" }
@@ -2154,6 +2187,14 @@ routes.post("/__qa/stream", (c) => {
     }
     if (tick % 15 === 0) nextStep(owned, "colour");
   }, 40);
+  return c.json({ ok: true });
+});
+// dot thinks aloud: the narrator band speaks its latest sentence (thoughts are not kept in history).
+routes.post("/__qa/think", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("thought.delta", {
+    text: c.req.query("text") ?? "Checking February's net total against revenue minus returns.",
+  });
   return c.json({ ok: true });
 });
 // dot says something in the thread: n messages at once, or one sent word by word (stream=1).

@@ -29,63 +29,6 @@
   font: inherit;
   resize: vertical;
 }
-.takeover-panel {
-  width: 100%;
-  max-width: 720px;
-  box-sizing: border-box;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  padding: calc(var(--spacing) * 4);
-  margin-top: calc(var(--spacing) * 3);
-}
-.takeover-panel h3 {
-  margin: 0;
-  font-size: var(--text-title-3);
-  line-height: var(--text-title-3--line-height);
-  font-weight: 600;
-}
-.takeover-panel p {
-  white-space: pre-wrap;
-}
-.manual-entry,
-.manual-keys {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 1.5);
-  margin-top: calc(var(--spacing) * 3);
-}
-.manual-keys {
-  min-width: 0;
-  padding: 0;
-  margin-inline: 0;
-  border: 0;
-}
-.manual-pointer {
-  margin-inline-start: auto;
-}
-@media (--phone) {
-  .manual-pointer {
-    width: 100%;
-    margin-inline-start: 0;
-  }
-}
-.manual-paste-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: calc(var(--spacing) * 2);
-  margin-top: calc(var(--spacing) * 3);
-}
-.manual-hint .ui-kbd {
-  margin-inline-end: calc(var(--spacing) * 0.5);
-}
-.takeover-panel > .manual-note {
-  margin-top: calc(var(--spacing) * 4);
-}
-.takeover-panel > .manual-return {
-  margin-top: calc(var(--spacing) * 3);
-}
 .stage > .manual-surface {
   position: absolute;
   inset: 0;
@@ -124,20 +67,6 @@
   caret-color: transparent;
   background: transparent;
 }
-.manual-paste {
-  -webkit-text-security: disc;
-}
-.manual-hint-touch {
-  display: none;
-}
-@media (pointer: coarse) {
-  .manual-hint-pointer {
-    display: none;
-  }
-  .manual-hint-touch {
-    display: inline;
-  }
-}
 .pane-computer.manual-pane {
   overflow-y: auto;
 }
@@ -148,8 +77,4 @@
 }
 .manual-column .stage {
   flex: none;
-}
-.manual-column > .takeover-panel {
-  width: min(100%, calc((100vh - var(--spacing-stage-reserve)) * 1.6));
-  max-width: none;
 }

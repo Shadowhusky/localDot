@@ -183,6 +183,7 @@ export async function authorizePrepared(
         "Complete this action yourself, then hand control back.",
         ctx.step,
         ctx.lease,
+        true,
       );
       ctx.check();
       return undefined;

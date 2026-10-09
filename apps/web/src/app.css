@@ -189,6 +189,18 @@
   max-width: calc(100% - 2 * (56px + 16px));
 }
 
+@media (orientation: portrait) {
+  .app[data-focus] .stage-col {
+    justify-content: center;
+    padding: 0 calc(var(--spacing) * 2);
+  }
+
+  .app[data-focus] .stage-col > .stage-frame {
+    width: 100%;
+    max-width: none;
+  }
+}
+
 /* Panels that list things down a column: Activity, and Replay's library. */
 .rail {
   display: flex;
@@ -240,20 +252,6 @@
 .stage-veil.on,
 .stage-veil[role="alert"] {
   opacity: 1;
-}
-
-.stage > .screen-label {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  left: 12px;
-  max-width: calc(100% - 24px);
-  padding: 6px 10px;
-  border-radius: 8px;
-  background-color: var(--color-glass-solid);
-  color: var(--color-fg-2);
-  font-size: 12px;
-  pointer-events: none;
 }
 
 .stage > canvas,

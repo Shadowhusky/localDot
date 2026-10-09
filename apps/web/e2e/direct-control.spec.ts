@@ -39,7 +39,9 @@ async function takeControl(page: Page) {
   });
   await page.goto(`${origin}/#token=${TOKEN}`);
   await page.request.post(`${origin}/__qa/takeover`);
-  await expect(page.getByRole("region", { name: "Manual control" })).toBeVisible();
+  // dot hands the computer over; it is the user's once they take it.
+  await page.getByRole("button", { name: "Take control" }).click();
+  await expect(page.getByRole("button", { name: "Hand back" })).toBeEnabled();
   const keys = page.getByLabel("Type on the computer");
   await expect(keys).toBeEnabled();
   const surface = page.locator(".manual-surface");
@@ -69,8 +71,8 @@ test("typing on the computer while in control reaches it as one ordered stream",
   await expect
     .poll(async () => keyboard(await delivered(page, origin)))
     .toEqual(["user@example.test", ["tab"], "pass word!"]);
-  await page.getByRole("button", { name: "Return control to dot" }).click();
-  await expect(page.getByRole("region", { name: "Manual control" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Hand back" }).click();
+  await expect(page.getByRole("button", { name: "Hand back" })).toHaveCount(0);
   const journal = await (
     await page.request.get(`${origin}/api/sessions/${fixture?.sessionId}/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },

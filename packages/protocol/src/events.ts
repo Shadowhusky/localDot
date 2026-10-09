@@ -373,7 +373,7 @@ export const AskAnswer = event(
     fields: z.record(AskFieldId, AskFieldRecord).optional(),
     // The user chose the way out ("Not now").
     declined: z.literal(true).optional(),
-    by: z.enum(["user", "timeout", "stop", "pause"]),
+    by: z.enum(["user", "timeout", "stop", "pause", "control"]),
   }),
 );
 export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);
@@ -383,6 +383,8 @@ export const TakeoverRequest = event(
     requestId: z.string().regex(ULID_PATTERN),
     reason: TakeoverReason,
     note: z.string().max(500),
+    // The user took the computer themselves; absent when dot handed it over.
+    by: z.literal("user").optional(),
   }),
 );
 export const TakeoverEnd = event(

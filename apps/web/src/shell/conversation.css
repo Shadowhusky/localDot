@@ -91,6 +91,27 @@
   letter-spacing: var(--text-footnote--letter-spacing);
 }
 
+/* The computer changing hands: a quiet line between hairlines. */
+.thread-divider {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2.5);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+}
+
+.thread-divider::before,
+.thread-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-separator);
+}
+
 .thread-note {
   color: var(--color-fg-3);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
@@ -723,7 +744,7 @@
   overflow-wrap: anywhere;
 }
 
-.thread-work-metric {
+.thread-work-time {
   color: var(--color-fg-3);
 }
 
@@ -1308,6 +1329,20 @@
   .toolbar-button {
     --_icon-fg: var(--color-fg-1);
   }
+}
+
+/* A phone's toolbar while the user has the computer: its keyboard, a right-click for the next tap,
+   typing a pasted text, and Hand back at the trailing end. */
+.control-tools {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+}
+
+.control-tools-hand-back {
+  margin-left: auto;
 }
 
 /* The message field as one rounded pill: attach inside on the left, Send inside on the right, and

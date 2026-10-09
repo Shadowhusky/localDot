@@ -17,6 +17,8 @@ import {
   QuestionAnswerRequest,
   ResumeSafetyRequest,
   scanKeyLike,
+  type TakeComputerReply,
+  type TakeControlReply,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -45,6 +47,7 @@ import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./man
 import { MemoryError, type MemoryStore } from "./memory.ts";
 import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
+import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
@@ -68,6 +71,8 @@ export interface AgentRoutesDeps {
         | "budgetHoldOf"
         | "sessions"
         | "release"
+        | "hold"
+        | "holds"
       >
     >;
   conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
@@ -216,6 +221,8 @@ function fail(error: unknown): Response {
     return new Response("the selected models or keys are unavailable", { status: 400 });
   if (error instanceof SessionStoppedError || error instanceof ControlHeldError)
     return new Response("task control changed", { status: 409 });
+  if (error instanceof PausedStepError)
+    return new Response("Pause is changing; try again in a moment", { status: 409 });
   if (error instanceof DesktopdError)
     return new Response("the computer transfer failed", {
       status: error.status === 413 || error.status === 409 ? error.status : 502,
@@ -521,6 +528,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
         ...(s.pendingTakeover ? { pendingTakeover: s.pendingTakeover } : {}),
         ...(s.manualControl ? { manualControl: s.manualControl } : {}),
+        ...(deps.runner.holds?.(s.id) ? { holder: true } : {}),
       });
     }),
   );
@@ -531,6 +539,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const parsed = await json(c.req.raw, Message);
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (deps.runner.holds?.(s.id))
+        throw new RouteError(409, "hand back the computer, then message dot");
       s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
       return c.body(null, 202);
     }),
@@ -619,6 +629,36 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
               parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
             );
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // The user takes the computer whatever dot is doing; the reply names the control to hand back.
+  app.post(
+    "/api/agent/sessions/:id/takeover",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      // A hold the user handed back is ending; the computer's own route starts the next one.
+      if (
+        s.stopped ||
+        deps.taskMutationReady?.(s) === false ||
+        (deps.runner.holds?.(s.id) && !s.controlHeld)
+      )
+        throw new RouteError(409, "the computer is not ready to hand over");
+      return c.json({ requestId: s.takeControl() } satisfies TakeControlReply, 202);
+    }),
+  );
+  // The user takes the computer whether or not a task is at work on it.
+  app.post(
+    "/api/cells/:id/takeover",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (!deps.runner.hold) throw new RouteError(503, "taking control is unavailable");
+      const reply = await deps.runner.hold(cellId, c.req.raw.signal);
+      return c.json(reply satisfies TakeComputerReply, 202);
     }),
   );
   app.post(

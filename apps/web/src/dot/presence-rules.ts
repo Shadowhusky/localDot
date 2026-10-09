@@ -13,6 +13,8 @@ export interface PresenceInput {
   keyboard: boolean;
   // First-run setup covers the app.
   setup?: boolean;
+  // The stage fills the screen, with no band under it.
+  full?: boolean;
 }
 
 export function presencePlace({
@@ -21,10 +23,11 @@ export function presencePlace({
   replaying,
   keyboard,
   setup,
+  full,
 }: PresenceInput): PresencePlace | null {
   if (!showDot) return null;
   if (setup) return "intro";
   if (replaying) return "dock";
   if (curtain) return "hero";
-  return keyboard ? "badge" : "dock";
+  return keyboard || full ? "badge" : "dock";
 }

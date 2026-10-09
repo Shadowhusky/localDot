@@ -177,3 +177,57 @@ it("drops a decision under the ring on a field dot will fill, and hangs it back 
     vi.restoreAllMocks();
   }
 });
+
+it("shrinks to the full screen shape inside the picture, with Take control as an icon and a way out", () => {
+  const onExitFull = vi.fn();
+  const view = render(<HudIsland {...props({ full: true, onExitFull })} />);
+  const anchor = document.querySelector(".island-anchor");
+  expect(anchor?.hasAttribute("data-full")).toBe(true);
+  const take = screen.getByRole("button", { name: "Take control" });
+  expect(take.classList.contains("ui-icon-button")).toBe(true);
+  expect(take.textContent).toBe("");
+  for (const name of ["Pause", "Stop"]) expect(screen.getByRole("button", { name })).toBeTruthy();
+  screen.getByRole("button", { name: "Exit full screen" }).click();
+  expect(onExitFull).toHaveBeenCalledOnce();
+
+  view.rerender(
+    <HudIsland
+      {...props({
+        full: true,
+        rise: true,
+        shape: "control",
+        status: status("control", "You're in control"),
+        onExitFull,
+      })}
+    />,
+  );
+  expect(anchor?.hasAttribute("data-risen")).toBe(false);
+  expect(screen.getByRole("button", { name: "Hand back" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Exit full screen" })).toBeTruthy();
+
+  view.rerender(<HudIsland {...props()} />);
+  expect(screen.queryByRole("button", { name: "Exit full screen" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Take control" }).textContent).toContain(
+    "Take control",
+  );
+});
+
+it("rises over a sheet's scrim while it is up, and settles back as the sheet closes", async () => {
+  render(<HudIsland {...props()} />);
+  const anchor = document.querySelector(".island-anchor");
+  const frame = () => new Promise((done) => requestAnimationFrame(done));
+  await frame();
+  expect(anchor?.hasAttribute("data-lifted")).toBe(false);
+  const layer = document.createElement("div");
+  layer.className = "ui-layer";
+  layer.innerHTML = '<div class="ui-scrim"></div><div class="ui-sheet"></div>';
+  document.body.append(layer);
+  await frame();
+  await frame();
+  expect(anchor?.hasAttribute("data-lifted")).toBe(true);
+  layer.setAttribute("data-closing", "");
+  await frame();
+  await frame();
+  expect(anchor?.hasAttribute("data-lifted")).toBe(false);
+  layer.remove();
+});

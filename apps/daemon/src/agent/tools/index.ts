@@ -290,7 +290,10 @@ async function dispatchAdmitted(
         append(ctx, "step.start", { kind: "gui" });
         result = await computerTool(t, ctx, input);
         ctx.check();
-        append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });
+        // A step refused for a stale look did nothing: dot looks again, nothing failed.
+        append(ctx, "step.end", {
+          status: result.ok ? "ok" : result.cancelled === "stale" ? "cancelled" : "failed",
+        });
         break;
       case "shell":
         result = await shellTool(t, ctx, input);

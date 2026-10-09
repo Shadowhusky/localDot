@@ -354,6 +354,7 @@ export function createAgent(d: AgentWiringDeps) {
               check();
               session.tainted = true;
               session.lastFrameId = frame.frameId;
+              session.freshLook();
               return {
                 frameId: frame.frameId,
                 full: true,

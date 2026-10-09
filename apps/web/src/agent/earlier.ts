@@ -40,7 +40,12 @@ export async function readThread(
     foldEvents(stage, events);
     for (const event of events) model = projectAgentEvent(model, event);
   });
-  const items = threadItems(model.messages.values(), model.questions.values(), model.results);
+  const items = threadItems(
+    model.messages.values(),
+    model.questions.values(),
+    model.results,
+    model.takeovers.values(),
+  );
   const steps = workSteps(timelineRows(stepRows(stage), stage.keyUses), model);
   return owned(withWork(items, steps, false, model.spendCalls), sessionId);
 }
