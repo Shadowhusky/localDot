@@ -91,9 +91,11 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
+import { useSignIn } from "./settings/useSignIn.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
@@ -840,6 +842,18 @@ function Theatre({ api }: { api: ApiClient }) {
   const ownHold =
     agent.snapshot?.holder === true ||
     (session.ended && agent.history === true && agent.model.messages.size === 0);
+  // Sign-ins go to the web browser, where they are kept: from Settings, or from the desktop's own
+  // browser while the user holds the computer with no task.
+  const signIn = useSignIn(api, askCell, () => {
+    if (settings.open) settings.close();
+    session.check();
+  });
+  useDesktopSignIn({
+    api,
+    cellId: askCell,
+    watching: manualLive && shownScreen === "desktop" && !settings.open && !replayId,
+    offer: ownHold ? (site) => void signIn.start(site) : undefined,
+  });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {
     if (!shownTask) return false;
@@ -1788,6 +1802,7 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
           notifications={settingsNotifications}
           accounts={settingsAccounts}
+          signIn={signIn}
           rules={rules}
           spending={
             settings.draft

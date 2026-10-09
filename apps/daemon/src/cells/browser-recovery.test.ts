@@ -23,6 +23,21 @@ describe("browser admission follows credential recovery", () => {
     await owner.close();
     expect(owner.availableFor("two")).toBe(false);
   });
+  // The daemon's startup recovery used to close admission for good when keyd's first healthy
+  // report came in before it: no later change in health opened it again.
+  it("goes by the latest health heard when a recovery starts without any", async () => {
+    const owner = new BrowserRecovery({ reconcile: async () => {} });
+    await owner.recover();
+    expect(owner.available).toBe(false);
+    const health = { ...healthy, bootId: "one" };
+    await owner.recover(health);
+    health.online = false;
+    await owner.recover();
+    expect(owner.availableFor("one")).toBe(true);
+    await owner.recover({ online: false });
+    await owner.recover();
+    expect(owner.available).toBe(false);
+  });
   it("is closed until actual recovery of healthy keyd finishes", async () => {
     const result = Promise.withResolvers<void>();
     const reconcile = vi.fn(() => result.promise);

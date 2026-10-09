@@ -7,7 +7,7 @@ import {
   openBrowserKeyd,
 } from "../keyd/browser-wiring.ts";
 import { AccountsProfile } from "./accounts-profile.ts";
-import { readBrowserHealth, validateBrowserHealth } from "./browser-health.ts";
+import { answersReady, readBrowserHealth, validateBrowserHealth } from "./browser-health.ts";
 import { type BrowserLedger, BrowserLedgerStore, BrowserLifecycleError } from "./browser-ledger.ts";
 import {
   browserLabels,
@@ -37,6 +37,7 @@ import type { CellStore } from "./store.ts";
 import type { BrowserCellRecord, CellState } from "./types.ts";
 
 type Docker = Pick<DockerClient, "request" | "socketPath">;
+const HEALTH_TIMEOUT_MS = 3000;
 type Raw = Record<string, unknown>;
 const raw = (value: unknown): value is Raw =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -163,6 +164,24 @@ export class BrowserOrchestrator {
     if (!ready || !this.deps.parentAvailable(parentCellId) || !this.deps.store.get(parentCellId))
       return undefined;
     return structuredClone(ready);
+  }
+
+  // How the running browser answers now: "silent" when it doesn't, "unready" when it can no
+  // longer be controlled; undefined when none is running.
+  async health(parentCellId: string): Promise<"ready" | "unready" | "silent" | undefined> {
+    const ready = this.#ready.get(parentCellId);
+    if (!ready) return undefined;
+    let value: unknown;
+    try {
+      value = await (this.deps.probe ?? readBrowserHealth)(
+        Number(new URL(ready.browserd.baseUrl).port),
+        ready.browserd.token,
+        AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+      );
+    } catch {
+      return "silent";
+    }
+    return answersReady(value, ready) ? "ready" : "unready";
   }
 
   start(parentCellId: string, signal = new AbortController().signal): Promise<ReadyBrowser> {
