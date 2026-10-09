@@ -155,28 +155,26 @@ func TestOtherDecisions(t *testing.T) {
 	brain, _ := ForRole(Brain)
 	bound := map[string]bool{"api.example.test": true}
 	cases := []struct {
-		name     string
-		p        Policy
-		target   Target
-		captured bool
-		want     Decision
+		name   string
+		p      Policy
+		target Target
+		want   Decision
 	}{
-		{"another port asks", desktop, Target{"chat.example.com", 8080}, false, Decision{Ask: true}},
-		{"a proxy's CONNECT to 80 asks", desktop, Target{"example.com", 80}, false, Decision{Ask: true}},
-		{"captured plain http is web traffic", desktop, Target{"example.com", 80}, true, Decision{Allow: true}},
-		{"a captured other port asks", desktop, Target{"example.com", 5222}, true, Decision{Ask: true}},
-		{"a proxy's CONNECT to an address asks", desktop, Target{"203.0.113.9", 443}, false, Decision{Ask: true}},
-		{"a captured address on the web's ports is web traffic", desktop, Target{"203.0.113.9", 443}, true, Decision{Allow: true}},
-		{"a captured address on plain http is web traffic", desktop, Target{"203.0.113.9", 80}, true, Decision{Allow: true}},
-		{"a captured address on another port asks", desktop, Target{"203.0.113.9", 8080}, true, Decision{Ask: true}},
-		{"smtp never", desktop, Target{"mail.example.com", 25}, false, Decision{Reason: ReasonSMTP}},
-		{"smtp to an address never", desktop, Target{"203.0.113.9", 25}, true, Decision{Reason: ReasonSMTP}},
-		{"a bound host only on 443", desktop, Target{"api.example.test", 8443}, true, Decision{Reason: ReasonBoundPort}},
-		{"deny list", desktop, Target{"printer.local", 9100}, true, Decision{Reason: ReasonHostDenied}},
-		{"brain has no web", brain, Target{"example.com", 8080}, true, Decision{Reason: ReasonNoWeb}},
+		{"another port asks", desktop, Target{"chat.example.com", 8080}, Decision{Ask: true}},
+		{"plain http by name is web traffic", desktop, Target{"example.com", 80}, Decision{Allow: true}},
+		{"an address on the web's ports is web traffic", desktop, Target{"203.0.113.9", 443}, Decision{Allow: true}},
+		{"an address on plain http is web traffic", desktop, Target{"203.0.113.9", 80}, Decision{Allow: true}},
+		{"an address on another port asks", desktop, Target{"203.0.113.9", 8080}, Decision{Ask: true}},
+		{"smtp never", desktop, Target{"mail.example.com", 25}, Decision{Reason: ReasonSMTP}},
+		{"smtp to an address never", desktop, Target{"203.0.113.9", 25}, Decision{Reason: ReasonSMTP}},
+		{"a bound host only on 443", desktop, Target{"api.example.test", 8443}, Decision{Reason: ReasonBoundPort}},
+		{"a bound host never on plain http", desktop, Target{"api.example.test", 80}, Decision{Reason: ReasonBoundPort}},
+		{"deny list", desktop, Target{"printer.local", 9100}, Decision{Reason: ReasonHostDenied}},
+		{"brain has no web", brain, Target{"example.com", 8080}, Decision{Reason: ReasonNoWeb}},
+		{"brain reaches no address", brain, Target{"203.0.113.9", 443}, Decision{Reason: ReasonNoWeb}},
 	}
 	for _, c := range cases {
-		if got := c.p.Other(c.target, bound, c.captured); got != c.want {
+		if got := c.p.Other(c.target, bound); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
 		}
 	}

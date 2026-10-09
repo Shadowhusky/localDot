@@ -149,23 +149,28 @@ type checker interface {
 	Check(ctx context.Context, network, address string) error
 }
 
-// ask holds the connection until the daemon answers, the hold runs out, the cell is stopped or
-// the program gives up. A destination netguard would refuse is refused first: nobody is asked
-// about the Mac, its networks, link-local or metadata addresses, whatever answer they would give.
-func (c *Cell) ask(r *http.Request, g *generation, t policy.Target, via string) (string, string) {
-	address := net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
-	if check, ok := c.deps.Dialer.(checker); ok {
-		ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
-		err := check.Check(ctx, "tcp", absolute(address))
-		cancel()
-		if err != nil {
-			if g.ctx.Err() != nil {
-				return "", ReasonRevoked
-			}
-			_, reason := dialOutcome(err)
-			return "", reason
-		}
+// guard refuses a destination netguard would refuse before anything is dialled or anyone asked:
+// the Mac, its networks, link-local and metadata addresses. The dial checks it again.
+func (c *Cell) guard(g *generation, t policy.Target) string {
+	check, ok := c.deps.Dialer.(checker)
+	if !ok {
+		return ""
 	}
+	ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
+	defer cancel()
+	if err := check.Check(ctx, "tcp", absolute(net.JoinHostPort(t.Host, strconv.Itoa(t.Port)))); err != nil {
+		if g.ctx.Err() != nil {
+			return ReasonRevoked
+		}
+		_, reason := dialOutcome(err)
+		return reason
+	}
+	return ""
+}
+
+// ask holds the connection until the daemon answers, the hold runs out, the cell is stopped or
+// the program gives up.
+func (c *Cell) ask(r *http.Request, g *generation, t policy.Target, via string) (string, string) {
 	id, err := askID()
 	if err != nil {
 		return "", ReasonUpstream

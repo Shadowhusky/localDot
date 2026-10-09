@@ -20,7 +20,8 @@ type Capture struct {
 	// Keyd is the cell's keyd listener, host:port.
 	Keyd  string
 	Token string
-	// Self is the gate's own address on the cell's network: a connection to it was not redirected.
+	// Self is the gate's end of the desktop's link (192.0.0.1, cells/gate/link.sh): a connection
+	// to it was not redirected.
 	Self netip.Addr
 	Pool *Pool
 	// Original is where the program meant to connect (SO_ORIGINAL_DST on Linux).

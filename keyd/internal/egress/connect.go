@@ -85,7 +85,7 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, line audit.Line) (*goproxy.ConnectAction, string) {
 	line.DestPort = t.Port
 	g := c.current()
-	d := c.cfg.Policy.Other(t, c.interceptedHosts(), via == ViaCapture)
+	d := c.cfg.Policy.Other(t, c.interceptedHosts())
 	if !d.Allow && !d.Ask {
 		return c.refuseConnect(ctx, line, d.Reason)
 	}
@@ -93,6 +93,9 @@ func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, l
 	// a bound host's answers past the scrubber.
 	if len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
 		return c.refuseConnect(ctx, line, policy.ReasonBoundPort)
+	}
+	if reason := c.guard(g, t); reason != "" {
+		return c.refuseConnect(ctx, line, reason)
 	}
 	if d.Ask {
 		app, reason := c.ask(ctx.Req, g, t, via)

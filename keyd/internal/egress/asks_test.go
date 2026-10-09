@@ -232,17 +232,17 @@ func TestTheGateCaptureTokenIsForCONNECTOnly(t *testing.T) {
 	if conns.Load() != 1 {
 		t.Fatalf("%d connections", conns.Load())
 	}
-	// The same CONNECT from the proxy asks: proxies send plain http in absolute form.
-	_, br = connectAs(t, c, "plain.example.test:80", testToken, "")
-	_, a := nextAsk(t, sub)
-	if a.Via != ViaProxy {
-		t.Fatalf("ask %+v", a)
+	// The same CONNECT through the proxy, as a browser's ws:// makes, is web traffic too.
+	conn, br = connectAs(t, c, "plain.example.test:80", testToken, "")
+	if resp := reply(t, br); resp.StatusCode != http.StatusOK {
+		t.Fatalf("proxied :80: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
 	}
-	c.Answer(a.ID, false, "")
-	reply(t, br)
-	// Any other port the gate captured asks too, and says so.
+	echoes(t, conn, br)
+	noAsk(t, sub)
+	// Any other port the gate captured asks, and says so.
 	_, br = connectAs(t, c, "plain.example.test:8080", testCaptureToken, sourceHeader+": 5001\r\n")
-	if _, a = nextAsk(t, sub); a.Via != ViaCapture || a.Source != 5001 {
+	_, a := nextAsk(t, sub)
+	if a.Via != ViaCapture || a.Source != 5001 {
 		t.Fatalf("ask %+v", a)
 	}
 	c.Answer(a.ID, false, "")
@@ -396,7 +396,7 @@ func TestACapturedProgramMaySpeakItsOwnProtocolOn443ButTLSKeepsItsSNI(t *testing
 	}
 }
 
-func TestACapturedAddressOnTheWebsPortsIsWebTrafficButNeverAPrivateOne(t *testing.T) {
+func TestAnAddressOnTheWebsPortsIsWebTrafficButNeverAPrivateOne(t *testing.T) {
 	w := newWorld(t)
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -433,9 +433,11 @@ func TestACapturedAddressOnTheWebsPortsIsWebTrafficButNeverAPrivateOne(t *testin
 		t.Fatalf("private address: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
 	}
 	noAsk(t, sub)
-	// The proxy's own CONNECT to an address still waits for the user.
-	_, br = connectAs(t, c, "93.184.216.34:443", testToken, "")
-	_, a := nextAsk(t, sub)
-	c.Answer(a.ID, false, "")
-	reply(t, br)
+	// The proxy's own CONNECT to the address is the same web traffic.
+	conn, br = connectAs(t, c, "93.184.216.34:443", testToken, "")
+	if resp := reply(t, br); resp.StatusCode != http.StatusOK {
+		t.Fatalf("proxied address: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	echoes(t, conn, br)
+	noAsk(t, sub)
 }
