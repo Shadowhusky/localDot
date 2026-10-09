@@ -1744,6 +1744,11 @@ function Theatre({ api }: { api: ApiClient }) {
             setRoutineTarget(null);
             selectReplay(sessionId);
           }}
+          onAnswer={() => {
+            setRoutineTarget(null);
+            if (replayId) selectReplay(null);
+            setRailView("chat");
+          }}
           returnFocus={routineOrigin}
         />
       </ErrorBoundary>

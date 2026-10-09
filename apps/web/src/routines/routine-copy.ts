@@ -60,6 +60,10 @@ export function shortWhen(ms: number, tz: string, now: number): string {
 
 // What a routine's row says after its schedule.
 export function rowState(routine: Routine, now: number): string {
+  if (routine.lastRun?.outcome === "needs_you" && routine.lastRun.endedAt === null)
+    return "needs you now";
+  if (routine.lastRun?.outcome === "running" || routine.lastRun?.outcome === "pending")
+    return "running now";
   if (routine.state === "paused") return "Paused";
   if (routine.state === "finished") return "Finished";
   if (!routine.nextDueAt) return "Planning…";

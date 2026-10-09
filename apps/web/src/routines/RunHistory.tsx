@@ -9,11 +9,14 @@ export function RunHistory({
   runs,
   tz,
   onOpen,
+  onAnswer,
 }: {
   // Undefined while they load.
   runs: readonly RoutineRun[] | undefined;
   tz: string;
   onOpen?(sessionId: string): void;
+  // A run waiting for the user: its task is live, so the answer is given there.
+  onAnswer?(): void;
 }) {
   if (runs === undefined) return <Skeleton loading shape="block" width="100%" height="132px" />;
   if (runs.length === 0) return <p className="routine-history-empty">It hasn't run yet.</p>;
@@ -31,10 +34,19 @@ export function RunHistory({
                 {whenText(Date.parse(run.startedAt ?? run.dueAt), tz, now)}
               </time>
             </span>
-            {recorded && onOpen && run.outcome !== "running" && run.outcome !== "pending" && (
-              <Button variant="quiet" size="sm" onClick={() => onOpen(recorded)}>
-                Watch
+            {run.outcome === "needs_you" && run.endedAt === null && onAnswer ? (
+              <Button size="sm" onClick={onAnswer}>
+                Answer
               </Button>
+            ) : (
+              recorded &&
+              onOpen &&
+              run.outcome !== "running" &&
+              run.outcome !== "pending" && (
+                <Button variant="quiet" size="sm" onClick={() => onOpen(recorded)}>
+                  Watch
+                </Button>
+              )
             )}
           </li>
         );

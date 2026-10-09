@@ -29,6 +29,8 @@ export interface RoutineSheetProps {
   target: RoutineTarget | null;
   onClose(): void;
   onWatch?(sessionId: string): void;
+  // Goes to the task a waiting run asks in.
+  onAnswer?(): void;
   returnFocus?: RefObject<HTMLElement | null>;
 }
 
@@ -40,6 +42,7 @@ export function RoutineSheet({
   target,
   onClose,
   onWatch,
+  onAnswer,
   returnFocus,
 }: RoutineSheetProps) {
   const zone = routines.reply?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -172,7 +175,12 @@ export function RoutineSheet({
         {editing && form ? (
           <RoutineForm value={form} errors={errors} zone={zone} onChange={setForm} />
         ) : routine ? (
-          <RoutineDetail routine={routine} routines={routines} onWatch={onWatch} />
+          <RoutineDetail
+            routine={routine}
+            routines={routines}
+            onWatch={onWatch}
+            onAnswer={onAnswer}
+          />
         ) : (
           <EmptyState title="This routine was deleted" icon="repeat" />
         )}
@@ -199,10 +207,12 @@ function RoutineDetail({
   routine,
   routines,
   onWatch,
+  onAnswer,
 }: {
   routine: Routine;
   routines: RoutinesView;
   onWatch?(sessionId: string): void;
+  onAnswer?(): void;
 }) {
   const [runs, setRuns] = useState<readonly RoutineRun[] | undefined>(undefined);
   const lastRun = routine.lastRun;
@@ -296,7 +306,7 @@ function RoutineDetail({
       </Group>
       <div>
         <GroupHead title="Recent runs" />
-        <RunHistory runs={runs} tz={routine.tz} onOpen={onWatch} />
+        <RunHistory runs={runs} tz={routine.tz} onOpen={onWatch} onAnswer={onAnswer} />
       </div>
     </div>
   );

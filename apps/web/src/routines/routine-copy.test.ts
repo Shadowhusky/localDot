@@ -71,6 +71,20 @@ describe("routine copy", () => {
       "next 30 Oct 08:30",
     );
     expect(rowState({ ...base, state: "paused" }, now)).toBe("Paused");
+    const waiting = {
+      id: base.id,
+      routineId: base.id,
+      dueAt: "2026-10-12T07:30:00.000Z",
+      startedAt: "2026-10-12T07:30:01.000Z",
+      endedAt: null,
+      sessionId: base.id,
+      outcome: "needs_you",
+      note: "",
+    } as const;
+    expect(rowState({ ...base, lastRun: waiting }, now)).toBe("needs you now");
+    expect(rowState({ ...base, lastRun: { ...waiting, outcome: "running" } }, now)).toBe(
+      "running now",
+    );
   });
   it("shows a glyph for every outcome, never colour alone", () => {
     expect(outcomeGlyph("done")).toBe("done");
