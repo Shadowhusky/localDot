@@ -311,6 +311,28 @@ describe("routine launcher", () => {
     expect(f.store.lastRun(routine.id)?.outcome).toBe("needs_you_expired");
   });
 
+  it("ends the run Needs you · expired when its question times out", async () => {
+    const f = fixture();
+    const routine = f.routine({ approvalWindowMinutes: 60 });
+    await f.launcher.launch(routine, DUE);
+    const { id } = await f.session();
+    const askId = ulid();
+    f.log.append(id, {
+      type: "ask.request",
+      agent: "main",
+      data: { askId, question: "Which bank?", options: [], allowText: true },
+    });
+    f.parked.add(id);
+    f.log.append(id, { type: "ask.answer", agent: "main", data: { askId, by: "timeout" } });
+    f.parked.delete(id);
+    expect(f.expired.has(id)).toBe(true);
+    expect(f.store.lastRun(routine.id)?.outcome).toBe("needs_you");
+    f.clock.advance(120_000);
+    await f.clock.flush();
+    expect(f.runner.end).toHaveBeenCalledWith(id);
+    expect(f.store.lastRun(routine.id)?.outcome).toBe("needs_you_expired");
+  });
+
   it("ends the run on a task spending limit", async () => {
     const f = fixture();
     const routine = f.routine({ budgetUSD: 0.5 });

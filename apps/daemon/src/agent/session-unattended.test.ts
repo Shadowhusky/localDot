@@ -48,6 +48,24 @@ describe("unattended sessions", () => {
     });
   });
 
+  it("a question waits for the routine's window, not the usual thirty minutes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const h = toolHarness({ autoApprove: false, approvalTtlMs: 3_600_000 });
+    harnesses.push(h);
+    let settled = false;
+    const pending = h.call("ask_user", { question: "Which bank?" }).finally(() => {
+      settled = true;
+    });
+    await until(() => h.events().some((e) => e.type === "ask.request"));
+    await vi.advanceTimersByTimeAsync(59 * 60_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const result = await pending;
+    expect(result.body.ok).toBe(false);
+    expect(JSON.stringify(result.body.content)).toContain("within 60 minutes");
+    expect(h.events().find((e) => e.type === "ask.answer")?.data).toMatchObject({ by: "timeout" });
+  });
+
   it("an attended task keeps the default card window", async () => {
     const h = toolHarness({ autoApprove: false });
     harnesses.push(h);

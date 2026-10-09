@@ -143,7 +143,8 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 }
 
 export interface AgentSessionOptions {
-  // An unattended run (a routine): approval cards wait this long, then the step is refused.
+  // An unattended run (a routine): approval cards and questions wait this long, then the step is
+  // refused.
   readonly approvalTtlMs?: number;
   readonly run?: SessionRun;
 }
@@ -154,7 +155,7 @@ export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly taskAutonomy: TaskAutonomy;
   readonly #approvals: ApprovalBroker;
-  readonly #unattended: boolean;
+  readonly #approvalWindowMs: number | undefined;
   readonly #run: SessionRun | undefined;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
@@ -235,7 +236,7 @@ export class AgentSession {
     const ttl = options.approvalTtlMs;
     if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 60_000 || ttl > 14_400_000))
       throw new RangeError("approval window must be between one minute and four hours");
-    this.#unattended = ttl !== undefined;
+    this.#approvalWindowMs = ttl;
     this.#run = options.run === undefined ? undefined : SessionRun.parse(options.run);
     this.#autonomy = freezeAutonomy(autonomy);
     this.taskAutonomy = new TaskAutonomy(rules);
@@ -276,7 +277,10 @@ export class AgentSession {
     );
   }
   get unattended(): boolean {
-    return this.#unattended;
+    return this.#approvalWindowMs !== undefined;
+  }
+  get approvalWindowMs(): number | undefined {
+    return this.#approvalWindowMs;
   }
   get run(): SessionRun | undefined {
     return this.#run;

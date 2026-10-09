@@ -330,7 +330,10 @@ export class RoutineLauncher {
         case "takeover.end":
           waiting?.();
           waiting = undefined;
-          park(false);
+          // A routine's question waits for its window; running out ends the run like a card.
+          if (event.type === "ask.answer" && event.data.by === "timeout")
+            expire(this.deps.wrapUpMs ?? 120_000);
+          else park(false);
           break;
         case "budget.exceeded":
           // Nobody is there to raise a spending limit, so the run ends.
