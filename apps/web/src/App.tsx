@@ -560,7 +560,11 @@ function Theatre({ api }: { api: ApiClient }) {
     return plan.kind === "answer" ? "answered" : "declined";
   };
   const manualLive =
-    yours && controls.canInput && physicalStageCell?.state === "ready" && !physicalStageCell.paused;
+    yours &&
+    controls.canInput &&
+    physicalStageCell?.state === "ready" &&
+    !physicalStageCell.paused &&
+    !(selectedScreen?.screen === "browser" && browserScreen.stale);
   const manual = useManualChannel(
     api,
     manualLive ? agent.sessionId : null,

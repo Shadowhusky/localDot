@@ -5,7 +5,9 @@ import { openSocket } from "../lib/socket.ts";
 import { parseCell } from "./parse.ts";
 import type { CellSummary } from "./types.ts";
 
-// A browser has its own status feed. A ready desktop is never evidence of a ready browser.
+// A browser has its own status feed. A ready desktop is never evidence of a ready browser. While
+// that feed reconnects, the last browser it verified stays on screen but is stale: input waits for
+// a fresh status, the picture does not.
 export function useBrowserScreen(
   api: ApiClient,
   parent: CellSummary | null,
@@ -25,6 +27,7 @@ export function useBrowserScreen(
   const [view, setView] = useState<{
     owner: typeof owner;
     cell: CellSummary | null;
+    stale: boolean;
     reconnects: number;
     error: string | null;
   } | null>(null);
@@ -35,7 +38,14 @@ export function useBrowserScreen(
     let reconnects = 0;
     const abort = new AbortController();
     const clear = (error: string | null) => {
-      if (!closed) setView({ owner, cell: null, reconnects, error });
+      if (!closed) setView({ owner, cell: null, stale: false, reconnects, error });
+    };
+    const hold = (error: string | null) => {
+      if (closed) return;
+      setView((last) => {
+        const cell = last?.owner === owner ? last.cell : null;
+        return { owner, cell, stale: !!cell, reconnects, error };
+      });
     };
     const socket = openSocket({
       url: api.socketUrl(`/api/browsers/${id}/status`),
@@ -47,7 +57,7 @@ export function useBrowserScreen(
             const cell = parseCell(JSON.parse(data), id);
             if (cell.scale !== scale || cell.createdAt !== createdAt)
               throw new Error("Browser owner changed");
-            setView({ owner, cell, reconnects, error: null });
+            setView({ owner, cell, stale: false, reconnects, error: null });
           } catch {
             clear("Browser status could not be verified. Reconnecting…");
           }
@@ -55,9 +65,9 @@ export function useBrowserScreen(
         onOpen() {
           if (opened) reconnects++;
           opened = true;
-          clear(null);
+          hold(null);
         },
-        onClose: () => clear("Browser connection interrupted. Reconnecting…"),
+        onClose: () => hold("Browser connection interrupted. Reconnecting…"),
         onRefused() {
           // The WebSocket API hides refusal codes. This authenticated read detects revoked
           // install tokens; only a new status stream can restore display/input readiness.
@@ -73,5 +83,5 @@ export function useBrowserScreen(
   }, [api, available, createdAt, id, owner, parentId, scale]);
   return view?.owner === owner && available && id
     ? view
-    : { cell: null, reconnects: 0, error: null };
+    : { cell: null, stale: false, reconnects: 0, error: null };
 }
