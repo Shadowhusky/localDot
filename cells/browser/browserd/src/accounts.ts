@@ -48,6 +48,7 @@ export class BrowserAccounts {
         name: cookie.name,
         domain: cookie.domain,
         path: cookie.path,
+        ...(cookie.partitionKey ? { partitionKey: cookie.partitionKey } : {}),
       });
     const hosts = new Set([site, `www.${site}`, ...cookies.map((cookie) => host(cookie.domain))]);
     for (const name of hosts) {

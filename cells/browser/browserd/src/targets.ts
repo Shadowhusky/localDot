@@ -5,6 +5,7 @@ import {
   BrowserUploadOffer,
 } from "../../../../packages/protocol/src/browser-uploads.ts";
 import { GuardedCdp } from "./cdp.ts";
+import { cookiePartitionKey } from "./cdp-guard.ts";
 import { navigateOwnedDocument } from "./navigation.ts";
 import type { CdpTransport } from "./pipe.ts";
 
@@ -43,6 +44,7 @@ const cookieList = schema.object({
         name: schema.string().max(4096),
         domain: schema.string().min(1).max(256),
         path: schema.string().max(4096),
+        partitionKey: cookiePartitionKey.optional(),
       }),
     )
     .max(50_000),
@@ -52,6 +54,7 @@ export interface BrowserCookie {
   readonly name: string;
   readonly domain: string;
   readonly path: string;
+  readonly partitionKey?: schema.infer<typeof cookiePartitionKey>;
 }
 
 export class BrowserTargetError extends Error {
@@ -674,7 +677,12 @@ export class BrowserTargets {
     const parsed = cookieList.safeParse(await this.#broker.send("Storage.getCookies", {}));
     this.#checkOpen();
     if (!parsed.success) throw new BrowserTargetError("protocol");
-    return parsed.data.cookies.map(({ name, domain, path }) => ({ name, domain, path }));
+    return parsed.data.cookies.map(({ name, domain, path, partitionKey }) => ({
+      name,
+      domain,
+      path,
+      ...(partitionKey ? { partitionKey } : {}),
+    }));
   }
 
   async cancelDownload(guid: string, signal?: AbortSignal): Promise<void> {

@@ -70,6 +70,18 @@ describe("sign-ins in the shared browser", () => {
     ]);
   });
 
+  it("deletes a partitioned cookie inside its partition", async () => {
+    const partitionKey = { topLevelSite: "https://news.test", hasCrossSiteAncestor: false };
+    const f = targets([{ name: "chat", domain: "chat.google.com", path: "/", partitionKey }]);
+    await new BrowserAccounts(f.value).signOut("google.com");
+    expect(f.command).toHaveBeenCalledWith(document, "Network.deleteCookies", {
+      name: "chat",
+      domain: "chat.google.com",
+      path: "/",
+      partitionKey,
+    });
+  });
+
   it("refuses an address that is not a site name, and works only with an open page", async () => {
     for (const site of ["google", "1.2.3.4", "https://google.com", "a..com", "GOOGLE.com"])
       expect(isSiteName(site)).toBe(false);
@@ -103,6 +115,15 @@ describe("sign-ins in the shared browser", () => {
     expect(guardCdpCommand("Network.deleteCookies", cookie, capabilities, "owned").sessionId).toBe(
       "owned",
     );
+    for (const partitionKey of [
+      "https://news.test",
+      { topLevelSite: "https://news.test", hasCrossSiteAncestor: true },
+    ])
+      expect(
+        guardCdpCommand("Network.deleteCookies", { ...cookie, partitionKey }, capabilities, "owned")
+          .method,
+      ).toBe("Network.deleteCookies");
+    refused("Network.deleteCookies", { ...cookie, partitionKey: { topLevelSite: 1 } }, "owned");
     refused("Network.getAllCookies", {}, "owned");
     refused("Storage.setCookies", { cookies: [] });
     const clear = (origin: string) => ({ origin, storageTypes: "all" });

@@ -15,12 +15,22 @@ const filter = schema.tuple([
 ]);
 
 const cookieText = schema.string().max(4096);
+// Partitioned cookies are named by their top-level site: an object in current Chromium, a string
+// in older releases.
+export const cookiePartitionKey = schema.union([
+  schema.string().max(300),
+  schema.strictObject({
+    topLevelSite: schema.string().max(300),
+    hasCrossSiteAncestor: schema.boolean(),
+  }),
+]);
 const commands = Object.freeze({
   "Storage.getCookies": empty,
   "Network.deleteCookies": schema.strictObject({
     name: cookieText,
     domain: schema.string().min(1).max(256),
     path: cookieText,
+    partitionKey: cookiePartitionKey.optional(),
   }),
   "Storage.clearDataForOrigin": schema.strictObject({
     origin: schema.string().min(1).max(270),
