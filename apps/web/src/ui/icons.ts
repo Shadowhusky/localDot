@@ -30,6 +30,10 @@ export const ICONS = {
       },
     ],
   ],
+  "hand-back": [
+    ["path", { d: "M9 14 4 9l5-5" }],
+    ["path", { d: "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" }],
+  ],
   stop: [["rect", { x: "6.5", y: "6.5", width: "11", height: "11", rx: "2.4", ...FILLED }]],
   pause: [
     ["rect", { x: "6.5", y: "5", width: "3.6", height: "14", rx: "1.2", ...FILLED }],

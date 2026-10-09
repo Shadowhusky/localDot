@@ -222,6 +222,11 @@ export class Conversations {
     }
   }
 
+  // What a task was called when it started.
+  title(sessionId: string): string | undefined {
+    return this.#head(sessionId).find((event) => event.type === "session.start")?.data.title;
+  }
+
   has(sessionId: string): boolean {
     return ULID_PATTERN.test(sessionId) && this.log.hasSession(sessionId);
   }

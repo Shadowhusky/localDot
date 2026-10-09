@@ -38,6 +38,8 @@ export interface MenuProps {
   label: string;
   side?: Side;
   align?: Align;
+  // Dims the page behind it.
+  dim?: boolean;
   className?: string;
   children: ReactNode;
 }

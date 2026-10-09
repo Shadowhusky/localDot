@@ -365,12 +365,6 @@
   color: var(--color-fg-1);
 }
 
-/* The island stays above an inspector's scrim, so Stop and Take control are never behind it. */
-:root:has(.ui-layer:not([data-closing]) > .ui-sheet[data-side="inspector"][data-modal])
-.island-anchor {
-  z-index: 51;
-}
-
 /* A phone: the console's own surface, 16 px gutters, iOS-spaced groups. */
 .settings-sheet[data-side="bottom"],
 .settings-sheet[data-side="bottom"] .ui-sheet-page {

@@ -11,7 +11,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
-import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -37,6 +36,7 @@ import {
   type ThreadKind,
   type ThreadRow,
   threadRows,
+  timeLabel,
   type WorkStep,
 } from "./thread.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
@@ -140,7 +140,7 @@ const MessageCard = memo(function MessageCard({
       ) : (
         <>
           {copy}
-          <SafeMarkdown text={message.text} announce={announce} />
+          <SafeMarkdown text={message.text} streaming={!message.final} announce={announce} />
         </>
       )}
       {message.truncated && <p className="thread-note">Message preview shortened.</p>}
@@ -164,7 +164,7 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
           step.key === other.key &&
           step.state === other.state &&
           step.title === other.title &&
-          step.metric === other.metric &&
+          step.time === other.time &&
           step.startT === other.startT &&
           step.endT === other.endT
         );
@@ -216,6 +216,17 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       then.downloads === thread.downloads &&
       then.onReplay === thread.onReplay &&
       then.replayTask === thread.replayTask,
+  },
+  control: {
+    draw: ({ item }) => (
+      <p className="thread-divider">
+        <span>
+          {item.took ? "You took control" : "You handed back"}
+          {item.at !== undefined && <time className="num"> · {timeLabel(item.at)}</time>}
+        </span>
+      </p>
+    ),
+    same: (was, now) => was.took === now.took && was.at === now.at,
   },
   work: {
     draw: ({ item, thread }) => (
@@ -277,12 +288,6 @@ const Row = memo(function Row({ row, fresh, thread }: RowProps) {
           <time>{row.separator}</time>
         </p>
       )}
-      {row.groupStart && item.speaker === "dot" && (
-        <p className="thread-who" aria-hidden="true">
-          <Glyph size={14} />
-          dot
-        </p>
-      )}
       <Card item={item} thread={thread} />
     </div>
   );
@@ -315,6 +320,8 @@ export interface ConversationProps {
   // Beside the composer, as a phone's toolbar holds it: before it and after it.
   lead?: ReactNode;
   trail?: ReactNode;
+  // In the toolbar's place, the composer and what is beside it hidden but kept, so a draft survives.
+  tools?: ReactNode;
   // The composer stays at the foot however short the column gets, as a phone's toolbar does.
   pinned?: boolean;
   // Another view of the task (Activity) laid over the thread, above the foot, so the composer
@@ -348,6 +355,7 @@ export function Conversation({
   ask,
   lead,
   trail,
+  tools,
   pinned = false,
   cover,
   covered = false,
@@ -770,6 +778,8 @@ export function Conversation({
       >
         <Button
           size="sm"
+          round
+          variant="quiet"
           icon="arrow-down"
           aria-label={
             choiceWaits ? undefined : unread.length ? unreadLabel(unread) : "Jump to latest"
@@ -780,11 +790,13 @@ export function Conversation({
             reachChoice.current?.();
           }}
         >
-          {choiceWaits
-            ? "Check your last message"
-            : unread.length
-              ? `${unread.length} new`
-              : "Latest"}
+          <span className="thread-jump-label">
+            {choiceWaits
+              ? "Check your last message"
+              : unread.length
+                ? unreadLabel(unread)
+                : "Latest"}
+          </span>
         </Button>
       </span>
       <div className="thread-foot" ref={foot} />
@@ -801,9 +813,12 @@ export function Conversation({
             )}
           </Collapse>
           <div className="thread-toolbar">
-            {lead}
-            <div className="thread-composer">{composer}</div>
-            {trail}
+            {!tools && lead}
+            <div className="thread-composer" hidden={!!tools}>
+              {composer}
+            </div>
+            {!tools && trail}
+            {tools}
           </div>
         </Outbox.Provider>,
         dockHost,

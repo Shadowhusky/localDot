@@ -9,7 +9,9 @@ import {
   islandAttention,
   islandDecision,
   islandShape,
+  liftOverScrim,
   pauseSlot,
+  takeReason,
   takeSlot,
 } from "./island.ts";
 
@@ -127,15 +129,35 @@ it("makes Take control the porcelain action when dot hands the computer over", (
   expect(takeSlot(statusFor({ computer: live, task: task("takeover", "waiting") }))).toEqual({
     primary: true,
   });
-  const working = takeSlot(statusFor({ computer: live, task: task("acting") }));
-  expect(working.primary).toBe(false);
-  expect(working.reason).toBeTruthy();
+});
+
+it("offers Take control whatever dot is doing, and says why only when it can't be had", () => {
+  for (const row of ["acting", "thinking", "paused", "question"] as const)
+    expect(
+      takeSlot(
+        statusFor({ computer: live, task: task(row, row === "acting" ? "running" : "waiting") }),
+      ),
+    ).toEqual({ primary: false });
+  expect(takeSlot(statusFor({ computer: live, task: null }))).toEqual({ primary: false });
+  const working = statusFor({ computer: live, task: task("acting") });
+  expect(takeSlot(working, { blocked: "Wait a moment" })).toEqual({
+    primary: false,
+    reason: "Wait a moment",
+  });
+  expect(takeSlot(working, { taking: true })).toEqual({ primary: false, busy: true });
 });
 
 it("lets Take control answer an approval: the user does the step themselves", () => {
   const waiting = statusFor({ computer: live, task: task("approval", "waiting") });
-  expect(takeSlot(waiting, "approval")).toEqual({ primary: false });
-  expect(takeSlot(waiting).reason).toBeTruthy();
+  expect(takeSlot(waiting, { decision: "approval", blocked: "Wait" })).toEqual({ primary: false });
+});
+
+it("gives the user's control its own shape, with Hand back in Take control's place", () => {
+  const yours = statusFor({ computer: live, task: task("control", "waiting") });
+  expect(islandShape(yours, false)).toBe("control");
+  expect(islandShape(yours, true)).toBe("hidden");
+  expect(yours.actions.map((action) => action.kind)).toEqual(["stop-task"]);
+  expect(yours.control).toBe(false);
 });
 
 describe("islandDecision", () => {
@@ -156,6 +178,26 @@ describe("islandDecision", () => {
     for (const shape of ["hidden", "ready", "computer"] as const)
       expect(islandDecision({ ...base, shape, approval: true, chatShown: false })).toBeNull();
     expect(islandDecision(base)).toBeNull();
+  });
+});
+
+describe("takeReason", () => {
+  it("lets the user take the computer with no task at work, once it is ready", () => {
+    expect(takeReason({ task: false, ready: true, pause: undefined })).toBeUndefined();
+    expect(takeReason({ task: false, ready: false, pause: undefined })).toBe(
+      "Wait for the computer to be ready",
+    );
+  });
+
+  it("says Stop for a Pause that can't be confirmed, which never settles by itself", () => {
+    expect(takeReason({ task: true, ready: false, pause: "uncertain" })).toBe(
+      "Stop the task to take over",
+    );
+    expect(takeReason({ task: true, ready: false, pause: "pausing" })).toBe(
+      "Wait for the pause to settle",
+    );
+    expect(takeReason({ task: true, ready: false, pause: "paused" })).toBe("Wait a moment");
+    expect(takeReason({ task: true, ready: true, pause: "paused" })).toBeUndefined();
   });
 });
 
@@ -213,5 +255,29 @@ describe("decisionTop", () => {
     expect(decisionTop({ hung, size, stageW: stage.w, rings: [pass], floor: 500 })).toBe(
       500 - size.h,
     );
+  });
+});
+
+describe("liftOverScrim", () => {
+  // The task island at 1440 x 900 and at 1100 x 800, and Settings' inspector at each width.
+  const island1440 = { left: 287, top: 56, right: 777, bottom: 96 };
+  const island1100 = { left: 117, top: 56, right: 607, bottom: 96 };
+  const inspector = (width: number) => ({
+    left: width - 608,
+    top: 8,
+    right: width - 8,
+    bottom: 792,
+  });
+  const activity = { left: 0, top: 214, right: 390, bottom: 900 };
+
+  it("rises over the scrim where no sheet meets it", () => {
+    expect(liftOverScrim(true, island1440, [inspector(1440)])).toBe(true);
+    expect(liftOverScrim(true, { left: 8, top: 8, right: 382, bottom: 40 }, [activity])).toBe(true);
+    expect(liftOverScrim(true, island1440, [])).toBe(true);
+  });
+
+  it("stays under a sheet it would cover, and stays down without a scrim", () => {
+    expect(liftOverScrim(true, island1100, [inspector(1100)])).toBe(false);
+    expect(liftOverScrim(false, island1440, [])).toBe(false);
   });
 });

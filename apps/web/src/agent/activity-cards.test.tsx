@@ -83,7 +83,9 @@ describe("activity rows and inspection", () => {
     ).toEqual(["Next", "In progress", "Done", "Skipped"]);
     const row = screen.getByTestId("tool-row");
     expect(within(row).getByRole("img", { name: "Running" })).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Changes" })).toBeNull();
+    expect(
+      within(screen.getByRole("region", { name: "Files" })).getAllByTestId("change-row"),
+    ).toHaveLength(1);
     fireEvent.click(within(row).getByRole("button"));
     expect(screen.getAllByLabelText("Unified text diff")).toHaveLength(1);
     expect(screen.getByLabelText("Unified text diff").textContent).toBe("+sample");

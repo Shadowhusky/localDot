@@ -81,6 +81,15 @@
   --color-grabber: rgba(255, 255, 255, 0.24);
   --color-row-hover: rgba(255, 255, 255, 0.035);
   --color-scrollbar: rgba(255, 255, 255, 0.16);
+  /* Behind a phone's menu: lighter than a sheet's scrim, since the menu is small. */
+  --color-menu-dim: rgba(0, 0, 0, 0.28);
+  /* dot's Markdown: code text in its well, inline code, a quote's bar, a link's underline and a
+     table's header. */
+  --color-code-text: #d9dbde;
+  --color-inline-code: rgba(255, 255, 255, 0.07);
+  --color-quote-bar: rgba(255, 255, 255, 0.2);
+  --color-link-line: rgba(255, 255, 255, 0.35);
+  --color-table-head: rgba(255, 255, 255, 0.03);
   /* Replay's scrubber: its track, and a tick at each step. */
   --color-scrubber-track: rgba(255, 255, 255, 0.16);
   --color-step-tick: rgba(255, 255, 255, 0.5);
@@ -334,6 +343,8 @@
   /* The island grown into a decision. */
   --radius-decision: 22px;
   --radius-transport: 16px;
+  /* The corner of your message bubble that points at you. */
+  --radius-tail: 6px;
   --radius-track-28: 9px;
   --radius-thumb-24: 6px;
 
@@ -396,6 +407,8 @@
      go back under the island they come out of. Overlays (50) and pickers (60) cover them all. */
   --layer-toast: 10;
   --layer-island: 11;
+  /* While a sheet's scrim is up the island rises over it, so the task's controls stay in reach. */
+  --layer-island-lifted: 51;
 
   --breakpoint-tablet: 700px;
   --breakpoint-laptop: 1100px;
@@ -409,6 +422,8 @@
   --stage-top: 76px;
   --band-min: 112px;
   --island-h: 40px;
+  --island-rise: 48px;
+  --control-strip-w: 380px;
   --sheet-medium-top: 214px;
   --sheet-large-top: 40px;
 }

@@ -42,6 +42,7 @@ export function ChatThread({
   ask,
   lead,
   trail,
+  tools,
   pinned = false,
   cover,
   covered = false,
@@ -64,6 +65,8 @@ export function ChatThread({
   ask?: ReactNode;
   lead?: ReactNode;
   trail?: ReactNode;
+  // A phone's control toolbar in the composer's place, while the user has the computer.
+  tools?: ReactNode;
   pinned?: boolean;
   cover?: ReactNode;
   covered?: boolean;
@@ -90,7 +93,14 @@ export function ChatThread({
   const steps = useMemo<WorkStep[]>(() => (model ? workSteps(rows, model) : []), [rows, model]);
   const items = useMemo(
     () =>
-      model ? threadItems(model.messages.values(), model.questions.values(), model.results) : [],
+      model
+        ? threadItems(
+            model.messages.values(),
+            model.questions.values(),
+            model.results,
+            model.takeovers.values(),
+          )
+        : [],
     [model],
   );
   const working = !!live && live.phase !== "finished" && !ended;
@@ -133,6 +143,7 @@ export function ChatThread({
       ask={ask}
       lead={lead}
       trail={trail}
+      tools={tools}
       pinned={pinned}
       cover={cover}
       covered={covered}
