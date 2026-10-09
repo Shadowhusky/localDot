@@ -128,7 +128,7 @@ describe("moving between pages", () => {
 describe("how a file is shown", () => {
   it("shows decks as slides, landscape PDFs too, and everything else as pages", () => {
     expect(modeFor("review.pptx", 0.77)).toBe("slides");
-    expect(modeFor("talk.key", 1.78)).toBe("slides");
+    expect(modeFor("talk.odp", 1.78)).toBe("slides");
     expect(modeFor("export.pdf", 16 / 9)).toBe("slides");
     expect(modeFor("export.pdf", 4 / 3)).toBe("slides");
     expect(modeFor("handbook.pdf", 612 / 792)).toBe("pages");

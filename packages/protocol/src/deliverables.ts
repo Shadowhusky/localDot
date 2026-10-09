@@ -34,20 +34,17 @@ const KINDS: Readonly<Record<string, FileKind>> = Object.freeze({
   ppt: "office",
   pps: "office",
   ppsx: "office",
-  key: "office",
   rtf: "office",
   pdf: "pdf",
 });
 // Opened on the Mac with its default app. Everything that can run code, open a browser on a local
 // file or follow a link (scripts, apps, installers, html, svg, webloc) is absent, and so is every
 // format that can carry VBA macros (xlsm/docm, and the legacy binary doc/xls/ppt/pps). Slide shows
-// and Keynote files only preview.
+// only preview.
 const OPENABLE = new Set([
   ...Object.keys(KINDS).filter(
     (ext) =>
-      !["json", "yaml", "yml", "toml", "log", "doc", "xls", "ppt", "pps", "ppsx", "key"].includes(
-        ext,
-      ),
+      !["json", "yaml", "yml", "toml", "log", "doc", "xls", "ppt", "pps", "ppsx"].includes(ext),
   ),
   "tif",
   "tiff",
@@ -117,7 +114,7 @@ export function textFormat(name: string): TextFormat {
   if (ext === "json" || ext === "log") return ext;
   return ext === "txt" ? "plain" : "code";
 }
-const PRESENTATIONS = new Set(["pptx", "ppt", "pps", "ppsx", "odp", "key"]);
+const PRESENTATIONS = new Set(["pptx", "ppt", "pps", "ppsx", "odp"]);
 // Shown a slide at a time in the full preview.
 export function isPresentation(name: string): boolean {
   return PRESENTATIONS.has(fileExtension(name));
