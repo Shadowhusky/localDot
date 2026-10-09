@@ -1,25 +1,17 @@
-import {
-  type KeyboardEvent,
-  type MouseEvent,
-  type PointerEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-} from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { isApple } from "../ui/Kbd.tsx";
 import { REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
-import { mergeHandlers } from "../ui/merge.ts";
-import { useTooltip } from "../ui/Tooltip.tsx";
 import { awayFrom } from "./machine.ts";
 import { HOLD_KEYS, type Voice } from "./useVoice.ts";
 import { routeBlocked, routeLabel } from "./words.ts";
-import "./voice.css";
 
 const now = () => performance.now();
 
 // The mic in the composer: hold to talk, let go to put the words in the message, slide away to
-// cancel; a tap keeps it listening until the next tap.
+// cancel; a tap keeps it listening until the next tap. While it listens, a halo behind it breathes
+// with the voice.
 export function VoiceButton({ voice, size }: { voice: Voice; size: 28 | 36 }) {
   const { state, route } = voice;
   const blocked = voice.enabled ? routeBlocked(route) : "Not available right now";
@@ -27,79 +19,65 @@ export function VoiceButton({ voice, size }: { voice: Voice; size: 28 | 36 }) {
   const active = state.phase !== "idle";
   const away = (state.phase === "starting" || state.phase === "listening") && state.away;
   const latched = (state.phase === "starting" || state.phase === "listening") && !state.held;
-  const where = routeLabel(route);
-  const { triggerProps, tooltip } = useTooltip({
-    content: (
-      <>
-        <span>{latched ? "Tap to finish" : "Hold to talk"}</span>
-        <span className="ui-tooltip-reason">{blocked ?? where}</span>
-      </>
-    ),
-    kbd: HOLD_KEYS(isApple()),
-    description: blocked,
-    showOnPress: Boolean(blocked),
-  });
-  const handlers = {
-    onPointerDown(event: PointerEvent<HTMLButtonElement>) {
-      if (event.button !== 0 || blocked) return;
-      // The field keeps its focus and a phone's keyboard stays as it was.
-      event.preventDefault();
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      pointer.current = { id: event.pointerId, rect: event.currentTarget.getBoundingClientRect() };
-      voice.send({ type: "press", at: now() });
-    },
-    onPointerMove(event: PointerEvent<HTMLButtonElement>) {
-      const held = pointer.current;
-      if (!held || held.id !== event.pointerId) return;
-      voice.send({ type: "away", away: awayFrom(held.rect, event.clientX, event.clientY, away) });
-    },
-    onPointerUp(event: PointerEvent<HTMLButtonElement>) {
-      if (pointer.current?.id !== event.pointerId) return;
-      pointer.current = null;
-      voice.send({ type: "release", at: now() });
-    },
-    onPointerCancel() {
-      if (!pointer.current) return;
-      pointer.current = null;
-      voice.send({ type: "cancel" });
-    },
-    onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-      if ((event.key !== " " && event.key !== "Enter") || blocked) return;
-      event.preventDefault();
-      if (!event.repeat) voice.send({ type: "press", at: now() });
-    },
-    onKeyUp(event: KeyboardEvent<HTMLButtonElement>) {
-      if (event.key !== " " && event.key !== "Enter") return;
-      event.preventDefault();
-      voice.send({ type: "release", at: now() });
-    },
-    onContextMenu(event: MouseEvent<HTMLButtonElement>) {
-      event.preventDefault();
-    },
-  };
   return (
-    <>
-      <button
-        {...mergeHandlers(handlers, triggerProps.handlers)}
-        type="button"
-        className="ui-icon-button voice-mic"
-        data-size={size}
-        data-round={size === 36 ? "" : undefined}
-        data-voice={active ? state.phase : undefined}
-        data-away={away || undefined}
-        aria-label="Talk to dot"
+    <span
+      className="voice-mic"
+      data-voice={active ? state.phase : undefined}
+      data-away={away || undefined}
+    >
+      <span className="voice-mic-halo" aria-hidden="true" />
+      <IconButton
+        label={latched ? "Tap to finish" : "Hold to talk"}
+        icon={away ? "x" : "mic"}
+        size={size}
+        round={size === 36}
+        kbd={HOLD_KEYS(isApple())}
+        disabledReason={blocked}
         aria-pressed={active && !away}
-        aria-disabled={blocked ? true : undefined}
-        aria-describedby={triggerProps["aria-describedby"]}
-        aria-keyshortcuts={triggerProps["aria-keyshortcuts"]}
         // A held finger may wander: the page must not take the slide for a scroll and drop the turn.
-        style={{ touchAction: "none" }}
-      >
-        <span className="voice-mic-halo" aria-hidden="true" />
-        <Icon name={away ? "x" : "mic"} size={size === 36 ? 18 : 16} />
-      </button>
-      {tooltip}
-    </>
+        style={{ touchAction: "none", color: away ? "var(--color-danger-fg)" : undefined }}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || blocked) return;
+          // The field keeps its focus and a phone's keyboard stays as it was.
+          event.preventDefault();
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          pointer.current = {
+            id: event.pointerId,
+            rect: event.currentTarget.getBoundingClientRect(),
+          };
+          voice.send({ type: "press", at: now() });
+        }}
+        onPointerMove={(event) => {
+          const held = pointer.current;
+          if (!held || held.id !== event.pointerId) return;
+          voice.send({
+            type: "away",
+            away: awayFrom(held.rect, event.clientX, event.clientY, away),
+          });
+        }}
+        onPointerUp={(event) => {
+          if (pointer.current?.id !== event.pointerId) return;
+          pointer.current = null;
+          voice.send({ type: "release", at: now() });
+        }}
+        onPointerCancel={() => {
+          if (!pointer.current) return;
+          pointer.current = null;
+          voice.send({ type: "cancel" });
+        }}
+        onKeyDown={(event) => {
+          if ((event.key !== " " && event.key !== "Enter") || blocked) return;
+          event.preventDefault();
+          if (!event.repeat) voice.send({ type: "press", at: now() });
+        }}
+        onKeyUp={(event) => {
+          if (event.key !== " " && event.key !== "Enter") return;
+          event.preventDefault();
+          voice.send({ type: "release", at: now() });
+        }}
+        onContextMenu={(event) => event.preventDefault()}
+      />
+    </span>
   );
 }
 
@@ -121,15 +99,14 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
   return (
     <div className="voice-strip" data-phase={state.phase} data-away={away || undefined}>
       {latched && (
-        <button
-          type="button"
-          className="ui-icon-button voice-cancel"
-          data-size={24}
-          aria-label="Cancel"
+        <IconButton
+          className="voice-cancel"
+          label="Cancel"
+          icon="x"
+          size={24}
+          kbd={["Escape"]}
           onClick={() => voice.send({ type: "cancel" })}
-        >
-          <Icon name="x" size={14} />
-        </button>
+        />
       )}
       <Waveform voice={voice} since={state.phase === "listening" ? state.since : null} />
       <span className="voice-tail">{away ? "Let go to cancel" : routeLabel(route)}</span>
@@ -187,7 +164,7 @@ function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
         const heard = level.current();
         const value = heard < 0 ? 0.1 + 0.06 * Math.sin(t / 220) : heard;
         levels.current = [...levels.current, value].slice(-count);
-        card?.style.setProperty("--voice-level", value.toFixed(3));
+        card?.style.setProperty("--_level", value.toFixed(3));
       }
       context.clearRect(0, 0, width, height);
       context.fillStyle = color;
@@ -216,7 +193,7 @@ function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
     return () => {
       cancelAnimationFrame(frame);
       resize.disconnect();
-      card?.style.removeProperty("--voice-level");
+      card?.style.removeProperty("--_level");
     };
   }, [finishing, reduced, since]);
   return (

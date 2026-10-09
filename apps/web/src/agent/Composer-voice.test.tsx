@@ -104,7 +104,7 @@ async function setup(over: Partial<ComposerProps> = {}) {
   };
   const view = render(<Composer {...props} />);
   const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
-  const mic = screen.getByRole("button", { name: "Talk to dot" });
+  const mic = screen.getByRole("button", { name: "Hold to talk" });
   // The route is known once the browser has answered.
   await waitFor(() => expect(mic.getAttribute("aria-disabled")).toBeNull());
   await act(async () => {});
@@ -247,7 +247,7 @@ describe("talking to dot from the composer", () => {
         receiveKey={vi.fn(() => false)}
       />,
     );
-    const mic = screen.getByRole("button", { name: "Talk to dot" });
+    const mic = screen.getByRole("button", { name: "Hold to talk" });
     await waitFor(() => expect(mic.getAttribute("aria-disabled")).toBe("true"));
     fireEvent.pointerDown(mic, { button: 0, pointerId: 7 });
     expect(engine.open).toBeUndefined();
