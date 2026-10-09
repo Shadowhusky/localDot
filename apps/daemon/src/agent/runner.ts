@@ -349,6 +349,8 @@ export class AgentRunner {
         new RulesStore(this.deps.home),
       );
       session.earlier = earlier;
+      // dot's earlier replies may repeat what a page said: they never unlock memory writes.
+      if (earlier.length) session.tainted = true;
       session.recent = recent;
       session.actionLimit = settings.checkIns?.actions;
       const rt: Runtime = {
