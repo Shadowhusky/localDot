@@ -15,7 +15,7 @@ const BOLD = font("Kalam-Bold.ttf");
 export const GRAPHITE = "#2c2e33";
 export const SOFT = "#5d6168";
 export const XENON = "#3fb5de";
-const PAPER = "#f6f2e8";
+export const PAPER = "#f6f2e8";
 
 const round = (n) => Math.round(n * 10) / 10;
 
@@ -50,7 +50,7 @@ export class Sheet {
     const dashed = dash ? ` stroke-dasharray="${dash.join(" ")}"` : "";
     for (const p of this.gen.toPaths(drawable))
       this.strokes.push(
-        `<path d="${p.d}" stroke="${p.stroke}" stroke-width="${p.strokeWidth}" fill="${p.fill ?? "none"}" stroke-linecap="round" stroke-linejoin="round"${dashed}/>`,
+        `<path d="${p.d.replace(/-?\d*\.\d+/g, (n) => String(round(Number(n))))}" stroke="${p.stroke}" stroke-width="${p.strokeWidth}" fill="${p.fill ?? "none"}" stroke-linecap="round" stroke-linejoin="round"${dashed}/>`,
       );
   }
 

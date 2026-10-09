@@ -351,7 +351,8 @@ Connectors live in `<home>/connectors.json`; their tools, as last listed, in
 The pencil diagrams and charts in `docs/readme/` are drawn by `docs/diagrams/build.mjs` with
 roughjs and the Kalam handwriting font (SIL Open Font License, in `docs/diagrams/fonts/`). The
 lettering is converted to outlines, so the SVGs render anywhere without the font. Each run
-writes an SVG and a PNG of every drawing (PNGs go through `pngquant` when it is installed):
+writes an SVG and a PNG of every drawing; the PNG is the fallback, made at two thirds of the
+sheet's size and put through `pngquant` when it is installed:
 
 ```sh
 cd docs/diagrams
@@ -362,4 +363,5 @@ pnpm build                  # or: node build.mjs system safety
 The numbers in the charts come from the measurements listed in
 [measurements/2026-10-readme-numbers.md](measurements/2026-10-readme-numbers.md). The
 screenshots and the tour come from the fixture daemon (`apps/web/e2e/fixtures/ui-server.ts`)
-with sample data only.
+with sample data only. `QA_ACTIVITY=research` starts it on a research task part-way through, with
+web searches, page reads and numbered sources.
