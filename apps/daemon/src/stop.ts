@@ -8,7 +8,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { StopAllOutcome, StopOutcome, ULID_PATTERN } from "@localdot/protocol";
+import { ComputerOperation, StopAllOutcome, StopOutcome, ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
 export interface StopOptions {
   home: string;
@@ -98,6 +98,7 @@ const Cell = z.strictObject({
   updateAvailable: z.literal(true).optional(),
   updating: z.literal(true).optional(),
   needsFreshStart: z.literal(true).optional(),
+  operation: ComputerOperation.optional(),
 });
 export async function runStop(options: StopOptions, io: StopIO): Promise<number> {
   const { home, cellId, signal } = options,

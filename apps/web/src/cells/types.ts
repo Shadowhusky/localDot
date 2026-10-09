@@ -1,3 +1,5 @@
+import type { ComputerOperation } from "@localdot/protocol";
+
 export type Scale = 1 | 2;
 
 export type CellState = "starting" | "ready" | "stopping" | "stopped" | "failed" | "removed";
@@ -26,4 +28,6 @@ export interface CellSummary {
   updating?: true;
   // Its update can't be finished; only a fresh start brings the computer back.
   needsFreshStart?: true;
+  // The start, update or stop going on, from when the daemon began it.
+  operation?: ComputerOperation;
 }

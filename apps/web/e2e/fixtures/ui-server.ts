@@ -16,7 +16,10 @@ import {
   CLAUDE_CODE_SIGN_IN,
   CLAUDE_CODE_UPDATE,
   type ClaudeCodeStatus,
+  type ComputerOperation,
+  type ComputerOperationStep,
   DEFAULT_RESEARCH_BUDGET,
+  EXPECTED_OPERATION_MS,
   type KeydRecord,
   microsToMs,
   msToMicros,
@@ -292,7 +295,7 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
     case "none":
       return undefined;
     case "starting":
-      return { ...b, state: "starting", stream: none };
+      return { ...b, state: "starting", stream: none, operation: operation("start", "ready") };
     case "connecting":
       return { ...b, state: "ready", stream: none };
     case "live":
@@ -319,6 +322,36 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
 }
 const initial = cellFor(cellKind, cellId);
 if (initial) cells.emit(initial);
+// A start takes this long here; a longer one lets a page reload part way through, as on a computer.
+const START_MS = Number(env.QA_START_MS ?? 1500);
+function operation(
+  kind: "first-start" | "start",
+  step: ComputerOperationStep,
+  startedAt = Date.now(),
+): ComputerOperation {
+  return { kind, step, startedAt, elapsedMs: 0, expectedMs: EXPECTED_OPERATION_MS[kind] };
+}
+// The steps the daemon reports, then ready with its screen up.
+function startCell(id: string, kind: "first-start" | "start"): void {
+  const startedAt = Date.now();
+  const step = (name: ComputerOperationStep) => {
+    const c = cells.get(id);
+    if (c?.state === "starting") cells.emit({ ...c, operation: operation(kind, name, startedAt) });
+  };
+  step("network");
+  setTimeout(() => step("desktop"), START_MS * 0.1);
+  setTimeout(() => step("ready"), START_MS * 0.2);
+  setTimeout(() => {
+    const c = cells.get(id);
+    if (c?.state !== "starting") return;
+    const { operation: _op, ...rest } = c;
+    cells.emit({
+      ...rest,
+      state: "ready",
+      stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+    });
+  }, START_MS);
+}
 // QA_DESKTOP=<url>,<password> streams a real desktop container's Selkies to the live cell, for
 // measurements (QA_TUNING=0 leaves its quality fixed); the fixture otherwise shows one still frame.
 const [realStream, realPassword] = (env.QA_DESKTOP ?? "").split(",");
@@ -348,21 +381,13 @@ cells.create = async (opts) => {
   const created = await origCreate(opts);
   cellId = created.id;
   cells.emit(created);
-  setTimeout(() => {
-    const c = cells.get(created.id);
-    if (c && c.state === "starting")
-      cells.emit({
-        ...c,
-        state: "ready",
-        stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
-      });
-  }, 1500);
-  return created;
+  startCell(created.id, "first-start");
+  return cells.get(created.id) ?? created;
 };
 cells.stop = async (id) => {
   const c = cells.get(id);
   if (!c) throw new Error("unknown");
-  const { paused: _p, ...rest } = c as CellSummary & { paused?: boolean };
+  const { paused: _p, operation: _op, ...rest } = c as CellSummary & { paused?: boolean };
   cells.emit({
     ...(rest as CellSummary),
     state: "stopped",
@@ -372,15 +397,7 @@ cells.stop = async (id) => {
 const origStart = cells.start.bind(cells);
 cells.start = async (id) => {
   await origStart(id);
-  setTimeout(() => {
-    const c = cells.get(id);
-    if (c && c.state === "starting")
-      cells.emit({
-        ...c,
-        state: "ready",
-        stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
-      });
-  }, 1500);
+  startCell(id, "start");
 };
 
 // Update: the computer stops, comes back on the new version and is ready a moment later.

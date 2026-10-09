@@ -1,5 +1,12 @@
 import { isDeepStrictEqual as equal } from "node:util";
-import { SELFTEST_CHECK_IDS, type SelfTestCheck, selfTestPassed, ulid } from "@localdot/protocol";
+import {
+  type ComputerOperationKind,
+  type ComputerOperationStep,
+  SELFTEST_CHECK_IDS,
+  type SelfTestCheck,
+  selfTestPassed,
+  ulid,
+} from "@localdot/protocol";
 import { ComputerResetRecord } from "../../../../packages/protocol/src/computer-reset.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
@@ -9,6 +16,7 @@ import { type DockerClient, DockerError } from "./docker.ts";
 import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-retirement.ts";
 import { gateCaptures, type ImageInspect, type Images } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
+import { type BeginOptions, CellOperations } from "./operations.ts";
 import { allocateKeydPort } from "./ports.ts";
 import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { captureComputerResetSource } from "./reset-source.ts";
@@ -75,6 +83,7 @@ export interface OrchestratorDeps {
   // Added to every Docker object a cell gets, so a test's cleanup can filter by its label alone.
   labels?: Readonly<Record<string, string>>;
   sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
   readyTimeoutMs?: number;
   watchEveryMs?: number;
   restartBackoffMs?: number[];
@@ -99,6 +108,8 @@ interface Ports {
   desktopd: number;
   stream: number;
 }
+
+type OperationStart = BeginOptions & { kind: ComputerOperationKind };
 
 interface Live {
   paused?: true;
@@ -214,6 +225,8 @@ export class CellOrchestrator {
   readonly #probeStream: OrchestratorDeps["probeStream"];
   readonly #namePrefix: string;
   readonly #sleep: (ms: number) => Promise<void>;
+  readonly #now: () => number;
+  readonly #ops: CellOperations;
   readonly #candidateHolds = new Set<string>();
   readonly #reservedIds = new Set<string>();
   readonly #retiredPortOwners = new Set<string>();
@@ -254,6 +267,8 @@ export class CellOrchestrator {
     this.#externalKeydPorts = deps.externalKeydPorts;
     this.#namePrefix = deps.namePrefix ?? NAME_PREFIX;
     this.#sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.#now = deps.now ?? Date.now;
+    this.#ops = new CellOperations(deps.store, this.#now);
     this.#readyTimeoutMs = deps.readyTimeoutMs ?? 180_000;
     this.#watchEveryMs = deps.watchEveryMs ?? 5000;
     this.#restartBackoffMs = deps.restartBackoffMs ?? DEFAULT_RESTART_BACKOFF_MS;
@@ -320,6 +335,7 @@ export class CellOrchestrator {
     const live = this.#live.get(id);
     if (!live) return;
     live.stream = { ...live.stream, ...patch };
+    if (live.stream.connection === "live") this.#ops.connected(id);
     this.#emit(id);
   }
 
@@ -428,6 +444,7 @@ export class CellOrchestrator {
         }
       } else if (desktop.State.Running && gate.State.Running) {
         const ports = await this.#readPorts(record.docker.gate);
+        this.#ops.begin(id, "start", "ready", { timed: false });
         this.#set(id, { state: "starting", restarts: 0, ports, stream: NO_STREAM });
         if (!(await this.#rewireIfLost(id))) this.#detach(id, this.#waitReady(record));
       } else if (!desktop.State.Running && !gate.State.Running) {
@@ -498,6 +515,7 @@ export class CellOrchestrator {
   }
 
   async #provision(id: string, keydPort: number, scale: Scale): Promise<CellSummary> {
+    const startedAt = this.#now();
     const names = cellNames(id, this.#namePrefix);
     const undo: UndoStep[] = [];
     try {
@@ -599,7 +617,11 @@ export class CellOrchestrator {
       });
       this.#store.save(record);
       this.#records.set(id, record);
-      if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
+      const begun = await this.#startContainers(record, 0, undefined, false, {
+        kind: "first-start",
+        startedAt,
+      });
+      if (begun) this.#detach(id, this.#waitReady(record));
       return this.#summary(record);
     } catch (err) {
       // Subscribers may have seen the cell start; they see it go, so none keeps a ghost.
@@ -615,7 +637,10 @@ export class CellOrchestrator {
           error:
             "start failed; keyd cleanup could not be confirmed; remove this computer when the key layer responds",
         });
-      } else this.#live.delete(id);
+      } else {
+        this.#live.delete(id);
+        this.#ops.end(id);
+      }
       throw err;
     }
   }
@@ -635,6 +660,7 @@ export class CellOrchestrator {
   }
 
   async #start(id: string): Promise<void> {
+    const startedAt = this.#now();
     if (this.#held(id))
       throw new CellControlConflict(
         "the computer is permanently fenced or awaiting replacement confirmation",
@@ -655,7 +681,11 @@ export class CellOrchestrator {
         });
       throw error;
     });
-    if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
+    const begun = await this.#startContainers(record, 0, undefined, false, {
+      kind: "start",
+      startedAt,
+    });
+    if (begun) this.#detach(id, this.#waitReady(record));
   }
 
   // Stops the computer, moves it onto the images its tags name now and starts it again. Its home,
@@ -666,6 +696,7 @@ export class CellOrchestrator {
   }
 
   async #update(id: string): Promise<void> {
+    const startedAt = this.#now();
     const updates = this.deps.updates;
     if (!updates) throw new CellControlConflict("Updates are unavailable.");
     const record = this.#require(id);
@@ -677,6 +708,7 @@ export class CellOrchestrator {
       );
     this.#updating.add(id);
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
+    this.#ops.begin(id, "update", "shutdown", { startedAt });
     this.#set(id, stopping);
     let refusal = UPDATE_UNDONE;
     let next: CellRecord;
@@ -687,6 +719,7 @@ export class CellOrchestrator {
       }
       for (const name of [record.docker.desktop, record.docker.gate])
         await this.#stopContainer(name);
+      this.#step(id, "install");
       next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
     } catch (error) {
       this.#updating.delete(id);
@@ -702,7 +735,10 @@ export class CellOrchestrator {
         throw new CellControlConflict(unfinished);
       }
       const old = this.#require(id);
-      const back = await this.#startContainers(old, 0).catch(() => false);
+      const back = await this.#startContainers(old, 0, undefined, false, {
+        kind: "start",
+        timed: false,
+      }).catch(() => false);
       if (back) this.#detach(id, this.#waitReady(old));
       else if (this.#current(id, stopping))
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
@@ -997,7 +1033,10 @@ export class CellOrchestrator {
     const wired = await this.#keyd.isWired(record).catch(() => true);
     if (wired || !this.#current(id, live)) return false;
     const note = "the key layer restarted; reconnecting the computer";
-    if (await this.#startContainers(record, live.restarts, note).catch(() => false)) {
+    const restart = { kind: "restart" } as const;
+    if (
+      await this.#startContainers(record, live.restarts, note, false, restart).catch(() => false)
+    ) {
       this.#detach(id, this.#waitReady(record));
     }
     return true;
@@ -1010,6 +1049,7 @@ export class CellOrchestrator {
   async #stop(id: string): Promise<void> {
     const record = this.#require(id);
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
+    this.#ops.begin(id, "stop", "shutdown");
     this.#set(id, stopping);
     const closed = await this.#closeInKeyd(id);
     try {
@@ -1039,6 +1079,7 @@ export class CellOrchestrator {
       }
       throw err;
     }
+    this.#ops.finish(id);
     this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
   }
 
@@ -1107,6 +1148,7 @@ export class CellOrchestrator {
     restarts: number,
     error?: string,
     frozen = false,
+    operation?: OperationStart,
   ): Promise<boolean> {
     if (this.#fenced(record.id))
       throw new CellControlConflict("the computer is permanently fenced");
@@ -1132,6 +1174,8 @@ export class CellOrchestrator {
       ...(error ? { error } : {}),
       ...(frozen ? { paused: true as const } : {}),
     };
+    if (operation) this.#ops.begin(record.id, operation.kind, "network", operation);
+    this.#ops.step(record.id, "network");
     this.#set(record.id, starting);
     try {
       await this.#stopBrowser(record.id);
@@ -1168,6 +1212,7 @@ export class CellOrchestrator {
       }
       if (!this.#current(record.id, starting)) return false;
       if (!frozen) {
+        this.#step(record.id, "desktop");
         await this.#docker.request({
           method: "POST",
           path: objectPath("containers", d.desktop, "start"),
@@ -1177,6 +1222,7 @@ export class CellOrchestrator {
       // Every start publishes new host ports (Review Focus 2).
       const ports = await this.#readPorts(d.gate);
       if (!this.#current(record.id, starting)) return false;
+      if (!frozen) this.#ops.step(record.id, "ready");
       this.#set(
         record.id,
         frozen
@@ -1220,6 +1266,7 @@ export class CellOrchestrator {
           // A held replacement candidate still reaches Ready here: its owner waits for it, and
           // input, Start and stream tickets keep refusing it until the owner publishes it.
           if (!this.#current(record.id, live) || this.#fenced(record.id)) return;
+          this.#ops.finish(record.id);
           // The restart count survives a recovery: it resets only on a user start or stop, so a
           // cell that keeps dying runs out of attempts instead of flapping forever.
           this.#set(record.id, {
@@ -1335,6 +1382,9 @@ export class CellOrchestrator {
           restarts: attempt,
           error: `${exited.detail}; restarting (attempt ${attempt} of ${this.#restartBackoffMs.length})`,
         };
+        this.#ops.begin(record.id, "restart", "network", {
+          extraMs: this.#restartBackoffMs[attempt - 1] ?? 0,
+        });
         this.#set(record.id, next);
         return next;
       });
@@ -1660,10 +1710,25 @@ export class CellOrchestrator {
 
   #set(id: string, live: Live): void {
     if (live.state !== "stopping" && live.state !== "starting") this.#updating.delete(id);
+    // Every way into starting or stopping has a start time, even one that began no operation.
+    if (live.state === "starting" || live.state === "stopping") {
+      if (!this.#ops.running(id))
+        this.#ops.begin(
+          id,
+          live.state === "starting" ? "start" : "stop",
+          live.state === "starting" ? "network" : "shutdown",
+          { timed: false },
+        );
+    } else if (live.state === "ready" && !live.paused) this.#ops.settle(id);
+    else this.#ops.end(id);
     this.#live.set(id, live);
     if (!this.#browserHolds.has(id) && (live.state !== "ready" || live.paused))
       void this.#stopBrowser(id).catch(() => {});
     this.#emit(id);
+  }
+
+  #step(id: string, step: ComputerOperationStep): void {
+    if (this.#ops.step(id, step)) this.#emit(id);
   }
 
   // Every cell with a state has its record in memory, so an event never reads the disk.
@@ -1881,6 +1946,9 @@ export class CellOrchestrator {
       restarts: 0,
       stream: NO_STREAM,
     };
+    const operation = this.deps.runtimeHold?.(record.id)
+      ? undefined
+      : this.#ops.summary(record.id, live);
     return {
       id: record.id,
       ...(this.deps.permanentFence?.(record.id)
@@ -1898,6 +1966,7 @@ export class CellOrchestrator {
       stream: live.stream,
       ...(live.error ? { error: live.error } : {}),
       ...(live.paused ? { paused: true as const } : {}),
+      ...(operation ? { operation } : {}),
       ...(this.#updating.has(record.id) ? { updating: true as const } : {}),
       ...(this.deps.updates?.needsFreshStart(record.id) ? { needsFreshStart: true as const } : {}),
       ...(!this.#updating.has(record.id) &&
