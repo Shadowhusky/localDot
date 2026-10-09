@@ -85,7 +85,14 @@ import { RowMenu } from "./routines/RowMenu.tsx";
 import { useRoutines } from "./routines/useRoutines.ts";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
+import {
+  footWork,
+  type HudAction,
+  statusFor,
+  taskFacts,
+  taskHud,
+  withSending,
+} from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
@@ -310,6 +317,9 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
   link: "expired",
   code: "expired",
 };
+
+// How long a sent message shows dot thinking with no word from the task before the real status returns.
+const SENDING_HOLD_MS = 20_000;
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
@@ -985,7 +995,7 @@ function Theatre({ api }: { api: ApiClient }) {
     !!session.sessionId && (agent.connection === "lost" || agent.availability === "error"),
     LINK_LOST_MS,
   );
-  const appStatus = statusFor({
+  const baseStatus = statusFor({
     computer: {
       ...computer,
       action: {
@@ -1021,6 +1031,19 @@ function Theatre({ api }: { api: ApiClient }) {
       !agent.model.pendingTakeover &&
       !agent.snapshot?.pendingTakeover,
   });
+  // From the moment a message is sent until the task's first word, dot is shown thinking.
+  const [sendingSince, setSendingSince] = useState<number | null>(null);
+  const sendingAnswered = baseStatus.row !== "ready" && baseStatus.row !== "done";
+  useEffect(() => {
+    if (sendingSince === null) return;
+    if (sendingAnswered) {
+      setSendingSince(null);
+      return;
+    }
+    const timer = setTimeout(() => setSendingSince(null), SENDING_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [sendingSince, sendingAnswered]);
+  const appStatus = withSending(baseStatus, sendingSince !== null);
   // The sheets offer Shut down, which the island leaves out; on a phone, where a sheet covers the
   // island, the task's Stop too.
   const sheetStop = appStatus.actions.find(
@@ -1853,6 +1876,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 <Composer
                   api={api}
                   cell={cell}
+                  onSending={(on) => setSendingSince(on ? Date.now() : null)}
                   known={status === "known"}
                   pending={pending !== null}
                   controlBlocked={
