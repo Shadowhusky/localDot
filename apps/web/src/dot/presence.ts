@@ -48,6 +48,8 @@ export class Presence {
   private flight: Flight | null = null;
   private motion: Animation | null = null;
   private place: PresencePlace | null = null;
+  // Put away because its place had no box to draw it over.
+  private lost = false;
   private drawn = 0;
   private fade: ReturnType<typeof setTimeout> | undefined;
   private reduced: boolean;
@@ -70,6 +72,7 @@ export class Presence {
     this.place = place;
     const box = place && boxOf(placeElement(place));
     if (!box) {
+      this.lost = place !== null;
       this.show(false);
       return;
     }
@@ -88,7 +91,10 @@ export class Presence {
       clearTimeout(this.fade);
       this.fade = setTimeout(() => {
         const at = this.place && boxOf(placeElement(this.place));
-        if (!at) return;
+        if (!at) {
+          this.lost = this.place !== null;
+          return;
+        }
         this.land(at);
         this.show(true);
       }, FADE_MS);
@@ -104,10 +110,17 @@ export class Presence {
     this.animate(t);
   }
 
-  // The place moved under dot: a window resize lands it there, anything else is followed.
+  // The place moved under dot: a window resize lands it there, anything else is followed. A dot put
+  // away while its place had no box comes back at once.
   follow(resized: boolean): void {
     const box = this.place && boxOf(placeElement(this.place));
-    if (!box || !this.flight) return;
+    if (!box) return;
+    if (this.lost) {
+      this.land(box);
+      this.show(true);
+      return;
+    }
+    if (!this.flight) return;
     const target = this.flight.target;
     if (
       Math.abs(box.x - target.x) < 0.5 &&
@@ -162,6 +175,7 @@ export class Presence {
   }
 
   private land(box: Box): void {
+    this.lost = false;
     if (this.flight) this.flight.jump(box, frameTime());
     else this.flight = new Flight(box);
     this.draw(box.size);
