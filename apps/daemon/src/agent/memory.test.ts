@@ -154,6 +154,24 @@ describe("MemoryStore entries", () => {
     expect(readdirSync(join(home, "memory"))).not.toContain(".forget.json");
   });
 
+  it("clears copies of a hand-written fact whose line was retyped since", () => {
+    const { home, memory } = store();
+    const file = join(home, "memory", "MEMORY.md");
+    writeFileSync(file, "# Things worth remembering\n\n- Spare key under the heron  \n", {
+      mode: 0o600,
+    });
+    memory.addEntry("MEMORY.md", "Takes the 8:10 train");
+    // An editor trims the line's trailing spaces: same fact, another untagged line.
+    writeFileSync(file, memory.read("MEMORY.md").replace("heron  \n", "heron\n"), { mode: 0o600 });
+    const heron = required(
+      memory.entries("MEMORY.md").find((e) => e.text === "Spare key under the heron"),
+    );
+    memory.deleteEntry("MEMORY.md", heron.id, heron.revision);
+    memory.addEntry("MEMORY.md", "Lives in Lisbon");
+    expect(history(home)).not.toContain("heron");
+    expect(history(home)).toContain("8:10 train");
+  });
+
   it("clears a deleted fact's copies when Undo's window passes", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
