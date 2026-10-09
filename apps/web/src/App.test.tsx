@@ -6,7 +6,9 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
+import { GREETINGS } from "./dot/tips.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
+import { ONBOARDING_KEY } from "./onboarding/wizard.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
@@ -860,6 +862,22 @@ describe("App HUD", () => {
     expect(document.body.textContent).not.toContain("Offline");
     pushState(summary("ready", "live"));
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
+  });
+
+  it("has dot greet the user beside a live computer with nothing to do", async () => {
+    window.localStorage.setItem(
+      ONBOARDING_KEY,
+      JSON.stringify({ step: "welcome", dismissed: true }),
+    );
+    render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(document.querySelector(".narration-line")).toBeNull();
+    pushState(summary("ready", "live"));
+    await waitFor(() =>
+      expect(Object.values(GREETINGS).flat()).toContain(
+        document.querySelector(".narration-line")?.textContent?.replace(/^dot: /, ""),
+      ),
+    );
   });
 
   it("keeps the stage lit while the stream reconnects, and says so in the island", async () => {
