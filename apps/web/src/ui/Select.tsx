@@ -23,6 +23,8 @@ export interface SelectProps {
   items?: readonly PickerItem[];
   groups?: readonly PickerGroup[];
   placeholder?: string;
+  // What the closed trigger says in place of the chosen label, such as Change.
+  shown?: string;
   // 32 px, or 36 px in a form; 44 px on a touch screen either way. Inline, sm is 12 px text on any
   // screen, as a decision's scope beside its buttons.
   size?: "sm" | "md" | "lg";
@@ -44,6 +46,7 @@ export function Select({
   items,
   groups,
   placeholder = "Choose…",
+  shown,
   size = "md",
   appearance = "field",
   className,
@@ -132,7 +135,7 @@ export function Select({
         onKeyDown={onKeyDown}
       >
         <span className="ui-select-value" data-placeholder={selected || value ? undefined : ""}>
-          {selected?.label ?? (value || placeholder)}
+          {shown ?? selected?.label ?? (value || placeholder)}
         </span>
         <Icon name="chevrons-up-down" size={14} className="ui-select-chevron" />
       </button>

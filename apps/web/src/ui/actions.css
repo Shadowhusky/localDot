@@ -178,7 +178,11 @@
     --_fg-hover: var(--color-fg-1);
   }
 
+  /* Red words on no face of their own, so a destructive step never shouts. */
   .ui-button[data-variant="destructive"] {
+    --_bg: transparent;
+    --_bg-hover: var(--color-control);
+    --_bg-pressed: var(--color-control-hover);
     --_fg: var(--color-danger-fg);
     --_fg-hover: var(--color-danger-fg);
   }
@@ -265,6 +269,8 @@
     }
   }
 
+  /* A quiet glyph reads in fg-2 unless its bar lights it brighter through --_icon-fg, as a phone's
+     toolbar does. */
   .ui-icon-button {
     --_size: calc(var(--spacing) * 7);
     display: inline-grid;
@@ -272,7 +278,7 @@
     width: var(--_size);
     height: var(--_size);
     border-radius: var(--radius-row);
-    color: var(--color-fg-2);
+    color: var(--_icon-fg, var(--color-fg-2));
   }
 
   .ui-icon-button > .ui-icon {
@@ -304,6 +310,11 @@
   .ui-icon-button[data-size="44"] {
     --_size: calc(var(--spacing) * 11);
     border-radius: var(--radius-group);
+  }
+
+  .ui-icon-button[data-size="52"] {
+    --_size: calc(var(--spacing) * 13);
+    border-radius: var(--radius-full);
   }
 
   .ui-icon-button:is([data-round], [data-variant="glass"], [data-variant="primary"]) {
@@ -565,6 +576,14 @@
     .ui-chip[data-variant="outline"]:hover {
       background-color: var(--color-control);
     }
+  }
+
+  /* One chip chosen from a row of them, as a provider is. */
+  .ui-chip[aria-pressed="true"],
+  .ui-chip[aria-pressed="true"]:hover {
+    background-color: var(--color-fg-1);
+    box-shadow: none;
+    color: var(--color-void);
   }
 
   .ui-chip[data-pressed] {

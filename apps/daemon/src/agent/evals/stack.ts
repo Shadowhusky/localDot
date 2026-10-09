@@ -321,7 +321,10 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
       );
     else if (event.type === "ask.request")
       setTimeout(() => {
-        if (session.answer(String(data.askId), "A", undefined)) assisted.answers += 1;
+        const askId = String(data.askId);
+        // Nothing here can fill in a form: a question with fields is declined.
+        if (data.fields ? session.decline(askId) : session.answer(askId, "A", undefined))
+          assisted.answers += 1;
       }, 0);
     else if (event.type === "safety.pause" && !abort.signal.aborted)
       abort.abort(new Error("the repeat guard paused the task"));

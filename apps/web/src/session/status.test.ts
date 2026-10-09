@@ -147,11 +147,11 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("agent.state", 1510, { state: "waiting_user", reason: "question" }),
     ];
     const { task, status } = view(asked, 9500);
-    expect(task).toMatchObject({ row: "question", label: "Has a question", control: false });
+    expect(task).toMatchObject({ row: "question", label: "Needs your answer", control: true });
     expect(status).toMatchObject({
       caption: { speaker: "dot", text: "Which format?" },
       actions: stopsTask,
-      control: false,
+      control: true,
       elapsedS: 8,
     });
     const answered = [...asked, ev("ask.answer", 2000, { askId: ID, option: "A", by: "user" })];
@@ -163,7 +163,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(view(requested, 9500).status).toMatchObject({
       label: "Needs your OK",
       actions: stopsTask,
-      control: false,
+      control: true,
       elapsedS: 8,
     });
     expect(view(requested, 3_662_000).status.elapsedS).toBe(3660);
@@ -835,7 +835,7 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["reconnecting, task running", "acting", "Reconnecting…", "acting", "working", "dot"],
   // 2–4. Approval, question, takeover.
   ["approval", "approval", "Needs your OK", "waiting", "needs_you", "system"],
-  ["question", "question", "Has a question", "waiting", "needs_you", "dot"],
+  ["question", "question", "Needs your answer", "waiting", "needs_you", "dot"],
   ["takeover", "takeover", "Your turn", "your-turn", "needs_you", "dot"],
   ["waiting in Replay", "waiting", "Waiting for you", "waiting", "needs_you", "system"],
   // 5. The user's Pause.
@@ -973,10 +973,17 @@ describe("one status model for every surface (T10)", () => {
     expect(at(start(), 7200, stream("stalled"))).toMatchObject({ elapsedS: 7, control: true });
   });
 
-  it("gives dot control only while it works and the app allows it", () => {
+  it("gives dot control only while it works or waits on the user's word, and the app allows it", () => {
     expect(statusFor({ computer: live, task: typing(), mayControl: false }).control).toBe(false);
     const working = [
-      ...["acting", "just acted", "thinking", "observing", "working", "pausing"],
+      "acting",
+      "just acted",
+      "thinking",
+      "observing",
+      "working",
+      "pausing",
+      "approval",
+      "question",
       "reconnecting, task running",
     ];
     const stopping = ["task stopping", "stop unconfirmed"];

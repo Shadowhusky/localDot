@@ -1,5 +1,6 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
 import { nestedKeys, roleCard, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // A custom Anthropic-compatible endpoint, from an empty setup: its key with the vendor's base URL,
@@ -53,6 +54,7 @@ for (const run of runs) {
       );
       const page = await context.newPage();
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
+      await skipSetup(page);
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
       const setup = page.getByRole("region", { name: "Finish setting up" });
       const model = setup.locator(".setup-row").filter({ hasText: "Model" });

@@ -83,3 +83,10 @@
 .rail-panel .thread {
   justify-content: flex-end;
 }
+
+/* Activity in a phone's sheet: the sheet is its one scroller, and its sticky heads take the sheet's
+   own surface. */
+.activity-sheet {
+  --rail-surface: var(--color-overlay);
+  margin-inline: calc(var(--spacing) * -1.5);
+}

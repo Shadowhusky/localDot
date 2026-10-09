@@ -1,4 +1,3 @@
-import { CLAUDE_PLAN_REFUSAL } from "@localdot/protocol";
 import { isOpenRouterRouterId, providerById } from "@localdot/providers";
 import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -21,17 +20,31 @@ export interface ModelChooserProps {
   onChange(value: RoleChoice): void;
 }
 
-function providerNote(id: string): string | undefined {
+export function providerNote(id: string): string | undefined {
   if (id === CHATGPT) return "Uses your ChatGPT account. No key or price needed.";
   const provider = providerById(id);
   if (!provider) return id ? "This provider is no longer offered. Choose another." : undefined;
   if (provider.notOffered) return provider.notOffered;
   if (provider.plan) return ["Uses your plan's limits.", provider.rule].filter(Boolean).join(" ");
-  if (provider.id === "anthropic") return CLAUDE_PLAN_REFUSAL;
+  if (provider.id === "anthropic")
+    return "Uses API keys only; Claude plan sign-ins aren't allowed for other apps.";
   return undefined;
 }
 
-// The provider, then one of its models: two searchable lists that open as a sheet on a phone.
+export function modelNote(
+  value: RoleChoice,
+  providers: readonly ProviderModels[],
+): string | undefined {
+  const chosen = providers
+    .find((row) => row.id === value.provider)
+    ?.models.find((model) => model.id === value.model);
+  return chosen && isOpenRouterRouterId(value.provider, chosen.id)
+    ? "Choose a specific model. A router can't set aside a known price."
+    : chosen?.note;
+}
+
+// The provider, then one of its models: two rows of a group, each a searchable list that opens as a
+// sheet on a phone.
 export function ModelChooser({
   modelRole: role,
   value,
@@ -44,19 +57,15 @@ export function ModelChooser({
   const typed = !!provider && customModelAllowed(provider);
   const chatgpt = value.provider === CHATGPT;
   const items = modelItems(role, provider, value.provider, models, subscriptionModels, value.model);
-  const chosen = models.find((model) => model.id === value.model);
-  const modelNote =
-    chosen && isOpenRouterRouterId(value.provider, chosen.id)
-      ? "Choose a specific model. A router can't set aside a known price."
-      : chosen?.note;
   const empty = chatgpt
     ? "Sign in and check the account to load its models."
     : "No models in the list yet. Refresh the model list.";
   const idProblem = value.model ? modelIdProblem(value.model) : null;
   return (
     <>
-      <Field label="Provider" description={providerNote(value.provider)}>
+      <Field label="Provider" inline className="ui-group-row">
         <Combobox
+          appearance="inline"
           value={value.provider}
           groups={providerGroups(role, value.provider)}
           placeholder="Choose a provider"
@@ -66,12 +75,9 @@ export function ModelChooser({
       </Field>
       {(chatgpt || (provider && !provider.notOffered)) &&
         (typed && !models.length ? (
-          <Field
-            label="Model ID"
-            description="As the server names it."
-            error={idProblem ?? undefined}
-          >
+          <Field label="Model ID" inline className="ui-group-row" error={idProblem ?? undefined}>
             <TextField
+              size="sm"
               value={value.model}
               maxLength={128}
               autoComplete="off"
@@ -84,11 +90,13 @@ export function ModelChooser({
         ) : (
           <Field
             label="Model"
-            description={modelNote}
+            inline
+            className="ui-group-row"
             {...(typed ? { error: idProblem ?? undefined } : {})}
             disabledReason={items.length || typed ? undefined : empty}
           >
             <Combobox
+              appearance="inline"
               value={value.model}
               items={items}
               placeholder="Choose a model"

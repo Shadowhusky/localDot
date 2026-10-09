@@ -1,5 +1,6 @@
 import { closeSync, constants, existsSync, openSync, readFileSync, readSync } from "node:fs";
 import {
+  type AskFieldRecord,
   CONVERSATION_TASKS,
   type ConversationSnapshot,
   EARLIER_CHARS,
@@ -37,6 +38,15 @@ export type ConversationLog = Pick<EventLog, "hasSession" | "logFile" | "listSes
 
 const clip = (text: string) =>
   text.length > EARLIER_TURN_CHARS ? `${text.slice(0, EARLIER_TURN_CHARS)}…` : text;
+// A field's answer as one line: a secret only as given.
+const fieldText = (value: AskFieldRecord) =>
+  typeof value === "string"
+    ? value
+    : Array.isArray(value)
+      ? value.join(", ")
+      : value === true
+        ? "yes"
+        : "(given, kept secret)";
 
 // The conversation the next task continues. Each task names the one it continues in its
 // session.start, so a conversation is a chain of tasks that survives restarts and ends where a
@@ -133,16 +143,24 @@ export class Conversations {
               [
                 event.data.question,
                 ...event.data.options.map((option) => `${option.key}: ${option.text}`),
+                ...(event.data.fields ?? []).map((field) => `- ${field.label}`),
               ].join("\n"),
             )}`,
           );
           break;
         case "ask.answer": {
           if (event.data.by !== "user") break;
-          const option = questions
-            .get(event.data.askId)
-            ?.options.find((choice) => choice.key === event.data.option)?.text;
-          const answer = [option, event.data.text].filter(Boolean).join("\n");
+          if (event.data.declined) {
+            turns.push("The user declined to answer.");
+            break;
+          }
+          const asked = questions.get(event.data.askId);
+          const option = asked?.options.find((choice) => choice.key === event.data.option)?.text;
+          const fields = Object.entries(event.data.fields ?? {}).map(([id, value]) => {
+            const label = asked?.fields?.find((field) => field.id === id)?.label ?? id;
+            return `${label}: ${fieldText(value)}`;
+          });
+          const answer = [option, event.data.text, ...fields].filter(Boolean).join("\n");
           if (answer) turns.push(`The user answered: ${clip(answer)}`);
           break;
         }

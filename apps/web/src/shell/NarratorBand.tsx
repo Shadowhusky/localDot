@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RevealedText } from "../agent/ApprovalValue.tsx";
+import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 
 // Each line stays at least this long, so a quick run of steps never flickers.
@@ -10,12 +12,20 @@ export interface NarratorBandProps {
   speaker: "dot" | "system";
   // Settings → Appearance → Show dot. Without dot beside it, the line names its speaker.
   showDot: boolean;
+  // Under dot in place of its line, while the band sits in focus mode's margin: the task's step.
+  note?: string;
+  // The line is dot's question, right above where the answer goes: nothing in it may hide.
+  reveal?: boolean;
 }
 
 // The band under the stage (design-v2 §10.17, §11 D): dot docked at the stage's corner and its line
 // beside it, two lines at most, crossfading one line to the next.
-export function NarratorBand({ line, speaker, showDot }: NarratorBandProps) {
-  const { text, leaving } = useLine(line);
+export function NarratorBand({ line, speaker, showDot, note, reveal = false }: NarratorBandProps) {
+  const { text, revealed, leaving } = useLine(line, reveal);
+  const warning = useMemo(
+    () => (revealed ? hiddenWarning(revealText(text)) : undefined),
+    [revealed, text],
+  );
   return (
     <div className="narrator" data-dot={showDot ? "" : undefined}>
       {showDot && <PresenceSlot name="dock" className="narrator-dock" />}
@@ -27,22 +37,31 @@ export function NarratorBand({ line, speaker, showDot }: NarratorBandProps) {
                 {showDot ? "dot: " : "dot"}
               </span>
             )}
-            {text}
+            {revealed ? <RevealedText text={text} /> : text}
+          </span>
+        )}
+        {text && warning && (
+          <span className="narration-warning" data-leaving={leaving || undefined}>
+            {warning}
           </span>
         )}
       </p>
+      {note && <p className="narrator-note num">{note}</p>}
     </div>
   );
 }
 
 // The line on show: a new one waits until the last has had its moment, fades the last out, then in.
-function useLine(line: string) {
+// Whether a line is revealed goes with the line.
+function useLine(line: string, reveal: boolean) {
   const [text, setText] = useState(line);
+  const [revealed, setRevealed] = useState(reveal);
   const [leaving, setLeaving] = useState(false);
   const since = useRef(Date.now());
   useEffect(() => {
     if (line === text) {
       setLeaving(false);
+      setRevealed(reveal);
       return;
     }
     const wait = Math.max(0, since.current + LINE_HOLD_MS - Date.now());
@@ -53,6 +72,7 @@ function useLine(line: string) {
         () => {
           since.current = Date.now();
           setText(line);
+          setRevealed(reveal);
           setLeaving(false);
         },
         text ? LINE_OUT_MS : 0,
@@ -62,6 +82,6 @@ function useLine(line: string) {
       clearTimeout(out);
       clearTimeout(swap);
     };
-  }, [line, text]);
-  return { text, leaving };
+  }, [line, text, reveal]);
+  return { text, revealed: revealed || (reveal && line === text), leaving };
 }

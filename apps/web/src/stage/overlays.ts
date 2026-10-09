@@ -22,6 +22,7 @@ import {
   targetRadius,
 } from "./geometry.ts";
 import type { StageTheme, ThemeColor } from "./theme.ts";
+import type { FieldMark } from "./worker-protocol.ts";
 
 const CHIP_H = 20;
 const CHIP_OFFSET = { x: 12, y: 18 };
@@ -32,6 +33,8 @@ const KEY_R = 7;
 const DISC_R = 14;
 const DRAG_PIECE_PX = 8;
 const SHADE_ALPHA = 0.3;
+// The rings on the fields dot will fill fade in as the picture dims under the question.
+const FIELD_FADE_MS = 200;
 
 // A box shadow's soft edge as stacked rounded rects: a linear ramp across `blur`, cheaper than a
 // blur filter behind every chip.
@@ -196,6 +199,7 @@ export class Overlays {
   readonly #keycaps = new Container();
   #keycapsLabel = "";
   #keycapsWidth = 0;
+  #fields: { marks: readonly FieldMark[]; since: number; fadeMs: number } | null = null;
 
   constructor(theme: StageTheme, dpr: number) {
     this.#theme = theme;
@@ -241,6 +245,17 @@ export class Overlays {
     this.#viewport = { w, h };
   }
 
+  // While dot waits on an answer, its target ring stays on each field the answer goes into.
+  setFields(marks: readonly FieldMark[], reducedMotion: boolean): void {
+    if (!marks.length) this.#fields = null;
+    else
+      this.#fields = {
+        marks,
+        since: this.#fields?.since ?? performance.now(),
+        fadeMs: reducedMotion ? 0 : FIELD_FADE_MS,
+      };
+  }
+
   draw(scene: Scene | null): void {
     this.#targetG.clear();
     this.#dragG.clear();
@@ -255,6 +270,16 @@ export class Overlays {
     if (!scene) return;
     const accent = this.#accent(scene.control);
     if (scene.target) this.#drawTarget(scene.target, accent);
+    if (this.#fields) {
+      // dot holds the computer while it waits, and these are where it will type.
+      const { marks, since, fadeMs } = this.#fields;
+      const alpha = fadeMs > 0 ? Math.min(1, (performance.now() - since) / fadeMs) : 1;
+      for (const mark of marks)
+        this.#drawTarget(
+          { rect: mark.bbox ?? null, point: mark.point, alpha, scale: 1 },
+          this.#theme.xenon,
+        );
+    }
     if (scene.drag) this.#drawDrag(scene.drag, accent);
     for (const ring of scene.rings) this.#drawRing(ring, accent);
     if (scene.press) this.#drawDisc(scene.press, accent);

@@ -81,6 +81,9 @@
   --color-grabber: rgba(255, 255, 255, 0.24);
   --color-row-hover: rgba(255, 255, 255, 0.035);
   --color-scrollbar: rgba(255, 255, 255, 0.16);
+  /* Replay's scrubber: its track, and a tick at each step. */
+  --color-scrubber-track: rgba(255, 255, 255, 0.16);
+  --color-step-tick: rgba(255, 255, 255, 0.5);
 
   /* Light tells who has the computer. Xenon means "dot has control" and nothing else; you are
      porcelain; attention is a 7–10 px point next to words, never a fill or a rim. */
@@ -201,6 +204,15 @@
     ),
     linear-gradient(180deg, #17181c 0%, #111215 60%, #0d0e10 100%);
   --curtain-shade: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.35));
+  /* First-run setup: the house with a soft beam from above and a faint pool where dot sits. */
+  --setup-light:
+    radial-gradient(ellipse 34% 60% at 50% -6%, rgba(255, 255, 255, 0.06), transparent 70%),
+    radial-gradient(ellipse 30% 22% at 50% 30%, rgba(255, 255, 255, 0.035), transparent 70%);
+  --setup-light-phone: radial-gradient(
+    ellipse 60% 40% at 50% -4%,
+    rgba(255, 255, 255, 0.06),
+    transparent 70%
+  );
   --color-progress-track: rgba(255, 255, 255, 0.1);
   --color-progress-fill: rgba(238, 239, 241, 0.75);
 
@@ -321,6 +333,7 @@
   --radius-island: 20px;
   /* The island grown into a decision. */
   --radius-decision: 22px;
+  --radius-transport: 16px;
   --radius-track-28: 9px;
   --radius-thumb-24: 6px;
 
@@ -435,8 +448,8 @@
     }
   }
 
-  /* A phone reads at 15 px and keeps the island at 32. */
-  @media (width < 700px) {
+  /* A phone reads at 15 px and keeps the island at 32, upright or held sideways. */
+  @media (width < 700px), (pointer: coarse) and (orientation: landscape) and (height < 500px) {
     :root {
       --band-min: 88px;
       --text-reading: 0.9375rem;

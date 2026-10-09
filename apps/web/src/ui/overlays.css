@@ -527,6 +527,40 @@
     font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
+  /* A pushed page with Done, as iOS draws it: Back at the leading edge, the title between. */
+  .ui-sheet-header:has(> .ui-sheet-done) > .ui-sheet-heading:has(> .ui-sheet-back) {
+    display: contents;
+  }
+
+  .ui-sheet-header:has(> .ui-sheet-done) .ui-sheet-back {
+    grid-area: 1 / 1;
+    justify-self: start;
+    margin: 0;
+    padding-inline: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    color: var(--color-fg-1);
+    font: var(--text-title-2) / var(--text-title-2--line-height) var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+  }
+
+  .ui-sheet-header:has(> .ui-sheet-done) .ui-sheet-back > .ui-icon {
+    width: 22px;
+    height: 22px;
+    stroke-width: 2;
+  }
+
+  .ui-sheet-header:has(> .ui-sheet-done)
+    > .ui-sheet-heading:has(> .ui-sheet-back)
+    > .ui-sheet-title {
+    grid-area: 1 / 2;
+    text-align: center;
+  }
+
+  .ui-sheet-header:has(> .ui-sheet-done)
+    > .ui-sheet-heading:has(> .ui-sheet-back)
+    > .ui-sheet-description {
+    display: none;
+  }
+
   .ui-sheet-body {
     flex: 1 1 auto;
     min-height: 0;

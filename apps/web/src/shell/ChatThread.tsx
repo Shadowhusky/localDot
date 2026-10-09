@@ -39,7 +39,10 @@ export function NewConversationButton({ run, reason }: NewConversation) {
 export function ChatThread({
   agent,
   composer,
-  answer,
+  ask,
+  lead,
+  trail,
+  pinned = false,
   cover,
   covered = false,
   recovery,
@@ -57,7 +60,11 @@ export function ChatThread({
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
-  answer?: ReactNode;
+  // The fields of the question dot is waiting on, drawn under it in the thread.
+  ask?: ReactNode;
+  lead?: ReactNode;
+  trail?: ReactNode;
+  pinned?: boolean;
   cover?: ReactNode;
   covered?: boolean;
   recovery?: ReactNode;
@@ -123,7 +130,10 @@ export function ChatThread({
       onReplayTask={onReplayTask}
       computerReady={computerReady}
       composer={composer}
-      answer={answer}
+      ask={ask}
+      lead={lead}
+      trail={trail}
+      pinned={pinned}
       cover={cover}
       covered={covered}
       start={start}

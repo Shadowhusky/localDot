@@ -1,4 +1,4 @@
-import { memo, type Ref } from "react";
+import { memo, type ReactNode, type Ref } from "react";
 import type { KeyStatus } from "../keys/useKeys.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
@@ -11,9 +11,13 @@ export interface TopBarProps {
   title?: string;
   // Said after the title, quieter: where a recording comes from.
   note?: string;
+  // Before the modes: what the stage's content offers, such as Continue on a recording.
+  lead?: ReactNode;
   mode: Mode;
   replayEnabled: boolean;
   onMode(mode: Mode): void;
+  // The chosen mode pressed again, such as Replay while a recording plays.
+  onModeAgain?(): void;
   keys: KeyStatus;
   keysOpen: boolean;
   onKeys(): void;
@@ -28,9 +32,11 @@ export interface TopBarProps {
 export const TopBar = memo(function TopBar({
   title,
   note,
+  lead,
   mode,
   replayEnabled,
   onMode,
+  onModeAgain,
   keys,
   keysOpen,
   onKeys,
@@ -60,6 +66,7 @@ export const TopBar = memo(function TopBar({
         {note && <span className="title-note">{note}</span>}
       </div>
       <div className="bar-r">
+        {lead}
         <SegmentedControl
           className="bar-modes"
           aria-label="Mode"
@@ -67,6 +74,7 @@ export const TopBar = memo(function TopBar({
           items={modes}
           value={mode}
           onValueChange={(value) => onMode(value as Mode)}
+          onReselect={onModeAgain}
         />
         <IconButton
           ref={settingsRef}

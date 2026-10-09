@@ -7,7 +7,8 @@ export function count(value: number, one: string, other: string): string {
 export function bytes(value: number): string {
   if (value < 1024) return count(value, "byte", "bytes");
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 // Whole dollars without cents; anything else to the cent.

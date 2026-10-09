@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type RevealPart, revealText } from "./reveal-text.ts";
+import { hiddenWarning, plainReveal, type RevealPart, revealText } from "./reveal-text.ts";
 
 const count = (n: number) => n.toLocaleString("en-US");
 // Past this many parts, styled markers would take the page seconds to draw, so the value is drawn
@@ -22,10 +22,7 @@ const MARK = {
 } as const;
 
 function draw(parts: RevealPart[]): ReactNode {
-  if (parts.length > MOST_STYLED_PARTS)
-    return parts
-      .map((part) => (part.kind === "text" || part.kind === "blank" ? part.text : `[${part.text}]`))
-      .join("");
+  if (parts.length > MOST_STYLED_PARTS) return plainReveal(parts);
   return parts.map((part, index) =>
     part.kind === "text" ? (
       part.text
@@ -91,13 +88,14 @@ export const ApprovalValue = memo(function ApprovalValue({
         {drawn}
       </pre>
       {facts && <p className="approval-value-facts">{facts}</p>}
-      {value.hidden && (
-        <p className="approval-value-warning">
-          {value.bidi
-            ? "Contains hidden characters that change text direction, shown as U+ codes."
-            : "Contains hidden characters, shown as U+ codes."}
-        </p>
-      )}
+      {value.hidden && <p className="approval-value-warning">{hiddenWarning(value)}</p>}
     </>
   );
 });
+
+// A short text dot wrote, such as its question, drawn in line as an approval card draws a value:
+// nothing in it can hide or reorder what is shown.
+export function RevealedText({ text }: { text: string }) {
+  const parts = useMemo(() => revealText(text).parts, [text]);
+  return <>{draw(parts)}</>;
+}

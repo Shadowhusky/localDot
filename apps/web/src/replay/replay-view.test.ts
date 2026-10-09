@@ -7,9 +7,13 @@ import {
   dayLabel,
   followRule,
   gapCard,
+  inFilter,
+  libraryTotal,
   matchesSearch,
+  previewMeta,
   recordedLabel,
   replayKey,
+  rowMeta,
   scrubberModel,
   speedLabel,
   suggestedExportName,
@@ -189,15 +193,38 @@ describe("the task library's words", () => {
   it("names days the way people say them", () => {
     expect(dayLabel(at(8, 0, 1), now)).toBe("Today");
     expect(dayLabel(at(7, 23, 59), now)).toBe("Yesterday");
-    expect(dayLabel(at(6, 12, 0), now)).toMatch(/6/);
+    expect(dayLabel(at(6, 12, 0), now)).toMatch(/^(?=.*Tuesday)(?=.*October)(?=.*6)/);
     expect(dayLabel(new Date(2025, 9, 6).toISOString(), now)).toMatch(/2025/);
   });
   it("gives each row its start and length, and a running task no length", () => {
     expect(taskMeta(card({}))).toBe("09:53 · 0:33");
     expect(taskMeta(card({ verdict: "live", durationMs: null }))).toBe("09:53 · Running");
-    expect(recordedLabel(card({}), now)).toBe("Recorded · Today 09:53");
+    expect(recordedLabel(card({}), now)).toBe("Today 09:53");
     expect(recordedLabel(card({ verdict: "live", durationMs: null }), now)).toBe(
       "Running · Today 09:53",
+    );
+  });
+  it("says on each row when it ran, how long, its steps and how it ended", () => {
+    expect(rowMeta(card({}), false)).toBe("09:53 · 3 steps");
+    expect(rowMeta(card({ verdict: "stopped", steps: 1 }), true)).toBe(
+      "09:53 · 0:33 · 1 step · you stopped it",
+    );
+    expect(rowMeta(card({ verdict: "live", durationMs: null }), true)).toBe(
+      "09:53 · 3 steps · running",
+    );
+    expect(previewMeta(card({}), now, "$0.21")).toBe("Today 09:53 · 0:33 · 3 steps · $0.21");
+  });
+  it("filters finished and stopped recordings, and counts what the library holds", () => {
+    const verdicts = ["done", "live", "stopped", "error"] as const;
+    expect(verdicts.filter((verdict) => inFilter({ verdict }, "finished"))).toEqual(["done"]);
+    expect(verdicts.filter((verdict) => inFilter({ verdict }, "stopped"))).toEqual([
+      "stopped",
+      "error",
+    ]);
+    const big = card({ recording: { state: "complete", bytes: 2.1 * 1024 ** 3 } });
+    expect(libraryTotal([big, card({})], false)).toBe("2 recordings · 2.1 GB");
+    expect(libraryTotal([card({ recording: { state: "none", bytes: 0 } })], true)).toBe(
+      "1+ recordings",
     );
   });
   it("draws every verdict as a glyph with words", () => {

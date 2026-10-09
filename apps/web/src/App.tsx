@@ -1,18 +1,23 @@
 import {
   DEFAULT_AUTONOMY,
   LLM_PROVIDERS,
+  type QuestionAnswerRequest,
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { AskForm } from "./agent/AskForm.tsx";
-import { Composer } from "./agent/Composer.tsx";
+import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
+import { useAskDraft } from "./agent/ask-draft.ts";
+import { composerReply } from "./agent/ask-form.ts";
+import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
+import { uploadFile } from "./agent/file-transfer.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
+import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
@@ -26,13 +31,13 @@ import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import { presetOf } from "./copy/autonomy.ts";
+import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
 import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
 import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
-import { KeysSheet } from "./keys/KeysSheet.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
@@ -45,7 +50,10 @@ import {
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
+import { Onboarding } from "./onboarding/Onboarding.tsx";
 import { setupSteps } from "./onboarding/setup.ts";
+import { useOnboarding } from "./onboarding/useOnboarding.ts";
+import { STEP_DOT } from "./onboarding/wizard.ts";
 import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
@@ -62,23 +70,36 @@ import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
-import { ApprovalDecision, DecisionSheet, QuestionDecision } from "./shell/DecisionIsland.tsx";
-import { HudIsland } from "./shell/HudIsland.tsx";
-import { islandDecision, islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
-import { useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
+import { FocusControls } from "./shell/FocusControls.tsx";
+import { useFocusMode, useStill } from "./shell/focus.ts";
+import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
+import {
+  islandAttention,
+  islandDecision,
+  islandShape,
+  pauseSlot,
+  takeSlot,
+} from "./shell/island.ts";
+import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import { useTabAttention } from "./shell/tab-attention.ts";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
+import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
+import { IconButton } from "./ui/IconButton.tsx";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
+import { Sheet } from "./ui/Sheet.tsx";
 import { Toaster } from "./ui/Toast.tsx";
 import "./app.css";
 
@@ -94,6 +115,12 @@ const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
 const OPENING_MAX_MS = 2000;
 const FROM_WATCH = { fromWatch: true };
+const FROM_LIBRARY = { fromLibrary: true };
+// Replay's address names the recording that plays, or this for the library of recordings.
+const LIBRARY = "library";
+const replayAddress = (selected: string | null) =>
+  selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
+const ACTIVITY_DETENTS = ["medium", "large"] as const;
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -223,10 +250,10 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
-  const [replayId, setReplayId] = useState<string | null>(() => {
-    const selected = new URLSearchParams(window.location.search).get("replay");
-    return selected && ULID_PATTERN.test(selected) ? selected : null;
-  });
+  const [replayId, setReplayId] = useState<string | null>(() =>
+    replayAddress(new URLSearchParams(window.location.search).get("replay")),
+  );
+  const playing = replayId === LIBRARY ? null : replayId;
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
@@ -237,25 +264,42 @@ function Theatre({ api }: { api: ApiClient }) {
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
   replayIdRef.current = replayId;
-  // Entering Replay from Watch adds one marked entry and leaving steps back over it, so browser
-  // Back returns to Watch without stacking entries. A deletion only replaces the current entry.
+  // Entering Replay from Watch adds one marked entry, and so does opening a recording from the
+  // library; leaving steps back over the entry it came by, so browser Back goes up one level without
+  // stacking entries. A deletion only replaces the current entry.
   const selectReplay = (id: string | null, entry: "navigate" | "replace" = "navigate") => {
+    const was = replayIdRef.current;
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
     else address.searchParams.delete("replay");
-    if (id !== replayIdRef.current) address.searchParams.delete("t");
-    const leaving = id === null && replayIdRef.current !== null;
-    if (entry === "navigate" && id !== null && replayIdRef.current === null)
+    if (id !== was) address.searchParams.delete("t");
+    const leaving = id === null && was !== null;
+    const up = id === LIBRARY && was !== null && was !== LIBRARY;
+    if (entry === "navigate" && id !== null && was === null)
       window.history.pushState(FROM_WATCH, "", address);
+    else if (entry === "navigate" && id !== null && id !== LIBRARY && was === LIBRARY)
+      window.history.pushState(FROM_LIBRARY, "", address);
+    else if (entry === "navigate" && up && window.history.state?.fromLibrary) window.history.back();
     else if (entry === "navigate" && leaving && window.history.state?.fromWatch)
       window.history.back();
     else window.history.replaceState(leaving ? null : window.history.state, "", address);
     setReplayId(id);
   };
+  // Back and Forward never reopen a recording deleted since the page opened: its entries show the
+  // library instead.
+  const deletedRecordings = useRef(new Set<string>());
   useEffect(() => {
     const restore = () => {
-      const selected = new URLSearchParams(window.location.search).get("replay");
-      setReplayId(selected && ULID_PATTERN.test(selected) ? selected : null);
+      const selected = replayAddress(new URLSearchParams(window.location.search).get("replay"));
+      if (selected && deletedRecordings.current.has(selected)) {
+        const address = new URL(window.location.href);
+        address.searchParams.set("replay", LIBRARY);
+        address.searchParams.delete("t");
+        window.history.replaceState(window.history.state, "", address);
+        setReplayId(LIBRARY);
+        return;
+      }
+      setReplayId(selected);
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
@@ -274,16 +318,7 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
   } = useCell(api);
   const keys = useKeys(api);
-  // Keys shows on its own sheet, or slid over Settings while Settings is open.
-  const [keysIn, setKeysIn] = useState<"sheet" | "settings" | null>(null);
-  const keysOpen = keysIn !== null;
-  const settings = useSettings(api, [], !keysOpen);
-  const settingsOpen = useRef(settings.open);
-  settingsOpen.current = settings.open;
-  const openKeys = useCallback(() => setKeysIn(settingsOpen.current ? "settings" : "sheet"), []);
-  useEffect(() => {
-    if (!settings.open) setKeysIn((now) => (now === "settings" ? null : now));
-  }, [settings.open]);
+  const settings = useSettings(api);
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
@@ -314,55 +349,51 @@ function Theatre({ api }: { api: ApiClient }) {
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
-  const keysOrigin = useRef<HTMLElement | null>(null);
+  const settingsOpen = useRef(settings.open);
+  settingsOpen.current = settings.open;
+  // Where Settings goes, with a count, so a section asked for again is still gone to.
+  const [settingsAt, setSettingsAt] = useState<{ section?: SettingsSection; request: number }>({
+    request: 0,
+  });
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const keyRequest = useRef(0);
   const keyCapture = useRef<{
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
-  const keysDiscard = useRef<((then: () => void) => void) | null>(null);
-  const showSettings = (trigger: HTMLElement, section: SettingsSection = "models") => {
-    const open = () => {
-      settingsOrigin.current = trigger;
-      setSettingsSection(section);
-      if (keysIn === "sheet") {
-        keysOrigin.current = null;
-        setKeysIn(null);
-      }
-      settings.show();
-    };
-    // One sheet at a time: Keys on its own gives way to Settings, after asking if a key is typed.
-    if (keysIn === "sheet" && keysDiscard.current) keysDiscard.current(open);
-    else open();
+  const { show: openSettings } = settings;
+  const goToSettings = useCallback(
+    (trigger: HTMLElement | null, section?: SettingsSection) => {
+      if (!settingsOpen.current) settingsOrigin.current = trigger;
+      setSettingsAt((now) => ({ section, request: now.request + 1 }));
+      openSettings();
+    },
+    [openSettings],
+  );
+  const showSettings = (trigger: HTMLElement, section?: SettingsSection) =>
+    goToSettings(trigger, section);
+  const showKeys = (trigger: HTMLElement | null) => {
+    keyCapture.current = null;
+    setKeyPreset(undefined);
+    goToSettings(trigger, "keys");
   };
   const receiveKey = useCallback<KeyIntake["receive"]>(
     (source, provider) => {
-      keysOrigin.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       keyCapture.current = null;
       flushSync(() => {
         setKeyPreset(undefined);
-        openKeys();
+        goToSettings(
+          document.activeElement instanceof HTMLElement ? document.activeElement : null,
+          "keys",
+        );
       });
       return keysIntake.current?.receive(source, provider) ?? false;
     },
-    [openKeys],
+    [goToSettings],
   );
-  const wasOpen = useRef(false);
-  const closeKeys = useCallback(() => setKeysIn(null), []);
-  useEffect(() => {
-    if (wasOpen.current && !keysOpen) {
-      if (keysOrigin.current?.isConnected && !keysOrigin.current.closest("[inert], [hidden]"))
-        keysOrigin.current.focus();
-      else if (!settings.open) keysButton.current?.focus();
-    }
-    wasOpen.current = keysOpen;
-  }, [keysOpen, settings.open]);
   const wasSettingsOpen = useRef(false);
   useEffect(() => {
-    if (wasSettingsOpen.current && !settings.open && !keysOpen) {
+    if (wasSettingsOpen.current && !settings.open) {
       if (
         settingsOrigin.current?.isConnected &&
         !settingsOrigin.current.closest("[inert], [hidden]")
@@ -371,7 +402,7 @@ function Theatre({ api }: { api: ApiClient }) {
       else settingsButton.current?.focus();
     }
     wasSettingsOpen.current = settings.open;
-  }, [settings.open, keysOpen]);
+  }, [settings.open]);
   const stage = useRef<StageHandle>(null);
   const [picture, setPicture] = useState<StreamPicture>("none");
   const conversation = useConversation(api);
@@ -417,7 +448,11 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
+  const phone = layout === "phone";
   const [railView, setRailView] = useState<RailView>("chat");
+  // A phone shows Activity in a sheet over the thread.
+  const [activityOpen, setActivityOpen] = useState(false);
+  if (activityOpen && !phone) setActivityOpen(false);
   const island = useRef<HTMLDivElement>(null);
   const controls = useTaskControls({
     api,
@@ -425,7 +460,7 @@ function Theatre({ api }: { api: ApiClient }) {
     cellPending: pending,
     agent,
     feed: session.agentFeed,
-    suspended: keysOpen || settings.open,
+    suspended: settings.open,
     manualVisible: true,
     refreshCell: retry,
   });
@@ -436,7 +471,7 @@ function Theatre({ api }: { api: ApiClient }) {
     feed: session.agentFeed,
     blocked: controls.stopping || controls.fenced,
     replaceBlocked: controls.stopping,
-    visible: !keysOpen && !settings.open,
+    visible: !settings.open,
     selectReady,
   });
   useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
@@ -475,6 +510,44 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const askDraft = useAskDraft(question);
+  const answer = useRef(controls.answer);
+  answer.current = controls.answer;
+  const answerAsk = useCallback((request: QuestionAnswerRequest) => answer.current(request), []);
+  const askCell = cell?.state === "ready" && !cell.paused ? cell.id : null;
+  const uploadAsk = useMemo<AskUpload | undefined>(
+    () => (askCell ? (file, signal) => uploadFile(api, askCell, file, signal) : undefined),
+    [api, askCell],
+  );
+  const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
+  // While dot waits on the answer, the stage keeps its ring on each field a secret goes into.
+  const askMarks = useMemo<readonly FieldMark[] | undefined>(
+    () =>
+      askDraft?.question.fields?.flatMap(({ target }) =>
+        target
+          ? [
+              {
+                screen: target.screen,
+                point: target.point,
+                ...(target.bbox ? { bbox: target.bbox } : {}),
+              },
+            ]
+          : [],
+      ),
+    [askDraft],
+  );
+  const shownScreen = selectedScreen?.screen ?? "desktop";
+  const askFields = useMemo<StageFields | undefined>(() => {
+    const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
+    return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
+  }, [askMarks, shownScreen, manualGeometry]);
+  const replyAsk = async (text: string, attached: boolean): Promise<ReplyOutcome> => {
+    if (!askDraft) return "failed";
+    const plan = composerReply(askDraft.question, text, attached);
+    if (plan.kind === "hold") return { hold: plan.reason };
+    if (!(await answerAsk(plan.request))) return "failed";
+    return plan.kind === "answer" ? "answered" : "declined";
+  };
   const manualLive =
     !!takeover &&
     controls.canInput &&
@@ -496,7 +569,8 @@ function Theatre({ api }: { api: ApiClient }) {
     setRailView("takeover");
   }, [takeover?.requestId]);
   const shownView: RailView =
-    (railView === "takeover" && !takeover) || (railView === "activity" && layout === "wide")
+    (railView === "takeover" && !takeover) ||
+    (railView === "activity" && (layout === "wide" || phone))
       ? "chat"
       : railView;
   const guardStart = () => {
@@ -622,7 +696,7 @@ function Theatre({ api }: { api: ApiClient }) {
   // The sheets offer Shut down, which the island leaves out; on a phone, where a sheet covers the
   // island, the task's Stop too.
   const sheetStop = appStatus.actions.find(
-    (action) => action.kind === "stop" || (layout === "phone" && action.kind === "stop-task"),
+    (action) => action.kind === "stop" || (phone && action.kind === "stop-task"),
   );
   const sheetStopControl = sheetStop && {
     label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
@@ -641,7 +715,6 @@ function Theatre({ api }: { api: ApiClient }) {
       if (use.decision === "allow") counts[use.secretId] = (counts[use.secretId] ?? 0) + 1;
     return counts;
   }, [keyUses]);
-  // One panel, on its own sheet or slid over Settings when Settings is open.
   const keysPanel = {
     keys,
     intakeRef: keysIntake,
@@ -651,12 +724,8 @@ function Theatre({ api }: { api: ApiClient }) {
       const context = keyCapture.current;
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
-    stop: sheetStopControl,
-    taskControls: <StopControl controls={controls} />,
   };
-  useEffect(() => {
-    document.title = appStatus.title;
-  }, [appStatus.title]);
+  useTabAttention(appStatus);
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
@@ -675,13 +744,16 @@ function Theatre({ api }: { api: ApiClient }) {
     retry,
   };
   const keyboard = useKeyboardUp();
+  const setupKnown = !!settings.saved;
+  const onboarding = useOnboarding({ known: setupKnown, configured: !!settings.saved?.main });
+  const setupStep = onboarding.progress.step;
   const place = presencePlace({
     showDot: showDot.value,
     curtain: curtain.up,
-    stageHidden: !!replayId,
+    replaying: !!replayId,
     keyboard,
+    setup: onboarding.open,
   });
-  const setupKnown = !!settings.saved;
   const chosenKey =
     mainChoice?.provider === "chatgpt"
       ? settings.chatgpt.canStart
@@ -698,19 +770,10 @@ function Theatre({ api }: { api: ApiClient }) {
     model: mainChoice
       ? `${mainProvider?.name ?? "ChatGPT"} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
       : null,
-    permissions:
-      savedAutonomy && JSON.stringify(savedAutonomy) !== JSON.stringify(DEFAULT_AUTONOMY)
-        ? (presetOf(savedAutonomy)?.label ?? "Your own choices")
-        : null,
+    permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
-  const showKeys = (trigger: HTMLElement | null) => {
-    keysOrigin.current = trigger;
-    keyCapture.current = null;
-    setKeyPreset(undefined);
-    openKeys();
-  };
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -718,7 +781,7 @@ function Theatre({ api }: { api: ApiClient }) {
       label: "Chat",
       attention: shownView !== "chat" && !!agent.model.pendingAsk,
     },
-    ...(wide ? [] : [{ value: "activity", label: "Activity" }]),
+    ...(wide || phone ? [] : [{ value: "activity", label: "Activity" }]),
     ...(takeover && !agent.model.ended
       ? [{ value: "takeover", label: "Your turn", attention: shownView !== "takeover" }]
       : []),
@@ -775,7 +838,7 @@ function Theatre({ api }: { api: ApiClient }) {
         key={takeover.requestId}
         takeover={takeover}
         controls={{ ...controls, canInput: manualLive }}
-        visible={!replayId && shownView === "takeover" && !keysOpen && !settings.open}
+        visible={!replayId && shownView === "takeover" && !settings.open}
         manualStatus={agent.snapshot?.manualControl}
         receiveKey={receiveKey}
         screen={manualGeometry}
@@ -790,8 +853,7 @@ function Theatre({ api }: { api: ApiClient }) {
     </div>
   );
   const shape = islandShape(appStatus, curtain.up || opening);
-  const sheetsClosed = !keysOpen && !settings.open;
-  const phone = layout === "phone";
+  const sheetsClosed = !settings.open;
   const decision = replayId
     ? null
     : islandDecision({
@@ -812,22 +874,51 @@ function Theatre({ api }: { api: ApiClient }) {
       layout={phone ? "sheet" : "island"}
     />
   );
+  // One question, answered where you are: in the thread, in the island while you watch the
+  // computer, or in a phone's sheet. Each is the same draft, so answering one answers all.
+  const askIn =
+    !askDraft || replayId || !sheetsClosed
+      ? null
+      : phone
+        ? "sheet"
+        : decision === "question"
+          ? "island"
+          : "thread";
+  const askThread = useMemo(
+    () =>
+      askDraft && askIn === "thread" ? (
+        <AskForm
+          key={askDraft.question.askId}
+          draft={askDraft}
+          layout="thread"
+          answer={answerAsk}
+          reason={askReason}
+          upload={uploadAsk}
+          receiveKey={receiveKey}
+        />
+      ) : undefined,
+    [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
+  );
+  const askOver = (layout: "island" | "sheet") =>
+    askDraft && (
+      <AskForm
+        key={askDraft.question.askId}
+        draft={askDraft}
+        layout={layout}
+        answer={answerAsk}
+        reason={askReason}
+        upload={uploadAsk}
+        receiveKey={receiveKey}
+      />
+    );
   const grown =
     phone || !decision
       ? undefined
       : decision === "approval"
         ? approvalView
-        : question && (
-            <QuestionDecision question={question.question}>
-              <AskForm
-                key={question.askId}
-                question={question}
-                controls={controls}
-                visible
-                receiveKey={receiveKey}
-              />
-            </QuestionDecision>
-          );
+        : askIn === "island"
+          ? askOver("island")
+          : undefined;
   const take = () => {
     if (decision !== "approval" || !approval) {
       setRailView("takeover");
@@ -842,28 +933,100 @@ function Theatre({ api }: { api: ApiClient }) {
     });
   };
   const replacement = safety.replacement?.phase;
-  // The curtain speaks while it is up; under it the band is quiet.
-  const narration =
-    !curtain.up && (appStatus.caption.speaker === "dot" || appStatus.computer !== "live")
-      ? appStatus.caption.text
-      : "";
+  // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
+  // is a sheet below, dot asks it aloud.
+  const narration = curtain.up
+    ? ""
+    : phone && approvalView && approval
+      ? decisionWords(approval).line
+      : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+        ? appStatus.caption.text
+        : "";
+  const speaker = phone && approvalView ? "dot" : appStatus.caption.speaker;
+  const asked = agent.model.pendingAsk
+    ? agent.model.questions.get(agent.model.pendingAsk)?.question
+    : undefined;
+  const pause = pauseSlot({
+    pause: safety.pause,
+    canPause: safety.canPause,
+    canResume: safety.canResume,
+    handedOver: !!takeover,
+    budgetHeld: agent.snapshot?.budgetHold === "task",
+  });
+  const { focus, leave: leaveFocus } = useFocusMode(
+    !curtain.up && !replayId,
+    !!question || (!!takeover && !agent.model.ended),
+  );
+  const still = useStill(focus) && !islandAttention(appStatus);
+  const working = !!task;
+  const stepCount = useMemo(
+    () => (focus && working ? workSteps(rows, agent.model).length : 0),
+    [focus, working, rows, agent.model],
+  );
+  const replayContinue = {
+    current: conversation.sessions.at(-1) ?? null,
+    reason: conversationReason,
+    run: (id: string) =>
+      void conversation.continueFrom(id).then((done) => {
+        if (done) selectReplay(null);
+      }),
+  };
+  const page = useRef<HTMLDivElement>(null);
+  useKeyboardFit(page, keyboard);
   return (
-    <div className="app" data-layout={layout} data-replaying={replayId ? "" : undefined}>
+    <div
+      ref={page}
+      className="app"
+      data-layout={layout}
+      data-replaying={replayId ? "" : undefined}
+      data-focus={focus ? "" : undefined}
+      data-still={still ? "" : undefined}
+      data-keyboard={keyboard ? "" : undefined}
+      data-setup={onboarding.open ? "" : undefined}
+    >
       <TopBar
         title={
-          replayId
-            ? (shownRecording?.title ?? RECORDED_TASK)
-            : (session.model.title ??
-              (curtain.up && !agent.sessionId && conversation.sessions.length === 0
-                ? undefined
-                : "New conversation"))
+          replayId === LIBRARY
+            ? "Replay"
+            : replayId
+              ? (shownRecording?.title ?? RECORDED_TASK)
+              : (session.model.title ??
+                (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                  ? undefined
+                  : "New conversation"))
         }
         note={shownRecording?.note}
+        lead={
+          shownRecording && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon="continue"
+              disabledReason={
+                shownRecording.verdict !== "live" &&
+                shownRecording.sessionId !== conversation.sessions.at(-1)
+                  ? conversationReason
+                  : undefined
+              }
+              onClick={() =>
+                shownRecording.verdict === "live" ||
+                shownRecording.sessionId === conversation.sessions.at(-1)
+                  ? selectReplay(null)
+                  : replayContinue.run(shownRecording.sessionId)
+              }
+            >
+              Continue
+            </Button>
+          )
+        }
         mode={replayId ? "replay" : "watch"}
         replayEnabled={!!(replayId || newestReplayId)}
-        onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
+        onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
+        onModeAgain={() => {
+          if (playing) selectReplay(LIBRARY);
+        }}
         keys={keysState}
-        keysOpen={keysOpen}
+        keysOpen={settings.open && settingsAt.section === "keys"}
         onKeys={() => showKeys(keysButton.current)}
         keysRef={keysButton}
         settingsOpen={settings.open}
@@ -915,13 +1078,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     status={appStatus}
                     shape={shape}
                     badge={place === "badge"}
-                    pause={pauseSlot({
-                      pause: safety.pause,
-                      canPause: safety.canPause,
-                      canResume: safety.canResume,
-                      handedOver: !!takeover,
-                      budgetHeld: agent.snapshot?.budgetHold === "task",
-                    })}
+                    pause={pause}
                     take={takeSlot(appStatus, decision)}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
@@ -929,6 +1086,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onTake={take}
                     onComputer={onComputer}
                     decision={grown}
+                    fields={askFields}
                     notices={
                       <>
                         <StopControl controls={controls} inIsland />
@@ -948,9 +1106,25 @@ function Theatre({ api }: { api: ApiClient }) {
               band={
                 <NarratorBand
                   line={narration}
-                  speaker={appStatus.caption.speaker}
+                  speaker={speaker}
+                  reveal={!!asked && narration === asked}
                   showDot={showDot.value}
+                  note={focus && stepCount ? `Step ${stepCount}` : undefined}
                 />
+              }
+              side={
+                focus && (
+                  <FocusControls
+                    take={takeSlot(appStatus, decision)}
+                    pause={shape === "task" ? pause : null}
+                    stop={appStatus.actions.find((action) => action.kind === "stop-task")}
+                    onTake={take}
+                    onPause={() => void safety.requestPause()}
+                    onContinue={() => void safety.resume()}
+                    onStop={taskStop}
+                    onLeave={leaveFocus}
+                  />
+                )
               }
             >
               {!replayId && selectedScreen && (
@@ -965,6 +1139,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 ref={stage}
                 mode={replayId ? "replay" : "live"}
                 dim={decision !== null}
+                fields={replayId ? undefined : askMarks}
                 cell={stageCell}
                 parentId={cell?.id}
                 selection={selectedScreen}
@@ -999,34 +1174,7 @@ function Theatre({ api }: { api: ApiClient }) {
           views={views}
           view={shownView}
           onView={(view) => setRailView(view as RailView)}
-          end={
-            layout === "phone" ? (
-              <MoreMenu
-                items={[
-                  ...(agent.sessionId
-                    ? [
-                        {
-                          label: "New conversation",
-                          icon: "compose" as const,
-                          disabledReason: newConversation.reason,
-                          run: newConversation.run,
-                        },
-                      ]
-                    : []),
-                  {
-                    label: "Replay",
-                    icon: "history",
-                    disabledReason: replayId || newestReplayId ? undefined : "No recordings yet",
-                    run: () => selectReplay(replayId ?? newestReplayId),
-                  },
-                  { label: "Settings", icon: "settings", run: (trigger) => showSettings(trigger) },
-                  { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
-                ]}
-              />
-            ) : (
-              agent.sessionId && <NewConversationButton {...newConversation} />
-            )
-          }
+          end={!phone && agent.sessionId && <NewConversationButton {...newConversation} />}
         >
           <ErrorBoundary>
             <ChatThread
@@ -1045,20 +1193,64 @@ function Theatre({ api }: { api: ApiClient }) {
               sessions={conversation.sessions}
               more={conversation.more}
               pending={threadPending}
+              pinned={phone}
+              lead={
+                phone && (
+                  <IconButton
+                    className="toolbar-button"
+                    size={44}
+                    round
+                    icon="list"
+                    label="Activity"
+                    onClick={() => setActivityOpen(true)}
+                  />
+                )
+              }
+              trail={
+                phone && (
+                  <MoreMenu
+                    items={[
+                      ...(agent.sessionId
+                        ? [
+                            {
+                              label: "New conversation",
+                              icon: "compose" as const,
+                              disabledReason: newConversation.reason,
+                              run: newConversation.run,
+                            },
+                          ]
+                        : []),
+                      {
+                        label: "Replay",
+                        icon: "history",
+                        disabledReason:
+                          replayId || newestReplayId ? undefined : "No recordings yet",
+                        run: () => selectReplay(LIBRARY),
+                      },
+                      {
+                        label: "Settings",
+                        icon: "settings",
+                        run: (trigger) => showSettings(trigger),
+                      },
+                      { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                    ]}
+                  />
+                )
+              }
               start={
                 setupKnown && !mainReady ? (
                   <FinishSetup
                     steps={setup.steps}
                     done={setup.done}
-                    onChooseModel={(event) => showSettings(event.currentTarget)}
-                    onContinue={(event) => showSettings(event.currentTarget)}
+                    onChooseModel={(event) => showSettings(event.currentTarget, "models")}
+                    onContinue={() => onboarding.reopen()}
                   />
                 ) : undefined
               }
               covered={shownView !== "chat"}
               cover={
                 <>
-                  {!wide && (
+                  {!wide && !phone && (
                     <div
                       className="rail-cover-activity"
                       data-shown={shownView === "activity" || undefined}
@@ -1077,17 +1269,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   onContinue={continueTask}
                 />
               }
-              answer={
-                question && !agent.model.ended && decision !== "question" ? (
-                  <AskForm
-                    key={question.askId}
-                    question={question}
-                    controls={controls}
-                    visible={shownView === "chat" && !keysOpen && !settings.open}
-                    receiveKey={receiveKey}
-                  />
-                ) : undefined
-              }
+              ask={askThread}
               composer={
                 <Composer
                   api={api}
@@ -1102,11 +1284,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     !!safety.approval
                   }
                   agent={agent}
-                  keysOpen={keysOpen || settings.open}
+                  keysOpen={settings.open}
                   receiveKey={receiveKey}
                   configured={mainReady}
-                  onSettings={showSettings}
+                  onSettings={(trigger) => showSettings(trigger, "models")}
                   onTaskStarted={session.check}
+                  layout={phone ? "pill" : "card"}
+                  reply={askDraft ? replyAsk : undefined}
                 />
               }
             />
@@ -1117,38 +1301,35 @@ function Theatre({ api }: { api: ApiClient }) {
         <ErrorBoundary className="replay-failed">
           <ReplayView
             api={api}
-            sessionId={replayId}
+            sessionId={playing}
             onSelect={selectReplay}
+            onLibrary={() => selectReplay(LIBRARY)}
             onGoLive={() => selectReplay(null)}
             onDeleted={(id) => {
+              deletedRecordings.current.add(id);
               if (id === newestReplayId) setNewestReplayId(null);
               historyOwner.current++;
               setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(null, "replace");
+              if (id === replayId) selectReplay(LIBRARY, "replace");
             }}
             onTitle={setRecorded}
-            continueTask={{
-              current: conversation.sessions.at(-1) ?? null,
-              reason: conversationReason,
-              run: (id) =>
-                void conversation.continueFrom(id).then((done) => {
-                  if (done) selectReplay(null);
-                }),
-            }}
+            continueTask={replayContinue}
             exportJob={exportJob}
-            visible={!keysOpen && !settings.open && !safety.approval}
+            visible={!settings.open && !safety.approval}
+            showDot={showDot.value}
           />
         </ErrorBoundary>
       )}
       <ErrorBoundary floating>
         <SettingsSheet
-          focusSection={settingsSection}
+          section={settingsAt.section}
+          sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
           taskControls={<StopControl controls={controls} />}
           stop={sheetStopControl}
           open={settings.open}
-          keysPage={keysIn === "settings" ? { ...keysPanel, onBack: closeKeys } : undefined}
+          keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}
           chatgpt={settings.chatgpt}
           subscriptionModels={settings.subscriptionModels}
@@ -1174,10 +1355,7 @@ function Theatre({ api }: { api: ApiClient }) {
           loading={settings.phase === "loading" || !settings.draft}
           error={settings.error}
           validation={settings.validation}
-          onClose={() => {
-            settings.close();
-            setKeysIn(null);
-          }}
+          onClose={settings.close}
           onChange={settings.change}
           onKeys={(role, providerId, trigger) => {
             const provider = providerById(providerId);
@@ -1193,19 +1371,18 @@ function Theatre({ api }: { api: ApiClient }) {
               return;
             const request = ++keyRequest.current;
             keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
-            keysOrigin.current = trigger;
             setKeyPreset({
               requestId: request,
               provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
               ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
             });
-            setKeysIn("settings");
+            goToSettings(trigger, "keys");
           }}
           onRefresh={() => void settings.refresh()}
           onReload={settings.reload}
           save={{
             enabled: settings.saveEnabled && settings.dirty,
-            run: () => void settings.save(),
+            run: settings.save,
           }}
           manualPrices={Object.fromEntries(
             (["main", "fast", "local"] as const)
@@ -1233,28 +1410,70 @@ function Theatre({ api }: { api: ApiClient }) {
               ? { value: settings.draft.checkIns, change: settings.checkIn }
               : undefined
           }
+          spent={agent.model.spend}
+          onSetup={() => {
+            settings.close();
+            onboarding.reopen("thinks");
+          }}
         />
       </ErrorBoundary>
-      <ErrorBoundary floating>
-        <KeysSheet
-          {...keysPanel}
-          open={keysIn === "sheet"}
-          onClose={closeKeys}
-          discardRef={keysDiscard}
-        />
-      </ErrorBoundary>
-      {phone && approvalView && (
+      {phone && (approvalView || askIn === "sheet") && (
         <ErrorBoundary floating>
           <DecisionSheet label={appStatus.label} elapsedS={appStatus.elapsedS}>
-            {approvalView}
+            {approvalView || askOver("sheet")}
           </DecisionSheet>
         </ErrorBoundary>
       )}
+      {phone && (
+        <Sheet
+          open={activityOpen}
+          onClose={() => setActivityOpen(false)}
+          title="Activity"
+          doneLabel="Done"
+          detents={ACTIVITY_DETENTS}
+        >
+          <div className="activity-sheet">{activity}</div>
+        </Sheet>
+      )}
+      <Presence show={onboarding.open}>
+        <ErrorBoundary floating>
+          <Onboarding
+            api={api}
+            control={onboarding}
+            phone={phone}
+            keys={keys}
+            index={settings.index}
+            saved={settings.saved}
+            onSaved={settings.reload}
+            turnOn={
+              computerAction && computerAction.kind !== "stop"
+                ? {
+                    run: () => onComputer[computerAction.kind](),
+                    reason: computerAction.enabled ? undefined : "Wait a moment",
+                  }
+                : null
+            }
+            showDot={showDot.value}
+          />
+        </ErrorBoundary>
+      </Presence>
       {showDot.value && (
         <PresenceLayer
           place={place}
-          feed={dotFeed(appStatus, session.sessionId ? session.model : null, now)}
-          line={appStatus.caption.speaker === "dot" ? narration : ""}
+          feed={
+            onboarding.open
+              ? {
+                  state: STEP_DOT[setupStep],
+                  control: false,
+                  attention: false,
+                  focus: null,
+                  dispatched: null,
+                  done: false,
+                  nod: setupStep,
+                }
+              : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+          }
+          line={onboarding.open || speaker !== "dot" ? "" : narration}
         />
       )}
       <Announcer />

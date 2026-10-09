@@ -15,6 +15,8 @@ export interface StageFrameProps {
   curtain?: ReactNode;
   // Under the stage: dot's place and its line.
   band?: ReactNode;
+  // In the margin beside the stage, while a phone held sideways gives it the whole screen.
+  side?: ReactNode;
   // The picture.
   children?: ReactNode;
 }
@@ -31,6 +33,7 @@ export function StageFrame({
   island,
   curtain,
   band,
+  side,
   children,
 }: StageFrameProps) {
   const picture = ["stage", live ? "lit" : "", frozen ? "frozen" : ""].filter(Boolean).join(" ");
@@ -50,6 +53,7 @@ export function StageFrame({
         {island}
       </div>
       <div className="stage-band">{band}</div>
+      {side && <div className="stage-side">{side}</div>}
       {curtain && <div className="stage-curtain">{curtain}</div>}
     </div>
   );

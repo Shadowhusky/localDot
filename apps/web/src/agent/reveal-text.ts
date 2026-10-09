@@ -108,3 +108,19 @@ export function revealText(value: string): Revealed {
   if (text) parts.push({ kind: "text", text });
   return { parts, hidden, bidi, lines: rows.length };
 }
+
+// The parts as one plain text, each marker in brackets: still every character, in order, for a
+// place that takes only text, such as a field's label.
+export function plainReveal(parts: readonly RevealPart[]): string {
+  return parts
+    .map((part) => (part.kind === "text" || part.kind === "blank" ? part.text : `[${part.text}]`))
+    .join("");
+}
+
+// What a reader is told when a value hides characters.
+export function hiddenWarning(value: Revealed): string | undefined {
+  if (!value.hidden) return undefined;
+  return value.bidi
+    ? "Contains hidden characters that change text direction, shown as U+ codes."
+    : "Contains hidden characters, shown as U+ codes.";
+}

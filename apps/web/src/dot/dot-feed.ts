@@ -15,11 +15,17 @@ export interface DotFeed {
   dispatched: string | null;
   // The task has just finished well.
   done: boolean;
+  // Changes when dot should blink that it heard, as each setup step arrives.
+  nod?: string;
 }
 
 const ATTENTION = new Set<StatusRow>(["approval", "question", "waiting", "recovery", "limit"]);
 
-export function dotFeed(status: Status, model: SessionModel | null, nowMs: number): DotFeed {
+export function dotFeed(
+  status: Pick<Status, "dotPose" | "control" | "row">,
+  model: SessionModel | null,
+  nowMs: number,
+): DotFeed {
   const action = model ? currentAction(model, nowMs) : undefined;
   // An action that waits on the computer (a page load, a download) is watched, not acted out.
   const state =

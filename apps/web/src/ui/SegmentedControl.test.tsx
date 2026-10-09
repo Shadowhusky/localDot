@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useId, useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Field } from "./Field.tsx";
 import { SegmentedControl, type SegmentItem } from "./SegmentedControl.tsx";
 import { TabPanel, Tabs } from "./Tabs.tsx";
@@ -25,6 +25,26 @@ function Speed({ start = "normal" }: { start?: string }) {
 }
 
 describe("SegmentedControl", () => {
+  it("tells a press on the chosen segment apart from a change", () => {
+    const onValueChange = vi.fn();
+    const onReselect = vi.fn();
+    render(
+      <SegmentedControl
+        aria-label="Mode"
+        items={SPEEDS}
+        value="normal"
+        onValueChange={onValueChange}
+        onReselect={onReselect}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "1×" }));
+    expect(onReselect).toHaveBeenCalledWith("normal");
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("radio", { name: "2×" }));
+    expect(onReselect).toHaveBeenCalledTimes(1);
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it("is a radio group whose chosen segment alone takes Tab", () => {
     render(<Speed />);
     screen.getByRole("radiogroup", { name: "Speed" });

@@ -1,5 +1,7 @@
 /* The stage frame (design-v2 §10.18, §8): the 16:10 box placed first, its rim, the light it spills
    on the floor, and the band under it. Its width is set by the layout (app.css). */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
 .stage-frame {
   position: relative;
   display: flex;
@@ -103,7 +105,7 @@
   pointer-events: auto;
 }
 
-@media (width < 700px) {
+@media (--phone) {
   /* On a phone the curtain covers the stage and the band, so there is never an empty band. */
   .stage-curtain {
     inset: 0;
@@ -141,7 +143,9 @@
   top: var(--line-y);
   left: var(--line-x);
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   width: min(600px, 100% - var(--line-x) - 24px);
   height: var(--line-h);
   color: var(--color-fg-1);
@@ -171,6 +175,19 @@
   opacity: 0;
 }
 
+/* Under dot's question when it hides characters, which its line shows as codes. */
+.narration-warning {
+  color: var(--color-danger-fg);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-warning[data-leaving] {
+  opacity: 0;
+}
+
 .narration-speaker {
   margin-right: calc(var(--spacing) * 2);
   color: var(--color-fg-3);
@@ -193,7 +210,7 @@
   }
 }
 
-@media (width < 700px) {
+@media (--phone) {
   .narrator {
     --dock-x: -2px;
     --dock-y: 4px;
@@ -209,6 +226,71 @@
     -webkit-line-clamp: 3;
     line-clamp: 3;
   }
+
+  .narration:has(.narration-warning) .narration-line {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+}
+
+/* Focus mode (design-v2 §8.5): the band moves into the left margin, dot over the step it is on, and
+   the task's controls stand in the right margin, each column 8 px from the picture. */
+.app[data-focus] .stage-spill {
+  display: none;
+}
+
+.app[data-focus] .stage-band,
+.stage-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  min-height: 0;
+}
+
+.app[data-focus] .stage-band {
+  right: calc(100% + 8px);
+}
+
+.stage-side {
+  left: calc(100% + 8px);
+  display: grid;
+  place-items: center;
+}
+
+.app[data-focus] .narrator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.app[data-focus] .narrator-dock {
+  position: relative;
+  top: auto;
+  left: auto;
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+.app[data-focus] .narration {
+  display: none;
+}
+
+.narrator-note {
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+}
+
+.focus-controls {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 2.5);
 }
 
 /* The curtain (design-v2 §4, §11 A–B): the stage's own box while there is no picture. dot sleeps in
@@ -346,7 +428,7 @@
     visibility 0s var(--dur-fade);
 }
 
-@media (width < 700px) {
+@media (--phone) {
   .curtain {
     --hero: 128px;
     --hero-gap: var(--spacing);

@@ -13,8 +13,6 @@ interface Tracking {
   // A jump scrolls smoothly; until it lands, its own scroll events must not end the following.
   jumping: boolean;
   glide: { frame: number; from: number; start: number; at: number } | null;
-  // Until then, the next growth glides even where growth is otherwise held at once.
-  glideUntil: number;
   height: number;
 }
 
@@ -59,7 +57,6 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     frame: 0,
     jumping: false,
     glide: null,
-    glideUntil: 0,
     height: 0,
   });
 
@@ -68,8 +65,6 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       element = t.element;
     if (!element) return;
     t.height = element.scrollHeight;
-    const glideOnce = performance.now() < t.glideUntil;
-    t.glideUntil = 0;
     if (t.pinned) {
       const end = element.scrollHeight - element.clientHeight;
       const lift = end - element.scrollTop;
@@ -81,7 +76,7 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       }
       // A whole screen or more (a first load, a page) is taken at once; one or two rows glide, from
       // wherever a glide in flight has got to, toward the end as it is when each frame is drawn.
-      const starts = glides.current || glideOnce;
+      const starts = glides.current;
       if (lift >= element.clientHeight || reducedMotion() || !(starts || t.glide)) {
         if (t.glide) cancelAnimationFrame(t.glide.frame);
         t.glide = null;
@@ -198,10 +193,6 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       setPin(true);
       t.jumping = true;
       scrollToEnd(t.element);
-    },
-    // The growth about to be drawn glides to the end, for a change the reader should see happen.
-    glideNext() {
-      tracking.current.glideUntil = performance.now() + 250;
     },
     interrupt() {
       const t = tracking.current;

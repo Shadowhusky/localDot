@@ -227,44 +227,38 @@
   gap: calc(var(--spacing) * 2);
 }
 
-/* A question keeps the answer panel the thread uses, set flat inside the island: the question is
-   the title, so the panel's own heading steps aside. */
-.decision-answer {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: calc(var(--spacing) * 3.5) calc(var(--spacing) * 4) calc(var(--spacing) * 4)
-    calc(var(--spacing) * 5.5);
-}
-
-.decision-answer .answer-panel {
-  padding: 0;
-  border-radius: 0;
-  background-color: transparent;
-  box-shadow: none;
-  animation: none;
-}
-
-.decision-answer .answer-panel-head {
-  display: none;
-}
-
 /* A phone: the decision rises from the bottom over the thread at its content's height, with no
-   scrim, so the stage and dot stay in sight above it. */
+   scrim, and never higher than the band, so the stage and dot stay in sight above it. With the
+   keyboard up the band has folded into the island, so only the stage stays. */
 .decision-sheet {
+  --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + var(--band-min));
   position: fixed;
   right: 0;
-  bottom: 0;
+  bottom: var(--_keyboard, 0px);
   left: 0;
   z-index: var(--layer-island);
   display: flex;
   flex-direction: column;
-  max-height: calc(100dvh - 40px);
+  max-height: calc(100dvh - var(--_above) - var(--_keyboard, 0px));
   padding-bottom: max(calc(var(--spacing) * 5), env(safe-area-inset-bottom));
+  transition: bottom var(--dur-default) var(--ease-spring);
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
   background-color: var(--color-overlay);
   box-shadow: var(--shadow-overlay);
   animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) both;
+}
+
+.decision-sheet[data-keyboard] {
+  --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
+}
+
+/* Held sideways a phone has little height: the sheet keeps a readable width, and its body scrolls
+   above the answers. */
+@media (pointer: coarse) and (orientation: landscape) and (height < 500px) {
+  .decision-sheet {
+    width: min(100%, 560px);
+    margin-inline: auto;
+  }
 }
 
 @keyframes decision-sheet-in {
@@ -371,4 +365,231 @@
       opacity: 0;
     }
   }
+}
+
+/* dot's question answered in place (HITL §1–4): fields under dot's message in the thread, in the
+   island over the computer, and in a phone's sheet. */
+.ask {
+  color: var(--color-fg-1);
+}
+
+.ask-fields {
+  --_gap: var(--spacing);
+  display: grid;
+  gap: var(--_gap);
+}
+
+.decision-body > .ask-fields {
+  margin-top: calc(var(--spacing) * 3.5);
+}
+
+/* In the thread the fields follow dot's message without a card of their own; the radio rows and
+   fields carry their own material. */
+.ask[data-layout="thread"] {
+  display: grid;
+  gap: var(--spacing);
+  margin-top: calc(var(--spacing) * 2.5);
+}
+
+/* A plain question's one field: dot's question above already names it. */
+.ask-field-plain > .ui-field-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ask-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ask-fieldset > legend {
+  margin-bottom: calc(var(--spacing) * 1.5);
+  padding: 0;
+}
+
+.ask-reveal {
+  margin-right: calc(var(--spacing) * -2);
+}
+
+.ask-choice {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-options .ui-radio-card-preview {
+  order: 2;
+  margin-left: auto;
+}
+
+.ask-file {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 56px;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 3);
+  border: 1px dashed var(--color-field-line);
+  border-radius: var(--radius-md);
+  background-color: var(--color-field);
+  transition:
+    border-color var(--dur-hover) var(--ease-standard),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+.ask-file[data-over] {
+  border-color: var(--color-fg-2);
+  background-color: var(--color-control);
+}
+
+.ask-file-tile {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-row);
+  background-color: var(--color-raised-2);
+  color: var(--color-fg-2);
+}
+
+.ask-file-text {
+  display: grid;
+  min-width: 0;
+}
+
+.ask-file-name {
+  overflow: hidden;
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-file-meta {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.ask-qr {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* The quiet toggle's words line up with the code above it. */
+.ask-qr > .ui-button {
+  margin-left: calc(var(--spacing) * -3);
+}
+
+.ask-qr-code {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-qr-hint {
+  margin: 0;
+  font:
+    var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-2--letter-spacing);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+
+.ask-qr-link {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: 2px;
+}
+
+/* The text a QR code holds, to copy when the code can't be scanned. */
+.ask-qr-value {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  max-width: 100%;
+}
+
+.ask-qr-value > p {
+  min-width: 0;
+  margin: 0;
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The site a secret is typed into reads first in its note; a hidden character's warning reads as
+   one. */
+.ask-site {
+  color: var(--color-fg-1);
+  font-weight: var(--font-weight-medium);
+}
+
+.ask-warning {
+  color: var(--color-danger-fg);
+  font-weight: var(--font-weight-medium);
+}
+
+/* A key taken out of a field: the banner unfolds under the fields, and folded takes no room, not
+   even the gap. */
+.ask-fields > .ask-key {
+  margin-top: calc(var(--_gap) * -1);
+}
+
+.ask-key .ui-banner {
+  margin-top: calc(var(--spacing) * 2);
+}
+
+.ask-foot {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-problem {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+.ask-actions {
+  display: flex;
+  flex: none;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask[data-layout="sheet"] .ask-actions[data-single] {
+  grid-template-columns: 1fr;
+}
+
+.ask[data-layout="sheet"] .ask-problem:empty {
+  display: none;
+}
+
+.ask[data-layout="sheet"] .ask-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--spacing) * 2.5);
+}
+
+.ask[data-layout="sheet"] .ask-fields {
+  --_gap: calc(var(--spacing) * 2);
+}
+
+.ask.decision[data-layout="sheet"] .decision-foot {
+  padding-top: calc(var(--spacing) * 4);
 }

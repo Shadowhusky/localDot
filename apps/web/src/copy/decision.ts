@@ -12,6 +12,8 @@ export interface DecisionWords {
   secondary: string;
   // One sentence on why this asks.
   why: string;
+  // dot's own line while it waits, asking in the first person.
+  line: string;
 }
 
 const QUESTION: Readonly<Record<ActionClass, string>> = {
@@ -29,6 +31,29 @@ const QUESTION: Readonly<Record<ActionClass, string>> = {
   credentials: "Use this password or code?",
   unknown: "Allow this step?",
 };
+
+const ASK: Readonly<Record<ActionClass, string>> = {
+  reading: "Can I read this?",
+  browsing: "Can I open this website?",
+  computer: "Can I do this on your computer?",
+  purchase: "Can I make this payment?",
+  send: "Can I send this as you?",
+  post: "Can I post this as you?",
+  delete: "Can I delete this online data?",
+  download_execute: "Can I run this downloaded program?",
+  system_settings: "Can I change this account setting?",
+  memory: "Can I save this to my memory?",
+  upload: "Can I upload these files?",
+  credentials: "Can I use this password or code?",
+  unknown: "Can I take this step?",
+};
+
+// A question for the user, such as "Send this email?", becomes dot asking to do it.
+function askLine(actionClass: ActionClass, title: string): string {
+  if (!title || title === QUESTION[actionClass]) return ASK[actionClass];
+  if (!title.endsWith("?")) return title;
+  return `Can I ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
+}
 
 const VERB: Partial<Readonly<Record<ActionClass, string>>> = {
   purchase: "Buy",
@@ -75,13 +100,16 @@ export function decisionWords(card: Pick<ApprovalCard, "actionClass" | "title">)
   const { actionClass } = card;
   const verb = VERB[actionClass] ?? "Allow";
   const always = ALWAYS_ASKS[actionClass];
+  const title =
+    card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title;
   return {
-    title: card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title,
+    title,
     primary: verb,
     secondary: `Don't ${verb.toLowerCase()}`,
     why: always
       ? `${always} always needs your OK. ${WAITS}`
       : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
+    line: askLine(actionClass, title),
   };
 }
 

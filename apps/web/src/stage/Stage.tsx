@@ -26,7 +26,7 @@ import type { Flip } from "./probe.ts";
 import type { PumpStats } from "./pump.ts";
 import { StageCanvas } from "./StageCanvas.tsx";
 import type { ReplayHandle, StageCanvasHandle } from "./stage-engine.ts";
-import type { OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
+import type { FieldMark, OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
 
 export interface StageHandle {
   replay: ReplayHandle;
@@ -49,6 +49,8 @@ export interface StageProps {
   listed: readonly string[];
   // A decision is open: the picture dims under it.
   dim?: boolean;
+  // The fields dot will type the user's answers into, ringed above the dim.
+  fields?: readonly FieldMark[];
   manual?: {
     enabled: boolean;
     screen: { w: number; h: number };
@@ -63,6 +65,7 @@ export interface StageProps {
 }
 
 const quiet = () => () => {};
+const NO_FIELDS: readonly FieldMark[] = [];
 
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   {
@@ -75,6 +78,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     parentId,
     selection,
     dim = false,
+    fields = NO_FIELDS,
     onPicture,
   },
   ref,
@@ -194,6 +198,9 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   useEffect(() => {
     canvas.current?.setView({ dim });
   }, [dim]);
+  useEffect(() => {
+    canvas.current?.setView({ fields: mode === "live" ? fields : NO_FIELDS });
+  }, [mode, fields]);
   useEffect(() => {
     canvas.current?.setView({
       freeze: paused,
