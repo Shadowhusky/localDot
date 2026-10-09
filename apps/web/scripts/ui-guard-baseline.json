@@ -19,9 +19,7 @@
     "native-control": 2
   },
   "src/agent/TakeoverPanel.tsx": {
-    "banned-copy": 1,
-    "native-control": 7,
-    "native-disabled": 7
+    "banned-copy": 1
   },
   "src/agent/UsageFooter.tsx": {
     "native-control": 1
@@ -32,11 +30,10 @@
     "stray-stylesheet": 1
   },
   "src/agent/controls.css": {
-    "control-selector": 4,
-    "radius-literal": 4,
-    "spacing-literal": 11,
-    "stray-stylesheet": 1,
-    "type-literal": 1
+    "control-selector": 3,
+    "radius-literal": 3,
+    "spacing-literal": 7,
+    "stray-stylesheet": 1
   },
   "src/agent/output.css": {
     "stray-stylesheet": 1,
@@ -104,9 +101,8 @@
     "native-control": 4,
     "native-disabled": 1
   },
-  "src/stage/Stage.tsx": {
-    "native-control": 1,
-    "native-disabled": 1
+  "src/stage/ManualSurface.tsx": {
+    "native-control": 1
   },
   "src/theme.css": {
     "control-selector": 2,

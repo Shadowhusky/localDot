@@ -159,7 +159,8 @@ describe("Stage in a Chromium browser", () => {
       clientX: x,
       clientY: y,
     });
-    expect(keys.disabled).toBe(true); // A ticket alone does not show the computer.
+    expect(keys.readOnly).toBe(true); // A ticket alone does not show the computer.
+    expect(keys.getAttribute("aria-disabled")).toBe("true");
     await waitFor(() => expect(client()).not.toBeNull());
     playInClient(client() as HTMLIFrameElement, "owned-input-track");
     await waitFor(() =>
@@ -176,7 +177,7 @@ describe("Stage in a Chromium browser", () => {
         },
       }),
     );
-    await waitFor(() => expect(keys.disabled).toBe(false));
+    await waitFor(() => expect(keys.readOnly).toBe(false));
     expect(surface.hasAttribute("data-live")).toBe(true);
 
     fireEvent.pointerDown(surface, mouse(340, 50)); // Letterboxing.
@@ -208,15 +209,23 @@ describe("Stage in a Chromium browser", () => {
     ]);
     send.mockClear();
 
-    fireEvent.input(keys, { target: { value: "u" } });
-    fireEvent.input(keys, { target: { value: "us" } });
+    // The field holds only a pad of zero-width spaces between keys, never what was typed.
+    const pad = keys.value;
+    expect(pad).toMatch(/^\u200b+$/);
+    fireEvent.input(keys, { target: { value: `${pad}u` } });
+    expect(keys.value).toBe(pad);
+    fireEvent.input(keys, { target: { value: `${pad}s` } });
     expect(fireEvent.keyDown(keys, { key: "Tab" })).toBe(false);
     fireEvent.compositionStart(keys);
-    fireEvent.input(keys, { target: { value: "ni" } });
+    fireEvent.input(keys, { target: { value: `${pad}ni` } });
     fireEvent.compositionEnd(keys, { data: "你" });
-    fireEvent.input(keys, { target: { value: "你" } });
+    fireEvent.input(keys, { target: { value: `${pad}你` } });
+    expect(keys.value).toBe(pad);
     fireEvent.paste(keys, { clipboardData: { getData: () => "pass word!" } });
     expect(fireEvent.keyDown(keys, { key: "Backspace" })).toBe(false);
+    // A phone keyboard's Backspace deletes from the pad instead.
+    fireEvent.input(keys, { target: { value: pad.slice(1) } });
+    expect(keys.value).toBe(pad);
     expect(send.mock.calls.map(([input]) => input)).toEqual([
       { kind: "text", text: "u" },
       { kind: "text", text: "s" },
@@ -224,8 +233,8 @@ describe("Stage in a Chromium browser", () => {
       { kind: "text", text: "你" },
       { kind: "text", text: "pass word!" },
       { kind: "key", combo: ["backspace"] },
+      { kind: "key", combo: ["backspace"] },
     ]);
-    expect(keys.value).toBe("");
     send.mockClear();
 
     fireEvent.keyDown(keys, { key: "Escape" });
@@ -251,8 +260,26 @@ describe("Stage in a Chromium browser", () => {
     fireEvent.pointerDown(surface, finger);
     fireEvent.pointerMove(surface, { ...finger, clientX: 342 }); // Within a finger's slop.
     fireEvent.pointerUp(surface, { ...finger, clientX: 342 });
+    // So does a mouse that shakes a pixel while it presses.
+    fireEvent.pointerDown(surface, mouse(340, 330));
+    fireEvent.pointerMove(surface, mouse(341, 331));
+    fireEvent.pointerUp(surface, mouse(341, 331));
     expect(send.mock.calls.map(([input]) => input)).toEqual([
       { kind: "click", at: { x: 1280, y: 800 }, button: "right", count: 1 },
+      { kind: "click", at: { x: 1280, y: 800 }, button: "right", count: 1 },
+    ]);
+
+    // In Click mode a finger that wobbles while it taps lets go where it pressed.
+    view.rerender(
+      <Stage ref={stage} cell={ready} api={api} reconnects={0} listed={[CELL]} manual={manual} />,
+    );
+    send.mockClear();
+    fireEvent.pointerDown(surface, finger);
+    fireEvent.pointerMove(surface, { ...finger, clientX: 342, clientY: 331 });
+    fireEvent.pointerUp(surface, { ...finger, clientX: 342, clientY: 331 });
+    expect(send.mock.calls.map(([input]) => input)).toEqual([
+      { kind: "down", at: { x: 1280, y: 800 }, button: "left" },
+      { kind: "up", at: { x: 1280, y: 800 }, button: "left" },
     ]);
 
     view.rerender(
@@ -266,7 +293,7 @@ describe("Stage in a Chromium browser", () => {
       />,
     );
     send.mockClear();
-    expect(keys.disabled).toBe(true);
+    expect(keys.readOnly).toBe(true);
     fireEvent.pointerDown(surface, mouse(340, 330));
     fireEvent.keyDown(keys, { key: "Enter" });
     fireEvent.input(keys, { target: { value: "late" } });

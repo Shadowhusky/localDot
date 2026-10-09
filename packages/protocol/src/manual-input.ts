@@ -51,7 +51,8 @@ export const TakeoverInputRequest = z.strictObject({
 export type TakeoverInputRequest = z.infer<typeof TakeoverInputRequest>;
 
 // The user's direct control, one input per message in the order they made it. A button that a
-// `down` pressed stays down only while the stream lasts: the daemon lets go of it when it ends.
+// `down` pressed stays down only while the stream lasts: the daemon lets go of it when it ends. A
+// key is pressed and released in one message; there is no key down or up to hold one.
 export const ManualStreamInput = z.discriminatedUnion("kind", [
   Click,
   Key,

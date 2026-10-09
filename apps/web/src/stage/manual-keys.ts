@@ -10,7 +10,9 @@ export interface KeyLike {
   isComposing?: boolean;
   keyCode?: number;
 }
-// What a key press on the computer view becomes.
+// What a key press on the computer view becomes. A key reaches the computer pressed and released
+// at once, as the desktop takes no key down or up: a held key arrives as the browser's repeats, and
+// a modifier goes only with the key, click or scroll it changes, never on its own.
 export type KeyRoute =
   // A key press on the computer; the browser does nothing with it.
   | { kind: "key"; combo: string[] }

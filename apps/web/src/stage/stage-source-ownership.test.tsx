@@ -60,7 +60,7 @@ it.each(["cell", "api", "reconnect"] as const)(
     );
     const surface = document.querySelector(".manual-surface") as HTMLElement;
     const keys = screen.getByLabelText<HTMLTextAreaElement>("Type on the computer");
-    const live = () => surface.hasAttribute("data-live") && !keys.disabled;
+    const live = () => surface.hasAttribute("data-live") && !keys.readOnly;
     const frame = () => document.querySelector<HTMLIFrameElement>("iframe.desktop-frame");
     const click = () => {
       const at = { pointerId: 1, pointerType: "mouse", button: 0, clientX: 640, clientY: 400 };

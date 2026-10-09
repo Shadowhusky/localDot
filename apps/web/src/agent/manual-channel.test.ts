@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { MANUAL_STREAM_CLOSE, ulid } from "@localdot/protocol";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { FakeWebSocket } from "../testing/fake-websocket.ts";
@@ -12,8 +12,10 @@ beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeWebSocket);
 });
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 const channel = (onEnd = vi.fn()) =>
   openManualChannel({
@@ -99,11 +101,18 @@ it("opens one stream for the user's control, reopens it after a drop, and stays 
   expect(first.sent).toEqual([JSON.stringify({ kind: "text", text: "x" })]);
   act(() => first.drop(1006));
   expect(ended).toHaveBeenCalledOnce();
-  view.result.current.send({ kind: "text", text: "dropped" });
+  // Typed while it reopens: it waits for the new socket, in order.
+  view.result.current.send({ kind: "text", text: "while" });
+  view.result.current.send({ kind: "key", combo: ["tab"] });
   act(() => vi.advanceTimersByTime(300));
   const second = FakeWebSocket.instances[1] as FakeWebSocket;
   expect(second).toBeDefined();
   second.open();
+  expect(second.sent.map((data) => JSON.parse(data))).toEqual([
+    { kind: "text", text: "while" },
+    { kind: "key", combo: ["tab"] },
+  ]);
+  expect(first.sent).toHaveLength(1);
   act(() => second.drop(MANUAL_STREAM_CLOSE.uncertain));
   act(() => vi.advanceTimersByTime(5000));
   expect(FakeWebSocket.instances).toHaveLength(2);
@@ -113,4 +122,29 @@ it("opens one stream for the user's control, reopens it after a drop, and stays 
   view.rerender({ session: null, request: null });
   expect(third.closed).toBe(true);
   view.unmount();
+});
+
+it("closes the stream while the page is hidden, drops what is typed meanwhile, and reopens on return", () => {
+  const api = createApi("a".repeat(43), { origin: "http://127.0.0.1:4768" }),
+    hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  const view = renderHook(() => useManualChannel(api, ulid(), ulid(), vi.fn()));
+  const first = FakeWebSocket.instances[0] as FakeWebSocket;
+  first.open();
+  hidden.mockReturnValue(true);
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(first.closed).toBe(true);
+  view.result.current.send({ kind: "text", text: "unseen" });
+  expect(FakeWebSocket.instances).toHaveLength(1);
+  hidden.mockReturnValue(false);
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  const second = FakeWebSocket.instances[1] as FakeWebSocket;
+  second.open();
+  expect(second.sent).toEqual([]);
+  expect(first.sent).toEqual([]);
+  view.unmount();
+  expect(second.closed).toBe(true);
 });

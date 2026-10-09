@@ -41,10 +41,11 @@ interface Press {
   mods: ReturnType<typeof modsOf>;
 }
 
-// A touch moves this far before it drags.
+// A touch, or a press that clicks once it lifts, moves this far before it drags or is dropped.
 const SLOP = 6;
-// A phone keyboard reads the word being typed to correct and suggest it; the field keeps that much.
-const CONTEXT = 24;
+// All the keyboard field holds between keys: a phone keyboard reports its Backspace only by deleting
+// something, and nothing typed stays in the page.
+const PAD = "\u200b".repeat(4);
 // Wheel travel per notch, by deltaMode: pixels, lines, pages.
 const NOTCH = [50, 3, 0.1];
 const PASTE_LIMIT = 4000;
@@ -66,7 +67,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       props.current = { live, mode, locate, send, onTyping, onRefused };
     });
     const state = useRef({
-      // What the keyboard field holds, all of it already typed on the computer.
+      // What the keyboard field holds: the pad, then a composition already typed on the computer.
       mirror: "",
       composing: false,
       // The field's text when a composition began, which its result follows.
@@ -80,10 +81,10 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
     });
 
     // Built once: they read the latest props and state through refs.
-    const { move, flushHover, emit, forget, sync } = useMemo(() => {
+    const { move, flushHover, emit, reset, sync } = useMemo(() => {
       const move = (at: Point) => {
         const s = state.current;
-        if (s.sent?.x === at.x && s.sent?.y === at.y) return;
+        if (!props.current.live || (s.sent?.x === at.x && s.sent?.y === at.y)) return;
         s.sent = at;
         props.current.send({ kind: "move", at });
       };
@@ -99,41 +100,40 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
         if ("at" in input) state.current.sent = input.at;
         props.current.send(input);
       };
-      // The remote caret may have moved: what the field holds no longer sits before it. A
-      // composition keeps its text until it is committed.
-      const forget = () => {
+      // Back to the pad alone. A composition keeps its text until it is committed.
+      const reset = () => {
         const s = state.current;
         if (s.composing) return;
-        s.mirror = "";
-        if (field.current) field.current.value = "";
+        s.mirror = props.current.live ? PAD : "";
+        if (field.current && field.current.value !== s.mirror) field.current.value = s.mirror;
       };
       const sync = () => {
         const s = state.current,
           el = field.current;
         if (!el || s.composing) return;
-        if (!props.current.live) {
-          el.value = "";
-          s.mirror = "";
-          return;
+        if (props.current.live) {
+          const edit = textEdit(s.mirror, el.value);
+          for (let i = 0; i < edit.erase; i++) emit({ kind: "key", combo: ["backspace"] });
+          for (const input of textInputs(edit.text)) emit(input);
         }
-        const edit = textEdit(s.mirror, el.value);
-        for (let i = 0; i < edit.erase; i++) emit({ kind: "key", combo: ["backspace"] });
-        for (const input of textInputs(edit.text)) emit(input);
-        const kept = [...el.value].slice(-CONTEXT).join("");
-        if (kept !== el.value) el.value = kept;
-        s.mirror = kept;
+        reset();
       };
-      return { move, flushHover, emit, forget, sync };
+      return { move, flushHover, emit, reset, sync };
     }, []);
 
     useImperativeHandle(ref, () => ({
       keyboard(on) {
-        if (on) field.current?.focus();
+        if (on && props.current.live) field.current?.focus();
         else field.current?.blur();
       },
     }));
     useEffect(() => {
-      if (!live) field.current?.blur();
+      if (live) return;
+      const s = state.current;
+      cancelAnimationFrame(s.frame);
+      s.frame = 0;
+      s.hover = null;
+      field.current?.blur();
     }, [live]);
     useEffect(() => {
       const el = surface.current;
@@ -165,7 +165,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       const touch = (event: TouchEvent) => {
         if (props.current.live) event.preventDefault();
       };
-      const hide = () => forget();
+      const hide = () => reset();
       el.addEventListener("wheel", wheel, { passive: false });
       el.addEventListener("touchstart", touch, { passive: false });
       window.addEventListener("pagehide", hide);
@@ -175,7 +175,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
         window.removeEventListener("pagehide", hide);
         cancelAnimationFrame(state.current.frame);
       };
-    }, [apple, emit, forget]);
+    }, [apple, emit, reset]);
 
     const down = (event: PointerEvent<HTMLDivElement>) => {
       const now = props.current,
@@ -186,7 +186,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       if (!at) return;
       if (event.pointerType !== "touch") field.current?.focus({ preventScroll: true });
       event.currentTarget.setPointerCapture?.(event.pointerId);
-      forget();
+      reset();
       const button = event.button === 1 ? "middle" : event.button === 2 ? "right" : "left";
       const mods = modsOf(event, apple);
       s.press = {
@@ -210,7 +210,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       if (!press && event.pointerType !== "mouse") return;
       if (press && !press.moved) {
         const far = Math.hypot(event.clientX - press.client.x, event.clientY - press.client.y);
-        if (press.touch && far < SLOP) return;
+        if ((press.touch || press.tap) && far < SLOP) return;
         press.moved = true;
       }
       if (press?.tap) return;
@@ -242,7 +242,10 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
           });
         return;
       }
-      const at = now.locate({ x: event.clientX, y: event.clientY }, true) ?? press.last;
+      // A finger that wobbled less than the slop lets go where it pressed, so the press stays a click.
+      const at = press.moved
+        ? (now.locate({ x: event.clientX, y: event.clientY }, true) ?? press.last)
+        : press.at;
       emit({ kind: "up", at, button: press.button });
     };
     // The browser took the pointer away (a system gesture): let go where it last was.
@@ -276,10 +279,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
       const route = routeKey(event.nativeEvent, apple);
       if (route.kind !== "key") return;
       event.preventDefault();
-      if (route.combo.length === 1 && route.combo[0] === "backspace" && s.mirror) {
-        s.mirror = [...s.mirror].slice(0, -1).join("");
-        if (field.current) field.current.value = s.mirror;
-      } else forget();
+      reset();
       emit({ kind: "key", combo: route.combo });
     };
 
@@ -304,7 +304,9 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
           className="manual-keyboard"
           aria-label="Type on the computer"
           rows={1}
-          disabled={!live}
+          readOnly={!live}
+          tabIndex={live ? undefined : -1}
+          aria-disabled={live ? undefined : true}
           autoCapitalize="off"
           autoComplete="off"
           autoCorrect="off"
@@ -316,11 +318,13 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
             state.current.base = state.current.mirror;
           }}
           onCompositionEnd={(event) => {
-            // The committed text is the event's: some browsers update the field only after it.
+            // The committed text is the event's: some browsers update the field only after it, so
+            // the field returns to the pad once that input has come.
             const s = state.current;
             s.composing = false;
             if (props.current.live) for (const input of textInputs(event.data ?? "")) emit(input);
             s.mirror = s.base + (event.data ?? "");
+            setTimeout(sync);
           }}
           onPaste={(event) => {
             event.preventDefault();
@@ -330,17 +334,18 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
               props.current.onRefused?.("Paste up to 4,000 characters at a time.");
               return;
             }
-            forget();
+            reset();
             props.current.onRefused?.(null);
             for (const input of textInputs(text)) emit(input);
           }}
           onFocus={() => {
+            reset();
             setTyping(true);
             props.current.onTyping?.(true);
           }}
           onBlur={() => {
             state.current.composing = false;
-            forget();
+            reset();
             setTyping(false);
             props.current.onTyping?.(false);
           }}
