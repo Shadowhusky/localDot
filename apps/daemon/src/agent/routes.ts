@@ -349,8 +349,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       route(async (c) => {
         await empty(c.req.raw);
         check(c.req.raw.signal);
-        if (!deps.chatgpt?.availability().available)
-          throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
+        const availability = harness();
+        if (!availability.available)
+          throw new RouteError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
         if (installer.status().state !== "ready") throw new RouteError(409, CHATGPT_INSTALL_FIRST);
         void setup.check();
         return c.json({ sandbox: setup.sandbox() }, 202);

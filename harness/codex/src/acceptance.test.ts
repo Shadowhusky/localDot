@@ -35,8 +35,14 @@ const release = () => ({
 });
 const host = { system: "25G83", runtime: "0.0.78" };
 const released = (record: unknown) => codexReleased(record, "darwin", "arm64");
-const native = () => stampNative(undefined, host, "c".repeat(64), 1, "darwin", "arm64");
-const both = () => stampAccount(native(), host, 2, "darwin", "arm64");
+const sources = (inputSha256: string) => ({
+  ...release(),
+  nativeSandbox: { ...release().nativeSandbox, inputSha256 },
+});
+const native = () => stampNative(undefined, host, "c".repeat(64), 1, release(), "darwin", "arm64");
+const both = () => stampAccount(native(), host, 2, release(), "darwin", "arm64");
+const stamped = (record: unknown, at = host, evidence: unknown = release()) =>
+  nativeStamped(record, at, evidence, "darwin", "arm64");
 const accepted = (record: unknown, at = host, evidence: unknown = release()) =>
   codexAccepted(record, at, evidence, "darwin", "arm64");
 afterEach(() => {
@@ -78,26 +84,45 @@ describe("this Mac's own acceptance", () => {
   });
   it("checks again after a macOS or sandbox runtime update, keeping the account stamp", () => {
     const updated = { system: "25H12", runtime: host.runtime };
-    expect(nativeStamped(both(), updated, "darwin", "arm64")).toBe(false);
-    expect(nativeStamped(both(), { ...host, runtime: "0.0.79" }, "darwin", "arm64")).toBe(false);
+    expect(stamped(both(), updated)).toBe(false);
+    expect(stamped(both(), { ...host, runtime: "0.0.79" })).toBe(false);
     expect(accepted(both(), updated)).toBe(false);
-    const again = stampNative(both(), updated, "d".repeat(64), 3, "darwin", "arm64");
+    const again = stampNative(both(), updated, "d".repeat(64), 3, release(), "darwin", "arm64");
     expect(accountStamped(again, "darwin", "arm64")).toBe(true);
     expect(accepted(again, updated)).toBe(true);
+  });
+  it("checks again when a release changes localDot's sandbox sources, keeping the account stamp", () => {
+    const next = sources("e".repeat(64));
+    expect(stamped(both())).toBe(true);
+    expect(stamped(both(), host, next)).toBe(false);
+    expect(accepted(both(), host, next)).toBe(false);
+    expect(() => stampAccount(native(), host, 3, next, "darwin", "arm64")).toThrow();
+    const again = stampNative(both(), host, "d".repeat(64), 3, next, "darwin", "arm64");
+    expect(again.nativeSandbox).toMatchObject({ passed: true, inputSha256: "e".repeat(64) });
+    expect(accountStamped(again, "darwin", "arm64")).toBe(true);
+    expect(accepted(again, host, next)).toBe(true);
+    expect(accepted(again)).toBe(false);
+  });
+  it("never stamps this Mac without the release's sandbox sources", () => {
+    const unstamped = { ...release(), nativeSandbox: { passed: false } };
+    expect(() =>
+      stampNative(undefined, host, "c".repeat(64), 1, unstamped, "darwin", "arm64"),
+    ).toThrow();
+    expect(stamped(both(), host, unstamped)).toBe(false);
   });
   it("starts both stamps again for another pin", () => {
     const old = { ...both(), codexVersion: "0.153.0" };
     expect(accountStamped(old, "darwin", "arm64")).toBe(false);
-    expect(nativeStamped(old, host, "darwin", "arm64")).toBe(false);
-    const fresh = stampNative(old, host, "c".repeat(64), 3, "darwin", "arm64");
+    expect(stamped(old)).toBe(false);
+    const fresh = stampNative(old, host, "c".repeat(64), 3, release(), "darwin", "arm64");
     expect(fresh.codexVersion).toBe(CODEX_VERSION);
     expect(fresh.realAccount).toEqual({ passed: false });
     expect(accepted(fresh)).toBe(false);
   });
   it("never records a sign-in before this Mac's sandbox check", () => {
-    expect(() => stampAccount(undefined, host, 1, "darwin", "arm64")).toThrow();
+    expect(() => stampAccount(undefined, host, 1, release(), "darwin", "arm64")).toThrow();
     expect(() =>
-      stampAccount(native(), { ...host, system: "25H12" }, 1, "darwin", "arm64"),
+      stampAccount(native(), { ...host, system: "25H12" }, 1, release(), "darwin", "arm64"),
     ).toThrow();
   });
   it.each([
@@ -108,6 +133,13 @@ describe("this Mac's own acceptance", () => {
     [
       "a malformed report digest",
       { ...both(), nativeSandbox: { ...native().nativeSandbox, reportSha256: "x" } },
+    ],
+    [
+      "a stamp that names no release sources",
+      {
+        ...both(),
+        nativeSandbox: { ...native().nativeSandbox, inputSha256: undefined },
+      },
     ],
   ])("refuses %s", (_name, record) => {
     expect(accepted(record)).toBe(false);

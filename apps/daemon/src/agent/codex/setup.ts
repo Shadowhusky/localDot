@@ -3,6 +3,8 @@ import {
   accountStamped,
   CODEX_VERSION,
   type CodexInstaller,
+  codexAccepted,
+  codexReleased,
   type InstalledCodex,
   type LocalAcceptance,
   NativeCheckError,
@@ -68,15 +70,16 @@ export class ChatgptSetup implements ChatgptSetupControl {
     return (
       this.#state === "passed" &&
       this.#host !== undefined &&
-      nativeStamped(this.#record, this.#host) &&
-      accountStamped(this.#record)
+      codexAccepted(this.#record, this.#host)
     );
   }
+  // Without release evidence for this pin there is nothing for this Mac to check against.
   check(): Promise<ChatgptSandbox> {
     if (this.#flight) return this.#flight;
     if (
       this.#state === "passed" ||
       this.#abort.signal.aborted ||
+      !codexReleased() ||
       this.#deps.installer.status().state !== "ready"
     )
       return Promise.resolve(this.#state);

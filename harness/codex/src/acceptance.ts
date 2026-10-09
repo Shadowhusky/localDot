@@ -37,8 +37,15 @@ export function codexReleased(
   return object(record) && pinned(record, platform, arch) && passed(record.nativeSandbox);
 }
 
-// This Mac's own record, written by the daemon: its sandbox self-check for this pin, macOS build
-// and sandbox runtime, and the user's first verified sign-in with this pin.
+// The release sources the committed native run covered, localDot's sandbox profile, its launch
+// arguments and the patched sandbox runtime among them.
+function releaseInput(release: unknown): string | undefined {
+  const native = object(release) ? release.nativeSandbox : undefined;
+  return object(native) && typeof native.inputSha256 === "string" ? native.inputSha256 : undefined;
+}
+
+// This Mac's own record, written by the daemon: its sandbox self-check for this pin, release
+// sources, macOS build and sandbox runtime, and the user's first verified sign-in with this pin.
 const hex = z.string().regex(/^[a-f0-9]{64}$/);
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const label = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/);
@@ -52,6 +59,7 @@ export const LocalAcceptance = z.strictObject({
     unstamped,
     z.strictObject({
       passed: z.literal(true),
+      inputSha256: hex,
       system: label,
       runtime: label,
       reportSha256: hex,
@@ -61,7 +69,8 @@ export const LocalAcceptance = z.strictObject({
   realAccount: z.union([unstamped, z.strictObject({ passed: z.literal(true), checkedAt: time })]),
 });
 export type LocalAcceptance = z.infer<typeof LocalAcceptance>;
-// Besides the pin, a native stamp is bound to the macOS build and the sandbox runtime.
+// Besides the pin and the release sources, a native stamp is bound to the macOS build and the
+// sandbox runtime.
 export interface AcceptanceHost {
   readonly system: string;
   readonly runtime: string;
@@ -72,12 +81,16 @@ const current = (record: unknown, platform: string, arch: string): record is Loc
 export function nativeStamped(
   record: unknown,
   host: AcceptanceHost,
+  release: unknown = committed,
   platform: string = process.platform,
   arch: string = process.arch,
 ): boolean {
+  const input = releaseInput(release);
   return (
     current(record, platform, arch) &&
     record.nativeSandbox.passed &&
+    input !== undefined &&
+    record.nativeSandbox.inputSha256 === input &&
     record.nativeSandbox.system === host.system &&
     record.nativeSandbox.runtime === host.runtime
   );
@@ -99,7 +112,7 @@ export function codexAccepted(
 ): boolean {
   return (
     codexReleased(release, platform, arch) &&
-    nativeStamped(record, host, platform, arch) &&
+    nativeStamped(record, host, release, platform, arch) &&
     accountStamped(record, platform, arch)
   );
 }
@@ -120,6 +133,7 @@ export function stampNative(
   host: AcceptanceHost,
   reportSha256: string,
   checkedAt: number,
+  release: unknown = committed,
   platform: string = process.platform,
   arch: string = process.arch,
 ): LocalAcceptance {
@@ -127,6 +141,7 @@ export function stampNative(
     ...base(previous, platform, arch),
     nativeSandbox: {
       passed: true,
+      inputSha256: releaseInput(release),
       system: host.system,
       runtime: host.runtime,
       reportSha256,
@@ -139,10 +154,11 @@ export function stampAccount(
   previous: unknown,
   host: AcceptanceHost,
   checkedAt: number,
+  release: unknown = committed,
   platform: string = process.platform,
   arch: string = process.arch,
 ): LocalAcceptance {
-  if (!nativeStamped(previous, host, platform, arch))
+  if (!nativeStamped(previous, host, release, platform, arch))
     throw new Error("The sandbox check must pass before the account is recorded.");
   return LocalAcceptance.parse({
     ...LocalAcceptance.parse(previous),

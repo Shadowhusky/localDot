@@ -1,6 +1,8 @@
 import {
   type AcceptanceHost,
   accountStamped,
+  CODEX_MANIFEST_SHA256,
+  CODEX_VERSION,
   type CodexInstallState,
   type InstalledCodex,
   type LocalAcceptance,
@@ -9,9 +11,24 @@ import {
   stampAccount,
   stampNative,
 } from "@localdot/codex-harness";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatgptStatus } from "./account.ts";
 import { ChatgptSetup, SANDBOX_REASONS, SETUP_UNSAVED } from "./setup.ts";
+
+const m = vi.hoisted(() => ({ release: {} as Record<string, unknown> }));
+vi.mock("../../../../../harness/codex/acceptance/record.json", () => ({ default: m.release }));
+const release = (inputSha256 = "a".repeat(64)) => ({
+  format: 1,
+  codexVersion: CODEX_VERSION,
+  platform: `${process.platform}-${process.arch}`,
+  manifestSha256: CODEX_MANIFEST_SHA256,
+  nativeSandbox: { passed: true, inputSha256, reportSha256: "b".repeat(64) },
+  realAccount: { passed: false },
+});
+beforeEach(() => {
+  for (const key of Object.keys(m.release)) delete m.release[key];
+  Object.assign(m.release, release());
+});
 
 const HOST: AcceptanceHost = { system: "25G83", runtime: "0.0.78" };
 const INSTALLED = {
@@ -170,6 +187,27 @@ describe("ChatGPT plan setup", () => {
     expect(nativeStamped(f.stored(), next)).toBe(true);
     expect(accountStamped(f.stored())).toBe(true);
     expect(f.setup.ready()).toBe(true);
+  });
+  it("checks again after a release changes localDot's sandbox sources and keeps the account stamp", async () => {
+    const record = stampAccount(stampNative(undefined, HOST, "c".repeat(64), 1), HOST, 2);
+    Object.assign(m.release, release("e".repeat(64)));
+    const f = fixture({ record });
+    expect(f.setup.sandbox()).toBe("unchecked");
+    expect(f.setup.ready()).toBe(false);
+    f.install();
+    expect(await f.setup.check()).toBe("passed");
+    expect(f.check).toHaveBeenCalledTimes(1);
+    expect(f.stored()?.nativeSandbox).toMatchObject({ inputSha256: "e".repeat(64) });
+    expect(accountStamped(f.stored())).toBe(true);
+    expect(f.setup.ready()).toBe(true);
+  });
+  it("runs no check without release evidence for this pin", async () => {
+    Object.assign(m.release, { nativeSandbox: { passed: false } });
+    const f = fixture();
+    f.install();
+    expect(await f.setup.check()).toBe("unchecked");
+    expect(f.check).not.toHaveBeenCalled();
+    expect(f.write).not.toHaveBeenCalled();
   });
   it("starts both stamps again for another Codex version", async () => {
     const old = stampAccount(stampNative(undefined, HOST, "c".repeat(64), 1), HOST, 2);

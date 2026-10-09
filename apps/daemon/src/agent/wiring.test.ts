@@ -20,6 +20,7 @@ import { LiveSessions } from "../gateway/live.ts";
 import type { CodexAuthOwnerDeps } from "./codex/auth-owner.ts";
 import type { CodexDriverDeps } from "./codex/driver.ts";
 import type { McpEndpointInput } from "./codex/mcp-endpoint.ts";
+import { SANDBOX_REASONS } from "./codex/setup.ts";
 import { AgentSession } from "./session.ts";
 import type { ToolApiDeps } from "./tool-api.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
@@ -389,12 +390,20 @@ describe("ChatGPT production integration", () => {
     Object.assign(m.record, released());
     m.installed = true;
     const f = setup();
+    // Every Codex launch, for the account or a task, stays closed until this Mac's check passes.
+    expect(m.owner?.sandboxReason?.()).toBe(SANDBOX_REASONS.unchecked);
     await f.agent.start();
     const plan = f.agent.routes.chatgpt?.setup;
     await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.owner?.sandboxReason?.()).toBeUndefined();
     expect(m.check).toHaveBeenCalledTimes(1);
     expect(recordOf(f)).toMatchObject({
-      nativeSandbox: { passed: true, system: "25G83", runtime: "0.0.78" },
+      nativeSandbox: {
+        passed: true,
+        inputSha256: "a".repeat(64),
+        system: "25G83",
+        runtime: "0.0.78",
+      },
       realAccount: { passed: false },
     });
     choose(f);
@@ -421,6 +430,7 @@ describe("ChatGPT production integration", () => {
     await f.agent.start();
     const plan = f.agent.routes.chatgpt?.setup;
     await vi.waitFor(() => expect(plan?.sandbox()).toBe("failed"));
+    expect(m.owner?.sandboxReason?.()).toBe(SANDBOX_REASONS.failed);
     choose(f);
     m.status.mockResolvedValue(signedIn);
     await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
@@ -444,6 +454,24 @@ describe("ChatGPT production integration", () => {
     expect(m.check).toHaveBeenCalledTimes(1);
     expect(recordOf(f)).toMatchObject({
       nativeSandbox: { passed: true, system: "25G83" },
+      realAccount: { passed: true, checkedAt: 2 },
+    });
+  });
+  it("checks again after a release changes localDot's sandbox sources and keeps the account stamp", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    const record = stampAccount(stampNative(undefined, m.host, "d".repeat(64), 1), m.host, 2);
+    Object.assign(m.record, {
+      nativeSandbox: { ...released().nativeSandbox, inputSha256: "e".repeat(64) },
+    });
+    const f = setup({ record });
+    expect(m.owner?.sandboxReason?.()).toBe(SANDBOX_REASONS.unchecked);
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.check).toHaveBeenCalledTimes(1);
+    expect(recordOf(f)).toMatchObject({
+      nativeSandbox: { passed: true, inputSha256: "e".repeat(64) },
       realAccount: { passed: true, checkedAt: 2 },
     });
   });

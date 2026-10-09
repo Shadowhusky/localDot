@@ -784,6 +784,7 @@ describe("ChatGPT settings and installation integration", () => {
       cancel: vi.fn(() => {}),
     };
     let available = true,
+      released = true,
       sandbox: ChatgptSandbox = "unchecked";
     const plan = {
       sandbox: () => sandbox,
@@ -795,7 +796,13 @@ describe("ChatGPT settings and installation integration", () => {
     };
     const f = await setup({
       chatgpt: { account, installer, availability: () => ({ available }), setup: plan },
-      harness: () => ({ available }),
+      harness: () =>
+        available && !released
+          ? {
+              available: false,
+              reason: "ChatGPT plan support isn't switched on in this version yet.",
+            }
+          : { available },
     });
     return {
       ...f,
@@ -808,6 +815,9 @@ describe("ChatGPT settings and installation integration", () => {
       },
       setAvailable(value: boolean) {
         available = value;
+      },
+      setReleased(value: boolean) {
+        released = value;
       },
       setSandbox(value: ChatgptSandbox) {
         sandbox = value;
@@ -945,6 +955,17 @@ describe("ChatGPT settings and installation integration", () => {
     expect((await f.send("POST", "/api/agent/chatgpt/check", {})).status).toBe(400);
     f.setAvailable(false);
     expect((await f.send("POST", "/api/agent/chatgpt/check")).status).toBe(503);
+    expect(f.plan.check).not.toHaveBeenCalled();
+  });
+  it("runs no check without release evidence for this version", async () => {
+    const f = await installedFixture();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    f.setReleased(false);
+    const refused = await f.send("POST", "/api/agent/chatgpt/check");
+    expect(refused.status).toBe(503);
+    expect(await refused.text()).toBe(
+      "ChatGPT plan support isn't switched on in this version yet.",
+    );
     expect(f.plan.check).not.toHaveBeenCalled();
   });
   it.each(["/install", "/install/cancel", "/check"])(
