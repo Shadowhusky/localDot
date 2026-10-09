@@ -31,6 +31,8 @@ describe("theme tokens", () => {
       "--color-glyph-light": "#ffffff",
       "--color-glyph-mid": "#d9dce0",
       "--color-glyph-shade": "#9fa4ab",
+      "--color-spill": "rgba(220, 228, 238, 0.07)",
+      "--color-spill-xenon": "rgba(63, 181, 222, 0.11)",
       "--font-ui": ' system-ui, -apple-system, "Segoe UI Variable Text", sans-serif',
     };
     const theme = readTheme({
@@ -54,6 +56,8 @@ describe("theme tokens", () => {
       "hudSolid",
       "keyBevel",
       "shadeCursor",
+      "spill",
+      "spillXenon",
       "text",
       "text2",
       "void",

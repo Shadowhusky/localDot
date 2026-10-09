@@ -95,16 +95,12 @@
   display: block;
   aspect-ratio: 1024 / 112;
   min-height: 14px;
-  background: radial-gradient(
-    ellipse 46% 106% at 50% 0,
-    rgba(220, 228, 238, 0.07),
-    transparent 70%
-  );
+  background: radial-gradient(ellipse 46% 106% at 50% 0, var(--color-spill), transparent 70%);
 }
 
 .export-preview .dot-glyph {
   flex: none;
-  color: var(--dot-body, var(--color-fg-1));
+  color: var(--color-avatar-body);
 }
 
 .export-preview-band-inner > .dot-glyph {
@@ -143,7 +139,7 @@
   left: var(--spacing);
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: calc(var(--spacing) * 0.75);
   max-width: calc(100% - var(--spacing) * 3);
   opacity: 0;
   transition: opacity var(--dur-fade) var(--ease-standard);
@@ -367,8 +363,8 @@
 
 .trim-strip {
   --_h: calc(var(--spacing) * 12);
-  --_hw: 14px;
-  --_reach: 10px;
+  --_hw: calc(var(--spacing) * 3.5);
+  --_reach: calc(var(--spacing) * 2.5);
   --_glide: var(--dur-default) var(--ease-spring);
   position: relative;
   height: var(--_h);
@@ -417,7 +413,7 @@
 }
 
 .trim-shade {
-  background-color: rgba(10, 11, 13, 0.64);
+  background-color: color-mix(in srgb, var(--color-void) 64%, transparent);
 }
 
 .trim-shade[data-side="from"] {
@@ -490,7 +486,7 @@
   width: 3px;
   height: 16px;
   border-radius: var(--radius-full);
-  background-color: rgba(11, 12, 14, 0.36);
+  background-color: color-mix(in srgb, var(--color-porcelain-ink) 36%, transparent);
   transition:
     background-color var(--dur-press) var(--ease-standard),
     scale var(--dur-snappy) var(--ease-spring);
@@ -530,7 +526,7 @@
 
 .trim-strip[data-dragging="from"] .trim-handle[data-edge="from"]::before,
 .trim-strip[data-dragging="to"] .trim-handle[data-edge="to"]::before {
-  background-color: rgba(11, 12, 14, 0.62);
+  background-color: color-mix(in srgb, var(--color-porcelain-ink) 62%, transparent);
   scale: 1 1.15;
 }
 
@@ -616,7 +612,7 @@
 @media (pointer: coarse) {
   .trim-strip {
     --_h: calc(var(--spacing) * 14);
-    --_hw: 22px;
+    --_hw: calc(var(--spacing) * 5.5);
     --_reach: calc(44px - var(--_hw));
   }
 

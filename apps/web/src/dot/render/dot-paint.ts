@@ -1,16 +1,8 @@
 import type { DotPose } from "../engine/engine.ts";
 import type { Lod } from "../engine/states.ts";
+import { EYE, EYE_STOPS, GLOSS_STOPS, PEARL_STOPS, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, type EyeGeometry, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL } from "./lod.ts";
-
-// dot.css's colours, for a canvas that has no style sheet.
-const EYE = "#0b0c0f";
-const EYE_STOPS: [number, string][] = [
-  [0, "#23262c"],
-  [0.42, EYE],
-  [1, "#050607"],
-];
-const VOID = "#0a0b0d";
 
 export interface DotPlates {
   neutral: CanvasImageSource;
@@ -116,23 +108,8 @@ function paintBody(ctx: Context, rim: number, dim: number, xenon: string): void 
     ctx.arc(32, 32, 24, 0, Math.PI * 2);
   };
   disc();
-  fillInBox(ctx, DISC, (c) =>
-    radial(c, { cx: 0.37, cy: 0.3, r: 0.78 }, [
-      [0, "#f6f7f8"],
-      [0.36, "#eceef0"],
-      [0.68, "#d3d6db"],
-      [0.9, "#a9adb5"],
-      [1, "#8d929a"],
-    ]),
-  );
-  fillInBox(ctx, DISC, (c) =>
-    radial(c, EDGE, [
-      [0, "rgba(255,255,255,0)"],
-      [0.86, "rgba(255,255,255,0)"],
-      [0.97, "rgba(255,255,255,0.55)"],
-      [1, "rgba(255,255,255,0)"],
-    ]),
-  );
+  fillInBox(ctx, DISC, (c) => radial(c, { cx: 0.37, cy: 0.3, r: 0.78 }, PEARL_STOPS));
+  fillInBox(ctx, DISC, (c) => radial(c, EDGE, SHEEN_STOPS));
   layer(ctx, rim, () =>
     fillInBox(ctx, DISC, (c) => {
       const gradient = c.createRadialGradient(EDGE.cx, EDGE.cy, 0, EDGE.cx, EDGE.cy, EDGE.r);
@@ -184,11 +161,7 @@ function paintEye(ctx: Context, g: EyeGeometry, gloss: boolean): void {
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     fillInBox(ctx, { x: cx - rx, y: cy - ry, w: 2 * rx, h: 2 * ry }, (c) =>
-      radial(c, { cx: 0.5, cy: 0.5, r: 0.5 }, [
-        [0, "rgba(255,255,255,0.75)"],
-        [0.55, "rgba(255,255,255,0.22)"],
-        [1, "rgba(255,255,255,0)"],
-      ]),
+      radial(c, { cx: 0.5, cy: 0.5, r: 0.5 }, GLOSS_STOPS),
     );
   }
   ctx.restore();

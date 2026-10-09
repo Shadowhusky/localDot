@@ -106,6 +106,8 @@ const theme = {
   hudSolid: color(0x0e0f12),
   text: color(0xeeeff1),
   void: color(0x0a0b0d),
+  spill: { color: 0xdce4ee, alpha: 0.07 },
+  spillXenon: { color: 0x3fb5de, alpha: 0.11 },
 } as StageTheme;
 
 const feed = (patch: Partial<DotFeed> = {}): DotFeed => ({

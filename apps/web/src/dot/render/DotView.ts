@@ -1,6 +1,7 @@
 import { DotEngine, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
+import { GLOSS_STOPS, PEARL_STOPS, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
 import { addView, type Frameable, now, removeView } from "./scheduler.ts";
@@ -27,18 +28,8 @@ function svg<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
-function stops(gradient: Element, list: [offset: number, color: string, opacity?: number][]): void {
-  for (const [offset, color, opacity] of list) {
-    svg(
-      "stop",
-      {
-        offset,
-        "stop-color": color,
-        ...(opacity === undefined ? {} : { "stop-opacity": opacity }),
-      },
-      gradient,
-    );
-  }
+function stops(gradient: Element, list: [offset: number, color: string][]): void {
+  for (const [offset, color] of list) svg("stop", { offset, "stop-color": color }, gradient);
 }
 
 interface Eye {
@@ -150,25 +141,13 @@ export class DotView implements Frameable {
     ] as const) {
       svg("stop", { offset, class: `dot-stop-${name}` }, eyeFill);
     }
-    stops(svg("radialGradient", { id: `dot${this.id}-gloss` }, defs), [
-      [0, "#ffffff", 0.75],
-      [0.55, "#ffffff", 0.22],
-      [1, "#ffffff", 0],
-    ]);
-    stops(svg("radialGradient", { id: `dot${this.id}-pearl`, cx: 0.37, cy: 0.3, r: 0.78 }, defs), [
-      [0, "#f6f7f8"],
-      [0.36, "#eceef0"],
-      [0.68, "#d3d6db"],
-      [0.9, "#a9adb5"],
-      [1, "#8d929a"],
-    ]);
+    stops(svg("radialGradient", { id: `dot${this.id}-gloss` }, defs), GLOSS_STOPS);
+    stops(
+      svg("radialGradient", { id: `dot${this.id}-pearl`, cx: 0.37, cy: 0.3, r: 0.78 }, defs),
+      PEARL_STOPS,
+    );
     const edge = { cx: 0.3, cy: 0.62, r: 0.95, fx: 0.3, fy: 0.62 };
-    stops(svg("radialGradient", { id: `dot${this.id}-sheen`, ...edge }, defs), [
-      [0, "#ffffff", 0],
-      [0.86, "#ffffff", 0],
-      [0.97, "#ffffff", 0.55],
-      [1, "#ffffff", 0],
-    ]);
+    stops(svg("radialGradient", { id: `dot${this.id}-sheen`, ...edge }, defs), SHEEN_STOPS);
     const xenon = svg("radialGradient", { id: `dot${this.id}-xenon`, ...edge }, defs);
     for (const [offset, opacity] of [
       [0, 0],
@@ -184,7 +163,7 @@ export class DotView implements Frameable {
     svg("circle", { ...disc, class: "dot-pearl", fill: ref("pearl") }, svgBody);
     svg("circle", { ...disc, class: "dot-pearl", fill: ref("sheen") }, svgBody);
     this.svgXenon = svg("circle", { ...disc, fill: ref("xenon"), opacity: 0 }, svgBody);
-    this.svgDim = svg("circle", { ...disc, fill: "#0a0b0d", opacity: 0 }, svgBody);
+    this.svgDim = svg("circle", { ...disc, fill: VOID, opacity: 0 }, svgBody);
 
     const eyes = svg("g", { "clip-path": ref("body") }, face);
     const eye = (side: "L" | "R"): Eye => {

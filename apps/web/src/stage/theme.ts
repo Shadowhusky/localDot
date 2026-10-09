@@ -21,6 +21,8 @@ export interface StageTheme {
   glyphLight: ThemeColor;
   glyphMid: ThemeColor;
   glyphShade: ThemeColor;
+  spill: ThemeColor;
+  spillXenon: ThemeColor;
 }
 
 type ColorKey = Exclude<keyof StageTheme, "font">;
@@ -42,6 +44,8 @@ const TOKENS: Record<ColorKey, string> = {
   glyphLight: "--color-glyph-light",
   glyphMid: "--color-glyph-mid",
   glyphShade: "--color-glyph-shade",
+  spill: "--color-spill",
+  spillXenon: "--color-spill-xenon",
 };
 
 export function parseCssColor(value: string): ThemeColor {

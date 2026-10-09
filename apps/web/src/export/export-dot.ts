@@ -14,6 +14,7 @@ import { DotEngine, type Point } from "../dot/engine/engine.ts";
 import type { DotState } from "../dot/engine/states.ts";
 import { gazeTo } from "../dot/gaze.ts";
 import { PLATE_FILES, plateFile, SHADOW_FILES } from "../dot/plates.ts";
+import { canvasColour, SHADE } from "../dot/render/dot-colours.ts";
 import { type DotPlates, paintDot } from "../dot/render/dot-paint.ts";
 import { lodFor } from "../dot/render/lod.ts";
 import type { StageTheme, ThemeColor } from "../stage/theme.ts";
@@ -21,8 +22,6 @@ import { clampLines, type DotLayout, dotLayout, LineTrack } from "./dot-band.ts"
 
 // The stage's light on the floor (design-v2 §4): neutral, and xenon while dot has control, with the
 // rim's glow just under the picture. The rim fades in over 400 ms and out over 300 ms.
-const SPILL = "rgba(220,228,238,0.07)";
-const SPILL_XENON = "rgba(63,181,222,0.11)";
 const LIGHT_IN_MS = 400;
 const LIGHT_OUT_MS = 300;
 const MARK_MS = 150;
@@ -38,9 +37,6 @@ const GLOW_FALLOFF = [
   [1, 0.023],
   [1.25, 0],
 ] as const;
-
-const css = (c: ThemeColor) =>
-  `rgba(${(c.color >> 16) & 255},${(c.color >> 8) & 255},${c.color & 255},${c.alpha})`;
 
 // The body plates at the size the video draws dot; null when they can't load, so the body is drawn.
 export async function loadDotPlates(px: number, signal: AbortSignal): Promise<DotPlates | null> {
@@ -63,7 +59,12 @@ export async function loadDotPlates(px: number, signal: AbortSignal): Promise<Do
   }
 }
 
-function spillTexture(width: number, height: number, color: string, glow: boolean): Texture {
+function spillTexture(
+  width: number,
+  height: number,
+  color: ThemeColor,
+  glow: ThemeColor | null,
+): Texture {
   const canvas = new OffscreenCanvas(
     Math.max(1, Math.round(width)),
     Math.max(1, Math.round(height)),
@@ -78,8 +79,8 @@ function spillTexture(width: number, height: number, color: string, glow: boolea
     ctx.translate(w / 2, 0);
     ctx.scale(0.46 * w, 0.7 * h);
     const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-    gradient.addColorStop(0, color);
-    gradient.addColorStop(0.7, color.replace(/[\d.]+\)$/, "0)"));
+    gradient.addColorStop(0, canvasColour(color));
+    gradient.addColorStop(0.7, canvasColour({ ...color, alpha: 0 }));
     ctx.fillStyle = gradient;
     ctx.fillRect(-1 / 0.92, 0, 2 / 0.92, 1 / 0.7);
     ctx.restore();
@@ -93,7 +94,7 @@ function spillTexture(width: number, height: number, color: string, glow: boolea
         const reach = 1.25 * blur * s;
         const edge = ctx.createLinearGradient(0, 0, 0, reach);
         for (const [at, share] of GLOW_FALLOFF)
-          edge.addColorStop(at / 1.25, `rgba(63,181,222,${(alpha * share).toFixed(4)})`);
+          edge.addColorStop(at / 1.25, canvasColour({ ...glow, alpha: alpha * share }));
         ctx.fillStyle = edge;
         ctx.fillRect(0, 0, w, reach);
       }
@@ -115,8 +116,8 @@ function shadeTexture(px: number): Texture {
   if (ctx) {
     const k = px / 64;
     const shade = ctx.createRadialGradient(32 * k, 34 * k, 0, 32 * k, 34 * k, 30 * k);
-    shade.addColorStop(0.75, "rgba(0,0,0,0.26)");
-    shade.addColorStop(1, "rgba(0,0,0,0)");
+    shade.addColorStop(0.75, SHADE);
+    shade.addColorStop(1, "transparent");
     ctx.fillStyle = shade;
     ctx.fillRect(0, 0, px, px);
   }
@@ -172,7 +173,7 @@ export class ExportDot extends Container {
     this.#theme = o.theme;
     this.#size = o.size;
     this.#plates = o.plates;
-    this.#xenon = css(o.theme.xenon);
+    this.#xenon = canvasColour(o.theme.xenon);
     const { feed, line } = o.first;
     this.#state = feed.state;
     this.#control = feed.control;
@@ -204,9 +205,11 @@ export class ExportDot extends Container {
       const floor = new Graphics()
         .rect(0, band.y, o.size.w, band.h)
         .fill({ color: o.theme.void.color, alpha: 1 });
-      const spill = new Sprite(spillTexture(o.size.w, band.spillH, SPILL, false));
+      const spill = new Sprite(spillTexture(o.size.w, band.spillH, o.theme.spill, null));
       spill.position.set(0, band.y);
-      const light = new Sprite(spillTexture(o.size.w, band.spillH, SPILL_XENON, true));
+      const light = new Sprite(
+        spillTexture(o.size.w, band.spillH, o.theme.spillXenon, o.theme.xenon),
+      );
       light.position.set(0, band.y);
       this.#light = light;
       this.addChild(floor, spill, light);
