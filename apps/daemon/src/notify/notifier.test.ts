@@ -36,6 +36,7 @@ function fixture(
       },
       current: () => current,
       approvalExpiresAt: () => expires,
+      isRoutine: () => false,
     },
     store: { settings: () => DEFAULT_NOTIFY_SETTINGS },
     mac: {

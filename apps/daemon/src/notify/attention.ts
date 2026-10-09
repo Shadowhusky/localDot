@@ -31,6 +31,7 @@ export class AttentionLedger {
   readonly #items = new Map<string, AttentionItem>();
   readonly #tasks = new Map<string, string | null>();
   readonly #expires = new Map<string, number>();
+  readonly #routines = new Set<string>();
   readonly #listeners = new Set<(item: AttentionItem) => void>();
   readonly #now: () => number;
 
@@ -39,7 +40,10 @@ export class AttentionLedger {
   }
 
   observe(sessionId: string, event: LocalDotEvent): void {
-    if (event.type === "session.start") this.#tasks.set(sessionId, taskTitle(event.data.title));
+    if (event.type === "session.start") {
+      this.#tasks.set(sessionId, taskTitle(event.data.title));
+      if ("origin" in event.data && event.data.origin) this.#routines.add(sessionId);
+    }
     if (event.type === "approval.request") this.#expires.set(sessionId, event.data.expiresAt);
     const next = this.#next(sessionId, this.#items.get(sessionId), event);
     if (next) this.#set(next);
@@ -59,6 +63,11 @@ export class AttentionLedger {
     return this.#items.get(sessionId)?.reason === "approval"
       ? this.#expires.get(sessionId)
       : undefined;
+  }
+
+  // A session a routine or a follow-up started: its results are told through routine.run.
+  isRoutine(sessionId: string): boolean {
+    return this.#routines.has(sessionId);
   }
 
   current(sessionId: string): AttentionItem | undefined {
@@ -162,6 +171,7 @@ export class AttentionLedger {
       this.#items.delete(id);
       this.#tasks.delete(id);
       this.#expires.delete(id);
+      this.#routines.delete(id);
     } else {
       this.#items.delete(id);
       this.#items.set(id, item);
@@ -183,6 +193,7 @@ export class AttentionLedger {
         this.#items.delete(id);
         this.#tasks.delete(id);
         this.#expires.delete(id);
+        this.#routines.delete(id);
       }
     }
   }

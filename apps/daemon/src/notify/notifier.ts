@@ -4,7 +4,7 @@ import {
   NOTIFY_COPY,
   type NotifyTestResult,
 } from "@localdot/protocol";
-import type { AttentionLedger } from "./attention.ts";
+import { type AttentionLedger, taskTitle } from "./attention.ts";
 import type { MacNotifier } from "./mac.ts";
 import { decide, type Notice, noticeOf } from "./policy.ts";
 import type { PresenceBoard } from "./presence.ts";
@@ -16,8 +16,27 @@ import type { WebPushSender } from "./webpush.ts";
 export const SETTLE_MS = 1_500;
 const REMEMBERED_KEYS = 512;
 
+// A routine run's news, as Spec 1's routine.run app event carries it (title: "<name>: <outcome>").
+export interface RoutineRunNotice {
+  runId: string;
+  outcome:
+    | "pending"
+    | "running"
+    | "done"
+    | "needs_you"
+    | "needs_you_expired"
+    | "failed"
+    | "skipped"
+    | "missed"
+    | "budget"
+    | "stopped";
+  sessionId: string | null;
+  notify: boolean;
+  title: string;
+}
+
 export interface NotifierDeps {
-  ledger: Pick<AttentionLedger, "subscribe" | "current" | "approvalExpiresAt">;
+  ledger: Pick<AttentionLedger, "subscribe" | "current" | "approvalExpiresAt" | "isRoutine">;
   store: Pick<NotifyStore, "settings">;
   mac: MacNotifier;
   push: Pick<WebPushSender, "sendAll">;
@@ -39,6 +58,8 @@ export class Notifier {
       this.deps.publish({ type: "attention.change", item, page: false });
       const notice = noticeOf(item);
       if (!notice) return;
+      // A routine's own policy decides what its results say, through routine.run.
+      if (notice.event !== "needs_you" && this.deps.ledger.isRoutine(item.sessionId ?? "")) return;
       const timer = setTimeout(() => {
         this.#timers.delete(timer);
         if (this.deps.ledger.current(item.sessionId ?? "")?.key !== item.key) return;
@@ -94,6 +115,22 @@ export class Notifier {
         }),
       );
     await Promise.allSettled(work);
+  }
+
+  // A routine's result, told as its own notify setting asks. The routine's session raises Needs you
+  // itself (approval, question, take-over); only a question with no session ("Keep running …?")
+  // comes from here.
+  async notifyRoutine(run: RoutineRunNotice): Promise<void> {
+    if (!run.notify || run.outcome === "pending" || run.outcome === "running") return;
+    if (run.outcome === "needs_you" && run.sessionId) return;
+    const needsYou = run.outcome === "needs_you";
+    await this.deliver({
+      key: `routine:${run.runId}:${run.outcome}`,
+      event: needsYou ? "needs_you" : "routine",
+      kind: needsYou ? "needs_you" : "routine",
+      sessionId: run.sessionId,
+      detail: taskTitle(run.title),
+    });
   }
 
   // Send a test ignores the switches and quiet hours: it is how the user checks they work.
