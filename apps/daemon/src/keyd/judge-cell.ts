@@ -31,14 +31,21 @@ export class JudgeCell {
     const cell = await this.#cell(secretId);
     signal.throwIfAborted();
     this.#rest();
-    const reply = await (this.deps.fetch ?? undiciFetch)(`https://${JEV_HOST}${JEV_PATH}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${cell.surrogate}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-      dispatcher: cell.agent,
-      redirect: "error",
-      signal,
-    });
+    let reply: Response;
+    try {
+      reply = await (this.deps.fetch ?? undiciFetch)(`https://${JEV_HOST}${JEV_PATH}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${cell.surrogate}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+        dispatcher: cell.agent,
+        redirect: "error",
+        signal,
+      });
+    } catch (error) {
+      // A listener keyd closed or lost answers nothing; the next question opens a fresh one.
+      if (!signal.aborted) await this.close();
+      throw error;
+    }
     if (!reply.ok) {
       await reply.body?.cancel().catch(() => {});
       // A replaced or removed key ends its stand-in; the next question opens a fresh listener.

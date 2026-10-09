@@ -55,6 +55,14 @@ describe("the judge's keyd listener", () => {
     expect(c.keyd.openCell).toHaveBeenCalledTimes(2);
   });
 
+  it("opens a fresh listener after one that stopped answering", async () => {
+    const c = cell();
+    c.fetch.mockRejectedValueOnce(new Error("connection refused"));
+    await expect(c.judge.post("jev", {}, new AbortController().signal)).rejects.toThrow();
+    await c.judge.post("jev", {}, new AbortController().signal);
+    expect(c.keyd.openCell).toHaveBeenCalledTimes(2);
+  });
+
   it("gives the port back when keyd refuses to open the listener", async () => {
     const c = cell();
     c.keyd.openCell.mockRejectedValueOnce(new Error("no secret jev"));
