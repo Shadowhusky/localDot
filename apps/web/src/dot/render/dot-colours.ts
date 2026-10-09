@@ -1,19 +1,24 @@
+import { parseCssColor } from "../../stage/theme.ts";
+
 // dot's materials where dot.css does not reach: the gradients of DotView's SVG skin and the canvas
 // that paints dot into an exported video, in a worker. The eye colours are dot.css's --dot-eye*.
 export const EYE = "#0b0c0f";
+const GRAPHITE = "#23262c";
 export const EYE_STOPS: [offset: number, color: string][] = [
-  [0, "#23262c"],
+  [0, GRAPHITE],
   [0.42, EYE],
   [1, "#050607"],
 ];
 // What the body darkens toward as dot dims.
 export const VOID = "#0a0b0d";
+// The porcelain, from its lit crown to its shaded foot.
+const PEARL = ["#f6f7f8", "#eceef0", "#d3d6db", "#a9adb5", "#8d929a"] as const;
 export const PEARL_STOPS: [offset: number, color: string][] = [
-  [0, "#f6f7f8"],
-  [0.36, "#eceef0"],
-  [0.68, "#d3d6db"],
-  [0.9, "#a9adb5"],
-  [1, "#8d929a"],
+  [0, PEARL[0]],
+  [0.36, PEARL[1]],
+  [0.68, PEARL[2]],
+  [0.9, PEARL[3]],
+  [1, PEARL[4]],
 ];
 const CLEAR = "rgba(255,255,255,0)";
 // The light along the body's lower left edge.
@@ -36,33 +41,53 @@ export function canvasColour({ color, alpha }: { color: number; alpha: number })
   return `rgba(${(color >> 16) & 255},${(color >> 8) & 255},${color & 255},${alpha})`;
 }
 
-// The props dot works with: flat porcelain and graphite, with one accent the painter supplies.
+// One of these colours at an opacity.
+export function shadeOf(colour: string, alpha: number): string {
+  return canvasColour({ color: parseCssColor(colour).color, alpha });
+}
+
+// A colour part way from a to b, as #rrggbb or rgb()/rgba().
+export function mixColours(a: string, b: string, t: number): string {
+  const x = parseCssColor(a);
+  const y = parseCssColor(b);
+  const k = Math.min(1, Math.max(0, t));
+  const channel = (shift: number) => {
+    const from = (x.color >> shift) & 255;
+    return Math.round(from + (((y.color >> shift) & 255) - from) * k) << shift;
+  };
+  return canvasColour({
+    color: channel(16) | channel(8) | channel(0),
+    alpha: x.alpha + (y.alpha - x.alpha) * k,
+  });
+}
+
+// The props dot works with, in its own porcelain, graphite and ink; the painter supplies the accent.
 export const PROP = {
-  accentRest: "#e8eaed",
-  shade: "rgba(0,0,0,0.32)",
-  graphite: "#26282d",
-  graphiteHi: "#34373d",
-  graphiteLo: "#17181c",
-  hairline: "rgba(255,255,255,0.12)",
-  key: "#dfe2e6",
-  keyDown: "#aeb3ba",
-  keyEdge: "#8d929a",
-  cardDark: "#16171b",
-  cardDarkBar: "#212227",
-  dots: "rgba(255,255,255,0.22)",
-  lineLight: "rgba(205,209,215,0.62)",
-  porcelainHi: "#f4f5f7",
-  porcelainLo: "#d6d9dd",
-  porcelainFold: "#c3c7cd",
-  pageBar: "#d0d3d8",
-  pagePill: "#f7f8f9",
-  pageImage: "rgba(40,44,52,0.13)",
-  pageBack: "#e3e5e8",
-  lineDark: "#41454c",
-  lineMid: "rgba(65,69,76,0.42)",
-  ink: "#0b0c0f",
-  glass: "rgba(225,238,248,0.10)",
-  glassEdge: "rgba(255,255,255,0.3)",
-  fold: "rgba(11,12,15,0.4)",
-  spine: "rgba(0,0,0,0.2)",
+  accentRest: PEARL[1],
+  shade: SHADE,
+  graphite: GRAPHITE,
+  graphiteHi: mixColours(GRAPHITE, PEARL[3], 0.1),
+  graphiteLo: mixColours(GRAPHITE, VOID, 0.6),
+  hairline: shadeOf(PEARL[0], 0.12),
+  key: PEARL[1],
+  keyDown: PEARL[3],
+  keyEdge: PEARL[4],
+  cardDark: mixColours(GRAPHITE, VOID, 0.65),
+  cardDarkBar: mixColours(GRAPHITE, VOID, 0.2),
+  dots: shadeOf(PEARL[0], 0.22),
+  lineLight: shadeOf(PEARL[2], 0.62),
+  porcelainHi: PEARL[0],
+  porcelainLo: PEARL[2],
+  porcelainFold: mixColours(PEARL[2], PEARL[3], 0.45),
+  pageBar: mixColours(PEARL[2], PEARL[3], 0.2),
+  pagePill: PEARL[0],
+  pageImage: shadeOf(GRAPHITE, 0.13),
+  pageBack: PEARL[1],
+  lineDark: mixColours(GRAPHITE, PEARL[3], 0.25),
+  lineMid: shadeOf(GRAPHITE, 0.42),
+  ink: EYE,
+  glass: shadeOf(PEARL[0], 0.1),
+  glassEdge: shadeOf(PEARL[0], 0.3),
+  fold: shadeOf(EYE, 0.4),
+  spine: shadeOf(VOID, 0.2),
 } as const;

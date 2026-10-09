@@ -1,8 +1,9 @@
+import { parseCssColor } from "../../stage/theme.ts";
 import { DotEngine, type DotPose, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import type { DotTool } from "../engine/tools.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
-import { GLOSS_STOPS, PEARL_STOPS, SHEEN_STOPS, VOID } from "./dot-colours.ts";
+import { canvasColour, GLOSS_STOPS, PEARL_STOPS, PROP, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
 import { type PropLayer, paintProps } from "./prop-paint.ts";
@@ -13,7 +14,6 @@ const SVG = "http://www.w3.org/2000/svg";
 const RESYNC_MS = 10_000;
 // Below this activity nothing moves fast enough to need every frame.
 const CALM = 2;
-const XENON = "#3fb5de";
 let uid = 0;
 
 const num = (v: number) => (Math.abs(v) < 1e-4 ? "0" : v.toFixed(3));
@@ -378,10 +378,15 @@ export class DotView implements Frameable {
     return layers;
   }
 
+  // The accent warms to the xenon token; without one it stays porcelain.
   private xenon(): string {
     if (this.xenonColour === null) {
       const value = getComputedStyle(this.root).getPropertyValue("--color-xenon").trim();
-      this.xenonColour = value || XENON;
+      try {
+        this.xenonColour = canvasColour(parseCssColor(value));
+      } catch {
+        this.xenonColour = PROP.accentRest;
+      }
     }
     return this.xenonColour;
   }

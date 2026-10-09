@@ -17,7 +17,7 @@ import {
   pressOf,
   tapOf,
 } from "../engine/tools.ts";
-import { PROP } from "./dot-colours.ts";
+import { mixColours as mix, PROP } from "./dot-colours.ts";
 
 type Context = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 interface Point {
@@ -667,23 +667,4 @@ function book(ctx: Context, p: PropPose, ball: Ball, accent: string): void {
   ctx.moveTo(1.6, 6.2);
   ctx.lineTo(1.9, 9.6);
   ctx.stroke();
-}
-
-// Mixes two colours given as #rrggbb or rgb()/rgba() (whose alpha is dropped).
-function mix(a: string, b: string, t: number): string {
-  const pa = rgb(a);
-  const pb = rgb(b);
-  if (!pa || !pb) return t < 0.5 ? a : b;
-  const c = pa.map((v, i) => Math.round(v + ((pb[i] as number) - v) * clamp(t, 0, 1)));
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
-}
-
-function rgb(colour: string): [number, number, number] | null {
-  const hex = /^#([0-9a-f]{6})$/i.exec(colour.trim());
-  if (hex) {
-    const n = Number.parseInt(hex[1] as string, 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
-  const fn = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(colour.trim());
-  return fn ? [Number(fn[1]), Number(fn[2]), Number(fn[3])] : null;
 }
