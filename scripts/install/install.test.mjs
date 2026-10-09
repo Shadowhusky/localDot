@@ -47,6 +47,7 @@ const REAL = [
   "perl",
   "readlink",
   "rm",
+  "rmdir",
   "sed",
   "sh",
   "shasum",
@@ -119,7 +120,7 @@ function makeOrigin(root) {
   return origin;
 }
 
-async function makeHost({ os = "linux", machine, release } = {}) {
+async function makeHost({ os = "linux", machine, release, prefix: within } = {}) {
   const root = mkdtempSync(join(tmpdir(), "localdot-install-"));
   roots.push(root);
   const home = join(root, "home");
@@ -134,7 +135,7 @@ async function makeHost({ os = "linux", machine, release } = {}) {
     const path = which(tool);
     if (path) symlinkSync(path, join(real, tool));
   }
-  const prefix = join(home, ".local/share/localdot");
+  const prefix = join(home, within ?? ".local/share/localdot");
   const kernel = os === "macos" ? "Darwin" : "Linux";
   const arch = machine ?? (os === "macos" ? "arm64" : "x86_64");
   const nodePlatform = `${os === "macos" ? "darwin" : "linux"}-${arch === "x86_64" ? "x64" : "arm64"}`;
@@ -749,6 +750,80 @@ describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, (
     expect(calls).toContain(`tailscale serve --https=${host.port} off`);
     expect(result.stdout).toContain("docker rm -f");
     expect((await host.run(["--uninstall"])).stdout).toContain("isn't installed");
+  });
+});
+
+describe.concurrent("the install folder", { timeout: 60_000 }, () => {
+  it("refuses a folder that holds other things, and leaves it as it was", async () => {
+    const host = await makeHost({ prefix: ".local" });
+    const keyring = join(host.home, ".local/share/keyrings/login.keyring");
+    mkdirSync(dirname(keyring), { recursive: true });
+    writeFileSync(keyring, "secret\n");
+    const result = await host.run(["--prefix", host.prefix]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("already holds other files (such as share)");
+    expect(readFileSync(keyring, "utf8")).toBe("secret\n");
+    expect(existsSync(join(host.prefix, "app"))).toBe(false);
+    expect(host.calls()).toEqual([]);
+  });
+
+  it("installs into a new folder and uninstalls back to nothing", async () => {
+    const host = await makeHost({ prefix: "apps/localdot" });
+    expect((await host.run(["--prefix", host.prefix])).code).toBe(0);
+    expect((await host.command(["uninstall"])).code).toBe(0);
+    expect(existsSync(host.prefix)).toBe(false);
+    expect(existsSync(join(host.home, "apps"))).toBe(true);
+  });
+
+  it("uninstalls only what it made, even from a folder an older installer shared", async () => {
+    const host = await makeHost({ prefix: ".local" });
+    const keyring = join(host.home, ".local/share/keyrings/login.keyring");
+    mkdirSync(dirname(keyring), { recursive: true });
+    writeFileSync(keyring, "secret\n");
+    mkdirSync(join(host.prefix, "app"), { recursive: true });
+    mkdirSync(join(host.prefix, "bin"), { recursive: true });
+    writeFileSync(join(host.prefix, "bin/keyd"), "");
+    writeFileSync(join(host.prefix, "bin/other-tool"), "");
+    writeFileSync(
+      join(host.prefix, "install.env"),
+      `# Managed by localDot's install.sh\nLOCALDOT_HOME="${host.home}/.localdot"\n`,
+    );
+    const result = await host.run(["--uninstall", "--prefix", host.prefix]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(keyring, "utf8")).toBe("secret\n");
+    expect(existsSync(join(host.prefix, "bin/other-tool"))).toBe(true);
+    for (const made of ["app", "runtime", "bin/keyd", "install.env"])
+      expect(existsSync(join(host.prefix, made)), made).toBe(false);
+    expect(result.stdout).toContain(`Kept ${host.prefix}`);
+  });
+
+  it("runs again after an install that stopped part way", async () => {
+    const host = await makeHost();
+    mkdirSync(join(host.prefix, "app.new"), { recursive: true });
+    expect((await host.run([], { STUB_DOCKER: "stopped" })).code).toBe(1);
+    expect((await host.run()).code).toBe(0);
+  });
+});
+
+describe.concurrent("options it refuses before doing anything", { timeout: 60_000 }, () => {
+  it.each([
+    [["--home", "relative/data"], "must be an absolute path"],
+    [["--home", "/tmp/with space"], "has characters the services can't use"],
+    [["--prefix", "/tmp/a$b"], "has characters the services can't use"],
+    [["--ref", "-upload-pack=x"], "--ref wants a branch, tag or commit name"],
+    [["--ref", "main;reboot"], "--ref wants a branch, tag or commit name"],
+    [["--repo", "--upload-pack=x"], "--repo wants a Git URL or path"],
+    [["--repo", "https://example.test/a b.git"], "--repo wants a Git URL or path"],
+    [["--registry", "GHCR.io/Owner"], "--registry wants a registry and owner"],
+    [["--registry", "ghcr.io/owner;x"], "--registry wants a registry and owner"],
+    [["--port", "80"], "--port wants a number from 1024 to 65535"],
+  ])("%j", async (args, words) => {
+    const host = await makeHost();
+    const result = await host.run(args);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(words);
+    expect(host.calls()).toEqual([]);
+    expect(existsSync(join(host.prefix, "app"))).toBe(false);
   });
 });
 

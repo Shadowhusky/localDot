@@ -94,11 +94,21 @@ function Initialize-Distro {
   }
 }
 
+# A new private file in the Linux user's home, which no other user of the distro can swap.
 function Invoke-Installer([string[]]$Options) {
-  $download = Invoke-Wsl -d $Distro --exec curl -fsSL -o /tmp/localdot-install.sh $InstallUrl
-  if ($download.Code -ne 0) { throw "Couldn't download the installer inside ${Distro}: $($download.Text)" }
-  & wsl.exe -d $Distro --cd "~" --exec bash /tmp/localdot-install.sh @Options
-  if ($LASTEXITCODE -ne 0) { throw "The installer inside $Distro stopped; see its message above." }
+  $made = Invoke-Wsl -d $Distro --cd "~" --exec mktemp .localdot-install.XXXXXX
+  if ($made.Code -ne 0 -or $made.Text -notmatch '^\.localdot-install\.[A-Za-z0-9]{6}$') {
+    throw "Couldn't make a file for the installer inside ${Distro}: $($made.Text)"
+  }
+  $file = $made.Text
+  try {
+    $download = Invoke-Wsl -d $Distro --cd "~" --exec curl -fsSL -o $file $InstallUrl
+    if ($download.Code -ne 0) { throw "Couldn't download the installer inside ${Distro}: $($download.Text)" }
+    & wsl.exe -d $Distro --cd "~" --exec bash $file @Options
+    if ($LASTEXITCODE -ne 0) { throw "The installer inside $Distro stopped; see its message above." }
+  } finally {
+    Invoke-Wsl -d $Distro --cd "~" --exec rm -f $file | Out-Null
+  }
 }
 
 # WSL shuts a Linux down once no Windows program uses it; a hidden wsl.exe keeps its services up.

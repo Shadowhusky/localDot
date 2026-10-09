@@ -36,8 +36,9 @@ function wsl.exe {
     "^--install --distribution (\S+)$" { if ($script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds } }
     "--exec id -u$" { $out = $script:machine.Uid }
     "--exec test -d /run/systemd/system$" { $code = $script:machine.Systemd }
+    "--exec mktemp \.localdot-install\.XXXXXX$" { $out = ".localdot-install.Ab12Cd" }
     "--exec curl " { $code = $script:machine.Download }
-    "--exec bash /tmp/localdot-install.sh" { $code = $script:machine.Installer }
+    "--exec bash \.localdot-install\.Ab12Cd" { $code = $script:machine.Installer }
   }
   $global:LASTEXITCODE = $code
   if ($out) { $out }
@@ -79,8 +80,10 @@ $calls = @($script:calls)
 Check ($calls -contains "wsl --install --distribution Ubuntu") "installs Ubuntu when it is missing"
 Check (@($calls | Where-Object { $_ -like "wsl -d Ubuntu -u root --exec sh -c *systemd=true*" }).Count -eq 1) "turns on systemd as root"
 Check ($calls -contains "wsl --terminate Ubuntu") "restarts the distro so systemd starts"
-Check ($calls -contains "wsl -d Ubuntu --exec curl -fsSL -o /tmp/localdot-install.sh https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh") "downloads install.sh inside Linux"
-Check ($calls -contains "wsl -d Ubuntu --cd ~ --exec bash /tmp/localdot-install.sh --ref v1.2.3 --tailscale") "runs install.sh with the chosen options"
+Check ($calls -contains "wsl -d Ubuntu --cd ~ --exec mktemp .localdot-install.XXXXXX") "makes a private file for install.sh in the Linux home"
+Check ($calls -contains "wsl -d Ubuntu --cd ~ --exec curl -fsSL -o .localdot-install.Ab12Cd https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh") "downloads install.sh into it"
+Check ($calls -contains "wsl -d Ubuntu --cd ~ --exec bash .localdot-install.Ab12Cd --ref v1.2.3 --tailscale") "runs install.sh with the chosen options"
+Check ($calls -contains "wsl -d Ubuntu --cd ~ --exec rm -f .localdot-install.Ab12Cd") "removes the file afterwards"
 Check (@($calls | Where-Object { $_ -like "Register-ScheduledTask localDot wscript.exe *keep-running.vbs*" }).Count -eq 1) "keeps Linux running after sign-in"
 Check ($calls -contains "Start-ScheduledTask localDot") "starts it now the first time"
 $vbs = Get-Content (Join-Path $env:LOCALAPPDATA "localDot/keep-running.vbs") -Raw
@@ -105,6 +108,7 @@ $machine.Distros = @(, @("Ubuntu", "2"))
 $message = ""
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
 Check ($message -like "*installer inside Ubuntu stopped*") "reports a failed Linux install"
+Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec rm -f .localdot-install.Ab12Cd") "removes the file after a failed install too"
 Check (-not (@($script:calls) -match "Register-ScheduledTask")) "registers nothing after a failed install"
 
 Reset-Machine @{}
@@ -112,7 +116,7 @@ $machine.Distros = @(, @("Ubuntu", "2"))
 $Uninstall = [switch]$true
 Install-LocalDot
 $Uninstall = [switch]$false
-Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec bash /tmp/localdot-install.sh --uninstall") "uninstalls inside Linux"
+Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec bash .localdot-install.Ab12Cd --uninstall") "uninstalls inside Linux"
 Check ($script:calls -contains "Unregister-ScheduledTask localDot") "removes the keep-alive task"
 
 Check (-not $EnableSystemd.Contains('"')) "passes the systemd edit without double quotes"

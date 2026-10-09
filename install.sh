@@ -55,7 +55,8 @@ Usage: install.sh [options]
   --prefix <folder>              Where the app is installed (default ~/.local/share/localdot)
   --tailscale                    Reach localDot from your other devices through Tailscale Serve
   --no-tailscale                 Stop serving localDot through Tailscale
-  --registry <registry/owner>    Pull published computer images instead of building them
+  --registry <registry/owner>    Pull published computer images instead of building them.
+                                 Only for a registry you trust: they run as published.
   --skip-images                  Use the computer images already in Docker
   --uninstall                    Remove localDot; keeps your data
   --help                         Show this help
@@ -384,6 +385,31 @@ set_paths() {
 
 owned() { [ -f "$1" ] && grep -qF "$MARKER" "$1"; }
 
+# Uninstall removes what the installer made in the prefix, so a prefix must be localDot's own: an
+# earlier install's, or holding nothing but what an unfinished one left.
+check_prefix() {
+  [ -e "$PREFIX" ] || return 0
+  [ -d "$PREFIX" ] || die "$PREFIX isn't a folder. Choose another one with --prefix."
+  ! owned "$PREFIX/install.env" || return 0
+  local other
+  other=$(cd "$PREFIX" && find . -mindepth 1 -maxdepth 2 \
+    ! -path ./app ! -path './app/*' ! -path ./app.new ! -path './app.new/*' \
+    ! -path ./runtime ! -path './runtime/*' ! -path ./install.env.new ! -path ./bin \
+    ! -path ./bin/keyd ! -path ./bin/keyd.new ! -path ./bin/localdot ! -path ./bin/localdot.new \
+    -print -quit)
+  [ -z "$other" ] || die "$PREFIX already holds other files (such as ${other#./}). localDot needs a folder of its own: choose a new or empty one with --prefix, such as ~/.local/share/localdot."
+}
+
+# Removes only what the installer makes, and the prefix itself once nothing else is in it.
+remove_installed() {
+  rm -rf "$PREFIX/app" "$PREFIX/app.new" "$PREFIX/runtime"
+  rm -f "$PREFIX/install.env" "$PREFIX/install.env.new" "$PREFIX/bin/keyd" "$PREFIX/bin/keyd.new" \
+    "$PREFIX/bin/localdot" "$PREFIX/bin/localdot.new"
+  rmdir "$PREFIX/bin" 2>/dev/null || true
+  rmdir "$PREFIX" 2>/dev/null || true
+  [ ! -d "$PREFIX" ] || say "Kept $PREFIX: it holds files localDot didn't make."
+}
+
 check_services_are_ours() {
   local file
   for file in "$KEYD_FILE" "$DAEMON_FILE"; do
@@ -513,6 +539,8 @@ images_present() {
   done
 }
 
+# Commit tags are mutable and nothing here checks an image against the source, so --registry
+# trusts that registry with the computers.
 pull_image() {
   local remote="$REGISTRY/localdot-$1:$COMMIT"
   docker pull "$remote" && docker tag "$remote" "localdot/$1:dev"
@@ -866,6 +894,7 @@ finish() {
 run_install() {
   detect_platform
   resolve_settings
+  check_prefix
   set_paths
   check_services_are_ours
   check_prerequisites
@@ -903,7 +932,7 @@ run_uninstall() {
   [ "$TAILSCALE" != on ] || stop_tailscale "$PORT"
   local link=$HOME/.local/bin/localdot
   if [ "$(readlink "$link" 2>/dev/null || true)" = "$PREFIX/bin/localdot" ]; then rm -f "$link"; fi
-  rm -rf "$PREFIX"
+  remove_installed
   say "Removed localDot. Your data is still in $LD_HOME; to delete it too: rm -rf $LD_HOME"
   say "Computers and their images stay in Docker. To remove them (and those of any other localDot on this Docker):"
   say "  docker rm -f \$(docker ps -aq --filter label=localdot.role)"

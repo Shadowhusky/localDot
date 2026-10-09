@@ -57,7 +57,8 @@ Open localDot in your Windows browser: `http://127.0.0.1:4750` reaches it inside
 2. Gets Node.js and Go into `~/.local/share/localdot/runtime`, builds the app and the key service.
 3. Builds the computer images. The first build takes 10 to 30 minutes; later ones reuse Docker's
    cache. `--registry <registry/owner>` pulls images published for the exact version instead, and
-   builds any that are missing.
+   builds any that are missing. Use only a registry you trust: its images run as published,
+   without a check against the source.
 4. Starts two services that run whenever you are signed in, or always on Linux:
    - macOS: LaunchAgents `dev.localdot.keyd` and `dev.localdot.daemon`.
    - Linux and WSL 2: systemd user units `localdot-keyd.service` and `localdot-daemon.service`.
@@ -98,8 +99,9 @@ an upgrade that changed the key service. The installer asks for it when you run 
   again does the same. Your settings are kept; options change them, for example
   `localdot update --ref v0.2.0` or `localdot update --tailscale`.
 - `localdot uninstall` (or `install.sh --uninstall`) removes the services, the `localdot`
-  command and `~/.local/share/localdot`. It keeps your data and Docker's computers and images, and
-  prints the commands that delete them.
+  command and what the installer put in `~/.local/share/localdot`. It keeps your data and Docker's
+  computers and images, and prints the commands that delete them. `--prefix` must name a new or
+  empty folder, so uninstalling never removes anything else.
 
 ## The localdot command
 
