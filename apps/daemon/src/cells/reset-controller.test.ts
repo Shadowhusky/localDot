@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -176,6 +176,7 @@ function fixture() {
     retireReplacement: cells.retireReplacement.bind(cells),
     holdReplacement: cells.holdReplacement.bind(cells),
     publishReplacement: cells.publishReplacement.bind(cells),
+    thawReplacement: vi.fn(async (_id: string) => {}),
   };
   const deps = {
     home,
@@ -231,9 +232,43 @@ it("composes real computer/browser retirement, grant closure and durable publica
   expect(f.create).toHaveBeenCalledOnce();
   const restartedHolds = new ComputerResetHolds(f.home);
   const restarted = createComputerResetController({ ...f.deps, holds: restartedHolds });
-  expect(restartedHolds.candidateHeld(fresh)).toBe(true);
-  await restarted.restoreReady();
   expect(restartedHolds.candidateHeld(fresh)).toBe(false);
+  vi.mocked(f.deps.cells.inspectReplacement).mockClear();
+  await restarted.restoreReady();
+  expect(f.deps.cells.inspectReplacement).not.toHaveBeenCalled();
+  expect(restartedHolds.candidateHeld(fresh)).toBe(false);
+  expect(f.cells.get(fresh)?.replacementPending).toBeUndefined();
+  expect(f.create).toHaveBeenCalledOnce();
+});
+it.each([
+  ["thaws a frozen candidate published before release receipts and confirms it", true],
+  ["keeps a frozen unconfirmable candidate held", false],
+])("on restart %s", async (_, recovers) => {
+  const f = fixture();
+  await f.controller.reset(old, confirmation);
+  const receipt = join(f.home, "safety/computer-reset-releases", `${requestId}.json`);
+  unlinkSync(receipt);
+  let frozen = true;
+  vi.mocked(f.deps.cells.inspectReplacement).mockImplementation(async () =>
+    frozen ? "owned" : "ready",
+  );
+  vi.mocked(f.deps.cells.thawReplacement).mockImplementation(async () => {
+    if (!recovers) throw new Error("not exactly owned");
+    frozen = false;
+  });
+  const restartedHolds = new ComputerResetHolds(f.home);
+  const restarted = createComputerResetController({
+    ...f.deps,
+    holds: restartedHolds,
+    readyTimeoutMs: 1000,
+  });
+  expect(restartedHolds.candidateHeld(fresh)).toBe(true);
+  if (recovers) await restarted.restoreReady();
+  else await expect(restarted.restoreReady()).rejects.toThrow(`could not re-verify ${fresh}`);
+  expect(f.deps.cells.thawReplacement).toHaveBeenCalledWith(fresh);
+  expect(restartedHolds.candidateHeld(fresh)).toBe(!recovers);
+  expect(existsSync(receipt)).toBe(recovers);
+  expect(new ComputerResetHolds(f.home).candidateHeld(fresh)).toBe(!recovers);
   expect(f.create).toHaveBeenCalledOnce();
 });
 it("copies the computer's own sign-ins into the shared profile before erasing its old profile", async () => {

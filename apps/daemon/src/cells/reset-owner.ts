@@ -19,6 +19,10 @@ export interface ComputerResetHost {
   retireOld(record: ComputerResetRecord): Promise<void>;
   oldAbsent(record: ComputerResetRecord): Promise<boolean>;
   inspectFresh(record: ComputerResetRecord): Promise<"absent" | "owned" | "ready" | "foreign">;
+  /** The candidate was published in an earlier run and is an ordinary computer now. */
+  finalised(record: ComputerResetRecord): boolean;
+  /** Thaw an exactly owned frozen candidate and wait for it; throws for anything else. */
+  thawFresh(record: ComputerResetRecord): Promise<void>;
   createFresh(record: ComputerResetRecord): Promise<void>;
   retireFresh(record: ComputerResetRecord): Promise<void>;
   publish(record: ComputerResetRecord): void;
@@ -82,12 +86,23 @@ export class ComputerResetOwner {
    * republished; incomplete records retain their holds until an explicit same-request retry. */
   async restoreReady(): Promise<void> {
     if (!this.#available) throw fail();
+    const held: string[] = [];
     for (const raw of this.host.store.list()) {
       const record = ComputerResetRecord.parse(raw);
-      if (record.phase !== "ready" || this.#old.has(record.newCellId)) continue;
+      if (
+        record.phase !== "ready" ||
+        this.#old.has(record.newCellId) ||
+        this.host.finalised(record)
+      )
+        continue;
       if (this.#old.get(record.oldCellId) !== record.requestId) throw fail();
-      await this.#run(record);
+      // A candidate that fails fresh verification keeps its hold; the others still publish.
+      await this.#run(record).catch(() => held.push(record.newCellId));
     }
+    if (held.length)
+      throw new Error(
+        `Computer reset could not re-verify ${held.join(", ")}; it stays held until the same request is retried.`,
+      );
   }
   status(oldCellId: string, requestId: string): ComputerResetRecord | undefined {
     if (
@@ -185,9 +200,17 @@ export class ComputerResetOwner {
       this.#check(record);
       if (record.phase === "ready") {
         // A later reset of the candidate must never be undone by replaying this old request.
-        if (!this.#old.has(record.newCellId)) {
+        if (!this.#old.has(record.newCellId) && !this.host.finalised(record)) {
           if (!(await this.host.oldAbsent(record))) throw fail();
-          if ((await this.host.inspectFresh(record)) !== "ready") throw fail();
+          let fresh = await this.host.inspectFresh(record);
+          if (fresh === "owned") {
+            // A frozen candidate cannot show Ready. Thaw only that, then confirm from the start.
+            this.#check(record);
+            await this.host.thawFresh(record);
+            if (!(await this.host.oldAbsent(record))) throw fail();
+            fresh = await this.host.inspectFresh(record);
+          }
+          if (fresh !== "ready") throw fail();
           this.#check(record);
           this.host.publish(record);
         }

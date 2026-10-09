@@ -96,7 +96,7 @@ export function spendingText(data: {
 }
 // The daily limit belongs to the key layer and is shared by every task, so no raise here moves it.
 const DAY_LIMIT =
-  "All tasks share one daily spending limit, and today's is used up. It resets at midnight; resume the task after that. Raising this task's limit does not change it.";
+  "Today's spending limit is used up. All tasks share it, and it resets at midnight.";
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
 
@@ -125,12 +125,16 @@ export function TaskRecovery({
   controls,
   onSettings,
   onContinue,
+  onCarryOn,
 }: {
   agent: AgentSessionView;
   controls: TaskControls;
   onSettings(trigger: HTMLButtonElement, section?: "models"): void;
   // Sends a follow-up that carries on a task the user's action limit stopped.
   onContinue?(): Promise<boolean>;
+  // Starts the conversation's next task to carry on one that was interrupted; left out while the
+  // computer can't take a task.
+  onCarryOn?(): Promise<boolean>;
 }) {
   const budget = agent.model.budget;
   const need = budget?.data.needUSD;
@@ -142,6 +146,39 @@ export function TaskRecovery({
   const [problem, setProblem] = useState<string | null>(null);
   const [continuing, setContinuing] = useState(false);
   const state = agent.model.state;
+  const send = (run: () => Promise<boolean>) => {
+    if (continuing) return;
+    setContinuing(true);
+    void run().then((sent) => {
+      setContinuing(false);
+      setProblem(sent ? null : "That didn't go through. Try again.");
+    });
+  };
+  if (agent.interrupted && !controls.fenced)
+    return (
+      <section className="thread-recovery" aria-label="Task recovery">
+        <h3 className="thread-recovery-title">I was cut off before I finished</h3>
+        <p className="thread-recovery-text">
+          localDot restarted while I was working. Continue, and I'll pick up where I left off.
+        </p>
+        <div className="thread-recovery-actions">
+          <Button
+            variant="primary"
+            icon="continue"
+            busy={continuing}
+            disabledReason={onCarryOn ? undefined : "Turn on your computer first"}
+            onClick={() => onCarryOn && send(onCarryOn)}
+          >
+            Continue
+          </Button>
+        </div>
+        {problem && (
+          <p className="thread-recovery-reason" role="alert">
+            {problem}
+          </p>
+        )}
+      </section>
+    );
   // While a Pause holds the task, only a spending limit that still holds it needs this panel.
   const hold = agent.snapshot?.pause ? agent.snapshot.budgetHold : undefined;
   const limited = state?.state === "idle" && state.reason === STALL.actionLimit;
@@ -193,14 +230,7 @@ export function TaskRecovery({
       variant="primary"
       busy={continuing}
       disabledReason={onContinue ? undefined : "The task can't continue right now."}
-      onClick={() => {
-        if (!onContinue || continuing) return;
-        setContinuing(true);
-        void onContinue().then((sent) => {
-          setContinuing(false);
-          setProblem(sent ? null : "That didn't go through. Try again.");
-        });
-      }}
+      onClick={() => onContinue && send(onContinue)}
     >
       Continue
     </Button>

@@ -79,7 +79,7 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
 interface ThreadContext {
   announce(text: string): void;
   downloads: ResultDownloads;
-  ended?: "done" | "stopped" | "error";
+  ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk: string | null;
   // The fields of the question dot is waiting on, drawn under it.
   ask?: ReactNode;
@@ -307,7 +307,7 @@ export interface ConversationProps {
   ownerKey?: string;
   // The latest turn's work while its task has not ended.
   live?: LiveWork | null;
-  ended?: "done" | "stopped" | "error";
+  ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk?: string | null;
   api?: ApiClient | null;
   sessionId?: string | null;

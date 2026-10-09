@@ -61,7 +61,7 @@ function useAnchoredTo(
       const parent = own?.offsetParent;
       if (!own || !target || !(parent instanceof HTMLElement)) return;
       // A toast rises with its anchor over a sheet's scrim.
-      own.toggleAttribute("data-lifted", target.hasAttribute("data-lifted"));
+      own.toggleAttribute("data-lifted", !!target.closest("[data-lifted]"));
       const box = parent.getBoundingClientRect();
       const at = target.getBoundingClientRect();
       const top = at.bottom - box.top - parent.clientTop + parent.scrollTop + ANCHOR_GAP;

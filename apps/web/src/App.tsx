@@ -13,6 +13,7 @@ import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
+import { taskStalled } from "./agent/heartbeat.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -140,6 +141,7 @@ const replayAddress = (selected: string | null) =>
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
+const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -481,6 +483,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
   const island = useRef<HTMLDivElement>(null);
+  const toastAnchor = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
@@ -656,6 +659,22 @@ function Theatre({ api }: { api: ApiClient }) {
         mode: "followup",
         text: "Continue.",
       });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // An interrupted task carries on as the conversation's next one.
+  const carryOn = async () => {
+    if (!cell) return false;
+    try {
+      await deliverText(api, {
+        cellId: cell.id,
+        sessionId: null,
+        mode: "new",
+        text: "Continue where you left off.",
+      });
+      session.check();
       return true;
     } catch {
       return false;
@@ -1024,9 +1043,11 @@ function Theatre({ api }: { api: ApiClient }) {
         ? UNCONFIRMED_LINE
         : yours && phone
           ? PHONE_CONTROL_LINE
-          : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-            ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
-            : "";
+          : !replayId && taskStalled(agent, performance.now())
+            ? SLOW_LINE
+            : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+              ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
+              : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const asked = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
@@ -1195,17 +1216,17 @@ function Theatre({ api }: { api: ApiClient }) {
                     onExitFull={fullScreen.exit}
                     onRowWidth={setIslandWidth}
                     fields={askFields}
+                    noticesRef={toastAnchor}
                     notices={
                       <SafetyNotes
                         safety={safety}
                         agent={agent}
                         cell={cell}
                         visible={sheetsClosed}
-                        replaying={!!replayId}
                       />
                     }
                   />
-                  <Toaster anchor={island} />
+                  <Toaster anchor={toastAnchor} />
                 </>
               }
               band={
@@ -1430,6 +1451,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   controls={controls}
                   onSettings={showSettings}
                   onContinue={continueTask}
+                  onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
                 />
               }
               ask={askThread}

@@ -98,15 +98,15 @@
   }
 }
 
-/* Notes drop from the island: under it, or under the decision it grew into. */
+/* Notes drop from the island: under it, or under the decision it grew into. Toasts hang from the
+   foot of this column, so a note and a toast stack rather than overlap. */
 .island-notices {
   position: absolute;
-  top: calc(var(--_drop, var(--island-h)) + 8px);
+  top: var(--_drop, var(--island-h));
   left: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: calc(var(--spacing) * 2);
   width: max-content;
   max-width: min(480px, 100vw - 32px);
   translate: -50% 0;
@@ -118,6 +118,7 @@
   align-items: center;
   gap: calc(var(--spacing) * 2.5);
   max-width: 100%;
+  margin-top: calc(var(--spacing) * 2);
   min-height: 40px;
   padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1) calc(var(--spacing) * 1)
     calc(var(--spacing) * 3.5);

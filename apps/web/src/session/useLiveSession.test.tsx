@@ -213,7 +213,7 @@ it("keeps a task the daemon lost on show, at rest, so the next message starts a 
   f.run(null);
   await wait(5_000);
   expect(f.view.result.current).toMatchObject({ sessionId: SESSION, resting: true, ended: true });
-  expect(f.view.result.current.model.ended).toEqual({ t: 0, reason: "stopped" });
+  expect(f.view.result.current.model.ended).toEqual({ t: 0, reason: "interrupted" });
 });
 
 it("clears the page for a new conversation once the live task has ended, and never brings it back", async () => {

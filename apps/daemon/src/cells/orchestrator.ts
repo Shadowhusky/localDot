@@ -1696,6 +1696,47 @@ export class CellOrchestrator {
       return "foreign";
     }
   }
+  /** Thaws a held reset candidate only when every object is exactly owned and only the desktop is
+   * frozen, with Resume's key order: revoke while frozen, refresh, then thaw. It never publishes;
+   * the caller must still confirm Ready. */
+  thawReplacement(id: string): Promise<void> {
+    return this.#withBrowser(id, async () => {
+      const refused = () =>
+        new CellControlConflict("the reset computer cannot be resumed for confirmation");
+      const record = this.#record(id),
+        keyd = this.#keyd;
+      if (
+        !record?.ownership ||
+        !keyd ||
+        this.#disposed ||
+        this.#fenced(id) ||
+        !this.#candidateHeld(id)
+      )
+        throw refused();
+      const objects = await inspectOwnedCell(this.#docker, id, record.docker, record.ownership);
+      const container = (role: string) =>
+        objects.find((o) => o.kind === "containers" && o.role === role);
+      const desktop = container("desktop"),
+        gate = container("gate");
+      if (
+        objects.length !== 5 ||
+        !gate?.running ||
+        gate.paused !== false ||
+        !desktop?.running ||
+        desktop.paused !== true
+      )
+        throw refused();
+      await this.deps.verifyRuntime?.(record);
+      await keyd.revoke(id);
+      if (!(await keyd.isWired(record))) throw refused();
+      await keyd.refresh(record);
+      if (this.#disposed || this.#fenced(id) || !this.#candidateHeld(id)) throw refused();
+      await this.#docker.request({
+        method: "POST",
+        path: objectPath("containers", record.ownership.desktop, "unpause"),
+      });
+    });
+  }
   retireReset(input: ComputerResetRecord, retire: () => Promise<void>): Promise<void> {
     const reset = ComputerResetRecord.parse(input),
       id = reset.oldCellId;

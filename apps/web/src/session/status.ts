@@ -59,6 +59,7 @@ export type TaskRow =
   | "done"
   | "ready"
   | "stopped"
+  | "interrupted"
   | "failed";
 
 export interface TaskHud {
@@ -185,11 +186,14 @@ function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): stri
   return step && pausing(model, step, at, nowMs) ? "pausing" : at.state;
 }
 
+// A task whose log stops short of its end: localDot went away under it.
+const INTERRUPTED_CAPTION = "I was cut off before I finished. Shall I continue?";
+
 // What a task paused on, other than its own Pause or a question, says on the HUD.
 const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> = {
   [STALL.budget]: {
     row: "limit",
-    label: "Reached your spending limit",
+    label: "Spending limit reached",
     caption: "I stopped at the spending limit you set.",
   },
   [STALL.modelBusy]: {
@@ -283,6 +287,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (model.ended && model.ended.t <= nowMs) {
     if (model.ended.reason === "done") return finished("done", "Done", "Done.");
     if (model.ended.reason === "stopped") return finished("stopped", "Task stopped", "Stopped.");
+    if (model.ended.reason === "interrupted")
+      return finished("interrupted", "Task interrupted", INTERRUPTED_CAPTION);
     return finished("failed", "Task failed", "The task failed.");
   }
   const at = agentStateAt(model, nowMs);
@@ -444,6 +450,7 @@ export const TASK_POSE: Record<TaskRow, DotState> = {
   observing: "observing",
   done: "idle",
   stopped: "idle",
+  interrupted: "idle",
   ready: "idle",
   failed: "error",
 };
@@ -465,11 +472,13 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
   observing: "working",
   done: "done",
   stopped: null,
+  interrupted: null,
   ready: null,
   failed: "blocked",
 };
 // Rows whose caption is dot's own words: its narration, its question or its note to the user.
 const DOT_SPEAKS = new Set<TaskRow>([
+  "interrupted",
   "limit",
   "retrying",
   "recovery",
