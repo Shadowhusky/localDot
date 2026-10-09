@@ -15,17 +15,12 @@ const TEXT_W = 880;
 const CAPTION_CHARS = 60;
 const CHIP_ALPHA = 0.92;
 
-// What the one chip says: why nothing was recorded during a gap, else the step under way and how
-// fast it plays.
-export function burnInText(
-  label: string | null,
-  caption: string | null,
-  gap: RecordingGapReason | null,
-): string | null {
+// What the one chip says: why nothing was recorded during a gap, else the step under way when the
+// viewer asked for it.
+export function burnInText(caption: string | null, gap: RecordingGapReason | null): string | null {
   const card = gap ? gapCard(gap) : null;
   if (card) return `${card.title}\n${card.body}`;
-  const parts = [caption && clipText(caption, CAPTION_CHARS), label].filter(Boolean);
-  return parts.length ? parts.join(" · ") : null;
+  return caption ? clipText(caption, CAPTION_CHARS) : null;
 }
 
 // One caption chip, bottom-centre on the HUD's solid material, in the interface's own typeface.
@@ -59,8 +54,8 @@ export class ExportBurnIn extends Container {
     this.visible = false;
   }
 
-  draw(label: string | null, caption: string | null, gap: RecordingGapReason | null): void {
-    const text = burnInText(label, caption, gap);
+  draw(caption: string | null, gap: RecordingGapReason | null): void {
+    const text = burnInText(caption, gap);
     this.visible = text !== null;
     if (text === null || this.#text.text === text) return;
     this.#text.text = text;
