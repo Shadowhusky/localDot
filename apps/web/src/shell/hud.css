@@ -255,6 +255,11 @@
     width: 172px;
   }
 
+  /* Its label never changes while the computer is the user's, so it needs no room to spare. */
+  .island[data-shape="control"] .island-label {
+    width: 120px;
+  }
+
   .island-elapsed {
     width: 50px;
     padding-left: calc(var(--spacing) * 1.5);

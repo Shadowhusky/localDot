@@ -74,6 +74,8 @@ interface Question {
 export interface TakeoverOutcome {
   note?: string;
   by: "user" | "stop";
+  // The user said "Not now" to dot's hand-off.
+  declined?: true;
 }
 export interface PlanItem {
   id: string;
@@ -1398,10 +1400,13 @@ export class AgentSession {
     record.returning = true;
     return this.#endControl(record, note);
   }
+  // `declined`: the user said "Not now" to dot's hand-off; control they took themselves has nothing
+  // to decline.
   async handback(
     requestId: string,
     note: string | undefined,
     signal?: AbortSignal,
+    declined = false,
   ): Promise<boolean> {
     const record = this.#control;
     if (
@@ -1450,14 +1455,14 @@ export class AgentSession {
     // Native takeover can retire its brain. With no current generation, keep the physical
     // screens and recorder fenced until prepareScreens confirms the replacement's grant.
     if (this.#screens) this.lastFrameId = undefined;
-    return this.#endControl(record, note);
+    return this.#endControl(record, note, declined && !record.user);
   }
   // A hand-back that cannot finish leaves the user in control, free to try again.
   #keepControl(record: ControlRecord): false {
     if (this.#control === record && !this.stopped) record.returning = false;
     return false;
   }
-  #endControl(record: ControlRecord, note: string | undefined): boolean {
+  #endControl(record: ControlRecord, note: string | undefined, declined = false): boolean {
     // Persist the user's hand-back note before waking any replacement brain.
     if (note) this.post("steer", note);
     this.append(
@@ -1467,6 +1472,7 @@ export class AgentSession {
         ...(note ? { note } : {}),
         by: "user",
         ...(record.typed ? { typed: true } : {}),
+        ...(declined ? { declined: true } : {}),
       },
       record.step,
     );
@@ -1482,7 +1488,11 @@ export class AgentSession {
       this.#note(handedBack(Date.now() - user.since, user.asked));
       if (this.safetyPause) this.#safetyChanged();
     }
-    record.resolve({ ...(note ? { note } : {}), by: "user" });
+    record.resolve({
+      ...(note ? { note } : {}),
+      by: "user",
+      ...(declined ? { declined: true } : {}),
+    });
     this.#wake();
     return true;
   }

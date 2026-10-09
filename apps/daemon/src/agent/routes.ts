@@ -753,6 +753,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         parsed.requestId,
         parsed.note === undefined ? undefined : redact(parsed.note, s.id, s.cellId, 1000),
         c.req.raw.signal,
+        parsed.declined === true,
       );
       return ok ? c.body(null, 204) : c.text("the screen is not handed over", 409);
     }),

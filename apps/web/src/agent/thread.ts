@@ -32,8 +32,9 @@ export type ThreadItem =
   | (Item<"routine"> & { proposal: RoutineProposal })
   // What started a task the user didn't: a routine or a follow-up.
   | (Item<"origin"> & { origin: SessionOrigin })
-  // The computer changing hands: the user took it, or handed it back.
-  | (Item<"control"> & { took: boolean; at?: number })
+  // The computer changing hands: the user took it or dot handed it over (`handed`), or the user
+  // handed it back, maybe saying "Not now" to dot's hand-off (`declined`).
+  | (Item<"control"> & { took: boolean; at?: number; handed?: boolean; declined?: boolean })
   | (Item<"work"> & {
       turn: string;
       steps: readonly WorkStep[];
@@ -43,6 +44,12 @@ export type ThreadItem =
     });
 
 export type ThreadKind = ThreadItem["kind"];
+
+// What the divider says where the computer changed hands.
+export function controlLine(item: Extract<ThreadItem, { kind: "control" }>): string {
+  if (item.took) return item.handed ? "dot handed you the computer" : "You took control";
+  return item.declined ? "You said not now" : "You handed back";
+}
 
 export interface ThreadRow {
   item: ThreadItem;
@@ -136,6 +143,7 @@ export function threadItems(
           speaker: "user",
           at: took.time,
           took: true,
+          ...(takeover.by === "user" ? {} : { handed: true }),
         },
         took.seq,
       );
@@ -147,6 +155,7 @@ export function threadItems(
           speaker: "user",
           at: takeover.endTime,
           took: false,
+          ...(takeover.end.declined ? { declined: true } : {}),
         },
         takeover.endSeq,
       );
