@@ -35,6 +35,7 @@ import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFi
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
 import {
+  controlLine,
   type ThreadItem,
   type ThreadKind,
   type ThreadRow,
@@ -241,12 +242,16 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
     draw: ({ item }) => (
       <p className="thread-divider">
         <span>
-          {item.took ? "You took control" : "You handed back"}
+          {controlLine(item)}
           {item.at !== undefined && <time className="num"> · {timeLabel(item.at)}</time>}
         </span>
       </p>
     ),
-    same: (was, now) => was.took === now.took && was.at === now.at,
+    same: (was, now) =>
+      was.took === now.took &&
+      was.at === now.at &&
+      was.handed === now.handed &&
+      was.declined === now.declined,
   },
   work: {
     draw: ({ item, thread }) => (

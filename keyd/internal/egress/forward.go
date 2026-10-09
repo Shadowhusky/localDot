@@ -108,6 +108,9 @@ func (c *Cell) swap(h http.Header, swaps []keys.Entry) (int, string) {
 		return http.StatusServiceUnavailable, ReasonNoAudit
 	}
 	if err := keys.ApplySwaps(h, swaps, c.deps.Vault.Value); err != nil {
+		if errors.Is(err, vault.ErrLocked) {
+			return http.StatusLocked, ReasonVaultLocked
+		}
 		return http.StatusBadGateway, ReasonSecret
 	}
 	return 0, ""

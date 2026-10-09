@@ -19,7 +19,7 @@ export type DotState =
   | "error"
   | "annoyed";
 
-export type Reaction = "success" | "error" | "acknowledged" | "live" | "dispatch";
+export type Reaction = "success" | "error" | "acknowledged" | "live" | "dispatch" | "wince";
 
 // Levels of detail by CSS size; see render/lod.ts.
 export type Lod = "glyph" | "badge" | "presence" | "glance" | "hero";
@@ -168,6 +168,10 @@ export const SPRINGS = {
   hop: spring(0.8, 0.3),
   snap: spring(1, 0.07),
   shake: spring(0.35, 0.11),
+  // A prop comes out of dot's edge and tucks back in, without overshoot.
+  propIn: spring(1, 0.42),
+  propOut: spring(1, 0.3),
+  scroll: spring(1, 0.32),
   // Reduced motion keeps short critically damped morphs in place of every other spring.
   reduced: spring(1, 0.24),
 } as const;

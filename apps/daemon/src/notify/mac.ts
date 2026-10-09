@@ -1,6 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 
 export type MacResult = "shown" | "failed" | "unavailable";
+// This computer's own banner: macOS Notification Center, or a Linux desktop's notifications.
 export interface MacNotifier {
   readonly available: boolean;
   show(title: string, body: string): Promise<MacResult>;
@@ -40,7 +41,27 @@ export function cleanLine(text: string, max: number): string {
 export function macNotifier(
   opts: { platform?: NodeJS.Platform; execFile?: ExecFile; now?: () => number } = {},
 ): MacNotifier {
-  const available = (opts.platform ?? process.platform) === "darwin";
+  return bannerCommand({
+    available: (opts.platform ?? process.platform) === "darwin",
+    file: OSASCRIPT,
+    args: (title, body) => [...SCRIPT, title, body],
+    env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, LANG: "en_US.UTF-8" },
+    failure: "a Mac notification could not be shown",
+    ...opts,
+  });
+}
+
+// One program that shows a banner, at most PER_MINUTE a minute, its text as plain arguments.
+export function bannerCommand(opts: {
+  available: boolean;
+  file: string;
+  args: (title: string, body: string) => string[];
+  env: NodeJS.ProcessEnv;
+  failure: string;
+  execFile?: ExecFile;
+  now?: () => number;
+}): MacNotifier {
+  const { available } = opts;
   const run = opts.execFile ?? (nodeExecFile as unknown as ExecFile);
   const now = opts.now ?? Date.now;
   const recent: number[] = [];
@@ -52,21 +73,12 @@ export function macNotifier(
       while (recent.length && (recent[0] ?? 0) <= at - 60_000) recent.shift();
       if (recent.length >= PER_MINUTE) return Promise.resolve("failed");
       recent.push(at);
-      const args = [...SCRIPT, cleanLine(title, 64) || "localDot", cleanLine(body, 160) || " "];
+      const args = opts.args(cleanLine(title, 64) || "localDot", cleanLine(body, 160) || " ");
       return new Promise((resolve) => {
-        run(
-          OSASCRIPT,
-          args,
-          {
-            timeout: 5_000,
-            maxBuffer: 16 * 1024,
-            env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, LANG: "en_US.UTF-8" },
-          },
-          (error) => {
-            if (error) console.error("a Mac notification could not be shown");
-            resolve(error ? "failed" : "shown");
-          },
-        );
+        run(opts.file, args, { timeout: 5_000, maxBuffer: 16 * 1024, env: opts.env }, (error) => {
+          if (error) console.error(opts.failure);
+          resolve(error ? "failed" : "shown");
+        });
       });
     },
   };

@@ -31,6 +31,13 @@
   transform-origin: 50% 87.5%;
 }
 
+.dot-props {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .dot-shadow {
   display: none;
   transform-origin: 50% 92%;

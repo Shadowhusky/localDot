@@ -69,6 +69,16 @@ export function PresenceLayer({ place: asked, provisional = false, ...now }: Pre
   useEffect(() => {
     if (feed.nod) presence.current?.view.react("acknowledged");
   }, [feed.nod]);
+  const tool = feed.tool ?? null;
+  useEffect(() => presence.current?.view.setTool(tool), [tool]);
+  const beatKey = feed.beat?.key;
+  const beatN = feed.beat?.n;
+  useEffect(() => {
+    if (beatKey !== undefined && beatN !== undefined) presence.current?.view.beat(beatKey, beatN);
+  }, [beatKey, beatN]);
+  useEffect(() => {
+    if (feed.failed) presence.current?.view.react("wince");
+  }, [feed.failed]);
 
   useEffect(() => {
     const p = presence.current;

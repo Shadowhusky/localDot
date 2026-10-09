@@ -1,5 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { ulid } from "@localdot/protocol";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { request } from "node:http";
+import { join } from "node:path";
+import { type BootConfig, DEFAULT_AGENT_LIMITS, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CellRecord, type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
@@ -116,7 +118,10 @@ function required<T>(x: T | undefined): T {
   if (x === undefined) throw new Error("fixture missing value");
   return x;
 }
-function setup(transfers?: Transfers) {
+function setup(
+  transfers?: Transfers,
+  extra: (home: string) => Partial<AgentWiringDeps> = () => ({}),
+) {
   const home = mkdtempSync("/tmp/ld-agent-wiring-"),
     log = new EventLog(home),
     live = new LiveSessions(),
@@ -168,6 +173,7 @@ function setup(transfers?: Transfers) {
     killSwitch: { isBusy: () => busy, stopSession: async () => undefined },
     keydPorts: { from: 4791, to: 4796 },
     toolPort: 0,
+    ...extra(home),
   };
   const agent = createAgent(deps);
   fixtures.push({ agent, log, home });
@@ -394,4 +400,74 @@ it("real idle-upload admission cannot pass a completed drain and overlap the rep
     wait.mockRestore();
     await until(() => mocks.opens.length === 2);
   }
+});
+
+function overSocket(socketPath: string, path: string, token: string) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = request(
+      { socketPath, path, agent: false, headers: { authorization: `Bearer ${token}` } },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      },
+    );
+    req.once("error", reject);
+    req.end();
+  });
+}
+
+it("serves the tool API on the gates' socket too, and removes the socket when it closes", async () => {
+  const relay = async () =>
+    ({ kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" }) as const;
+  const h = setup(undefined, (home) => ({ relay, toolSocket: join(home, "relay", "tool.sock") }));
+  expect(mocks.brainDeps?.relay).toBe(relay);
+  const socket = required(h.deps.toolSocket);
+  await h.agent.start();
+  const sessionId = h.log.createSession("over the socket");
+  const session = new AgentSession(sessionId, h.cellId, "over the socket", h.log);
+  const boot: BootConfig = {
+    sessionId,
+    task: "over the socket",
+    models: {
+      main: {
+        route: "fixture",
+        client: "openai-compatible",
+        model: "fixture",
+        surrogate: "s".repeat(43),
+        computer: "none",
+        coords: "pixels",
+        vision: false,
+        reasoning: false,
+        contextTokens: 200000,
+        maxOutputTokens: 200,
+      },
+    },
+    proxy: { url: "http://172.30.4.10:3128", token: "p".repeat(43) },
+    memory: { user: "", memory: "" },
+    skills: [],
+    limits: DEFAULT_AGENT_LIMITS,
+    resume: false,
+    inboxAfter: 0,
+  };
+  session.publishBrain(session.beginBrain(), {
+    toolToken: "t".repeat(43),
+    brainCellId: ulid(),
+    boot,
+  });
+  h.agent.runner.sessions.set(sessionId, session);
+  try {
+    const reply = await overSocket(socket, "/v1/boot", "t".repeat(43));
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(reply.body)).toEqual(boot);
+    expect((await overSocket(socket, "/v1/boot", "u".repeat(43))).status).toBe(401);
+  } finally {
+    h.agent.runner.sessions.clear();
+    session.stop();
+  }
+  await h.agent.close();
+  expect(existsSync(socket)).toBe(false);
 });

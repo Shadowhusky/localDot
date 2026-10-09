@@ -213,6 +213,34 @@ it("shrinks to the full screen shape, with Take control as an icon and a way out
   );
 });
 
+it("offers Not now beside Hand back while the user holds the computer dot handed over", () => {
+  const onDecline = vi.fn();
+  const view = render(
+    <HudIsland
+      {...props({
+        shape: "control",
+        status: status("control", "You're in control"),
+        onDecline,
+      })}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+  view.rerender(
+    <HudIsland
+      {...props({
+        shape: "control",
+        status: status("control", "You're in control"),
+        decline: {},
+        onDecline,
+      })}
+    />,
+  );
+  const buttons = screen.getAllByRole("button").map((button) => button.textContent);
+  expect(buttons.slice(-2)).toEqual(["Not now", "Hand back"]);
+  screen.getByRole("button", { name: "Not now" }).click();
+  expect(onDecline).toHaveBeenCalledOnce();
+});
+
 it("rises over a sheet's scrim while it is up, and settles back as the sheet closes", async () => {
   render(<HudIsland {...props()} />);
   const anchor = document.querySelector(".island-anchor");

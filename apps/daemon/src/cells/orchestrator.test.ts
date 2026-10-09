@@ -5,6 +5,7 @@ import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "./docker.ts";
 import { CellOrchestrator, UnknownCellError } from "./orchestrator.ts";
+import type { GateRelay } from "./relay.ts";
 import { ISOLATED_GATEWAY_OPTION } from "./spec.ts";
 import { CellStore } from "./store.ts";
 import { type FakeDocker, startFakeDocker } from "./testing/fake-docker.ts";
@@ -88,6 +89,7 @@ async function setup(
     makeStore?: (home: string) => CellStore;
     externalKeydPorts?: () => Iterable<number>;
     labels?: Record<string, string>;
+    relay?: () => Promise<GateRelay>;
   } = {},
 ) {
   fake = await startFakeDocker();
@@ -108,6 +110,7 @@ async function setup(
     watchEveryMs: 0,
     restartBackoffMs: opts.restartBackoffMs ?? [0, 0],
     ...(opts.externalKeydPorts ? { externalKeydPorts: opts.externalKeydPorts } : {}),
+    ...(opts.relay ? { relay: opts.relay } : {}),
   });
   made.push(orchestrator);
   orchestrator.subscribe((cell) => changes.push(cell));
@@ -276,6 +279,20 @@ describe("CellOrchestrator.create", () => {
     expect(fake.state.networks.size).toBe(0);
     expect(fake.state.containers.size).toBe(0);
     expect(fake.state.volumes.size).toBe(0);
+  });
+
+  it("gives the gate keyd's socket on Docker Engine", async () => {
+    const relay = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" } as const;
+    const { orchestrator, store } = await setup({ relay: async () => relay });
+    const cell = await orchestrator.create({ scale: 2 });
+    const record = store.get(cell.id);
+    const gate = fake.state.calls.find(
+      (c) => c.path === "/containers/create" && c.query.get("name") === record?.docker.gate,
+    )?.body as { Env: string[]; HostConfig: { Mounts?: unknown } };
+    expect(gate.Env).toContain(`LD_KEYD_SOCKET=/run/localdot/keyd/${record?.keydPort}.sock`);
+    expect(gate.HostConfig.Mounts).toEqual([
+      { Type: "bind", Source: "/h/keyd/relay", Target: "/run/localdot/keyd", ReadOnly: true },
+    ]);
   });
 
   it("gives two concurrent creates different keyd ports", async () => {

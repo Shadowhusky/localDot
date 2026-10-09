@@ -127,10 +127,11 @@ export function takeReason({ task, ready, pause }: TakeReasonInput): string | un
 }
 
 // Take control works whatever dot is doing. dot handing the computer over makes it the porcelain
-// action; while dot waits on an approval it answers that approval: the user does the step
-// themselves.
+// action, which the page presses itself; while dot waits on an approval it answers that approval:
+// the user does the step themselves.
 export function takeSlot(status: Status, { decision = null, blocked, taking }: TakeInput = {}) {
-  if (status.row === "takeover") return { primary: true } satisfies TakeSlot;
+  if (status.row === "takeover")
+    return { primary: true, ...(taking ? { busy: true } : {}) } satisfies TakeSlot;
   if (decision === "approval") return { primary: false } satisfies TakeSlot;
   if (taking) return { primary: false, busy: true } satisfies TakeSlot;
   return { primary: false, ...(blocked ? { reason: blocked } : {}) } satisfies TakeSlot;

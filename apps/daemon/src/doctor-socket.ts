@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { dockerSocketPath } from "./cells/docker.ts";
 
 export interface DockerSocket {
@@ -22,6 +22,7 @@ export interface SocketProbes {
 export function findDockerSocket(
   env: NodeJS.ProcessEnv = process.env,
   probes: SocketProbes = hostProbes(env),
+  platform: NodeJS.Platform = process.platform,
 ): DockerSocket {
   const path = dockerSocketPath(env);
   const fromEnv = env.DOCKER_HOST !== undefined;
@@ -32,19 +33,38 @@ export function findDockerSocket(
   if (probes.exists(path)) return { path, source };
   // With Docker Desktop's "Allow the default Docker socket to be used" off, /var/run/docker.sock is
   // missing and only the CLI's context knows where the engine listens.
-  for (const found of otherSockets(env, probes)) {
+  for (const found of otherSockets(env, probes, platform)) {
     if (found.path !== path && probes.exists(found.path)) return found;
   }
   return { path, source };
 }
 
-function otherSockets(env: NodeJS.ProcessEnv, probes: SocketProbes): DockerSocket[] {
+function otherSockets(
+  env: NodeJS.ProcessEnv,
+  probes: SocketProbes,
+  platform: NodeJS.Platform,
+): DockerSocket[] {
   const context = probes.context();
   const fromContext = context?.host.startsWith("unix://")
     ? [{ path: context.host.slice("unix://".length), source: `the docker context ${context.name}` }]
     : [];
-  const userSocket = join(env.HOME || homedir(), ".docker", "run", "docker.sock");
-  return [...fromContext, { path: userSocket, source: "Docker Desktop's user socket" }];
+  const home = env.HOME || homedir();
+  if (platform !== "linux")
+    return [
+      ...fromContext,
+      { path: join(home, ".docker", "run", "docker.sock"), source: "Docker Desktop's user socket" },
+    ];
+  const runtime = env.XDG_RUNTIME_DIR;
+  return [
+    ...fromContext,
+    ...(runtime && isAbsolute(runtime)
+      ? [{ path: join(runtime, "docker.sock"), source: "rootless Docker's socket" }]
+      : []),
+    {
+      path: join(home, ".docker", "desktop", "docker.sock"),
+      source: "Docker Desktop's user socket",
+    },
+  ];
 }
 
 export function hostProbes(env: NodeJS.ProcessEnv): SocketProbes {

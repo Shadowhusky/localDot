@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -211,6 +212,14 @@ func admitted(scope Scope, starting bool) (journal, error) {
 	return record, nil
 }
 
+// The Keychain on macOS; elsewhere keyd chooses the keyring or its encrypted file.
+func vaultMode(goos string) string {
+	if goos == "darwin" {
+		return "keychain"
+	}
+	return "auto"
+}
+
 func configurationID(c configuration) string {
 	s := c.Settings
 	// Match the installer's JSON.stringify field order and Unicode spelling exactly.
@@ -296,7 +305,7 @@ func Prepare(scope Scope, executingPath string, lookup func(string) string) (*La
 		"LOCALDOT_SERVICE_CONFIGURATION=" + scope.Configuration, "LOCALDOT_SERVICE_ROLE=" + scope.Role, "LOCALDOT_SERVICE_ATTEMPT=" + record.ID,
 		"LOCALDOT_SERVICE_LEASE_FD=" + strconv.Itoa(int(lease.Fd()))}
 	program := helper
-	args := []string{helper, "-home", scope.Home, "-vault", "keychain", "-ports", "4760-4789"}
+	args := []string{helper, "-home", scope.Home, "-vault", vaultMode(runtime.GOOS), "-ports", "4760-4789"}
 	if scope.Role == "daemon" {
 		program = s.Node
 		args = []string{s.Node, filepath.Join(release, "app", "dist", "daemon.mjs")}

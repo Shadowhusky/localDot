@@ -19,6 +19,7 @@ import {
   KeydRouteModels,
   KeydSecrets,
   KeydStatus,
+  KeydVault,
   ModelAdmissionSnapshot,
   ModelAdmissionWrite,
   type Sealed,
@@ -105,6 +106,12 @@ export class KeydClient {
 
   status(): Promise<KeydStatus> {
     return this.#json("GET", "/v1/status", undefined, KeydStatus);
+  }
+
+  // The passphrase arrives sealed to keyd, so this daemon never reads it. A new vault takes the
+  // first passphrase it receives as its own.
+  unlockVault(sealed: Sealed): Promise<KeydVault> {
+    return this.#json("POST", "/v1/vault/unlock", { sealed }, KeydVault);
   }
 
   async secrets(): Promise<KeydRecord[]> {

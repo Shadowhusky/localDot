@@ -15,6 +15,7 @@ import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
+import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -23,6 +24,7 @@ import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
 import { useHandBack } from "./agent/useHandBack.ts";
+import { useHandOff } from "./agent/useHandOff.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -90,9 +92,11 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
+import { useSignIn } from "./settings/useSignIn.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
@@ -655,6 +659,14 @@ function Theatre({ api }: { api: ApiClient }) {
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
   const yours = !!takeover && takeover === heldByUser(agent.model);
+  useHandOff({
+    sessionId: agent.sessionId,
+    fresh: agent.fresh,
+    offered: yours ? undefined : takeover,
+    shown: !replayId && !settings.open,
+    canTake: controls.canTake,
+    take: controls.take,
+  });
   const askDraft = useAskDraft(question);
   const answer = useRef(controls.answer);
   answer.current = controls.answer;
@@ -831,6 +843,18 @@ function Theatre({ api }: { api: ApiClient }) {
   const ownHold =
     agent.snapshot?.holder === true ||
     (session.ended && agent.history === true && agent.model.messages.size === 0);
+  // Sign-ins go to the web browser, where they are kept: from Settings, or from the desktop's own
+  // browser while the user holds the computer with no task.
+  const signIn = useSignIn(api, askCell, () => {
+    if (settings.open) settings.close();
+    session.check();
+  });
+  useDesktopSignIn({
+    api,
+    cellId: askCell,
+    watching: manualLive && shownScreen === "desktop" && !settings.open && !replayId,
+    offer: ownHold ? (site) => void signIn.start(site) : undefined,
+  });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {
     if (!shownTask) return false;
@@ -1189,9 +1213,10 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
-  const asked = agent.model.pendingAsk
+  const pendingQuestion = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
+  const asked = pendingQuestion && markdownToPlain(pendingQuestion);
   const pause = pauseSlot({
     pause: safety.pause,
     canPause: safety.canPause,
@@ -1259,29 +1284,6 @@ function Theatre({ api }: { api: ApiClient }) {
         note={
           shownRecording?.note ??
           (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
-        }
-        lead={
-          shownRecording && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon="continue"
-              disabledReason={
-                shownRecording.verdict !== "live" &&
-                shownRecording.sessionId !== conversation.sessions.at(-1)
-                  ? conversationReason
-                  : undefined
-              }
-              onClick={() =>
-                shownRecording.verdict === "live" ||
-                shownRecording.sessionId === conversation.sessions.at(-1)
-                  ? selectReplay(null)
-                  : replayContinue.run(shownRecording.sessionId)
-              }
-            >
-              Continue
-            </Button>
-          )
         }
         mode={replayId ? "replay" : "watch"}
         watchAttention={
@@ -1357,11 +1359,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     pause={pause}
                     take={takeState}
                     handBack={handBack.slot}
+                    decline={handBack.declinable ? handBack.declineSlot : undefined}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStopTask={taskStop}
                     onTake={take}
                     onHandBack={() => void handBack.run()}
+                    onDecline={() => void handBack.decline()}
                     onComputer={onComputer}
                     decision={grown}
                     full={full}
@@ -1419,6 +1423,12 @@ function Theatre({ api }: { api: ApiClient }) {
                           onRightClick={(on) => setPointerMode(on ? "right" : "click")}
                           handBack={handBack.slot}
                           onHandBack={() => void handBack.run()}
+                          {...(handBack.declinable
+                            ? {
+                                decline: handBack.declineSlot,
+                                onDecline: () => void handBack.decline(),
+                              }
+                            : {})}
                         />
                       ) : undefined
                     }
@@ -1771,6 +1781,7 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
           notifications={settingsNotifications}
           accounts={settingsAccounts}
+          signIn={signIn}
           rules={rules}
           spending={
             settings.draft

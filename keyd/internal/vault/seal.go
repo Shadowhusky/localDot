@@ -54,6 +54,18 @@ func (o *Opener) PublicKey() string {
 
 // Open decrypts a value sealed for rec: a blob sealed for another id or binding does not open.
 func (o *Opener) Open(s Sealed, rec Record) ([]byte, error) {
+	return o.open(s, sealAAD(rec))
+}
+
+// OpenPassphrase decrypts a key vault passphrase. Its AAD is no record's, so a sealed secret never
+// opens as a passphrase, nor a passphrase as a secret.
+func (o *Opener) OpenPassphrase(s Sealed) ([]byte, error) {
+	return o.open(s, []byte(passphraseAAD))
+}
+
+const passphraseAAD = sealInfo + ":vault-passphrase"
+
+func (o *Opener) open(s Sealed, aad []byte) ([]byte, error) {
 	if s.V != 1 {
 		return nil, fmt.Errorf("vault: sealed version %d, want 1", s.V)
 	}
@@ -71,7 +83,7 @@ func (o *Opener) Open(s Sealed, rec Record) ([]byte, error) {
 	if err != nil {
 		return nil, errSealed
 	}
-	plain, err := aead.Open(nil, nonce, ct, sealAAD(rec))
+	plain, err := aead.Open(nil, nonce, ct, aad)
 	if err != nil {
 		return nil, errSealed
 	}
@@ -80,6 +92,15 @@ func (o *Opener) Open(s Sealed, rec Record) ([]byte, error) {
 
 // Seal encrypts plaintext for rec to the holder of publicKey, as the UI does.
 func Seal(publicKey string, rec Record, plaintext []byte) (Sealed, error) {
+	return seal(publicKey, sealAAD(rec), plaintext)
+}
+
+// SealPassphrase encrypts a key vault passphrase to the holder of publicKey, as the CLI does.
+func SealPassphrase(publicKey string, passphrase []byte) (Sealed, error) {
+	return seal(publicKey, []byte(passphraseAAD), passphrase)
+}
+
+func seal(publicKey string, aad, plaintext []byte) (Sealed, error) {
 	recipientBytes, err := b64.DecodeString(publicKey)
 	if err != nil {
 		return Sealed{}, err
@@ -100,7 +121,7 @@ func Seal(publicKey string, rec Record, plaintext []byte) (Sealed, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return Sealed{}, err
 	}
-	ct := aead.Seal(nil, nonce, plaintext, sealAAD(rec))
+	ct := aead.Seal(nil, nonce, plaintext, aad)
 	return Sealed{V: 1, EPK: b64.EncodeToString(eph.PublicKey().Bytes()), Nonce: b64.EncodeToString(nonce), CT: b64.EncodeToString(ct)}, nil
 }
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import type { CellState, CellSummary } from "../cells/types.ts";
-import { BrowserWarmer, type BrowserWarmerDeps, WARM_SWEEP_MS } from "./warmer.ts";
+import { BrowserWarmer, type BrowserWarmerDeps, SILENT_SWEEPS, WARM_SWEEP_MS } from "./warmer.ts";
 
 const A = "01JXYZ0000000000000000000A",
   B = "01JXYZ0000000000000000000B";
@@ -29,6 +29,16 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
     holder = parent;
     return { parentCellId: parent } as ReadyBrowser;
   });
+  const health = vi.fn(
+    async (parent: string): Promise<"ready" | "unready" | "silent" | undefined> =>
+      running.has(parent) ? "ready" : undefined,
+  );
+  const stop = vi.fn(async (parent: string) => {
+    running.delete(parent);
+    if (holder === parent) holder = undefined;
+    for (const listener of browserListeners) listener(parent);
+  });
+  const report = vi.fn();
   const deps: BrowserWarmerDeps = {
     cells: {
       list: () => [...table.values()],
@@ -40,6 +50,8 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
     },
     browser: {
       start,
+      stop,
+      health,
       endpoints: (parent) =>
         running.has(parent) ? ({ parentCellId: parent } as ReadyBrowser) : undefined,
       get: (parent) => {
@@ -53,10 +65,14 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
       },
     },
     available: () => true,
+    report,
   };
   return {
     deps,
     start,
+    stop,
+    health,
+    report,
     set(entry: CellSummary) {
       table.set(entry.id, entry);
       for (const listener of cellListeners) listener(entry);
@@ -159,5 +175,50 @@ describe("the web browser starts with its computer", () => {
     allowed = true;
     await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
     expect(f.start).toHaveBeenCalledWith(A);
+  });
+});
+
+// A browser whose controls had failed stayed listed as running, so the warmer never started it
+// again and every switch to it failed at once until the computer restarted.
+describe("a running web browser that stops working starts again", () => {
+  it("restarts one that can no longer be controlled at the next sweep", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.health.mockResolvedValueOnce("unready");
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+    expect(f.stop).toHaveBeenCalledWith(A);
+    expect(f.report).toHaveBeenCalledWith(
+      "the web browser can no longer be controlled; starting it again",
+    );
+  });
+
+  it("gives one that doesn't answer another sweep before restarting it", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.health.mockResolvedValue("silent");
+    for (let sweep = 1; sweep < SILENT_SWEEPS; sweep++)
+      await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    expect(f.stop).not.toHaveBeenCalled();
+    f.health.mockResolvedValueOnce("ready");
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    for (let sweep = 1; sweep < SILENT_SWEEPS; sweep++)
+      await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    expect(f.stop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+  });
+
+  it("says why a start failed", async () => {
+    const f = fixture();
+    f.start.mockRejectedValueOnce(new Error("Browser start failed during readiness"));
+    warm(f.deps);
+    await vi.waitFor(() =>
+      expect(f.report).toHaveBeenCalledWith(
+        "the web browser couldn't start: Browser start failed during readiness",
+      ),
+    );
   });
 });

@@ -10,6 +10,7 @@ import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-re
 import type { Images } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
+import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { captureComputerResetSource } from "./reset-source.ts";
 import { newCellToken } from "./secrets.ts";
 import {
@@ -64,6 +65,8 @@ export interface OrchestratorDeps {
   docker: DockerClient;
   store: CellStore;
   images: Images;
+  // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
+  relay?: () => Promise<GateRelay>;
   streamFullcolor?: boolean;
   probeDesktopd(endpoint: CellEndpoints["desktopd"]): Promise<DesktopdHealth | undefined>;
   probeStream(endpoint: CellEndpoints["stream"]): Promise<boolean>;
@@ -202,6 +205,7 @@ export class CellOrchestrator {
   readonly #docker: DockerClient;
   readonly #store: CellStore;
   readonly #images: Images;
+  readonly #relay: () => Promise<GateRelay>;
   readonly #streamFullcolor: boolean;
   readonly #probeDesktopd: OrchestratorDeps["probeDesktopd"];
   readonly #probeStream: OrchestratorDeps["probeStream"];
@@ -240,6 +244,7 @@ export class CellOrchestrator {
     this.#docker = deps.docker;
     this.#store = deps.store;
     this.#images = deps.images;
+    this.#relay = deps.relay ?? (() => Promise.resolve(HOST_RELAY));
     this.#streamFullcolor = deps.streamFullcolor ?? false;
     this.#probeDesktopd = deps.probeDesktopd;
     this.#probeStream = deps.probeStream;
@@ -557,7 +562,7 @@ export class CellOrchestrator {
         },
       };
       for (const [name, spec] of [
-        [names.gate, gateSpec(record, this.#images.gate)],
+        [names.gate, gateSpec(record, this.#images.gate, await this.#relay())],
         [
           names.desktop,
           desktopSpec(record, this.#images.desktop, { fullcolor: this.#streamFullcolor }),

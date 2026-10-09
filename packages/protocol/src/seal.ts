@@ -52,13 +52,31 @@ export interface SealOptions {
   nonce?: Uint8Array<ArrayBuffer>;
 }
 
-export async function sealSecret(
+export function sealSecret(
   publicKey: string,
   binding: SecretBinding,
   value: string,
   opts: SealOptions = {},
 ): Promise<Sealed> {
-  const aad = utf8(`${SEAL_INFO}:${bindingJson(binding)}`);
+  return seal(publicKey, utf8(`${SEAL_INFO}:${bindingJson(binding)}`), value, opts);
+}
+
+// A key vault passphrase seals under an AAD no binding has (a binding's JSON starts with "["), so
+// keyd never opens a passphrase as a secret or a secret as a passphrase.
+export function sealPassphrase(
+  publicKey: string,
+  passphrase: string,
+  opts: SealOptions = {},
+): Promise<Sealed> {
+  return seal(publicKey, utf8(`${SEAL_INFO}:vault-passphrase`), passphrase, opts);
+}
+
+async function seal(
+  publicKey: string,
+  aad: Uint8Array<ArrayBuffer>,
+  value: string,
+  opts: SealOptions,
+): Promise<Sealed> {
   const { subtle } = globalThis.crypto;
   const keydRaw = fromBase64url(publicKey);
   const keyd = await subtle.importKey(

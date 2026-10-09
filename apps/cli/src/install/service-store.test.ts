@@ -102,19 +102,16 @@ it("publishes complete private definitions, reopens from authority and preserves
   expect(record.id).toMatch(/^[a-f0-9]{32}$/);
   expect(defs.daemon.ownerId).toBe(record.id);
   expect((await lstat(join(f.settings.state, "service-owner.json"))).mode & 0o777).toBe(0o600);
-  expect((await readdir(dirname(defs.daemon.plist))).sort()).toEqual([
-    "daemon.plist",
-    "keyd.plist",
-  ]);
+  expect((await readdir(dirname(defs.daemon.file))).sort()).toEqual(["daemon.plist", "keyd.plist"]);
   for (const role of ["daemon", "keyd"] as const) {
-    expect(await readFile(defs[role].plist, "utf8")).toBe(defs[role].contents);
-    expect((await lstat(defs[role].plist)).mode & 0o777).toBe(0o600);
+    expect(await readFile(defs[role].file, "utf8")).toBe(defs[role].contents);
+    expect((await lstat(defs[role].file)).mode & 0o777).toBe(0o600);
   }
   const log = join(f.settings.state, "logs/daemon.log");
   await writeFile(log, "retain log");
-  const before = await lstat(defs.daemon.plist);
+  const before = await lstat(defs.daemon.file);
   expect(await prepareInstalledServices(f.settings, f.identity, signal())).toEqual(defs);
-  expect((await lstat(defs.daemon.plist)).ino).toBe(before.ino);
+  expect((await lstat(defs.daemon.file)).ino).toBe(before.ino);
   expect(await readFile(log, "utf8")).toBe("retain log");
   expect(await reopenInstalledServices(f.settings, f.identity, signal())).toEqual(defs);
   expect(hooks.read).toHaveBeenCalledTimes(3);
@@ -126,8 +123,8 @@ it("changing runtime configuration creates another immutable directory with the 
   const settings = { ...f.settings, port: 4883 };
   const second = await prepareInstalledServices(settings, f.identity, signal());
   expect(second.daemon.target).toBe(first.daemon.target);
-  expect(second.daemon.plist).not.toBe(first.daemon.plist);
-  expect(await readFile(first.daemon.plist, "utf8")).toBe(first.daemon.contents);
+  expect(second.daemon.file).not.toBe(first.daemon.file);
+  expect(await readFile(first.daemon.file, "utf8")).toBe(first.daemon.contents);
   expect(await reopenInstalledServices(f.settings, f.identity, signal())).toEqual(first);
   expect(await reopenInstalledServices(settings, f.identity, signal())).toEqual(second);
 });
@@ -137,13 +134,13 @@ it.each(["bytes", "extra", "mode", "link", "hardlink", "missing"])(
   async (kind) => {
     const f = await fixture(),
       defs = await prepareInstalledServices(f.settings, f.identity, signal());
-    const file = defs.daemon.plist;
+    const file = defs.daemon.file;
     if (kind === "bytes") await writeFile(file, "foreign");
     if (kind === "extra") await writeFile(join(dirname(file), "foreign.txt"), "retain");
     if (kind === "mode") await chmod(file, 0o644);
     if (kind === "link") {
       await unlink(file);
-      await symlink(defs.keyd.plist, file);
+      await symlink(defs.keyd.file, file);
     }
     if (kind === "hardlink") await link(file, join(f.root, "retain.plist"));
     if (kind === "missing") await unlink(file);
@@ -243,10 +240,7 @@ it("cancellation before publishing cannot leave a partially eligible definition"
   );
   hooks.rename.mockReset();
   const defs = await prepareInstalledServices(f.settings, f.identity, signal());
-  expect((await readdir(dirname(defs.daemon.plist))).sort()).toEqual([
-    "daemon.plist",
-    "keyd.plist",
-  ]);
+  expect((await readdir(dirname(defs.daemon.file))).sort()).toEqual(["daemon.plist", "keyd.plist"]);
 });
 
 it("recovers a complete publication after failed parent sync and requires a successful resync", async () => {
@@ -269,7 +263,7 @@ it("recovers a complete publication after failed parent sync and requires a succ
   );
   hooks.sync.mockReset();
   const defs = await prepareInstalledServices(f.settings, f.identity, signal());
-  expect(dirname(defs.daemon.plist)).toBe(join(publishedParent, names[0] as string));
+  expect(dirname(defs.daemon.file)).toBe(join(publishedParent, names[0] as string));
   expect(hooks.sync).toHaveBeenCalledWith(publishedParent);
 });
 
@@ -283,7 +277,7 @@ it("authorizes only reverified owned definitions before invoking the fixed servi
   ).resolves.toEqual({ code: 0, stdout: "", stderr: "" });
   expect(hooks.command).toHaveBeenCalledWith(defs.daemon, "bootstrap", requestSignal);
   hooks.command.mockClear();
-  await writeFile(defs.keyd.plist, "foreign");
+  await writeFile(defs.keyd.file, "foreign");
   await expect(
     runInstalledServiceCommand(f.settings, f.identity, "daemon", "bootout", signal()),
   ).rejects.toThrow();

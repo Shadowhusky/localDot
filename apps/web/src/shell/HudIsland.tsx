@@ -52,11 +52,14 @@ export interface HudIslandProps {
   take: TakeSlot;
   // In Take control's place while the user has the computer.
   handBack?: { reason?: string; busy?: boolean };
+  // Beside Hand back while the computer is one dot handed over: the user won't do it now.
+  decline?: { reason?: string; busy?: boolean };
   onPause(): void;
   onContinue(): void;
   onStopTask(): void;
   onTake(): void;
   onHandBack?(): void;
+  onDecline?(): void;
   onComputer: Record<ComputerKind, () => void>;
   // What the island grows into while dot waits on the user; the row stays as its header.
   decision?: ReactNode;
@@ -84,11 +87,13 @@ export function HudIsland({
   pause,
   take,
   handBack = {},
+  decline,
   onPause,
   onContinue,
   onStopTask,
   onTake,
   onHandBack,
+  onDecline,
   onComputer,
   decision,
   notices,
@@ -170,8 +175,10 @@ export function HudIsland({
   const yours = shape === "control";
   const task = shape === "task" || yours;
   const control = phone ? 28 : 32;
-  // A phone keeps Hand back in its toolbar, so its island ends at Stop.
+  // A phone keeps Hand back in its toolbar, so while the computer is the user's its island is the
+  // label, the time and Stop, then Not now for a computer dot handed over (design-v2 §11 F).
   const handSlot = !(yours && phone);
+  const declining = yours ? decline : undefined;
   return (
     <div className="island-anchor" ref={anchor} data-full={full || undefined}>
       <div
@@ -208,12 +215,14 @@ export function HudIsland({
             <span className="island-divider" aria-hidden="true" />
             {task && (
               <>
-                <PauseButton
-                  slot={pause}
-                  size={control}
-                  onPause={onPause}
-                  onContinue={onContinue}
-                />
+                {handSlot && (
+                  <PauseButton
+                    slot={pause}
+                    size={control}
+                    onPause={onPause}
+                    onContinue={onContinue}
+                  />
+                )}
                 <IconButton
                   variant="glass"
                   size={control}
@@ -230,13 +239,27 @@ export function HudIsland({
                   }
                   onClick={onStopTask}
                 />
-                {handSlot && !(full && !yours) && (
+                {(handSlot || !!declining) && !(full && !yours) && (
                   <span className="island-divider" aria-hidden="true" />
                 )}
               </>
             )}
+            {declining && (
+              <Button
+                className="island-action"
+                variant="glass"
+                round
+                size={phone ? "sm" : "md"}
+                busy={declining.busy}
+                disabledReason={declining.reason}
+                onClick={onDecline}
+              >
+                Not now
+              </Button>
+            )}
             {yours && handSlot && (
               <Button
+                className="island-action"
                 variant="primary"
                 round
                 size="md"

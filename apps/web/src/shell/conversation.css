@@ -499,6 +499,31 @@
   margin-top: 0;
 }
 
+/* Where room is short, such as an Activity note: headings keep the surface's own type and blocks
+   sit 4 apart. */
+.safe-markdown[data-compact] > * + * {
+  margin-top: var(--spacing);
+}
+
+.safe-markdown[data-compact] :is(h3, h4) {
+  font: inherit;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: inherit;
+}
+
+.safe-markdown[data-compact] > :is(h3, h4):not(:first-child) {
+  margin-top: calc(var(--spacing) * 2);
+}
+
+.safe-markdown[data-compact] > :is(h3, h4) + * {
+  margin-top: calc(var(--spacing) * 0.5);
+}
+
+.safe-markdown[data-compact] :is(ul, ol):not(.md-tasks) {
+  gap: calc(var(--spacing) * 0.5);
+  padding-left: calc(var(--spacing) * 4);
+}
+
 /* A code block: its language and Copy in a 30 px head, the code scrolling inside the block only. */
 .md-code {
   display: flex;
@@ -756,12 +781,11 @@
 }
 
 .result-summary {
+  min-width: 0;
   color: var(--color-fg-1);
   font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
   letter-spacing: var(--text-reading--letter-spacing);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  text-wrap: pretty;
 }
 
 .deliverables {

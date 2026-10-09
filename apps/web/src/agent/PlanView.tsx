@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
+import { markdownToPlain } from "./markdown.ts";
 
 export interface PlanItem {
   readonly id: string;
@@ -72,7 +73,7 @@ export function PlanView({
           return (
             <li key={item.id} className="plan-item" data-state={item.status}>
               <StatusGlyph state={state} label={word} />
-              <span className="plan-text">{item.text}</span>
+              <span className="plan-text">{markdownToPlain(item.text)}</span>
             </li>
           );
         })}

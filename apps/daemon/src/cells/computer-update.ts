@@ -14,6 +14,7 @@ import {
   UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
+import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
 import type { CellRecord } from "./types.ts";
@@ -110,6 +111,8 @@ export interface ComputerUpdatesDeps {
   docker: Docker;
   images: Images;
   stream: StreamOptions;
+  // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
+  relay?: () => Promise<GateRelay>;
   everyMs?: number;
 }
 
@@ -118,6 +121,7 @@ export interface ComputerUpdatesDeps {
 export class ComputerUpdates {
   readonly #docker: Docker;
   readonly #images: Images;
+  readonly #relay: () => Promise<GateRelay>;
   readonly #stream: StreamOptions;
   readonly #everyMs: number;
   readonly #available = new Map<string, boolean>();
@@ -128,6 +132,7 @@ export class ComputerUpdates {
   constructor(deps: ComputerUpdatesDeps) {
     this.#docker = deps.docker;
     this.#images = deps.images;
+    this.#relay = deps.relay ?? (() => Promise.resolve(HOST_RELAY));
     this.#stream = deps.stream;
     this.#everyMs = deps.everyMs ?? 60_000;
     try {
@@ -230,7 +235,7 @@ export class ComputerUpdates {
       for (const role of ROLES) {
         const spec =
           role === "gate"
-            ? gateSpec(record, this.#images.gate)
+            ? gateSpec(record, this.#images.gate, await this.#relay())
             : desktopSpec(record, this.#images.desktop, this.#stream);
         await this.#docker
           .request({

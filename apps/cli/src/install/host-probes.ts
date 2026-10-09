@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access, lstat, realpath, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize } from "node:path";
+import { detectHost } from "../../../daemon/src/platform/host.ts";
 import { readHostCommand } from "./host-command.ts";
 import { readHostDockerFacts } from "./host-docker-facts.ts";
 import type { DockerFacts, InstallPreflightProbes } from "./preflight.ts";
@@ -93,9 +94,27 @@ export async function installDockerSocket(
     )
       throw error;
   }
-  for (const path of [join(homedir(), ".docker/run/docker.sock"), "/var/run/docker.sock"])
+  for (const path of defaultDockerSockets(process.platform, env))
     if (await socketExists(path)) return path;
-  throw new Error("Docker Desktop is not available");
+  throw new Error("Docker is not available");
+}
+
+// Where Docker listens when no context says: Docker Desktop's user socket on macOS; on Linux the
+// system engine, then rootless Docker in the runtime directory, then Docker Desktop for Linux.
+export function defaultDockerSockets(platform: string, env: NodeJS.ProcessEnv): string[] {
+  if (platform !== "linux")
+    return [join(homedir(), ".docker/run/docker.sock"), "/var/run/docker.sock"];
+  const runtime = env.XDG_RUNTIME_DIR;
+  return [
+    "/var/run/docker.sock",
+    ...(runtime &&
+    isAbsolute(runtime) &&
+    normalize(runtime) === runtime &&
+    !containsControl(runtime)
+      ? [join(runtime, "docker.sock")]
+      : []),
+    join(homedir(), ".docker/desktop/docker.sock"),
+  ];
 }
 
 export function installHostProbes(
@@ -110,6 +129,10 @@ export function installHostProbes(
         architecture: process.arch,
         nodeVersion: process.versions.node,
       };
+      if (base.platform === "linux") {
+        const host = detectHost();
+        return { ...base, wsl: host.wsl, systemd: host.systemd };
+      }
       if (base.platform !== "darwin") return base;
       const result = await readHostCommand({ kind: "macos" }, signal);
       return { ...base, macOSVersion: result.trim() };

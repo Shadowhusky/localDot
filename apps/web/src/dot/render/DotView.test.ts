@@ -105,6 +105,39 @@ describe("DotView", () => {
     expect(second.root.dataset.skin).toBe("loading");
   });
 
+  it("paints a tool's prop behind and in front of the body, sized once, and clears it when put down", () => {
+    const calls: string[] = [];
+    const context = new Proxy(
+      {},
+      {
+        get: (_target, name) =>
+          name === "createLinearGradient" || name === "createRadialGradient"
+            ? () => ({ addColorStop() {} })
+            : (..._args: unknown[]) => calls.push(String(name)),
+        set: () => true,
+      },
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      (() => context) as never,
+    );
+    const { root, view } = mount({ size: 96, state: "acting" });
+    drive(view, T0, T0 + 200);
+    expect(root.querySelector(".dot-props")).toBeNull();
+    view.setTool("typing");
+    drive(view, clock, clock + 400);
+    const layers = [...root.children].map((node) => node.className);
+    expect(layers.indexOf("dot-props dot-props-back")).toBeLessThan(layers.indexOf("dot-body"));
+    expect(layers.indexOf("dot-props dot-props-front")).toBeGreaterThan(layers.indexOf("dot-body"));
+    const front = root.querySelector<HTMLCanvasElement>(".dot-props-front");
+    expect(front?.width).toBe(96);
+    expect(calls).toContain("roundRect");
+    view.setTool(null);
+    drive(view, clock, clock + 4000);
+    calls.length = 0;
+    drive(view, clock, clock + 200);
+    expect(calls).not.toContain("roundRect");
+  });
+
   it("draws the face with the badge rules and moves to richer detail as it grows", () => {
     const { root, view } = mount();
     expect(root.dataset.lod).toBe("badge");

@@ -255,6 +255,11 @@
     width: 172px;
   }
 
+  /* Its label never changes while the computer is the user's, so it needs no room to spare. */
+  .island[data-shape="control"] .island-label {
+    width: 120px;
+  }
+
   .island-elapsed {
     width: 50px;
     padding-left: calc(var(--spacing) * 1.5);
@@ -294,21 +299,20 @@
     opacity var(--dur-default) var(--ease-standard);
 }
 
+/* Faded, they still take the pointer: a tap where one was shows it and lands on its button rather
+   than going through to the computer. */
 .app[data-full][data-still] :is(.island-anchor, .control-strip) {
   opacity: 0;
-  pointer-events: none;
 }
 
 .app[data-full][data-still]
   :is(.island-anchor, .control-strip):has(:focus-visible, [aria-expanded="true"]) {
   opacity: 1;
-  pointer-events: auto;
 }
 
 @media (hover: hover) {
   .app[data-full][data-still] :is(.island-anchor, .control-strip):hover {
     opacity: 1;
-    pointer-events: auto;
   }
 }
 

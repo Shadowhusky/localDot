@@ -46,6 +46,9 @@ export type CodexLaunchFailure =
   | "process_exited"
   | "shutdown_failed";
 export const CHATGPT_NEEDS_APPLE_SILICON = "ChatGPT plan needs a Mac with Apple silicon.";
+export const CHATGPT_NOT_ON_LINUX = "ChatGPT plan isn't available on Linux yet.";
+export const CHATGPT_NOT_HERE = "ChatGPT plan isn't available on this computer.";
+export const NO_CA_BUNDLE = "The system certificate bundle is unavailable.";
 export const CHATGPT_INSTALL_FIRST = "Install ChatGPT support first.";
 const MESSAGES: Record<CodexLaunchFailure, string> = {
   cancelled: "The Codex launch was cancelled.",
@@ -72,13 +75,23 @@ export interface HarnessAvailability {
   readonly available: boolean;
   readonly reason?: string;
 }
+// Codex runs only where localDot can also contain it, through keyd's native supervisor: macOS on
+// Apple silicon. Linux has a pinned build, but keyd has no supervisor there yet.
+export function platformUnavailable(
+  platform: string = process.platform,
+  arch: string = process.arch,
+): string | undefined {
+  if (platform === "darwin")
+    return arch === "arm64" && codexBuild(platform, arch) ? undefined : CHATGPT_NEEDS_APPLE_SILICON;
+  return platform === "linux" ? CHATGPT_NOT_ON_LINUX : CHATGPT_NOT_HERE;
+}
 export function harnessAvailability(
   platform: string = process.platform,
   arch: string = process.arch,
   caBundle = CA_BUNDLE,
 ): HarnessAvailability {
-  if (platform !== "darwin" || arch !== "arm64" || !codexBuild(platform, arch))
-    return { available: false, reason: CHATGPT_NEEDS_APPLE_SILICON };
+  const reason = platformUnavailable(platform, arch);
+  if (reason) return { available: false, reason };
   try {
     const file = lstatSync(caBundle);
     if (
@@ -91,7 +104,7 @@ export function harnessAvailability(
       throw new Error();
     accessSync(caBundle, constants.R_OK);
   } catch {
-    return { available: false, reason: "The system certificate bundle is unavailable." };
+    return { available: false, reason: NO_CA_BUNDLE };
   }
   return { available: true };
 }

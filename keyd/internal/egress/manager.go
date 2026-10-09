@@ -54,6 +54,8 @@ type ManagerDeps struct {
 	AskHold time.Duration
 	// CellsDir holds <cell>/ca.pem, the public half of each cell's CA.
 	CellsDir string
+	// RelayDir holds each cell's <port>.sock for gates on Docker Engine; empty means none.
+	RelayDir string
 }
 
 type OpenRequest struct {
@@ -158,7 +160,7 @@ func (m *Manager) Open(req OpenRequest) (Opened, error) {
 	if token == req.CaptureToken {
 		return Opened{}, errors.New("egress: the proxy token collided with the capture token")
 	}
-	cell, err := Open(Config{CellID: req.CellID, Policy: p, Port: req.Port, Token: token, CaptureToken: req.CaptureToken, CA: ca, AskHold: m.d.AskHold}, m.d.Deps)
+	cell, err := Open(Config{CellID: req.CellID, Policy: p, Port: req.Port, RelayDir: m.d.RelayDir, Token: token, CaptureToken: req.CaptureToken, CA: ca, AskHold: m.d.AskHold}, m.d.Deps)
 	if err != nil {
 		return Opened{}, err
 	}

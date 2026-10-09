@@ -34,6 +34,14 @@ describe("credential service health polling", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it("passes on where saved keys live and whether they wait for localdot unlock", async () => {
+    const vault = { backend: "file", state: "locked", key: "passphrase" } as const;
+    const monitor = new KeydMonitor({ status: async () => ({ ...status(), vault }) });
+    expect((await monitor.refresh()).vault).toEqual(vault);
+    const mac = new KeydMonitor({ status: async () => status() });
+    expect("vault" in (await mac.refresh())).toBe(false);
+  });
+
   it("reports audit and hairpin changes, but ignores a polling timestamp alone", async () => {
     const read = vi.fn<() => Promise<KeydStatus>>().mockResolvedValue(status());
     const monitor = new KeydMonitor({ status: read });

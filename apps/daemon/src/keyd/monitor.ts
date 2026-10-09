@@ -1,4 +1,4 @@
-import type { HairpinGuard } from "@localdot/protocol";
+import type { HairpinGuard, KeydVault } from "@localdot/protocol";
 import type { KeydClient } from "./client.ts";
 
 export interface KeydHealth {
@@ -10,6 +10,8 @@ export interface KeydHealth {
   // Whether keyd knows the public address it denies (hairpin NAT); a keyd that does not say is
   // reported as unknown, never as active.
   hairpin?: HairpinGuard;
+  // Off macOS: where saved keys live, and whether they wait for localdot unlock.
+  vault?: KeydVault;
   error?: string;
 }
 
@@ -57,6 +59,7 @@ export class KeydMonitor {
         sealKey: s.sealKey,
         audit: s.audit,
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
+        ...(s.vault ? { vault: s.vault } : {}),
       };
     } catch (err) {
       next = { online: false, error: err instanceof Error ? err.message : String(err) };

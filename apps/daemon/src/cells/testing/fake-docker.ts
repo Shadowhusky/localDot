@@ -62,6 +62,8 @@ export interface FakeDockerState {
   imageInspect?: (reference: string, reply: Record<string, unknown>) => unknown;
   // The image ID a reference names now; a rebuilt image moves its tag to a new ID.
   imageIds: Map<string, string>;
+  // Extra /info fields, such as the limits a native engine supports.
+  info?: Record<string, unknown>;
 }
 
 export interface FakeDocker {
@@ -160,6 +162,7 @@ export async function startFakeDocker(
         ID: "fake-docker-engine",
         OSType: state.version.Os,
         Architecture: state.version.Arch,
+        ...state.info,
       });
     const image = /^\/images\/(.+)\/json$/.exec(path);
     if (method === "GET" && image) {

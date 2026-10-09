@@ -5,11 +5,12 @@ export const WS_TOKEN_PREFIX = "localdot.token.";
 let publicOrigins: URL[] = [];
 
 export function setPublicOrigin(value: string | undefined): void {
-  if (value === undefined) {
-    publicOrigins = [];
-    return;
-  }
-  publicOrigins = value.split(",").map((entry) => parseOrigin(entry.trim()));
+  publicOrigins = parsePublicOrigins(value);
+}
+
+export function parsePublicOrigins(value: string | undefined): URL[] {
+  if (value === undefined) return [];
+  return value.split(",").map((entry) => parseOrigin(entry.trim()));
 }
 
 function parseOrigin(value: string): URL {

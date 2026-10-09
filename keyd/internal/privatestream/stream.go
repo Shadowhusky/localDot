@@ -27,19 +27,15 @@ func Duplicate(file *os.File) (*os.File, error) {
 		return nil, ErrStream
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Nlink != 0 || int(stat.Uid) != os.Getuid() {
+	if !ok || !anonymous(int(file.Fd()), stat) || int(stat.Uid) != os.Getuid() {
 		return nil, ErrStream
 	}
 	fd := int(file.Fd())
 	switch info.Mode() & os.ModeType {
 	case os.ModeNamedPipe:
 	case os.ModeSocket:
-		local, e1 := syscall.Getsockname(fd)
-		peer, e2 := syscall.Getpeername(fd)
-		typeID, e3 := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_TYPE)
-		l, localUnix := local.(*syscall.SockaddrUnix)
-		p, peerUnix := peer.(*syscall.SockaddrUnix)
-		if e1 != nil || e2 != nil || e3 != nil || !localUnix || !peerUnix || l.Name != "" || p.Name != "" || typeID != syscall.SOCK_STREAM {
+		typeID, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_TYPE)
+		if err != nil || typeID != syscall.SOCK_STREAM || !unnamedPair(fd) {
 			return nil, ErrStream
 		}
 	default:

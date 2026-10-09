@@ -17,6 +17,7 @@ import {
   startedCount,
   stepAt,
 } from "@localdot/stage";
+import { markdownToPlain } from "../agent/markdown.ts";
 import { type AgentModel, heldByUser } from "../agent/model.ts";
 import type { ComputerPhase, HudActionKind, HudState } from "../cells/hud-state.ts";
 import type { DotState } from "../dot/engine/states.ts";
@@ -82,9 +83,11 @@ export function taskFacts(model: AgentModel): TaskFacts {
   return {
     approval: !!model.approval,
     connection: !!model.connection,
-    question: model.pendingAsk ? (model.questions.get(model.pendingAsk)?.question ?? "") : null,
+    question: model.pendingAsk
+      ? markdownToPlain(model.questions.get(model.pendingAsk)?.question ?? "")
+      : null,
     takeover: model.pendingTakeover
-      ? (model.takeovers.get(model.pendingTakeover)?.note ?? "")
+      ? markdownToPlain(model.takeovers.get(model.pendingTakeover)?.note ?? "")
       : null,
     yours: !yours ? null : yours.by === "user" ? "user" : yours.reason,
     pause: model.safetyPause?.phase ?? null,

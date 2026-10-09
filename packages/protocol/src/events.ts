@@ -411,6 +411,8 @@ export const TakeoverEnd = event(
     by: z.enum(["user", "stop"]),
     // The user typed on the computer while they had it. What they typed is never recorded.
     typed: z.literal(true).optional(),
+    // The user said "Not now" to dot's hand-off.
+    declined: z.literal(true).optional(),
   }),
 );
 export const TaskResult = event(

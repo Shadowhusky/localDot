@@ -1,5 +1,6 @@
 // Command keyd is localDot's key layer: the only process that holds real secrets. It runs as a
-// LaunchAgent, keeps its state in <home>/keyd, and answers the daemon on <home>/keyd/admin.sock.
+// LaunchAgent on macOS or a systemd user service on Linux, keeps its state in <home>/keyd, and
+// answers the daemon on <home>/keyd/admin.sock.
 package main
 
 import (
@@ -10,12 +11,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +55,8 @@ type Config struct {
 	// The zero value asks nobody, as the tests do.
 	Discovery netguard.Discovery
 	Service   *admin.ServiceIdentity
+	// The machine's stores; nil means this machine.
+	host *vaultHost
 }
 
 const (
@@ -93,7 +99,7 @@ func run(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("keyd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	home := fs.String("home", defaultHome(), "localDot home; keyd keeps its state in <home>/keyd")
-	store := fs.String("vault", "keychain", "where secret values live: keychain, or memory for tests")
+	store := fs.String("vault", defaultVaultMode(runtime.GOOS), "where secret values live: auto, keychain, secret-service, file, passphrase, or memory for tests")
 	ports := fs.String("ports", "4760-4789", "the listener ports the daemon may ask for")
 	natpmp := fs.String("natpmp", "on", "ask the router for the public address keyd denies: on or off")
 	stun := fs.String("stun", netguard.DefaultSTUN, "STUN server asked when the router gives no public address, or off")
@@ -101,8 +107,8 @@ func run(args []string, stderr io.Writer) int {
 		return 2
 	}
 	portRange, err := parsePorts(*ports)
-	if err != nil || (*store != "keychain" && *store != "memory") || (*natpmp != "on" && *natpmp != "off") || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault keychain or memory, -natpmp on or off")
+	if err != nil || !slices.Contains(vaultModes, *store) || (*natpmp != "on" && *natpmp != "off") || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault auto, keychain, secret-service, file, passphrase or memory, -natpmp on or off")
 		return 2
 	}
 	service, err := managedServiceFromEnv(os.LookupEnv)
@@ -155,7 +161,7 @@ type Daemon struct {
 }
 
 func start(cfg Config) (*Daemon, error) {
-	if cfg.Vault != "memory" && cfg.Vault != "keychain" {
+	if !slices.Contains(vaultModes, cfg.Vault) {
 		return nil, errors.New("keyd: unknown vault mode")
 	}
 	if cfg.Service != nil {
@@ -186,15 +192,16 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if d.log, err = audit.Open(filepath.Join(dir, "audit.jsonl")); err != nil {
 		return err
 	}
-	keychain := vault.NewKeychain(keychainService)
-	var store vault.Store = keychain
-	index := filepath.Join(dir, "secrets.json")
-	if cfg.Vault == "memory" {
-		store, index = vault.NewMemory(), ""
-	} else if err := keychain.Check(); err != nil {
-		return errors.New("keyd: the Keychain vault requires a signed native keyd build")
+	host := systemVaultHost(runtime.GOOS)
+	if cfg.host != nil {
+		host = *cfg.host
 	}
-	v, err := vault.Open(store, index)
+	backend, err := openVaultBackend(cfg.Vault, dir, host)
+	if err != nil {
+		return err
+	}
+	store := backend.store
+	v, err := vault.Open(store, backend.index)
 	if err != nil {
 		return err
 	}
@@ -215,6 +222,10 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if err := os.RemoveAll(cells); err != nil {
 		return err
 	}
+	relay, err := relayDir(dir, runtime.GOOS)
+	if err != nil {
+		return err
+	}
 	hub := events.NewHub()
 	registry := keys.NewRegistry()
 	local := keys.LocalRoutes()
@@ -228,13 +239,15 @@ func (d *Daemon) init(dir string, cfg Config) error {
 		},
 		Ports:    cfg.Ports,
 		CellsDir: cells,
+		RelayDir: relay,
 	})
 	ln, err := admin.Listen(d.Socket)
 	if err != nil {
 		return err
 	}
 	api := &admin.Server{Manager: d.manager, Vault: v, Registry: registry, Opener: opener, Settings: settings,
-		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public}
+		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public,
+		VaultState: backend.state, Unlock: backend.unlock}
 	if cfg.Service != nil {
 		api.Service = &admin.ServiceProcessIdentity{ServiceIdentity: *cfg.Service, PID: os.Getpid()}
 	}
@@ -334,6 +347,38 @@ func privateDir(dir string) error {
 		return fmt.Errorf("%s belongs to another user", dir)
 	}
 	return os.Chmod(dir, 0o700)
+}
+
+// relayDir makes <dir>/relay off macOS, where gates on Docker Engine reach each cell through its
+// socket there. Running gates keep the folder mounted, so it stays and only old sockets go.
+func relayDir(dir, goos string) (string, error) {
+	if goos == "darwin" {
+		return "", nil
+	}
+	relay := filepath.Join(dir, "relay")
+	if err := os.Mkdir(relay, 0o711); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	info, err := os.Lstat(relay)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a folder", relay)
+	}
+	if err := os.Chmod(relay, 0o711); err != nil {
+		return "", err
+	}
+	old, err := filepath.Glob(filepath.Join(relay, "*.sock"))
+	if err != nil {
+		return "", err
+	}
+	for _, path := range old {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+	}
+	return relay, nil
 }
 
 // lockDir holds an exclusive flock on <dir>/keyd.lock for the life of the process.

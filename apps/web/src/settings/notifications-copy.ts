@@ -1,4 +1,4 @@
-import type { NotifyEvent, NotifyTestResult, PushDevice } from "@localdot/protocol";
+import type { BannerKind, NotifyEvent, NotifyTestResult, PushDevice } from "@localdot/protocol";
 import { ApiError } from "../lib/api.ts";
 import type { DeviceState } from "../notify/this-device.ts";
 
@@ -14,16 +14,22 @@ export const SCRIPT_EDITOR_HINT =
 
 export type DeviceAction = "turn-on" | "turn-off" | "copy-link";
 
-export function deviceCopy(state: DeviceState): { line: string; action: DeviceAction | null } {
+export function deviceCopy(
+  state: DeviceState,
+  banner: BannerKind = "mac",
+): { line: string; action: DeviceAction | null } {
   switch (state.kind) {
     case "this-mac":
       return {
-        line: "Notifications come from localDot itself, even with no tab open.",
+        line:
+          banner === "none"
+            ? "Notifications show here while this tab is open."
+            : "Notifications come from localDot itself, even with no tab open.",
         action: null,
       };
     case "needs-https":
       return {
-        line: "To get notifications here, open localDot from your Mac's Tailscale address on this device.",
+        line: `To get notifications here, open localDot from your ${computerNoun(banner)}'s Tailscale address on this device.`,
         action: null,
       };
     case "needs-home-screen":
@@ -48,13 +54,19 @@ export function deviceCopy(state: DeviceState): { line: string; action: DeviceAc
 const phones = (n: number) =>
   `${n} ${new Intl.PluralRules("en").select(n) === "one" ? "phone" : "phones"}`;
 
-export function testResultLine(result: NotifyTestResult): string {
+// What the computer running localDot is called in notification copy.
+export function computerNoun(banner: BannerKind): string {
+  return banner === "mac" ? "Mac" : "computer";
+}
+
+export function testResultLine(result: NotifyTestResult, banner: BannerKind = "mac"): string {
   const sent = result.phones.filter((phone) => phone.result === "sent").length;
+  const here = `this ${computerNoun(banner)}`;
   const parts: string[] = [];
   if (result.mac === "shown")
-    parts.push(sent ? `Sent to this Mac and ${phones(sent)}.` : "Sent to this Mac.");
+    parts.push(sent ? `Sent to ${here} and ${phones(sent)}.` : `Sent to ${here}.`);
   else if (sent) parts.push(`Sent to ${phones(sent)}.`);
-  if (result.mac === "failed") parts.push("The Mac banner didn't show.");
+  if (result.mac === "failed") parts.push(`The ${computerNoun(banner)} banner didn't show.`);
   for (const phone of result.phones) {
     if (phone.result === "gone")
       parts.push(`${phone.label} stopped accepting notifications and was removed.`);
@@ -62,7 +74,7 @@ export function testResultLine(result: NotifyTestResult): string {
       parts.push(`${phone.label} didn't get it. Check its connection and try again.`);
   }
   if (!parts.length) return "Nothing was sent: no phones are set up yet.";
-  if (result.mac !== "unavailable") parts.push(SCRIPT_EDITOR_HINT);
+  if (result.mac !== "unavailable" && banner === "mac") parts.push(SCRIPT_EDITOR_HINT);
   return parts.join(" ");
 }
 

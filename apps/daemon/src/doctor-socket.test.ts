@@ -80,4 +80,21 @@ describe("findDockerSocket", () => {
       source: "the default socket",
     });
   });
+
+  it("finds rootless Docker and Docker Desktop for Linux when the system socket is missing", () => {
+    const env = { HOME: "/home/ana", XDG_RUNTIME_DIR: "/run/user/1000" };
+    expect(findDockerSocket(env, machine(["/run/user/1000/docker.sock"]), "linux")).toEqual({
+      path: "/run/user/1000/docker.sock",
+      source: "rootless Docker's socket",
+    });
+    expect(
+      findDockerSocket(env, machine(["/home/ana/.docker/desktop/docker.sock"]), "linux"),
+    ).toEqual({
+      path: "/home/ana/.docker/desktop/docker.sock",
+      source: "Docker Desktop's user socket",
+    });
+    expect(findDockerSocket(env, machine(["/run/user/1000/docker.sock"]), "darwin").path).toBe(
+      "/var/run/docker.sock",
+    );
+  });
 });

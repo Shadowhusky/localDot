@@ -4,6 +4,9 @@
 # A desktop's gate relays keyd out and desktopd and the stream in, and with a capture token runs
 # ldgate for the programs that ignore the proxy; a brain's gate (LD_ROLE=brain, Part 5a) relays keyd
 # and the daemon's tool API out, and nothing in.
+# Out means host.docker.internal on Docker Desktop. Docker Engine has no such name and can't reach
+# the host's 127.0.0.1, so there the daemon mounts keyd's and its own sockets (LD_KEYD_SOCKET,
+# LD_TOOL_SOCKET) instead.
 set -eu
 : "${LD_ROLE:=desktop}" "${LD_INTERNAL_ADDR:?}" "${LD_KEYD_PORT:?}"
 # PID 1 ignores signals it doesn't trap; exiting takes the relays down with the container.
@@ -32,14 +35,19 @@ until has_addr "$LD_INTERNAL_ADDR"; do
   sleep 0.1
 done
 
-socat "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "TCP4:host.docker.internal:$LD_KEYD_PORT" &
+host_target() {
+  if [ -n "$1" ]; then echo "UNIX-CONNECT:$1"; else echo "TCP4:host.docker.internal:$2"; fi
+}
+keyd_to=$(host_target "${LD_KEYD_SOCKET:-}" "$LD_KEYD_PORT")
+socat "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "$keyd_to" &
 keyd=$!
 case "$LD_ROLE" in
   brain)
     : "${LD_TOOL_PORT:?}"
-    socat "TCP4-LISTEN:4751,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "TCP4:host.docker.internal:$LD_TOOL_PORT" &
+    tool_to=$(host_target "${LD_TOOL_SOCKET:-}" "$LD_TOOL_PORT")
+    socat "TCP4-LISTEN:4751,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "$tool_to" &
     tool=$!
-    echo "gate (brain): keyd $LD_INTERNAL_ADDR:3128 -> host.docker.internal:$LD_KEYD_PORT; tool API $LD_INTERNAL_ADDR:4751 -> host.docker.internal:$LD_TOOL_PORT"
+    echo "gate (brain): keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to; tool API $LD_INTERNAL_ADDR:4751 -> $tool_to"
     relays="$keyd $tool"
     ;;
   desktop)
@@ -48,7 +56,7 @@ case "$LD_ROLE" in
     desktopd=$!
     socat "TCP4-LISTEN:8082,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:3000" &
     stream=$!
-    echo "gate: keyd $LD_INTERNAL_ADDR:3128 -> host.docker.internal:$LD_KEYD_PORT; inbound $LD_EGRESS_ADDR:8081 -> $LD_DESKTOP_ADDR:7700, $LD_EGRESS_ADDR:8082 -> $LD_DESKTOP_ADDR:3000"
+    echo "gate: keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to; inbound $LD_EGRESS_ADDR:8081 -> $LD_DESKTOP_ADDR:7700, $LD_EGRESS_ADDR:8082 -> $LD_DESKTOP_ADDR:3000"
     relays="$keyd $desktopd $stream"
     if [ -n "${LD_CAPTURE_TOKEN:-}" ]; then
       /usr/local/bin/ldgate &

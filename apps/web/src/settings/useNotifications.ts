@@ -1,4 +1,4 @@
-import type { NotifySettings, PushDevice } from "@localdot/protocol";
+import type { BannerKind, NotifySettings, PushDevice } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import {
@@ -23,6 +23,8 @@ import { errorLine, testResultLine } from "./notifications-copy.ts";
 
 export interface NotificationsView {
   settings: NotifySettings | null;
+  // How the computer running localDot shows banners: a Mac, a Linux desktop, or none at all.
+  banner: BannerKind;
   // The saved settings or the phones could not be read; retry() reads them again.
   failed: boolean;
   devices: PushDevice[];
@@ -73,6 +75,7 @@ export function useNotifications(
   const toast = useRef(opts.toast ?? showToast);
   toast.current = opts.toast ?? showToast;
   const [settings, setSettings] = useState<NotifySettings | null>(null);
+  const [banner, setBanner] = useState<BannerKind>("mac");
   const [failed, setFailed] = useState(false);
   const [devices, setDevices] = useState<PushDevice[]>([]);
   const [device, setDevice] = useState<DeviceState | null>(null);
@@ -105,9 +108,12 @@ export function useNotifications(
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
-    Promise.all([notify.settings(), refresh()]).then(
-      ([loaded]) => {
+    // An older daemon has no host route; it ran on a Mac.
+    const host = notify.host().catch((): BannerKind => "mac");
+    Promise.all([notify.settings(), host, refresh()]).then(
+      ([loaded, kind]) => {
         if (cancelled) return;
+        setBanner(kind);
         setSettings(loaded);
         setFailed(false);
       },
@@ -137,11 +143,14 @@ export function useNotifications(
   const label = deviceLabel(env().userAgent, env().maxTouchPoints);
   return {
     settings,
+    banner,
     failed,
     devices,
     device,
     name: LOOPBACK.has(env().hostname)
-      ? "This Mac"
+      ? banner === "mac"
+        ? "This Mac"
+        : "This computer"
       : label === "This device"
         ? label
         : `This ${label}`,
@@ -189,7 +198,7 @@ export function useNotifications(
       run("test", async () => {
         setResult(null);
         try {
-          const line = testResultLine(await notify.test());
+          const line = testResultLine(await notify.test(), banner);
           setResult({ line, failed: false });
           announce(ANNOUNCE, line);
         } catch (failure) {

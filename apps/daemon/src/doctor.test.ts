@@ -1,11 +1,16 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient, DockerError } from "./cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
-import { runDoctor } from "./doctor.ts";
+import { runDoctor, vaultCheck } from "./doctor.ts";
+import type { RelayProbeDeps } from "./doctor-relay.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { KeydClient } from "./keyd/client.ts";
 import { type FakeKeyd, startFakeKeyd } from "./keyd/testing/fake-keyd.ts";
+import type { HostPlatform } from "./platform/host.ts";
 
 const images = { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" };
 describe("runDoctor's key layer checks", () => {
@@ -217,6 +222,30 @@ describe("runDoctor", () => {
     const report = await runDoctor({ docker: new DockerClient(fake.socketPath), images, port });
     expect(byName(report)[`port-${port}`]).toMatchObject({ ok: false });
     await new Promise<void>((r) => holder.close(() => r()));
+  });
+
+  it("counts the port as fine when this home's own running daemon holds it", async () => {
+    fake = await startFakeDocker();
+    const holder = createServer();
+    await new Promise<void>((r) => holder.listen(0, "127.0.0.1", r));
+    const port = (holder.address() as { port: number }).port;
+    const home = mkdtempSync(join(tmpdir(), "localdot-doctor-home-"));
+    try {
+      const check = async () =>
+        byName(
+          await runDoctor({ docker: new DockerClient(fake?.socketPath ?? ""), images, port, home }),
+        )[`port-${port}`];
+      expect(await check()).toMatchObject({ ok: false });
+      writeFileSync(join(home, "daemon.lock"), `${process.pid}\n`);
+      expect(await check()).toEqual({
+        name: `port-${port}`,
+        ok: true,
+        detail: `localDot is running on 127.0.0.1:${port}`,
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      await new Promise<void>((r) => holder.close(() => r()));
+    }
   });
 });
 
@@ -476,7 +505,10 @@ describe("runDoctor's probe network", () => {
 
   it("is removed even when the create's reply or the inspect is lost", async () => {
     fake = await startFakeDocker();
-    for (const lost of ["POST /networks/create", `GET /networks/${"2".padStart(64, "0")}`]) {
+    // The fake's ids are zero-padded and the probe's names start with "localdot-", so this loses
+    // the first inspect by id: the one right after the create, whatever id the fake handed out.
+    const inspectById = "GET /networks/0000";
+    for (const lost of ["POST /networks/create", inspectById]) {
       fake.state.loseReplies.add(lost);
       const docker = new DockerClient(fake.socketPath);
       const report = await runDoctor({ docker, images, port: await freePort() });
@@ -499,5 +531,187 @@ describe("runDoctor's probe network", () => {
     expect(byName(report)["isolated-gateway-mode"]?.detail).toBe(
       "Diagnostic network cleanup could not be confirmed. Check Docker Desktop; no other network was removed.",
     );
+  });
+});
+
+describe("runDoctor on Linux", () => {
+  const linux: HostPlatform = {
+    os: "linux",
+    arch: "x64",
+    user: "ana",
+    wsl: null,
+    systemd: true,
+    desktop: false,
+    linger: false,
+  };
+  const limits = { MemoryLimit: true, SwapLimit: true, CpuCfsQuota: true, PidsLimit: true };
+
+  it("leads with the machine and checks the engine's limits", async () => {
+    fake = await startFakeDocker({ info: { OperatingSystem: "Ubuntu 24.04.1 LTS", ...limits } });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+    });
+    expect(report.checks[0]).toMatchObject({
+      name: "host-platform",
+      ok: true,
+      detail: expect.stringContaining("enable-linger ana"),
+    });
+    expect(byName(report)["docker-limits"]).toMatchObject({ ok: true });
+    expect(report.ok).toBe(true);
+  });
+
+  it("fails an engine that would drop the computers' memory limit", async () => {
+    fake = await startFakeDocker({ info: { ...limits, MemoryLimit: false } });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+    });
+    expect(report.ok).toBe(false);
+    expect(byName(report)["docker-limits"]?.detail).toContain("cgroup_enable=memory");
+  });
+
+  it("says how to update the native engine when internal networks keep a gateway", async () => {
+    fake = await startFakeDocker({ gatewayOnInternal: true, info: limits });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+    });
+    expect(byName(report)["isolated-gateway-mode"]?.detail).toContain(
+      "Update Docker Engine to version 28 or later",
+    );
+  });
+
+  it("checks that a test computer reaches keyd the way this kind of Docker needs", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ld-doctor-relay-"));
+    try {
+      const seen: RelayProbeDeps[] = [];
+      const run = async (info: Record<string, unknown>) => {
+        fake = await startFakeDocker({ info: { ...limits, ...info } });
+        const report = await runDoctor({
+          docker: new DockerClient(fake.socketPath),
+          images,
+          port: await freePort(),
+          host: linux,
+          home,
+          relayProbe: async (deps) => {
+            seen.push(deps);
+            return { ok: false, detail: "no route" };
+          },
+        });
+        await fake.close();
+        fake = undefined;
+        return report;
+      };
+      const engine = await run({ DockerRootDir: "/var/snap/docker/common/var-lib-docker" });
+      expect(engine.ok).toBe(false);
+      expect(byName(engine)["gate-relay"]).toEqual({
+        name: "gate-relay",
+        ok: false,
+        detail: "no route",
+      });
+      expect(seen[0]).toMatchObject({
+        relay: { kind: "socket", keydDir: join(home, "keyd", "relay") },
+        image: images.gate,
+        snap: true,
+      });
+      await run({ OperatingSystem: "Docker Desktop" });
+      expect(seen[1]?.relay).toEqual({ kind: "host" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("skips the relay check without the gate image", async () => {
+    fake = await startFakeDocker({ info: limits, images: new Set([images.desktop]) });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+      home: "/nonexistent/ld-home",
+      relayProbe: async () => ({ ok: true, detail: "reached" }),
+    });
+    expect(byName(report)["gate-relay"]).toMatchObject({ ok: false, detail: "skipped" });
+  });
+
+  it("adds the fix after Docker's own question without a stray full stop", async () => {
+    const report = await runDoctor({
+      docker: new DockerClient("/nonexistent/ld-docker.sock"),
+      images,
+      port: await freePort(),
+      host: linux,
+      home: "/nonexistent/ld-home",
+    });
+    const detail = byName(report)["docker-socket"]?.detail ?? "";
+    expect(detail).toMatch(/running\? Start Docker:/);
+    expect(detail).not.toContain("?.");
+    expect(byName(report)["gate-relay"]).toMatchObject({ detail: "skipped" });
+  });
+
+  it("keeps macOS as it was: no machine check and no /info request of its own", async () => {
+    const infoCalls = async (host: typeof linux) => {
+      fake = await startFakeDocker({ info: limits });
+      const report = await runDoctor({
+        docker: new DockerClient(fake.socketPath),
+        images,
+        port: await freePort(),
+        host,
+      });
+      const calls = fake.state.calls.filter((call) => call.path.endsWith("/info")).length;
+      await fake.close();
+      fake = undefined;
+      return { report, calls };
+    };
+    const mac = await infoCalls({ ...linux, os: "macos", desktop: true });
+    expect(mac.report.checks[0]?.name).toBe("docker-socket");
+    expect(byName(mac.report)["docker-limits"]).toBeUndefined();
+    expect((await infoCalls(linux)).calls).toBe(mac.calls + 1);
+  });
+});
+
+describe("vaultCheck", () => {
+  it("says where keys live and how to unlock a passphrase vault", () => {
+    expect(vaultCheck({ backend: "secret-service", state: "ready" })).toMatchObject({
+      name: "key-vault",
+      ok: true,
+      detail: expect.stringMatching(
+        /^Saved keys are kept in your desktop keyring: safe from other users and from the computers, but not from programs running as you\./,
+      ),
+    });
+    expect(vaultCheck({ backend: "file", state: "ready", key: "tpm" }).detail).toContain("TPM");
+    expect(vaultCheck({ backend: "file", state: "ready", key: "host" }).detail).toContain(
+      "not from programs running as you",
+    );
+    const passphrase = vaultCheck({ backend: "file", state: "ready", key: "passphrase" }).detail;
+    expect(passphrase).toContain("only your passphrase opens");
+    expect(passphrase).toContain("not from a program already running as you once you unlock them");
+    expect(passphrase).not.toContain("other programs can't read them");
+    for (const vault of [
+      { backend: "secret-service", state: "ready" as const },
+      { backend: "file", state: "ready" as const, key: "host" as const },
+    ]) {
+      expect(vaultCheck(vault).detail).toContain(
+        "A passphrase vault keeps them from those until you unlock it",
+      );
+      expect(vaultCheck(vault).detail).not.toContain("keeps them from those too");
+    }
+    expect(vaultCheck({ backend: "file", state: "ready", key: "host" }).detail).not.toContain(
+      "only this machine",
+    );
+    expect(vaultCheck({ backend: "file", state: "locked", key: "passphrase" })).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("localdot unlock"),
+    });
+    expect(vaultCheck({ backend: "file", state: "setup" })).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("Choose its passphrase"),
+    });
   });
 });

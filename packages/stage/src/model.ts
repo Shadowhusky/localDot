@@ -81,6 +81,11 @@ export interface StepState {
   planItem?: string;
   // dot's line for the user about the call this step starts.
   intent?: string;
+  // The tool the step runs and its title (a command, "write notes.md"), from tool.start.
+  tool?: string;
+  title?: string;
+  // When its output arrived, at most one time per OUTPUT_GAP_MS and OUTPUT_CAP times in all.
+  outputs?: number[];
 }
 // What dot has said to the user, by message: the tail of its words, and each sentence it finished
 // with when, so a moment in Replay shows the line the live band showed then.
@@ -127,6 +132,9 @@ export interface SessionModel {
   byStep: Map<string, number>;
   stepIndex: Map<string, number>;
 }
+
+const OUTPUT_GAP_MS = 120;
+const OUTPUT_CAP = 400;
 
 export function emptyModel(): SessionModel {
   return {
@@ -258,6 +266,26 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
           step.endT = t;
           step.status = e.data.status;
         }
+        break;
+      }
+      case "tool.start": {
+        const step = stepOf(model, e.step);
+        if (step) {
+          step.tool = e.data.tool;
+          step.title = e.data.title;
+        }
+        const mark = markOf(e);
+        if (mark) model.marks.push(mark);
+        break;
+      }
+      case "tool.output": {
+        const step = stepOf(model, e.step);
+        if (!step) break;
+        step.outputs ??= [];
+        const outputs = step.outputs;
+        const last = outputs.at(-1);
+        if (outputs.length < OUTPUT_CAP && (last === undefined || t - last >= OUTPUT_GAP_MS))
+          outputs.push(t);
         break;
       }
       case "plan.set":
@@ -393,6 +421,11 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
     }
   }
   return model;
+}
+
+function stepOf(model: SessionModel, id: string | undefined): StepState | undefined {
+  const index = id ? model.stepIndex.get(id) : undefined;
+  return index === undefined ? undefined : model.steps[index];
 }
 
 function current(model: SessionModel, step: string | undefined): ActionState | undefined {

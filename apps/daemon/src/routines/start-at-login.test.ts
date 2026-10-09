@@ -56,18 +56,28 @@ function fixture(code: number | null) {
 }
 
 describe("start at login from the daemon", () => {
-  it("is unavailable outside the installed app or off macOS", async () => {
+  it("is unavailable outside the installed app or off macOS and Linux", async () => {
     const port = startAtLoginPort({ home: "/tmp/x", identity: null, node: "/n", env: {} });
     expect(await port.status()).toBe("unavailable");
     expect(await port.set(true)).toBe("unavailable");
-    const linux = startAtLoginPort({
+    const windows = startAtLoginPort({
       home: "/tmp/x",
+      identity,
+      node: "/n",
+      env: {},
+      platform: "win32",
+    });
+    expect(await windows.status()).toBe("unavailable");
+  });
+  it("is available on Linux, where the CLI manages a systemd user unit", async () => {
+    const linux = startAtLoginPort({
+      home: "/tmp/ld-no-such-home",
       identity,
       node: "/n",
       env: {},
       platform: "linux",
     });
-    expect(await linux.status()).toBe("unavailable");
+    expect(await linux.status()).toBe("off");
   });
   it("reads off when nothing was recorded", async () => {
     expect(await fixture(0).port.status()).toBe("off");

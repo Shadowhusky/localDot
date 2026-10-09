@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo } from "react";
 import { RevealedText } from "./ApprovalValue.tsx";
+import { markdownToPlain } from "./markdown.ts";
 import type { AgentQuestion } from "./model.ts";
 import { hiddenWarning, revealText } from "./reveal-text.ts";
 
@@ -22,14 +23,15 @@ export function QuestionCard({
   form?: ReactNode;
 }) {
   const answer = question.answer;
-  const asked = useMemo(() => revealText(question.question), [question.question]);
+  const plain = useMemo(() => markdownToPlain(question.question), [question.question]);
+  const asked = useMemo(() => revealText(plain), [plain]);
   return (
     <article className="thread-question" aria-label="Question">
       <p
         className="thread-question-text"
         {...(form ? { id: `ask-${question.askId}`, tabIndex: -1 } : {})}
       >
-        <RevealedText text={question.question} />
+        <RevealedText text={plain} />
       </p>
       {asked.hidden && <p className="decision-warning">{hiddenWarning(asked)}</p>}
       {answer && answer.by !== "user" ? (

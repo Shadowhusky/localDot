@@ -43,6 +43,13 @@ import {
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
+import {
+  type DesktopSignIn,
+  desktopSignIn,
+  SignInRequest,
+  signInSite,
+  signInUrl,
+} from "../../../../packages/protocol/src/accounts.ts";
 import type { BrowserScope } from "../browser/client.ts";
 import { type QuarantineRoutesDeps, quarantineRoutes } from "../browser/quarantine-routes.ts";
 import { DesktopdError } from "../desktopd/client.ts";
@@ -95,6 +102,7 @@ export interface AgentRoutesDeps {
         | "release"
         | "hold"
         | "holds"
+        | "signIn"
       >
     >;
   conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
@@ -117,6 +125,8 @@ export interface AgentRoutesDeps {
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
   desktop(cellId: string, requestSignal: AbortSignal): UploadAccess | undefined;
   manual?(session: AgentSession, scope: BrowserScope): ManualDesktop | undefined;
+  // The address of the page the desktop's own browser shows, if it is open.
+  desktopPage?(cellId: string, signal: AbortSignal): Promise<string | undefined>;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
   appendTo(sessionId: string, type: "memory.change", data: Record<string, unknown>): void;
   home: string;
@@ -749,6 +759,31 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json(reply satisfies TakeComputerReply, 202);
     }),
   );
+  // Settings > Accounts: the web browser opens the site's sign-in page and the user takes it there.
+  app.post(
+    "/api/cells/:id/accounts/sign-in",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      const host = signInSite((await json(c.req.raw, SignInRequest)).site);
+      check(c.req.raw.signal);
+      if (!host) throw new RouteError(400, "that isn't a site the web browser can open");
+      if (!deps.runner.signIn) throw new RouteError(503, "signing in is unavailable");
+      const reply = await deps.runner.signIn(cellId, host, signInUrl(host), c.req.raw.signal);
+      return c.json(reply satisfies TakeComputerReply, 202);
+    }),
+  );
+  // The site whose sign-in the desktop's own browser shows, which isn't kept there.
+  app.get(
+    "/api/cells/:id/desktop-sign-in",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      const url = await deps.desktopPage?.(cellId, c.req.raw.signal).catch(() => undefined);
+      check(c.req.raw.signal);
+      return c.json({ site: (url && desktopSignIn(url)) || null } satisfies DesktopSignIn);
+    }),
+  );
   app.post(
     "/api/agent/sessions/:id/takeover/done",
     route(async (c) => {
@@ -759,6 +794,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         parsed.requestId,
         parsed.note === undefined ? undefined : redact(parsed.note, s.id, s.cellId, 1000),
         c.req.raw.signal,
+        parsed.declined === true,
       );
       return ok ? c.body(null, 204) : c.text("the screen is not handed over", 409);
     }),
