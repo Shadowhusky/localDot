@@ -500,31 +500,41 @@ describe("settings inspector", () => {
   });
   it("offers Shut down on every size, and on a phone also the task's Stop and how it went", () => {
     const shutDown = vi.fn();
+    const note = { line: "Stopped. Your computer is paused." };
     const view = render(
       <SettingsSheet
         {...props()}
         stop={{ label: "Shut down", enabled: true, run: shutDown }}
-        taskControls={<p>Stopping…</p>}
+        stopNote={note}
       />,
     );
     fireEvent.click(within(sheet()).getByRole("button", { name: "Shut down" }));
     expect(shutDown).toHaveBeenCalledOnce();
-    expect(within(sheet()).queryByText("Stopping…")).toBeNull();
+    expect(within(sheet()).queryByText(note.line)).toBeNull();
     view.unmount();
     const run = vi.fn();
     const stop = { label: "Stop", enabled: true, run };
     onPhone();
     {
-      const later = render(
-        <SettingsSheet {...props()} stop={stop} taskControls={<p>Stopping…</p>} />,
-      );
+      const later = render(<SettingsSheet {...props()} stop={stop} />);
       fireEvent.click(within(sheet()).getByRole("button", { name: "Stop" }));
       expect(run).toHaveBeenCalledOnce();
-      expect(within(sheet()).getByText("Stopping…")).toBeTruthy();
-      // Stopped, the computer has no Stop to offer, and the sheet still says how it went.
-      later.rerender(<SettingsSheet {...props()} taskControls={<p>Stopped.</p>} />);
+      // Stopped, the computer has no Stop to offer, and its row still says how it went, with
+      // what couldn't be confirmed behind Details.
+      later.rerender(
+        <SettingsSheet
+          {...props()}
+          stopNote={{ ...note, details: ["Couldn't confirm that your keys were locked away."] }}
+        />,
+      );
       expect(within(sheet()).queryByRole("button", { name: "Stop" })).toBeNull();
-      expect(within(sheet()).getByText("Stopped.")).toBeTruthy();
+      expect(within(sheet()).getByText(note.line)).toBeTruthy();
+      const details = within(sheet()).getByRole("button", { name: "Details" });
+      expect(details.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(details);
+      expect(
+        within(sheet()).getByText("Couldn't confirm that your keys were locked away."),
+      ).toBeTruthy();
     }
   });
 

@@ -312,7 +312,6 @@ export interface ConversationProps {
   api?: ApiClient | null;
   sessionId?: string | null;
   recovery?: ReactNode;
-  error?: string | null;
   // Under the thread: the composer, always in its place, so a draft survives and nothing moves.
   composer?: ReactNode;
   // The fields of the question dot is waiting on, drawn under the question in the thread.
@@ -352,7 +351,6 @@ export function Conversation({
   api = null,
   sessionId = null,
   recovery,
-  error,
   composer,
   ask,
   lead,
@@ -761,11 +759,6 @@ export function Conversation({
             <div className="thread-recovery-slot" ref={recoverySlot}>
               {recovery}
             </div>
-            {error && (
-              <p className="thread-note thread-error" role="status">
-                {error}
-              </p>
-            )}
           </section>
           <div className="thread-end" ref={end} />
         </div>

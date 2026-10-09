@@ -10,6 +10,7 @@ import { type AppearanceControl, AppearancePicker } from "../onboarding/Appearan
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
 import { Button } from "../ui/Button.tsx";
+import { DetailLines } from "../ui/Disclosure.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
@@ -105,9 +106,9 @@ export interface SettingsSheetProps {
   stop?: { label: string; enabled: boolean; run(): void };
   // A new version of the computer, while one is ready or going on.
   update?: ComputerUpdate;
-  // On a phone, what Stop reports, which stays after Stop itself has gone; the island says it
-  // on a wider screen.
-  taskControls?: ReactNode;
+  // On a phone, how the task's Stop went, which stays after Stop itself has gone; it drops from
+  // the island on a wider screen.
+  stopNote?: StopNote;
   // Opens first-run setup again, from its first choice.
   onSetup?(): void;
 }
@@ -546,7 +547,7 @@ function SectionList({
   };
   return (
     <>
-      {(props.stop || props.taskControls || props.update?.available || props.stream) && (
+      {(props.stop || props.stopNote || props.update?.available || props.stream) && (
         <ComputerControls props={props} />
       )}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
@@ -587,19 +588,27 @@ function StreamChoice({
   );
 }
 
+export interface StopNote {
+  line: string;
+  details?: readonly string[];
+}
+
+// The computer's rows: Shut down, or on a phone the task's Stop, with how the last Stop went under
+// its name and any cleanup it couldn't confirm behind Details; then the stream's quality.
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
-  const { stop, stream } = props;
+  const { stop, stopNote: note, stream } = props;
   const update = props.update?.available ? props.update : undefined;
   const phone = useMediaQuery(PHONE);
   return (
     <div>
-      {(stop || update || stream) && (
-        <Group>
-          {stop && (
-            <GroupRow
-              leading={<IconTile icon="power" />}
-              label="Your computer"
-              trailing={
+      <Group>
+        {(stop || note) && (
+          <GroupRow
+            leading={<IconTile icon="power" />}
+            label="Your computer"
+            detail={note && <span role="status">{note.line}</span>}
+            trailing={
+              stop && (
                 <Button
                   size="sm"
                   icon="stop"
@@ -610,23 +619,25 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
                 >
                   {stop.label}
                 </Button>
-              }
-            />
-          )}
-          {update && <UpdateRow update={update} />}
-          {stream && (
-            <GroupRow
-              leading={<IconTile icon="monitor" />}
-              label="Stream quality"
-              trailing={phone ? undefined : <StreamChoice stream={stream} size={24} />}
-            >
-              {phone && (
-                <StreamChoice stream={stream} size={32} className="settings-stream-choice" />
-              )}
-            </GroupRow>
-          )}
-        </Group>
-      )}
+              )
+            }
+          >
+            {!!note?.details?.length && (
+              <DetailLines lines={note.details} className="settings-stop-details" />
+            )}
+          </GroupRow>
+        )}
+        {update && <UpdateRow update={update} />}
+        {stream && (
+          <GroupRow
+            leading={<IconTile icon="monitor" />}
+            label="Stream quality"
+            trailing={phone ? undefined : <StreamChoice stream={stream} size={24} />}
+          >
+            {phone && <StreamChoice stream={stream} size={32} className="settings-stream-choice" />}
+          </GroupRow>
+        )}
+      </Group>
       {stream && (
         <GroupNote>
           {stream.saved
@@ -634,7 +645,6 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
             : "Applied for this visit. This browser couldn't save it."}
         </GroupNote>
       )}
-      {props.taskControls}
     </div>
   );
 }
@@ -805,7 +815,7 @@ function SectionContent({
     case "keys":
       return keysPanel;
     case "computer":
-      return <ComputerControls props={{ ...props, taskControls: undefined }} />;
+      return <ComputerControls props={{ ...props, stopNote: undefined }} />;
   }
 }
 

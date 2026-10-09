@@ -115,7 +115,7 @@ export function hudFor({ cell, status, pending, picture = "none" }: CellView): H
         return hud(
           "frozen",
           "Paused",
-          "Your computer is frozen while its connection recovers. Stop it for a clean start.",
+          "Your computer is paused while its connection recovers. Shut it down for a fresh start.",
           "stop",
         );
       const restart = cell.error ? RESTART_NOTE.exec(cell.error) : null;
@@ -150,7 +150,7 @@ export function hudFor({ cell, status, pending, picture = "none" }: CellView): H
     return hud(
       "frozen",
       "Paused",
-      "Stopped. Your computer is frozen. Resume it to use it again: programs dot started carry on. Stop it for a clean start.",
+      "Your computer is paused. Resume it to carry on, or shut it down for a fresh start.",
       "resume",
     );
   }

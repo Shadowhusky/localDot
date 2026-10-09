@@ -819,6 +819,27 @@
     color: var(--color-fg-2);
   }
 
+  /* Label and value pairs, the labels sharing one column. */
+  .ui-dialog-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: calc(var(--spacing) * 1.5) calc(var(--spacing) * 4);
+    margin-top: var(--spacing);
+  }
+
+  .ui-dialog-facts > div {
+    display: contents;
+  }
+
+  .ui-dialog-facts dt {
+    color: var(--color-fg-2);
+  }
+
+  .ui-dialog-facts dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .ui-dialog-actions {
     display: flex;
     justify-content: flex-end;

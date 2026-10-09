@@ -113,8 +113,7 @@
   transition: top var(--dur-default) var(--ease-spring);
 }
 
-.island-note,
-.island-notices .control-status {
+.island-note {
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 2.5);
@@ -133,31 +132,15 @@
   animation: island-note-in var(--dur-default) var(--ease-spring) both;
 }
 
-.island-notices .control-status {
-  flex-wrap: wrap;
-  margin: 0;
-  border: 0;
-  overflow-wrap: anywhere;
-}
-
-.island-note:not(:has(.ui-button)),
-.island-notices .control-status:not(:has(.ui-button)) {
+.island-note:not(:has(.ui-button)) {
   padding-right: calc(var(--spacing) * 3.5);
 }
 
-.island-note p,
-.island-notices .control-status p {
+.island-note p {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   text-wrap: pretty;
-}
-
-.island-notices ul {
-  margin: 0;
-  padding-left: calc(var(--spacing) * 4);
-  color: var(--color-fg-2);
-  font-weight: var(--font-weight-normal);
 }
 
 .island-note.leaving {
@@ -353,7 +336,8 @@
   opacity: 0;
 }
 
-/* Above a sheet's scrim, so Stop and Take control are never behind a sheet (design-v2 §5). */
+/* Above a sheet's scrim, so Stop and Take control are never behind a sheet (design-v2 §5). The
+   toast that hangs from it rises with it (Toast.tsx). */
 .island-anchor[data-lifted] {
   z-index: var(--layer-island-lifted);
 }

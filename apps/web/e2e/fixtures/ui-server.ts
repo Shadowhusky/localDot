@@ -896,14 +896,24 @@ const record = (key: string): CellRecord =>
     },
   }) as CellRecord;
 const effects: string[] = [];
+// The parts of the next Stop that fail, as the kill switch names them: keyd, pause, close, stop.
+// keyd-once fails only the first revoke, which the kill switch then retries and confirms.
+const stopFails = new Set<string>();
+const failing = (step: string) => {
+  if (step === "keyd" && stopFails.delete("keyd-once")) throw new Error("keyd failed once");
+  if (stopFails.has(step)) throw new Error(`${step} failed`);
+};
+let revokeAgain = false;
 const controlsFor = (key: string): CellControls => ({
-  waitedForOperation: false,
+  waitedForOperation: revokeAgain,
   pause: async () => {
+    failing("pause");
     effects.push("pause");
     const cell = cells.get(key);
     if (cell) cells.emit({ ...cell, paused: true });
   },
   stop: async () => {
+    failing("stop");
     effects.push("stop");
     await cells.stop(key);
   },
@@ -923,10 +933,12 @@ const killSwitch = new KillSwitch({
   live,
   keyd: {
     revoke: async () => {
+      failing("keyd");
       effects.push("revoke");
       return 0;
     },
     close: async () => {
+      failing("close");
       effects.push("close");
     },
     isWired: async () => true,
@@ -2144,6 +2156,14 @@ routes.post("/__qa/takeover", (c) =>
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
 routes.post("/__qa/spend", () => reply(spend()));
+// ?steps=pause leaves the computer off; pause,stop leaves the Stop unconfirmed; keyd-once pauses
+// it with a cleanup note.
+routes.post("/__qa/stop-fails", (c) => {
+  stopFails.clear();
+  for (const step of (c.req.query("steps") ?? "").split(",").filter(Boolean)) stopFails.add(step);
+  revokeAgain = stopFails.has("keyd-once");
+  return c.json({ ok: true });
+});
 routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);
