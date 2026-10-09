@@ -212,7 +212,7 @@ describe.skipIf(!ENABLED)("a desktop app that ignores the proxy", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]).toMatchObject({
       actionClass: "network",
-      title: "curl wants to connect to portquiz.net on port 8080",
+      title: "An app named curl wants to connect to portquiz.net on port 8080",
     });
     expect(rules.list().rules).toMatchObject([
       { scope: "destination", destination: "portquiz.net:8080", app: "curl" },
@@ -224,8 +224,8 @@ describe.skipIf(!ENABLED)("a desktop app that ignores the proxy", () => {
     const refused = await curl("-m", "60", "http://portquiz.net:8081/");
     expect(refused.status).not.toBe(0);
     expect(cards.map((card) => card.title)).toEqual([
-      "curl wants to connect to portquiz.net on port 8080",
-      "curl wants to connect to portquiz.net on port 8081",
+      "An app named curl wants to connect to portquiz.net on port 8080",
+      "An app named curl wants to connect to portquiz.net on port 8081",
     ]);
   });
 

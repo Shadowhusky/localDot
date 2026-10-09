@@ -54,8 +54,8 @@ describe("dot's working rules", () => {
   it("say what the network allows and never work around it", () => {
     const rules = workingRules("batch");
     for (const rule of [
-      "Websites work even for apps that skip the proxy; other ports wait for the user's OK.",
-      "Never tunnel around a block.",
+      "Apps reach websites; other ports need the user's OK.",
+      "If something is blocked, tell the user; never bypass it with tunnels, proxies or port forwards.",
     ])
       expect(rules, rule).toContain(rule);
   });

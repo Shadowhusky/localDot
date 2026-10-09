@@ -17,6 +17,11 @@ import type { TaskAutonomy } from "./task-autonomy.ts";
 // "Allow once" lets the waiting connections through and the program's retries for a minute: a
 // program whose own timeout ran out while the card waited connects again on its next try.
 export const ONCE_MS = 60_000;
+// keyd lets a held connection go after this long (DefaultAskHold); one let go before its card
+// showed needs no card, since the program's next try asks again.
+export const HOLD_MS = 120_000;
+// As many destinations as keyd holds connections for at once: more are refused without a card.
+export const MAX_WAITING = 16;
 // The card's word for a program desktopd couldn't name.
 export const NOT_KNOWN = "Not known";
 
@@ -24,8 +29,8 @@ export interface ConnectionRequest {
   readonly app?: string;
   readonly host: string;
   readonly port: number;
-  // One sentence on why this asks.
-  readonly why: string;
+  // One sentence on why this asks, worked out only when its card is shown.
+  why(): Promise<string>;
 }
 export type ConnectionDecision =
   | { readonly allow: true; readonly always?: AlwaysOption }
@@ -76,11 +81,16 @@ export function connectionWhy(
 
 const WEB_CHECK = /(?:^|[\s;|&(`])(?:curl|wget2?)(?=\s|$)/;
 const NO_PROXY = /--no-?proxy|no_proxy=/i;
+// dot hears how to test an app's own route with each web check through the proxy, at most this
+// often.
+const ROUTE_NOTE_MS = 60_000;
 
 interface Entry {
   readonly key: string;
   readonly request: ConnectionRequest;
   readonly waiters: ((decision: ConnectionDecision) => void)[];
+  // When keyd lets go of the newest connection waiting on this entry.
+  heldUntil: number;
   card?: ApprovalCard;
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -94,7 +104,7 @@ export class ConnectionCards {
   readonly #queue: Entry[] = [];
   readonly #notes: string[] = [];
   #revision = 0;
-  #proxyNoted = false;
+  #routeNotedAt = Number.NEGATIVE_INFINITY;
   constructor(
     private readonly task: string,
     private readonly publishRequest: (card: ApprovalCard) => void,
@@ -107,14 +117,21 @@ export class ConnectionCards {
   }
   request(request: ConnectionRequest): Promise<ConnectionDecision> {
     const key = `${request.app ?? ""}\0${destinationOf(request.host, request.port)}`;
+    const heldUntil = this.now() + HOLD_MS;
     return new Promise((resolve) => {
+      this.#drop((entry) => entry !== this.#queue[0] && entry.heldUntil <= this.now());
       const same = this.#queue.find((entry) => entry.key === key);
       if (same) {
         same.waiters.push(resolve);
+        same.heldUntil = heldUntil;
         return;
       }
-      this.#queue.push({ key, request, waiters: [resolve] });
-      if (this.#queue.length === 1) this.#show();
+      if (this.#queue.length >= MAX_WAITING) {
+        resolve({ allow: false });
+        return;
+      }
+      this.#queue.push({ key, request, waiters: [resolve], heldUntil });
+      if (this.#queue.length === 1) void this.#show();
     });
   }
   owns(approvalId: string): boolean {
@@ -156,10 +173,17 @@ export class ConnectionCards {
     return notes.length ? notes.join("\n") : undefined;
   }
   // A web check from the shell goes through the proxy, so it says nothing of an app that ignores
-  // the proxy; dot hears that once, the first time it checks that way.
+  // the proxy; dot hears that with the checks it makes that way, so a later one is never taken
+  // for the app's own route.
   checkedThroughProxy(command: string): void {
-    if (this.#proxyNoted || !WEB_CHECK.test(command) || NO_PROXY.test(command)) return;
-    this.#proxyNoted = true;
+    const now = this.now();
+    if (
+      now - this.#routeNotedAt < ROUTE_NOTE_MS ||
+      !WEB_CHECK.test(command) ||
+      NO_PROXY.test(command)
+    )
+      return;
+    this.#routeNotedAt = now;
     this.#note(
       "curl and wget in the computer go through its proxy, so they only show that websites work. An app that ignores the proxy takes its own route: test that route with curl --noproxy '*' -m 10 -sv https://<host>, or telnet://<host>:<port> </dev/null for another port.",
     );
@@ -168,16 +192,33 @@ export class ConnectionCards {
     this.#notes.push(text);
     if (this.#notes.length > 8) this.#notes.shift();
   }
-  #show(): void {
+  // Settles the queued entries that match without a card: their connections are already let go.
+  #drop(match: (entry: Entry) => boolean): void {
+    for (const entry of this.#queue.filter(match)) {
+      this.#queue.splice(this.#queue.indexOf(entry), 1);
+      for (const resolve of entry.waiters) resolve({ allow: false });
+    }
+  }
+  // Shows the first entry whose connection keyd still holds, with the purpose check's reason.
+  async #show(): Promise<void> {
+    this.#drop((entry) => !entry.card && entry.heldUntil <= this.now());
     const entry = this.#queue[0];
     if (!entry) return;
-    const { app, host, port, why } = entry.request;
+    const { app, host, port } = entry.request;
+    const why = await entry.request.why().catch(() => connectionWhy(app, undefined, []));
+    // The task ended, or the entry was settled, while its reason was worked out.
+    if (this.#queue[0] !== entry || entry.card) return;
     const destination = destinationOf(host, port);
     const name = short(host, 120);
     entry.card = CardSchema.parse({
       actionClass: "network",
       risk: "medium",
-      title: short(`${app ?? "An app"} wants to connect to ${name} on port ${port}`, 200),
+      // The name is the program's own claim, which any program can make: the card says so, and so
+      // does the reach of its Always.
+      title: short(
+        `${app ? `An app named ${app}` : "An app"} wants to connect to ${name} on port ${port}`,
+        200,
+      ),
       why: short(why, 400),
       fields: [
         ["App", app ?? NOT_KNOWN],
@@ -188,7 +229,10 @@ export class ConnectionCards {
         { scope: "task", label: "For this task", destination },
         {
           scope: "destination",
-          label: short(app ? `Always for ${app} on ${name}` : `Always for ${name}`, 200),
+          label: short(
+            `Always for ${app ? `apps named ${app} on ` : ""}${name} · port ${port}`,
+            200,
+          ),
           destination,
           ...(app ? { app } : {}),
         },
@@ -241,7 +285,7 @@ export class ConnectionCards {
         // A lost event cannot undo an answer already given.
       }
     }
-    if (next) this.#show();
+    if (next) void this.#show();
   }
 }
 
@@ -317,16 +361,18 @@ export class ConnectionApprovals {
     const once = `${cellId}\0${app ?? ""}\0${destination}`;
     if (this.#once.has(once)) return true;
     if (!task) return false;
-    const fits = task.purpose
-      ? await task.purpose
-          .fitsConnection(held.host, held.port, AbortSignal.timeout(JUDGE_WAIT_MS))
-          .catch(() => undefined)
-      : null;
     const decision = await task.connections.request({
       ...(app ? { app } : {}),
       host: held.host,
       port: held.port,
-      why: connectionWhy(app, fits, fits === false ? task.taint.kinds : []),
+      why: async () => {
+        const fits = task.purpose
+          ? await task.purpose
+              .fitsConnection(held.host, held.port, AbortSignal.timeout(JUDGE_WAIT_MS))
+              .catch(() => undefined)
+          : null;
+        return connectionWhy(app, fits, fits === false ? task.taint.kinds : []);
+      },
     });
     if (decision.allow && !decision.always)
       this.#once.set(once, (this.deps.now?.() ?? Date.now()) + ONCE_MS);

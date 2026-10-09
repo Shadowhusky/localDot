@@ -60,11 +60,12 @@ export class TaskAutonomy {
     const rule = this.rules?.add(actionClass, option, approvalId);
     return rule && ruleChange(rule);
   }
-  revoke(actionClass: ActionClass): RuleChange | undefined {
+  // A connection's allowance ends for its own destination only.
+  revoke(actionClass: ActionClass, destination?: string): RuleChange | undefined {
     if (actionClass === "network") {
-      const [first] = this.#destinations.values();
-      this.#destinations.clear();
-      return first && { scope: "task", actionClass, label: first.label };
+      const change = destination === undefined ? undefined : this.#destinations.get(destination);
+      if (change && destination !== undefined) this.#destinations.delete(destination);
+      return change;
     }
     const change = this.#allowed.get(actionClass);
     this.#allowed.delete(actionClass);

@@ -1,5 +1,5 @@
 import { ULID_PATTERN, ulid } from "@localdot/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolPolicy } from "./policy.ts";
 import {
   toolHarness as createHarness,
@@ -552,8 +552,9 @@ describe("the tools", () => {
       app: "wechat",
       host: "long.example.com",
       port: 8080,
-      why: "wechat hasn't used this destination before.",
+      why: async () => "wechat hasn't used this destination before.",
     });
+    await vi.waitFor(() => expect(h.session.connections.pending).toBeDefined());
     const second = await h.call("shell", { command: "ls" });
     expect(second.body.content.at(-1)?.text).toContain(
       'The app "wechat" is waiting for the user\'s OK to connect to long.example.com:8080.',

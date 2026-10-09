@@ -62,7 +62,8 @@ export const HeldResult = z.object({
 export type HeldResult = z.infer<typeof HeldResult>;
 
 // The program holding a TCP connection from one local port, as desktopd finds it in /proc; the
-// name is its process name, for the user to recognise.
+// name is the one it gives itself (its launcher entry's or its process name), for the user to
+// recognise, and any program can give itself any name.
 export const ConnectionOwner = z.object({ app: z.string().min(1).max(128) });
 export type ConnectionOwner = z.infer<typeof ConnectionOwner>;
 

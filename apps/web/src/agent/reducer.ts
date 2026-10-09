@@ -151,7 +151,8 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         rule &&
         rule.id === e.data.id &&
         rule.actionClass === e.data.actionClass &&
-        rule.scope === e.data.scope
+        rule.scope === e.data.scope &&
+        rule.destination === e.data.destination
       )
         next = { ...next, approvalOutcome: { ...outcome, ruleRemoved: true } };
       break;

@@ -198,6 +198,25 @@ describe("Always allow routes", () => {
     );
   });
 
+  it("undoes a connection's task allowance for its own destination only", async () => {
+    const f = setup();
+    const autonomy = f.session.taskAutonomy;
+    for (const destination of ["chat.example.com:5222", "chat.example.com:5223"])
+      autonomy.grant("network", { scope: "task", label: "For this task", destination }, ulid());
+    const path = `/api/agent/sessions/${f.session.id}/allowances/network`;
+    expect((await f.send("DELETE", path)).status).toBe(404);
+    const one = `${path}?destination=${encodeURIComponent("chat.example.com:5222")}`;
+    expect((await f.send("DELETE", one)).status).toBe(204);
+    expect(autonomy.relaxes("network", { destination: "chat.example.com:5222" })).toBe(false);
+    expect(autonomy.relaxes("network", { destination: "chat.example.com:5223" })).toBe(true);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        type: "rule.removed",
+        data: expect.objectContaining({ destination: "chat.example.com:5222" }),
+      }),
+    );
+  });
+
   it("leaves a stopped task's allowances and log alone", async () => {
     const f = setup();
     f.session.taskAutonomy.grant("send", { scope: "task", label: "For this task" }, ulid());
@@ -260,9 +279,13 @@ describe("a connection's card", () => {
       app: "wechat",
       host: "chat.example.com",
       port: 5222,
-      why: "wechat hasn't used this destination before.",
+      why: async () => "wechat hasn't used this destination before.",
     });
-    const card = session.connections.pending;
+    const card = await vi.waitFor(() => {
+      const shown = session.connections.pending;
+      if (!shown) throw new Error("no card yet");
+      return shown;
+    });
     if (!card) throw new Error("no card");
     const generation = session.generation;
     if (generation) session.retireBrain(generation);
@@ -291,7 +314,7 @@ describe("a connection's card", () => {
         scope: "destination",
         destination: "chat.example.com:5222",
         app: "wechat",
-        label: "Always for wechat on chat.example.com",
+        label: "Always for apps named wechat on chat.example.com · port 5222",
       },
     ]);
     expect((await post(answer)).status).toBe(409);

@@ -692,7 +692,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!actionClass.success) throw new RouteError(400, "invalid action class");
       await empty(c.req.raw);
       check(c.req.raw.signal);
-      const change = s.taskAutonomy.revoke(actionClass.data);
+      const change = s.taskAutonomy.revoke(actionClass.data, c.req.query("destination"));
       if (!change) throw new RouteError(404, "nothing is allowed for that in this task");
       s.append("rule.removed", change);
       return c.body(null, 204);

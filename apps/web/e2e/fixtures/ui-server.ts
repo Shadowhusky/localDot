@@ -1723,7 +1723,7 @@ function requestApproval(
         app: "WeChat",
         host: "long.weixin.qq.com",
         port: 8080,
-        why: connectionWhy("WeChat", undefined, []),
+        why: async () => connectionWhy("WeChat", undefined, []),
       })
       .then((decision) => effects.push(`connection:${decision.allow ? "allow" : "deny"}`));
     return;

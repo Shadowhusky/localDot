@@ -340,7 +340,14 @@ export function useSafety(props: SafetyProps) {
     setAllowed({ ...choice, undo: "pending" });
     try {
       if (saved.id) await removeRule(p.api, saved.id, abort.signal);
-      else await removeAllowance(p.api, choice.session, choice.actionClass, abort.signal);
+      else
+        await removeAllowance(
+          p.api,
+          choice.session,
+          choice.actionClass,
+          abort.signal,
+          choice.option.destination,
+        );
       settle("done");
       return true;
     } catch (error) {
