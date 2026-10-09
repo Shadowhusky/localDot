@@ -1215,6 +1215,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       {
                         label: "Replay",
                         icon: "history",
+                        startsGroup: true,
                         disabledReason:
                           replayId || newestReplayId ? undefined : "No recordings yet",
                         run: () => selectReplay(LIBRARY),

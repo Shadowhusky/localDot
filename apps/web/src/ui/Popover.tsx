@@ -22,6 +22,8 @@ export interface AnchoredProps {
   // Keeps Tab inside the popup; a menu closes on Tab instead.
   trap: boolean;
   initialFocus(panel: HTMLElement): HTMLElement | undefined;
+  // Dims the page behind, as a phone's menu over a busy screen does.
+  dim?: boolean;
   panelRef?: RefObject<HTMLDivElement | null>;
   panelProps: HTMLAttributes<HTMLDivElement> & { [data: `data-${string}`]: string | undefined };
   children: ReactNode;
@@ -75,6 +77,7 @@ function AnchoredLayer({
   align = "start",
   trap,
   initialFocus,
+  dim = false,
   panelRef,
   panelProps,
   children,
@@ -131,6 +134,7 @@ function AnchoredLayer({
     <LayerPortal kind={kind} closing={closing} rootRef={root}>
       <div
         className="ui-catcher"
+        data-dim={dim || undefined}
         aria-hidden="true"
         onPointerDown={(event) => {
           event.preventDefault();

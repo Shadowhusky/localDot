@@ -11,7 +11,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
-import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -140,7 +139,7 @@ const MessageCard = memo(function MessageCard({
       ) : (
         <>
           {copy}
-          <SafeMarkdown text={message.text} announce={announce} />
+          <SafeMarkdown text={message.text} streaming={!message.final} announce={announce} />
         </>
       )}
       {message.truncated && <p className="thread-note">Message preview shortened.</p>}
@@ -275,12 +274,6 @@ const Row = memo(function Row({ row, fresh, thread }: RowProps) {
       {row.separator && (
         <p className="thread-time">
           <time>{row.separator}</time>
-        </p>
-      )}
-      {row.groupStart && item.speaker === "dot" && (
-        <p className="thread-who" aria-hidden="true">
-          <Glyph size={14} />
-          dot
         </p>
       )}
       <Card item={item} thread={thread} />
@@ -770,6 +763,8 @@ export function Conversation({
       >
         <Button
           size="sm"
+          round
+          variant="quiet"
           icon="arrow-down"
           aria-label={
             choiceWaits ? undefined : unread.length ? unreadLabel(unread) : "Jump to latest"
@@ -780,11 +775,13 @@ export function Conversation({
             reachChoice.current?.();
           }}
         >
-          {choiceWaits
-            ? "Check your last message"
-            : unread.length
-              ? `${unread.length} new`
-              : "Latest"}
+          <span className="thread-jump-label">
+            {choiceWaits
+              ? "Check your last message"
+              : unread.length
+                ? unreadLabel(unread)
+                : "Latest"}
+          </span>
         </Button>
       </span>
       <div className="thread-foot" ref={foot} />
