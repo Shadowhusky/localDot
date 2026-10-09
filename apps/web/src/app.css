@@ -246,12 +246,38 @@
     var(--font-weight-medium) var(--text-title-3) / var(--text-title-3--line-height) var(--font-ui);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration-veil) var(--ease-veil);
+  transition: opacity var(--dur-fade) var(--ease-standard);
 }
 
 .stage-veil.on,
 .stage-veil[role="alert"] {
   opacity: 1;
+}
+
+/* A stalled picture keeps its last frame: only a quiet glass chip says it is reconnecting. */
+.stage-veil:not([role="alert"]) {
+  background-color: transparent;
+}
+
+.stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  height: calc(var(--spacing) * 8);
+  padding: 0 calc(var(--spacing) * 3.5) 0 calc(var(--spacing) * 3);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass-solid);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  white-space: nowrap;
+}
+
+.stage-chip > .ui-spinner {
+  color: var(--color-fg-2);
 }
 
 .stage > .screen-label {
@@ -282,7 +308,7 @@
   opacity: 0;
   scale: 0.985;
   transition:
-    opacity var(--duration-lit) var(--ease-lit),
+    opacity var(--dur-default) var(--ease-standard),
     scale var(--dur-gentle) var(--ease-spring);
 }
 

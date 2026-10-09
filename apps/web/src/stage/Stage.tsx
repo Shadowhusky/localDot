@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { Spinner } from "../ui/Spinner.tsx";
 import { forgetOldTickets } from "./client-storage.ts";
 import { DesktopFrame } from "./DesktopFrame.tsx";
 import type { ProbeApi } from "./debug-hooks.ts";
@@ -290,7 +291,10 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
         />
       )}
       <div className={reconnecting ? "stage-veil on" : "stage-veil"} aria-hidden={!reconnecting}>
-        <p>Reconnecting…</p>
+        <p className="stage-chip">
+          <Spinner size={14} />
+          Reconnecting…
+        </p>
       </div>
       {mode === "live" && manual && (
         <ManualSurface

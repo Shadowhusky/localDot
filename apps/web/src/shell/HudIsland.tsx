@@ -25,7 +25,7 @@ type ComputerKind = Exclude<HudAction["kind"], "stop-task">;
 const COMPUTER: Record<ComputerKind, { label: string; icon?: IconName }> = {
   start: { label: "Turn on", icon: "power" },
   stop: { label: "Shut down", icon: "power" },
-  resume: { label: "Continue", icon: "play" },
+  resume: { label: "Resume", icon: "play" },
   retry: { label: "Try again" },
 };
 const STOP_KEYS = ["Mod", "Shift", "."] as const;
@@ -283,20 +283,37 @@ export function HudIsland({
                 </Button>
               ))}
             {shape === "computer" &&
-              computerActions.map((action) => (
-                <Button
-                  key={action.kind}
-                  className="island-action"
-                  variant="glass"
-                  round
-                  size={phone ? "sm" : "md"}
-                  icon={COMPUTER[action.kind].icon}
-                  disabledReason={action.enabled ? undefined : "Wait a moment"}
-                  onClick={onComputer[action.kind]}
-                >
-                  {COMPUTER[action.kind].label}
-                </Button>
-              ))}
+              computerActions.map((action) => {
+                const { label, icon } = COMPUTER[action.kind];
+                const reason = action.enabled ? undefined : "Wait a moment";
+                // A phone's island is one short line: its buttons are glyphs, as Take control is.
+                return phone && icon ? (
+                  <IconButton
+                    key={action.kind}
+                    className="island-action"
+                    variant="glass"
+                    round
+                    size={control}
+                    icon={icon}
+                    label={label}
+                    disabledReason={reason}
+                    onClick={onComputer[action.kind]}
+                  />
+                ) : (
+                  <Button
+                    key={action.kind}
+                    className="island-action"
+                    variant="glass"
+                    round
+                    size={phone ? "sm" : "md"}
+                    icon={icon}
+                    disabledReason={reason}
+                    onClick={onComputer[action.kind]}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
             {full && (
               <IconButton
                 variant="glass"

@@ -395,9 +395,11 @@ export interface StatusInput {
   readonly computer: HudState;
   // The task on this computer; null when there is none, or once a task Stop froze or stopped it.
   readonly task: TaskHud | null;
-  // A task Stop in flight, or one whose outcome is not confirmed.
-  readonly stop?: "stopping" | "unconfirmed" | null;
+  // A task Stop in flight, one whose outcome is not confirmed, or one that left the computer paused.
+  readonly stop?: "stopping" | "unconfirmed" | "stopped" | null;
   readonly canStop?: boolean;
+  // The running task's feed has been out of touch for a moment.
+  readonly link?: "lost" | null;
   // False while the task feed is stale, a takeover waits or the computer is fenced.
   readonly mayControl?: boolean;
 }
@@ -485,30 +487,40 @@ const DOWN = new Set<ComputerPhase>([
 // A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
 // computer that is down outranks it too but leaves its Stop. A finished task keeps its verdict
 // only while the computer is live.
+const LOST_CAPTION = "Lost touch with the task for a moment. Reconnecting.";
+const UNCONFIRMED_CAPTION = "I couldn't confirm that I stopped. Press Stop again to be sure.";
+
 export function statusFor({
   computer,
   task,
   stop = null,
   canStop = true,
+  link = null,
   mayControl = true,
 }: StatusInput): Status {
   const held = computer.paused ? null : task;
   const own = DOWN.has(computer.phase) ? null : held;
   const running = own && own.phase !== "finished" ? own : null;
   const shown = running ?? (own && computer.live ? own : null);
-  const row: StatusRow = stop
+  const halting = stop === "stopped" ? null : stop;
+  const lost = link === "lost" && !!running && !halting;
+  const row: StatusRow = halting
     ? "stopping"
     : (shown?.row ?? (computer.phase === "live" ? "ready" : "computer"));
   const label =
-    stop === "stopping"
+    halting === "stopping"
       ? "Stopping…"
-      : stop === "unconfirmed"
-        ? "Stop unconfirmed"
-        : (shown ?? computer).label;
+      : halting === "unconfirmed"
+        ? "Stop not confirmed"
+        : lost
+          ? "Reconnecting…"
+          : stop === "stopped" && computer.phase === "frozen"
+            ? "Stopped"
+            : (shown ?? computer).label;
   const actions: HudAction[] =
-    stop || (held && held.phase !== "finished")
+    halting || (held && held.phase !== "finished")
       ? [
-          stop === "stopping"
+          halting === "stopping"
             ? { kind: "stop-task", enabled: false, busy: true }
             : { kind: "stop-task", enabled: canStop },
         ]
@@ -519,26 +531,32 @@ export function statusFor({
     row,
     computer: computer.phase,
     label,
-    caption: {
-      speaker: own && DOT_SPEAKS.has(own.row) ? "dot" : "system",
-      text: own?.caption ?? computer.caption,
-    },
+    caption: lost
+      ? { speaker: "system", text: LOST_CAPTION }
+      : halting === "unconfirmed"
+        ? { speaker: "dot", text: UNCONFIRMED_CAPTION }
+        : {
+            speaker: own && DOT_SPEAKS.has(own.row) ? "dot" : "system",
+            text: own?.caption ?? computer.caption,
+          },
     elapsedS: running?.elapsedS ?? null,
-    countdownS: stop ? null : (running?.countdownS ?? null),
+    countdownS: halting ? null : (running?.countdownS ?? null),
     actions,
     control: (running?.control ?? false) && mayControl,
     dotPose:
-      stop === "unconfirmed"
+      halting === "unconfirmed"
         ? "error"
-        : stop
+        : halting
           ? "resting"
-          : shown
-            ? TASK_POSE[shown.row]
-            : COMPUTER_POSE[computer.phase],
+          : lost
+            ? "reconnecting"
+            : shown
+              ? TASK_POSE[shown.row]
+              : COMPUTER_POSE[computer.phase],
     attention:
-      stop === "unconfirmed"
+      halting === "unconfirmed"
         ? "blocked"
-        : stop
+        : halting
           ? "working"
           : shown
             ? TASK_ATTENTION[shown.row]

@@ -18,19 +18,26 @@
     translate: -50% 0;
   }
 
+  .ui-toaster[data-lifted] {
+    z-index: var(--layer-island-lifted);
+  }
+
   .ui-toast-list {
     position: relative;
     height: 100%;
     list-style: none;
   }
 
-  /* A glass pill centred under the island. */
+  /* A glass pill centred under the island, as wide as what it says. */
   .ui-toast {
     position: absolute;
     top: 0;
     left: 0;
+    right: 0;
     z-index: 1;
-    width: 100%;
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
     overflow: hidden;
     border-radius: var(--radius-island);
     background-color: var(--color-glass-solid);
@@ -70,13 +77,26 @@
     transition: opacity var(--dur-exit) var(--ease-exit);
   }
 
+  /* Everything lines up on the title's line, so a second line or opened details grow the toast
+     downwards and nothing beside the title moves. One line of text makes it 40 tall. */
   .ui-toast-body {
+    --_line: var(--text-body--line-height);
+    --_pad-y: calc((var(--spacing) * 10 - var(--_line)) / 2);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: calc(var(--spacing) * 2.5);
     min-height: calc(var(--spacing) * 10);
-    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 1.5) calc(var(--spacing) * 2)
-      calc(var(--spacing) * 3.5);
+    padding: var(--_pad-y) calc(var(--spacing) * 1.5) var(--_pad-y) calc(var(--spacing) * 3.5);
+  }
+
+  .ui-toast-body > .ui-button {
+    flex: none;
+    margin-block: calc((var(--_line) - var(--spacing) * 7) / 2);
+  }
+
+  .ui-toast-body > .ui-icon-button {
+    flex: none;
+    margin-block: calc((var(--_line) - var(--_size)) / 2);
   }
 
   /* A leading glyph carries its own side bearing, so the padding before it is optically smaller. */
@@ -85,6 +105,8 @@
   }
 
   .ui-toast-icon {
+    flex: none;
+    margin-block: calc((var(--_line) - var(--spacing) * 4) / 2);
     color: var(--color-fg-2);
   }
 
@@ -109,9 +131,32 @@
     text-wrap: balance;
   }
 
+  /* Details take a line of their own under the title, the toast's whole width from the title's
+     edge, so the action never squeezes them. */
+  .ui-toast-body:has(> .ui-toast-details) {
+    flex-wrap: wrap;
+    row-gap: calc(var(--spacing) * 0.5);
+  }
+
+  /* They never widen the toast: opened, they wrap to the width its title row already has. */
+  .ui-toast-details {
+    flex-basis: 100%;
+    contain: inline-size;
+    padding-inline-end: calc(var(--spacing) * 2);
+  }
+
+  .ui-toast-icon ~ .ui-toast-details {
+    padding-inline-start: calc(var(--spacing) * 6.5);
+  }
+
+  .ui-toast-details .ui-detail-lines {
+    max-width: calc(var(--spacing) * 100);
+  }
+
   /* On touch the toast grows to 44 and its buttons keep their size, reaching 44 px past them. */
   @media (--coarse) {
     .ui-toast-body {
+      --_pad-y: calc((var(--spacing) * 11 - var(--_line)) / 2);
       min-height: calc(var(--spacing) * 11);
     }
 
@@ -211,9 +256,10 @@
     color: var(--color-fg-1);
   }
 
+  /* Amber is only ever a point beside words (design-v2 §2), never a rim: attention reads from the
+     words and the glyph, on the same quiet face. */
   .ui-banner[data-tone="attention"] {
-    background-color: transparent;
-    box-shadow: inset 0 0 0 1px var(--color-attention);
+    background-color: var(--color-control);
   }
 
   .ui-banner[data-tone="danger"] {
@@ -227,7 +273,7 @@
   }
 
   .ui-banner[data-tone="attention"] .ui-banner-icon {
-    color: var(--color-attention);
+    color: var(--color-fg-1);
   }
 
   .ui-banner[data-tone="danger"] .ui-banner-icon {

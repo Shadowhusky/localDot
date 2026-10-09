@@ -70,11 +70,11 @@
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
+/* The command sits under its sentence, so it never strands a word on a narrow screen. */
 .keys-status-fix {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 1.5);
 }
 
 /* The Details row's chevron lines up with the text above it. */

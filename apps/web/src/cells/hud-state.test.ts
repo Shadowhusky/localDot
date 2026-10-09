@@ -35,7 +35,9 @@ describe("hudFor", () => {
         action: { kind: "resume", enabled: true },
         live: false,
       });
-      expect(hud.caption).toContain("programs dot started carry on");
+      expect(hud.caption).toBe(
+        "Your computer is paused. Resume it to carry on, or shut it down for a fresh start.",
+      );
       expect(hudFor(known(paused, "resume")).action).toEqual({ kind: "resume", enabled: false });
       expect(hudFor(known(paused, "stop")).action.enabled).toBe(false);
     }

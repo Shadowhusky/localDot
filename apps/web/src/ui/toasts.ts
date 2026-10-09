@@ -1,4 +1,5 @@
 import { announce, type Urgency, withdraw as unsay } from "./Announcer.tsx";
+import type { IconName } from "./icons.ts";
 
 // A toast waits this long before it shows, so a state that flips straight back shows nothing.
 export const SETTLE_MS = 400;
@@ -24,8 +25,12 @@ export interface ToastOptions {
   title: string;
   description?: string;
   tone?: ToastTone;
+  // In place of the tone's own glyph.
+  icon?: IconName;
   // A toast with an action stays until it is dismissed, unless others wait.
   action?: ToastAction;
+  // Lines behind a quiet Details disclosure; a toast with them stays like one with an action.
+  details?: readonly string[];
   // "assertive" only for an error that stops work.
   urgency?: Urgency;
 }
@@ -38,7 +43,9 @@ export interface Toast {
   title: string;
   description?: string;
   tone: ToastTone;
+  icon?: IconName;
   action?: ToastAction;
+  details?: readonly string[];
   // Set once dismissed: it fades back under its anchor, or it was swiped away.
   leaving?: "fade" | "swipe";
 }
@@ -61,7 +68,7 @@ export interface ToastQueue {
 
 interface Entry {
   toast: Toast;
-  // Two toasts with the same id, title and description are the same message.
+  // Two toasts with the same id and words are the same message.
   message: string;
   urgency?: Urgency;
   withdrawn?: boolean;
@@ -91,8 +98,9 @@ export function createToasts(now: () => number = () => performance.now()): Toast
 
   const allowed = ({ toast, withdrawn }: Entry) => {
     if (withdrawn) return SHOWN_AT_LEAST;
-    if (waiting.length) return toast.action ? SHOWN_AT_MOST : SHOWN_AT_LEAST;
-    if (toast.action) return Number.POSITIVE_INFINITY;
+    const stays = !!toast.action || !!toast.details?.length;
+    if (waiting.length) return stays ? SHOWN_AT_MOST : SHOWN_AT_LEAST;
+    if (stays) return Number.POSITIVE_INFINITY;
     return toast.tone === "danger" ? SHOWN_AT_MOST : SHOWN_FOR;
   };
 
@@ -139,7 +147,12 @@ export function createToasts(now: () => number = () => performance.now()): Toast
     show(options) {
       made += 1;
       const id = options.id ?? `toast-${made}`;
-      const message = [options.id ?? "", options.title, options.description ?? ""].join("\n");
+      const message = [
+        options.id ?? "",
+        options.title,
+        options.description ?? "",
+        ...(options.details ?? []),
+      ].join("\n");
       const same = (entry: Entry | undefined) => entry?.message === message;
       if (
         (lately.get(message) ?? Number.NEGATIVE_INFINITY) > now() ||
@@ -155,7 +168,9 @@ export function createToasts(now: () => number = () => performance.now()): Toast
           title: options.title,
           description: options.description,
           tone: options.tone ?? "neutral",
+          icon: options.icon,
           action: options.action,
+          details: options.details,
         },
         message,
         urgency: options.urgency,

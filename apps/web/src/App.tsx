@@ -15,7 +15,6 @@ import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
-import { StopControl } from "./agent/StopControl.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
@@ -26,6 +25,7 @@ import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
+import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
 import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
@@ -55,7 +55,12 @@ import { Onboarding } from "./onboarding/Onboarding.tsx";
 import { setupSteps } from "./onboarding/setup.ts";
 import { useOnboarding } from "./onboarding/useOnboarding.ts";
 import { STEP_DOT } from "./onboarding/wizard.ts";
-import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
+import {
+  PREVIEW_ROOM,
+  RECORDED_TASK,
+  type RecordedTitle,
+  ReplayView,
+} from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
 import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
@@ -100,8 +105,10 @@ import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
+import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 import { isApple } from "./ui/Kbd.tsx";
+import { useMediaQuery } from "./ui/media.ts";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
@@ -119,6 +126,8 @@ type RailView = "chat" | "activity";
 const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
 const OPENING_MAX_MS = 2000;
+// How long the task's feed may be out of touch before the island says it is reconnecting.
+const LINK_LOST_MS = 1500;
 const FROM_WATCH = { fromWatch: true };
 const FROM_LIBRARY = { fromLibrary: true };
 // Replay's address names the recording that plays, or this for the library of recordings.
@@ -667,6 +676,11 @@ function Theatre({ api }: { api: ApiClient }) {
         ? "Just a moment…"
         : undefined;
   const computer = error ? { ...containedHud, caption: error } : containedHud;
+  // A task feed out of touch for a moment says nothing; one that stays out says so in the island.
+  const linkLost = useHeldFor(
+    !!session.sessionId && (agent.connection === "lost" || agent.availability === "error"),
+    LINK_LOST_MS,
+  );
   const appStatus = statusFor({
     computer: {
       ...computer,
@@ -692,8 +706,11 @@ function Theatre({ api }: { api: ApiClient }) {
       ? "stopping"
       : controls.stopStatus.phase === "unconfirmed"
         ? "unconfirmed"
-        : null,
+        : controls.stopStatus.phase === "paused"
+          ? "stopped"
+          : null,
     canStop: controls.canStop,
+    link: linkLost ? "lost" : null,
     mayControl:
       !controls.fenced &&
       agent.fresh &&
@@ -705,6 +722,8 @@ function Theatre({ api }: { api: ApiClient }) {
   const sheetStop = appStatus.actions.find(
     (action) => action.kind === "stop" || (phone && action.kind === "stop-task"),
   );
+  const stopped = stopNotice(controls.stopStatus);
+  const stopNote = stopped ? { line: stopped.title, details: stopped.details } : undefined;
   const sheetStopControl = sheetStop && {
     label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
     enabled: sheetStop.enabled,
@@ -741,6 +760,7 @@ function Theatre({ api }: { api: ApiClient }) {
     reason: conversationReason,
   };
   const curtain = useCurtain(appStatus.computer, !!replayId);
+  useStopToast(controls.stopStatus, controls.recheck, curtain.up);
   const stageBox = useRef<HTMLDivElement>(null);
   const fullScreen = useFullScreen({
     available: !curtain.up && !replayId,
@@ -762,10 +782,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const setupKnown = !!settings.saved;
   const onboarding = useOnboarding({ known: setupKnown, configured: !!settings.saved?.main });
   const setupStep = onboarding.progress.step;
+  const previewRoom = useMediaQuery(PREVIEW_ROOM) && !phone;
   const place = presencePlace({
     showDot: showDot.value,
     curtain: curtain.up,
     replaying: !!replayId,
+    browsing: replayId === LIBRARY && !previewRoom,
     keyboard,
     setup: onboarding.open,
     full,
@@ -1082,7 +1104,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     first={!cell && listed.length === 0}
                     waking={pending === "start" || pending === "create"}
                     caption={computer.caption}
-                    notice={error}
+                    notice={error ?? stoppedOff(controls.stopStatus)}
                     action={computerAction}
                     onAction={() => computerAction && onComputer[computerAction.kind]()}
                     replace={
@@ -1129,16 +1151,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     onRowWidth={setIslandWidth}
                     fields={askFields}
                     notices={
-                      <>
-                        <StopControl controls={controls} inIsland />
-                        <SafetyNotes
-                          safety={safety}
-                          agent={agent}
-                          cell={cell}
-                          visible={sheetsClosed}
-                          replaying={!!replayId}
-                        />
-                      </>
+                      <SafetyNotes
+                        safety={safety}
+                        agent={agent}
+                        cell={cell}
+                        visible={sheetsClosed}
+                        replaying={!!replayId}
+                      />
                     }
                   />
                   <Toaster anchor={island} />
@@ -1429,7 +1448,7 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
-          taskControls={<StopControl controls={controls} />}
+          stopNote={stopNote}
           stop={sheetStopControl}
           open={settings.open}
           keysPanel={keysPanel}
