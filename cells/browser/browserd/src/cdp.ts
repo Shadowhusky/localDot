@@ -26,6 +26,17 @@ const events = new Set([
   "Inspector.targetCrashed",
 ]);
 
+// Reads of a page that change nothing in Chromium. A slow page answers them slowly; one given up on,
+// by its caller or for taking too long, is no longer waited for and its late reply is dropped,
+// where any other request left unanswered fences the connection.
+const PAGE_READS = new Set([
+  "Page.getFrameTree",
+  "Page.getLayoutMetrics",
+  "DOMSnapshot.captureSnapshot",
+  "Accessibility.getFullAXTree",
+  "Browser.getWindowForTarget",
+]);
+
 export class CdpRequestError extends Error {
   constructor(
     readonly reason: "closed" | "busy" | "cancelled" | "timeout" | "protocol" | "failed",
@@ -86,11 +97,18 @@ export class GuardedCdp {
       }
       const id = this.#nextId++;
       const reply = Promise.withResolvers<Readonly<Record<string, unknown>>>();
-      const timeout = setTimeout(
-        () => this.#fail(new CdpRequestError("timeout")),
-        CDP_REQUEST_TIMEOUT_MS,
-      );
-      const cancelled = () => this.#fail(new CdpRequestError("cancelled"));
+      const unanswered = (reason: "timeout" | "cancelled") => {
+        if (!PAGE_READS.has(method)) {
+          this.#fail(new CdpRequestError(reason));
+          return;
+        }
+        if (this.#pending.get(id) !== request) return;
+        this.#pending.delete(id);
+        request.cleanup();
+        request.reject(new CdpRequestError(reason));
+      };
+      const timeout = setTimeout(() => unanswered("timeout"), CDP_REQUEST_TIMEOUT_MS);
+      const cancelled = () => unanswered("cancelled");
       const signal = options.signal;
       const request: PendingRequest = {
         sessionId: command.sessionId,

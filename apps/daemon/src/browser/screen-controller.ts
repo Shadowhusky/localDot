@@ -498,6 +498,8 @@ export class ScreenController {
     };
     let granted = false;
     let integrity = false;
+    let recorded = false;
+    let published = false;
     const operation = this.#tail
       .then(async () => {
         try {
@@ -553,6 +555,7 @@ export class ScreenController {
             revision: result.revision,
           });
           integrity = true;
+          recorded = true;
           await this.deps.attachRecording(selection, operationScope);
           integrity = false;
           guard();
@@ -584,6 +587,7 @@ export class ScreenController {
             guard();
           } else if (!this.deps.desktopReady()) throw new ScreenControlError();
           integrity = true;
+          published = true;
           this.deps.publish(result);
           guard();
           this.#selection = selection;
@@ -592,6 +596,18 @@ export class ScreenController {
         } catch (error) {
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
             await this.#revoke().catch(() => this.#retireBrowser());
+          } else if (screen === "browser" && !published) {
+            // A web browser that fails, its recording included, costs dot the web browser, never
+            // the task or the computer: no grant of it is left, and the session goes on recorded
+            // on the desktop.
+            if (granted || handback) await this.#revoke().catch(() => this.#retireBrowser());
+            this.#reportBrowser(error);
+            const desktop = await this.#onDesktop(scope, operationScope, handback, recorded);
+            if (handback && desktop) return desktop;
+            throw new ScreenUnavailableError(
+              screen,
+              this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
+            );
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
             // complete is uncertainty the session cannot continue past.
@@ -600,16 +616,6 @@ export class ScreenController {
             // The agent asked for a screen that is unavailable. That is an ordinary tool
             // failure once no grant this call requested can still be live.
             if (granted) await this.#revoke().catch(() => this.#retireBrowser());
-            if (screen === "browser")
-              this.deps.report?.(
-                `the web browser couldn't be shown: ${
-                  error instanceof BrowserClientError ||
-                  error instanceof BrowserLifecycleError ||
-                  error instanceof ScreenControlError
-                    ? error.message
-                    : "unknown"
-                }`,
-              );
             throw new ScreenUnavailableError(
               screen,
               this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
@@ -626,6 +632,65 @@ export class ScreenController {
       () => {},
     );
     return operation;
+  }
+
+  #reportBrowser(error: unknown): void {
+    this.deps.report?.(
+      `the web browser couldn't be shown: ${
+        error instanceof BrowserClientError ||
+        error instanceof BrowserLifecycleError ||
+        error instanceof ScreenControlError ||
+        (error instanceof Error && error.name === "ScreenRecordingError")
+          ? error.message
+          : "unknown"
+      }`,
+    );
+  }
+
+  // Where the session goes on after the web browser failed it: the desktop, recorded, and
+  // journaled when the selection moves there. A session that can't be put there is contained.
+  async #onDesktop(
+    scope: ScreenScope,
+    operation: BrowserScope,
+    handback: boolean,
+    recorded: boolean,
+  ): Promise<ScreenSwitchData | undefined> {
+    const previous = this.#selection;
+    try {
+      operation.check();
+      if (!this.deps.desktopReady()) throw new ScreenControlError();
+      if (previous.screen === "desktop") {
+        if (handback) throw new ScreenControlError();
+        if (recorded) {
+          await this.deps.attachRecording(previous, operation);
+          operation.check();
+        }
+        return undefined;
+      }
+      const result = ScreenSwitchData.parse({
+        screen: "desktop",
+        cellId: this.deps.parentCellId,
+        geometry: this.#desktopGeometry,
+        revision: previous.revision + 1,
+        by: "daemon",
+      });
+      const selection = Object.freeze({
+        screen: "desktop" as const,
+        cellId: this.deps.parentCellId,
+        geometry: this.#desktopGeometry,
+        revision: result.revision,
+      });
+      await this.deps.attachRecording(selection, operation);
+      operation.check();
+      if (!this.deps.desktopReady()) throw new ScreenControlError();
+      this.deps.publish(result);
+      this.#selection = selection;
+      if (handback) this.#ownerGeneration = scope.generation;
+      return result;
+    } catch {
+      await this.#fail();
+      throw new ScreenControlError();
+    }
   }
 
   async #foreground(owner: BrowserOwner, outer: BrowserScope): Promise<string> {

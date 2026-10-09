@@ -345,8 +345,13 @@ export class AgentRunner {
         const old = this.sessions.get(current);
         if (old?.status !== "idle" || old.controlHeld)
           throw new AgentError(409, "a task is already running on this computer");
-        // A hold the user handed back ends by itself.
-        if (!this.holds(current)) old.stop();
+        // A hold the user handed back ends by itself. A finished task ends as it would after its
+        // idle time: Stop would also stop the computer the next task is about to use.
+        const waiting = this.#runtime.get(current);
+        if (waiting?.idleWait) {
+          waiting.released = true;
+          waiting.idleWait.abort();
+        } else if (!this.holds(current)) old.stop();
         await (signal
           ? abortable(this.deps.live.settled(current), signal)
           : this.deps.live.settled(current));

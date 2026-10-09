@@ -520,6 +520,21 @@ describe("signing in to a site from Settings", () => {
     await f.live.settled(task.id);
   });
 
+  // Stop contains the computer; a task that only waits for a follow-up has nothing to contain.
+  it("ends a finished task without stopping the computer when the next one starts", async () => {
+    const f = setup();
+    const { closed } = screens(f);
+    const first = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => first.status === "idle");
+    const next = await f.runner.start(f.cellId, "Another task");
+    expect(first.stopped).toBe(true);
+    expect(closed).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
+    expect(f.live.get(f.cellId)).toBe(next.id);
+    next.stop();
+    await f.live.settled(next.id);
+  });
+
   it("ends the hold without stopping the computer when the web browser can't open", async () => {
     const f = setup();
     const browser = screens(f, true);

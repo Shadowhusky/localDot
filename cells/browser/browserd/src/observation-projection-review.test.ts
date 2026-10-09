@@ -305,7 +305,25 @@ describe("independent observation capture ownership", () => {
       expect(f.capture.alive).toBe(false);
     },
   );
-  it.each(["document", "geometry", "mask"])(
+  it.each(["geometry", "mask"])(
+    "O3 %s changing after a successful capture publishes only a later capture",
+    async (change) => {
+      const f = await ownerFixture();
+      const pending = f.observation.observe(permit, "tab", new AbortController().signal);
+      await f.requested;
+      if (change === "geometry") f.state.shifted = true;
+      if (change === "mask") f.metadata.snapshot.documents[0]!.layout.bounds[1]![0] = 60;
+      f.output.write(imagePacket(1));
+      for (let tries = 0; tries < 500 && f.packets.length < 2; tries++)
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      expect(f.packets).toHaveLength(2);
+      f.output.write(imagePacket(2));
+      const result = await pending;
+      expect(result.frame.image).toBe(imagePacket(2).subarray(8).toString("base64"));
+      expect(f.fatal).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["document"])(
     "O3 %s changing after a successful capture prevents any publication",
     async (change) => {
       const f = await ownerFixture();

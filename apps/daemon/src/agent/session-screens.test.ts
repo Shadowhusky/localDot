@@ -12,7 +12,7 @@ import type {
   BrowserUploadRequest,
 } from "../../../../packages/protocol/src/browser-uploads.ts";
 import type { DesktopUploadFile } from "../../../../packages/protocol/src/desktop-uploads.ts";
-import { BrowserClient, type BrowserScope } from "../browser/client.ts";
+import { BrowserClient, BrowserClientError, type BrowserScope } from "../browser/client.ts";
 import { screenGatewayBinding } from "../browser/gateway-binding.ts";
 import { ScreenController, type ScreenControllerDeps } from "../browser/screen-controller.ts";
 import { SessionScreens } from "../browser/session-screens.ts";
@@ -894,6 +894,23 @@ describe("session-owned screen authority", () => {
     expect(observe.mock.calls.at(-1)?.[0].cellId).not.toBe(f.session.cellId);
     expect(navigated.result.content.some((c) => c.type === "image")).toBe(true);
     expect(desktop).not.toHaveBeenCalled();
+  });
+
+  // A page that keeps changing as it settles can't be read yet; the page did open.
+  it("opens a page the web browser can't read yet", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.read.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    const navigated = await h.callTool("browser_navigate", { url: "https://example.test/game" });
+    expect(navigated.result.ok).toBe(true);
+    expect(navigated.result.content).toContainEqual(
+      expect.objectContaining({
+        type: "text",
+        text: expect.stringContaining("(https://example.test/game)"),
+      }),
+    );
+    expect(navigated.result.content.some((c) => c.type === "image")).toBe(true);
   });
 
   it("types a secret answer into the web browser's own field, and nothing once the screen changed", async () => {
