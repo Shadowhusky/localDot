@@ -31,7 +31,7 @@ export function browserEnv(): DeviceEnv {
   const nav = navigator as Navigator & { standalone?: boolean };
   return {
     hostname: location.hostname,
-    isSecureContext,
+    isSecureContext: globalThis.isSecureContext === true,
     userAgent: nav.userAgent,
     maxTouchPoints: nav.maxTouchPoints,
     standalone: isStandalone(),
@@ -52,7 +52,10 @@ export function browserEnv(): DeviceEnv {
 // Opened from the Home Screen rather than in a browser tab.
 export function isStandalone(): boolean {
   const nav = navigator as Navigator & { standalone?: boolean };
-  return nav.standalone === true || matchMedia("(display-mode: standalone)").matches;
+  return (
+    nav.standalone === true ||
+    (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches)
+  );
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
