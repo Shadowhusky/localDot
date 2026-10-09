@@ -1271,29 +1271,6 @@ function Theatre({ api }: { api: ApiClient }) {
           shownRecording?.note ??
           (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
         }
-        lead={
-          shownRecording && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon="continue"
-              disabledReason={
-                shownRecording.verdict !== "live" &&
-                shownRecording.sessionId !== conversation.sessions.at(-1)
-                  ? conversationReason
-                  : undefined
-              }
-              onClick={() =>
-                shownRecording.verdict === "live" ||
-                shownRecording.sessionId === conversation.sessions.at(-1)
-                  ? selectReplay(null)
-                  : replayContinue.run(shownRecording.sessionId)
-              }
-            >
-              Continue
-            </Button>
-          )
-        }
         mode={replayId ? "replay" : "watch"}
         watchAttention={
           !!replayId &&
