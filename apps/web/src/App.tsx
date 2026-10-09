@@ -132,7 +132,9 @@ import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
+import { ACTIVITY_WIDTH, CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
+import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
@@ -1204,6 +1206,7 @@ function Theatre({ api }: { api: ApiClient }) {
       scale={cell?.scale ?? 2}
       api={api}
       nowMs={now}
+      historyLoaded={agent.history === true}
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
@@ -1713,6 +1716,22 @@ function Theatre({ api }: { api: ApiClient }) {
           <RailPanel label="Activity" className="rail-activity">
             <ErrorBoundary>{activity}</ErrorBoundary>
           </RailPanel>
+        )}
+        {wide && (
+          <ResizeHandle
+            panel={ACTIVITY_WIDTH}
+            property="--activity-w"
+            label="Activity width"
+            className="rail-resize-activity"
+          />
+        )}
+        {(wide || layout === "laptop") && (
+          <ResizeHandle
+            panel={CHAT_WIDTH}
+            property="--rail-w"
+            label="Conversation width"
+            className="rail-resize-chat"
+          />
         )}
         <RailPanel
           label="Conversation"

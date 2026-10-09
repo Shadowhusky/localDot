@@ -207,9 +207,7 @@ async function load(page: Page, activeComposer = false) {
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("sample sales table");
-  await expect(page.getByRole("list", { name: "Task plan", includeHidden: true })).toContainText(
-    "Calculate monthly totals",
-  );
+  await expect(page.locator(".plan-strip-count").first()).toHaveText("1 of 1");
   // The visible sample title also prevents these screenshots implying real application execution.
   await expect(page.locator(".title")).toHaveText("Sample · monthly report");
   return { errors, external, sockets };

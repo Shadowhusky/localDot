@@ -258,9 +258,7 @@ async function load(page: Page, activeComposer = false) {
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("sample timeline");
-  await expect(page.getByRole("list", { name: "Task plan", includeHidden: true })).toContainText(
-    "Prepare the report",
-  );
+  await expect(page.locator(".plan-strip-text").first()).toHaveText("Prepare the report");
   // The visible sample title also prevents these screenshots implying real application execution.
   await expect(page.locator(".title")).toHaveText("Sample · mixed activity");
   return { errors, external, sockets };
@@ -286,10 +284,13 @@ for (const width of [1280, 390]) {
     const proof = await load(page);
     if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     const rail = page.getByRole("complementary", { name: "Plan and steps" });
+    await expect(rail.locator(".plan-strip-count")).toHaveText("1 of 4");
+    const strip = rail.getByRole("button", { name: /^Plan/ });
+    await strip.click();
     const plan = rail.getByRole("list", { name: "Task plan", exact: true });
     await expect(plan).toContainText("Send externally");
     await expect(plan.getByRole("img", { name: "Skipped", exact: true })).toHaveCount(1);
-    await expect(rail.locator(".plan-count")).toHaveText("1 of 4 done");
+    await strip.click();
     // Results are dot's turn in the conversation now, not part of Activity.
     await expect(rail.getByRole("region", { name: "Task result", exact: true })).toHaveCount(0);
     const thread = page.getByRole("region", { name: "Conversation history", includeHidden: true });
@@ -336,7 +337,8 @@ for (const width of [1280, 390]) {
       steps.getByRole("region", { name: "Unified text diff", exact: true }),
     ).toContainText("中文 and English");
     await file.click();
-    const memory = rail.getByRole("region", { name: "Files", exact: true });
+    await rail.getByRole("tab", { name: /^Files/ }).click();
+    const memory = rail.getByRole("region", { name: "Memory", exact: true });
     await memory.getByRole("button", { name: /^MEMORY\.md Memory updated/ }).click();
     await expect(
       memory.getByRole("region", { name: "Unified text diff", exact: true }),
@@ -357,7 +359,7 @@ for (const width of [1280, 390]) {
     });
     await fits(page);
     await page.screenshot({ path: info.outputPath(`activity-${width}-sample.png`) });
-    await rail.getByRole("heading", { name: "Steps", exact: true }).scrollIntoViewIfNeeded();
+    await rail.getByRole("tab", { name: /^Steps/ }).click();
     await page.waitForTimeout(400);
     await page.screenshot({ path: info.outputPath(`steps-${width}-sample.png`) });
     expect(proof.errors).toEqual([]);

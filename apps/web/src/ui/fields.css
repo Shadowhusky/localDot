@@ -679,6 +679,35 @@
     opacity: 0;
   }
 
+  .ui-segmented[data-variant="line"] {
+    display: grid;
+    width: 100%;
+    border-radius: 0;
+    background-color: transparent;
+    box-shadow: inset 0 -1px 0 var(--color-hairline);
+  }
+
+  .ui-segmented[data-variant="line"] > .ui-segmented-thumb {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: calc(100% / var(--_count));
+    height: 2px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-1);
+    box-shadow: none;
+    translate: calc(var(--_index) * 100%) 0;
+  }
+
+  .ui-segmented[data-variant="quiet"] {
+    background-color: transparent;
+  }
+
+  .ui-segmented[data-variant="quiet"] > .ui-segmented-thumb {
+    background-color: var(--color-control);
+    box-shadow: none;
+  }
+
   .ui-segmented:has(> .ui-segment[data-pressed]:is([aria-checked="true"], [aria-selected="true"]))
     > .ui-segmented-thumb {
     scale: 0.96;
@@ -727,6 +756,10 @@
     line-height: var(--text-footnote--line-height);
   }
 
+  .ui-segmented[data-variant="line"] > .ui-segment {
+    min-width: 0;
+  }
+
   /* The chosen label brightens as the thumb arrives under it, not before. */
   .ui-segment:is([aria-checked="true"], [aria-selected="true"]) {
     color: var(--color-fg-1);
@@ -756,6 +789,24 @@
   .ui-segment-label {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .ui-segment-count {
+    color: var(--color-fg-3);
+    font-variant-numeric: tabular-nums;
+    transition: color var(--dur-hover) var(--ease-standard);
+  }
+
+  .ui-segment:is([aria-checked="true"], [aria-selected="true"]) > .ui-segment-count {
+    color: var(--color-fg-2);
+  }
+
+  .ui-segment-fresh {
+    flex: none;
+    width: 5px;
+    height: 5px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-xenon);
   }
 
   .ui-segment-attention {
@@ -790,6 +841,15 @@
     .ui-segmented > .ui-segmented-thumb {
       top: calc((var(--_reach) - var(--_h)) / 2 + 2px);
       bottom: calc((var(--_reach) - var(--_h)) / 2 + 2px);
+    }
+
+    .ui-segmented:is([data-variant="line"], [data-variant="quiet"])::before {
+      display: none;
+    }
+
+    .ui-segmented[data-variant="line"] > .ui-segmented-thumb {
+      top: auto;
+      bottom: 0;
     }
 
     .ui-radio-card {
