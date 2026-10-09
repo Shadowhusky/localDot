@@ -2,6 +2,14 @@ import { afterEach, expect, it } from "vitest";
 import { brainFlow } from "./testing/brain-flow.ts";
 
 const fixtures: Awaited<ReturnType<typeof brainFlow>>[] = [];
+// The brain looks at the screen before its first model call; the user's word comes after that, so
+// only what the tools under test return can mark the task untrusted.
+function freshAfterFirstLook(f: Awaited<ReturnType<typeof brainFlow>>) {
+  let calls = 0;
+  f.controls.beforeModel = () => {
+    if (calls++ === 0) f.h.session.tainted = false;
+  };
+}
 afterEach(async () => {
   for (const f of fixtures.splice(0)) await f.close();
 });
@@ -18,6 +26,7 @@ it("a recall from the brain is untrusted and the next remember is refused", asyn
     [{ name: "done", input: { summary: "Checked." } }],
   ]);
   fixtures.push(f);
+  freshAfterFirstLook(f);
   f.h.tools.recall = () => [
     {
       title: "Renew the car insurance",
@@ -42,6 +51,7 @@ it("a people lookup from the brain is untrusted and the next remember is refused
     [{ name: "done", input: { summary: "Checked." } }],
   ]);
   fixtures.push(f);
+  freshAfterFirstLook(f);
   f.h.tools.people?.record(f.h.session.id, { name: "Henry", app: "WeChat", handle: "henry_l" });
   expect(await f.run()).toBe("done");
   const stored = JSON.stringify(f.h.transcripts.read(f.h.session.id));
