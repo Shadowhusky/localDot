@@ -3,6 +3,7 @@ import { SELFTEST_CHECK_IDS, type SelfTestCheck, selfTestPassed, ulid } from "@l
 import { ComputerResetRecord } from "../../../../packages/protocol/src/computer-reset.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
+import type { ComputerUpdates } from "./computer-update.ts";
 import { type DiagnosticSelfTest, probeDiagnosticSelfTest } from "./diagnostic-selftest.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-retirement.ts";
@@ -50,6 +51,7 @@ export interface OrchestratorDeps {
   creationAllowed?(): boolean;
   verifyRuntime?(record: CellRecord): Promise<void>;
   diagnosticAdmission?(id: string): { release(): void } | undefined;
+  updates?: Pick<ComputerUpdates, "available" | "pending" | "swap" | "recover">;
   diagnosticProbe?(
     endpoint: CellEndpoints["desktopd"],
     signal: AbortSignal,
@@ -171,6 +173,8 @@ const isStatus = (err: unknown, ...statuses: number[]) =>
 const objectPath = (kind: "containers" | "networks" | "volumes", name: string, action?: string) =>
   `/${kind}/${encodeURIComponent(name)}${action ? `/${action}` : ""}`;
 
+export const UPDATE_UNFINISHED = "The update didn't finish. Turn on your computer to finish it.";
+
 // Detail that comes from a container or from desktopd is cut to this length before it is shown.
 const MAX_DETAIL = 200;
 const clamp = (text: string) =>
@@ -198,7 +202,8 @@ export class CellOrchestrator {
   readonly #restartBackoffMs: number[];
   readonly #live = new Map<string, Live>();
   readonly #watchOwners = new Map<string, Live>();
-  // Records never change once created, so each is read from disk once, not per request or event.
+  // A record changes only when an update moves it onto new containers, which also caches it, so
+  // each is read from disk once, not per request or event.
   readonly #records = new Map<string, CellRecord>();
   readonly #invalidRecords = new Set<string>();
   readonly #unclosedKeyd = new Set<string>();
@@ -210,6 +215,8 @@ export class CellOrchestrator {
   readonly #browserHolds = new Map<string, number>();
   readonly #browserStops = new Map<string, Promise<void>>();
   readonly #browserFailures = new Set<string>();
+  // From an update's stop until its computer is ready again or fails.
+  readonly #updating = new Set<string>();
   #browserRecoveries = 0;
   #browserRecoveryEpoch = 0;
   #browserRecoveryFailed = false;
@@ -360,7 +367,7 @@ export class CellOrchestrator {
   }
 
   async #reconcile(id: string, strict = false): Promise<void> {
-    const record = this.#record(id);
+    let record = this.#record(id);
     if (!record) return;
     if (this.deps.runtimeHold?.(id) && !this.deps.permanentFence?.(id)) {
       this.#set(id, {
@@ -384,6 +391,7 @@ export class CellOrchestrator {
       return;
     }
     try {
+      record = await this.#finishUpdate(record);
       await this.deps.verifyRuntime?.(record);
       if (this.#held(id))
         throw new CellControlConflict("computer admission changed during recovery");
@@ -611,8 +619,71 @@ export class CellOrchestrator {
       this.#records.set(id, repaired);
       this.#invalidRecords.delete(id);
     }
-    const record = this.#require(id);
+    const record = await this.#finishUpdate(this.#require(id));
     if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
+  }
+
+  // Stops the computer, moves it onto the images its tags name now and starts it again. Its home,
+  // networks, addresses, tokens and keyd port stay; an update that fails before the old containers
+  // go brings the computer back as it was.
+  update(id: string): Promise<void> {
+    return this.#withBrowser(id, () => this.#update(id));
+  }
+
+  async #update(id: string): Promise<void> {
+    const updates = this.deps.updates;
+    if (!updates) throw new CellControlConflict("Updates are unavailable.");
+    if (this.#held(id))
+      throw new CellControlConflict(
+        "the computer is permanently fenced or awaiting replacement confirmation",
+      );
+    const record = this.#require(id);
+    this.#updating.add(id);
+    const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
+    this.#set(id, stopping);
+    let next: CellRecord;
+    try {
+      if (!(await this.#closeInKeyd(id)))
+        throw new CellControlConflict("The key layer didn't answer. Try again in a moment.");
+      for (const name of [record.docker.desktop, record.docker.gate])
+        await this.#stopContainer(name);
+      next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
+    } catch (error) {
+      if (!this.#current(id, stopping)) throw error;
+      if (updates.pending(id)) {
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          stream: NO_STREAM,
+          error: UPDATE_UNFINISHED,
+        });
+        throw new CellControlConflict(UPDATE_UNFINISHED);
+      }
+      const old = this.#require(id);
+      if (await this.#startContainers(old, 0).catch(() => false))
+        this.#detach(id, this.#waitReady(old));
+      throw new CellControlConflict("Your computer couldn't be updated. It's back as it was.");
+    }
+    if (!this.#current(id, stopping)) return;
+    if (await this.#startContainers(next, 0)) this.#detach(id, this.#waitReady(next));
+  }
+
+  // An update the daemon stopped in the middle is finished, or rolled back, before anything else
+  // uses the computer's containers.
+  async #finishUpdate(record: CellRecord): Promise<CellRecord> {
+    const updates = this.deps.updates;
+    if (!updates?.pending(record.id)) return record;
+    return updates.recover(record, (next) => this.#adopt(next));
+  }
+
+  #adopt(next: CellRecord): void {
+    this.#store.save(next);
+    this.#records.set(next.id, next);
+  }
+
+  // Sends a computer's summary again, after something outside the lifecycle changed it.
+  notify(id: string): void {
+    this.#emit(id);
   }
 
   /** An idle-only fresh observation. Lifecycle commands preempt its transport before waiting
@@ -923,7 +994,7 @@ export class CellOrchestrator {
   }
 
   async #remove(id: string, opts: { purgeHome?: boolean }): Promise<void> {
-    const record = this.#require(id);
+    const record = await this.#finishUpdate(this.#require(id));
     const d = record.docker;
     const ignoreMissing = (err: unknown) => {
       if (!isStatus(err, 404)) throw err;
@@ -1470,6 +1541,7 @@ export class CellOrchestrator {
   }
 
   #set(id: string, live: Live): void {
+    if (live.state !== "stopping" && live.state !== "starting") this.#updating.delete(id);
     this.#live.set(id, live);
     if (!this.#browserHolds.has(id) && (live.state !== "ready" || live.paused))
       void this.#stopBrowser(id).catch(() => {});
@@ -1666,6 +1738,12 @@ export class CellOrchestrator {
       stream: live.stream,
       ...(live.error ? { error: live.error } : {}),
       ...(live.paused ? { paused: true as const } : {}),
+      ...(this.#updating.has(record.id) ? { updating: true as const } : {}),
+      ...(!this.#updating.has(record.id) &&
+      !this.#held(record.id) &&
+      this.deps.updates?.available(record.id)
+        ? { updateAvailable: true as const }
+        : {}),
       ...(this.deps.runtimeHold?.(record.id)
         ? {
             state: "failed" as const,
