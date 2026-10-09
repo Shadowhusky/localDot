@@ -63,6 +63,8 @@ import { type HudAction, statusFor, taskFacts, taskHud } from "./session/status.
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
+import { CHATGPT } from "./settings/chooser.ts";
+import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
@@ -1410,11 +1412,8 @@ function Theatre({ api }: { api: ApiClient }) {
               ? {
                   on: settings.draft.purposeCheck,
                   change: settings.purposeCheck,
-                  judge: keys.keys.some(isJevKey)
-                    ? "jev"
-                    : settings.draft.choices.fast
-                      ? "fast"
-                      : "none",
+                  judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
+                  plan: settings.draft.choices.main?.provider === CHATGPT,
                   addJevKey: (trigger) => {
                     keyCapture.current = null;
                     setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
