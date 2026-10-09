@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { expect, type Harness, runAt, test } from "./harness.ts";
 
-// Export from Replay: the popover's choices, a video being made, a saved file and a browser that
+// Export from Replay: the sheet's choices, a video being made, a saved file and a browser that
 // cannot make video. Chrome saves through its save picker (lent here, so nothing reaches the disk);
 // WebKit has none and saves through a download.
 runAt("c14", "w14", "w39");
@@ -53,8 +53,8 @@ async function openExport(page: Page, ui: Harness) {
   await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}&t=16000`);
   await expect(page.getByRole("status", { name: "Replay time" })).toHaveText("0:16 / 3:00");
   await ui.picture(page.locator(".replay-stage"));
-  await page.getByRole("button", { name: "Export MP4" }).click();
-  const panel = page.getByRole("dialog", { name: "Export MP4" });
+  await page.getByRole("button", { name: "Export video" }).click();
+  const panel = page.getByRole("dialog", { name: "Export video" });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("button", { name: /^Save/ })).not.toHaveAttribute(
     "aria-disabled",
@@ -103,7 +103,7 @@ test("export, saved", async ({ page, ui }) => {
     await expect(panel.getByText("Downloaded", { exact: true })).toBeVisible();
     await expect(panel.getByRole("button", { name: "Save again" })).toBeVisible();
   } else await expect(saved).toBeVisible();
-  await expect(panel.getByText("2.3 MB · 1:38", { exact: true })).toBeVisible();
+  await expect(panel.getByText(/^2\.3 MB · 1:38 video · made in \d+:\d\d$/)).toBeVisible();
   await still(ui);
 });
 
@@ -111,13 +111,13 @@ test("export, unsupported", async ({ page, ui }) => {
   await page.addInitScript(() => Object.assign(window, { VideoEncoder: undefined }));
   await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}&t=16000`);
   await ui.picture(page.locator(".replay-stage"));
-  const trigger = page.getByRole("button", { name: "Export MP4" });
+  const trigger = page.getByRole("button", { name: "Export video" });
   const reason = "Export needs Chrome, Edge or Safari 17 or later";
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
   await expect(trigger).toHaveAccessibleDescription(reason);
   await trigger.click({ force: true });
   await expect(page.locator(".ui-tooltip")).toContainText(reason);
-  await expect(page.getByRole("dialog", { name: "Export MP4" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Export video" })).toHaveCount(0);
   await still(ui);
 });
 
@@ -129,16 +129,22 @@ test.describe("in WebKit", () => {
   test("Export saves through a download, or says why it cannot", async ({ page, ui }) => {
     await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}&t=16000`);
     await ui.picture(page.locator(".replay-stage"));
-    const trigger = page.getByRole("button", { name: "Export MP4" });
+    const trigger = page.getByRole("button", { name: "Export video" });
     if ((await trigger.getAttribute("aria-disabled")) === "true") {
       await expect(trigger).toHaveAccessibleDescription(/\S/);
       return;
     }
     await trigger.click();
-    const panel = page.getByRole("dialog", { name: "Export MP4" });
+    const panel = page.getByRole("dialog", { name: "Export video" });
     await panel.getByRole("radio", { name: "This step" }).click();
-    await panel.getByRole("radio", { name: "8×" }).click();
-    await panel.getByRole("radio", { name: "720p" }).click();
+    await panel
+      .getByRole("radiogroup", { name: "Preset" })
+      .getByRole("radio", { name: "Fast" })
+      .click();
+    await panel
+      .getByRole("radiogroup", { name: "Speed" })
+      .getByRole("radio", { name: "3×" })
+      .click();
     await panel.getByRole("button", { name: "Save", exact: true }).click();
     const ready = panel.getByRole("button", { name: "Save video" });
     await expect(ready).toBeVisible({ timeout: 60_000 });

@@ -7,6 +7,7 @@ export interface ExportProbeResult {
   hashes: string[] | null;
   peakOpenFrames: number;
   peakEncodeQueue: number;
+  ms: number;
 }
 export interface ExportProbe {
   run(options: ExportProbeOptions): Promise<ExportProbeResult>;

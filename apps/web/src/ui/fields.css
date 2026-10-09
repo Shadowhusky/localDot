@@ -554,6 +554,15 @@
     flex-shrink: 0;
   }
 
+  .ui-radio-card-aside {
+    flex-shrink: 0;
+    margin-left: auto;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+  }
+
   .ui-radio-cards[data-layout="tiles"] .ui-radio-card-preview {
     margin-bottom: calc(var(--spacing) * 2.5);
   }

@@ -10,8 +10,10 @@ const SKIPPED =
 
 describe("describeRequestError", () => {
   it("reports safe Resume answers without echoing arbitrary server errors or calling every 502 a Docker outage", () => {
-    const offline = "key protection is off: turn it back on, then resume the computer";
-    expect(describeRequestError(new ApiError(503, offline), "resume")).toBe(offline);
+    const offline = "the key layer is offline: start keyd, then resume the computer";
+    expect(describeRequestError(new ApiError(503, offline), "resume")).toBe(
+      "Key protection is off. Run localdot doctor in Terminal, then resume.",
+    );
     for (const status of [409, 502, 503]) {
       const message = describeRequestError(new ApiError(status, "private-internal-path"), "resume");
       expect(message).not.toContain("private-internal-path");
@@ -31,16 +33,16 @@ describe("describeRequestError", () => {
       "Some computer records can't be read. Fix or remove them in localDot's cells folder, then try again.",
     );
     expect(describeRequestError(new ApiError(500, "internal error"))).toBe(
-      "The daemon couldn't do that. Try again.",
+      "localDot couldn't do that. Try again.",
     );
     expect(describeRequestError(new ApiError(400, "invalid cell id"))).toBe(
-      "The daemon refused that request.",
+      "localDot couldn't do that.",
     );
   });
 
   it("says the daemon can't be reached when no answer came back", () => {
     expect(describeRequestError(new TypeError("Failed to fetch"))).toBe(
-      "localDot's daemon isn't answering. Check that it's running.",
+      "localDot isn't answering. Check that it's running on your Mac.",
     );
   });
 });

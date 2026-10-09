@@ -28,7 +28,7 @@ export function ExportButton({
       className="replay-export"
       variant="quiet"
       icon="share"
-      aria-label="Export MP4"
+      aria-label="Export video"
       data-ring={ring ? "" : undefined}
       {...triggerProps("dialog", open)}
       disabledReason={phase === "options" ? disabledReason : undefined}

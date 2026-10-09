@@ -67,7 +67,7 @@ test("a Pause the computer cannot confirm says so", async ({ page }) => {
   await page.getByRole("button", { name: "Pause after this step" }).click();
   await expectWaiting(page, "Paused");
   await qa(page, "pause-uncertain");
-  await expectWaiting(page, "Pause unconfirmed");
+  await expectWaiting(page, "Pause not confirmed");
   await expect(page.getByRole("button", { name: "Resume task" })).toBeDisabled();
 });
 
@@ -88,7 +88,7 @@ test("after Send, dot has control again and a quiet task still warns", async ({ 
   await expect(control(page)).toHaveCount(1);
   await qa(page, "heartbeat");
   await expect(
-    page.getByText("dot is taking longer than usual. Use Stop if it seems stuck."),
+    page.getByText("This is taking longer than usual. Stop me if it looks stuck."),
   ).toBeVisible();
 });
 
@@ -160,7 +160,7 @@ test("a question puts the question first", async ({ page }) => {
 test("a budget pause names the limit", async ({ page }) => {
   await open(page);
   await qa(page, "budget");
-  await expectWaiting(page, "Reached your spending limit");
+  await expectWaiting(page, "Spending limit reached");
   await expect(page.getByRole("region", { name: "Task recovery" })).toBeVisible();
 });
 

@@ -16,6 +16,8 @@ export interface RadioCardOption {
   preview?: ReactNode;
   // A tile at the row's start, as in a grouped list.
   icon?: IconName;
+  // A short value at a row's end, such as what the choice comes to.
+  aside?: ReactNode;
   disabledReason?: string;
 }
 
@@ -110,6 +112,9 @@ export function RadioCards({
                 </span>
               )}
             </span>
+            {option.aside !== undefined && (
+              <span className="ui-radio-card-aside">{option.aside}</span>
+            )}
             <span className="ui-radio-card-check" aria-hidden="true">
               <Icon name="check" size={12} strokeWidth={2.4} />
             </span>

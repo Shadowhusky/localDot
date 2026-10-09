@@ -29,12 +29,12 @@ const REACT_HZ_MS = 100;
 const CLOCK_EVERY_MS = 20_000;
 const NO_MODEL = emptyModel();
 
-// A task at rest whose log stops short of its end (the daemon went away under it) is over all the
-// same, from its last moment.
+// A task at rest whose log stops short of its end (the daemon went away under it) was interrupted,
+// from its last moment.
 function cutShort(model: SessionModel): SessionModel {
   if (model.ended) return model;
   const t = Math.max(model.startT ?? 0, ...model.agentStates.map((state) => state.t));
-  return { ...model, ended: { t, reason: "stopped" } };
+  return { ...model, ended: { t, reason: "interrupted" } };
 }
 
 interface Shown {

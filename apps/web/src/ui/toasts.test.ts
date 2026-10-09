@@ -113,6 +113,15 @@ describe("toast queue", () => {
     expect(shown(other)).toEqual(["Saved to Downloads"]);
   });
 
+  it("keeps one with details until it is dismissed, and shows changed details in place", () => {
+    const queue = createToasts();
+    queue.show({ id: "stop", title: "Stopped", details: ["One note"] });
+    wait(SETTLE_MS + 60_000);
+    expect(shown(queue)).toEqual(["Stopped"]);
+    queue.show({ id: "stop", title: "Stopped", details: ["One note", "Another"] });
+    expect(queue.list()[0]?.details).toEqual(["One note", "Another"]);
+  });
+
   it("stands the time still while held, and goes on from there", () => {
     const queue = createToasts();
     queue.show({ title: "Saved to Downloads" });

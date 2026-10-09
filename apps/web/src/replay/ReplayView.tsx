@@ -7,7 +7,7 @@ import { type DotFeed, dotFeed } from "../dot/dot-feed.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
-import { ExportPopover } from "../export/ExportPopover.tsx";
+import { ExportSheet } from "../export/ExportSheet.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
 import type { ExportJob } from "../export/job.ts";
 import { exportSupport } from "../export/sink.ts";
@@ -59,7 +59,8 @@ import { useReplay } from "./useReplay.ts";
 import "./replay.css";
 
 // Below a laptop the library has no room for its preview, so a row opens its recording at once.
-const PREVIEW_ROOM = "(width >= 1100px)";
+// Wide enough for the chosen recording beside the list.
+export const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
 const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.
@@ -313,9 +314,12 @@ function Library({
               }}
             />
           ) : (
-            <EmptyState className="replay-rail-empty" title="Choose a recording">
-              Its picture, what dot said and the files it made show here.
-            </EmptyState>
+            <div className="replay-rail-empty">
+              {showDot && <PresenceSlot name="dock" className="replay-rail-dot" />}
+              <EmptyState title="Choose a recording">
+                Its picture, what dot said and the files it made show here.
+              </EmptyState>
+            </div>
           )}
         </RailPanel>
       )}
@@ -672,9 +676,16 @@ function Player({
           </Presence>
           <GapCard kind={gapKind} />
           {replay.status === "error" && !gapKind && (
-            <p className="replay-error" role="alert">
-              Some of the recording couldn't load. The steps are still here.
-            </p>
+            <div className="replay-error" role="alert">
+              <p className="replay-gap-title">
+                {chapterRows.length
+                  ? "Part of this recording couldn't load"
+                  : "This recording couldn't load"}
+              </p>
+              <p className="replay-gap-body">
+                {chapterRows.length ? "Its steps are still here." : "Try again in a moment."}
+              </p>
+            </div>
           )}
           {replay.compare && (
             <CompareView
@@ -772,7 +783,7 @@ function Player({
         </RailPanel>
       )}
       {exporting && (
-        <ExportPopover
+        <ExportSheet
           key={exporting.key}
           api={api}
           job={job}
