@@ -353,7 +353,8 @@ button.activity-row-head[data-pressed] {
   display: grid;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
-  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 8.5);
+  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3)
+    calc(var(--spacing) * 8.5);
 }
 
 .activity-detail-actions {
