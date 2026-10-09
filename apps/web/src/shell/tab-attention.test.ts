@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import attentionIcon from "../favicon-attention.svg";
 import type { Status } from "../session/status.ts";
@@ -26,6 +26,7 @@ const hide = (hidden: boolean) => {
 };
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
   document.head.innerHTML = "";
 });
@@ -48,4 +49,36 @@ it("gives the tab's icon the amber point while hidden and puts it back on return
   expect(document.title).toBe("• Needs your answer · localDot");
   act(() => hide(false));
   expect(link.getAttribute("href")).toBe("/favicon.svg");
+});
+
+it("says what waits across tasks while hidden, counting once there is more than one", () => {
+  const working = status("working", "Thinking");
+  expect(tabTitle(working, true, { count: 1, top: "done" })).toBe("Done · localDot");
+  expect(tabTitle(working, true, { count: 2, top: "failed" })).toBe("(2) Failed · localDot");
+  expect(tabTitle(working, true, { count: 1, top: "blocked" })).toBe("Paused · localDot");
+  expect(tabTitle(working, true, { count: 2, top: "needs_you" })).toBe(
+    "• (2) Needs you · localDot",
+  );
+  expect(tabTitle(status("needs_you"), true, { count: 2, top: "needs_you" })).toBe(
+    "• (2) Needs your answer · localDot",
+  );
+  expect(tabTitle(working, false, { count: 2, top: "needs_you" })).toBe("localDot — Thinking");
+  expect(tabTitle(working, true, { count: 0, top: "none" })).toBe("localDot — Thinking");
+});
+
+it("marks the tab's icon while another task needs you out of sight", () => {
+  document.head.innerHTML = '<link rel="icon" href="/favicon.svg" />';
+  const link = document.querySelector("link") as HTMLLinkElement;
+  hide(true);
+  const view = renderHook(
+    ({ top }) => useTabAttention(status("working", "Thinking"), { count: 1, top }),
+    {
+      initialProps: { top: "needs_you" as "needs_you" | "done" },
+    },
+  );
+  expect(link.getAttribute("href")).toBe(attentionIcon);
+  expect(document.title).toBe("• Needs you · localDot");
+  view.rerender({ top: "done" });
+  expect(link.getAttribute("href")).toBe("/favicon.svg");
+  expect(document.title).toBe("Done · localDot");
 });

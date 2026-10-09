@@ -13,7 +13,6 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { ApprovalDecision } from "../shell/DecisionIsland.tsx";
-import { notifyApproval } from "./approval-notification.ts";
 import { taskStalled } from "./heartbeat.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
@@ -441,38 +440,6 @@ it("expired card leaves all decisions disabled", () => {
     fireEvent.click(button);
   }
   expect(decision).not.toHaveBeenCalled();
-});
-it("Notification click focuses only and deduplicates the same owned card without preview secrets", () => {
-  const notices: { title: string; onclick?: () => void; close: () => void }[] = [];
-  class Notice {
-    static permission = "granted";
-    onclick?: () => void;
-    close = vi.fn();
-    constructor(public title: string) {
-      notices.push(this);
-    }
-  }
-  vi.stubGlobal("Notification", Notice);
-  const focus = vi.fn(),
-    seen = new Set<string>();
-  notifyApproval(card, SESSION, seen, focus);
-  notifyApproval(card, SESSION, seen, focus);
-  expect(notices).toHaveLength(1);
-  expect(notices[0]?.title).toBe("localDot needs your decision");
-  notices[0]?.onclick?.();
-  expect(focus).toHaveBeenCalledOnce();
-});
-it("notification permission failure leaves the visible approval usable", () => {
-  class Notice {
-    static permission = "granted";
-    constructor() {
-      throw new Error("denied");
-    }
-  }
-  vi.stubGlobal("Notification", Notice);
-  expect(notifyApproval(card, SESSION, new Set(), vi.fn())).toMatch(/could not be shown/);
-  render(<ApprovalDecision card={card} pending={false} onDecision={vi.fn()} />);
-  expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBeNull();
 });
 it("Stop chord stays reachable in text and dialogs without hijacking normal typing or IME", () => {
   const stop = vi.fn();

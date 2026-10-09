@@ -52,6 +52,9 @@ import {
   takeInstallLink,
 } from "./lib/install-link.ts";
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
+import { listenForSessionLinks } from "./notify/session-link.ts";
+import { useAttention } from "./notify/useAttention.ts";
+import { useAttentionToasts } from "./notify/useAttentionToasts.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
 import { Onboarding } from "./onboarding/Onboarding.tsx";
@@ -69,6 +72,7 @@ import { stepRows } from "./session/session-view.ts";
 import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
+import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
@@ -818,7 +822,31 @@ function Theatre({ api }: { api: ApiClient }) {
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
   };
-  useTabAttention(appStatus);
+  const live = useRef({
+    sessionId: agent.sessionId,
+    approval: safety.approval,
+    select: selectReplay,
+  });
+  live.current = { sessionId: agent.sessionId, approval: safety.approval, select: selectReplay };
+  // A notification or a toast names a task: the live one opens in Watch at its decision, any other
+  // in Replay.
+  const openSession = useCallback((id: string | null) => {
+    if (!id) return;
+    const now = live.current;
+    if (id !== now.sessionId) return now.select(id);
+    now.select(null);
+    const approval = now.approval?.approvalId;
+    if (approval)
+      requestAnimationFrame(() =>
+        document.getElementById(`approval-${approval}`)?.focus({ preventScroll: true }),
+      );
+  }, []);
+  const attention = useAttention(api, openSession);
+  useEffect(() => listenForSessionLinks(openSession), [openSession]);
+  const viewing = replayId === LIBRARY ? null : (replayId ?? agent.sessionId ?? null);
+  useSeenReporting(api, attention.items, viewing);
+  useAttentionToasts(attention.latest, viewing, openSession);
+  useTabAttention(appStatus, { count: attention.items.length, top: attention.top });
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
@@ -1230,14 +1258,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onRowWidth={setIslandWidth}
                     fields={askFields}
                     noticesRef={toastAnchor}
-                    notices={
-                      <SafetyNotes
-                        safety={safety}
-                        agent={agent}
-                        cell={cell}
-                        visible={sheetsClosed}
-                      />
-                    }
+                    notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
                   />
                   <Toaster anchor={toastAnchor} />
                 </>
