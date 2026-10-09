@@ -141,14 +141,16 @@ browser stay put across restarts and new tasks, so you log in once.
 
 ## Meet dot
 
-<img src="docs/readme/dot-moods.png" alt="dot idle, thinking, working, waiting, asking for your turn, and asleep">
+<p align="center">
+  <img src="docs/readme/dot-sequence.gif" width="820" alt="dot working through a task, its tool changing with each step: thinking, opening a web page, waiting for it to load, clicking, typing">
+</p>
 
-dot is the little white ball doing the work. It looks where it's working, waits patiently when
-it needs you, and nods off when there's nothing to do. It has no other hobbies.
+dot is the little white ball doing the work, and it picks up whatever the job needs. A keyboard
+when it types, a terminal when it runs code, a magnifier when it looks closely, a paper plane
+when something is going out. It glides from one to the next, waves when it needs you, and
+squints happily when it's done. It has no other hobbies.
 
-<!-- TODO(dot-poses): when docs/readme/dot-poses.png and docs/readme/dot-sequence.gif land on
-program/alpha, add them here: the per-tool poses (typing, browsing and so on) and the sequence
-that shows one flowing into the next. -->
+<img src="docs/readme/dot-poses.png" alt="Every one of dot's poses at hero and dock size: typing, terminal, browsing, clicking, dragging, looking, thinking, waiting, needs you, sending, saving, remembering, done and something failed">
 
 ## How it works
 
