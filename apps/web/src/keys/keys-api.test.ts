@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { type ApiClient, ApiError } from "../lib/api.ts";
-import { deleteKey, KeyProblem, lockedVaultError, problemText, saveKey } from "./keys-api.ts";
+import {
+  deleteKey,
+  KeyProblem,
+  keyHome,
+  lockedVaultError,
+  problemText,
+  saveKey,
+} from "./keys-api.ts";
 import { protectionOf } from "./Protection.tsx";
 import { keyStatus } from "./useKeys.ts";
 
@@ -252,5 +259,20 @@ describe("protectionOf", () => {
     expect(
       row({ online: true, hairpin: active, vault: { backend: "secret-service", state: "ready" } }),
     ).toEqual({ name: "Saved keys", state: "In your keyring", tone: "ok" });
+  });
+});
+
+describe("keyHome", () => {
+  it("names the keychain only for the signed Mac build", () => {
+    const at = (backend?: string) =>
+      keyHome({
+        online: true,
+        ...(backend ? { vault: { backend, state: "ready" as const } } : {}),
+      });
+    expect(at("keychain")).toBe("in your Mac's keychain");
+    expect(at("secret-service")).toBe("in the keyring of the computer running localDot");
+    expect(at("file")).toBe("encrypted on the computer running localDot");
+    expect(at()).toBe("on the computer running localDot");
+    expect(keyHome(null)).toBe("on the computer running localDot");
   });
 });

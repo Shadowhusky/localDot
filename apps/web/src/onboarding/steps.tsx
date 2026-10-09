@@ -50,7 +50,7 @@ export function WelcomeStep() {
         <GroupRow
           leading={<IconTile icon="monitor" />}
           label="My own computer"
-          detail="It runs inside your Mac, apart from your files"
+          detail="It runs in its own space, apart from your files"
         />
         <GroupRow
           leading={<IconTile icon="hand" />}
@@ -60,7 +60,7 @@ export function WelcomeStep() {
         <GroupRow
           leading={<IconTile icon="lock" />}
           label="Your keys stay here"
-          detail="They never leave this Mac"
+          detail="They never leave the computer running localDot"
         />
       </Group>
       <p className="onboarding-note">Setup takes about two minutes.</p>

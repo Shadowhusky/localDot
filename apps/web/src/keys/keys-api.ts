@@ -26,6 +26,21 @@ export interface KeydHealth {
 export const UNLOCK = "localdot unlock";
 export const VAULT_LOCKED = `Saved keys are locked. On that computer, run: ${UNLOCK}`;
 
+// Where saved keys live: the Keychain only for the signed Mac release; otherwise keyd's own vault
+// on the computer running localDot, which may not be the one showing this page.
+export function keyHome(health: KeydHealth | null): string {
+  switch (health?.vault?.backend) {
+    case "keychain":
+      return "in your Mac's keychain";
+    case "secret-service":
+      return "in the keyring of the computer running localDot";
+    case "file":
+      return "encrypted on the computer running localDot";
+    default:
+      return "on the computer running localDot";
+  }
+}
+
 export const vaultLocked = (health: KeydHealth | null) =>
   health?.online === true && (health.vault?.state === "locked" || health.vault?.state === "setup");
 

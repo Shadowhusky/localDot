@@ -176,7 +176,7 @@ let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
   | "signed_out"
   | "signed_in"
   | undefined;
-let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
+let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard" | "locked";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
@@ -1600,6 +1600,9 @@ routes.get("/api/keyd", (c) =>
           keydMode === "guard"
             ? { state: "unknown", addresses: 0 }
             : { state: "active", source: "router", addresses: 1 },
+        ...(keydMode === "locked"
+          ? { vault: { backend: "file", state: "locked", key: "passphrase" } }
+          : {}),
       }),
 );
 routes.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
@@ -1607,6 +1610,14 @@ routes.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
 routes.post("/api/keys", async (c) => {
+  if (keydMode === "locked")
+    return c.json(
+      {
+        error: "vault-locked",
+        message: "Saved keys are locked. On that computer, run: localdot unlock",
+      },
+      423,
+    );
   const { binding } = (await c.req.json()) as { binding: KeydRecord };
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;
