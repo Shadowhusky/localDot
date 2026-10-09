@@ -30,3 +30,13 @@ export function exportRequest(search: string): { fromMs: number; toMs: number } 
   const toMs = Number(match[2]);
   return toMs > fromMs ? { fromMs, toMs } : null;
 }
+
+// The asked-for part inside what the recording holds, or null when none of it is there.
+export function withinRecording(
+  whole: { fromMs: number; toMs: number },
+  range: { fromMs: number; toMs: number },
+): { fromMs: number; toMs: number } | null {
+  const fromMs = Math.max(whole.fromMs, range.fromMs);
+  const toMs = Math.min(whole.toMs, range.toMs);
+  return toMs > fromMs ? { fromMs, toMs } : null;
+}

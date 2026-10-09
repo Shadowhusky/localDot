@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { exportRequest, openReplay } from "./replay-link.ts";
+import { exportRequest, openReplay, withinRecording } from "./replay-link.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 describe("replay links", () => {
@@ -25,5 +25,13 @@ describe("replay links", () => {
     expect(exportRequest("?export=5000-1000")).toBeNull();
     expect(exportRequest("?export=1")).toBeNull();
     expect(exportRequest("")).toBeNull();
+  });
+  it("exports only the part of the asked range the recording holds", () => {
+    const whole = { fromMs: 2000, toMs: 60_000 };
+    expect(withinRecording(whole, { fromMs: 0, toMs: 30_000 })).toEqual({
+      fromMs: 2000,
+      toMs: 30_000,
+    });
+    expect(withinRecording(whole, { fromMs: 61_000, toMs: 70_000 })).toBeNull();
   });
 });

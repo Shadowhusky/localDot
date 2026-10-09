@@ -69,7 +69,12 @@ export function DeliverableFile({
     open: boolean;
   } | null>(null);
   const versions = useVersions(api, sessionId, file.name, refresh) ?? [];
-  const current = findVersion(versions, shown);
+  // A file listed without its number (from a recording's summary) is the newest of its task.
+  const current =
+    findVersion(versions, shown) ??
+    (shown.version === null && file.version === undefined
+      ? versions.findLast((v) => v.sessionId === shown.sessionId && v.available)
+      : undefined);
   const newest = !current || current === versions.at(-1);
   const kind = fileKind(file.name);
   const preview = usePreview(
