@@ -42,11 +42,13 @@ export function useSettings(
   const [saved, setSaved] = useState<AgentSettingsDocument | null>(null);
   const [index, setIndex] = useState<ProviderIndex | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  // Each account is read while it is chosen or saved, so the app knows whether a task can start on
+  // it rather than taking a status not yet read for one that says no.
   const chatgpt = useChatgpt(
     api,
-    open && accountVisible && draft?.choices.main?.provider === "chatgpt",
+    (open && accountVisible && draft?.choices.main?.provider === "chatgpt") ||
+      saved?.main?.provider === "chatgpt",
   );
-  // Read while it is chosen or saved, so the app knows whether a task can start on it.
   const claudeCode = useClaudeCode(
     api,
     (open && draft?.choices.main?.provider === "claude-code") ||

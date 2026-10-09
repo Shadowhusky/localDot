@@ -54,4 +54,19 @@ describe.skipIf(!DOCKER_TESTS)("page images made inside the desktop", () => {
       expect(left.out.trim()).toBe("0");
     },
   );
+  it.each(["totals.ods", "brief.docx"])("makes every page of %s as a PDF", async (name) => {
+    const bytes = Buffer.from(
+      await new Response(await tools.fetchFile(`fixtures/${name}`)).arrayBuffer(),
+    );
+    const abort = new AbortController();
+    const converter = computerConverter({
+      computers: () => [{ id: "01JXYZ0000000000000000CE11", state: "ready" }],
+      access: () => ({ tools, signal: abort.signal, check: () => {}, release: () => {} }),
+    });
+    const pdf = await converter.pages(name, bytes, abort.signal);
+    expect(Buffer.isBuffer(pdf)).toBe(true);
+    expect((pdf as Buffer).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    const left = execAsDesktopUser(C, "bash", "-lc", "ls ~/.cache/localdot-preview | wc -l");
+    expect(left.out.trim()).toBe("0");
+  });
 });

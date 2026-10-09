@@ -38,6 +38,19 @@ describe("PageBrowser", () => {
     });
   });
 
+  it("reads only the front page's address, running nothing in the page", async () => {
+    const { WebSocketImpl, sent } = fakeCdp(() => ({}));
+    const browser = new PageBrowser({
+      WebSocketImpl,
+      fetchImpl: fakeTargets([
+        { type: "page", url: "https://accounts.google.com/signin" },
+        { type: "page", url: "https://example.com/" },
+      ]),
+    });
+    expect(await browser.page()).toEqual({ url: "https://accounts.google.com/signin" });
+    expect(sent).toEqual([]);
+  });
+
   it("says there is no page when Chromium has none or is not running", async () => {
     const { WebSocketImpl } = fakeCdp(() => ({}));
     await expect(

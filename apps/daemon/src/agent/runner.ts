@@ -74,6 +74,9 @@ export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it."
 export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
 // What Replay calls the user's own time on the computer.
 const HOLD_TITLE = "You used the computer";
+// How long a sign-in waits for the web browser to start before saying to try again.
+export const SIGN_IN_BROWSER_WAIT_MS = 20_000;
+const BROWSER_UNAVAILABLE = "The web browser couldn't open. Try again in a moment.";
 // The brain checks in only where the user asked it to.
 export function agentLimits(checkIns: CheckIns | undefined): AgentLimits {
   return {
@@ -123,6 +126,8 @@ export interface AgentRunnerDeps {
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
   installSession?(session: AgentSession, cell: CellSummary): void;
+  // Starts the computer's web browser, or finds it running.
+  startBrowser?(cellId: string): Promise<void>;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close"> &
     Partial<Pick<BrainCells, "retireSession">>;
   keyd: Pick<KeydClient, "secrets" | "beginTask" | "modelAdmission" | "setModelAdmission"> &
@@ -559,6 +564,7 @@ export class AgentRunner {
   ): Promise<TakeComputerReply> {
     if (!ULID_PATTERN.test(cellId)) throw new AgentError(400, "invalid computer id");
     this.#ready(cellId);
+    await this.#browserStarted(cellId, signal);
     const current = this.deps.live.get(cellId);
     const live = current ? this.sessions.get(current) : undefined;
     if (current && (!live || live.stopped))
@@ -569,6 +575,28 @@ export class AgentRunner {
         throw new AgentError(409, "Hand back the computer, then sign in.");
     } else if (live) await this.release(signal);
     return this.hold(cellId, signal, { url, title: `Sign in to ${site}` });
+  }
+  // The web browser starts before the user's own hold gives way, so one that can't start leaves
+  // them in control where they are. A start that runs long goes on by itself.
+  async #browserStarted(cellId: string, signal?: AbortSignal): Promise<void> {
+    const starting = this.deps.startBrowser?.(cellId);
+    if (!starting) return;
+    const timeout = Promise.withResolvers<boolean>();
+    const timer = setTimeout(() => timeout.resolve(false), SIGN_IN_BROWSER_WAIT_MS);
+    let started: boolean;
+    try {
+      const race = Promise.race([
+        starting.then(
+          () => true,
+          () => false,
+        ),
+        timeout.promise,
+      ]);
+      started = await (signal ? abortable(race, signal) : race);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!started) throw new AgentError(503, BROWSER_UNAVAILABLE);
   }
   // With no task at work, the user's own session holds the computer, in the current conversation,
   // until they hand it back. A task at work, or at rest, gives the user its own control. Given a
@@ -644,7 +672,7 @@ export class AgentRunner {
     }
     // A page that can't open ends the hold; its run records the end.
     const taken = await Promise.resolve(requestId).catch(() => {
-      throw new AgentError(503, "The web browser couldn't open. Try again in a moment.");
+      throw new AgentError(503, BROWSER_UNAVAILABLE);
     });
     try {
       this.deps.conversations?.adopt(id);

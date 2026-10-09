@@ -217,7 +217,7 @@ export class ScreenController {
   async openForUser(url: string, raw: ScreenScope): Promise<void> {
     const scope = this.#scope(raw);
     if (this.#held || this.#ownerGeneration !== undefined) throw new ScreenControlError();
-    await this.#switch("browser", scope, false, "daemon");
+    await this.#switch("browser", scope, false, true);
     const lease = this.lease(scope);
     try {
       const { client, permit, tabId } = this.browserAccess(lease);
@@ -460,7 +460,7 @@ export class ScreenController {
     screen: ScreenName,
     scope: ScreenScope,
     handback: boolean,
-    by: ScreenSwitchData["by"] = handback ? "daemon" : "agent",
+    forUser = false,
   ): Promise<ScreenSwitchData> {
     const epoch = this.#epoch;
     const guard = () => {
@@ -531,7 +531,7 @@ export class ScreenController {
             cellId,
             geometry,
             revision: this.#selection.revision + 1,
-            by,
+            by: handback || forUser ? "daemon" : "agent",
           });
           const selection = Object.freeze({
             screen,
@@ -556,15 +556,18 @@ export class ScreenController {
               this.#browserScope(owner, operationScope),
             );
             guard();
-            await this.#startDownloads(
-              owner,
-              {
-                holder: "agent",
-                sessionId: this.deps.sessionId,
-                permit: owner.permit,
-              },
-              operationScope,
-            );
+            // A page opened for the user is no task's: its hold has no brain to collect downloads
+            // for, and the user's own collection starts at the takeover that follows.
+            if (!forUser)
+              await this.#startDownloads(
+                owner,
+                {
+                  holder: "agent",
+                  sessionId: this.deps.sessionId,
+                  permit: owner.permit,
+                },
+                operationScope,
+              );
             guard();
           } else if (!this.deps.desktopReady()) throw new ScreenControlError();
           integrity = true;
@@ -681,7 +684,11 @@ export class ScreenController {
         this.deps.report?.("the web browser stopped working; starting it again");
         owner.client.close();
         if (this.#browser === owner) this.#browser = undefined;
-        await this.deps.browser.stop(this.deps.parentCellId);
+        // Only the browser that failed is stopped, never one started since.
+        if (
+          this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance
+        )
+          await this.deps.browser.stop(this.deps.parentCellId);
         scope.check();
       }
     }

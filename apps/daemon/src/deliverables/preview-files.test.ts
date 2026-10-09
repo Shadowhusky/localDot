@@ -8,6 +8,7 @@ import { OutputStore } from "../agent/output-store.ts";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
+import { PageQuieter } from "./page-quieter.ts";
 import { byteRange } from "./preview-files.ts";
 import { PreviewLinks } from "./preview-links.ts";
 import { deliverablesDeps } from "./testing/qa-scenarios.ts";
@@ -22,7 +23,8 @@ afterEach(() => {
   for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
 });
 
-function setup() {
+// A second of CPU per page: what is too much for that is too much for the daemon's five.
+function setup(quieter = new PageQuieter({ cpu: 1 })) {
   const home = mkdtempSync(join(tmpdir(), "localdot-preview-files-"));
   homes.push(home);
   const log = new EventLog(home);
@@ -39,6 +41,7 @@ function setup() {
       frames: new FrameStore(home),
       effects: [],
       session: () => undefined,
+      quieter,
     }),
   });
   const outputs = new OutputStore(home);
@@ -225,6 +228,17 @@ describe("the preview route", () => {
       expect(performance.now() - started, name).toBeLessThan(3000);
       expect(stall, name).toBeLessThan(500);
     }
+    expect(await (await load(`${base}plain.html`)).text()).toContain("<p>A plain page</p>");
+  }, 15_000);
+
+  it("refuses a page that runs its reader out of heap, and goes on serving", async () => {
+    const { save, load, link } = setup(new PageQuieter({ heap: 48 }));
+    save("heavy.html", "<br>".repeat(1_250_000));
+    save("plain.html", "<p>A plain page</p>");
+    const base = await link();
+    const reply = await load(`${base}heavy.html`);
+    expect(reply.status).toBe(415);
+    expect(await reply.text()).toBe("too complex to preview");
     expect(await (await load(`${base}plain.html`)).text()).toContain("<p>A plain page</p>");
   }, 15_000);
 

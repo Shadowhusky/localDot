@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CodexLaunchError, prepareOwnedCodexRoots } from "@localdot/codex-harness";
@@ -5,8 +6,10 @@ import { CAREFUL_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BrowserClient, BrowserClientError } from "../browser/client.ts";
 import { SessionScreens } from "../browser/session-screens.ts";
 import { BrowserStreams } from "../browser/streams.ts";
+import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
@@ -15,8 +18,14 @@ import type { ChatgptStatus } from "./codex/account.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexCleanupError } from "./codex/driver.ts";
 import { Conversations } from "./conversation.ts";
+import { sendManualInput } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import {
+  AgentError,
+  AgentRunner,
+  type AgentRunnerDeps,
+  SIGN_IN_BROWSER_WAIT_MS,
+} from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -272,6 +281,185 @@ describe("signing in to a site from Settings", () => {
       } as never);
     return { opened, closed };
   }
+  // The real session screens, with the web browser's cell and browserd faked at their edges.
+  function webBrowser(f: ReturnType<typeof setup>) {
+    const endpoint: ReadyBrowser = {
+      parentCellId: f.cellId,
+      browserCellId: ulid(),
+      instance: randomUUID(),
+      browserd: { baseUrl: "http://127.0.0.1:5000", token: "t".repeat(43) },
+      stream: { baseUrl: "http://127.0.0.1:5001", authorization: "fixture" },
+    };
+    const { parentCellId, browserCellId, instance } = endpoint;
+    const tabId = randomUUID();
+    const browserd = {
+      holder: "user" as "user" | "agent",
+      revision: 0,
+      armed: [] as string[],
+      opened: [] as string[],
+      typed: [] as string[],
+    };
+    const current = (permit: { revision: number }, holder: "user" | "agent") => {
+      if (browserd.holder !== holder || permit.revision !== browserd.revision)
+        throw new BrowserClientError("unavailable");
+    };
+    const prototype = BrowserClient.prototype;
+    vi.spyOn(prototype, "health").mockImplementation(async (scope) => {
+      scope.check();
+      return { ...endpoint, ready: true, width: 1280, height: 800, holder: browserd.holder };
+    });
+    vi.spyOn(prototype, "tabs").mockImplementation(async (scope) => {
+      scope.check();
+      return { tabs: [{ id: tabId, ready: true }] };
+    });
+    vi.spyOn(prototype, "control").mockImplementation(async (request, scope) => {
+      scope.check();
+      if (request.revision <= browserd.revision) throw new BrowserClientError("unavailable");
+      browserd.revision = request.revision;
+      browserd.holder = request.holder;
+      return {
+        parentCellId,
+        browserCellId,
+        instance,
+        revision: request.revision,
+        requestId: request.requestId,
+        holder: request.holder,
+        reloaded: 0,
+        selectionsCleared: request.holder === "agent",
+      };
+    });
+    vi.spyOn(prototype, "clock").mockImplementation(async (permit, _tab, scope) => {
+      scope.check();
+      current(permit, "agent");
+      return { mono: 50 } as never;
+    });
+    vi.spyOn(prototype, "navigate").mockImplementation(async (permit, _tab, url, scope) => {
+      scope.check();
+      current(permit, "agent");
+      browserd.opened.push(url);
+      return { done: true } as never;
+    });
+    vi.spyOn(prototype, "manual").mockImplementation(async (permit, input, scope) => {
+      scope.check();
+      current(permit, "user");
+      if (input.kind === "text") browserd.typed.push(input.text);
+      return {
+        kind: "text",
+        receipt: {
+          done: true,
+          count: input.kind === "text" ? [...input.text].length : 0,
+          firstPressMono: 2,
+          armedMono: 1,
+          injector: "xtest",
+        },
+      } as never;
+    });
+    vi.spyOn(prototype, "armDownloads").mockImplementation(async (binding, scope) => {
+      scope.check();
+      current(binding.permit, binding.holder);
+      browserd.armed.push(binding.holder);
+    });
+    const browser = {
+      start: vi.fn(async () => structuredClone(endpoint)),
+      endpoints: () => structuredClone(endpoint),
+      get: () => ({ id: browserCellId, parentCellId, state: "ready" as const }),
+      stop: vi.fn(async () => {}),
+    };
+    const streams = new BrowserStreams({
+      parents: { get: f.deps.cell, list: () => [], subscribe: () => () => {} },
+      browser: { ...browser, subscribe: () => () => {} },
+      tickets: { revoke: () => {} },
+    });
+    const report = vi.fn();
+    const screens = new SessionScreens({
+      cells: { get: f.deps.cell, subscribe: () => () => {}, stop: vi.fn(async () => {}) },
+      browser,
+      streams,
+      registry: { for: () => undefined },
+      recordings: { attach: async () => {}, fence: async () => {} },
+      downloads: { collect: async () => [] },
+      report,
+      now: () => 0,
+    });
+    f.deps.installSession = (session, cell) => screens.install(session, cell);
+    f.deps.startBrowser = (id) => screens.startBrowser(id);
+    return { browserd, browser, screens, report, dispose: () => streams.dispose() };
+  }
+  async function signInByHand(f: ReturnType<typeof setup>, web: ReturnType<typeof webBrowser>) {
+    const { sessionId, requestId } = await f.runner.signIn(
+      f.cellId,
+      "google.com",
+      "https://accounts.google.com/",
+    );
+    const session = f.runner.get(sessionId);
+    if (!session) throw new Error("fixture missing hold");
+    await until(() => session.manualControl === "ready");
+    expect(web.report).not.toHaveBeenCalled();
+    expect(web.browserd.opened).toEqual(["https://accounts.google.com/"]);
+    expect(session.screens?.selection.screen).toBe("browser");
+    // dot's grant ended at the takeover: only the user's input and downloads reach the browser.
+    expect(web.browserd.holder).toBe("user");
+    expect(web.browserd.armed.at(-1)).toBe("user");
+    await sendManualInput(
+      session,
+      { requestId, input: { kind: "text", text: "hunter2-secret" } },
+      new AbortController().signal,
+      web.screens.manual.bind(web.screens),
+    );
+    expect(web.browserd.typed).toEqual(["hunter2-secret"]);
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(sessionId);
+    const events = f.log.read(sessionId);
+    expect(JSON.stringify(events)).not.toContain("hunter2-secret");
+    expect(events.find((event) => event.type === "takeover.end")?.data).toMatchObject({
+      typed: true,
+    });
+    expect(events.find((event) => event.type === "session.end")?.data).toEqual({ reason: "done" });
+    expect(web.browserd.holder).toBe("user");
+    expect(web.browser.stop).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
+  }
+
+  it("puts the user in control on the web browser's screen with no task, and hands back", async () => {
+    const f = setup();
+    const web = webBrowser(f);
+    try {
+      await signInByHand(f, web);
+      // The page opened for the user is the daemon's alone: nothing armed downloads for dot.
+      expect(web.browserd.armed).not.toContain("agent");
+    } finally {
+      web.dispose();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("puts the user in control on the web browser after a task that used it comes to rest", async () => {
+    const f = setup();
+    const web = webBrowser(f);
+    f.run.mockImplementationOnce(async (session) => {
+      const generation = session.beginBrain();
+      session.setStatus("running");
+      try {
+        await session.prepareScreens(generation);
+        const lease = session.admit(generation);
+        await session.switchScreen("browser", lease);
+        lease.finish();
+        return 0;
+      } finally {
+        session.retireBrain(generation);
+      }
+    });
+    try {
+      const rest = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => rest.status === "idle");
+      expect(rest.screens?.selection.screen).toBe("browser");
+      await signInByHand(f, web);
+      expect(rest.stopped).toBe(true);
+    } finally {
+      web.dispose();
+      vi.restoreAllMocks();
+    }
+  });
 
   it("opens the site's sign-in page in the web browser, then hands it to the user", async () => {
     const f = setup();
@@ -343,6 +531,53 @@ describe("signing in to a site from Settings", () => {
     await until(() => f.live.get(f.cellId) === undefined);
     expect(browser.closed).not.toHaveBeenCalled();
     expect(f.containment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the user in control of the desktop when the web browser can't start", async () => {
+    const f = setup();
+    const browser = screens(f);
+    const startBrowser = vi.fn(async () => {
+      throw new Error("the web browser couldn't start");
+    });
+    f.deps.startBrowser = startBrowser;
+    const first = await f.runner.hold(f.cellId);
+    const held = f.runner.get(first.sessionId);
+    if (!held) throw new Error("fixture missing hold");
+    await until(() => held.manualControl === "ready");
+    const failure = await f.runner
+      .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+      .catch((error: unknown) => error);
+    expect((failure as AgentError).status).toBe(503);
+    expect(startBrowser).toHaveBeenCalledWith(f.cellId);
+    expect(browser.opened).toEqual([]);
+    expect(held.stopped).toBe(false);
+    expect(held.manualControl).toBe("ready");
+    expect(f.live.get(f.cellId)).toBe(first.sessionId);
+    held.stop();
+    await f.live.settled(first.sessionId);
+  });
+
+  it("says to try again while the web browser is still starting, and lets it go on", async () => {
+    const f = setup();
+    screens(f);
+    const starting = deferred<void>();
+    f.deps.startBrowser = vi.fn(() => starting.promise);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const signing = f.runner
+        .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(SIGN_IN_BROWSER_WAIT_MS);
+      expect(((await signing) as AgentError).status).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(f.live.get(f.cellId)).toBeUndefined();
+    starting.resolve();
+    const reply = await f.runner.signIn(f.cellId, "google.com", "https://accounts.google.com/");
+    expect(f.live.get(f.cellId)).toBe(reply.sessionId);
+    f.runner.get(reply.sessionId)?.stop();
+    await f.live.settled(reply.sessionId);
   });
 });
 

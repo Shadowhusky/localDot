@@ -410,6 +410,11 @@ export class DotEngine {
 
   // An upper bound on how fast anything visible is moving, in frame units per second; a renderer
   // slows down while it is calm. Breathing and the talk-bob render at the calm frame rate.
+  // When the next scheduled move (a blink, a glance) starts.
+  nextEventAt(): number {
+    return this.queue[0]?.t ?? Number.POSITIVE_INFINITY;
+  }
+
   activity(t: number): number {
     this.advance(t);
     const rich = this.rich && !this.reduced;
@@ -417,12 +422,15 @@ export class DotEngine {
     for (const k of SPEED_KEYS) {
       if (rich || !RICH_ONLY.has(k)) m = Math.max(m, this.ch[k].speed(t) * SPEED_UNITS[k]);
     }
-    for (const track of this.tracks.values()) {
-      m = Math.max(m, track.amount.speed(t) * FADE);
-      // A prop's loops (a caret, a sweep, an orbit) want every frame while it is out.
-      if (rich && track.amount.value(t) > 0.001) m = Math.max(m, 2 * FADE);
-    }
+    for (const track of this.tracks.values()) m = Math.max(m, track.amount.speed(t) * FADE);
     return m + this.blinkAmount(t) * 50;
+  }
+
+  // A prop is out and its loops (a caret, a sweep, an orbit) keep it moving.
+  looping(t: number): boolean {
+    if (!this.rich || this.reduced) return false;
+    for (const track of this.tracks.values()) if (track.amount.value(t) > 0.001) return true;
+    return false;
   }
 
   private get rich(): boolean {

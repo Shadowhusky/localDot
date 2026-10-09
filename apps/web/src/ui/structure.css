@@ -45,9 +45,8 @@
     color: var(--color-xenon);
   }
 
-  .ui-status-arc {
-    transform-box: view-box;
-    transform-origin: 8px 8px;
+  /* The whole glyph turns (its ring is round), so the compositor runs the spin without repainting. */
+  .ui-status-glyph[data-state="doing"] {
     animation: ui-spin var(--loop-turn) linear infinite;
   }
 
@@ -978,7 +977,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .ui-status-arc {
+    .ui-status-glyph[data-state="doing"] {
       animation: none;
     }
 

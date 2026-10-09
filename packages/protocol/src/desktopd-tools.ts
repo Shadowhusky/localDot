@@ -127,6 +127,9 @@ export const BrowserReadResult = z.object({
   elements: z.array(PageElement).max(300).optional(),
 });
 export type BrowserReadResult = z.infer<typeof BrowserReadResult>;
+// Only the address of the page Chromium shows in front, read without running anything in it.
+export const BrowserPageResult = z.object({ url: z.string().max(8192) });
+export type BrowserPageResult = z.infer<typeof BrowserPageResult>;
 
 export const BrowserNavigateRequest = z.object({ url: z.string().min(1).max(2048) });
 export type BrowserNavigateRequest = z.infer<typeof BrowserNavigateRequest>;

@@ -3,7 +3,7 @@ import type { ApiClient } from "../lib/api.ts";
 import { forgetOldTickets } from "./client-storage.ts";
 import { type FrameSource, tapVideoTrack } from "./frame-source.ts";
 import { streamPreference } from "./stream-preference.ts";
-import { QualityController, RoundTrips } from "./stream-quality.ts";
+import { framerateCeiling, QualityController, RoundTrips } from "./stream-quality.ts";
 
 export interface StreamTarget {
   api: ApiClient;
@@ -145,7 +145,7 @@ export class LiveStream {
   #troubleSince: number | null = null;
   #picture: StreamPicture = "none";
   #listeners = new Set<() => void>();
-  readonly #quality = new QualityController(streamPreference());
+  readonly #quality = new QualityController(streamPreference(), framerateCeiling());
   readonly #trips = new RoundTrips();
   #tripAt = 0;
   #tunedAt = 0;

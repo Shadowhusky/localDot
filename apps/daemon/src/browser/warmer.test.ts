@@ -21,11 +21,15 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
   const table = new Map(cells.map((entry) => [entry.id, entry]));
   const cellListeners = new Set<(entry: CellSummary) => void>();
   const browserListeners = new Set<(parent: string) => void>();
-  const running = new Set<string>();
+  const running = new Map<string, string>();
   const states = new Map<string, CellState>();
   let holder: string | undefined;
+  let started = 0;
+  const run = (parent: string) => {
+    running.set(parent, `instance-${++started}`);
+  };
   const start = vi.fn(async (parent: string) => {
-    running.add(parent);
+    run(parent);
     holder = parent;
     return { parentCellId: parent } as ReadyBrowser;
   });
@@ -52,8 +56,10 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
       start,
       stop,
       health,
-      endpoints: (parent) =>
-        running.has(parent) ? ({ parentCellId: parent } as ReadyBrowser) : undefined,
+      endpoints: (parent) => {
+        const instance = running.get(parent);
+        return instance ? ({ parentCellId: parent, instance } as ReadyBrowser) : undefined;
+      },
       get: (parent) => {
         const state = states.get(parent);
         return state ? { id: parent, parentCellId: parent, state } : undefined;
@@ -84,9 +90,10 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
     },
     hold(parent: string | undefined, live = true, state?: CellState) {
       holder = parent;
-      if (parent && live) running.add(parent);
+      if (parent && live) run(parent);
       if (parent && state) states.set(parent, state);
     },
+    restartBrowser: run,
   };
 }
 
@@ -178,8 +185,6 @@ describe("the web browser starts with its computer", () => {
   });
 });
 
-// A browser whose controls had failed stayed listed as running, so the warmer never started it
-// again and every switch to it failed at once until the computer restarted.
 describe("a running web browser that stops working starts again", () => {
   it("restarts one that can no longer be controlled at the next sweep", async () => {
     const f = fixture();
@@ -209,6 +214,20 @@ describe("a running web browser that stops working starts again", () => {
     expect(f.stop).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
     await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+  });
+
+  it("leaves running a browser started since it was asked", async () => {
+    const f = fixture();
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
+    f.health.mockImplementationOnce(async (parent) => {
+      f.restartBrowser(parent);
+      return "unready";
+    });
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
+    expect(f.health).toHaveBeenCalled();
+    expect(f.stop).not.toHaveBeenCalled();
+    expect(f.report).not.toHaveBeenCalled();
   });
 
   it("says why a start failed", async () => {

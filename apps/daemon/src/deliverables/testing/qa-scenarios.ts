@@ -1,16 +1,17 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { type ReviseLink, ULID_PATTERN, ulid } from "@localdot/protocol";
+import { isPresentation, type ReviseLink, ULID_PATTERN, ulid } from "@localdot/protocol";
 import type { Hono } from "hono";
 import sharp from "sharp";
 import { OutputStore } from "../../agent/output-store.ts";
 import type { AgentSession } from "../../agent/session.ts";
 import type { EventLog } from "../../event-log.ts";
 import type { FrameStore } from "../../gateway/frames.ts";
+import type { PageQuieter } from "../page-quieter.ts";
 import { type Converter, Previews } from "../previews.ts";
 import type { DeliverablesDeps, ReviseDeps } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
-import { pdfOf, wavOf, xlsxOf, zipOf } from "./sample-files.ts";
+import { pdfOf, type SamplePage, wavOf, xlsxOf, zipOf } from "./sample-files.ts";
 
 export interface DeliverablesFixture {
   home: string;
@@ -21,6 +22,7 @@ export interface DeliverablesFixture {
   session(): AgentSession | undefined;
   // Starts a task linked to the version it revises, as the runner does.
   start?(task: string, revises: ReviseLink): Promise<{ id: string }>;
+  quieter?: PageQuieter;
 }
 // A page image stands in for LibreOffice: the fixture has no real computer.
 const page = sharp({ create: { width: 1240, height: 1754, channels: 3, background: "#ffffff" } })
@@ -35,10 +37,16 @@ const page = sharp({ create: { width: 1240, height: 1754, channels: 3, backgroun
   .toBuffer();
 
 export function deliverablesDeps(f: DeliverablesFixture): Omit<DeliverablesDeps, "port"> {
+  // LibreOffice's PDFs are stood in for the same way: a deck's slides, a workbook's print pages.
   const converter: Converter = {
     convert: async (name) => {
       f.effects.push(`convert:${name}`);
       return page;
+    },
+    pages: async (name) => {
+      f.effects.push(`pages:${name}`);
+      if (isPresentation(name)) return sampleDeck();
+      return /\.(xlsx|xls|ods)$/i.test(name) ? samplePrintView() : sampleDocument(12);
     },
   };
   mkdirSync(join(f.home, "mac-downloads"), { recursive: true });
@@ -56,6 +64,7 @@ export function deliverablesDeps(f: DeliverablesFixture): Omit<DeliverablesDeps,
       launch: async (path) => void f.effects.push(`open:${path.slice(downloads.length + 1)}`),
     },
     ...(f.start ? { revise: fakeRevise(f, f.start) } : {}),
+    ...(f.quieter ? { quieter: f.quieter } : {}),
   };
 }
 // The copy into the computer is recorded, not made: the fixture has no real computer.
@@ -168,6 +177,18 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
     });
     return c.json({ ok: true });
   });
+  // A deck, a long PDF, a document and a workbook, for paging through in the full preview.
+  app.post("/__qa/paged", (c) => {
+    const s = f.session();
+    if (!s) return c.text("no session", 409);
+    hand(s, "Here are the review deck, the handbook, the brief and the orders.", {
+      "review-deck.pptx": "sample deck bytes",
+      "handbook.pdf": sampleDocument(300),
+      "brief.docx": "sample document bytes",
+      "orders.xlsx": sampleWorkbook(),
+    });
+    return c.json({ ok: true });
+  });
   app.post("/__qa/revise", (c) => {
     const s = f.session();
     if (!s) return c.text("no session", 409);
@@ -179,6 +200,89 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
 }
 
 const REGIONS = ["North", "South", "East", "West"];
+const DECK = [
+  "Q3 review",
+  "Where we started",
+  "What we set out to do",
+  "Orders by month",
+  "Regions at a glance",
+  "North",
+  "South",
+  "East",
+  "West",
+  "Returns",
+  "The desk range",
+  "Delivery times",
+  "What customers said",
+  "Warehouse",
+  "Staffing",
+  "Costs",
+  "Margin",
+  "Risks",
+  "What we learned",
+  "Q4 plan",
+  "Weekend delivery trial",
+  "West warehouse",
+  "Asks",
+  "Thank you",
+];
+// 24 slides at 16:9, the first a dark title slide, as LibreOffice exports a deck.
+function sampleDeck(): Buffer {
+  return pdfOf(
+    DECK.map((title, i): SamplePage => {
+      const first = i === 0;
+      return {
+        title: first ? "Q3 review: a strong quarter" : title,
+        lines: first
+          ? ["Sales, returns and the plan for Q4", "Prepared by dot · October 2026"]
+          : [
+              `${i + 1}. ${title} in one line.`,
+              `Net ${(41 + ((i * 7) % 19)).toFixed(1)}k, ${REGIONS[i % 4]} ahead of plan.`,
+              "Figures are net of returns.",
+            ],
+        bars: first || i % 3 !== 0 ? undefined : [90, 140, 120, 170, 210],
+        size: [960, 540],
+        fill: first ? [0.07, 0.09, 0.13] : [0.98, 0.98, 0.99],
+        ink: first ? [0.96, 0.97, 0.98] : undefined,
+        scale: first ? 2 : 1.6,
+      };
+    }),
+  );
+}
+const CHAPTERS = ["Getting started", "Orders", "Returns", "Stock", "Delivery", "Customers"];
+// A long handbook: a chapter every 50 pages, a page of text on each.
+function sampleDocument(count: number): Buffer {
+  return pdfOf(
+    Array.from({ length: count }, (_, i): SamplePage => {
+      const chapter = CHAPTERS[Math.floor(i / 50) % CHAPTERS.length] as string;
+      return {
+        title:
+          i % 50 === 0 ? `${Math.floor(i / 50) + 1}. ${chapter}` : `${chapter} · page ${i + 1}`,
+        lines: Array.from(
+          { length: 32 },
+          (_, l) =>
+            `${chapter} ${l + 1}: check the ${ITEMS[(i + l) % ITEMS.length]?.toLowerCase()} order against the ${REGIONS[(i + l) % 4]} sheet before it ships.`,
+        ),
+      };
+    }),
+  );
+}
+// The orders sheet as LibreOffice prints it: rows across portrait pages.
+function samplePrintView(): Buffer {
+  return pdfOf(
+    Array.from(
+      { length: 6 },
+      (_, p): SamplePage => ({
+        title: `Orders · page ${p + 1}`,
+        lines: Array.from(
+          { length: 36 },
+          (_, r) =>
+            `Q3-${1001 + p * 36 + r}    2026-07-${String(1 + ((p * 36 + r) % 28)).padStart(2, "0")}    ${REGIONS[r % 4]}    ${ITEMS[(r * 7) % 5]}    ${1 + ((r * 13) % 9)}`,
+        ),
+      }),
+    ),
+  );
+}
 const ITEMS = ["Lamp", "Desk", "Chair", "Shelf", "Rug"];
 function sampleWorkbook(): Buffer {
   const orders: (string | number | Date)[][] = [["Order", "Date", "Region", "Item", "Qty", "Net"]];

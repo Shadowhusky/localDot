@@ -1,5 +1,8 @@
 /* The rail panel (design-v2 §10.19): console material, a segmented header and one body with the
    composer at its foot. */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
+
 .rail-panel {
   display: flex;
   flex-direction: column;
@@ -11,6 +14,29 @@
   background-color: var(--rail-surface);
   box-shadow: var(--shadow-console);
   color: var(--color-fg-1);
+  transition:
+    opacity var(--dur-gentle) var(--ease-spring) var(--dur-press),
+    translate var(--dur-gentle) var(--ease-spring) var(--dur-press);
+}
+
+/* The page's entrance (design-v2 §7): while what it shows is still being read, the rail waits just
+   off its edge, then slides in on the gentle spring a beat after the curtain starts to lift. */
+.app[data-entering] .rail-panel {
+  opacity: 0;
+  translate: calc(var(--spacing) * 6) 0;
+  transition: none;
+}
+
+@media (--phone) {
+  .app[data-entering] .rail-panel {
+    translate: 0 calc(var(--spacing) * 6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-entering] .rail-panel {
+    translate: none;
+  }
 }
 
 .rail-head {
@@ -21,6 +47,12 @@
   gap: calc(var(--spacing) * 3);
   height: 56px;
   padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 4);
+}
+
+.rail-actions {
+  display: flex;
+  flex: none;
+  gap: calc(var(--spacing) * 1);
 }
 
 /* Without a header the body still starts clear of the console's rounded top. */
@@ -60,8 +92,18 @@
   flex: 1;
 }
 
+.thread-cover > * {
+  transition:
+    opacity var(--dur-fade) var(--ease-standard) var(--dur-press),
+    visibility 0s;
+}
+
 .thread-cover > :not([data-shown]) {
   visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--dur-text-out) var(--ease-exit),
+    visibility 0s var(--dur-text-out);
 }
 
 .thread-cover > * {
@@ -78,4 +120,158 @@
 .activity-sheet {
   --rail-surface: var(--color-overlay);
   margin-inline: calc(var(--spacing) * -1.5);
+}
+
+/* The recent conversations: a search over rows by day (design-v2 §10.9, §10.12). Each row is a grid,
+   so its time never overlaps the title. */
+.conversations {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 1);
+  min-height: 0;
+}
+
+/* In the popover its rows scroll under the search, which stays put. */
+.ui-popover > .conversations {
+  max-height: 520px;
+}
+
+.conversations-search {
+  flex: none;
+}
+
+.conversations-note {
+  flex: none;
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1) 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.conversations-body {
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-inline: calc(var(--spacing) * -2);
+  padding-inline: calc(var(--spacing) * 2);
+  scrollbar-width: thin;
+}
+
+.conversations-body > :is(.ui-empty, .conversations-loading) {
+  min-height: 160px;
+}
+
+.conversations-day {
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 2.5) calc(var(--spacing) * 1);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.conversations-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: calc(var(--spacing) * 3);
+  height: 40px;
+  padding: 0 calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-row);
+  cursor: default;
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+/* The current conversation keeps a quiet light and a heavier title; the row the arrows or the
+   pointer are on lights as a picker's does. */
+.conversations-row[data-current] {
+  background-color: var(--color-state-hover);
+}
+
+.conversations-row[data-active] {
+  background-color: var(--color-selected);
+}
+
+.conversations-row[aria-disabled] {
+  opacity: var(--opacity-disabled);
+}
+
+.conversations-title {
+  overflow: hidden;
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversations-when {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* The status point: xenon while dot works, amber when it needs you, red for a failure, a quiet
+   disc when done and a ring when stopped. */
+.conversations-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-fg-3);
+}
+
+.conversations-status[data-status="running"] {
+  background-color: var(--color-xenon);
+}
+
+.conversations-status[data-status="needs-you"] {
+  background-color: var(--color-attention);
+}
+
+.conversations-status[data-status="failed"] {
+  background-color: var(--color-danger-fg);
+}
+
+.conversations-status[data-status="stopped"] {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--color-fg-3);
+}
+
+.conversations-foot {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding-top: calc(var(--spacing) * 2);
+  border-top: 1px solid var(--color-separator);
+}
+
+/* A phone's sheet: taller rows for a finger, the sheet's own scroller. */
+.conversations-sheet .conversations-body {
+  margin-inline: 0;
+  padding-inline: 0;
+  overflow: visible;
+}
+
+.conversations-sheet .conversations-row {
+  height: 52px;
+}
+
+.conversations-sheet .conversations-title {
+  font-size: var(--text-row);
+  line-height: var(--text-row--line-height);
+}
+
+.conversations-sheet .conversations-foot {
+  border-top: 0;
+}
+
+/* On a touch screen a row lights while pressed, not because it is the active one. */
+.conversations-sheet .conversations-row[data-active]:not([data-current]) {
+  background-color: transparent;
+}
+
+.conversations-sheet .conversations-row:active {
+  background-color: var(--color-state-pressed);
+}
+
+.conversations-row[data-current] .conversations-title {
+  font-weight: var(--font-weight-semibold);
 }

@@ -129,7 +129,7 @@
   const site = new URLSearchParams(location.search).get("site");
   if (site) {
     const asked = document.getElementById("asked");
-    asked.textContent = `Look at localDot: it offers to open ${site} in its web browser.`;
+    asked.textContent = "localDot shows what to do next.";
     asked.hidden = false;
     document.getElementById("site").value = site;
   }

@@ -116,7 +116,7 @@ export interface AgentWiringDeps {
   relay?: () => Promise<GateRelay>;
   codex?: { realHome: string; user: string };
   claudeCode?: { realHome: string };
-  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
+  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser">;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
@@ -531,6 +531,7 @@ export function createAgent(d: AgentWiringDeps) {
   const runner = new AgentRunner({
     home: d.home,
     installSession: d.sessionScreens?.install.bind(d.sessionScreens),
+    startBrowser: d.sessionScreens?.startBrowser.bind(d.sessionScreens),
     fences: d.fences,
     eventLog: d.eventLog,
     live: d.live,
@@ -790,7 +791,7 @@ export function createAgent(d: AgentWiringDeps) {
     desktopPage: async (cellId, signal) => {
       const cell = d.cells.get(cellId);
       if (!ready || closing || cell?.state !== "ready" || cell.paused) return undefined;
-      return (await desktop(cellId)?.browserRead(1, signal))?.url;
+      return desktop(cellId)?.browserPage(signal);
     },
     home: d.home,
     harness,

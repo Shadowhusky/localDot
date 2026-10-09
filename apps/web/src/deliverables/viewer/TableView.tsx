@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: A table's rows and cells have no identity but their position.
 import type { TableFileReply } from "@localdot/protocol";
-import { useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { count } from "../../copy/format.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
@@ -25,17 +25,19 @@ export function rowsNote(table: Pick<Table, "rows" | "totalRows" | "columns">): 
 }
 
 // A table with its first row held at the top and row numbers down the side; a workbook's sheets as
-// tabs, each read when chosen.
+// tabs, each read when chosen. `lead` starts the bar, such as a workbook's Table | Pages.
 export function TableView({
   api,
   sessionId,
   name,
   version,
+  lead,
 }: {
   api: ApiClient;
   sessionId: string;
   name: string;
   version: number | null;
+  lead?: ReactNode;
 }) {
   const tabs = useId();
   const [sheet, setSheet] = useState(0);
@@ -58,8 +60,9 @@ export function TableView({
   const reply = loaded?.sheet === sheet ? loaded.reply : null;
   const table = reply && reply !== "failed" && reply.kind === "table" ? reply : null;
   const bar =
-    sheets.length > 1 || table ? (
+    lead || sheets.length > 1 || table ? (
       <ViewerBar note={table ? rowsNote(table) : undefined}>
+        {lead}
         {sheets.length > 1 && (
           <div className="viewer-sheets">
             <Tabs

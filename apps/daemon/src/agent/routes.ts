@@ -105,7 +105,7 @@ export interface AgentRoutesDeps {
         | "signIn"
       >
     >;
-  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
+  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has" | "list">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
@@ -572,6 +572,10 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     app.get(
       "/api/conversation",
       route((c) => c.json(conversations.snapshot())),
+    );
+    app.get(
+      "/api/conversations",
+      route((c) => c.json({ conversations: conversations.list() })),
     );
     app.post(
       "/api/conversation/new",

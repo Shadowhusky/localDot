@@ -80,7 +80,9 @@
   width: var(--_card-w, 480px);
   max-height: calc(100dvh - var(--stage-top) - 40px);
   translate: -50% 0;
-  animation: island-card-in var(--dur-fade) var(--ease-standard) 90ms both;
+  /* Held only through its delay: a fill after the end would pin the card visible, and it could not
+     fade out along the way it came as the island collapses. */
+  animation: island-card-in var(--dur-fade) var(--ease-standard) 90ms backwards;
 }
 
 @keyframes island-card-in {
@@ -121,7 +123,7 @@
   color: var(--color-fg-1);
   font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
   letter-spacing: var(--text-body--letter-spacing);
-  animation: island-note-in var(--dur-default) var(--ease-spring) both;
+  animation: island-note-in var(--dur-default) var(--ease-spring) backwards;
 }
 
 .island-note:not(:has(.ui-button)) {
@@ -370,5 +372,22 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .island-plate {
     background-color: var(--color-glass-solid);
+  }
+}
+
+/* A phone blurs glass again for every frame of the picture under it: there the island, its notes
+   and toasts are solid. */
+@media (pointer: coarse) {
+  .island-plate,
+  .island-note,
+  .ui-toast {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .island[data-open] .island-plate {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }

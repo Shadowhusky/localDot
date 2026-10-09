@@ -96,6 +96,15 @@ describe("Codex developer instructions", () => {
       "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
     );
   });
+
+  it("keeps every sign-in in the web browser", () => {
+    expect(CODEX_TOOL_DESCRIPTIONS.switch_screen).toContain(
+      "Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields.",
+    );
+    expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(
+      "Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
+    );
+  });
 });
 
 describe("dot's line for the user", () => {

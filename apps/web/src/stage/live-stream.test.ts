@@ -163,13 +163,13 @@ async function relayClient(rtt: () => number = () => 80, coarse = false) {
   return { ...held, disconnect, send, transport, second, reports, minted, restore };
 }
 
-it("asks for full quality on a phone too, from its first report", async () => {
+it("asks for 30 fps at most on a phone, from its first report", async () => {
   const { second, send, restore } = await relayClient(undefined, true);
   try {
     await second();
-    expect(send).toHaveBeenCalledWith(qualityMessage({ visible: true, framerate: 60, crf: 25 }));
+    expect(send).toHaveBeenCalledWith(qualityMessage({ visible: true, framerate: 30, crf: 25 }));
     expect(send).not.toHaveBeenCalledWith(
-      qualityMessage({ visible: true, framerate: 30, crf: 25 }),
+      qualityMessage({ visible: true, framerate: 60, crf: 25 }),
     );
   } finally {
     restore();

@@ -36,12 +36,13 @@ export function deliverablesFixture(opts: { converter?: Converter; revise?: Revi
     launch: async (p) => void launched.push(p),
   };
   const convert = vi.fn<Converter["convert"]>(async () => "computer_off" as const);
+  const pages = vi.fn<Converter["pages"]>(async () => "computer_off" as const);
   deliverableRoutes(app, {
     home,
     port: PORT,
     eventLog: log,
     scanner: new TaskScanner(log),
-    previews: new Previews(home, opts.converter ?? { convert }),
+    previews: new Previews(home, opts.converter ?? { convert, pages }),
     frames: new FrameStore(home),
     opener,
     ...(opts.revise ? { revise: opts.revise } : {}),

@@ -130,9 +130,23 @@ export function odsOf(sheets: SampleSheet[]): Buffer {
   });
 }
 
+export interface SamplePage {
+  title: string;
+  lines: string[];
+  bars?: number[];
+  // Width and height in points; a US Letter page unless given.
+  size?: [number, number];
+  // The page's colour and its text's, as 0–1 RGB.
+  fill?: [number, number, number];
+  ink?: [number, number, number];
+  // Type size relative to a document page's.
+  scale?: number;
+}
+
 // A PDF of plain pages: each a title, lines of text and a few bars, in a standard font.
-export function pdfOf(pages: { title: string; lines: string[]; bars?: number[] }[]): Buffer {
+export function pdfOf(pages: SamplePage[]): Buffer {
   const text = (s: string) => s.replace(/[\\()]/g, (c) => `\\${c}`);
+  const rgb = (c: number[]) => c.map((v) => v.toFixed(2)).join(" ");
   const objects: string[] = [];
   const add = (body: string) => objects.push(body);
   add("<< /Type /Catalog /Pages 2 0 R >>");
@@ -141,17 +155,30 @@ export function pdfOf(pages: { title: string; lines: string[]; bars?: number[] }
   add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
   const kids: string[] = [];
   for (const page of pages) {
+    const [w, h] = page.size ?? [612, 792];
+    const k = page.scale ?? 1;
+    const ink = page.ink ?? [0.12, 0.13, 0.15];
+    const body = page.ink ? page.ink.map((v) => v * 0.8 + 0.1) : [0.3, 0.31, 0.34];
+    const left = Math.round(72 * Math.min(k, 1.2));
+    const floor = h > w ? 140 : 72;
     const ops = [
-      "0.12 0.13 0.15 rg",
-      `BT /F2 22 Tf 72 712 Td (${text(page.title)}) Tj ET`,
-      "0.30 0.31 0.34 rg",
-      ...page.lines.map((line, i) => `BT /F1 11 Tf 72 ${676 - i * 17} Td (${text(line)}) Tj ET`),
-      ...(page.bars ?? []).map((h, i) => `0.25 0.45 0.78 rg ${72 + i * 46} 140 30 ${h} re f`),
+      ...(page.fill ? [`${rgb(page.fill)} rg 0 0 ${w} ${h} re f`] : []),
+      `${rgb(ink)} rg`,
+      `BT /F2 ${Math.round(22 * k)} Tf ${left} ${h - Math.round(80 * k)} Td (${text(page.title)}) Tj ET`,
+      `${rgb(body)} rg`,
+      ...page.lines.map(
+        (line, i) =>
+          `BT /F1 ${Math.round(11 * k)} Tf ${left} ${h - Math.round((116 + i * 17) * k)} Td (${text(line)}) Tj ET`,
+      ),
+      ...(page.bars ?? []).map(
+        (bar, i) =>
+          `0.25 0.45 0.78 rg ${left + i * Math.round(46 * k)} ${floor} ${Math.round(30 * k)} ${bar} re f`,
+      ),
     ].join("\n");
     add(`<< /Length ${Buffer.byteLength(ops)} >>\nstream\n${ops}\nendstream`);
     const contents = objects.length;
     add(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contents} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Contents ${contents} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>`,
     );
     kids.push(`${objects.length} 0 R`);
   }

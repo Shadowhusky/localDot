@@ -32,6 +32,7 @@ function daemon(
     if (path === "/api/whoami") return whoami();
     if (path === "/api/cells") return json([]);
     if (path === "/api/session-index") return json({ sessions: [], next: null });
+    if (path === "/api/conversation") return json({ sessions: [], more: false });
     if (path === "/api/agent/settings") return json({});
     if (path === "/api/agent/providers") return json(providerFixture());
     if (path === "/api/keyd")

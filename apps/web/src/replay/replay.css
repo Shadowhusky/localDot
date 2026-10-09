@@ -1052,6 +1052,15 @@
   }
 }
 
+/* A phone blurs glass again for every frame of the picture under it: there the transport is solid. */
+@media (pointer: coarse) {
+  .replay-transport {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 @media (prefers-reduced-transparency: reduce) {
   :is(.replay-gap-card, .replay-error) {
     backdrop-filter: none;
@@ -1068,5 +1077,17 @@
   .replay-played,
   .replay-knob {
     background: Highlight;
+  }
+}
+
+/* Watch and Replay crossfade (design-v2 §7): the mode coming in, and each Replay view, fades up in
+   its place; a rail keeps its own spring. */
+.replay > :not(.rail-panel) {
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+@starting-style {
+  .replay > * {
+    opacity: 0;
   }
 }

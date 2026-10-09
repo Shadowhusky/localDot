@@ -1,6 +1,6 @@
 import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { tabbables } from "./focus.ts";
-import { LayerPortal, useBehind, useExit, useLayer } from "./LayerStack.tsx";
+import { LayerPortal, useBehind, useExit, useLayer, useLeaving } from "./LayerStack.tsx";
 import { PHONE, useMediaQuery } from "./media.ts";
 import { finishPlacing } from "./Popover.tsx";
 import { place as placeBeside } from "./position.ts";
@@ -50,7 +50,8 @@ function putDialog(element: HTMLElement, target: HTMLElement, beside: boolean) {
 export function Dialog(props: DialogProps) {
   const root = useRef<HTMLDivElement>(null);
   const { mounted, closing } = useExit(props.open, root);
-  return mounted ? <DialogLayer {...props} root={root} closing={closing} /> : null;
+  const shown = useLeaving(props, closing);
+  return mounted ? <DialogLayer {...shown} root={root} closing={closing} /> : null;
 }
 
 function DialogLayer({

@@ -3,6 +3,7 @@ import {
   canOpenOnMac,
   fileExtension,
   fileKind,
+  isPresentation,
   JsonPreview,
   ReviseLink,
   textFormat,
@@ -56,6 +57,9 @@ describe("file kinds", () => {
       "a.doc",
       "a.xls",
       "a.ppt",
+      "a.pps",
+      "a.ppsx",
+      "a.key",
       "a.jar",
       "a.json",
       "noext",
@@ -94,6 +98,19 @@ describe("full preview kinds", () => {
       "plain",
       "code",
     ]);
+  });
+  it("shows decks a slide at a time, slide shows included, and documents as pages", () => {
+    for (const name of ["a.pptx", "a.PPT", "a.pps", "a.ppsx", "a.odp"]) {
+      expect(viewerKind(name), name).toBe("page");
+      expect(isPresentation(name), name).toBe(true);
+    }
+    for (const name of ["a.docx", "a.odt", "a.rtf", "a.xls", "a.pdf", "a.keynote"])
+      expect(isPresentation(name), name).toBe(false);
+  });
+  it("keeps a .key file an attachment, as it is most often a private key", () => {
+    expect(fileKind("server.key")).toBe("attachment");
+    expect(viewerKind("server.key")).toBe("details");
+    expect(isPresentation("server.key")).toBe(false);
   });
   it("previews code as text but never opens it on the Mac", () => {
     for (const name of ["a.py", "a.sh", "a.ts"]) {
