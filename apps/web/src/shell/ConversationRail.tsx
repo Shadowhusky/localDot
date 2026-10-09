@@ -1,6 +1,6 @@
 import { type ReactNode, useMemo } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
-import { useEarlierThread } from "../agent/earlier.ts";
+import { leftToReplay, useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
 import { threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
@@ -45,7 +45,9 @@ export function ConversationRail({
   onReplayTask,
   computerReady = false,
   sessions = NO_SESSIONS,
+  more = false,
   newConversation,
+  titled = true,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -60,7 +62,11 @@ export function ConversationRail({
   computerReady?: boolean;
   // The conversation's tasks, oldest first; the one shown is its latest.
   sessions?: readonly string[];
+  // Older tasks of the conversation are left out of `sessions`.
+  more?: boolean;
   newConversation?: NewConversation;
+  // False where a tab names the rail: its title is left to screen readers.
+  titled?: boolean;
 }) {
   const model = agent?.model;
   const ended = model?.ended?.reason;
@@ -87,7 +93,7 @@ export function ConversationRail({
   }, [earlier, thread]);
   return (
     <aside className="rail conversation-rail" aria-label="Conversation">
-      <div className="rail-h">
+      <div className={titled ? "rail-h" : "ui-visually-hidden"}>
         <h2>Conversation</h2>
       </div>
       <Presence show={!!newConversation && !!sessionId}>
@@ -100,6 +106,7 @@ export function ConversationRail({
         ownerKey={sessions[0] ?? sessionId ?? ""}
         items={shown}
         truncated={model?.historyTruncated ?? false}
+        earlierInReplay={leftToReplay(sessions, sessionId, more)}
         live={working ? live : null}
         ended={ended}
         pendingAsk={model?.pendingAsk ?? null}

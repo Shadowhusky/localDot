@@ -246,6 +246,12 @@
   min-width: 0;
 }
 
+/* The task's name gives way to Continue conversation beside it. */
+.replay-library-slot {
+  display: flex;
+  min-width: 0;
+}
+
 .replay-library-trigger {
   max-width: 100%;
 }
@@ -255,6 +261,7 @@
 }
 
 .replay-library-trigger-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }

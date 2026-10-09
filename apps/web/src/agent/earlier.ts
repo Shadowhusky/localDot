@@ -11,6 +11,20 @@ import { type ThreadItem, threadItems, withWork, workSteps } from "./thread.ts";
 // The earlier tasks the thread shows above the latest one; older ones stay in Replay.
 export const EARLIER_SHOWN = 6;
 
+// The conversation's tasks before the one shown, oldest first.
+function before(sessions: readonly string[], sessionId: string | null): readonly string[] {
+  if (!sessionId) return [];
+  const at = sessions.indexOf(sessionId);
+  return at < 0 ? sessions : sessions.slice(0, at);
+}
+
+// The conversation has earlier tasks than the thread shows.
+export const leftToReplay = (
+  sessions: readonly string[],
+  sessionId: string | null,
+  more: boolean,
+): boolean => !!sessionId && (more || before(sessions, sessionId).length > EARLIER_SHOWN);
+
 // Results of an earlier task download that task's files.
 function owned(items: readonly ThreadItem[], sessionId: string): ThreadItem[] {
   return items.map((item) =>
@@ -53,10 +67,7 @@ export function useEarlierThread(
       threads.current.set(left.sessionId, owned(left.items, left.sessionId));
   }
   previous.current = shown;
-  const at = shown.sessionId ? sessions.indexOf(shown.sessionId) : -1;
-  const earlier = shown.sessionId
-    ? (at < 0 ? sessions : sessions.slice(0, at)).slice(-EARLIER_SHOWN)
-    : [];
+  const earlier = before(sessions, shown.sessionId).slice(-EARLIER_SHOWN);
   const key = earlier.join(" ");
   // biome-ignore lint/correctness/useExhaustiveDependencies: the key names the tasks to read.
   useEffect(() => {

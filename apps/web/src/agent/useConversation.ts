@@ -13,12 +13,16 @@ export interface Conversation {
   // The daemon has said which conversation is current.
   readonly known: boolean;
   readonly busy: boolean;
+  // How many conversations the user has chosen (New, Continue).
+  readonly choice: number;
   startNew(): Promise<boolean>;
   continueFrom(sessionId: string): Promise<boolean>;
   reload(): void;
 }
 
 const NONE: ConversationSnapshot = { sessions: [], more: false };
+const RETRY_MS = 1000;
+const RETRY_MAX_MS = 30_000;
 
 // Which conversation is current is the daemon's: a refresh, a stopped computer or a restart reads
 // it back. The newest request wins, so a slow read never undoes a choice made after it.
@@ -28,20 +32,33 @@ export function useConversation(api: ApiClient): Conversation {
     known: false,
   });
   const [busy, setBusy] = useState(false);
+  const [choice, setChoice] = useState(0);
   const [revision, setRevision] = useState(0);
   const latest = useRef(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new revision reads it again.
   useEffect(() => {
     const ask = ++latest.current;
     const controller = new AbortController();
-    api
-      .get("/api/conversation", { signal: controller.signal })
-      .then((data) => {
-        if (ask === latest.current)
-          setState({ snapshot: ConversationSnapshot.parse(data), known: true });
-      })
-      .catch(() => {});
-    return () => controller.abort();
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const read = (failures: number) =>
+      api
+        .get("/api/conversation", { signal: controller.signal })
+        .then((data) => {
+          if (ask === latest.current)
+            setState({ snapshot: ConversationSnapshot.parse(data), known: true });
+        })
+        .catch(() => {
+          if (controller.signal.aborted || ask !== latest.current) return;
+          retry = setTimeout(
+            () => void read(failures + 1),
+            Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** failures),
+          );
+        });
+    void read(0);
+    return () => {
+      controller.abort();
+      clearTimeout(retry);
+    };
   }, [api, revision]);
   const act = useCallback(
     async (path: string, body?: unknown) => {
@@ -50,6 +67,7 @@ export function useConversation(api: ApiClient): Conversation {
       try {
         const snapshot = ConversationSnapshot.parse(await api.post(path, body));
         if (ask === latest.current) setState({ snapshot, known: true });
+        setChoice((value) => value + 1);
         return true;
       } catch (error) {
         announce(
@@ -77,6 +95,7 @@ export function useConversation(api: ApiClient): Conversation {
     more: state.snapshot.more,
     known: state.known,
     busy,
+    choice,
     startNew,
     continueFrom,
     reload,

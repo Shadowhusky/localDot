@@ -632,8 +632,15 @@ export function Composer(props: ComposerProps) {
     : sending || uncertain
       ? "Wait until your message is sent."
       : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
-  const sendLabel =
-    mode === "new" ? "Start task" : mode === "followup" ? "Send follow-up" : "Send now";
+  // A message to a conversation at rest starts its next task, but reads as any other message.
+  const newConversation = mode === "new" && !props.agent.sessionId;
+  const sendLabel = newConversation
+    ? "Start task"
+    : mode === "new"
+      ? "Send"
+      : mode === "followup"
+        ? "Send follow-up"
+        : "Send now";
   const note =
     mode === "new"
       ? undefined
@@ -725,10 +732,8 @@ export function Composer(props: ComposerProps) {
           <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
         </Collapse>
         <ComposerField
-          label={mode === "new" ? "New task" : "Message"}
-          placeholder={
-            mode === "new" && !props.agent.sessionId ? "Ask dot to do something…" : "Message dot…"
-          }
+          label={newConversation ? "New task" : "Message"}
+          placeholder={newConversation ? "Ask dot to do something…" : "Message dot…"}
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}

@@ -3,7 +3,7 @@ import { LocalDotEvent, ulid } from "@localdot/protocol";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { useEarlierThread } from "./earlier.ts";
+import { EARLIER_SHOWN, leftToReplay, useEarlierThread } from "./earlier.ts";
 import type { ThreadItem } from "./thread.ts";
 
 afterEach(cleanup);
@@ -108,4 +108,13 @@ it("shows nothing earlier while no task is shown", async () => {
   await settle();
   expect(view.result.current).toEqual([]);
   expect(f.read).not.toHaveBeenCalled();
+});
+
+it("says when the conversation goes back further than the thread shows", () => {
+  const ids = Array.from({ length: EARLIER_SHOWN + 2 }, () => ulid());
+  const latest = ids.at(-1) ?? null;
+  expect(leftToReplay(ids.slice(-(EARLIER_SHOWN + 1)), latest, false)).toBe(false);
+  expect(leftToReplay(ids, latest, false)).toBe(true);
+  expect(leftToReplay([FIRST, SECOND], SECOND, true)).toBe(true);
+  expect(leftToReplay([], null, true)).toBe(false);
 });

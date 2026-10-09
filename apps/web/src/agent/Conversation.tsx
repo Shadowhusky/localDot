@@ -285,6 +285,8 @@ const Row = memo(function Row({ row, fresh, thread }: RowProps) {
 export interface ConversationProps {
   items: readonly ThreadItem[];
   truncated: boolean;
+  // The conversation goes back further than the thread shows.
+  earlierInReplay?: boolean;
   visible?: boolean;
   ownerKey?: string;
   // The latest turn's work while its task has not ended.
@@ -308,6 +310,7 @@ export interface ConversationProps {
 export function Conversation({
   items,
   truncated,
+  earlierInReplay = false,
   visible = true,
   ownerKey = "",
   live = null,
@@ -634,8 +637,12 @@ export function Conversation({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users focus the history to scroll it.
             tabIndex={0}
           >
-            {truncated && !page.hasOlder && (
-              <p className="thread-note thread-start">Earlier messages are kept in the task log.</p>
+            {(earlierInReplay || truncated) && !page.hasOlder && (
+              <p className="thread-note thread-start">
+                {earlierInReplay
+                  ? "Earlier messages are in Replay."
+                  : "Earlier messages are kept in the task log."}
+              </p>
             )}
             {page.hasOlder && (
               <p className="thread-note thread-older" ref={edges.older}>

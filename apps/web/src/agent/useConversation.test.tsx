@@ -80,3 +80,43 @@ it("says to finish the task at work first when the daemon refuses", async () => 
   expect(f.view.result.current.sessions).toEqual([LATEST]);
   expect(spoken.announce).toHaveBeenCalledWith("conversation", FINISH_FIRST, "assertive");
 });
+
+it("reads the conversation again after a failed read, waiting longer each time", async () => {
+  vi.useFakeTimers();
+  try {
+    let failures = 2;
+    const f = setup(async () =>
+      failures-- > 0
+        ? new Response("unavailable", { status: 503 })
+        : Response.json({ sessions: [LATEST], more: false }),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(f.view.result.current.known).toBe(false);
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(f.asked).toHaveLength(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(f.asked).toHaveLength(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(f.asked).toHaveLength(3);
+    expect(f.view.result.current).toMatchObject({ known: true, sessions: [LATEST] });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("counts each conversation the user chooses", async () => {
+  const f = setup(async (method) =>
+    method === "GET"
+      ? Response.json({ sessions: [LATEST], more: false })
+      : Response.json({ sessions: [], more: false }),
+  );
+  await settle();
+  expect(f.view.result.current.choice).toBe(0);
+  await act(async () => {
+    await f.view.result.current.startNew();
+  });
+  expect(f.view.result.current.choice).toBe(1);
+  f.view.result.current.reload();
+  await settle();
+  expect(f.view.result.current.choice).toBe(1);
+});

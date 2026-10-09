@@ -358,6 +358,7 @@ function Theatre({ api }: { api: ApiClient }) {
     cell,
     stage,
     status === "known" && conversation.known ? (conversation.sessions.at(-1) ?? null) : undefined,
+    conversation.choice,
   );
   const seen = useRef<string | null>(null);
   const { reload: rereadConversation } = conversation;
@@ -720,6 +721,8 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
                 onReplayTask={selectReplay}
                 sessions={conversation.sessions}
+                more={conversation.more}
+                titled={!narrow}
                 newConversation={narrow ? undefined : newConversation}
                 recovery={
                   <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
@@ -861,6 +864,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }}
             >
               <ActivityRail
+                titled={!narrow}
                 cellId={cell?.id}
                 releaseReady={
                   cell?.state === "ready" &&

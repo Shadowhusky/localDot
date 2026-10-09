@@ -46,14 +46,18 @@ interface Shown {
 // The worker gets every event at once; React sees the model at most ten times a second.
 // The computer's live task is shown while there is one. Otherwise the conversation's latest task,
 // `resting` (undefined until known), stays on show as ended, so a refresh, a stopped computer or a
-// restarted daemon reopens the conversation rather than an empty page.
+// restarted daemon reopens the conversation rather than an empty page. `choice` counts the
+// conversations the user chose (New, Continue).
 export function useLiveSession(
   api: ApiClient,
   cell: CellSummary | null,
   stage: RefObject<StageHandle | null>,
   resting?: string | null,
+  choice = 0,
 ): LiveSession {
   const [shown, setShown] = useState<Shown | null>(null);
+  // The computer that has answered whether it runs a task.
+  const [answered, setAnswered] = useState<string | null>(null);
   const [agentFeed] = useState(createAgentFeed);
   const [version, setVersion] = useState(0);
   const [ended, setEnded] = useState(false);
@@ -84,21 +88,36 @@ export function useLiveSession(
   }, [cellId, stage]);
 
   // A conversation chosen anew (a new one, or an older one continued) takes the page once no live
-  // task is at work there.
+  // task is at work there. On opening, a running computer first says whether it still runs one.
   const applied = useRef<string | null | undefined>(undefined);
-  // Answers about the computer's task asked before the choice say nothing about it.
-  const choices = useRef(0);
   const working = !!shown?.live && !ended;
+  const asking = !!cellId && ready && answered !== cellId;
   useEffect(() => {
-    if (resting === undefined || resting === applied.current || working) return;
+    if (resting === undefined || resting === applied.current) return;
+    if (applied.current === undefined) {
+      if (asking) return;
+      // A task the computer runs takes the page on opening, and keeps it once it ends.
+      if (working) applied.current = resting;
+    }
+    if (working) return;
     applied.current = resting;
-    choices.current++;
     setShown((now) => {
       if (now?.live) over.current.add(now.sessionId);
       if (now?.sessionId === resting) return now.live ? { ...now, live: false } : now;
       return resting ? { sessionId: resting, cellId: null, live: false } : null;
     });
-  }, [resting, working]);
+  }, [resting, working, asking]);
+
+  // Answers about the computer's task asked before the user chose a conversation say nothing
+  // about it, so the computer is asked again at once.
+  const choices = useRef(0);
+  const chosen = useRef(choice);
+  useEffect(() => {
+    if (chosen.current === choice) return;
+    chosen.current = choice;
+    choices.current++;
+    lookNow.current();
+  }, [choice]);
 
   // Asks the computer for its task: often while it may be starting one, every five seconds
   // otherwise. A task the computer no longer runs stays on show, at rest.
@@ -106,12 +125,15 @@ export function useLiveSession(
     if (!cellId || !ready) return;
     let cancelled = false;
     let polling = false;
+    let again = false;
+    let first = true;
     let misses = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       if (polling) return;
       polling = true;
-      const choice = choices.current;
+      again = false;
+      const asked = choices.current;
       try {
         const reply = await api.get<{ sessionId: string } | undefined>(`/api/cells/${cellId}/live`);
         const found =
@@ -120,7 +142,7 @@ export function useLiveSession(
           !over.current.has(reply.sessionId)
             ? reply.sessionId
             : null;
-        if (!cancelled && choice === choices.current)
+        if (!cancelled && asked === choices.current)
           setShown((now) => {
             if (found)
               return now?.live && now.cellId === cellId && now.sessionId === found
@@ -134,11 +156,16 @@ export function useLiveSession(
       } finally {
         polling = false;
         misses++;
-        if (!cancelled) timer = setTimeout(poll, misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
+        if (!cancelled) {
+          if (first) setAnswered(cellId);
+          first = false;
+          timer = setTimeout(poll, again ? 0 : misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
+        }
       }
     };
     lookNow.current = () => {
       misses = 0;
+      again = polling;
       if (polling) return;
       clearTimeout(timer);
       void poll();

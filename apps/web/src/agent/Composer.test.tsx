@@ -819,9 +819,11 @@ describe("the composer's controls", () => {
         },
       },
     );
-    expect(f.field.getAttribute("placeholder")).toBe("Message dot…");
+    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe(
+      "Message dot…",
+    );
     f.input("Now make it blue");
-    await act(async () => f.submit());
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
     expect(f.requests).toEqual([
       { path: `/api/cells/${cellId}/agent`, body: { task: "Now make it blue" } },
     ]);

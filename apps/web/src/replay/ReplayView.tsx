@@ -239,14 +239,13 @@ export function ReplayView({
               !live &&
               continuable({ id: sessionId, verdict: card?.verdict ?? "done" }, continueTask) && (
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   size="sm"
                   className="replay-continue"
-                  aria-label="Continue this conversation"
                   disabledReason={continueTask.reason}
                   onClick={() => continueTask.run(sessionId)}
                 >
-                  Continue
+                  Continue conversation
                 </Button>
               )}
             {twoScreens && (
@@ -259,22 +258,24 @@ export function ReplayView({
               />
             )}
             {!railed && (
-              <Button
-                ref={libraryTrigger}
-                variant="secondary"
-                className="replay-library-trigger"
-                aria-label={`All tasks, showing ${title}`}
-                {...triggerProps("dialog", library)}
-                onClick={() => setLibrary(true)}
-              >
-                <span className="replay-library-trigger-text" data-phone="">
-                  {title}
-                </span>
-                <span className="replay-library-trigger-text" data-phone="hidden">
-                  All tasks
-                </span>
-                <Icon name="chevron-down" size={14} />
-              </Button>
+              <span className="replay-library-slot">
+                <Button
+                  ref={libraryTrigger}
+                  variant="secondary"
+                  className="replay-library-trigger"
+                  aria-label={`All tasks, showing ${title}`}
+                  {...triggerProps("dialog", library)}
+                  onClick={() => setLibrary(true)}
+                >
+                  <span className="replay-library-trigger-text" data-phone="">
+                    {title}
+                  </span>
+                  <span className="replay-library-trigger-text" data-phone="hidden">
+                    All tasks
+                  </span>
+                  <Icon name="chevron-down" size={14} />
+                </Button>
+              </span>
             )}
           </div>
         </div>

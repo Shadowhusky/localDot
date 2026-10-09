@@ -238,6 +238,38 @@ it("shows an older conversation chosen to continue in place of the one at rest",
 });
 
 it("pays no heed to an answer about the computer's task asked before a new conversation was chosen", async () => {
+  const answers: ((response: Response) => void)[] = [];
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/live"))
+      return new Promise<Response>((resolve) => {
+        answers.push(resolve);
+      });
+    return Response.json({ originMicros: 0, serverMicros: 0 });
+  });
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
+  const view = renderHook(
+    ({ resting, choice }: { resting: string | null; choice: number }) =>
+      useLiveSession(api, ready, { current: null }, resting, choice),
+    { initialProps: { resting: SESSION as string | null, choice: 0 } },
+  );
+  await wait(100);
+  await act(async () => answers.shift()?.(new Response(null, { status: 204 })));
+  await wait(1_000);
+  expect(view.result.current.sessionId).toBe(SESSION);
+  expect(answers).toHaveLength(1);
+  view.rerender({ resting: null, choice: 1 });
+  await wait(100);
+  expect(view.result.current.sessionId).toBeNull();
+  // The daemon answered before it ended the finished task for the new conversation.
+  await act(async () => answers.shift()?.(Response.json({ sessionId: SESSION })));
+  await wait(0);
+  expect(view.result.current.sessionId).toBeNull();
+  // and is asked again straight away.
+  expect(answers).toHaveLength(1);
+});
+
+it("on opening, shows a task the computer still runs as running, never as stopped meanwhile", async () => {
   let answer!: (response: Response) => void;
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     const path = new URL(String(input)).pathname;
@@ -248,18 +280,21 @@ it("pays no heed to an answer about the computer's task asked before a new conve
     return Response.json({ originMicros: 0, serverMicros: 0 });
   });
   const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
+  const shown: { sessionId: string | null; ended: boolean }[] = [];
   const view = renderHook(
-    ({ resting }: { resting: string | null }) =>
-      useLiveSession(api, ready, { current: null }, resting),
-    { initialProps: { resting: SESSION as string | null } },
+    ({ resting }: { resting?: string }) => {
+      const session = useLiveSession(api, ready, { current: null }, resting);
+      shown.push({ sessionId: session.sessionId, ended: session.ended });
+      return session;
+    },
+    { initialProps: {} },
   );
+  // The conversation is read back while the computer's answer is on its way.
   await wait(100);
-  expect(view.result.current.sessionId).toBe(SESSION);
-  view.rerender({ resting: null });
-  await wait(100);
-  expect(view.result.current.sessionId).toBeNull();
-  // The daemon answered before it ended the finished task for the new conversation.
+  view.rerender({ resting: SESSION });
+  await wait(200);
   await act(async () => answer(Response.json({ sessionId: SESSION })));
   await wait(100);
-  expect(view.result.current.sessionId).toBeNull();
+  expect(view.result.current).toMatchObject({ sessionId: SESSION, resting: false, ended: false });
+  expect(shown.filter((entry) => entry.sessionId === SESSION && entry.ended)).toEqual([]);
 });
