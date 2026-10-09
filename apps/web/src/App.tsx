@@ -1099,7 +1099,10 @@ function Theatre({ api }: { api: ApiClient }) {
             : replayId
               ? (shownRecording?.title ?? RECORDED_TASK)
               : (session.model.title ??
-                (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                ((curtain.up && !agent.sessionId && conversation.sessions.length === 0) ||
+                // Until the shown task's history is in, its title is unknown, not new.
+                threadPending ||
+                (!!session.sessionId && agent.history !== true)
                   ? undefined
                   : "New conversation"))
         }

@@ -6,6 +6,7 @@ import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import type { KeydHealth } from "./keys-api.ts";
+import "./keys.css";
 
 const DOCTOR = "localdot doctor";
 const COPIED_MS = 1500;
@@ -82,7 +83,7 @@ function Glyph({ tone }: { tone: Exclude<Tone, "ok"> }) {
 }
 
 // A command to run in Terminal, copied with one press where the browser allows it.
-function Command() {
+export function DoctorCommand() {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -139,7 +140,7 @@ export function Protection({ health }: { health: KeydHealth | null }) {
                   <p>{status.problem}</p>
                   <div className="keys-status-fix">
                     <span>To fix it, run this in Terminal:</span>
-                    <Command />
+                    <DoctorCommand />
                   </div>
                   {status.details && (
                     <Disclosure summary="Details" className="keys-status-details">

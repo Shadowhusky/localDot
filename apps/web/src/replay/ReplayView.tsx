@@ -432,6 +432,8 @@ function RecordingPreview({
 }
 
 // The island over a recording: what dot was doing at the playhead and when; no controls.
+const LOST_LINE = "I couldn't open this recording. Shall I try again?";
+
 function ReplayIsland({ label, time }: { label: string; time: string }) {
   return (
     <div className="island-anchor">
@@ -603,12 +605,15 @@ function Player({
   }, [whole, noticeKey]);
 
   const hud = taskHud(replay.model, replay.tMs);
+  // A recording that never loaded has no moment to show: the island and dot say so instead.
+  const lost = replay.status === "error" && !replay.map && !replay.model.steps.length;
+  const line = opening ? "" : lost ? LOST_LINE : hud.caption;
   const feed = dotFeed(
-    { dotPose: TASK_POSE[hud.row], control: hud.control, row: hud.row },
+    { dotPose: lost ? "error" : TASK_POSE[hud.row], control: hud.control, row: hud.row },
     replay.model,
     replay.tMs,
   );
-  useEffect(() => setReplayPresence({ feed, line: hud.caption }));
+  useEffect(() => setReplayPresence({ feed, line }));
   const support = exportSupport();
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
@@ -638,6 +643,7 @@ function Player({
     replay.screen === "browser" || (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));
   const steps = (
     <ActivityRail
+      empty={lost ? "Steps show here once the recording loads." : undefined}
       rows={timelineRows(chapterRows, replay.model.keyUses)}
       api={api}
       sessionId={sessionId}
@@ -658,9 +664,14 @@ function Player({
           live
           frozen={false}
           island={
-            phone ? undefined : <ReplayIsland label={hud.label} time={timeLabel(replay.tMs)} />
+            phone ? undefined : (
+              <ReplayIsland
+                label={opening ? "Opening…" : lost ? "Couldn't load" : hud.label}
+                time={opening || lost ? "" : timeLabel(replay.tMs)}
+              />
+            )
           }
-          band={<NarratorBand line={hud.caption} speaker="dot" showDot={showDot} />}
+          band={<NarratorBand line={line} speaker="dot" showDot={showDot} />}
         >
           <Stage
             key={sessionId}
@@ -676,15 +687,27 @@ function Player({
           </Presence>
           <GapCard kind={gapKind} />
           {replay.status === "error" && !gapKind && (
-            <div className="replay-error" role="alert">
-              <p className="replay-gap-title">
-                {chapterRows.length
-                  ? "Part of this recording couldn't load"
-                  : "This recording couldn't load"}
-              </p>
-              <p className="replay-gap-body">
-                {chapterRows.length ? "Its steps are still here." : "Try again in a moment."}
-              </p>
+            <div className="replay-error" role="alert" data-place={lost ? "centre" : undefined}>
+              <div className="replay-error-text">
+                <p className="replay-gap-title">
+                  {lost ? "This recording couldn't load" : "Part of this recording couldn't load"}
+                </p>
+                <p className="replay-gap-body">
+                  {lost
+                    ? "It may still be saving. Try again in a moment."
+                    : "Its steps are still here."}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setOpened(null);
+                  replay.retry();
+                }}
+              >
+                Try again
+              </Button>
             </div>
           )}
           {replay.compare && (
@@ -697,7 +720,11 @@ function Player({
               onClose={() => replay.run({ kind: "exit" })}
             />
           )}
-          <div className="replay-transport-slot" data-shown={transportShown ? "" : undefined}>
+          <div
+            className="replay-transport-slot"
+            data-shown={transportShown && !lost ? "" : undefined}
+            inert={lost}
+          >
             <ReplayControls
               api={api}
               replay={replay}
