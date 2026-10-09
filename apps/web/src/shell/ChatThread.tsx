@@ -53,6 +53,7 @@ export function ChatThread({
   sessions = NO_SESSIONS,
   more = false,
   pending = false,
+  start,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -73,6 +74,8 @@ export function ChatThread({
   more?: boolean;
   // Which conversation and task the thread shows is not known yet.
   pending?: boolean;
+  // In place of the empty thread's suggestions.
+  start?: ReactNode;
 }) {
   const model = agent?.model;
   const ended = model?.ended?.reason;
@@ -123,6 +126,7 @@ export function ChatThread({
       answer={answer}
       cover={cover}
       covered={covered}
+      start={start}
     />
   );
 }

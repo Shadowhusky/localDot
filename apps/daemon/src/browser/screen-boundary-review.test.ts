@@ -105,6 +105,7 @@ function fixture() {
     browser: {
       start: vi.fn(async () => current),
       endpoints: vi.fn(() => current),
+      get: () => undefined,
       stop: vi.fn(async () => {}),
     },
     client: () => client,

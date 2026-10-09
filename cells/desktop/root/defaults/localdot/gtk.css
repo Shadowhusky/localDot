@@ -1,0 +1,16 @@
+/* The menu bar: room around the dot glyph, menu titles 17 pt apart and the app name in bold.
+   The appmenu plugin keeps an app's menus in reverse with the app name and one hidden item after
+   them, so the app name is the only item or the last but one. Its seven-item desktop menu puts
+   Files last but one; that menu keeps a regular weight. */
+#applicationsmenu-1 button {
+  padding: 0 9px 0 12px;
+}
+
+.-vala-panel-appmenu-private > menuitem {
+  padding: 0 8.5px;
+}
+
+.-vala-panel-appmenu-private > menuitem:only-child > label,
+.-vala-panel-appmenu-private > menuitem:nth-last-child(2):not(:nth-child(6)) > label {
+  font-weight: 700;
+}

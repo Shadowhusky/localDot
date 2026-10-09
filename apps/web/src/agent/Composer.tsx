@@ -17,7 +17,6 @@ import type { CellSummary } from "../cells/types.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
 import { afterMotion } from "../ui/finished.ts";
@@ -624,12 +623,14 @@ export function Composer(props: ComposerProps) {
       ? "Choose what to do with your last message first."
       : guard.notice
         ? "Discard the key or move it to Keys first."
-        : (reason ??
-          (uploads.blocked
-            ? "Wait for your files to finish uploading."
-            : text.blank
-              ? "Write a message first."
-              : undefined));
+        : connect
+          ? "Choose a model first"
+          : (reason ??
+            (uploads.blocked
+              ? "Wait for your files to finish uploading."
+              : text.blank
+                ? "Write a message first."
+                : undefined));
   const attachReason = guard.notice
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
@@ -788,33 +789,17 @@ export function Composer(props: ComposerProps) {
               Send after this task
             </MenuItem>
           </Menu>
-          <Pop shown={connect}>
-            {connect && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  const input = field();
-                  if (input) props.onSettings?.(input);
-                }}
-              >
-                Connect a model
-              </Button>
-            )}
-          </Pop>
-          {!connect && (
-            <IconButton
-              type="submit"
-              className="composer-send"
-              variant="primary"
-              size={32}
-              icon="arrow-up"
-              label={sendLabel}
-              kbd={touch ? undefined : ["Enter"]}
-              disabledReason={sendReason}
-              aria-describedby={guard.notice ? keyNotice : undefined}
-            />
-          )}
+          <IconButton
+            type="submit"
+            className="composer-send"
+            variant="primary"
+            size={32}
+            icon="arrow-up"
+            label={sendLabel}
+            kbd={touch ? undefined : ["Enter"]}
+            disabledReason={sendReason}
+            aria-describedby={guard.notice ? keyNotice : undefined}
+          />
         </div>
         <div className="composer-drop" aria-hidden="true">
           <Icon name="paperclip" />

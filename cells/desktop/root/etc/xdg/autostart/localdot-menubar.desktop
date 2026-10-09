@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Menu bar
+Exec=/usr/local/bin/localdot-menubar
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true

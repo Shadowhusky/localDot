@@ -3,15 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, expect, it } from "vitest";
 import { App } from "./App.tsx";
 import { TOKEN_KEY } from "./lib/token.ts";
-import { APPEARANCE_KEY } from "./onboarding/appearance.ts";
 import { providerFixture } from "./settings/testing.ts";
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
-  delete document.documentElement.dataset.appearance;
 });
-it("guides an empty authenticated workspace without starting tasks or saving policy", async () => {
+it("lists what setup has left in the chat without starting tasks or saving policy", async () => {
   localStorage.setItem(TOKEN_KEY, "a".repeat(43));
   const methods: string[] = [];
   const fetchImpl = (async (input, init) => {
@@ -34,30 +32,32 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
                 }
               : path === "/api/session-index"
                 ? { sessions: [], next: null }
-                : [];
+                : path === "/api/conversation"
+                  ? { sessions: [], more: false }
+                  : [];
     return Response.json(data);
   }) as typeof fetch;
   render(<App fetchImpl={fetchImpl} />);
-  expect(await screen.findByRole("heading", { name: "Set up localDot" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));
-  await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("midnight"));
-  expect(localStorage.getItem(APPEARANCE_KEY)).toBe("midnight");
-  fireEvent.click(screen.getByRole("button", { name: "Review when dot checks with you" }));
-  const dialog = await screen.findByRole("dialog", { name: "Settings" });
-  await waitFor(() =>
-    expect(document.activeElement).toBe(
-      within(within(dialog).getByRole("radiogroup", { name: "Start from" })).getByRole("radio", {
-        name: "Balanced",
-      }),
-    ),
-  );
+  const setup = await screen.findByRole("region", { name: "Finish setting up" });
+  expect(setup.textContent).toContain("0 of 6 steps done. dot needs a model before it can start.");
   expect(
-    (within(dialog).getByRole("radio", { name: "Midnight" }) as HTMLInputElement).checked,
-  ).toBe(true);
+    within(setup)
+      .getAllByRole("listitem")
+      .map((row) => row.textContent),
+  ).toEqual([
+    "How dot thinksNot chosen yet",
+    "KeyNot added yet",
+    "ModelNeeded to startChoose…",
+    "PermissionsBalanced until you choose",
+    "PhoneOptional",
+  ]);
+  const choose = within(setup).getByRole("button", { name: "Choose…" });
+  fireEvent.click(choose);
+  const dialog = await screen.findByRole("dialog", { name: "Settings" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Close settings" }));
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Review when dot checks with you" }),
-  );
+  expect(document.activeElement).toBe(choose);
+  fireEvent.click(within(setup).getByRole("button", { name: "Continue setup" }));
+  expect(await screen.findByRole("dialog", { name: "Settings" })).toBeTruthy();
   expect(methods.every((method) => method === "GET")).toBe(true);
 });
 it("offers one Turn on, on the curtain, with the island hidden under it", async () => {
@@ -83,12 +83,13 @@ it("offers one Turn on, on the curtain, with the island hidden under it", async 
     return Response.json(data);
   }) as typeof fetch;
   render(<App fetchImpl={fetchImpl} />);
-  await screen.findByRole("heading", { name: "Set up localDot" });
+  await screen.findByRole("heading", { name: "Your computer is off" });
+  expect(screen.getByText("Turn it on to start your first task.")).toBeTruthy();
   const [footer, ...more] = screen.getAllByRole("button", { name: "Turn on" });
   if (!footer) throw new Error("expected a Turn on control");
   expect(more).toEqual([]);
   expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("hidden");
-  expect(screen.queryByRole("button", { name: /^Start/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Start(?! task)/ })).toBeNull();
   expect(footer.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(footer);
   expect(posts).toEqual(["/api/cells"]);

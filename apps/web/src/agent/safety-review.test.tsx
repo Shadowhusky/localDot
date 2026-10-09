@@ -4,7 +4,7 @@ import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
+import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyProps, useSafety } from "./useSafety.ts";
 
@@ -234,8 +234,7 @@ it("a granted notification still announces a current approval while the visible 
   const f = fixture(fetchImpl);
   act(() => window.dispatchEvent(new Event("blur")));
   expect(f.result.current.canApprove).toBe(false);
-  render(<SafetyControls safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />);
-  expect(document.querySelector(".approval-card")).not.toBeNull();
+  render(<SafetyNotes safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />);
   expect(notices).toHaveLength(1);
   expect(notices[0]?.title).toBe("localDot needs your decision");
   expect(fetchImpl).not.toHaveBeenCalled();

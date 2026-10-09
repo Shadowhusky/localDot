@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_PREPARATION_DRAIN_MS, prepareBrowserRuntime } from "./prepare.ts";
 import { browserRuntimeConfig } from "./runtime-config.ts";
 
-vi.mock("./profile-preferences.ts", () => ({ prepareProfilePreferences: vi.fn() }));
+vi.mock("./profile-preferences.ts", () => ({
+  prepareProfilePreferences: vi.fn(),
+  releaseProfileLocks: vi.fn(),
+}));
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 vi.mock("node:fs/promises", () => ({ lstat: vi.fn(), mkdir: vi.fn(), open: vi.fn() }));

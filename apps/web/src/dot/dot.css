@@ -131,3 +131,85 @@
     opacity: 0;
   }
 }
+
+/* The one live dot (design-v2 §10.17): a fixed layer over the page, above the stage, its island and
+   the band, under sheets, menus and dialogs. */
+.presence {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--layer-island) + 1);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.presence-frame {
+  --frame: 96px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--frame);
+  height: var(--frame);
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+  will-change: transform;
+}
+
+.presence-frame[data-shown] {
+  opacity: 1;
+}
+
+/* The contact shadow lifts off while dot flies, so it never drags across the picture. */
+.presence-frame .dot > .dot-shadow {
+  transition: filter var(--dur-exit) var(--ease-standard);
+}
+
+.presence-frame[data-flying] .dot > .dot-shadow {
+  filter: opacity(0);
+}
+
+/* dot needs the user: an amber point at the ball's upper right, never a fill. */
+.presence-mark {
+  position: absolute;
+  top: calc(var(--frame) * 0.23 - 5px);
+  left: calc(var(--frame) * 0.77 - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-attention);
+  box-shadow: 0 0 0 2px var(--color-void);
+  opacity: 0;
+  scale: 0.6;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    scale var(--dur-default) var(--ease-spring);
+}
+
+.presence-frame[data-attention] .presence-mark {
+  opacity: 1;
+  scale: 1;
+}
+
+.presence-glyph {
+  position: absolute;
+  inset: 12.5%;
+  display: none;
+}
+
+/* The plates are pictures and ignore the forced palette, so the static mark stands in. */
+@media (forced-colors: active) {
+  .presence-frame .dot {
+    display: none;
+  }
+
+  .presence-glyph {
+    display: block;
+    color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presence-mark {
+    scale: 1;
+  }
+}

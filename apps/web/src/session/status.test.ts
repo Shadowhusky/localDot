@@ -135,7 +135,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(view(noResult, 9500).task).toMatchObject({ row: "ready", label: "Ready" });
   });
 
-  it("puts a question first, keeps the task's Stop and shows no clock", () => {
+  it("puts a question first, keeps the task's Stop and counts the wait from the question", () => {
     const asked = [
       ...typed(),
       ev("ask.request", 1500, {
@@ -152,7 +152,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       caption: { speaker: "dot", text: "Which format?" },
       actions: stopsTask,
       control: false,
-      elapsedS: null,
+      elapsedS: 8,
     });
     const answered = [...asked, ev("ask.answer", 2000, { askId: ID, option: "A", by: "user" })];
     expect(view(answered, 3000).task).toMatchObject({ row: "working", control: true });
@@ -164,8 +164,9 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       label: "Needs your OK",
       actions: stopsTask,
       control: false,
-      elapsedS: null,
+      elapsedS: 8,
     });
+    expect(view(requested, 3_662_000).status.elapsedS).toBe(3660);
     const recorded = [
       ...requested,
       ev("agent.state", 1501, { state: "waiting_user", reason: "approval" }),
@@ -410,7 +411,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
         caption: { speaker: "dot", text: "Sign in for me" },
         actions: stopsTask,
         control: false,
-        elapsedS: null,
+        elapsedS: 8,
       },
     });
     const ended = [...requested, ev("takeover.end", 4000, { requestId: ID, by: "user" })];
@@ -808,7 +809,7 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["stop unconfirmed", "stopping", "Stop unconfirmed", "error", "blocked", "dot"],
   // 1. The computer is not live, or nothing runs on it. A computer that is off, failing or not
   // up yet holds the row over an open task; a late picture or a list check does not.
-  ["checking", "computer", "Checking…", "idle", null, "system"],
+  ["checking", "computer", "Checking…", "waking", null, "system"],
   ["no computer", "computer", "No computer", "sleeping", null, "system"],
   ["list failed", "computer", "Unavailable", "error", "blocked", "system"],
   ["starting", "computer", "Starting…", "waking", null, "system"],

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { type KeydCellInfo, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserKeydClient } from "../keyd/browser-wiring.ts";
+import { AccountsProfile } from "./accounts-profile.ts";
 import { BrowserLedgerStore } from "./browser-ledger.ts";
 import { BrowserOrchestrator, type BrowserOrchestratorDeps } from "./browser-orchestrator.ts";
 import { CellStore } from "./store.ts";
@@ -77,6 +78,8 @@ function fixture() {
   };
   const owner = new BrowserOrchestrator(deps);
   return {
+    accounts: new AccountsProfile({ home, docker, prefix: "localdot-review-", image: () => "" })
+      .volume,
     home,
     store,
     parent,
@@ -217,7 +220,7 @@ describe("independent lifecycle correction boundaries", () => {
     expect(f.owner.reservedKeydPorts()).toContain(record.keydPort);
     f.docker.before = undefined;
     await f.owner.remove(f.parent.id, { purgeProfile: true });
-    expect(f.docker.volumes.size).toBe(0);
+    expect([...f.docker.volumes.keys()]).toEqual([f.accounts]);
     expect(f.ledger.list()).toEqual([]);
     expect(f.store.getBrowser(record.id)).toBeUndefined();
   });
@@ -228,7 +231,7 @@ describe("independent lifecycle correction boundaries", () => {
     await f.owner.remove(f.parent.id, { purgeProfile: true });
     expect(f.docker.containers.size).toBe(0);
     expect(f.docker.networks.size).toBe(0);
-    expect(f.docker.volumes.size).toBe(0);
+    expect([...f.docker.volumes.keys()]).toEqual([f.accounts]);
     expect(f.listeners.size).toBe(0);
     expect(f.ledger.list()).toEqual([]);
   });

@@ -2,6 +2,7 @@ import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
+import type { ShowDotControl } from "../dot/show-dot.ts";
 import {
   KEYS_DESCRIPTION,
   KEYS_TITLE,
@@ -15,6 +16,8 @@ import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
 import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
+import { Switch } from "../ui/Switch.tsx";
+import { AccountsSection } from "./AccountsSection.tsx";
 import { AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import {
@@ -30,6 +33,7 @@ import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, SpendingLimits } from "./Limits.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
+import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { RulesView } from "./useRules.ts";
 import "./settings.css";
@@ -49,6 +53,7 @@ export interface SettingsSheetProps {
   keysPage?: KeysPage;
   focusSection?: SettingsSection;
   appearance?: AppearanceControl;
+  showDot?: ShowDotControl;
   choices: Partial<Record<ModelRole, RoleChoice>>;
   providers: readonly ProviderModels[];
   keys: readonly PickerKey[];
@@ -81,6 +86,7 @@ export interface SettingsSheetProps {
     change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
   knowledge?: Knowledge;
+  accounts?: AccountsView;
   // A phone's sheet covers the page and its Stop, so it carries one, with what Stop reports.
   stop?: { label: string; enabled: boolean; run(): void };
   taskControls?: ReactNode;
@@ -418,9 +424,15 @@ function SettingsSections(props: SettingsSheetProps) {
         </Section>
       )}
 
+      {props.accounts && (
+        <Section id="settings-accounts" title="Accounts">
+          <AccountsSection accounts={props.accounts} />
+        </Section>
+      )}
+
       {props.appearance && (
         <Section id="settings-appearance" title="Appearance">
-          <Appearance appearance={props.appearance} />
+          <Appearance appearance={props.appearance} showDot={props.showDot} />
         </Section>
       )}
     </>
@@ -440,17 +452,37 @@ function Revert({ disabledReason, onRevert }: { disabledReason?: string; onRever
   );
 }
 
-function Appearance({ appearance }: { appearance: AppearanceControl }) {
+function Appearance({
+  appearance,
+  showDot,
+}: {
+  appearance: AppearanceControl;
+  showDot?: ShowDotControl;
+}) {
   return (
-    <Field
-      label="Theme"
-      description={
-        appearance.saved
-          ? "Applies to this browser."
-          : "Applied for this visit. This browser couldn't save it."
-      }
-    >
-      <AppearancePicker appearance={appearance} />
-    </Field>
+    <>
+      <Field
+        label="Theme"
+        description={
+          appearance.saved
+            ? "Applies to this browser."
+            : "Applied for this visit. This browser couldn't save it."
+        }
+      >
+        <AppearancePicker appearance={appearance} />
+      </Field>
+      {showDot && (
+        <Switch
+          label="Show dot"
+          description={
+            showDot.saved
+              ? "dot's face on the curtain and beside the stage. Status and its words stay."
+              : "Applied for this visit. This browser couldn't save it."
+          }
+          checked={showDot.value}
+          onCheckedChange={(checked) => showDot.change(checked)}
+        />
+      )}
+    </>
   );
 }

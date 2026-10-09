@@ -325,6 +325,8 @@ export interface ConversationProps {
   // Opens an earlier task of the conversation in Replay.
   onReplayTask?: (sessionId: string) => void;
   computerReady?: boolean;
+  // In place of the empty thread's suggestions, such as the steps setup has left.
+  start?: ReactNode;
 }
 
 export function Conversation({
@@ -349,6 +351,7 @@ export function Conversation({
   onReplay,
   onReplayTask,
   computerReady = false,
+  start,
 }: ConversationProps) {
   // While its task is live, the latest turn's work line sits in the foot, always in view; once the
   // turn is over it joins the thread as that turn's last row.
@@ -652,6 +655,17 @@ export function Conversation({
   };
   const empty = !shown.length && !liveWork;
   const olderTasks = !!earlier?.more;
+  // What setup has left reads from its top; the thread follows its end again once it has gone.
+  const startShown = empty && !loading && !!start;
+  const followNow = useRef(follow);
+  followNow.current = follow;
+  useLayoutEffect(() => {
+    const view = scroller.current;
+    if (!startShown || !view || view.scrollHeight <= view.clientHeight) return;
+    followNow.current.release();
+    view.scrollTop = 0;
+    return () => followNow.current.jump();
+  }, [startShown]);
   // A suggestion is put in the composer as if typed, so it is read and checked the same way.
   const suggest = (text: string) => {
     const field = dockHost.querySelector("textarea");
@@ -718,6 +732,8 @@ export function Conversation({
             />
             {loading ? (
               <ThreadSkeleton />
+            ) : startShown ? (
+              <div className="thread-empty thread-start-steps">{start}</div>
             ) : empty ? (
               <div className="thread-empty">
                 <h3>What should we do?</h3>

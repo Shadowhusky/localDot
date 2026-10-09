@@ -10,10 +10,12 @@ export type DotState =
   | "thinking"
   | "acting"
   | "observing"
+  | "watching"
   | "speaking"
   | "waiting"
   | "your-turn"
   | "resting"
+  | "dozing"
   | "error"
   | "annoyed";
 
@@ -93,10 +95,24 @@ export const STATES: Record<DotState, StateDef> = {
     period: 4000,
   },
   observing: { pose: { upL: 0.06, upR: 0.06, breath: 0.25 }, blink: 0, period: 4000 },
+  // Waiting on the computer (a page load, a save): a patient gaze at the work and slow blinks.
+  watching: {
+    pose: { upL: 0.14, upR: 0.14, breath: 0.8 },
+    blink: 0.8,
+    blinkDur: 1.1,
+    period: 4600,
+  },
   speaking: { pose: {}, blink: 0, period: 3600 },
   waiting: { pose: { eyeScale: 1.15, bodyY: -1 }, blink: 1, period: 3800 },
   "your-turn": { pose: { upL: 0.08, upR: 0.08, bodyX: -1, breath: 0.9 }, blink: 1, period: 4200 },
   resting: { pose: { upL: 0.35, upR: 0.35 }, blink: 1 / 1.6, blinkDur: 1.2, period: 5000 },
+  // Long idle while the computer is on: heavy lids, never closed, because closed means off.
+  dozing: {
+    pose: { upL: 0.55, upR: 0.55, bodyY: 0.8, breath: 1.3 },
+    blink: 1 / 2.4,
+    blinkDur: 1.5,
+    period: 6200,
+  },
   error: {
     pose: { upL: 0.2, upR: 0.2, tiltL: -14, tiltR: -14, bodyY: 1, size: 0.97 },
     blink: 0.8,

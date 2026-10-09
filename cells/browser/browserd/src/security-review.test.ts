@@ -134,8 +134,12 @@ describe("independent CDP authority and framing controls", () => {
   it("evaluation cookie and storage commands have no native write path", async () => {
     const f = fixture();
     try {
-      for (const method of ["Runtime.evaluate", "Network.getAllCookies", "Storage.getCookies"])
+      for (const method of ["Runtime.evaluate", "Network.getAllCookies", "Storage.setCookies"])
         await expect(f.broker.send(method, {}, { sessionId: "owned" })).rejects.toThrow("method");
+      // Listing for Settings > Accounts is browser-wide only; no page session can ask for it.
+      await expect(f.broker.send("Storage.getCookies", {}, { sessionId: "owned" })).rejects.toThrow(
+        "scope",
+      );
       expect(f.writes).toHaveLength(0);
     } finally {
       f.broker.close();

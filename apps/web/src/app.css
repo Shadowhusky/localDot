@@ -113,10 +113,6 @@
     width: 100%;
   }
 
-  .stage-col .narration {
-    left: 84px;
-  }
-
   .rail-chat {
     --rail-surface: var(--color-void);
     grid-area: 2 / 1;
@@ -216,13 +212,18 @@
   border-radius: inherit;
 }
 
+/* The picture materialises as the curtain lifts: it fades up and settles from just under full size. */
 .stage > canvas {
   opacity: 0;
-  transition: opacity var(--duration-lit) var(--ease-lit);
+  scale: 0.985;
+  transition:
+    opacity var(--duration-lit) var(--ease-lit),
+    scale var(--dur-gentle) var(--ease-spring);
 }
 
 .stage.lit > canvas {
   opacity: 1;
+  scale: 1;
 }
 
 .stage.frozen > canvas {
@@ -244,6 +245,7 @@
 @media (prefers-reduced-motion: reduce) {
   .stage > canvas,
   .stage > .stage-veil {
+    scale: 1;
     transition: none;
   }
 }

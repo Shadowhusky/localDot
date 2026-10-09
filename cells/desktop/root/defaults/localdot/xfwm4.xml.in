@@ -46,11 +46,11 @@
     <property name="repeat_urgent_blink" type="bool" value="false"/>
     <property name="resize_opacity" type="int" value="100"/>
     <property name="scroll_workspaces" type="bool" value="true"/>
-    <property name="shadow_delta_height" type="int" value="0"/>
-    <property name="shadow_delta_width" type="int" value="0"/>
-    <property name="shadow_delta_x" type="int" value="0"/>
-    <property name="shadow_delta_y" type="int" value="-3"/>
-    <property name="shadow_opacity" type="int" value="50"/>
+    <property name="shadow_delta_height" type="int" value="10"/>
+    <property name="shadow_delta_width" type="int" value="10"/>
+    <property name="shadow_delta_x" type="int" value="-5"/>
+    <property name="shadow_delta_y" type="int" value="14"/>
+    <property name="shadow_opacity" type="int" value="40"/>
     <property name="show_app_icon" type="bool" value="false"/>
     <property name="show_dock_shadow" type="bool" value="false"/>
     <property name="show_frame_shadow" type="bool" value="true"/>
@@ -63,7 +63,7 @@
     <property name="theme" type="string" value="@THEME@"/>
     <property name="tile_on_move" type="bool" value="true"/>
     <property name="title_alignment" type="string" value="center"/>
-    <property name="title_font" type="string" value="Inter Bold 9"/>
+    <property name="title_font" type="string" value="Inter Semi-Bold 10"/>
     <property name="title_horizontal_offset" type="int" value="0"/>
     <property name="titleless_maximize" type="bool" value="false"/>
     <property name="title_shadow_active" type="string" value="false"/>

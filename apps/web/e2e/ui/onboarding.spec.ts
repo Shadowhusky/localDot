@@ -12,14 +12,15 @@ const box = (page: Page, selector: string) => page.locator(selector).first().bou
 
 test("first run", async ({ page, ui }) => {
   await ui.open("first-run");
-  await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
   await ui.settle();
   await ui.still();
 });
 
 test("first run, model ready", async ({ page, ui }) => {
   await ui.open("model-ready");
-  await expect(page.getByText("Anthropic · claude-sonnet-5-5", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Finish setting up" })).toHaveCount(0);
   await ui.settle();
   await ui.still();
 });
@@ -29,27 +30,27 @@ test("first run shows Turn on without scrolling and keeps the stage where the co
   ui,
 }) => {
   await ui.open("first-run");
-  const turnOn = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });
+  const turnOn = page.locator(".curtain").getByRole("button", { name: "Turn on" });
   await expect(turnOn).toBeVisible();
   const viewport = page.viewportSize() ?? { width: 0, height: 0 };
   const button = await turnOn.boundingBox();
   expect(button && button.y + button.height <= viewport.height).toBe(true);
   expect(await turnOn.evaluate((element) => element.closest(".ui-scroll-area"))).toBeNull();
   const scrollers = await page
-    .locator(".welcome-setup *")
+    .locator(".curtain *")
     .evaluateAll(
       (all) =>
         all.filter((element) => /auto|scroll/.test(getComputedStyle(element).overflowY)).length,
     );
-  expect(scrollers).toBe(1);
+  expect(scrollers).toBe(0);
   const before = await box(page, ".stage");
   expect((before?.width ?? 0) / (before?.height ?? 1)).toBeCloseTo(1.6, 2);
-  const setup = await box(page, ".welcome-setup");
+  const setup = await box(page, ".curtain");
   // Over the stage on a wide screen; over the stage and the band under it on a phone.
   if (viewport.width >= 700) expect(setup).toEqual(before);
   else expect(setup).toEqual(await box(page, ".stage-frame"));
   await turnOn.click();
-  await expect(page.locator(".welcome-setup")).toHaveCount(0);
+  await expect(turnOn).toHaveAttribute("aria-hidden", "true");
   expect(await box(page, ".stage")).toEqual(before);
 });
 

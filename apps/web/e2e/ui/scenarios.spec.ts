@@ -11,13 +11,13 @@ const hud = (label: string) => (page: Page) =>
   expect(page.getByTestId("hud-status")).toHaveText(label);
 const shows = (find: (page: Page) => Locator) => (page: Page) => expect(find(page)).toBeVisible();
 const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
-  "first-run": shows((page) => page.getByRole("heading", { name: "Set up localDot" })),
+  "first-run": shows((page) => page.getByRole("heading", { name: "Your computer is off" })),
   "model-ready": hud("No computer"),
   starting: hud("Starting…"),
   ready: hud("Ready"),
   "chatgpt-plan": hud("Ready"),
   running: hud("Select the Net total cell"),
-  approval: shows((page) => page.getByRole("dialog", { name: /^Send the monthly report/ })),
+  approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),
   ask: hud("Has a question"),
   takeover: hud("Your turn"),
   budget: hud("Reached your spending limit"),

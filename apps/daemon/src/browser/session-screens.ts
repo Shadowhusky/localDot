@@ -14,11 +14,15 @@ import { screenGatewayBinding } from "./gateway-binding.ts";
 import { ScreenController, type ScreenLease } from "./screen-controller.ts";
 import type { BrowserStreams } from "./streams.ts";
 
+const KEPT_REVISIONS = 16;
+
 export class SessionScreens {
+  readonly #revisions = new Map<string, number>();
+
   constructor(
     private readonly deps: {
       cells: Pick<CellApi, "get" | "subscribe" | "stop">;
-      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop">;
+      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
       streams: BrowserStreams;
       recordings: Pick<ScreenRecordings, "attach" | "fence">;
       registry: Pick<DesktopdRegistry, "for">;
@@ -46,6 +50,7 @@ export class SessionScreens {
           );
         },
         browser: this.deps.browser,
+        revision: (instance) => this.#revision(instance),
         downloads: this.deps.downloads
           ? (endpoint, binding, owner) => {
               const collector = this.deps.downloads;
@@ -107,6 +112,17 @@ export class SessionScreens {
         },
       }),
     );
+  }
+
+  #revision(instance: string): number {
+    const next = (this.#revisions.get(instance) ?? 0) + 1;
+    this.#revisions.delete(instance);
+    this.#revisions.set(instance, next);
+    for (const old of this.#revisions.keys()) {
+      if (this.#revisions.size <= KEPT_REVISIONS) break;
+      this.#revisions.delete(old);
+    }
+    return next;
   }
 
   bind(session: AgentSession, lease: ScreenLease) {

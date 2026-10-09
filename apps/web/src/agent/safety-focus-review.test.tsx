@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { DesktopFrame } from "../stage/DesktopFrame.tsx";
 import { type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
+import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyView, useSafety } from "./useSafety.ts";
 
@@ -85,7 +85,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
           Parent task draft
           <input aria-label="Parent task draft" />
         </label>
-        <SafetyControls safety={current} agent={agent} cell={cell} />
+        <SafetyNotes safety={current} agent={agent} cell={cell} />
       </>
     );
   }

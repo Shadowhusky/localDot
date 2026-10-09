@@ -140,6 +140,8 @@
   --color-glass-hover: rgba(255, 255, 255, 0.1);
   --color-glass-pressed: rgba(255, 255, 255, 0.16);
   --color-thick-glass: rgba(24, 25, 29, 0.97);
+  /* A quiet panel inside a card, such as a decision's reason. */
+  --color-inset: rgba(255, 255, 255, 0.04);
   --blur-glass: 24px;
   --blur-thick-glass: 30px;
 
@@ -179,6 +181,28 @@
     rgba(242, 243, 245, 0.08),
     transparent 70%
   );
+
+  /* The curtain: the stage while there is no picture. Soft folds of two periods, a beam from
+     above, a pool of light where dot sleeps, and a shade at its foot. */
+  --curtain:
+    radial-gradient(ellipse 30% 70% at 50% -8%, rgba(255, 255, 255, 0.07), transparent 70%),
+    radial-gradient(ellipse 44% 56% at 50% 36%, rgba(255, 255, 255, 0.06), transparent 72%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.1) 0,
+      rgba(255, 255, 255, 0.012) 37px,
+      rgba(0, 0, 0, 0.1) 74px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.06) 0,
+      rgba(255, 255, 255, 0.01) 23px,
+      rgba(0, 0, 0, 0.06) 46px
+    ),
+    linear-gradient(180deg, #17181c 0%, #111215 60%, #0d0e10 100%);
+  --curtain-shade: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.35));
+  --color-progress-track: rgba(255, 255, 255, 0.1);
+  --color-progress-fill: rgba(238, 239, 241, 0.75);
 
   --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --shadow-stage:
@@ -267,6 +291,15 @@
   --text-tag--letter-spacing: 0.02em;
   --text-tile: 0.5625rem;
   --text-tile--line-height: 0.625rem;
+  /* A decision's reason; on a phone its sheet's title and facts. */
+  --text-note: 0.75rem;
+  --text-note--line-height: 1.0625rem;
+  --text-sheet-title: 1.25rem;
+  --text-sheet-title--line-height: 1.5625rem;
+  --text-sheet-title--letter-spacing: -0.023em;
+  --text-sheet-fact: 0.9375rem;
+  --text-sheet-fact--line-height: 1.25rem;
+  --text-sheet-fact--letter-spacing: -0.015em;
 
   --spacing: 4px;
 
@@ -286,6 +319,8 @@
   --radius-button-xl: 13px;
   --radius-tag: 5px;
   --radius-island: 20px;
+  /* The island grown into a decision. */
+  --radius-decision: 22px;
   --radius-track-28: 9px;
   --radius-thumb-24: 6px;
 
@@ -331,7 +366,12 @@
   --dur-light-out: 300ms;
   /* A label's new words, the dim over the picture, the island leaving under the curtain. */
   --dur-text-in: 180ms;
+  --dur-text-out: 120ms;
   --dur-dim: 200ms;
+  /* The curtain lifting off the stage, or falling back over it. */
+  --dur-curtain: 320ms;
+  /* About as long as a computer's first start, which the curtain's progress eases toward. */
+  --dur-first-start: 60s;
   /* Loops, which reduced motion stops rather than shortens. */
   --loop-sweep: 1400ms;
   --loop-turn: 1200ms;
