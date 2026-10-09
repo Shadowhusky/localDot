@@ -1,5 +1,5 @@
-/* The top bar over the stage column (design-v2 §8.1): wordmark and title, an empty centre the island
-   can rise into, then Watch | Replay, Settings and Keys. */
+/* The top bar over the stage column (design-v2 §8.1): wordmark and title, then Watch | Replay,
+   Settings and Keys. */
 .bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -49,15 +49,4 @@
 
 .bar-modes {
   margin-right: calc(var(--spacing) * 2);
-}
-
-/* The island has risen into the centre: it is the island's alone, and the title stops short of it. */
-.bar[data-centre] {
-  grid-template-columns: minmax(0, 1fr) var(--bar-centre) minmax(0, 1fr);
-}
-
-/* Its own width, as in two columns, so the room it leaves the island never changes with it. */
-.bar[data-centre] > .bar-r {
-  grid-column: 3;
-  justify-self: end;
 }

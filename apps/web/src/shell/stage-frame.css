@@ -450,16 +450,17 @@
   }
 }
 
-/* Full screen (design-v2 §11 G): the stage takes the whole screen, 16:10 and square-cornered, its
-   rim inside the screen's edge. The house fades away behind it as it travels; the band folds, dot
-   moves into the island and the control strip floats over the picture's foot. */
+/* Full screen (design-v2 §11 G): the stage takes the screen under the island's strip, 16:10 and
+   square-cornered, its rim inside the screen's edge. The house fades away behind it as it travels;
+   the band folds, dot moves into the island and the control strip floats over the picture's foot. */
 .app[data-full] .stage-col {
+  --_strip: calc(var(--spacing) * 3 + var(--island-h) + var(--island-gap));
   position: fixed;
   inset: 0;
   z-index: var(--layer-island);
   justify-content: center;
   align-items: center;
-  padding: 0;
+  padding: var(--_strip) 0 0;
 }
 
 .app[data-full] .stage-col::before {
@@ -478,7 +479,7 @@
 
 .app[data-full] .stage-col > .stage-frame {
   flex: none;
-  width: min(100vw, 100dvh * 1.6);
+  width: min(100vw, (100dvh - var(--_strip)) * 1.6);
 }
 
 .app[data-full] :is(.stage-box > .stage, .stage-rim) {
