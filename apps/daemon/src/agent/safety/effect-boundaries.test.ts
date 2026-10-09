@@ -293,6 +293,29 @@ describe("drawing and dragging by hand under Balanced", () => {
     expect(kinds(f)).toEqual(["down", "move"]);
   });
 
+  it("asks before a file is dropped where a busy page left the lookup unknown", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    f.fake.script.hitTest = (point) =>
+      point.x > 1000
+        ? { target: null, window: null, unknown: true, ms: 1000 }
+        : {
+            target: { point, source: "ax", role: "list item", name: "report.txt" },
+            window: 7,
+            ms: 1,
+          };
+    const cards = answerEveryCard(f);
+    const out = await f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 600, y: 300 },
+      ],
+    });
+    expect(out.body.ok).toBe(false);
+    expect(cards.map((card) => card.title)).toEqual(["Upload your files"]);
+    expect(f.effects()).toHaveLength(0);
+  });
+
   it("refuses a drag approved over no element once a web page is found at its drop", async () => {
     const f = setup();
     let page = false;

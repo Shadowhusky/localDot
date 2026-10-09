@@ -37,6 +37,7 @@ const factsOf = (action: GuiAction, identity: NativeActionIdentity) =>
     action,
     identity.target,
     identity.drop ? identity.drop.target : action.verb === "drag" ? null : undefined,
+    { target: identity.unknown, drop: identity.drop?.unknown },
   );
 
 const modsOf = (a: ComputerAction): { mods?: string[] } | string =>

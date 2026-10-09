@@ -38,6 +38,9 @@ export type RiskFacts = {
   target?: NativeTargetFacts;
   // A drag's drop end: its element, or null when none is known there. Both ends are classified.
   drop?: NativeTargetFacts | null;
+  // A drag's end whose lookup ran out of time: any element may be there.
+  targetUnknown?: true;
+  dropUnknown?: true;
   keys?: readonly string[];
   newline?: boolean;
   // Typed text goes on past a Tab, which moves focus to the next control.

@@ -50,6 +50,8 @@ const PATTERNS = {
   search: /search|搜索|搜尋|\bfind\b|\bquery\b/i,
   enter: /^(?:return|enter|kp_enter)$/i,
   terminal: /terminal/i,
+  // Window classes of the browsers a desktop runs.
+  browserApp: /^(?:chromium|(?:google-)?chrome|firefox|brave|microsoft-edge)\b/i,
   ctrl: /^(?:ctrl|control(?:_l)?)$/i,
   shift: /^shift(?:_l)?$/i,
   tab: /^(?:tab|\t)$/i,
@@ -169,10 +171,12 @@ export function classify(facts: RiskFacts): readonly ActionClass[] {
 
 // `drop` is a drag's drop end, null when no element is known there: a drag's own, or that of a
 // move, scroll or release while a button is down. A hover or a scroll with no button down browses.
+// `unknown` names the ends whose lookup ran out of time.
 export function nativeActionFacts(
   action: GuiAction,
   target: Target | null,
   drop?: Target | null,
+  unknown: { target?: boolean; drop?: boolean } = {},
 ): RiskFacts {
   if (action.verb === "wait") return { operation: "wait" };
   if ((action.verb === "scroll" || action.verb === "move") && drop === undefined)
@@ -190,6 +194,8 @@ export function nativeActionFacts(
     ...(action.verb === "type" && terminal ? { command: action.text } : {}),
     ...(target ? { target: targetFacts(target) } : {}),
     ...(drop !== undefined ? { drop: drop && targetFacts(drop) } : {}),
+    ...(drop !== undefined && unknown.target ? { targetUnknown: true as const } : {}),
+    ...(drop !== undefined && unknown.drop ? { dropUnknown: true as const } : {}),
   };
 }
 
@@ -208,14 +214,18 @@ function targetFacts(target: Target): NativeTargetFacts {
 // A drag acts at both ends: where it picks up and where it lets go. A drop with no element known
 // there is a press on nothing, which runs in the computer and is unclear on a signed-in screen.
 // Something carried onto a web page from outside any page, such as a file from the file manager,
-// is uploaded to it.
-function drag({ target, drop, ...facts }: RiskFacts): ActionClass[] {
+// is uploaded to it. A start not known to be on a page is off it. A drop in a browser window may
+// be on one, and so may a drop whose lookup ran out of time anywhere but another app's window.
+function drag({ target, drop, targetUnknown, dropUnknown, ...facts }: RiskFacts): ActionClass[] {
   const classes = new Set([
     ...input({ ...facts, ...(target ? { target } : {}) }),
     ...input({ ...facts, ...(drop ? { target: drop } : {}) }),
   ]);
-  if (facts.screen !== "browser" && target && drop && !onPage(target) && onPage(drop))
-    classes.add("upload");
+  const fromPage = target !== undefined && !targetUnknown && onPage(target);
+  const toPage =
+    (drop && (onPage(drop) || PATTERNS.browserApp.test(drop.app ?? ""))) ||
+    (dropUnknown && !drop?.app);
+  if (facts.screen !== "browser" && !fromPage && toPage) classes.add("upload");
   return [...classes];
 }
 

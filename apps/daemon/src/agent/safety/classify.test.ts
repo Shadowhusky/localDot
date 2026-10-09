@@ -863,6 +863,30 @@ describe("drags, and moves, scrolls and releases while a button is down", () => 
     expect(classify({ ...signedIn, ...drag(file("report.txt"), zone) })).not.toContain("upload");
   });
 
+  it("uploads what is carried onto a page no lookup could name, from a start no lookup could name", () => {
+    const zone = dom("Attach files", "button");
+    // desktopd's page lookup ran past its budget: only the browser window is known.
+    const busyPage: NativeTargetFacts = { source: "coords", fresh: true, app: "Chromium" };
+    const upload = { actionClass: "upload", mode: "ask" };
+    for (const facts of [
+      // A press whose lookup failed or ran out of time is off any page.
+      { operation: "pointer", drop: zone },
+      { ...drag(dom("Card", "listitem"), zone), targetUnknown: true },
+      // A drop in a browser window, known or not, or one whose lookup named no window at all.
+      drag(file("report.txt"), busyPage),
+      { ...drag(file("report.txt"), busyPage), dropUnknown: true },
+      { ...drag(file("report.txt"), null), dropUnknown: true },
+    ] as const)
+      expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY)).toMatchObject(upload);
+    // Another app's window is no page, whether or not its lookup ran out of time.
+    const paint: NativeTargetFacts = { source: "coords", fresh: true, app: "Gimp-2.10" };
+    for (const facts of [
+      { ...drag(canvas, paint), dropUnknown: true },
+      { ...drag(undefined, paint), targetUnknown: true, dropUnknown: true },
+    ] as const)
+      expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY).mode).toBe("act");
+  });
+
   it("hands off a drop on a secret field and keeps the stronger mode of the two ends", () => {
     const secret = { ...file("Password"), role: "password text" };
     expect(decide({ ...desktop, ...drag(file("a"), secret) }, BALANCED_AUTONOMY).mode).toBe(
@@ -892,6 +916,9 @@ describe("drags, and moves, scrolls and releases while a button is down", () => 
     expect(facts({ verb: "scroll", point: end.point, dx: 0, dy: 1 }, end)).toEqual(ends);
     expect(facts({ verb: "up" }, end)).toEqual(ends);
     expect(facts({ verb: "drag", path }, null)).toEqual({ ...ends, drop: null });
+    expect(
+      nativeActionFacts({ verb: "drag", path }, start, null, { target: true, drop: true }),
+    ).toEqual({ ...ends, drop: null, targetUnknown: true, dropUnknown: true });
     expect(facts({ verb: "down" })).toEqual({ operation: "pointer", target: ends.target });
     // With no button down, a hover or a scroll only browses.
     expect(facts({ verb: "move", point: end.point })).toEqual({ operation: "scroll" });
