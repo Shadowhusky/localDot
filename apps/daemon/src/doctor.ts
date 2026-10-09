@@ -9,8 +9,10 @@ import {
   type DockerVersion,
 } from "./cells/docker.ts";
 import type { Images } from "./cells/images.ts";
+import { gateRelay } from "./cells/relay.ts";
 import { imageVerdict } from "./doctor-image.ts";
 import { runDoctorNetworkProbe } from "./doctor-network.ts";
+import { type RelayProbeDeps, type RelayVerdict, runRelayProbe } from "./doctor-relay.ts";
 import type { DockerSocket } from "./doctor-socket.ts";
 import type { KeydClient } from "./keyd/client.ts";
 import { lockHolder } from "./lock.ts";
@@ -49,11 +51,15 @@ export interface DoctorDeps {
   home?: string;
   // This machine; detected when absent.
   host?: HostPlatform;
+  relayProbe?: (deps: RelayProbeDeps) => Promise<RelayVerdict>;
 }
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
 export const MIN_ENGINE_MAJOR = 28;
 const ENGINE_CHECKS = ["docker-engine", "isolated-gateway-mode", "image-desktop", "image-gate"];
+// Off macOS a test computer also checks that it can reach keyd, given a home to find it in.
+const engineChecks = (host: HostPlatform, home: string | undefined) =>
+  host.os === "macos" || !home ? ENGINE_CHECKS : [...ENGINE_CHECKS, "gate-relay"];
 const TIMED_OUT = Symbol("timed out");
 
 export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
@@ -152,23 +158,22 @@ function hairpinCheck(guard: HairpinGuard): DoctorCheck {
   };
 }
 
-async function dockerChecks(
-  { docker, images, socket, probeNetwork, signal, versionDeadlineMs = 10_000 }: DoctorDeps,
-  host: HostPlatform,
-): Promise<DoctorCheck[]> {
+async function dockerChecks(deps: DoctorDeps, host: HostPlatform): Promise<DoctorCheck[]> {
+  const { docker, images, socket, probeNetwork, signal, home, versionDeadlineMs = 10_000 } = deps;
+  const pending = engineChecks(host, home);
   let v: DockerVersion;
   try {
     const answer = await withDeadline(docker.version(), versionDeadlineMs);
     if (answer === TIMED_OUT) {
       const detail = `not answering on ${located(docker, socket)} after ${versionDeadlineMs / 1000} s`;
-      return [{ name: "docker-socket", ok: false, detail }, ...skipped(ENGINE_CHECKS)];
+      return [{ name: "docker-socket", ok: false, detail }, ...skipped(pending)];
     }
     v = answer;
   } catch (err) {
     if (!(err instanceof DockerError && err.status === 400)) {
       const fix = socketFix(err, host);
-      const detail = `${located(docker, socket)}: ${messageOf(err)}${fix ? `. ${fix}` : ""}`;
-      return [{ name: "docker-socket", ok: false, detail }, ...skipped(ENGINE_CHECKS)];
+      const detail = `${located(docker, socket)}: ${fix ? sentences(messageOf(err), fix) : messageOf(err)}`;
+      return [{ name: "docker-socket", ok: false, detail }, ...skipped(pending)];
     }
     // Docker Desktop answers /version at an API version the engine refuses with a 400 and no
     // message; the unversioned path still says which versions the engine serves.
@@ -179,16 +184,15 @@ async function dockerChecks(
     return [
       socketCheck(docker, socket, engine),
       { name: "docker-engine", ok: false, detail: refusedApi(served) },
-      ...skipped(ENGINE_CHECKS.slice(1)),
+      ...skipped(pending.slice(1)),
     ];
   }
   const major = Number(v.Version.split(".")[0]);
-  const runtime =
+  const info =
     host.os === "macos"
       ? null
-      : dockerRuntime(
-          await docker.request<unknown>({ method: "GET", path: "/info" }).catch(() => null),
-        );
+      : await docker.request<unknown>({ method: "GET", path: "/info" }).catch(() => null);
+  const runtime = dockerRuntime(info);
   const isolated = await runDoctorNetworkProbe(docker.socketPath, probeNetwork, signal);
   const checks = [
     socketCheck(docker, socket, `Engine ${v.Version}, API ${v.ApiVersion}`),
@@ -209,12 +213,23 @@ async function dockerChecks(
     },
     ...(runtime ? dockerRuntimeChecks(runtime, host) : []),
   ];
-  if (signal?.aborted) return [...checks, ...skipped(["image-desktop", "image-gate"])];
-  return [
-    ...checks,
+  if (signal?.aborted) return [...checks, ...skipped(pending.slice(2))];
+  const gate = await imageCheck(docker, "image-gate", images.gate, "cells/gate/build.sh", v);
+  checks.push(
     await imageCheck(docker, "image-desktop", images.desktop, "cells/desktop/build.sh", v),
-    await imageCheck(docker, "image-gate", images.gate, "cells/gate/build.sh", v),
-  ];
+    gate,
+  );
+  if (host.os === "macos" || !home) return checks;
+  if (!runtime || !gate.ok || signal?.aborted) return [...checks, ...skipped(["gate-relay"])];
+  const probe = deps.relayProbe ?? runRelayProbe;
+  const relay = gateRelay(info, home, "linux");
+  const verdict = await probe({ docker, relay, home, image: images.gate, snap: runtime.snap });
+  return [...checks, { name: "gate-relay", ...verdict }];
+}
+
+// Joins two sentences, adding a full stop only where the first has none.
+function sentences(first: string, second: string): string {
+  return /[.!?]$/.test(first) ? `${first} ${second}` : `${first}. ${second}`;
 }
 
 // The daemon finds its socket the same way (findDockerSocket), so any socket that answers will do.

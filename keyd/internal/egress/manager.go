@@ -50,6 +50,8 @@ type ManagerDeps struct {
 	Ports PortRange
 	// CellsDir holds <cell>/ca.pem, the public half of each cell's CA.
 	CellsDir string
+	// RelayDir holds each cell's <port>.sock for gates on Docker Engine; empty means none.
+	RelayDir string
 }
 
 type OpenRequest struct {
@@ -145,7 +147,7 @@ func (m *Manager) Open(req OpenRequest) (Opened, error) {
 	if err != nil {
 		return Opened{}, err
 	}
-	cell, err := Open(Config{CellID: req.CellID, Policy: p, Port: req.Port, Token: token, CA: ca}, m.d.Deps)
+	cell, err := Open(Config{CellID: req.CellID, Policy: p, Port: req.Port, RelayDir: m.d.RelayDir, Token: token, CA: ca}, m.d.Deps)
 	if err != nil {
 		return Opened{}, err
 	}

@@ -69,6 +69,15 @@ Your data lives in `~/.localdot` (`--home` chooses another folder), with the log
 `~/.localdot/logs`. The installer refuses to replace services it did not create, such as an
 existing localDot run by hand, and a port something else uses (`--port` chooses another).
 
+### How the computers reach localDot
+
+A computer reaches the internet and your model providers only through localDot's key service. On
+Docker Desktop it gets there through `host.docker.internal`. Docker Engine has no such name, and
+its containers can't reach services that listen on `127.0.0.1`, so there each computer's gate
+gets the key service's socket through a read-only folder, `~/.localdot/keyd/relay`, instead.
+`localdot doctor` checks this with a test computer (`gate-relay`). Docker from the Snap Store
+can't share that hidden folder: install Docker Engine from docs.docker.com instead.
+
 ## Saved keys
 
 Your provider keys are kept by the key service:

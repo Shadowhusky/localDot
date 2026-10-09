@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient, DockerError } from "./cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
 import { runDoctor, vaultCheck } from "./doctor.ts";
+import type { RelayProbeDeps } from "./doctor-relay.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { KeydClient } from "./keyd/client.ts";
 import { type FakeKeyd, startFakeKeyd } from "./keyd/testing/fake-keyd.ts";
@@ -582,6 +583,73 @@ describe("runDoctor on Linux", () => {
     expect(byName(report)["isolated-gateway-mode"]?.detail).toContain(
       "Update Docker Engine to version 28 or later",
     );
+  });
+
+  it("checks that a test computer reaches keyd the way this kind of Docker needs", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ld-doctor-relay-"));
+    try {
+      const seen: RelayProbeDeps[] = [];
+      const run = async (info: Record<string, unknown>) => {
+        fake = await startFakeDocker({ info: { ...limits, ...info } });
+        const report = await runDoctor({
+          docker: new DockerClient(fake.socketPath),
+          images,
+          port: await freePort(),
+          host: linux,
+          home,
+          relayProbe: async (deps) => {
+            seen.push(deps);
+            return { ok: false, detail: "no route" };
+          },
+        });
+        await fake.close();
+        fake = undefined;
+        return report;
+      };
+      const engine = await run({ DockerRootDir: "/var/snap/docker/common/var-lib-docker" });
+      expect(engine.ok).toBe(false);
+      expect(byName(engine)["gate-relay"]).toEqual({
+        name: "gate-relay",
+        ok: false,
+        detail: "no route",
+      });
+      expect(seen[0]).toMatchObject({
+        relay: { kind: "socket", keydDir: join(home, "keyd", "relay") },
+        image: images.gate,
+        snap: true,
+      });
+      await run({ OperatingSystem: "Docker Desktop" });
+      expect(seen[1]?.relay).toEqual({ kind: "host" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("skips the relay check without the gate image", async () => {
+    fake = await startFakeDocker({ info: limits, images: new Set([images.desktop]) });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+      home: "/nonexistent/ld-home",
+      relayProbe: async () => ({ ok: true, detail: "reached" }),
+    });
+    expect(byName(report)["gate-relay"]).toMatchObject({ ok: false, detail: "skipped" });
+  });
+
+  it("adds the fix after Docker's own question without a stray full stop", async () => {
+    const report = await runDoctor({
+      docker: new DockerClient("/nonexistent/ld-docker.sock"),
+      images,
+      port: await freePort(),
+      host: linux,
+      home: "/nonexistent/ld-home",
+    });
+    const detail = byName(report)["docker-socket"]?.detail ?? "";
+    expect(detail).toMatch(/running\? Start Docker:/);
+    expect(detail).not.toContain("?.");
+    expect(byName(report)["gate-relay"]).toMatchObject({ detail: "skipped" });
   });
 
   it("keeps macOS as it was: no machine check and no /info request of its own", async () => {

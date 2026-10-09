@@ -7,6 +7,8 @@ export interface DockerRuntime {
   osType: string;
   cgroup: string | null;
   limits: { memory: boolean; swap: boolean; cpu: boolean; pids: boolean };
+  // Docker from the Snap Store keeps its data under /var/snap.
+  snap: boolean;
 }
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -35,6 +37,7 @@ export function dockerRuntime(info: unknown): DockerRuntime | null {
       cpu: info.CpuCfsQuota === true,
       pids: info.PidsLimit === true,
     },
+    snap: typeof info.DockerRootDir === "string" && info.DockerRootDir.startsWith("/var/snap/"),
   };
 }
 

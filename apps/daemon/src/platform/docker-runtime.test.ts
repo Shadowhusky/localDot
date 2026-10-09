@@ -36,7 +36,11 @@ describe("dockerRuntime", () => {
       osType: "",
       cgroup: "2",
       limits: { memory: true, swap: true, cpu: true, pids: true },
+      snap: false,
     });
+    expect(dockerRuntime({ DockerRootDir: "/var/snap/docker/common/var-lib-docker" })?.snap).toBe(
+      true,
+    );
     expect(dockerRuntime(null)).toBeNull();
     expect(dockerRuntime([])).toBeNull();
   });

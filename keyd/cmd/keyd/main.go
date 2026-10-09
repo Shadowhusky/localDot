@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -221,6 +222,10 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if err := os.RemoveAll(cells); err != nil {
 		return err
 	}
+	relay, err := relayDir(dir, runtime.GOOS)
+	if err != nil {
+		return err
+	}
 	hub := events.NewHub()
 	registry := keys.NewRegistry()
 	local := keys.LocalRoutes()
@@ -234,6 +239,7 @@ func (d *Daemon) init(dir string, cfg Config) error {
 		},
 		Ports:    cfg.Ports,
 		CellsDir: cells,
+		RelayDir: relay,
 	})
 	ln, err := admin.Listen(d.Socket)
 	if err != nil {
@@ -341,6 +347,38 @@ func privateDir(dir string) error {
 		return fmt.Errorf("%s belongs to another user", dir)
 	}
 	return os.Chmod(dir, 0o700)
+}
+
+// relayDir makes <dir>/relay off macOS, where gates on Docker Engine reach each cell through its
+// socket there. Running gates keep the folder mounted, so it stays and only old sockets go.
+func relayDir(dir, goos string) (string, error) {
+	if goos == "darwin" {
+		return "", nil
+	}
+	relay := filepath.Join(dir, "relay")
+	if err := os.Mkdir(relay, 0o711); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	info, err := os.Lstat(relay)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a folder", relay)
+	}
+	if err := os.Chmod(relay, 0o711); err != nil {
+		return "", err
+	}
+	old, err := filepath.Glob(filepath.Join(relay, "*.sock"))
+	if err != nil {
+		return "", err
+	}
+	for _, path := range old {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+	}
+	return relay, nil
 }
 
 // lockDir holds an exclusive flock on <dir>/keyd.lock for the life of the process.
