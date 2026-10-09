@@ -88,6 +88,7 @@ import { Thumbnails } from "./sessions/thumbs.ts";
 import { webDir } from "./static-ui.ts";
 import { loadOrCreateToken } from "./token.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
+import { installedSpeech } from "./voice/speech.ts";
 
 const port = portFromEnv();
 publicOriginFromEnv();
@@ -565,6 +566,7 @@ const app = createApp({
   },
   keys: { keyd, monitor: keydMonitor, afterChange: (id) => refreshRunningCells(orchestrator, id) },
   notify: notify.routes,
+  voice: { speech: installedSpeech() },
   routines: {
     store: routineStore,
     scheduler: routineScheduler,

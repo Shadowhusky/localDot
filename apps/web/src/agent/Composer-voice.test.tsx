@@ -1,0 +1,255 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CellSummary } from "../cells/types.ts";
+import { createApi } from "../lib/api.ts";
+import { VoiceError } from "../voice/capture.ts";
+import type { HearingEvents } from "../voice/hearing.ts";
+import { isListening } from "../voice/listening.ts";
+import { changeVoicePrefs } from "../voice/prefs.ts";
+import { Composer, type ComposerProps } from "./Composer.tsx";
+import { emptyAgentModel } from "./model.ts";
+import type { AgentSessionView } from "./useAgentSession.ts";
+
+// The speech engine, played by the test: it opens when told, says words, and finishes on cue.
+const engine = vi.hoisted(() => ({
+  events: undefined as HearingEvents | undefined,
+  open: undefined as (() => void) | undefined,
+  refuse: undefined as Error | undefined,
+  finish: undefined as ((words: string) => void) | undefined,
+  aborted: 0,
+}));
+vi.mock("../voice/hearing.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../voice/hearing.ts")>()),
+  startHearing: (_route: unknown, _opts: unknown, events: HearingEvents) => {
+    engine.events = events;
+    return new Promise((resolve, reject) => {
+      engine.open = () =>
+        engine.refuse
+          ? reject(engine.refuse)
+          : resolve({
+              level: () => 0.4,
+              finish: () =>
+                new Promise<string>((done) => {
+                  engine.finish = done;
+                }),
+              abort: () => {
+                engine.aborted += 1;
+              },
+            });
+    });
+  },
+}));
+
+const cellId = "01JXYZ0000000000000000CE11";
+const sessionId = "01JXYZ0000000000000000SESS";
+const cell: CellSummary = {
+  id: cellId,
+  state: "ready",
+  scale: 2,
+  createdAt: "t",
+  stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+};
+const agent: AgentSessionView = {
+  sessionId,
+  model: emptyAgentModel(),
+  snapshot: { sessionId, cellId, status: "running", toolCalls: 0 },
+  availability: "ready",
+  error: null,
+  fresh: true,
+  connection: "live",
+  reconcile: vi.fn(),
+};
+
+let clock = 0;
+beforeEach(() => {
+  clock = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => clock);
+  engine.events = undefined;
+  engine.open = undefined;
+  engine.refuse = undefined;
+  engine.finish = undefined;
+  engine.aborted = 0;
+  vi.stubGlobal(
+    "webkitSpeechRecognition",
+    Object.assign(class {}, { available: async () => "available" }),
+  );
+  changeVoicePrefs({ language: "en-US", online: false });
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  } as unknown as typeof ResizeObserver;
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+async function setup(over: Partial<ComposerProps> = {}) {
+  const api = createApi("fixture", {
+    origin: "http://127.0.0.1:4790",
+    fetchImpl: async () => new Response(JSON.stringify({ onMac: { available: false } })),
+  });
+  const props: ComposerProps = {
+    api,
+    cell,
+    agent,
+    known: true,
+    pending: false,
+    keysOpen: false,
+    receiveKey: vi.fn(() => false),
+    ...over,
+  };
+  const view = render(<Composer {...props} />);
+  const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+  const mic = screen.getByRole("button", { name: "Talk to dot" });
+  // The route is known once the browser has answered.
+  await waitFor(() => expect(mic.getAttribute("aria-disabled")).toBeNull());
+  await act(async () => {});
+  const opened = async () => {
+    await waitFor(() => expect(engine.open).toBeDefined());
+    await act(async () => engine.open?.());
+  };
+  return { ...view, field, mic, opened };
+}
+
+describe("talking to dot from the composer", () => {
+  it("holds to talk, shows the words as they come and leaves them to edit", async () => {
+    const f = await setup();
+    fireEvent.input(f.field, { target: { value: "Please" } });
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 1 });
+    await f.opened();
+    expect(f.mic.getAttribute("aria-pressed")).toBe("true");
+    expect(isListening()).toBe(true);
+    expect(f.field.readOnly).toBe(true);
+    expect(f.container.querySelector(".voice-tail")?.textContent).toBe("On this device");
+    act(() => engine.events?.partial("book a table"));
+    expect(f.field.value).toBe("Please book a table");
+    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    clock += 1800;
+    fireEvent.pointerUp(f.mic, { pointerId: 1 });
+    await waitFor(() => expect(engine.finish).toBeDefined());
+    await act(async () => engine.finish?.("book a table for two"));
+    expect(f.field.value).toBe("Please book a table for two");
+    expect(f.field.readOnly).toBe(false);
+    expect(document.activeElement).toBe(f.field);
+    expect(isListening()).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled"),
+    ).toBeNull();
+  });
+
+  it("cancels by sliding away, putting the message back", async () => {
+    const f = await setup();
+    fireEvent.input(f.field, { target: { value: "Keep this" } });
+    vi.spyOn(f.mic, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 100, y: 100, width: 28, height: 28 }),
+    );
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 2 });
+    await f.opened();
+    act(() => engine.events?.partial("oops"));
+    fireEvent.pointerMove(f.mic, { pointerId: 2, clientX: 114, clientY: 20 });
+    expect(f.container.querySelector(".voice-tail")?.textContent).toBe("Let go to cancel");
+    clock += 1500;
+    fireEvent.pointerUp(f.mic, { pointerId: 2 });
+    expect(f.field.value).toBe("Keep this");
+    expect(engine.aborted).toBe(1);
+    expect(f.mic.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("keeps listening after a tap until the next tap", async () => {
+    const f = await setup();
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 3 });
+    await f.opened();
+    clock += 100;
+    fireEvent.pointerUp(f.mic, { pointerId: 3 });
+    expect(f.mic.getAttribute("aria-pressed")).toBe("true");
+    act(() => engine.events?.partial("hello"));
+    clock += 3000;
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 4 });
+    await waitFor(() => expect(engine.finish).toBeDefined());
+    await act(async () => engine.finish?.("hello dot"));
+    expect(f.field.value).toBe("hello dot");
+  });
+
+  it("says when the microphone isn't allowed", async () => {
+    engine.refuse = new VoiceError("denied");
+    const f = await setup();
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 5 });
+    await f.opened();
+    expect(screen.getByRole("status").textContent).toBe("Allow the microphone to talk to dot.");
+    expect(f.mic.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("says when nothing was heard", async () => {
+    const f = await setup();
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 6 });
+    await f.opened();
+    clock += 2000;
+    fireEvent.pointerUp(f.mic, { pointerId: 6 });
+    await waitFor(() => expect(engine.finish).toBeDefined());
+    await act(async () => engine.finish?.(""));
+    expect(screen.getByRole("status").textContent).toBe("Didn't catch that. Try again.");
+    expect(f.field.value).toBe("");
+  });
+
+  it("talks while Control-Shift-Space is held, off a Mac", async () => {
+    const f = await setup();
+    // On the page, where the field has a box (jsdom lays nothing out).
+    vi.spyOn(f.field, "getClientRects").mockReturnValue([new DOMRect()] as unknown as DOMRectList);
+    fireEvent.keyDown(document, { code: "Space", key: " ", ctrlKey: true, shiftKey: true });
+    await f.opened();
+    act(() => engine.events?.partial("from the keyboard"));
+    clock += 1200;
+    fireEvent.keyUp(document, { code: "Space", key: " " });
+    await waitFor(() => expect(engine.finish).toBeDefined());
+    await act(async () => engine.finish?.("from the keyboard"));
+    expect(f.field.value).toBe("from the keyboard");
+  });
+
+  it("waits while the message can't be written", async () => {
+    const f = await setup();
+    f.rerender(
+      <Composer
+        api={createApi("fixture", { origin: "http://127.0.0.1:4790" })}
+        cell={cell}
+        agent={agent}
+        known
+        pending={false}
+        keysOpen={false}
+        controlBlocked
+        receiveKey={vi.fn(() => false)}
+      />,
+    );
+    expect(f.mic.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 8 });
+    expect(engine.open).toBeUndefined();
+  });
+
+  it("is unavailable where this browser can only listen online and that is off", async () => {
+    vi.stubGlobal("webkitSpeechRecognition", class {});
+    changeVoicePrefs({ language: "fr-FR" });
+    render(
+      <Composer
+        api={createApi("fixture", {
+          origin: "http://127.0.0.1:4790",
+          fetchImpl: async () => new Response("", { status: 404 }),
+        })}
+        cell={cell}
+        agent={agent}
+        known
+        pending={false}
+        keysOpen={false}
+        receiveKey={vi.fn(() => false)}
+      />,
+    );
+    const mic = screen.getByRole("button", { name: "Talk to dot" });
+    await waitFor(() => expect(mic.getAttribute("aria-disabled")).toBe("true"));
+    fireEvent.pointerDown(mic, { button: 0, pointerId: 7 });
+    expect(engine.open).toBeUndefined();
+  });
+});

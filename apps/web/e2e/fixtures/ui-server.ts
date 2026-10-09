@@ -1624,6 +1624,8 @@ const routes = createApp({
   deliverables: deliverablesDeps(deliverablesFixture),
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
+  // No speech model on the fixture's computer: the browser's own speech, or none, is used.
+  voice: { speech: () => null },
   routines: {
     store: routineStore,
     scheduler: { replan: planRoutines },

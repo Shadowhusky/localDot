@@ -1620,9 +1620,27 @@
   display: none;
 }
 
+/* While the user talks, the waveform takes the field's place inside the pill, up to the mic, and
+   the field keeps its size underneath, so the toolbar doesn't move. */
+.composer-card[data-layout="pill"][data-voice] .composer-hint {
+  position: absolute;
+  inset: 0 calc(36px + 32px + var(--spacing) * 3) 0 0;
+  z-index: 2;
+  display: flex;
+  padding-left: var(--spacing);
+  border-radius: calc(var(--spacing) * 5.5) 0 0 calc(var(--spacing) * 5.5);
+  background-color: var(--color-raised);
+}
+
 .composer-card[data-layout="pill"] :is(.composer-pop, .composer-send) {
   order: 3;
   margin-bottom: 2px;
+}
+
+/* The mic is attach's size, so it sits on the pill's floor as attach does. */
+.composer-card[data-layout="pill"] .composer-pop:has(> .voice-mic) {
+  margin-right: calc(var(--spacing) / 2);
+  margin-bottom: 0;
 }
 
 .thread-recovery-custom > .ui-collapse-inner {

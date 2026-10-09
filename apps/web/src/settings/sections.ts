@@ -11,6 +11,7 @@ export type SettingsSection =
   | "rules"
   | "spending"
   | "appearance"
+  | "voice"
   | "notifications"
   | "knowledge"
   | "accounts"
@@ -30,6 +31,7 @@ export const SECTIONS: readonly SectionInfo[] = [
   { id: "rules", title: "Always allow", icon: "check-circle" },
   { id: "spending", title: "Spending", icon: "chart" },
   { id: "appearance", title: "Appearance", icon: "contrast" },
+  { id: "voice", title: "Voice", icon: "mic" },
   { id: "notifications", title: "Notifications", icon: "bell" },
   { id: "knowledge", title: "What dot knows", icon: "book" },
   { id: "accounts", title: "Accounts", icon: "globe" },
