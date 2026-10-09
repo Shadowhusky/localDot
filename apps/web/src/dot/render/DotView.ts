@@ -1,9 +1,12 @@
-import { DotEngine, type EyePose, type Point } from "../engine/engine.ts";
+import { parseCssColor } from "../../stage/theme.ts";
+import { DotEngine, type DotPose, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
+import type { DotTool } from "../engine/tools.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
-import { GLOSS_STOPS, PEARL_STOPS, SHEEN_STOPS, VOID } from "./dot-colours.ts";
+import { canvasColour, GLOSS_STOPS, PEARL_STOPS, PROP, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
+import { type PropLayer, paintProps } from "./prop-paint.ts";
 import { addView, type Frameable, now, removeView } from "./scheduler.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -71,6 +74,10 @@ export class DotView implements Frameable {
   private readonly svgDim: SVGCircleElement;
   private readonly eyes: [Eye, Eye];
   private readonly listeners = new AbortController();
+  // The props' two layers, made the first time dot picks up a tool.
+  private props: Record<PropLayer, HTMLCanvasElement> | null = null;
+  private propsOut = false;
+  private xenonColour: string | null = null;
 
   constructor(root: HTMLElement, o: DotViewOptions) {
     this.root = root;
@@ -224,6 +231,14 @@ export class DotView implements Frameable {
     this.engine.hop(now());
   }
 
+  setTool(tool: DotTool | null): void {
+    this.engine.setTool(tool, now());
+  }
+
+  beat(key: string, n: number): void {
+    this.engine.beat(key, n, now());
+  }
+
   setSize(size: number): void {
     if (size === this.size) return;
     this.size = size;
@@ -301,11 +316,12 @@ export class DotView implements Frameable {
     );
     if (this.detail.shadow) {
       const s = p.shadow.s;
+      const sx = (p.shadow.x * k).toFixed(2);
       this.style(
         this.shadow,
         "shadow",
         "transform",
-        `scale(${(s * p.body.sx).toFixed(3)}, ${s.toFixed(3)})`,
+        `translate(${sx}px, 0) scale(${(s * p.body.sx).toFixed(3)}, ${s.toFixed(3)})`,
       );
       this.style(this.shadow, "shadowOpacity", "opacity", p.shadow.o.toFixed(3));
     }
@@ -320,6 +336,59 @@ export class DotView implements Frameable {
     const devPerUnit = k * dpr;
     this.renderEye(this.eyes[0], p.eyes[0], devPerUnit);
     this.renderEye(this.eyes[1], p.eyes[1], devPerUnit);
+    this.renderProps(p, dpr);
+  }
+
+  // The props paint on two canvases, behind and in front of the body, with the exporter's painter.
+  // A canvas is resized only when dot is, so a frame never touches layout.
+  private renderProps(p: DotPose, dpr: number): void {
+    const out = p.props.length > 0;
+    if (!out && !this.propsOut) return;
+    this.propsOut = out;
+    const layers = this.props ?? this.makeProps();
+    const px = Math.max(1, Math.round(this.size * dpr));
+    const xenon = this.xenon();
+    for (const layer of ["back", "front"] as const) {
+      const canvas = layers[layer];
+      if (canvas.width !== px) {
+        canvas.width = px;
+        canvas.height = px;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, px, px);
+      if (!out) continue;
+      ctx.setTransform(px / 64, 0, 0, px / 64, 0, 0);
+      paintProps(ctx, p, layer, xenon);
+    }
+  }
+
+  private makeProps(): Record<PropLayer, HTMLCanvasElement> {
+    const canvas = (layer: PropLayer) => {
+      const node = document.createElement("canvas");
+      node.className = `dot-props dot-props-${layer}`;
+      return node;
+    };
+    const layers = { back: canvas("back"), front: canvas("front") };
+    this.root.insertBefore(layers.back, this.body);
+    this.body.after(layers.front);
+    this.props = layers;
+    return layers;
+  }
+
+  // The accent warms to the xenon token; without one it stays porcelain.
+  private xenon(): string {
+    if (this.xenonColour === null) {
+      const value = getComputedStyle(this.root).getPropertyValue("--color-xenon").trim();
+      try {
+        this.xenonColour = canvasColour(parseCssColor(value));
+      } catch {
+        this.xenonColour = PROP.accentRest;
+      }
+    }
+    return this.xenonColour;
   }
 
   private attr(node: Element, cache: Cache, key: string, name: string, value: string): void {

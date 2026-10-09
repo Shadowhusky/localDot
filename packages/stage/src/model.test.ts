@@ -242,6 +242,21 @@ describe("what dot says", () => {
   });
 });
 
+describe("tool steps", () => {
+  it("keeps the step's tool and title, and when its output arrived, coalesced", () => {
+    const m = foldEvents(emptyModel(), [
+      ev("step.start", 10, { kind: "shell" }, "s1"),
+      ev("tool.start", 11, { tool: "shell", title: "npm test" }, "s1"),
+      ...[20, 60, 200, 210, 400].map((t) =>
+        ev("tool.output", t, { stream: "stdout", chunk: "." }, "s1"),
+      ),
+      ev("tool.end", 500, { ok: true }, "s1"),
+    ]);
+    expect(m.steps[0]).toMatchObject({ tool: "shell", title: "npm test", outputs: [20, 200, 400] });
+    expect(m.marks.map((mark) => mark.label)).toContain("npm test");
+  });
+});
+
 describe("replay model indexes", () => {
   it("keeps observes, steps and plans in order and indexes the current action by step", () => {
     const events = [

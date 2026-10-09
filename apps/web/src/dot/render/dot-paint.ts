@@ -3,6 +3,7 @@ import type { Lod } from "../engine/states.ts";
 import { EYE, EYE_STOPS, GLOSS_STOPS, PEARL_STOPS, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, type EyeGeometry, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL } from "./lod.ts";
+import { type PropLayer, paintProps } from "./prop-paint.ts";
 
 export interface DotPlates {
   neutral: CanvasImageSource;
@@ -24,8 +25,9 @@ export interface PaintOptions {
   shadow?: boolean;
 }
 
-// Draws one pose of dot the way DotView shows it in the page: the contact shadow, the body plates
-// crossfading to xenon and dim, and the face over them, clipped to the frame as the page clips it.
+// Draws one pose of dot the way DotView shows it in the page: the contact shadow, the props behind
+// the body, the body plates crossfading to xenon and dim, the face over them and the props in front,
+// clipped to the frame as the page clips it.
 export function paintDot(ctx: Context, pose: DotPose, o: PaintOptions): void {
   const { px, plates } = o;
   const k = px / 64;
@@ -37,10 +39,12 @@ export function paintDot(ctx: Context, pose: DotPose, o: PaintOptions): void {
     const s = pose.shadow.s;
     ctx.save();
     ctx.globalAlpha = pose.shadow.o;
+    ctx.translate(pose.shadow.x * k, 0);
     around(ctx, 32 * k, 0.92 * px, s * pose.body.sx, s);
     ctx.drawImage(plates.shadow, 0, 0, px, px);
     ctx.restore();
   }
+  props(ctx, pose, "back", o.xenon, k);
   ctx.save();
   ctx.translate(pose.body.x * k, pose.body.y * k);
   around(ctx, 32 * k, 56 * k, pose.body.sx, pose.body.sy);
@@ -57,6 +61,15 @@ export function paintDot(ctx: Context, pose: DotPose, o: PaintOptions): void {
   ctx.arc(32, 32, 23.75, 0, Math.PI * 2);
   ctx.clip();
   for (const eye of pose.eyes) paintEye(ctx, eyeGeometry(eye, detail, k), detail.gloss);
+  ctx.restore();
+  props(ctx, pose, "front", o.xenon, k);
+}
+
+function props(ctx: Context, pose: DotPose, layer: PropLayer, xenon: string, k: number): void {
+  if (!pose.props.length) return;
+  ctx.save();
+  ctx.scale(k, k);
+  paintProps(ctx, pose, layer, xenon);
   ctx.restore();
 }
 
