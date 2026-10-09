@@ -20,7 +20,8 @@ export const LIVE_HOLD_MS = 500;
 
 export const curtainFor = (phase: ComputerPhase) => UP.has(phase);
 
-// Whether the curtain is up, and the phase it shows: while it lifts it keeps its last words.
+// Whether the curtain is up, and the phase it shows: while it lifts it keeps its last words, and
+// `lifting` says the computer has come up under it.
 export function useCurtain(phase: ComputerPhase, hidden: boolean) {
   const up = !hidden && UP.has(phase);
   const [shown, setShown] = useState(phase);
@@ -36,5 +37,5 @@ export function useCurtain(phase: ComputerPhase, hidden: boolean) {
     const timer = setTimeout(() => setLifting(false), LIVE_HOLD_MS);
     return () => clearTimeout(timer);
   }, [lifting]);
-  return { up: up || lifting, phase: up ? phase : shown };
+  return { up: up || lifting, phase: up ? phase : shown, lifting };
 }

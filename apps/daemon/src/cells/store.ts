@@ -10,7 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { ULID_PATTERN } from "@localdot/protocol";
+import { type TimedOperationKind, ULID_PATTERN } from "@localdot/protocol";
+import { z } from "zod";
 import { KEYD_PORT_RANGE, type PortRange } from "./ports.ts";
 import type {
   BrowserCellDocker,
@@ -45,6 +46,18 @@ const BROWSER_DOCKER_FIELDS = Object.entries({
   gateEgressIp: "address",
   browserIp: "address",
 } satisfies Record<keyof BrowserCellDocker, "name" | "address">);
+
+// Ten minutes: far past a start, which gives up after three.
+export const MAX_TIMING_MS = 600_000;
+const Duration = z.number().int().positive().max(MAX_TIMING_MS);
+const LastMs = z.strictObject({
+  "first-start": Duration.optional(),
+  start: Duration.optional(),
+  update: Duration.optional(),
+  stop: Duration.optional(),
+} satisfies Record<TimedOperationKind, unknown>);
+const StoredTimings = z.strictObject({ v: z.literal(1), lastMs: LastMs });
+export type CellTimings = z.infer<typeof LastMs>;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -238,14 +251,24 @@ export class CellStore {
 
   #write(record: StoredCellRecord): void {
     mkdirSync(this.#dir(record.id), { recursive: true, mode: 0o700 });
-    const file = this.#file(record.id);
-    const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+    writeAtomic(this.#file(record.id), record);
+  }
+
+  // How long this computer's last operation of each kind took. A missing or unreadable file only
+  // means there is no history yet.
+  timings(id: string): CellTimings {
     try {
-      writeFileSync(temp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-      renameSync(temp, file);
-    } finally {
-      rmSync(temp, { force: true });
+      return StoredTimings.parse(JSON.parse(readFileSync(this.#timingsFile(id), "utf8"))).lastMs;
+    } catch {
+      return {};
     }
+  }
+
+  // Kept beside the record and only while it is there: a folder left without its cell.json would
+  // hold up every new computer.
+  saveTimings(id: string, lastMs: CellTimings): void {
+    if (!existsSync(this.#file(id))) return;
+    writeAtomic(this.#timingsFile(id), StoredTimings.parse({ v: 1, lastMs }));
   }
 
   remove(id: string): void {
@@ -278,5 +301,19 @@ export class CellStore {
 
   #file(id: string): string {
     return join(this.#dir(id), "cell.json");
+  }
+
+  #timingsFile(id: string): string {
+    return join(this.#dir(id), "timings.json");
+  }
+}
+
+function writeAtomic(file: string, value: unknown): void {
+  const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(temp, file);
+  } finally {
+    rmSync(temp, { force: true });
   }
 }

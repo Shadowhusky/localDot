@@ -189,6 +189,36 @@ describe("CellOrchestrator.update", () => {
     expect(orchestrator.endpoints(id)?.desktopd.token).toBe(record.tokens.desktopd);
   });
 
+  it("reports the update as one operation from its stop through its start, and keeps its time", async () => {
+    const clock = { now: 1_000_000 };
+    const { updates, orchestrator, store, changes, id, record } = await setup({
+      now: () => clock.now,
+      probeDesktopd: async () => {
+        clock.now += 6_000;
+        return healthy;
+      },
+    });
+    rebuild();
+    await updates.check(record);
+    const from = changes.length;
+    const began = clock.now;
+    await orchestrator.update(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    const seen = changes.slice(from).filter((c) => c.id === id);
+    expect(new Set(seen.map((c) => c.operation?.kind))).toEqual(new Set(["update"]));
+    expect(new Set(seen.map((c) => c.operation?.startedAt))).toEqual(new Set([began]));
+    expect([...new Set(seen.map((c) => c.operation?.step))]).toEqual([
+      "shutdown",
+      "install",
+      "network",
+      "desktop",
+      "ready",
+      "screen",
+    ]);
+    expect(seen[0]?.operation?.expectedMs).toBe(40_000);
+    expect(store.timings(id)).toEqual({ "first-start": 6_000, update: 6_000 });
+  });
+
   it("gives a computer made before capture the gate's token, and containers that capture", async () => {
     const wired: CellRecord[] = [];
     const { store, boot, id, record } = await setup({
