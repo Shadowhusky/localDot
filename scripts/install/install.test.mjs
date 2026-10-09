@@ -428,6 +428,8 @@ describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
     expect(daemon).toContain("# Managed by localDot's install.sh");
     expect(daemon).toContain(`WorkingDirectory=${app}/apps/daemon`);
     expect(daemon).toContain(`ExecStart="${node}" "--import" "tsx" "src/main.ts"`);
+    // The daemon exits 128 + SIGTERM when systemd stops it.
+    expect(daemon).toContain("SuccessExitStatus=143\n");
     expect(daemon).toContain(`Environment="LOCALDOT_HOME=${host.home}/.localdot"`);
     expect(daemon).toContain(`Environment="LOCALDOT_PORT=${host.port}"`);
     expect(daemon).not.toContain("LOCALDOT_PUBLIC_ORIGIN");

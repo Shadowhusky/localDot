@@ -628,6 +628,7 @@ After=$KEYD_UNIT
 Type=exec
 WorkingDirectory=$APP/apps/daemon$environment
 ExecStart=\"$NODE_DIR/bin/node\" \"--import\" \"tsx\" \"src/main.ts\"
+SuccessExitStatus=143
 UMask=0077
 Restart=on-failure
 RestartSec=5
