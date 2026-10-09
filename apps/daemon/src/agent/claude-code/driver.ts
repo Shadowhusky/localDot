@@ -447,9 +447,15 @@ export class ClaudeCodeDriver {
       if (result) return;
       if (
         session.safetyPause &&
-        !["safety", "retired", "control", "crashed", "signed_out", "plan_limit"].includes(
-          candidate.kind,
-        )
+        ![
+          "safety",
+          "retired",
+          "control",
+          "crashed",
+          "signed_out",
+          "plan_limit",
+          "violation",
+        ].includes(candidate.kind)
       )
         return;
       result = candidate;

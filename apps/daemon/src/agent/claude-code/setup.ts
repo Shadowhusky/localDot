@@ -4,6 +4,7 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 import {
   CLAUDE_CODE_INSTALL,
   CLAUDE_CODE_MODEL,
+  CLAUDE_CODE_MODELS,
   CLAUDE_CODE_SIGN_IN,
   CLAUDE_CODE_UPDATE,
   ClaudeCodeStatus,
@@ -108,10 +109,6 @@ const AuthStatus = z.looseObject({
   loggedIn: z.boolean(),
   subscriptionType: z.string().nullish(),
 });
-export const DEFAULT_MODELS: readonly ClaudeCodeModel[] = Object.freeze([
-  { id: "sonnet", name: "Claude Sonnet" },
-  { id: "opus", name: "Claude Opus" },
-]);
 
 export const runFile: Run = (file, args, { env, cwd, signal }) =>
   new Promise((resolve, reject) => {
@@ -145,7 +142,8 @@ export class ClaudeCodeSetup {
   readonly #abort = new AbortController();
   #status: ClaudeCodeStatus | undefined;
   #launch: ClaudeCodeLaunch | undefined;
-  #flight: Promise<ClaudeCodeStatus> | undefined;
+  // One flight per kind: "Check again" lists the models afresh, and a task start never waits on it.
+  readonly #flights = new Map<boolean, Promise<ClaudeCodeStatus>>();
   constructor(deps: ClaudeCodeSetupDeps) {
     this.#deps = deps;
   }
@@ -169,10 +167,12 @@ export class ClaudeCodeSetup {
     this.#abort.abort();
   }
   #run(listing: boolean): Promise<ClaudeCodeStatus> {
-    this.#flight ??= this.#check(listing).finally(() => {
-      this.#flight = undefined;
-    });
-    return this.#flight;
+    let flight = this.#flights.get(listing);
+    if (!flight) {
+      flight = this.#check(listing).finally(() => this.#flights.delete(listing));
+      this.#flights.set(listing, flight);
+    }
+    return flight;
   }
   async #check(listing: boolean): Promise<ClaudeCodeStatus> {
     const known = this.#status?.state === "signed_in" ? this.#status.models : [];
@@ -270,7 +270,7 @@ export class ClaudeCodeSetup {
         version,
         ...(plan && /^[a-z0-9_-]{1,32}$/.test(plan) ? { plan } : {}),
       },
-      models.length ? models : [...DEFAULT_MODELS],
+      models.length ? models : [...CLAUDE_CODE_MODELS],
     );
     this.#launch = { ...launch, ...(status.plan ? { plan: status.plan } : {}) };
     return status;

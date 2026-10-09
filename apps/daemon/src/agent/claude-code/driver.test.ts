@@ -42,6 +42,14 @@ async function until(check: () => boolean): Promise<void> {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((yes) => {
+    resolve = yes;
+  });
+  return { promise, resolve };
+}
+
 class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
@@ -318,6 +326,27 @@ describe("Claude Code driver", () => {
     other.emit({ type: "assistant", parent_tool_use_id: "toolu_1", message: { content: [] } });
     expect(await second).toBe(CLAUDE_CODE_GAVE_UP);
     expect(g.states().at(-1)?.reason).toBe(
+      "Claude Code started a sub-agent; localDot stopped the task",
+    );
+  });
+
+  it("stops the task at once when Claude Code starts a sub-agent while pausing", async () => {
+    const f = fixture();
+    const held = deferred<ToolResult>();
+    f.dispatch.mockImplementationOnce(() => held.promise);
+    const result = f.run();
+    const fake = await f.started();
+    const call = fake.call("shell", { command: "sleep 1" });
+    await until(() => f.dispatch.mock.calls.length === 1);
+    const pause = f.session.requestSafetyPause(ulid());
+    const receipt = f.driver.pauseAtBoundary(f.session, pause);
+    void receipt.catch(() => {});
+    fake.emit({ type: "assistant", parent_tool_use_id: "toolu_1", message: { content: [] } });
+    await until(() => fake.closed);
+    held.resolve({ ok: true, content: [{ type: "text", text: "Done." }] });
+    await call.catch(() => {});
+    expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(f.states().at(-1)?.reason).toBe(
       "Claude Code started a sub-agent; localDot stopped the task",
     );
   });

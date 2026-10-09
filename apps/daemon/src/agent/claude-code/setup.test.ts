@@ -13,6 +13,13 @@ import {
   versionAtLeast,
 } from "./setup.ts";
 
+function gate<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((yes) => {
+    resolve = yes;
+  });
+  return { promise, resolve };
+}
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -142,6 +149,32 @@ describe("Claude Code detection", () => {
     expect(f.calls.filter((call) => call.args[0] === "auth")).toHaveLength(2);
     // The models were read once; a task start does not start Claude Code again to list them.
     expect(f.listModels).toHaveBeenCalledTimes(1);
+  });
+  it("lists the models afresh for Check again while a task start is checking", async () => {
+    const f = fixture();
+    await f.setup.status();
+    const held = gate<{ code: number; stdout: string }>();
+    f.run.mockImplementationOnce(async () => ({ code: 0, stdout: "2.1.290 (Claude Code)\n" }));
+    f.run.mockImplementationOnce(() => held.promise);
+    const launch = f.setup.launch();
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(4));
+    f.listModels.mockResolvedValueOnce([{ id: "opus", name: "Opus" }]);
+    const checked = f.setup.check();
+    expect((await checked).models).toEqual([{ id: "opus", name: "Opus" }]);
+    expect(f.listModels).toHaveBeenCalledTimes(2);
+    held.resolve({ code: 0, stdout: SIGNED_IN });
+    await launch;
+  });
+  it("starts a task without waiting for a model listing", async () => {
+    const f = fixture();
+    await f.setup.status();
+    const held = gate<readonly { id: string; name: string }[]>();
+    f.listModels.mockImplementationOnce(() => held.promise);
+    const checked = f.setup.check();
+    await vi.waitFor(() => expect(f.listModels).toHaveBeenCalledTimes(2));
+    expect(await f.setup.launch()).toMatchObject({ executable: "/Users/person/.local/bin/claude" });
+    held.resolve([{ id: "sonnet", name: "Sonnet" }]);
+    await checked;
   });
 });
 

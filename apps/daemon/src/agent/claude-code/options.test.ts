@@ -86,6 +86,8 @@ describe("Claude Code as dot's brain", () => {
       updatedInput: { a: 1 },
     });
     expect((await ask("Bash"))?.behavior).toBe("deny");
+    // Older Claude Code versions name no server: a localDot tool name alone isn't enough.
+    expect((await ask("mcp__localdot__computer"))?.behavior).toBe("deny");
     expect(
       (await ask("mcp__localdot__computer", { name: "localdot", source: "user" }))?.behavior,
     ).toBe("deny");

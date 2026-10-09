@@ -5,6 +5,12 @@ export const CLAUDE_CODE_MODEL = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const CLAUDE_CODE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 export const CLAUDE_CODE_SIGN_IN = "claude auth login";
 export const CLAUDE_CODE_UPDATE = "claude update";
+// Claude Code's own model aliases, offered by every version.
+export const CLAUDE_CODE_MODELS: readonly { readonly id: string; readonly name: string }[] =
+  Object.freeze([
+    { id: "sonnet", name: "Claude Sonnet" },
+    { id: "opus", name: "Claude Opus" },
+  ]);
 
 const line = (max: number) =>
   z
