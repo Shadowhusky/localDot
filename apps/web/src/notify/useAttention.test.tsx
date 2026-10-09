@@ -110,7 +110,7 @@ describe("useAttention", () => {
     await waitFor(() => expect(hook.result.current.items).toEqual([]));
   });
 
-  it("shows a notification itself only when the daemon asks and the tab is hidden", async () => {
+  it("shows a notification itself only when the daemon asks and no one is looking at the tab", async () => {
     const { notices } = setup();
     const socket = FakeWebSocket.instances[0];
     act(() => socket?.onopen?.());
@@ -122,5 +122,18 @@ describe("useAttention", () => {
       type: "shown",
       key: item(A, "needs_you", "approval").key,
     });
+  });
+
+  it("still shows a notification while its window is visible behind another app", () => {
+    const { doc, notices } = setup();
+    Object.assign(doc, { visibilityState: "visible", hasFocus: () => false });
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.onopen?.());
+    expect(JSON.parse(socket?.sent[0] ?? "{}")).toMatchObject({ visible: false });
+    change(socket, item(A, "needs_you", "approval"), true);
+    expect(notices).toEqual(["dot needs you"]);
+    Object.assign(doc, { hasFocus: () => true });
+    change(socket, item(B, "needs_you", "approval"), true);
+    expect(notices).toEqual(["dot needs you"]);
   });
 });

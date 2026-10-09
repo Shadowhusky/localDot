@@ -78,10 +78,12 @@ export function useAttention(
           if (since === changes) since = null;
         });
     };
+    // A visible window behind another app is not being looked at either.
+    const looking = () => doc.visibilityState === "visible" && doc.hasFocus();
     const presence = () =>
       JSON.stringify({
         type: "presence",
-        visible: doc.visibilityState === "visible" && doc.hasFocus(),
+        visible: looking(),
         canNotify: page.Notification?.permission === "granted",
       });
     load();
@@ -108,11 +110,7 @@ export function useAttention(
           const { item, page: fromPage } = parsed.data;
           since?.push(item);
           setState((current) => ({ items: applyChange(current.items, item), latest: item }));
-          if (
-            fromPage &&
-            doc.visibilityState !== "visible" &&
-            showPageNotification(item, shown.current, page) === "shown"
-          )
+          if (fromPage && !looking() && showPageNotification(item, shown.current, page) === "shown")
             socket.send(JSON.stringify({ type: "shown", key: item.key }));
         },
       },
