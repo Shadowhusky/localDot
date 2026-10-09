@@ -217,7 +217,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.");
   if (facts?.question != null)
-    return waiting("question", "Has a question", facts.question || "Waiting for your answer.");
+    return waiting("question", "Needs your answer", facts.question || "Waiting for your answer.");
   if (facts?.takeover != null)
     return waiting("takeover", "Your turn", facts.takeover || "Your turn to use the computer.");
   if (facts?.pause === "pausing" || state === "pausing")

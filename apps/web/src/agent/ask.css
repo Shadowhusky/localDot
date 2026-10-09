@@ -1,0 +1,230 @@
+/* dot's question answered in place (HITL §1–4): fields under dot's message in the thread, in the
+   island over the computer, and in a phone's sheet. */
+.ask {
+  color: var(--color-fg-1);
+}
+
+.ask-fields {
+  display: grid;
+  gap: var(--spacing);
+}
+
+.decision-body > .ask-fields {
+  margin-top: calc(var(--spacing) * 3.5);
+}
+
+/* In the thread the fields follow dot's message without a card of their own; the radio rows and
+   fields carry their own material. */
+.ask[data-layout="thread"] {
+  display: grid;
+  gap: var(--spacing);
+  margin-top: calc(var(--spacing) * 2.5);
+}
+
+/* A plain question's one field: dot's question above already names it. */
+.ask-field-plain > .ui-field-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ask-fieldset,
+.ask-code {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ask-fieldset > legend {
+  margin-bottom: calc(var(--spacing) * 1.5);
+  padding: 0;
+}
+
+.ask-reveal {
+  margin-right: calc(var(--spacing) * -2);
+}
+
+.ask-code {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* A code's cells: the field's edge and fill, each 44 × 52 with one large character. */
+.ask-code-cell {
+  flex: 0 1 44px;
+  min-width: 0;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--color-field-line);
+  border-radius: var(--radius-md);
+  background-color: var(--color-field);
+  color: var(--color-fg-1);
+  text-align: center;
+  font:
+    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
+    var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  caret-color: var(--color-fg-1);
+  outline: none;
+  transition:
+    border-color var(--dur-hover) var(--ease-standard),
+    box-shadow var(--dur-fade) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .ask-code-cell:not([readonly]):hover {
+    border-color: var(--color-field-line-hover);
+  }
+}
+
+.ask-code-cell:focus {
+  border-color: var(--color-fg-2);
+  box-shadow: 0 0 0 3px var(--color-field-ring);
+}
+
+.ask-code-cell[aria-invalid="true"] {
+  border-color: var(--color-danger-fg);
+}
+
+.ask-code-cell[readonly] {
+  border-color: var(--color-hairline);
+  background-color: transparent;
+}
+
+.ask-choice {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-options .ui-radio-card-preview {
+  order: 2;
+  margin-left: auto;
+}
+
+.ask-file {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 56px;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 3);
+  border: 1px dashed var(--color-field-line);
+  border-radius: var(--radius-md);
+  background-color: var(--color-field);
+  transition:
+    border-color var(--dur-hover) var(--ease-standard),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+.ask-file[data-over] {
+  border-color: var(--color-fg-2);
+  background-color: var(--color-control);
+}
+
+.ask-file-tile {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background-color: var(--color-raised-2);
+  color: var(--color-fg-2);
+}
+
+.ask-file-text {
+  display: grid;
+  min-width: 0;
+}
+
+.ask-file-name {
+  overflow: hidden;
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-file-meta {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.ask-qr {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* The quiet toggle's words line up with the code above it. */
+.ask-qr > .ui-button {
+  margin-left: calc(var(--spacing) * -3);
+}
+
+.ask-qr-code {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-qr-hint {
+  margin: 0;
+  font:
+    var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-2--letter-spacing);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+
+.ask-qr-link {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-decoration: underline 1px rgba(255, 255, 255, 0.35);
+  text-underline-offset: 2px;
+}
+
+.ask-foot {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-problem {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+.ask-actions {
+  display: flex;
+  flex: none;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask[data-layout="sheet"] .ask-problem:empty {
+  display: none;
+}
+
+.ask[data-layout="sheet"] .ask-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--spacing) * 2.5);
+}
+
+.ask[data-layout="sheet"] .ask-fields {
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask.decision[data-layout="sheet"] .decision-foot {
+  padding-top: calc(var(--spacing) * 4);
+}

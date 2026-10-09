@@ -25,8 +25,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   them all. By hand: `QA_PORT=0 node --import tsx e2e/fixtures/ui-server.ts --scenario approval`,
   then open the `origin` from the ready line with `#token=` and 43 `a`s.
 - **Questions:** `POST /__qa/ask` asks a plain question (`?text=0` without a free answer);
-  `?fields=<form>` asks one with typed fields: `login` (email and a password typed into the
-  page), `pin`, `code`, `choice`, `multichoice`, `longtext`, `confirm`, `details` (number, date,
+  `?fields=<form>` asks one with typed fields: `login` (a username and a password typed into
+  the page), `pin`, `code`, `choice`, `multichoice`, `longtext`, `confirm`, `details` (number, date,
   phone and web address), `file` or `qr`. Answers go through the real answer route; `GET
   /__qa/state` lists them under `effects`, secret answers only counted.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while

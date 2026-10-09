@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { AskForm } from "./AskForm.tsx";
+import { useAskDraft } from "./ask-draft.ts";
 import {
   type AgentFeedState,
   type AgentQuestion,
@@ -14,7 +15,7 @@ import {
 import { StopControl } from "./StopControl.tsx";
 import { TakeoverPanel } from "./TakeoverPanel.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
-import { useTaskControls } from "./useTaskControls.ts";
+import { type TaskControls, useTaskControls } from "./useTaskControls.ts";
 
 const CELL = "01JXYZ0000000000000000CELL",
   SESSION = "01JXYZ0000000000000000SESS",
@@ -71,6 +72,17 @@ function mount(takeover: boolean) {
   const drained = vi.fn(async () => true);
   const keyboard = vi.fn<(on: boolean) => void>();
   const feed = { read: () => state, subscribe: () => () => {} };
+  function Ask({ controls }: { controls: TaskControls }) {
+    const draft = useAskDraft(question);
+    return draft ? (
+      <AskForm
+        draft={draft}
+        layout="thread"
+        answer={controls.answer}
+        reason={controls.canAnswer ? undefined : "Check the current task before answering."}
+      />
+    ) : null;
+  }
   function Parts({ visible = true }: { visible?: boolean }) {
     const controls = useTaskControls({
       api,
@@ -107,7 +119,7 @@ function mount(takeover: boolean) {
             refused={null}
           />
         ) : (
-          <AskForm question={question} controls={controls} visible={visible} receiveKey={receive} />
+          <Ask controls={controls} />
         )}
         <StopControl controls={controls} />
       </>
@@ -118,10 +130,9 @@ function mount(takeover: boolean) {
 }
 it("respects Chinese composition, exact pending ask ID and shared answer exclusion", async () => {
   const f = mount(false);
-  fireEvent.click(screen.getByRole("radio", { name: "Something else…" }));
-  const field = screen.getByRole("textbox", { name: "Your answer" }) as HTMLTextAreaElement;
+  const field = screen.getByRole("textbox", { name: "Something else" }) as HTMLInputElement;
   fireEvent.compositionStart(field);
-  fireEvent.input(field, { target: { value: "中文" } });
+  fireEvent.change(field, { target: { value: "中文" } });
   fireEvent.keyDown(field, { key: "Enter", isComposing: true });
   expect(f.fetchImpl).not.toHaveBeenCalled();
   fireEvent.compositionEnd(field);
@@ -129,41 +140,50 @@ it("respects Chinese composition, exact pending ask ID and shared answer exclusi
   fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
   expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "中文" }));
-  await waitFor(() => expect(field.value).toBe(""));
   expect(screen.getByRole("button", { name: "Send answer" }).getAttribute("aria-disabled")).toBe(
     "true",
   );
+  fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(f.fetchImpl).toHaveBeenCalledOnce();
 });
-it("guards question and hand-back notes before a recognized key can enter a request", async () => {
+it("keeps a recognized key out of an answer and out of the page", async () => {
   const sentinel = `sk-proj-${"z".repeat(80)}`;
-  for (const takeover of [false, true]) {
-    const f = mount(takeover);
-    if (!takeover) fireEvent.click(screen.getByRole("radio", { name: "Something else…" }));
-    const field = screen.getByRole("textbox", {
-      name: takeover ? "Optional note for dot" : "Your answer",
-    }) as HTMLTextAreaElement;
-    fireEvent.input(field, { target: { value: sentinel } });
-    expect(field.value).toBe("");
-    expect(f.container.textContent).not.toContain(sentinel);
-    const send = screen.getByRole("button", {
-      name: takeover ? "Return control to dot" : "Send answer",
-    }) as HTMLButtonElement;
-    expect(send.disabled || send.getAttribute("aria-disabled") === "true").toBe(true);
-    const notice =
-      "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.";
-    const described = () =>
-      (send.getAttribute("aria-describedby") ?? "")
-        .split(" ")
-        .map((id) => document.getElementById(id)?.textContent);
-    expect(described()).toContain(notice);
-    fireEvent.click(send);
-    expect(f.fetchImpl).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
-    expect(f.receive).toHaveBeenCalledOnce();
-    expect(described()).not.toContain(notice);
-    f.unmount();
-    cleanup();
-  }
+  const f = mount(false);
+  const field = screen.getByRole("textbox", { name: "Something else" }) as HTMLInputElement;
+  fireEvent.change(field, { target: { value: `use ${sentinel}` } });
+  expect(field.value).toBe("use ");
+  expect(f.container.innerHTML).not.toContain(sentinel);
+  expect(screen.getByText(/That looked like a key/)).toBeTruthy();
+  fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
+  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "use" }));
+});
+it("guards hand-back notes before a recognized key can enter a request", async () => {
+  const sentinel = `sk-proj-${"z".repeat(80)}`;
+  const f = mount(true);
+  const field = screen.getByRole("textbox", {
+    name: "Optional note for dot",
+  }) as HTMLTextAreaElement;
+  fireEvent.input(field, { target: { value: sentinel } });
+  expect(field.value).toBe("");
+  expect(f.container.textContent).not.toContain(sentinel);
+  const send = screen.getByRole("button", { name: "Return control to dot" }) as HTMLButtonElement;
+  expect(send.disabled || send.getAttribute("aria-disabled") === "true").toBe(true);
+  const notice =
+    "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.";
+  const described = () =>
+    (send.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent);
+  expect(described()).toContain(notice);
+  fireEvent.click(send);
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+  expect(f.receive).toHaveBeenCalledOnce();
+  expect(described()).not.toContain(notice);
 });
 it("types pasted credentials on the computer through the input stream, clears the field and keeps them out of React state", async () => {
   const f = mount(true),
@@ -219,12 +239,12 @@ it("picks an answer by its number, writes one under Something else, and sends on
   const f = mount(false);
   const send = screen.getByRole("button", { name: "Send answer" });
   expect(send.getAttribute("aria-disabled")).toBe("true");
-  expect(screen.queryByRole("textbox", { name: "Your answer" })).toBeNull();
   const form = screen.getByRole("form", { name: "Answer dot" });
-  fireEvent.keyDown(form, { key: "2" });
-  expect(screen.getByRole("radio", { name: "Something else…" })).toHaveProperty("checked", true);
-  expect(screen.getByRole("textbox", { name: "Your answer" })).toBeTruthy();
-  expect(send.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.change(screen.getByRole("textbox", { name: "Something else" }), {
+    target: { value: "Both" },
+  });
+  expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", false);
+  expect(send.hasAttribute("aria-disabled")).toBe(false);
   fireEvent.keyDown(form, { key: "1" });
   expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", true);
   expect(send.hasAttribute("aria-disabled")).toBe(false);

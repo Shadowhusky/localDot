@@ -1761,7 +1761,7 @@ const ASK_FORMS: Record<string, AskForm> = {
   login: {
     question: "Sign in to your mail so I can read the latest message.",
     fields: [
-      { id: "email", kind: "email", label: "Email" },
+      { id: "username", kind: "text", label: "Username" },
       {
         id: "password",
         kind: "secret",

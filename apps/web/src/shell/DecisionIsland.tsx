@@ -3,7 +3,14 @@ import {
   type ApprovalCard,
   ApprovalCard as CardSchema,
 } from "@localdot/protocol";
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { ApprovalValue } from "../agent/ApprovalValue.tsx";
 import { type DecisionScope, decisionWords, defaultScope, ONCE } from "../copy/decision.ts";
 import { clock } from "../copy/format.ts";
@@ -13,6 +20,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { isApple } from "../ui/Kbd.tsx";
 import { Select } from "../ui/Select.tsx";
 import "./decision.css";
+import { useKeyboardInset } from "./layout.ts";
 
 class Mismatch extends Error {}
 
@@ -287,26 +295,8 @@ function UploadFacts({ upload }: { upload: NonNullable<ApprovalCard["upload"]> }
   );
 }
 
-// A question from dot, grown out of the island while the chat that holds it is out of sight.
-export function QuestionDecision({
-  question,
-  children,
-}: {
-  question: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="decision" data-layout="island" aria-label="dot asks">
-      <div className="decision-body">
-        <h2 className="decision-title">{question || "dot has a question"}</h2>
-      </div>
-      <div className="decision-answer">{children}</div>
-    </section>
-  );
-}
-
 // A phone's decision: a sheet over the thread at its content's height, so the stage and dot stay
-// in sight above it.
+// in sight above it. It rests on the keyboard while one is up.
 export function DecisionSheet({
   label,
   elapsedS,
@@ -316,8 +306,13 @@ export function DecisionSheet({
   elapsedS: number | null;
   children: ReactNode;
 }) {
+  const keyboard = useKeyboardInset();
   return (
-    <div className="decision-sheet">
+    <div
+      className="decision-sheet"
+      data-keyboard={keyboard ? "" : undefined}
+      style={keyboard ? ({ "--_keyboard": `${keyboard}px` } as CSSProperties) : undefined}
+    >
       <span className="decision-grabber" aria-hidden="true" />
       <div className="decision-sheet-head">
         <span className="decision-attention" aria-hidden="true" />

@@ -20,17 +20,29 @@ function keyboardUp(): boolean {
   return !!view && window.innerHeight - view.height > KEYBOARD_PX;
 }
 
+function watchViewport(onChange: () => void) {
+  const view = window.visualViewport;
+  view?.addEventListener("resize", onChange);
+  view?.addEventListener("scroll", onChange);
+  return () => {
+    view?.removeEventListener("resize", onChange);
+    view?.removeEventListener("scroll", onChange);
+  };
+}
+
 // A phone's keyboard is up: the band collapses and dot moves into the island.
 export function useKeyboardUp(): boolean {
   const phone = useMediaQuery(PHONE);
-  const up = useSyncExternalStore(
-    (onChange) => {
-      const view = window.visualViewport;
-      view?.addEventListener("resize", onChange);
-      return () => view?.removeEventListener("resize", onChange);
-    },
-    keyboardUp,
-    () => false,
-  );
+  const up = useSyncExternalStore(watchViewport, keyboardUp, () => false);
   return phone && up;
+}
+
+// How much of the page's foot the on-screen keyboard covers, so a sheet can rest on top of it.
+function keyboardInset(): number {
+  const view = window.visualViewport;
+  return view ? Math.max(0, Math.round(window.innerHeight - view.height - view.offsetTop)) : 0;
+}
+
+export function useKeyboardInset(): number {
+  return useSyncExternalStore(watchViewport, keyboardInset, () => 0);
 }

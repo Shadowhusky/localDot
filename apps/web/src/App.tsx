@@ -1,14 +1,18 @@
 import {
   DEFAULT_AUTONOMY,
   LLM_PROVIDERS,
+  type QuestionAnswerRequest,
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { AskForm } from "./agent/AskForm.tsx";
-import { Composer } from "./agent/Composer.tsx";
+import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
+import { useAskDraft } from "./agent/ask-draft.ts";
+import { composerReply } from "./agent/ask-form.ts";
+import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
+import { uploadFile } from "./agent/file-transfer.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
@@ -60,7 +64,7 @@ import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
-import { ApprovalDecision, DecisionSheet, QuestionDecision } from "./shell/DecisionIsland.tsx";
+import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
 import { HudIsland } from "./shell/HudIsland.tsx";
 import { islandDecision, islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
 import { useKeyboardUp, useLayout } from "./shell/layout.ts";
@@ -70,6 +74,7 @@ import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import { useTabAttention } from "./shell/tab-attention.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { Announcer } from "./ui/Announcer.tsx";
@@ -460,6 +465,23 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const askDraft = useAskDraft(question);
+  const answer = useRef(controls.answer);
+  answer.current = controls.answer;
+  const answerAsk = useCallback((request: QuestionAnswerRequest) => answer.current(request), []);
+  const askCell = cell?.state === "ready" && !cell.paused ? cell.id : null;
+  const uploadAsk = useMemo<AskUpload | undefined>(
+    () => (askCell ? (file, signal) => uploadFile(api, askCell, file, signal) : undefined),
+    [api, askCell],
+  );
+  const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
+  const replyAsk = async (text: string): Promise<ReplyOutcome> => {
+    if (!askDraft) return "failed";
+    const plan = composerReply(askDraft.question, text);
+    if (plan.kind === "hold") return { hold: plan.reason };
+    if (!(await answerAsk(plan.request))) return "failed";
+    return plan.kind === "answer" ? "answered" : "declined";
+  };
   const manualLive =
     !!takeover &&
     controls.canInput &&
@@ -609,9 +631,7 @@ function Theatre({ api }: { api: ApiClient }) {
     stop: sheetStopControl,
     taskControls: <StopControl controls={controls} />,
   };
-  useEffect(() => {
-    document.title = appStatus.title;
-  }, [appStatus.title]);
+  useTabAttention(appStatus);
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
@@ -767,22 +787,49 @@ function Theatre({ api }: { api: ApiClient }) {
       layout={phone ? "sheet" : "island"}
     />
   );
+  // One question, answered where you are: in the thread, in the island while you watch the
+  // computer, or in a phone's sheet. Each is the same draft, so answering one answers all.
+  const askIn =
+    !askDraft || replayId || !sheetsClosed
+      ? null
+      : phone
+        ? "sheet"
+        : decision === "question"
+          ? "island"
+          : "thread";
+  const askThread = useMemo(
+    () =>
+      askDraft && askIn === "thread" ? (
+        <AskForm
+          key={askDraft.question.askId}
+          draft={askDraft}
+          layout="thread"
+          answer={answerAsk}
+          reason={askReason}
+          upload={uploadAsk}
+        />
+      ) : undefined,
+    [askDraft, askIn, answerAsk, askReason, uploadAsk],
+  );
+  const askOver = (layout: "island" | "sheet") =>
+    askDraft && (
+      <AskForm
+        key={askDraft.question.askId}
+        draft={askDraft}
+        layout={layout}
+        answer={answerAsk}
+        reason={askReason}
+        upload={uploadAsk}
+      />
+    );
   const grown =
     phone || !decision
       ? undefined
       : decision === "approval"
         ? approvalView
-        : question && (
-            <QuestionDecision question={question.question}>
-              <AskForm
-                key={question.askId}
-                question={question}
-                controls={controls}
-                visible
-                receiveKey={receiveKey}
-              />
-            </QuestionDecision>
-          );
+        : askIn === "island"
+          ? askOver("island")
+          : undefined;
   const take = () => {
     if (decision !== "approval" || !approval) {
       setRailView("takeover");
@@ -1016,17 +1063,7 @@ function Theatre({ api }: { api: ApiClient }) {
               </>
             }
             recovery={<TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />}
-            answer={
-              question && !agent.model.ended && decision !== "question" ? (
-                <AskForm
-                  key={question.askId}
-                  question={question}
-                  controls={controls}
-                  visible={shownView === "chat" && !keysOpen && !settings.open}
-                  receiveKey={receiveKey}
-                />
-              ) : undefined
-            }
+            ask={askThread}
             composer={
               <Composer
                 api={api}
@@ -1046,6 +1083,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 configured={mainReady}
                 onSettings={showSettings}
                 onTaskStarted={session.check}
+                reply={askDraft ? replyAsk : undefined}
               />
             }
           />
@@ -1172,9 +1210,9 @@ function Theatre({ api }: { api: ApiClient }) {
         onClose={closeKeys}
         discardRef={keysDiscard}
       />
-      {phone && approvalView && (
+      {phone && (approvalView || askIn === "sheet") && (
         <DecisionSheet label={appStatus.label} elapsedS={appStatus.elapsedS}>
-          {approvalView}
+          {approvalView || askOver("sheet")}
         </DecisionSheet>
       )}
       {showDot.value && (

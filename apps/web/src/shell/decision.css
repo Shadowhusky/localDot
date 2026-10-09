@@ -227,44 +227,29 @@
   gap: calc(var(--spacing) * 2);
 }
 
-/* A question keeps the answer panel the thread uses, set flat inside the island: the question is
-   the title, so the panel's own heading steps aside. */
-.decision-answer {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: calc(var(--spacing) * 3.5) calc(var(--spacing) * 4) calc(var(--spacing) * 4)
-    calc(var(--spacing) * 5.5);
-}
-
-.decision-answer .answer-panel {
-  padding: 0;
-  border-radius: 0;
-  background-color: transparent;
-  box-shadow: none;
-  animation: none;
-}
-
-.decision-answer .answer-panel-head {
-  display: none;
-}
-
 /* A phone: the decision rises from the bottom over the thread at its content's height, with no
-   scrim, so the stage and dot stay in sight above it. */
+   scrim, and never higher than the band, so the stage and dot stay in sight above it. With the
+   keyboard up the band has folded into the island, so only the stage stays. */
 .decision-sheet {
+  --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + var(--band-min));
   position: fixed;
   right: 0;
-  bottom: 0;
+  bottom: var(--_keyboard, 0px);
   left: 0;
   z-index: var(--layer-island);
   display: flex;
   flex-direction: column;
-  max-height: calc(100dvh - 40px);
+  max-height: calc(100dvh - var(--_above) - var(--_keyboard, 0px));
   padding-bottom: max(calc(var(--spacing) * 5), env(safe-area-inset-bottom));
+  transition: bottom var(--dur-default) var(--ease-spring);
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
   background-color: var(--color-overlay);
   box-shadow: var(--shadow-overlay);
   animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) both;
+}
+
+.decision-sheet[data-keyboard] {
+  --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
 }
 
 @keyframes decision-sheet-in {

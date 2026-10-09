@@ -6,7 +6,7 @@ import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
 import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { withAttachments } from "./attachments.ts";
-import { Composer, type ComposerProps } from "./Composer.tsx";
+import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -1094,5 +1094,34 @@ describe("typing", () => {
     });
     expect(f.field.value).toBe("token ");
     expect(f.requests).toEqual([]);
+  });
+});
+describe("answering dot from the composer", () => {
+  it("answers dot's question, turns it down before sending the message on, or holds the message", async () => {
+    const reply = vi.fn<(text: string) => Promise<ReplyOutcome>>();
+    const f = setup(undefined, { reply });
+    expect(f.field.placeholder).toBe("Answer dot");
+    reply.mockResolvedValueOnce("answered");
+    f.input("PDF");
+    f.submit();
+    await waitFor(() => expect(f.field.value).toBe(""));
+    expect(reply).toHaveBeenLastCalledWith("PDF");
+    expect(f.requests).toEqual([]);
+    reply.mockResolvedValueOnce("declined");
+    f.input("use my work account");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${sessionId}/messages`,
+      body: { kind: "steer", text: "use my work account" },
+    });
+    reply.mockResolvedValueOnce({ hold: "Type it in dot's question above." });
+    f.input("hunter2");
+    f.submit();
+    await screen.findByText("Type it in dot's question above.");
+    expect(f.field.value).toBe("hunter2");
+    expect(f.requests).toHaveLength(1);
+    f.update({ reply: undefined });
+    expect(f.field.placeholder).toBe("Message dot");
   });
 });
