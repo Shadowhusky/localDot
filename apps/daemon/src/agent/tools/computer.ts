@@ -62,6 +62,9 @@ async function screenshot(
   return { ok: true, content: [await observation(deps, ctx, o.frameId, basedOn)] };
 }
 
+const UNREAD =
+  "Done, but the screen could not be read after it. Take a screenshot before acting on what it did.";
+
 // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
 // A drag, and a move, scroll or release while a button is down, has the press as its start and
 // what is under its own point as its drop.
@@ -360,6 +363,7 @@ export async function runInput(
   const notes: ToolResult["content"] = [];
   const note = keyboardNote(a, outcome) ?? pointerNote(a, outcome);
   if (note) notes.push(text(ctx.redact(note)));
+  if (outcome.ok && outcome.unread) notes.push(text(UNREAD));
   if (outcome.cancelled === "stale") {
     notes.push(
       text(

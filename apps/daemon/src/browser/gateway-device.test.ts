@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ulid } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { BrowserClientError } from "./client.ts";
 import { browserGatewayDevice } from "./gateway-device.ts";
 
 function fixture(scale: 1 | 2 = 2) {
@@ -128,6 +129,31 @@ describe("leased browser gateway device", () => {
       expect(f.device.clocks.toDaemonMicros(50)).toBe(100_000);
     },
   );
+  // A page refuses a lookup while frames come and go or its address changes.
+  it("asks a settling page again for the element under a point", async () => {
+    const f = fixture(2);
+    f.client.lookup.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    const result = await f.device.client.hitTest({ x: 80, y: 100 });
+    expect(result.target?.name).toBe("Continue");
+    expect(f.client.lookup).toHaveBeenCalledTimes(2);
+  });
+  it("pings a settling page's clock again", async () => {
+    const f = fixture(2);
+    f.client.clock.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    await expect(f.device.client.clock()).resolves.toEqual({ mono: 50 });
+    expect(f.client.clock).toHaveBeenCalledTimes(2);
+  });
+  it("ends its lookups by its deadline, leaving none to hold browserd", async () => {
+    const f = fixture(2);
+    f.client.lookup.mockRejectedValue(new BrowserClientError("unavailable"));
+    const device = browserGatewayDevice({ ...f.options, lookupMs: 600 });
+    expect(device.lookupMs).toBe(600);
+    const started = performance.now();
+    await expect(device.client.hitTest({ x: 80, y: 100 })).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(1500);
+    for (const call of f.client.lookup.mock.calls as unknown as [{ signal: AbortSignal }][])
+      expect(call.at(-1)?.signal.aborted).toBe(true);
+  });
   it("finds a listed element by its node, and anything else by its name", async () => {
     const f = fixture(2);
     const found = await f.device.client.find({ node: 13, role: "button", name: "Continue" });

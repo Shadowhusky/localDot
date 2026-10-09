@@ -35,6 +35,7 @@ const PAGE_READS = new Set([
   "DOMSnapshot.captureSnapshot",
   "Accessibility.getFullAXTree",
   "Browser.getWindowForTarget",
+  "DOM.getNodeForLocation",
 ]);
 
 export class CdpRequestError extends Error {

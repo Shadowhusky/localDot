@@ -190,6 +190,25 @@ describe("browser measured geometry", () => {
     expect(peer.targets.window).toHaveBeenCalledTimes(1);
   });
 
+  // A click that starts a round rewrites the page's address while the browser shows the old one.
+  it("measures again a page whose address changed during the read", async () => {
+    const peer = setup();
+    let surfaces = 0;
+    peer.nativeCommand.mockImplementation(async (method) => {
+      if (method === "windows")
+        return { windows: [{ id: 8, active: true, frame: peer.page.windowFrame }] };
+      surfaces += 1;
+      return {
+        window: 8,
+        page: surfaces <= 2 ? { ...peer.page, urlHash: "b".repeat(64) } : peer.page,
+      };
+    });
+    await expect(peer.geometry.read("tab", peer.controller.signal)).resolves.toMatchObject({
+      focus: "page",
+    });
+    expect(surfaces).toBe(4);
+  });
+
   it("stops measuring a page that keeps changing", async () => {
     const peer = setup();
     peer.check.mockImplementation(() => {

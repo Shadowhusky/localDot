@@ -11,6 +11,9 @@ import {
   ulid,
 } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { classify, nativeActionFacts } from "../agent/safety/classify.ts";
+import { BrowserClientError } from "../browser/client.ts";
+import { browserGatewayDevice } from "../browser/gateway-device.ts";
 import { FakeOrchestrator } from "../cells/testing/fake-orchestrator.ts";
 import { NO_STREAM, type StreamState } from "../cells/types.ts";
 import type { Clock } from "../clock.ts";
@@ -175,7 +178,174 @@ function boundScreen(s: ReturnType<typeof setup>) {
   };
 }
 
+// The web browser's own device over a browserd whose lookups answer as `lookup` does.
+function browserScreen(s: ReturnType<typeof setup>, lookup: () => Promise<HitTestResult>) {
+  const button = {
+    point: { x: 120, y: 80 },
+    bbox: { x: 100, y: 70, w: 40, h: 20 },
+    source: "ax" as const,
+    role: "button",
+    name: "Try a practice round",
+    url: "https://jev-games.test/cipher",
+  };
+  const client = {
+    clock: vi.fn(async () => ({ mono: 50 })),
+    settle: vi.fn(async () => ({
+      changed: [],
+      lastChangeMono: 50,
+      quiet: true,
+      noVisibleChange: false,
+    })),
+    lookup: vi.fn(lookup),
+    observe: vi.fn(async () => ({
+      frame: {
+        frameId: ulid(),
+        image: Buffer.from("frame").toString("base64"),
+        width: 1280 as const,
+        height: 800 as const,
+        pointer: { x: 120, y: 80 },
+        windows: [],
+      },
+      targets: [],
+    })),
+    input: vi.fn(async () => ({
+      armedMono: 50,
+      pressMono: 51,
+      presses: [51],
+      injector: "xtest" as const,
+    })),
+    type: vi.fn(async () => {
+      throw new Error("unused");
+    }),
+  };
+  const abort = new AbortController();
+  const permit = {
+    browserCellId: ulid(),
+    parentCellId: s.cellId,
+    instance: crypto.randomUUID(),
+    revision: 1,
+    requestId: ulid(),
+    owner: { sessionId: s.sessionId, generation: 1 },
+  };
+  const lease = {
+    selection: {
+      screen: "browser" as const,
+      cellId: permit.browserCellId,
+      revision: 1,
+      geometry: { w: 2560, h: 1600, scale: 2 as const },
+    },
+    signal: abort.signal,
+    check: () => abort.signal.throwIfAborted(),
+    finish: () => {},
+  };
+  const device = browserGatewayDevice({
+    client,
+    permit,
+    tabId: crypto.randomUUID(),
+    lease,
+    now: () => s.clock.nowMicros(),
+    lookupMs: 1500,
+  });
+  const screen: NativeScreenBinding = {
+    cellId: permit.browserCellId,
+    parentCellId: s.cellId,
+    scale: 2,
+    device,
+    signal: abort.signal,
+    check: () => abort.signal.throwIfAborted(),
+    stream: () => ({ ...NO_STREAM, connection: "live" as const, viewers: 1 }),
+    subscribe: () => () => {},
+  };
+  const identities: NativeActionIdentity[] = [];
+  const ctx: ActionContext = {
+    source: "agent",
+    sessionId: s.sessionId,
+    cellId: screen.cellId,
+    screen,
+    authorizeAgent: async (request) => {
+      identities.push(request.identity);
+      return { consume: () => true };
+    },
+    beforeEffect: () => true,
+  };
+  // What the policy makes of the approved click on the signed-in web browser screen.
+  const classes = () => {
+    const identity = identities[0];
+    if (!identity) throw new Error("no click was authorized");
+    return classify({
+      ...nativeActionFacts(
+        { verb: "click", point: { x: 60, y: 40 }, button: "left", count: 1 },
+        identity.target,
+        undefined,
+        { target: identity.unknown },
+      ),
+      screen: "browser",
+      signedIn: true,
+    });
+  };
+  return { client, ctx, button, identities, classes };
+}
+
 describe("ActionGateway admitted screen binding", () => {
+  it.each(["settle", "observe"] as const)(
+    "reports a click that landed when the screen can't be read after it (%s)",
+    async (step) => {
+      const s = setup(),
+        b = boundScreen(s);
+      b.fake.script[step] = () => {
+        throw new Error("the page is still changing");
+      };
+      const result = await s.gateway.run(b.ctx, {
+        verb: "click",
+        point: { x: 120, y: 80 },
+        speed: "instant",
+      });
+      expect(result).toMatchObject({ ok: true, unread: true });
+      expect(result.frameId).toBeUndefined();
+      expect(b.fake.calls.filter((c) => c.path === "/input")).toHaveLength(1);
+      expect(s.ofType("action.result").at(-1)?.data).toEqual({ ok: true });
+      s.registry.dispose();
+      s.eventLog.close();
+    },
+  );
+
+  // A page that adds frames or rewrites its address as it settles refuses the lookup a moment.
+  it("names the button on a settling page, so a plain click runs without asking", async () => {
+    const s = setup();
+    let refusals = 2;
+    const b = browserScreen(s, async () => {
+      if (refusals-- > 0) throw new BrowserClientError("unavailable");
+      return { target: b.button, window: null, ms: 1 };
+    });
+    const result = await s.gateway.run(b.ctx, {
+      verb: "click",
+      point: { x: 60, y: 40 },
+      speed: "instant",
+    });
+    expect(result.ok).toBe(true);
+    expect(b.identities[0]).toMatchObject({ target: { name: "Try a practice round" } });
+    expect(b.identities[0]?.unknown).toBeUndefined();
+    expect(b.classes()).toEqual(["computer"]);
+    expect(b.client.lookup.mock.calls.length).toBeGreaterThan(2);
+    s.registry.dispose();
+    s.eventLog.close();
+  });
+
+  it("still asks about a click on a page that can't be read at all", async () => {
+    const s = setup();
+    const b = browserScreen(s, async () => {
+      throw new BrowserClientError("unavailable");
+    });
+    await s.gateway.run(b.ctx, { verb: "click", point: { x: 60, y: 40 }, speed: "instant" });
+    expect(b.identities[0]?.unknown).toBe(true);
+    expect(b.classes()).toEqual(["unknown"]);
+    // No lookup outlives the device's own deadline to hold browserd busy.
+    for (const call of b.client.lookup.mock.calls as unknown as [{ signal: AbortSignal }][])
+      expect(call.at(-1)?.signal.aborted).toBe(true);
+    s.registry.dispose();
+    s.eventLog.close();
+  }, 10_000);
+
   it("routes a browser action to its bound device and uses its stream and scale", async () => {
     const s = setup({}, { scale: 1 }),
       b = boundScreen(s);

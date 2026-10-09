@@ -222,6 +222,16 @@ describe("the tools", () => {
     expect(stale.body.content[1]?.type).toBe("image");
   });
 
+  it("reports a click that landed even when the screen could not be read after it", async () => {
+    const h = toolHarness();
+    h.setOutcome(() => ({ ok: true, changed: false, unread: true }));
+    const r = await h.call("computer", { action: "click", point: { x: 300, y: 200 } });
+    expect(r.body.ok).toBe(true);
+    expect(r.body.content.map((c) => c.text)).toEqual([
+      "Done, but the screen could not be read after it. Take a screenshot before acting on what it did.",
+    ]);
+  });
+
   it("answers cursor_position in model pixels and repeats a key as one input", async () => {
     const h = toolHarness();
     expect((await h.call("computer", { action: "cursor_position" })).body.content[0]?.text).toBe(
