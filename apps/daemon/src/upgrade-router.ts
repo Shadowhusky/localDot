@@ -29,8 +29,9 @@ export function refuse(socket: Duplex, status: string): void {
 }
 
 // Never select the localdot.token.<t> entry: the chosen subprotocol is echoed back in the response.
-export function tokenSocketServer(): WebSocketServer {
+export function tokenSocketServer(options: { maxPayload?: number } = {}): WebSocketServer {
   return new WebSocketServer({
+    ...options,
     noServer: true,
     handleProtocols: (protocols) => (protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false),
   });

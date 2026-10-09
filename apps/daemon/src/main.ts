@@ -3,6 +3,7 @@ import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
+import { manualStreamRoute } from "./agent/manual-stream.ts";
 import { ComputerFences } from "./agent/safety/fences.ts";
 import { createReplacementController } from "./agent/safety/replacement-controller.ts";
 import { Transfers } from "./agent/transfers.ts";
@@ -403,6 +404,10 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
 // serve() is typed as HTTP/1-or-HTTP/2; this daemon only ever creates an HTTP/1 server.
 attachUpgradeRouter(server as Server, { port, token }, [
   sessionStreamRoute(eventLog),
+  manualStreamRoute({
+    session: (id) => agent.routes.runner.get(id),
+    manual: agent.routes.manual,
+  }),
   cellStatusRoute(orchestrator),
   cellStatusRoute(browserStreams, "browsers"),
   desktopStreamRoute(desktop),

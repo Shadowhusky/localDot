@@ -144,7 +144,7 @@ export interface BrowserScope {
 }
 
 // Reject unsupported names/control characters before the session marks an input dispatched.
-export function checkManualBrowserInput(raw: ManualInput): void {
+export function checkManualBrowserInput(raw: unknown): void {
   const input = ManualInput.parse(raw);
   if (input.kind === "key") {
     const keys = input.combo.map(keyName);
