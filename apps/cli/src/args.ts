@@ -4,7 +4,7 @@ export type Command =
   | { kind: "default" }
   | { kind: "help" }
   | { kind: "version" }
-  | { kind: "open" }
+  | { kind: "open"; qr?: true }
   | { kind: "down" }
   | { kind: "up"; atLogin?: true; fromLogin?: true }
   | { kind: "start-at-login"; operation: "on" | "off" | "status" }
@@ -87,6 +87,8 @@ export function parseArgs(args: readonly string[]): Command | undefined {
         return { kind: "logs", follow: false };
     }
   }
+  if (args.length === 2 && args[0] === "open" && args[1] === "--qr")
+    return { kind: "open", qr: true };
   if (args.length === 2 && args[0] === "logs" && args[1] === "--follow")
     return { kind: "logs", follow: true };
   if (
@@ -120,7 +122,8 @@ Usage:
                                 Turn start at login on or off, or show it
   localdot update [--to <version>]
                                 Install the latest stable or an exact newer release; keep data
-  localdot open                 Print a fresh, single-use sign-in link
+  localdot open [--qr]          Print a fresh, single-use sign-in link; --qr also draws it as
+                                a QR code for your phone (needs remote access set up)
   localdot stop [--cell <id>]   Stop agent actions and revoke access
   localdot stop --all           Stop every task, pause routines and freeze every computer
   localdot reset-computer --cell <id>
@@ -138,4 +141,5 @@ Usage:
 
 LOCALDOT_HOME selects the private installation directory.
 LOCALDOT_PORT selects the local daemon port (default 4750).
+LOCALDOT_PUBLIC_ORIGIN lists HTTPS addresses that reach this computer, such as Tailscale Serve.
 `;

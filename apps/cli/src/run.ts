@@ -82,7 +82,8 @@ export async function runCli(
       signal: options.signal,
     });
     options.signal.throwIfAborted();
-    if (command.kind === "open") return await runtime.open(context, io);
+    if (command.kind === "open")
+      return await runtime.open(context, io, command.qr ? { qr: true } : {});
     if (command.kind === "stop")
       return await runtime.stop(
         { ...context, cellId: command.cellId, ...(command.all ? { all: true } : {}) },

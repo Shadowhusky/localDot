@@ -3,6 +3,7 @@ import { DockerClient } from "../../daemon/src/cells/docker.ts";
 import { imagesFromEnv } from "../../daemon/src/cells/images.ts";
 import { runDoctor } from "../../daemon/src/doctor.ts";
 import { findDockerSocket } from "../../daemon/src/doctor-socket.ts";
+import { parsePublicOrigins } from "../../daemon/src/guard.ts";
 import { KeydClient, keydSocketPath } from "../../daemon/src/keyd/client.ts";
 import { runOpenLink } from "../../daemon/src/open-link.ts";
 import { runStop } from "../../daemon/src/stop.ts";
@@ -49,7 +50,7 @@ export interface Runtime {
     context: Pick<RuntimeContext, "home" | "signal"> & { follow: boolean },
     io: ConsoleIO,
   ): Promise<number>;
-  open(context: RuntimeContext, io: ConsoleIO): Promise<number>;
+  open(context: RuntimeContext, io: ConsoleIO, options: { qr?: true }): Promise<number>;
   stop(
     context: RuntimeContext & { cellId?: string; all?: boolean },
     io: ConsoleIO,
@@ -72,7 +73,15 @@ export const runtime: Runtime = {
   update: runUpdate,
   down: runDown,
   logs: runLogs,
-  open: runOpenLink,
+  open: (context, io, options) =>
+    runOpenLink(
+      {
+        ...context,
+        publicOrigins: parsePublicOrigins(context.env.LOCALDOT_PUBLIC_ORIGIN || undefined),
+        ...options,
+      },
+      io,
+    ),
   stop: runStop,
   resetComputer: runResetComputer,
   unlock: (context, io) =>
