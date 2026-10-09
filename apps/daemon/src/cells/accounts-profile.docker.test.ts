@@ -17,16 +17,16 @@ import { DOCKER_TESTS, docker, publishedPort } from "./testing/docker-cli.ts";
 // shared one, and a restarted computer whose desktop can neither mount nor reach it. The browser
 // sits alone with a stand-in gate on an isolated internal network, as in production; the gate
 // serves a tiny site that sets a cookie and forwards browserd to the host. Opt in with
-// LOCALDOT_DOCKER_TESTS=1.
-const PREFIX = process.env.LOCALDOT_ACCOUNTS_TEST_PREFIX || "ldtest-l11-";
-const LABEL = process.env.LOCALDOT_ACCOUNTS_TEST_LABEL || "dev.localdot.test=l11";
-const IMAGE = process.env.LOCALDOT_BROWSER_IMAGE || "localdot/browser:dev";
-const DESKTOP_IMAGE = process.env.LOCALDOT_DESKTOP_IMAGE || "localdot/desktop:dev";
+// LOCALDOT_DOCKER_TESTS=1, with LOCALDOT_BROWSER_IMAGE and LOCALDOT_DESKTOP_IMAGE naming images
+// built from this tree.
+const PREFIX = process.env.LOCALDOT_ACCOUNTS_TEST_PREFIX || "ldtest-accounts-";
+const LABEL = process.env.LOCALDOT_ACCOUNTS_TEST_LABEL || "dev.localdot.test=accounts";
+const IMAGE = process.env.LOCALDOT_BROWSER_IMAGE ?? "";
+const DESKTOP_IMAGE = process.env.LOCALDOT_DESKTOP_IMAGE ?? "";
 const SUBNET = "10.231.79";
 const BROWSER_IP = `${SUBNET}.3`;
 const SECCOMP = join(import.meta.dirname, "browser-seccomp.json");
-const COOKIE = "session=signed-in-l11";
-const [labelKey = "", labelValue = ""] = LABEL.split("=");
+const COOKIE = "session=signed-in-for-test";
 
 const SITE = `
 import http.server, socket, threading
@@ -116,26 +116,25 @@ interface Running {
 }
 
 describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile", () => {
-  const names = {
-    network: `${PREFIX}accountsnet`,
-    outside: `${PREFIX}accountsout`,
-    gate: `${PREFIX}accountsgate`,
-    legacy: `${PREFIX}profile-${ulid()}`,
-    accounts: `${PREFIX}accounts`,
-    desktop: "desk",
-  };
   const home = mkdtempSync(join(tmpdir(), "localdot-accounts-home-"));
-  const lifetime = new AbortController();
-  const scope: BrowserScope = { signal: lifetime.signal, check: () => {} };
-  const browsers: string[] = [];
-  let computer: EvalCell | undefined;
   const profile = new AccountsProfile({
     home,
     docker: new DockerClient(),
     prefix: PREFIX,
     image: () => IMAGE,
-    labels: { [labelKey]: labelValue },
   });
+  const names = {
+    network: `${PREFIX}accountsnet`,
+    outside: `${PREFIX}accountsout`,
+    gate: `${PREFIX}accountsgate`,
+    legacy: `${PREFIX}profile-${ulid()}`,
+    accounts: profile.volume,
+    desktop: "desk",
+  };
+  const lifetime = new AbortController();
+  const scope: BrowserScope = { signal: lifetime.signal, check: () => {} };
+  const browsers: string[] = [];
+  let computer: EvalCell | undefined;
 
   const removeAll = () => {
     const sh = (command: string) =>
@@ -277,6 +276,10 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
   }
 
   beforeAll(async () => {
+    if (!IMAGE || !DESKTOP_IMAGE)
+      throw new Error(
+        "Set LOCALDOT_BROWSER_IMAGE and LOCALDOT_DESKTOP_IMAGE to images built from this tree.",
+      );
     removeAll();
     docker(
       "network",
@@ -360,7 +363,7 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
       "browser-01jxyz0000000000000000000z-4242",
       "/profile/chromium/SingletonLock",
     );
-    await profile.ensure(names.legacy);
+    await profile.ensure([names.legacy]);
     expect(docker("volume", "inspect", "-f", "{{json .Labels}}", names.accounts)).toContain(
       '"localdot.role":"accounts-profile"',
     );
@@ -398,7 +401,7 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
       const found = cell.exec([
         "sh",
         "-c",
-        "grep -rls signed-in-l11 /config /tmp /run /home 2>/dev/null; true",
+        "grep -rls signed-in-for-test /config /tmp /run /home 2>/dev/null; true",
       ]);
       expect(found.out.trim()).toBe("");
       expect(cell.exec(["ls", "/profile"]).status).not.toBe(0);

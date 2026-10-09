@@ -1,5 +1,5 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { BrowserLifecycleError } from "./browser-ledger.ts";
@@ -28,24 +28,26 @@ export interface AccountsProfileDeps {
   prefix: string;
   // The browser image: it has the profile folder the copy fills and runs as the same user.
   image(): string;
-  labels?: Readonly<Record<string, string>>;
 }
 
 // The one browser profile the user's sign-ins live in. It belongs to no computer: browser cells
-// mount it one at a time, and stopping, removing or replacing a computer never deletes it.
+// mount it one at a time, and stopping, removing or replacing a computer never deletes it. It is
+// named after this install's home, so another daemon on the same Docker engine never opens it.
 export class AccountsProfile {
   readonly volume: string;
   readonly #path: string;
 
   constructor(private readonly deps: AccountsProfileDeps) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*-$/u.test(deps.prefix)) throw new BrowserLifecycleError();
-    this.volume = `${deps.prefix}accounts`;
+    const install = createHash("sha256").update(realpathSync(deps.home)).digest("hex");
+    this.volume = `${deps.prefix}accounts-${install.slice(0, 12)}`;
     this.#path = join(deps.home, "accounts-profile.json");
   }
 
-  // Creates the volume on first use and fills it once from the profile a browser cell kept for
-  // itself before sign-ins were shared, preferring `legacy` (the starting computer's own).
-  async ensure(legacy?: string): Promise<void> {
+  // Creates the volume on first use and fills it once from a profile one of this install's
+  // browser cells kept for itself before sign-ins were shared: the first of `legacy` that no
+  // container holds (the starting computer's own), else the newest.
+  async ensure(legacy: readonly string[] = []): Promise<void> {
     const identity = await this.#identity();
     await this.#volume(identity);
     if (identity.migration === "done") return;
@@ -91,7 +93,7 @@ export class AccountsProfile {
   }
 
   labels(owner: string): Record<string, string> {
-    return { ...this.deps.labels, "localdot.role": ACCOUNTS_PROFILE_ROLE, [OWNER_LABEL]: owner };
+    return { "localdot.role": ACCOUNTS_PROFILE_ROLE, [OWNER_LABEL]: owner };
   }
 
   async #identity(): Promise<Identity> {
@@ -169,8 +171,7 @@ export class AccountsProfile {
       throw new BrowserLifecycleError("Saved sign-ins cannot be confirmed");
   }
 
-  // The preferred profile when it is free, else the most recently created free one.
-  async #legacySource(preferred?: string): Promise<string | undefined> {
+  async #legacySource(legacy: readonly string[]): Promise<string | undefined> {
     const listing = await this.deps.docker.request<unknown>({
       method: "GET",
       path: "/volumes",
@@ -183,12 +184,17 @@ export class AccountsProfile {
       .filter(raw)
       .filter((volume) => {
         const match = typeof volume.Name === "string" ? own.exec(volume.Name) : null;
-        return match && raw(volume.Labels) && volume.Labels["localdot.cell"] === match[1];
+        return (
+          match &&
+          legacy.includes(match[0]) &&
+          raw(volume.Labels) &&
+          volume.Labels["localdot.cell"] === match[1]
+        );
       })
       .map((volume) => ({ name: volume.Name as string, created: String(volume.CreatedAt ?? "") }))
       .sort(
         (a, b) =>
-          Number(b.name === preferred) - Number(a.name === preferred) ||
+          Number(b.name === legacy[0]) - Number(a.name === legacy[0]) ||
           b.created.localeCompare(a.created),
       );
     for (const candidate of candidates) {

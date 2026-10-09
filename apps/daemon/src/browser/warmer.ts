@@ -56,7 +56,7 @@ export class BrowserWarmer {
       return;
     }
     const holder = this.deps.browser.profileHolder();
-    if (holder !== undefined || !this.deps.available(parent)) return;
+    if ((holder !== undefined && holder !== parent) || !this.deps.available(parent)) return;
     this.#starting.add(parent);
     void this.deps.browser.start(parent).then(
       () => {

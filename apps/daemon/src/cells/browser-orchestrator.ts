@@ -64,7 +64,6 @@ export interface BrowserOrchestratorDeps {
   parentAvailable(parentCellId: string): boolean;
   externalKeydPorts?(): Iterable<number>;
   namePrefix?: string;
-  accountsLabels?: Readonly<Record<string, string>>;
   readyTimeoutMs?: number;
   probe?: typeof readBrowserHealth;
   sendInput?: typeof sendContainerInput;
@@ -77,6 +76,8 @@ export class BrowserOrchestrator {
   readonly #starting = new Map<string, AbortController>();
   readonly #ready = new Map<string, ReadyBrowser>();
   readonly #state = new Map<string, CellState>();
+  // A Replace computer waiting for the saved sign-ins; any later fence of its computer cancels it.
+  readonly #resets = new Map<string, AbortController>();
   readonly #listeners = new Set<(parentCellId: string) => void>();
   readonly #accounts: AccountsProfile;
   #attaching: Promise<void> = Promise.resolve();
@@ -105,22 +106,27 @@ export class BrowserOrchestrator {
       docker: deps.docker,
       prefix: deps.namePrefix ?? NAME_PREFIX,
       image: () => deps.images.browser,
-      ...(deps.accountsLabels ? { labels: deps.accountsLabels } : {}),
     });
   }
 
-  // The computer whose browser has the saved sign-ins open, or is opening them.
+  // The computer whose browser has the saved sign-ins open, is opening them, or still has a
+  // container that may hold them.
   profileHolder(): string | undefined {
-    for (const [parent, state] of this.#state)
-      if (state === "ready" || state === "starting" || state === "stopping") return parent;
-    return undefined;
+    const [active] = [...this.#ready.keys(), ...this.#starting.keys()];
+    if (active) return active;
+    try {
+      return this.#ledger.list().find((record) => record.resources.browser)?.parentCellId;
+    } catch {
+      return undefined;
+    }
   }
 
-  // Signs out of every site: each browser lets go of the profile, which is then made again empty.
+  // Signs out of every site: each browser lets go of the profile, which is then made again empty,
+  // and the profiles computers kept for themselves before sign-ins were shared are deleted.
   clearAccounts(): Promise<void> {
     const parents = this.#ledger.list().map((record) => record.parentCellId);
     return this.#exclusive(new AbortController().signal, async () => {
-      await Promise.all(parents.map((parent) => this.stop(parent)));
+      await Promise.all(parents.map((parent) => this.#stop(parent, true)));
       await this.#accounts.wipe();
     });
   }
@@ -166,10 +172,14 @@ export class BrowserOrchestrator {
   }
 
   stop(parentCellId: string): Promise<void> {
+    return this.#stop(parentCellId, false);
+  }
+
+  #stop(parentCellId: string, purgeProfile: boolean): Promise<void> {
     this.#fence(parentCellId);
     return this.#queued(parentCellId, async () => {
       const record = this.#ledger.forParent(parentCellId);
-      if (record) await this.#contain(record);
+      if (record) await this.#contain(record, purgeProfile);
       else if (this.deps.store.browserFor(parentCellId))
         throw new BrowserLifecycleError("Browser recovery ownership is missing");
       this.#state.set(parentCellId, "stopped");
@@ -227,7 +237,9 @@ export class BrowserOrchestrator {
     retire: () => Promise<void>,
   ): Promise<void> {
     this.#fence(parent);
-    return this.#queued(parent, async () => {
+    const fenced = new AbortController();
+    this.#resets.set(parent, fenced);
+    const retired = this.#queued(parent, async () => {
       if (this.deps.parentAvailable(parent))
         throw new BrowserLifecycleError("Reset parent admission is not held");
       const record = this.#ledger.forParent(parent);
@@ -241,7 +253,7 @@ export class BrowserOrchestrator {
           throw new BrowserLifecycleError("Browser reset ownership changed");
         this.#association(record);
         await closeBrowserKeyd(this.deps.keyd, record);
-        await this.#adoptBeforeRetire(record);
+        await this.#adoptBeforeRetire(record, fenced.signal);
       } else {
         if (
           !this.resetRetired(parent, source) ||
@@ -260,6 +272,9 @@ export class BrowserOrchestrator {
         this.#ledger.remove(record);
       }
       this.#state.set(parent, "removed");
+    });
+    return retired.finally(() => {
+      if (this.#resets.get(parent) === fenced) this.#resets.delete(parent);
     });
   }
 
@@ -293,12 +308,18 @@ export class BrowserOrchestrator {
   }
 
   // Replace computer deletes this computer's own old profile: copy it first if sign-ins were
-  // never moved to the shared profile.
-  async #adoptBeforeRetire(record: BrowserLedger): Promise<void> {
+  // never moved to the shared profile. The wait gives way to Clear all, which stops this
+  // computer's browser from inside its turn.
+  async #adoptBeforeRetire(record: BrowserLedger, signal: AbortSignal): Promise<void> {
     if (await this.#accounts.migrated()) return;
     await this.#contain(record);
-    await this.#exclusive(new AbortController().signal, () =>
-      this.#accounts.ensure(browserNames(record.id, record.prefix).profileVolume),
+    await this.#exclusive(signal, () => this.#accounts.ensure(this.#legacyProfiles(record)));
+  }
+
+  // This install's profiles from before sign-ins were shared, the given computer's first.
+  #legacyProfiles(first: BrowserLedger): string[] {
+    return [first, ...this.#ledger.list().filter((record) => record.id !== first.id)].map(
+      (record) => browserNames(record.id, record.prefix).profileVolume,
     );
   }
 
@@ -338,6 +359,7 @@ export class BrowserOrchestrator {
     this.#ready.delete(parent);
     this.#state.set(parent, "stopping");
     this.#starting.get(parent)?.abort();
+    this.#resets.get(parent)?.abort();
     this.#changed(parent);
   }
 
@@ -520,7 +542,7 @@ export class BrowserOrchestrator {
       stage = "profile attachment";
       await this.#exclusive(signal, async () => {
         check();
-        await this.#accounts.ensure(names.profileVolume);
+        await this.#accounts.ensure(this.#legacyProfiles(owned));
         check();
         await this.#attachProfile(parent, check);
         stage = "container creation";

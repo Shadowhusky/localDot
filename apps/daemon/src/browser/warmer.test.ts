@@ -62,8 +62,9 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
       if (holder === parent) holder = undefined;
       for (const listener of browserListeners) listener(parent);
     },
-    hold(parent: string | undefined) {
+    hold(parent: string | undefined, live = true) {
       holder = parent;
+      if (parent && live) running.add(parent);
     },
   };
 }
@@ -111,6 +112,14 @@ describe("the web browser starts with its computer", () => {
     f.hold(undefined);
     await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS);
     expect(f.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts its own computer's browser again while an unconfirmed stop still holds the sign-ins", async () => {
+    const f = fixture([cell(A), cell(B)]);
+    f.hold(A, false);
+    warm(f.deps);
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledWith(A));
+    expect(f.start).not.toHaveBeenCalledWith(B);
   });
 
   it("retries a failed start with backoff and gives up while the computer is off", async () => {

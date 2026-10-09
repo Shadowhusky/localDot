@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ComputerFences } from "../agent/safety/fences.ts";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { AccountsProfile } from "./accounts-profile.ts";
 import { BrowserLedgerStore } from "./browser-ledger.ts";
 import { BrowserOrchestrator } from "./browser-orchestrator.ts";
 import { browserNames } from "./browser-spec.ts";
@@ -189,6 +190,7 @@ function fixture() {
   };
   const controller = createComputerResetController(deps);
   return {
+    accounts: new AccountsProfile({ home, docker, prefix: "localdot-", image: () => "" }).volume,
     home,
     holds,
     fences,
@@ -218,7 +220,7 @@ it("composes real computer/browser retirement, grant closure and durable publica
   expect(done.phase).toBe("ready");
   expect(f.store.get(old)).toBeUndefined();
   expect(f.ledgers.forParent(old)).toBeUndefined();
-  expect([...f.volumes.keys()]).toEqual(["localdot-accounts"]);
+  expect([...f.volumes.keys()]).toEqual([f.accounts]);
   expect(f.keys.size).toBe(0);
   expect(f.events[0]).toBe("drain");
   expect(f.events.at(-1)).toBe("create");
@@ -237,11 +239,11 @@ it("copies the computer's own sign-ins into the shared profile before erasing it
   const f = fixture();
   const profile = browserNames(browserId).profileVolume;
   await f.controller.reset(old, confirmation);
-  const copied = f.events.indexOf(`copy:${profile}>localdot-accounts`);
-  expect(f.events.indexOf("make:localdot-accounts")).toBeLessThan(copied);
+  const copied = f.events.indexOf(`copy:${profile}>${f.accounts}`);
+  expect(f.events.indexOf(`make:${f.accounts}`)).toBeLessThan(copied);
   expect(copied).toBeGreaterThan(-1);
   expect(copied).toBeLessThan(f.events.indexOf(`erase:${profile}`));
-  expect(f.volumes.get("localdot-accounts")?.["localdot.role"]).toBe("accounts-profile");
+  expect(f.volumes.get(f.accounts)?.["localdot.role"]).toBe("accounts-profile");
 });
 it("erases an old profile without copying once sign-ins already live in the shared profile", async () => {
   const f = fixture();
@@ -305,7 +307,7 @@ it("retries the same transaction after physical cleanup succeeds but computer-re
     remove(id);
   });
   await expect(f.controller.reset(old, confirmation)).rejects.toThrow();
-  expect([...f.volumes.keys()]).toEqual(["localdot-accounts"]);
+  expect([...f.volumes.keys()]).toEqual([f.accounts]);
   expect(f.store.get(old)).toBeDefined();
   expect(f.controller.status(old, requestId)?.phase).toBe("retiring");
   expect(f.create).not.toHaveBeenCalled();

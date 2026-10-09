@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { KeydCellInfo } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserKeydClient } from "../keyd/browser-wiring.ts";
+import { AccountsProfile } from "./accounts-profile.ts";
 import { BrowserLedgerStore } from "./browser-ledger.ts";
 import { BrowserOrchestrator, type BrowserOrchestratorDeps } from "./browser-orchestrator.ts";
 import { CellStore } from "./store.ts";
@@ -96,6 +97,8 @@ function fixture() {
   const controller = new BrowserOrchestrator(deps);
   const ledger = new BrowserLedgerStore(home, store.keydPorts);
   return {
+    accounts: new AccountsProfile({ home, docker, prefix: "localdot-test-", image: () => "" })
+      .volume,
     home,
     store,
     parent,
@@ -113,6 +116,38 @@ function fixture() {
       available = false;
     },
   };
+}
+
+// A profile one of this install's browser cells kept for itself before sign-ins were shared.
+function legacyProfile(f: ReturnType<typeof fixture>, cookie: string): string {
+  const owner = randomUUID();
+  const id = "01JXYZ0000000000000000000B";
+  f.ledger.save({
+    v: 1,
+    id,
+    parentCellId: f.parent.id,
+    owner,
+    prefix: "localdot-test-",
+    createdAt: new Date().toISOString(),
+    scale: 2,
+    keydPort: 4762,
+    tokens: { browserd: "x".repeat(43), stream: "y".repeat(43) },
+    resources: {},
+    phase: "stopped",
+  });
+  const legacy = `localdot-test-profile-${id}`;
+  f.docker.volumes.set(legacy, {
+    Name: legacy,
+    Labels: {
+      "localdot.cell": id,
+      "localdot.parent": f.parent.id,
+      "localdot.role": "profile",
+      "localdot.browser-owner": owner,
+    },
+    CreatedAt: "2026-01-01T00:00:00Z",
+    syntheticCookie: cookie,
+  });
+  return legacy;
 }
 
 describe("persistent browser lifecycle", () => {
@@ -154,7 +189,7 @@ describe("persistent browser lifecycle", () => {
         .filter((spec) => spec.Hostname)
         .map((spec) => spec.HostConfig.Mounts);
     await f.controller.start(f.parent.id);
-    const accounts = f.docker.volumes.get("localdot-test-accounts");
+    const accounts = f.docker.volumes.get(f.accounts);
     if (!accounts) throw new Error("the shared profile is missing");
     accounts.syntheticCookie = "signed-in";
     await f.controller.stop(f.parent.id);
@@ -171,12 +206,12 @@ describe("persistent browser lifecycle", () => {
     expect([...f.docker.volumes.values()]).toEqual([accounts]);
     expect(accounts.syntheticCookie).toBe("signed-in");
     expect(mounted()).toEqual(
-      Array(3).fill([{ Type: "volume", Source: "localdot-test-accounts", Target: "/profile" }]),
+      Array(3).fill([{ Type: "volume", Source: f.accounts, Target: "/profile" }]),
     );
     const holders = f.docker.requests
       .filter((request) => request.path === "/containers/create")
       .map((request) => request.body as { Labels: Record<string, string>; HostConfig: object })
-      .filter((spec) => JSON.stringify(spec.HostConfig).includes("localdot-test-accounts"));
+      .filter((spec) => JSON.stringify(spec.HostConfig).includes(f.accounts));
     expect(new Set(holders.map((spec) => spec.Labels["localdot.role"]))).toEqual(
       new Set(["browser"]),
     );
@@ -184,48 +219,87 @@ describe("persistent browser lifecycle", () => {
 
   it("moves the computer's existing browser profile into the shared one on first start", async () => {
     const f = fixture();
-    const owner = randomUUID();
-    const id = "01JXYZ0000000000000000000B";
-    f.ledger.save({
-      v: 1,
-      id,
-      parentCellId: f.parent.id,
-      owner,
-      prefix: "localdot-test-",
-      createdAt: new Date().toISOString(),
-      scale: 2,
-      keydPort: 4762,
-      tokens: { browserd: "x".repeat(43), stream: "y".repeat(43) },
-      resources: {},
-      phase: "stopped",
-    });
-    const legacy = `localdot-test-profile-${id}`;
-    f.docker.volumes.set(legacy, {
-      Name: legacy,
-      Labels: {
-        "localdot.cell": id,
-        "localdot.parent": f.parent.id,
-        "localdot.role": "profile",
-        "localdot.browser-owner": owner,
-      },
+    const legacy = legacyProfile(f, "from-before");
+    await f.controller.start(f.parent.id);
+    expect(f.docker.volumes.get(f.accounts)?.syntheticCookie).toBe("from-before");
+    expect(f.docker.volumes.get(legacy)?.syntheticCookie).toBe("from-before");
+  });
+
+  it("never fills the sign-ins from a profile another install left on the same Docker", async () => {
+    const f = fixture();
+    const foreign = "localdot-test-profile-01JXYZ0000000000000000000F";
+    f.docker.volumes.set(foreign, {
+      Name: foreign,
+      Labels: { "localdot.cell": "01JXYZ0000000000000000000F", "localdot.role": "profile" },
       CreatedAt: "2026-01-01T00:00:00Z",
-      syntheticCookie: "from-before",
+      syntheticCookie: "someone-else",
     });
     await f.controller.start(f.parent.id);
-    expect(f.docker.volumes.get("localdot-test-accounts")?.syntheticCookie).toBe("from-before");
-    expect(f.docker.volumes.get(legacy)?.syntheticCookie).toBe("from-before");
+    expect(f.docker.volumes.get(f.accounts)?.syntheticCookie).toBeUndefined();
+    expect(f.docker.volumes.get(foreign)?.syntheticCookie).toBe("someone-else");
+  });
+
+  it("leaves no profile with old sign-ins behind on Clear all", async () => {
+    const f = fixture();
+    legacyProfile(f, "from-before");
+    await f.controller.start(f.parent.id);
+    await f.controller.clearAccounts();
+    expect([...f.docker.volumes.keys()]).toEqual([f.accounts]);
+    expect(f.docker.volumes.get(f.accounts)?.syntheticCookie).toBeUndefined();
+    f.nextInstance();
+    await f.controller.start(f.parent.id);
+    expect(f.docker.volumes.get(f.accounts)?.syntheticCookie).toBeUndefined();
+  });
+
+  it("lets Clear all go ahead of a Replace computer still waiting to copy old sign-ins", async () => {
+    const f = fixture();
+    const legacy = legacyProfile(f, "from-before");
+    const source = f.controller.resetSource(f.parent.id);
+    f.unavailable();
+    const retire = vi.fn(async () => {});
+    const cleared = f.controller.clearAccounts();
+    const reset = f.controller.retireReset(f.parent.id, source, retire);
+    const outcome = await Promise.race([
+      Promise.allSettled([cleared, reset]),
+      new Promise((resolve) => setTimeout(() => resolve("stuck"), 2000)),
+    ]);
+    expect(outcome).not.toBe("stuck");
+    await expect(cleared).resolves.toBeUndefined();
+    await expect(reset).rejects.toThrow("cancelled");
+    expect(retire).not.toHaveBeenCalled();
+    expect(f.docker.volumes.has(legacy)).toBe(false);
+  });
+
+  it("stops counting a removed computer as holding the sign-ins after recovery", async () => {
+    const f = fixture();
+    await f.controller.start(f.parent.id);
+    expect(f.controller.profileHolder()).toBe(f.parent.id);
+    await f.controller.remove(f.parent.id, { purgeProfile: true });
+    await f.controller.reconcile();
+    expect(f.controller.profileHolder()).toBeUndefined();
+  });
+
+  it("counts a browser whose stop could not be confirmed as still holding the sign-ins", async () => {
+    const f = fixture();
+    await f.controller.start(f.parent.id);
+    f.docker.before = (request) => {
+      if (request.method === "DELETE" && request.path.startsWith("/containers/"))
+        throw new Error("synthetic docker failure");
+    };
+    await expect(f.controller.stop(f.parent.id)).rejects.toThrow("could not be confirmed");
+    expect(f.controller.profileHolder()).toBe(f.parent.id);
   });
 
   it("lets go of the sign-ins and starts them again empty on Clear all", async () => {
     const f = fixture();
     await f.controller.start(f.parent.id);
-    const accounts = f.docker.volumes.get("localdot-test-accounts");
+    const accounts = f.docker.volumes.get(f.accounts);
     if (!accounts) throw new Error("the shared profile is missing");
     accounts.syntheticCookie = "signed-in";
     await f.controller.clearAccounts();
     expect(f.controller.endpoints(f.parent.id)).toBeUndefined();
     expect(f.docker.containers.size).toBe(0);
-    expect(f.docker.volumes.get("localdot-test-accounts")?.syntheticCookie).toBeUndefined();
+    expect(f.docker.volumes.get(f.accounts)?.syntheticCookie).toBeUndefined();
     f.nextInstance();
     await f.controller.start(f.parent.id);
   });
@@ -334,12 +408,12 @@ describe("persistent browser lifecycle", () => {
     const first = await f.controller.start(f.parent.id);
     await f.controller.remove(f.parent.id);
     expect(f.store.browserFor(f.parent.id)).toBeUndefined();
-    expect([...f.docker.volumes.keys()]).toEqual(["localdot-test-accounts"]);
+    expect([...f.docker.volumes.keys()]).toEqual([f.accounts]);
     expect(f.controller.reservedKeydPorts()).not.toContain(4762);
     f.nextInstance();
     expect((await f.controller.start(f.parent.id)).browserCellId).toBe(first.browserCellId);
     await f.controller.remove(f.parent.id, { purgeProfile: true });
-    expect([...f.docker.volumes.keys()]).toEqual(["localdot-test-accounts"]);
+    expect([...f.docker.volumes.keys()]).toEqual([f.accounts]);
     expect(f.ledger.list()).toEqual([]);
   });
 

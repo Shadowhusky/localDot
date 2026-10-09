@@ -182,10 +182,11 @@ browser = new BrowserOrchestrator({
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const browserRecovery = new BrowserRecovery(browser);
-const browserWarmer =
-  process.env.LOCALDOT_BROWSER_WARM === "0"
-    ? undefined
-    : new BrowserWarmer({ cells: orchestrator, browser, available: browserAvailable });
+const browserWarmer = new BrowserWarmer({
+  cells: orchestrator,
+  browser,
+  available: browserAvailable,
+});
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
   parents: orchestrator,
@@ -346,7 +347,7 @@ const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
-  () => browserWarmer?.dispose(),
+  () => browserWarmer.dispose(),
   () => browserRecovery.close(),
   () => agent?.close(),
   () => orchestrator.dispose(),
