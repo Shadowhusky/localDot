@@ -147,6 +147,30 @@ func TestAJudgeCellReachesOnlyItsKeysHosts(t *testing.T) {
 	}
 }
 
+// A connector cell holds only web API keys: keyd swaps its key in at the bound host, it reaches the
+// rest of the web without one, and the LLM gateway not at all.
+func TestAConnectorCellSwapsItsKeyAndHasNoGateway(t *testing.T) {
+	m, w := newManager(t)
+	seen := make(chan string, 1)
+	var hits atomic.Int32
+	w.tlsUpstream("api.example.test", echo(&hits, seen))
+	if _, err := m.Open(OpenRequest{CellID: "k0", Role: "connector", Secrets: []string{"anthropic"}}); err == nil {
+		t.Fatal("a connector cell took an LLM key")
+	}
+	o, err := m.Open(OpenRequest{CellID: "k1", Role: "connector", Secrets: []string{"weather"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := cellClient(w, o)
+	resp, _ := do(t, client, "POST", "https://api.example.test/mcp", http.Header{"Authorization": {"Bearer " + o.Surrogates["weather"]}})
+	if got := <-seen; resp.StatusCode != 200 || got != "Bearer "+realValue {
+		t.Fatalf("connector request: %d, upstream saw %q", resp.StatusCode, got)
+	}
+	if resp, err := client.Post("http://llm.ldot/anthropic/messages", "application/json", strings.NewReader("{}")); err == nil && resp.StatusCode == 200 {
+		t.Fatal("a connector cell reached the LLM gateway")
+	}
+}
+
 func TestCloseRemovesTheListenerSurrogatesAndCA(t *testing.T) {
 	m, w := newManager(t)
 	o, _ := m.Open(OpenRequest{CellID: "c1", Role: "brain", Secrets: []string{"anthropic"}})

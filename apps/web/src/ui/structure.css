@@ -790,6 +790,11 @@
   .ui-group-row-chevron {
     color: var(--color-fg-4);
     stroke-width: 2;
+    transition: transform var(--dur-default) var(--ease-spring);
+  }
+
+  .ui-group-row[data-expanded] .ui-group-row-chevron {
+    transform: rotate(180deg);
   }
 
   /* A Switch or an inline Field standing as a row keeps the row's room. */
@@ -995,6 +1000,7 @@
 
     .ui-disclosure-chevron,
     .ui-file-chevron,
+    .ui-group-row-chevron,
     .ui-thumbnail {
       transition: none;
     }

@@ -56,6 +56,7 @@ const SOURCES: Readonly<Record<TaintKind, string>> = {
   memory: "what it remembers about you",
   files: "your files",
   recall: "your past conversations",
+  app: "your connected apps",
 };
 
 // Why a connection asks, in the purpose check's words when it could judge the destination; null

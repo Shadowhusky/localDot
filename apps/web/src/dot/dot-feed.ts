@@ -5,6 +5,7 @@ import {
   startedCount,
   stepAt,
 } from "@localdot/stage";
+import { isConnectorToolName, toolAccess } from "../../../../packages/protocol/src/connectors.ts";
 import {
   type Status,
   type StatusRow,
@@ -118,6 +119,11 @@ function toolOfAction(a: ActionState): DotTool {
 
 function toolOfStep(step: StepState): DotTool | null {
   const title = step.title ?? "";
+  // A connected app: reading from it is reading a page, a change to it flies off as a message.
+  if (step.tool && isConnectorToolName(step.tool)) {
+    const tool = step.tool.slice(step.tool.indexOf("__") + 2);
+    return toolAccess({ name: tool }).access === "read" ? "browsing" : "sending";
+  }
   switch (step.tool) {
     case "shell":
       return SHELL_WRITES.test(title) ? "typing" : "terminal";

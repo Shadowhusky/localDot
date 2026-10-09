@@ -8,6 +8,11 @@ import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
+import {
+  type ConnectorRoutesDeps,
+  connectorCallbackRoute,
+  connectorRoutes,
+} from "./connectors/routes.ts";
 import { type DeliverablesDeps, deliverableRoutes } from "./deliverables/routes.ts";
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
 import { errorCode } from "./error-code.ts";
@@ -52,6 +57,7 @@ export interface AppOptions {
   exports?: ExportJobs;
   notify?: NotifyRoutesDeps;
   routines?: RoutineRoutesDeps;
+  connectors?: Omit<ConnectorRoutesDeps, "port">;
   voice?: VoiceRoutesDeps;
 }
 
@@ -76,6 +82,7 @@ export function createApp({
   exports,
   notify,
   routines,
+  connectors,
   voice,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
@@ -116,6 +123,7 @@ export function createApp({
   });
 
   app.get("/healthz", (c) => c.text("ok"));
+  if (connectors?.signIn) connectorCallbackRoute(app, connectors.signIn);
 
   if (ui) serveUi(app, ui.dir);
 
@@ -194,5 +202,6 @@ export function createApp({
   if (notify) notifyRoutes(app, notify);
   if (voice) voiceRoutes(app, voice);
   if (exports) exportRoutes(app, exports, new ExportLinks());
+  if (connectors) connectorRoutes(app, { ...connectors, port });
   return app;
 }

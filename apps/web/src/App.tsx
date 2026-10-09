@@ -103,6 +103,7 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useConnectors } from "./settings/useConnectors.ts";
 import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
@@ -730,6 +731,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const settingsKnowledge = useKnowledge(api, null, settings.open);
   const whatDotKnows = useWhatDotKnows(api, settings.open);
   const settingsNotifications = useNotifications(api, settings.open);
+  const settingsConnectors = useConnectors(api, settings.open);
   const settingsAccounts = useAccounts(
     api,
     cell?.state === "ready" && !cell.paused ? cell.id : null,
@@ -2033,6 +2035,7 @@ function Theatre({ api }: { api: ApiClient }) {
           notifications={settingsNotifications}
           accounts={settingsAccounts}
           signIn={signIn}
+          connectors={settingsConnectors}
           rules={rules}
           spending={
             settings.draft

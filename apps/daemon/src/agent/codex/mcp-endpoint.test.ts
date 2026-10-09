@@ -203,6 +203,23 @@ describe("private Codex MCP capability", () => {
     expect(denied).toHaveProperty("error");
     expect(f.calls).toEqual([]);
   });
+  it("lists the task's connected apps' tools after the v1 table", async () => {
+    const f = await fixture({}, false);
+    const spec = {
+      name: "linear__list_issues",
+      app: "Linear",
+      description: "Linear (the user's connected app): List issues.",
+      inputSchema: { type: "object", properties: { team: { type: "string" } } },
+    };
+    f.session.connectors = { specs: [spec], get: () => undefined };
+    const reply = await f.c.request("tools/list", {});
+    const tools = (reply.result as { tools: { name: string; description: string }[] }).tools;
+    expect(tools.map((t) => t.name)).toEqual([...offeredTools(false), "linear__list_issues"]);
+    expect(tools.at(-1)).toMatchObject({
+      description: spec.description,
+      inputSchema: spec.inputSchema,
+    });
+  });
   it("lists the research tool to a research task", async () => {
     const session = new AgentSession(ulid(), "fixture-cell", "fixture", {
       append: (_id, event) => event as never,

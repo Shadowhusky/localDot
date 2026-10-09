@@ -36,6 +36,7 @@ export const STEP_KIND_LABEL: Record<string, string> = {
   browser: "Reading page",
   ask: "Asking you",
   think: "Thinking",
+  app: "Using an app",
 };
 const statuses = new Set(["doing", "ok", "failed", "blocked", "cancelled"]);
 function endOf(model: SessionModel, step: StepState, index: number, endMs: number): number {

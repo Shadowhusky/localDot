@@ -821,3 +821,201 @@
   flex: none;
   color: var(--color-danger-fg);
 }
+
+/* Connectors: one group per app (its switch, what it needs next, its tools behind a disclosure),
+   then the apps that can be added, each opening its form in its own row. */
+.settings-connectors,
+.connectors-block,
+.connectors-apps {
+  display: grid;
+  gap: var(--_settings-block);
+  min-width: 0;
+}
+
+.connectors-block {
+  gap: 0;
+}
+
+.connectors-apps {
+  gap: calc(var(--spacing) * 3);
+}
+
+.connectors-catalog,
+.connectors-tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connectors-status {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.connectors-status:is([data-status="needs_key"], [data-status="needs_sign_in"])::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-attention);
+}
+
+.connectors-status[data-status="failed"] {
+  color: var(--color-fg-2);
+}
+
+.connectors-pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-fg-2);
+  animation: connectors-pulse 1.4s var(--ease-standard) infinite alternate;
+}
+
+@keyframes connectors-pulse {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The tools sit in the disclosure's column, one quiet row each. */
+.connectors-tool {
+  padding-inline-start: calc(var(--spacing) * 5);
+}
+
+.connectors-tool .ui-group-row-label {
+  font-size: var(--text-callout);
+  line-height: var(--text-callout--line-height);
+}
+
+.connectors-tool .ui-group-row-detail {
+  color: var(--color-fg-3);
+}
+
+.connectors-search {
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 5);
+  box-shadow: inset 0 1px 0 var(--color-separator);
+}
+
+.settings-body .connectors-search .ui-text-field,
+.settings-body .connectors-form .ui-text-field {
+  flex: 1;
+  width: 100%;
+}
+
+.connectors-empty {
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 5);
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.connectors-actions {
+  box-shadow: inset 0 1px 0 var(--color-separator);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2) calc(var(--spacing) * 1.5)
+    calc(var(--spacing) * 3);
+}
+
+.connectors-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  margin-top: var(--spacing);
+}
+
+.connectors-link > a {
+  color: var(--color-fg-1);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: calc(var(--spacing) * 0.5);
+}
+
+.connectors-host {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 calc(var(--spacing) * 1.25);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-control);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.connectors-form {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+/* A form opened in its row sits under the row's line, inside the same cell. */
+.connectors-inline {
+  padding-block: calc(var(--spacing) * 3) calc(var(--spacing) * 1.5);
+}
+
+.connectors-form > .ui-segmented {
+  display: grid;
+  width: 100%;
+}
+
+.connectors-key {
+  padding-top: var(--spacing);
+}
+
+.connectors-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 2);
+}
+
+.connectors-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.connectors-or {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.connectors-failure {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3.5);
+  box-shadow: inset 0 1px 0 var(--color-separator);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.connectors-form > .connectors-failure {
+  padding: 0;
+  box-shadow: none;
+}
+
+.connectors-failure > .ui-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-danger-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connectors-pulse {
+    animation: none;
+  }
+}

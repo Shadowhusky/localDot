@@ -5,7 +5,7 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
-import { TOOL_NAMES } from "@localdot/protocol";
+import { isConnectorToolName, TOOL_NAMES } from "@localdot/protocol";
 import type { ClaudeCodeLaunch } from "./setup.ts";
 
 export const LOCALDOT_SERVER = "localdot";
@@ -44,8 +44,14 @@ export const BUILT_IN_TOOLS: readonly string[] = Object.freeze([
 ]);
 
 // Every tool call asks here: localDot's own in-process server is allowed, anything else refused.
+const PREFIX = `mcp__${LOCALDOT_SERVER}__`;
+// Connected apps' tools are served by the same in-process server, which checks each against the
+// task's own list.
 export const onlyLocaldot: CanUseTool = async (name, input, { mcpServer }) =>
-  LOCALDOT_TOOLS.includes(name) && mcpServer?.source === "sdk" && mcpServer.name === LOCALDOT_SERVER
+  (LOCALDOT_TOOLS.includes(name) ||
+    (name.startsWith(PREFIX) && isConnectorToolName(name.slice(PREFIX.length)))) &&
+  mcpServer?.source === "sdk" &&
+  mcpServer.name === LOCALDOT_SERVER
     ? { behavior: "allow", updatedInput: input }
     : { behavior: "deny", message: "Only localDot's tools are available." };
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConnectorToolSpec, MAX_TASK_CONNECTOR_TOOLS } from "./connectors.ts";
 import { EarlierTurns } from "./conversation.ts";
 import {
   AgentState,
@@ -110,6 +111,8 @@ export const BootConfig = z.object({
   recent: z.array(RecentLine).max(RECENT_TASKS).optional(),
   // Present when a routine started this task: the brain is told it runs unattended.
   run: SessionRun.optional(),
+  // The user's connected apps' tools, as this task sees them.
+  connectors: z.array(ConnectorToolSpec).max(MAX_TASK_CONNECTOR_TOOLS).optional(),
   // Present in research mode: the brain gets the research rules and tool, with this budget.
   research: ResearchBudget.optional(),
 });

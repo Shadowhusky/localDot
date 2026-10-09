@@ -24,6 +24,7 @@ import {
 } from "@localdot/protocol";
 import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
 import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
+import { NO_CONNECTORS as NO_TASK_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
 import type { ResearchLog } from "./research.ts";
@@ -227,6 +228,8 @@ export class AgentSession {
   research: ResearchLog | undefined;
   // The user's last few tasks when this one started.
   recent: readonly RecentLine[] = [];
+  // The connected apps' tools this task's model was shown.
+  connectors: TaskConnectors = NO_TASK_CONNECTORS;
   toolCalls = 0;
   // The user's optional hard stop: the most tool calls between two of their messages.
   actionLimit: number | undefined;

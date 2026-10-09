@@ -37,6 +37,8 @@ export interface Place {
   readonly site?: string;
   readonly app?: string;
   readonly destination?: string;
+  // A connected app's tool: only a yes for that tool, in this task, covers it.
+  readonly tool?: string;
 }
 
 const Rule = AutonomyRule.refine((rule) => ALWAYS_SCOPES[rule.actionClass].includes(rule.scope));

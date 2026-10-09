@@ -112,4 +112,36 @@ describe("Claude Code as dot's brain", () => {
     expect(call).toHaveBeenCalledWith("shell", { command: "ls" }, expect.any(AbortSignal));
     await mcp.close();
   });
+  it("lets the task's connected apps' tools through the same server, and nothing named like them elsewhere", async () => {
+    const ask = (name: string, mcpServer?: { name: string; source: string }) =>
+      onlyLocaldot(name, {}, {
+        signal: new AbortController().signal,
+        ...(mcpServer ? { mcpServer } : {}),
+      } as never);
+    const sdk = { name: "localdot", source: "sdk" };
+    expect((await ask("mcp__localdot__linear__list_issues", sdk))?.behavior).toBe("allow");
+    expect(
+      (await ask("mcp__localdot__linear__list_issues", { name: "localdot", source: "user" }))
+        ?.behavior,
+    ).toBe("deny");
+    expect(
+      (await ask("mcp__other__linear__list_issues", { name: "other", source: "sdk" }))?.behavior,
+    ).toBe("deny");
+    expect((await ask("mcp__localdot__not a tool", sdk))?.behavior).toBe("deny");
+    const call = vi.fn(async () => ({ isError: false, content: [] }));
+    const server = localdotServer(call, false, () => [
+      {
+        name: "linear__list_issues",
+        description: "Linear (the user's connected app): List issues.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ]);
+    const mcp = await connect(server);
+    const listed = await mcp.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toEqual([
+      ...offeredTools(false),
+      "linear__list_issues",
+    ]);
+    await mcp.close();
+  });
 });

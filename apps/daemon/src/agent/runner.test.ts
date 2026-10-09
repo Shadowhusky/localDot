@@ -1404,3 +1404,27 @@ it("native Pause receipt uncertainty runs the existing revoke and computer conta
   expect(f.containment).toHaveBeenCalledWith(session.id);
   expect(session.safetyPause?.resumeAvailable).toBe(false);
 });
+
+describe("connected apps", () => {
+  it("shows each model start the connectors as the user's settings stand then", async () => {
+    const f = setup();
+    const spec = {
+      name: "linear__list_issues",
+      app: "Linear",
+      description: "Linear (the user's connected app): List issues.",
+      inputSchema: { type: "object" },
+    };
+    const snapshot = { specs: [spec], get: () => undefined };
+    f.deps.connectors = vi.fn(() => snapshot);
+    let seen: unknown;
+    f.run.mockImplementationOnce(async (session) => {
+      seen = session.connectors;
+      return 0;
+    });
+    const task = await f.runner.start(f.cellId, "Check my issues");
+    await until(() => seen !== undefined);
+    expect(seen).toBe(snapshot);
+    task.stop();
+    await f.live.settled(task.id);
+  });
+});

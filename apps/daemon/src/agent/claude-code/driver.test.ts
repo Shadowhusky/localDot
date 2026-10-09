@@ -273,6 +273,51 @@ describe("Claude Code driver", () => {
     expect(f.session.generation).toBeUndefined();
   });
 
+  it("shows the task's connected apps' tools and passes their calls on, but no others", async () => {
+    const f = fixture();
+    const spec = {
+      name: "linear__list_issues",
+      app: "Linear",
+      description: "Linear (the user's connected app): List issues.",
+      inputSchema: { type: "object", properties: {} },
+    };
+    f.session.connectors = {
+      specs: [spec],
+      get: (name) =>
+        name === spec.name
+          ? {
+              exposed: spec.name,
+              connectorId: "linear",
+              app: "Linear",
+              tool: "list_issues",
+              spec,
+              schema: {},
+            }
+          : undefined,
+    };
+    const result = f.run();
+    const fake = await f.started();
+    const tools = await (await fake.mcp()).listTools();
+    expect(tools.tools.map((tool) => tool.name)).toEqual([
+      ...offeredTools(false),
+      "linear__list_issues",
+    ]);
+    await fake.call("linear__list_issues", { team: "ENG" });
+    expect(f.dispatch).toHaveBeenLastCalledWith(
+      f.session,
+      expect.anything(),
+      "linear__list_issues",
+      expect.stringMatching(/^claude-/),
+      { team: "ENG" },
+      expect.any(AbortSignal),
+    );
+    const calls = f.dispatch.mock.calls.length;
+    expect(await fake.call("github__delete_repo", {})).toMatchObject({ isError: true });
+    expect(f.dispatch.mock.calls.length).toBe(calls);
+    await fake.call("done", { summary: "ok" });
+    await result;
+  });
+
   it("checks each action against the newest screenshot dot had seen when it chose it", async () => {
     const f = fixture();
     const result = f.run();

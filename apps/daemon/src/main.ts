@@ -564,7 +564,15 @@ const app = createApp({
     killSwitch,
     prepareDesktopTask: agent.prepareDesktopTask,
   },
-  keys: { keyd, monitor: keydMonitor, afterChange: (id) => refreshRunningCells(orchestrator, id) },
+  keys: {
+    keyd,
+    monitor: keydMonitor,
+    afterChange: async (id) => {
+      await agent.connectors.afterKeyChange(id);
+      return refreshRunningCells(orchestrator, id);
+    },
+  },
+  connectors: { hub: agent.connectors, keyd, signIn: agent.connectorSignIn },
   notify: notify.routes,
   voice: { speech: installedSpeech() },
   routines: {

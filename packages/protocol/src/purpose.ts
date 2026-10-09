@@ -8,7 +8,7 @@ export type PurposeCheck = z.infer<typeof PurposeCheck>;
 
 // What private data a task has read. The origin names where (a host, a file, a memory file),
 // never what was read.
-export const TaintKind = z.enum(["screen", "memory", "files", "recall"]);
+export const TaintKind = z.enum(["screen", "memory", "files", "recall", "app"]);
 export type TaintKind = z.infer<typeof TaintKind>;
 export const TaintSource = z.strictObject({
   kind: TaintKind,

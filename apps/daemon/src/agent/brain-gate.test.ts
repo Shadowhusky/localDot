@@ -25,7 +25,7 @@ function run(role: string | undefined, toolPort?: string, extra: Record<string, 
       env: {
         PATH: `${dir}:/usr/bin:/bin`,
         GATE_CALLS: log,
-        GATE_EXPECTED: role === "brain" ? "2" : "3",
+        GATE_EXPECTED: role === "brain" ? "2" : role === "connector" ? "1" : "3",
         LD_INTERNAL_ADDR: "172.30.4.10",
         LD_EGRESS_ADDR: "172.30.5.10",
         LD_DESKTOP_ADDR: "172.30.4.11",
@@ -55,6 +55,13 @@ describe("gate role boundary", () => {
     expect(result.calls).toEqual([
       "TCP4-LISTEN:3128,bind=172.30.4.10,fork,reuseaddr TCP4:host.docker.internal:4791",
       "TCP4-LISTEN:4751,bind=172.30.4.10,fork,reuseaddr TCP4:host.docker.internal:4999",
+    ]);
+  });
+  it("connector relays only keyd out, and nothing in", () => {
+    const result = run("connector");
+    expect(result.status).toBe(1);
+    expect(result.calls).toEqual([
+      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,reuseaddr TCP4:host.docker.internal:4791",
     ]);
   });
   it("retains the default desktop route directions", () => {
