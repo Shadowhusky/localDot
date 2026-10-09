@@ -219,19 +219,19 @@ func TestSignedMigrationTellsARecordChangedOutsideKeydApart(t *testing.T) {
 }
 
 // With no marker, the helper's listing finds a bound item the index does not name, so the migration
-// closes instead of beginning for an index that names only an unbound record.
+// closes instead of beginning for an index that names only an unbound record, and retires that
+// record's unbound head rather than binding it.
 func TestSignedMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
 	k := newSignedKeychain(t)
 	if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
 		t.Fatal(err)
 	}
 	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
-	planted := k.head(t, "deepseek")
 	v := k.open(t, writeIndex(t, beforeUpgrade, movedDeepseek))
 	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
 		t.Fatalf("migration = %+v", m)
 	}
-	if head := k.head(t, "deepseek"); head != planted {
+	if head := k.head(t, "deepseek"); head != retiredHead {
 		t.Fatalf("deepseek's head became %q", head)
 	}
 }

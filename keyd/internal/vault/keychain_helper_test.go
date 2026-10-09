@@ -313,8 +313,8 @@ func TestInvalidReadAndDeleteDoNotRunHelper(t *testing.T) {
 }
 
 func TestSignedKeychainIdentityCheckOnly(t *testing.T) {
-	if os.Getenv("KEYD_SIGNED_IDENTITY_TEST") != "1" {
-		t.Skip("requires an explicitly signed fixture; no Keychain item access")
+	if os.Getenv("KEYD_SIGNED_VAULT") != "1" {
+		t.Skip("needs this test executable signed as keyd; set KEYD_SIGNED_VAULT=1")
 	}
 	if err := NewKeychain("localdot-keyd-test").Check(); err != nil {
 		t.Fatal(err)
