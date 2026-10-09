@@ -84,4 +84,13 @@ describe("defaultScope", () => {
     expect(defaultScope({ actionClass: "browsing", always: task })).toBe("task");
     expect(defaultScope({ actionClass: "browsing" })).toBe("once");
   });
+
+  it("answers once when dot would send what it read somewhere new", () => {
+    for (const actionClass of ["browsing", "computer"] as const)
+      expect(
+        defaultScope({ actionClass, always: task, destinations: ["evil.example"] }),
+        actionClass,
+      ).toBe("once");
+    expect(defaultScope({ actionClass: "computer", always: [] })).toBe("once");
+  });
 });

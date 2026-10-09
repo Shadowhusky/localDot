@@ -121,8 +121,11 @@ export function decisionWords(
 export const ONCE = "once";
 export type DecisionScope = AlwaysScope | typeof ONCE;
 
-// How far a yes reaches until changed: once for anything that acts as you, this task for the rest.
-export function defaultScope(card: Pick<ApprovalCard, "actionClass" | "always">): DecisionScope {
-  if (ALWAYS_ASKS[card.actionClass]) return ONCE;
+// How far a yes reaches until changed: once for anything that acts as you or sends what dot read
+// somewhere new, this task for the rest.
+export function defaultScope(
+  card: Pick<ApprovalCard, "actionClass" | "always" | "destinations">,
+): DecisionScope {
+  if (ALWAYS_ASKS[card.actionClass] || card.destinations) return ONCE;
   return card.always?.some((option) => option.scope === "task") ? "task" : ONCE;
 }
