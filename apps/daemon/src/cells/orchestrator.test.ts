@@ -254,6 +254,48 @@ describe("CellOrchestrator.create", () => {
     expect(orchestrator.list().every((c) => c.state !== "ready")).toBe(true);
   });
 
+  // An older gate image has no capture label and no link.sh for the helper to run.
+  const olderGate = () => {
+    fake.state.imageLabels.clear();
+    fake.state.failRequests.add("POST /containers/id-localdot-link-");
+  };
+  const settled = (orchestrator: CellOrchestrator, id: string) =>
+    waitUntil(() => ["ready", "failed"].includes(orchestrator.get(id)?.state ?? ""));
+
+  it("makes a computer without capture from a gate image that can't capture", async () => {
+    const { orchestrator, store } = await setup();
+    olderGate();
+    const cell = await orchestrator.create({ scale: 2 });
+    await settled(orchestrator, cell.id);
+    expect(orchestrator.get(cell.id)?.state).toBe("ready");
+    const record = store.get(cell.id);
+    if (record?.kind !== "desktop") throw new Error("no desktop record");
+    expect(record.tokens).not.toHaveProperty("capture");
+    const gate = fake.state.containers.get(record.docker.gate)?.body as
+      | { User?: string; Env?: string[] }
+      | undefined;
+    expect(gate?.User).toBe("nobody");
+    expect(gate?.Env?.some((entry) => entry.startsWith("LD_CAPTURE_TOKEN="))).toBe(false);
+    expect(fake.state.containers.get(record.docker.desktop)?.body.HostConfig).not.toHaveProperty(
+      "Dns",
+    );
+    expect(
+      fake.state.calls.some((c) => c.query.get("name")?.startsWith("localdot-link-") ?? false),
+    ).toBe(false);
+  });
+
+  it("starts a computer without its link once the gate image can't capture", async () => {
+    const { orchestrator, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    await orchestrator.stop(cell.id);
+    olderGate();
+    await orchestrator.start(cell.id);
+    await settled(orchestrator, cell.id);
+    expect(orchestrator.get(cell.id)?.state).toBe("ready");
+    expect(callsTo(`POST /containers/id-localdot-link-${cell.id}/wait`)).toBe(1);
+  });
+
   it("labels every Docker object it creates with the labels it was given", async () => {
     const { orchestrator, stateOf } = await setup({ labels: { "dev.localdot.test": "unit" } });
     const cell = await orchestrator.create({ scale: 2 });

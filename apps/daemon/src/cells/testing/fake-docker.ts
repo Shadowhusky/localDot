@@ -62,6 +62,8 @@ export interface FakeDockerState {
   imageInspect?: (reference: string, reply: Record<string, unknown>) => unknown;
   // The image ID a reference names now; a rebuilt image moves its tag to a new ID.
   imageIds: Map<string, string>;
+  // An image's own labels, by reference; the gate image built from this tree says it captures.
+  imageLabels: Map<string, Record<string, string>>;
   // Extra /info fields, such as the limits a native engine supports.
   info?: Record<string, unknown>;
 }
@@ -109,6 +111,7 @@ export async function startFakeDocker(
     loseReplies: new Set(),
     holds: new Map(),
     imageIds: new Map(),
+    imageLabels: new Map([["localdot/gate:dev", { "localdot.capture": "1" }]]),
     ...overrides,
   };
   let networkSeq = 20;
@@ -172,6 +175,7 @@ export async function startFakeDocker(
         Os: "linux",
         Architecture: state.version.Arch,
         RepoDigests: reference.includes("@") ? [reference] : [],
+        Config: { Labels: state.imageLabels.get(reference) ?? null },
       };
       return state.images.has(reference)
         ? json(200, state.imageInspect ? state.imageInspect(reference, reply) : reply)

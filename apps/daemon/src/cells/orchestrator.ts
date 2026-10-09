@@ -7,7 +7,7 @@ import type { ComputerUpdates } from "./computer-update.ts";
 import { type DiagnosticSelfTest, probeDiagnosticSelfTest } from "./diagnostic-selftest.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-retirement.ts";
-import type { Images } from "./images.ts";
+import { gateCaptures, type ImageInspect, type Images } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
 import { type GateRelay, HOST_RELAY } from "./relay.ts";
@@ -180,8 +180,11 @@ const isStatus = (err: unknown, ...statuses: number[]) =>
 
 // Names come back from cell.json, which can be edited by hand, so each one is sent as exactly one
 // path segment.
-const objectPath = (kind: "containers" | "networks" | "volumes", name: string, action?: string) =>
-  `/${kind}/${encodeURIComponent(name)}${action ? `/${action}` : ""}`;
+const objectPath = (
+  kind: "containers" | "networks" | "volumes" | "images",
+  name: string,
+  action?: string,
+) => `/${kind}/${encodeURIComponent(name)}${action ? `/${action}` : ""}`;
 
 export const UPDATE_UNFINISHED = "The update didn't finish. Turn on your computer to finish it.";
 export const UPDATE_RECORDS_UNREADABLE =
@@ -498,6 +501,7 @@ export class CellOrchestrator {
     const names = cellNames(id, this.#namePrefix);
     const undo: UndoStep[] = [];
     try {
+      const capture = await this.#gateCaptures();
       const internal = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
@@ -553,7 +557,11 @@ export class CellOrchestrator {
         createdAt: new Date().toISOString(),
         scale,
         keydPort,
-        tokens: { desktopd: newCellToken(), stream: newCellToken(), capture: newCellToken() },
+        tokens: {
+          desktopd: newCellToken(),
+          stream: newCellToken(),
+          ...(capture ? { capture: newCellToken() } : {}),
+        },
         docker: {
           ...names,
           gateInternalIp: hostAddress(internalSubnet, GATE_OFFSET),
@@ -1164,7 +1172,7 @@ export class CellOrchestrator {
           method: "POST",
           path: objectPath("containers", d.desktop, "start"),
         });
-        if (record.tokens.capture) await this.#link(record);
+        if (record.tokens.capture && (await this.#gateCaptures())) await this.#link(record);
       }
       // Every start publishes new host ports (Review Focus 2).
       const ports = await this.#readPorts(d.gate);
@@ -1550,7 +1558,20 @@ export class CellOrchestrator {
     }
   }
 
-  // v=true also removes the anonymous volumes an image's VOLUME lines create.
+  // A gate image that isn't there can't capture; creating a gate from it fails by itself.
+  async #gateCaptures(): Promise<boolean> {
+    const image = await this.#docker
+      .request<ImageInspect>({
+        method: "GET",
+        path: objectPath("images", this.#images.gate, "json"),
+      })
+      .catch((err) => {
+        if (isStatus(err, 404)) return undefined;
+        throw err;
+      });
+    return gateCaptures(image);
+  }
+
   // A fresh desktop's network namespace has no link to its gate yet: a one-shot helper adds it.
   async #link(record: CellRecord): Promise<void> {
     const name = linkName(record.id, this.#namePrefix);
@@ -1595,6 +1616,7 @@ export class CellOrchestrator {
     return this.deps.labels ? { ...spec, Labels: { ...spec.Labels, ...this.deps.labels } } : spec;
   }
 
+  // v=true also removes the anonymous volumes an image's VOLUME lines create.
   #removeContainer(name: string): Promise<unknown> {
     return this.#docker.request({
       method: "DELETE",

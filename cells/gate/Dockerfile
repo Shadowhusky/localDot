@@ -6,5 +6,7 @@ COPY link.sh /link.sh
 # Built by build.sh from keyd/cmd/ldgate for the engine's architecture.
 COPY dist/ldgate /usr/local/bin/ldgate
 RUN chmod 555 /relay.sh /gate.sh /link.sh /usr/local/bin/ldgate
+# The daemon gives a computer capture only from a gate image that says it can (apps/daemon/src/cells/images.ts).
+LABEL localdot.capture="1"
 USER nobody
 ENTRYPOINT ["/gate.sh"]
