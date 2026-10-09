@@ -1,5 +1,5 @@
-// Package egress is a cell's door to the outside: one explicit HTTP proxy per cell on 127.0.0.1,
-// guarded by the cell's proxy token. It refuses what policy refuses, terminates TLS only for the
+// Package egress is a cell's door to the outside: one explicit HTTP proxy per cell on 127.0.0.1
+// (and, for Docker Engine, on a Unix socket), guarded by the cell's proxy token. It refuses what policy refuses, terminates TLS only for the
 // hosts the cell's surrogates are bound to, swaps surrogates there and scrubs what comes back,
 // and passes every other allowed host through after checking its SNI.
 package egress
@@ -10,10 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"maps"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +48,7 @@ const (
 	ReasonRevoked       = "revoked"
 	ReasonEncoding      = "undecodable-encoding"
 	ReasonSecret        = "secret-unavailable"
+	ReasonVaultLocked   = "vault-locked"
 	ReasonNoAudit       = "audit-unavailable"
 	ReasonConnectionCap = "connection-cap"
 )
@@ -66,6 +70,7 @@ type Cell struct {
 	cfg            Config
 	deps           Deps
 	ln             net.Listener
+	unix           net.Listener
 	srv            *http.Server
 	connect        *goproxy.ProxyHttpServer
 	intercepted    map[string]bool
@@ -94,7 +99,16 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 			c.intercepted[host] = true
 		}
 	}
-	c.ln = &limitedListener{Listener: ln, slots: make(chan struct{}, maxCellConnections), refused: c.refuseConnection}
+	slots := make(chan struct{}, maxCellConnections)
+	c.ln = &limitedListener{Listener: ln, slots: slots, refused: c.refuseConnection}
+	if cfg.RelayDir != "" {
+		unix, err := listenRelay(RelaySocket(cfg.RelayDir, c.Port()))
+		if err != nil {
+			ln.Close()
+			return nil, err
+		}
+		c.unix = &limitedListener{Listener: unix, slots: slots, refused: c.refuseConnection}
+	}
 	c.connect = c.newConnectProxy()
 	c.srv = &http.Server{
 		Handler:           c,
@@ -106,7 +120,33 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		DisableGeneralOptionsHandler: true,
 	}
 	go c.srv.Serve(c.ln)
+	if c.unix != nil {
+		go c.srv.Serve(c.unix)
+	}
 	return c, nil
+}
+
+// RelaySocket is the cell's socket in dir, named after its port.
+func RelaySocket(dir string, port int) string {
+	return filepath.Join(dir, strconv.Itoa(port)+".sock")
+}
+
+func listenRelay(path string) (net.Listener, error) {
+	// The port is this cell's now, so a socket already there was left by a cell that is gone.
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	// Gates connect as nobody. The relay folder sits in keyd's private folder, which only the
+	// gates' mount opens, and the token guards the rest, as on the TCP port.
+	if err := os.Chmod(path, 0o666); err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return ln, nil
 }
 
 func (c *Cell) ID() string { return c.cfg.CellID }
@@ -124,6 +164,10 @@ func (c *Cell) Close() error {
 	g := c.gen
 	c.mu.Unlock()
 	err := c.srv.Close()
+	if c.unix != nil {
+		// Unlinks the socket now: a cell opened next on this port makes a new one at the same path.
+		c.unix.Close()
+	}
 	g.stop()
 	return err
 }

@@ -9,6 +9,7 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
+  BannerKind,
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   CLAUDE_CODE_INSTALL,
@@ -175,7 +176,7 @@ let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
   | "signed_out"
   | "signed_in"
   | undefined;
-let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
+let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard" | "locked";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
@@ -518,7 +519,11 @@ const planItems = (finished: boolean) => [
 ];
 
 // done: end as the real runner does, with agent.state done, which raises a Done notification.
-function finishTask(s: AgentSession, a: Append, done = false) {
+// A summary written as dot writes one when it couldn't finish: a heading, a list and bold words.
+const MARKDOWN_SUMMARY =
+  "## Couldn't print the report\n\nI made **summary.md**, but this computer has no printer, so nothing was printed.\n\n### What I checked\n\n- **Printers:** none are set up on this computer\n- **Drivers:** the `cups` service isn't installed\n- **Your files:** `summary.md` and `totals.csv` are ready to print elsewhere";
+
+function finishTask(s: AgentSession, a: Append, done = false, markdown = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -535,8 +540,9 @@ function finishTask(s: AgentSession, a: Append, done = false) {
     { mode: 0o600 },
   );
   a("task.result", {
-    summary:
-      "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
+    summary: markdown
+      ? MARKDOWN_SUMMARY
+      : "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
     files: [
       { name: "summary.md", path: "summary.md", bytes: 48 },
       { name: "totals.csv", path: "totals.csv", bytes: 32 },
@@ -1426,6 +1432,7 @@ const routineChanged = (routineId: string) => {
 };
 
 // Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+// QA_BANNER=desktop|none shows Settings as on a Linux desktop or a machine with no screen.
 const pushKey = createECDH("prime256v1");
 pushKey.generateKeys();
 const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
@@ -1446,6 +1453,10 @@ const notify = createNotify({
       notified.mac.push([title, body]);
       return "shown";
     },
+  },
+  banner: {
+    kind: BannerKind.catch("mac").parse(process.env.QA_BANNER ?? "mac"),
+    notifier: { available: false, show: async () => "unavailable" },
   },
 });
 
@@ -1594,6 +1605,9 @@ routes.get("/api/keyd", (c) =>
           keydMode === "guard"
             ? { state: "unknown", addresses: 0 }
             : { state: "active", source: "router", addresses: 1 },
+        ...(keydMode === "locked"
+          ? { vault: { backend: "file", state: "locked", key: "passphrase" } }
+          : {}),
       }),
 );
 routes.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
@@ -1601,6 +1615,14 @@ routes.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
 routes.post("/api/keys", async (c) => {
+  if (keydMode === "locked")
+    return c.json(
+      {
+        error: "vault-locked",
+        message: "Saved keys are locked. On that computer, run: localdot unlock",
+      },
+      423,
+    );
   const { binding } = (await c.req.json()) as { binding: KeydRecord };
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;
@@ -2379,13 +2401,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(done = false): string | undefined {
+function finish(done = false, markdown = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append, done);
+  finishTask(owned, append, done, markdown);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -2602,7 +2624,9 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
+routes.post("/__qa/finish", (c) =>
+  reply(finish(c.req.query("done") === "1", c.req.query("markdown") === "1")),
+);
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
   if (!session || session.stopped) return c.text("no live task", 409);

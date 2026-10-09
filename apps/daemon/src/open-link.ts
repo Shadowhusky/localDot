@@ -1,9 +1,13 @@
 import { readInstallToken } from "./install-token-reader.ts";
+import { terminalQr } from "./terminal-qr.ts";
 
 export interface OpenLinkOptions {
   home: string;
   port: number;
   signal: AbortSignal;
+  // HTTPS fronts such as Tailscale Serve: the same one-use code also works through them.
+  publicOrigins?: readonly URL[];
+  qr?: boolean;
 }
 export interface OpenLinkIO {
   out(message: string): void;
@@ -77,7 +81,13 @@ export async function runOpenLink(options: OpenLinkOptions, io: OpenLinkIO): Pro
     )
       throw new Error("invalid response");
     if (controller.signal.aborted || signal.aborted) throw new Error("interrupted");
-    io.out(`http://127.0.0.1:${port}/#code=${result.code}`);
+    const local = `http://127.0.0.1:${port}/#code=${result.code}`;
+    io.out(local);
+    const remote = (options.publicOrigins ?? []).map(
+      (origin) => `${origin.origin}/#code=${result.code}`,
+    );
+    for (const link of remote) io.out(`From your other devices: ${link}`);
+    if (options.qr) printQr(remote[0], io);
     return 0;
   } catch {
     io.err(
@@ -93,4 +103,18 @@ export async function runOpenLink(options: OpenLinkOptions, io: OpenLinkIO): Pro
     void reader?.cancel().catch(() => {});
     reader?.releaseLock();
   }
+}
+
+// A phone can't open a 127.0.0.1 link, so only a link through an HTTPS front gets a code.
+function printQr(link: string | undefined, io: OpenLinkIO): void {
+  const lines = link ? terminalQr(link) : null;
+  if (!lines) {
+    io.err(
+      "No QR code: a phone can't open a link to 127.0.0.1. Set up remote access first; see docs/install.md.",
+    );
+    return;
+  }
+  io.out(
+    ["", ...lines, "", "Scan it with your phone. The link works once, within a minute."].join("\n"),
+  );
 }

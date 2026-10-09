@@ -7,7 +7,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
-import { serve } from "@hono/node-server";
+import { createAdaptorServer, serve } from "@hono/node-server";
 import {
   CHATGPT_INSTALL_FIRST,
   CHATGPT_SWITCHED_OFF,
@@ -34,6 +34,7 @@ import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
+import { type GateRelay, listenOnSocket } from "../cells/relay.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
@@ -107,6 +108,9 @@ export interface AgentWiringDeps {
   policy?: ToolPolicy;
   routines?: RoutineToolPort;
   toolPort?: number;
+  // Also serves the tool API here, for brain gates on Docker Engine (cells/relay.ts).
+  toolSocket?: string;
+  relay?: () => Promise<GateRelay>;
   codex?: { realHome: string; user: string };
   claudeCode?: { realHome: string };
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
@@ -226,6 +230,7 @@ export function createAgent(d: AgentWiringDeps) {
     range: d.keydPorts,
     desktopPorts: () => d.cells.reservedKeydPorts(),
     ...(d.toolPort === undefined ? {} : { toolPort: d.toolPort }),
+    ...(d.relay ? { relay: d.relay } : {}),
   });
   const judgeCell = new JudgeCell({
     keyd: d.keyd,
@@ -779,6 +784,11 @@ export function createAgent(d: AgentWiringDeps) {
       !d.killSwitch.isBusy(session.cellId),
     desktop: upload,
     manual,
+    desktopPage: async (cellId, signal) => {
+      const cell = d.cells.get(cellId);
+      if (!ready || closing || cell?.state !== "ready" || cell.paused) return undefined;
+      return (await desktop(cellId)?.browserRead(1, signal))?.url;
+    },
     home: d.home,
     harness,
     ...(auth && installer && setup
@@ -815,6 +825,7 @@ export function createAgent(d: AgentWiringDeps) {
     return { tools, signal: access.signal, check: access.check, release: access.release };
   };
   let server: ReturnType<typeof serve> | undefined,
+    socketServer: ReturnType<typeof createAdaptorServer> | undefined,
     startPromise: Promise<void> | undefined,
     closePromise: Promise<void> | undefined;
   return {
@@ -864,8 +875,13 @@ export function createAgent(d: AgentWiringDeps) {
           );
           server.once("error", reject);
         });
+        if (d.toolSocket) {
+          socketServer = createAdaptorServer({ fetch: toolApp.fetch });
+          await listenOnSocket(socketServer, d.toolSocket);
+        }
         if (closing) {
           server?.close();
+          socketServer?.close();
           throw new Error("agent is closed");
         }
         ready = true;
@@ -891,10 +907,11 @@ export function createAgent(d: AgentWiringDeps) {
         const closeListener = async () => {
           // A sweep/listen already in flight still belongs to this lifecycle.
           await startPromise?.catch(() => {});
-          if (server?.listening)
-            await new Promise<void>((resolve, reject) => {
-              server?.close((error) => (error ? reject(error) : resolve()));
-            });
+          for (const listener of [server, socketServer])
+            if (listener?.listening)
+              await new Promise<void>((resolve, reject) => {
+                listener.close((error) => (error ? reject(error) : resolve()));
+              });
         };
         const outcomes = await Promise.allSettled([
           closeListener(),

@@ -121,3 +121,63 @@ it("propagates cancellation before probes and between stages", async () => {
   ).rejects.toThrow();
   expect(next.probes.docker).not.toHaveBeenCalled();
 });
+
+function linuxFixture() {
+  const f = fixture();
+  Object.assign(f.host, { platform: "linux", macOSVersion: undefined, wsl: null, systemd: true });
+  Object.assign(f.docker, { desktop: false });
+  return f;
+}
+
+it("passes Linux on Arm with systemd and the native Docker Engine", async () => {
+  const f = linuxFixture();
+  const result = await runInstallPreflight("/owned/home", f.controller.signal, f.probes, "linux");
+  expect(result.prerequisitesPassed).toBe(true);
+  expect(result.checks[0]?.message).toBe(
+    "Linux, Arm and Node.js meet the installation requirements.",
+  );
+  expect(result.checks[2]?.message).toBe(
+    "Docker Engine meets the engine, architecture and memory requirements.",
+  );
+});
+
+it.each([
+  [{ wsl: 1 }, "wsl --set-version"],
+  [{ wsl: 2, systemd: false }, "[boot] systemd=true"],
+  [{ systemd: false }, "loginctl enable-linger"],
+  [{ architecture: "x64" }, "Arm (arm64) processors for now"],
+  [{ platform: "win32" }, "wsl --install -d Ubuntu"],
+])("explains an unsupported Linux or Windows host in plain words: %j", async (change, words) => {
+  const f = linuxFixture();
+  Object.assign(f.host, change);
+  const result = await runInstallPreflight("/owned/home", f.controller.signal, f.probes, "linux");
+  expect(result.checks).toEqual([expect.objectContaining({ name: "host", ok: false })]);
+  expect(result.checks[0]?.message).toContain(words);
+  expect(f.probes.docker).not.toHaveBeenCalled();
+});
+
+it("tells a Linux host how to fix Docker in its own terms", async () => {
+  const f = linuxFixture();
+  Object.assign(f.docker, { version: "27.5.1" });
+  const old = await runInstallPreflight("/owned/home", f.controller.signal, f.probes, "linux");
+  expect(old.checks[2]?.message).toContain("Update Docker Engine to version 28");
+  Object.assign(f.docker, { version: "29.2.0", memoryBytes: 4 * 1024 ** 3 });
+  const small = await runInstallPreflight("/owned/home", f.controller.signal, f.probes, "linux");
+  expect(small.checks[2]?.message).toBe(
+    "localDot needs a machine with at least 8 GiB of memory for its computers.",
+  );
+  f.probes.docker.mockRejectedValue(new Error("connect EACCES"));
+  const missing = await runInstallPreflight("/owned/home", f.controller.signal, f.probes, "linux");
+  expect(missing.checks[2]?.message).toContain("Install and start Docker Engine");
+});
+
+it("keeps requiring Docker Desktop on macOS", async () => {
+  const f = fixture();
+  Object.assign(f.docker, { desktop: false });
+  const result = await runInstallPreflight("/owned/home", f.controller.signal, f.probes, "darwin");
+  expect(result.checks[2]).toEqual({
+    name: "docker",
+    ok: false,
+    message: "Use local Docker Desktop with a Linux arm64 engine.",
+  });
+});

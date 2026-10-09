@@ -56,6 +56,7 @@ import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 import type { NotificationsView } from "./useNotifications.ts";
 import type { RulesView } from "./useRules.ts";
+import type { SignInView } from "./useSignIn.ts";
 import "./settings.css";
 
 export type { SettingsSection } from "./sections.ts";
@@ -118,6 +119,8 @@ export interface SettingsSheetProps {
   onOpenTask?(sessionId: string): void;
   notifications?: NotificationsView;
   accounts?: AccountsView;
+  // Sign in to a site: the web browser opens it with the user in control.
+  signIn?: SignInView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
   // Shut down, and on a phone, where the sheet covers the island, the task's Stop.
   stop?: { label: string; enabled: boolean; run(): void; task?: boolean };
@@ -726,7 +729,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
                 checked={login.state === "on"}
                 disabledReason={
                   login.state === "unavailable"
-                    ? "Works in the installed app on a Mac"
+                    ? "Works in the installed app"
                     : login.state === undefined
                       ? "Checking…"
                       : login.busy
@@ -996,7 +999,9 @@ function SectionContent({
         />
       ) : null;
     case "accounts":
-      return props.accounts ? <AccountsSection accounts={props.accounts} /> : null;
+      return props.accounts ? (
+        <AccountsSection accounts={props.accounts} signIn={props.signIn} />
+      ) : null;
     case "keys":
       return keysPanel;
     case "computer":

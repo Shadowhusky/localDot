@@ -1,5 +1,6 @@
 import {
   AttentionSnapshot,
+  NotifyHost,
   NotifyKey,
   NotifySettings,
   NotifyTestResult,
@@ -14,6 +15,7 @@ export type NotifyApi = ReturnType<typeof notifyApi>;
 export function notifyApi(api: ApiClient) {
   return {
     settings: async () => NotifySettings.parse(await api.get("/api/notify/settings")),
+    host: async () => NotifyHost.parse(await api.get("/api/notify/host")).banner,
     saveSettings: async (settings: NotifySettings) =>
       NotifySettings.parse(await api.put("/api/notify/settings", settings)),
     key: async () => NotifyKey.parse(await api.get("/api/notify/key")).publicKey,

@@ -68,6 +68,8 @@ export async function runCli(
       if (command.fromLogin) return await runtime.up(context, io, { fromLogin: true });
       return await runtime.up(context, io);
     }
+    if (command.kind === "unlock")
+      return await runtime.unlock({ home: localdotHome(options.env), signal: options.signal }, io);
     if (command.kind === "start-at-login")
       return await runtime.startAtLogin(
         { home: localdotHome(options.env), signal: options.signal },
@@ -80,7 +82,8 @@ export async function runCli(
       signal: options.signal,
     });
     options.signal.throwIfAborted();
-    if (command.kind === "open") return await runtime.open(context, io);
+    if (command.kind === "open")
+      return await runtime.open(context, io, command.qr ? { qr: true } : {});
     if (command.kind === "stop")
       return await runtime.stop(
         { ...context, cellId: command.cellId, ...(command.all ? { all: true } : {}) },

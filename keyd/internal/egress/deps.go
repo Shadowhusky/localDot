@@ -23,8 +23,11 @@ type Config struct {
 	CellID string
 	Policy policy.Policy
 	// Port 0 picks a free port; tests use it.
-	Port  int
-	Token string
+	Port int
+	// RelayDir, when set, also serves the cell on <RelayDir>/<port>.sock. Docker Engine's
+	// containers cannot reach the host's 127.0.0.1, so a gate there mounts this folder instead.
+	RelayDir string
+	Token    string
 	// CA terminates TLS for its hosts; without one nothing is intercepted.
 	CA *cellca.CA
 }

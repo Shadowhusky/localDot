@@ -26,7 +26,8 @@ export function KnowledgeSection({
   return (
     <div className="settings-knowledge">
       <p className="settings-lede">
-        What dot remembers, the people it reaches and your recent tasks. It all stays on this Mac.
+        What dot remembers, the people it reaches and your recent tasks. It all stays on the
+        computer running localDot.
       </p>
       <MemoryEditor known={known} knowledge={knowledge} onOpenTask={onOpenTask} />
       <PeopleList known={known} onOpenTask={onOpenTask} />

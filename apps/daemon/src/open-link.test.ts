@@ -14,6 +14,7 @@ import { createApp } from "./app.ts";
 import type { EventLog } from "./event-log.ts";
 import { InstallCodes } from "./install-codes.ts";
 import { runOpenLink } from "./open-link.ts";
+import { terminalQr } from "./terminal-qr.ts";
 
 const TOKEN = "t".repeat(43),
   CODE = "c".repeat(43),
@@ -178,5 +179,48 @@ describe("read-only private install authority", () => {
     expect(await f.run()).toBe(130);
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.out).not.toHaveBeenCalled();
+  });
+});
+
+describe("links for other devices", () => {
+  const issue = () =>
+    vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(json({ code: CODE, expiresAt: Date.now() + 60_000 }));
+  const front = new URL("https://box.example.ts.net:4750");
+  const run = (options: { publicOrigins?: URL[]; qr?: boolean }) => {
+    const out = vi.fn(),
+      err = vi.fn();
+    const pending = runOpenLink(
+      { home, port: PORT, signal: new AbortController().signal, ...options },
+      { out, err, fetch: issue() },
+    );
+    return { out, err, pending };
+  };
+
+  it("prints the same one-use code through each HTTPS front", async () => {
+    const f = run({ publicOrigins: [front] });
+    expect(await f.pending).toBe(0);
+    expect(f.out.mock.calls.map(([line]) => line)).toEqual([
+      `http://127.0.0.1:${PORT}/#code=${CODE}`,
+      `From your other devices: https://box.example.ts.net:4750/#code=${CODE}`,
+    ]);
+    expect(f.err).not.toHaveBeenCalled();
+  });
+
+  it("draws the front's link as a QR code for a phone", async () => {
+    const f = run({ publicOrigins: [front], qr: true });
+    expect(await f.pending).toBe(0);
+    const printed = String(f.out.mock.calls[2]?.[0]);
+    for (const line of terminalQr(`https://box.example.ts.net:4750/#code=${CODE}`) ?? [])
+      expect(printed).toContain(line);
+    expect(printed).not.toContain(TOKEN);
+  });
+
+  it("draws no QR code for a link only this computer can open", async () => {
+    const f = run({ qr: true });
+    expect(await f.pending).toBe(0);
+    expect(f.out.mock.calls).toEqual([[`http://127.0.0.1:${PORT}/#code=${CODE}`]]);
+    expect(String(f.err.mock.calls[0]?.[0])).toContain("No QR code");
   });
 });

@@ -146,3 +146,37 @@ func TestBadFlagsExitWithUsage(t *testing.T) {
 		}
 	}
 }
+
+// Running gates keep the relay folder mounted, so a restart keeps the folder and drops old sockets.
+func TestRelayDirOffMacOSKeepsTheFolderAndDropsOldSockets(t *testing.T) {
+	dir := shortHome(t)
+	if relay, err := relayDir(dir, "darwin"); err != nil || relay != "" {
+		t.Fatalf("macOS: %q, %v", relay, err)
+	}
+	relay, err := relayDir(dir, "linux")
+	if err != nil || relay != filepath.Join(dir, "relay") {
+		t.Fatalf("linux: %q, %v", relay, err)
+	}
+	before, _ := os.Stat(relay)
+	os.WriteFile(filepath.Join(relay, "4760.sock"), nil, 0o600)
+	os.WriteFile(filepath.Join(relay, "note"), nil, 0o600)
+	os.Chmod(relay, 0o700)
+	if _, err := relayDir(dir, "linux"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.Stat(relay)
+	if !os.SameFile(before, after) || after.Mode().Perm() != 0o711 {
+		t.Fatalf("folder replaced or mode %v", after.Mode().Perm())
+	}
+	if _, err := os.Stat(filepath.Join(relay, "4760.sock")); !os.IsNotExist(err) {
+		t.Fatalf("old socket kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(relay, "note")); err != nil {
+		t.Fatalf("other file removed: %v", err)
+	}
+	other := shortHome(t)
+	os.Symlink(t.TempDir(), filepath.Join(other, "relay"))
+	if _, err := relayDir(other, "linux"); err == nil {
+		t.Fatal("a symlink was taken for the relay folder")
+	}
+}

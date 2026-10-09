@@ -248,7 +248,7 @@ async function fixture(count = 1, fullcolor = false) {
         },
         HostConfig: structuredClone(spec.HostConfig),
         State: { ...off },
-        volume: "Mounts" in spec.HostConfig ? spec.HostConfig.Mounts[0]?.Source : undefined,
+        volume: "Mounts" in spec.HostConfig ? spec.HostConfig.Mounts?.[0]?.Source : undefined,
       });
       aliases.set(`/containers/${r.query?.name}`, key);
       controls.afterMutation?.();

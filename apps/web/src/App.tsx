@@ -15,6 +15,7 @@ import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
+import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -94,9 +95,11 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
+import { useSignIn } from "./settings/useSignIn.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
@@ -131,7 +134,6 @@ import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
-import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
@@ -845,6 +847,18 @@ function Theatre({ api }: { api: ApiClient }) {
   const ownHold =
     agent.snapshot?.holder === true ||
     (session.ended && agent.history === true && agent.model.messages.size === 0);
+  // Sign-ins go to the web browser, where they are kept: from Settings, or from the desktop's own
+  // browser while the user holds the computer with no task.
+  const signIn = useSignIn(api, askCell, () => {
+    if (settings.open) settings.close();
+    session.check();
+  });
+  useDesktopSignIn({
+    api,
+    cellId: askCell,
+    watching: manualLive && shownScreen === "desktop" && !settings.open && !replayId,
+    offer: ownHold ? (site) => void signIn.start(site) : undefined,
+  });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {
     if (!shownTask) return false;
@@ -1246,9 +1260,10 @@ function Theatre({ api }: { api: ApiClient }) {
   const tipAction = idle?.action;
   const bandLine = idle ? idle.text : narration;
   const bandSpeaker = idle ? "dot" : speaker;
-  const asked = agent.model.pendingAsk
+  const pendingQuestion = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
+  const asked = pendingQuestion && markdownToPlain(pendingQuestion);
   const pause = pauseSlot({
     pause: safety.pause,
     canPause: safety.canPause,
@@ -1316,29 +1331,6 @@ function Theatre({ api }: { api: ApiClient }) {
         note={
           shownRecording?.note ??
           (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
-        }
-        lead={
-          shownRecording && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon="continue"
-              disabledReason={
-                shownRecording.verdict !== "live" &&
-                shownRecording.sessionId !== conversation.sessions.at(-1)
-                  ? conversationReason
-                  : undefined
-              }
-              onClick={() =>
-                shownRecording.verdict === "live" ||
-                shownRecording.sessionId === conversation.sessions.at(-1)
-                  ? selectReplay(null)
-                  : replayContinue.run(shownRecording.sessionId)
-              }
-            >
-              Continue
-            </Button>
-          )
         }
         mode={replayId ? "replay" : "watch"}
         watchAttention={
@@ -1844,6 +1836,7 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
           notifications={settingsNotifications}
           accounts={settingsAccounts}
+          signIn={signIn}
           rules={rules}
           spending={
             settings.draft

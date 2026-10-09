@@ -488,6 +488,22 @@ describe("brain network and container specifications", () => {
     expect(JSON.stringify(brain)).not.toContain("HTTP_PROXY");
     await cells.close(cell);
   });
+  it("gives the gate keyd's and the tool API's sockets on Docker Engine", async () => {
+    const f = fixture();
+    const relay = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" } as const;
+    const cells = f.make(undefined, { relay: async () => relay });
+    const cell = await cells.open(options());
+    const gate = f.calls.find(
+      (c) => c.path === "/containers/create" && c.query?.name === cell.names.gate,
+    )?.body as { Env: string[]; HostConfig: { Mounts?: unknown } };
+    expect(gate.Env).toContain(`LD_KEYD_SOCKET=/run/localdot/keyd/${cell.keydPort}.sock`);
+    expect(gate.Env).toContain("LD_TOOL_SOCKET=/run/localdot/tool/tool.sock");
+    expect(gate.HostConfig.Mounts).toEqual([
+      { Type: "bind", Source: "/h/keyd/relay", Target: "/run/localdot/keyd", ReadOnly: true },
+      { Type: "bind", Source: "/h/relay", Target: "/run/localdot/tool", ReadOnly: true },
+    ]);
+    await cells.close(cell);
+  });
   it("uses independent brain/gate image overrides", () => {
     expect(imagesWithBrain({ LOCALDOT_BRAIN_IMAGE: "b", LOCALDOT_GATE_IMAGE: "g" })).toEqual({
       brain: "b",

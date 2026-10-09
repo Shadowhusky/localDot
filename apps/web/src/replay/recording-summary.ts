@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { readThread } from "../agent/earlier.ts";
+import { markdownToPlain } from "../agent/markdown.ts";
 import type { AgentResult } from "../agent/model.ts";
 import type { ThreadItem } from "../agent/thread.ts";
 import { spendText } from "../copy/format.ts";
@@ -15,8 +16,7 @@ export interface RecordingSummary {
   spend: string | null;
 }
 
-// One line of dot's words without their Markdown: the first paragraph, its marks dropped and its
-// links reduced to their text.
+// One line of dot's words without their Markdown: the first paragraph, as plain words.
 export function plainLine(text: string): string {
   const paragraph =
     text
@@ -24,15 +24,7 @@ export function plainLine(text: string): string {
       .split(/\n\s*\n/)
       .map((part) => part.trim())
       .find((part) => part && !part.startsWith("```")) ?? "";
-  const plain = paragraph
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*(?:[-+*]|\d+[.)])\s+/gm, "")
-    .replace(/^>\s?/gm, "")
-    .replace(/(\*\*|__|`)/g, "")
-    .replace(/(^|[^\p{L}\p{N}])[*_]([^*_]+)[*_]/gu, "$1$2")
-    .replace(/\s+/g, " ")
-    .trim();
+  const plain = markdownToPlain(paragraph);
   return plain.length > LINE_CHARS ? `${plain.slice(0, LINE_CHARS - 1).trimEnd()}…` : plain;
 }
 

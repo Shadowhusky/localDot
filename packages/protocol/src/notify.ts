@@ -185,3 +185,9 @@ export const NotifyTestResult = z.strictObject({
     .max(MAX_PUSH_DEVICES),
 });
 export type NotifyTestResult = z.infer<typeof NotifyTestResult>;
+// How this computer shows its own banners: macOS, a Linux desktop, or none on a machine with no
+// screen, where phones and open tabs are the way to hear from dot.
+export const BannerKind = z.enum(["mac", "desktop", "none"]);
+export type BannerKind = z.infer<typeof BannerKind>;
+export const NotifyHost = z.strictObject({ banner: BannerKind });
+export type NotifyHost = z.infer<typeof NotifyHost>;

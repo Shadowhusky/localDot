@@ -8,6 +8,8 @@ export class BrowserRecovery {
   #epoch = 0;
   #available = false;
   #recoveredBootId: string | undefined;
+  // The latest keyd health heard, which a recovery started without one goes by.
+  #health: Health = { online: false };
   #closed = false;
   #closing: Promise<void> | undefined;
 
@@ -21,9 +23,11 @@ export class BrowserRecovery {
     return this.available && this.#recoveredBootId === bootId;
   }
 
-  recover(health: Health = { online: false }): Promise<void> {
+  recover(health?: Health): Promise<void> {
     if (this.#closed) return Promise.resolve();
-    return this.#recover(health);
+    if (health)
+      this.#health = { ...health, ...(health.audit ? { audit: { ...health.audit } } : {}) };
+    return this.#recover(this.#health);
   }
 
   close(): Promise<void> {

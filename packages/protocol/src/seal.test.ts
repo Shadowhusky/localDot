@@ -6,6 +6,7 @@ import {
   type EcPrivateJwk,
   fromBase64url,
   SEAL_INFO,
+  sealPassphrase,
   sealSecret,
 } from "./seal.ts";
 
@@ -142,6 +143,29 @@ describe("sealSecret", () => {
     const sealed = await sealSecret(KEYD_PUBLIC, groq, VALUE);
     expect(JSON.stringify(sealed)).not.toContain(VALUE);
     expect(JSON.stringify(sealed)).not.toContain(btoa(VALUE).replace(/=+$/, ""));
+  });
+});
+
+describe("sealPassphrase", () => {
+  it("produces the vector keyd's Go opener opens as a passphrase", async () => {
+    // Opened by vault.Opener.OpenPassphrase with the fixed key above (Go 1.27.1, 2026-10-09).
+    expect(
+      await sealPassphrase(KEYD_PUBLIC, "correct horse battery staple", {
+        ephemeral: EPHEMERAL,
+        nonce: NONCE,
+      }),
+    ).toEqual({
+      v: 1,
+      epk: "BLhfkHvMwLU1VR2xt2QbapafF0HZL1U_EABDIa8GocmgFNZqvKrR0ZinBw_bbXXvp1tZIDoT8KptqEj3qt86wj0",
+      nonce: "AAECAwQFBgcICQoL",
+      ct: "x5qE-Zrthy2MXfp9H6g4dhw8lZSqTTgHt9KIc5G4L85WNugGGb1NWeN4Rv0",
+    });
+  });
+
+  it("does not open as any secret", async () => {
+    const sealed = await sealPassphrase(KEYD_PUBLIC, VALUE);
+    await expect(open(sealed, weather)).rejects.toThrow();
+    await expect(open(sealed, groq)).rejects.toThrow();
   });
 });
 

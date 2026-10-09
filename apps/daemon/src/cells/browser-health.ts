@@ -32,6 +32,21 @@ export function validateBrowserHealth(
   return parsed.data;
 }
 
+// A running browser still answers as the one that started, ready to be controlled.
+export function answersReady(
+  value: unknown,
+  ready: { browserCellId: string; parentCellId: string; instance: string },
+): boolean {
+  const parsed = healthSchema.safeParse(value);
+  return (
+    parsed.success &&
+    parsed.data.ready &&
+    parsed.data.browserCellId === ready.browserCellId &&
+    parsed.data.parentCellId === ready.parentCellId &&
+    parsed.data.instance === ready.instance
+  );
+}
+
 export function readBrowserHealth(
   port: number,
   token: string,

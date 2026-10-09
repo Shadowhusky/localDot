@@ -32,13 +32,14 @@ export interface StartAtLoginDeps {
 const CHANGE_FAILED = "Start at login couldn't be changed. Try again in a minute.";
 const UNREADABLE = "Start at login can't be read.";
 
-/** The daemon never edits the LaunchAgent itself: it runs the installed release's own CLI with a
- * fixed command, which takes the install lock, verifies the recorded configuration and touches
- * only the login agent, so the running daemon cannot stop itself this way.
+/** The daemon never edits the LaunchAgent or systemd unit itself: it runs the installed release's
+ * own CLI with a fixed command, which takes the install lock, verifies the recorded configuration
+ * and touches only the login job, so the running daemon cannot stop itself this way.
  */
 export function startAtLoginPort(deps: StartAtLoginDeps): StartAtLoginPort {
   const identity = deps.identity;
-  if (!identity || (deps.platform ?? process.platform) !== "darwin") return unavailableStartAtLogin;
+  const platform = deps.platform ?? process.platform;
+  if (!identity || (platform !== "darwin" && platform !== "linux")) return unavailableStartAtLogin;
   const state = join(deps.home, "install");
   const cli = join(
     state,
