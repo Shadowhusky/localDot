@@ -4,7 +4,7 @@ import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import { ulid } from "@localdot/protocol";
+import { qualityMessage, type StreamQuality, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { createApp } from "../app.ts";
@@ -13,6 +13,7 @@ import { webDir } from "../static-ui.ts";
 import { attachUpgradeRouter } from "../upgrade-router.ts";
 import { TicketRegistry } from "./secrets.ts";
 import { desktopStreamRoute, type StreamProxyDeps } from "./stream-proxy.ts";
+import { StreamTuning } from "./stream-tuning.ts";
 import { FakeOrchestrator } from "./testing/fake-orchestrator.ts";
 import { type CellState, NO_STREAM, type StreamEndpoint } from "./types.ts";
 
@@ -679,6 +680,27 @@ describe("desktop stream relay", () => {
     ws.send("still here");
     expect(await echoed).toBe("echo:still here");
     expect(d.stream()).toMatchObject({ connection: "live", viewers: 1 });
+  });
+
+  it("keeps a viewer's quality report from the computer and tunes the stream to it until it leaves", async () => {
+    const selkies = await fakeSelkies();
+    const applied: StreamQuality[] = [];
+    const tuning = new StreamTuning({ applyGapMs: 0, onApply: (_id, q) => applied.push(q) });
+    stops.push(() => tuning.close());
+    const d = await daemon(selkies.baseUrl, { tuning });
+    const ws = d.open(`${d.prefix}/api/websockets`);
+    await opened(ws);
+    const got: string[] = [];
+    ws.on("message", (data) => got.push(String(data)));
+    ws.send(qualityMessage({ visible: true, framerate: 30, crf: 28 }));
+    ws.send("hello");
+    await until("the echo", () => got.includes("echo:hello"));
+    expect(got).toEqual(["echo:hello"]);
+    await until("the tuner", () => applied.length === 1);
+    expect(applied[0]).toEqual({ framerate: 30, crf: 28 });
+    ws.close();
+    await until("full quality", () => applied.length === 2);
+    expect(applied[1]).toEqual({ framerate: 60, crf: 25 });
   });
 
   it("writes nothing to the console, so no path, ticket or token reaches a log", async () => {
