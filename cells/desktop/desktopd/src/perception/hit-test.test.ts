@@ -522,13 +522,14 @@ describe("elements", () => {
     });
   });
 
-  it("finds a page element by its node only while it keeps its listed role and name", async () => {
+  it("finds a page element by its node only while it keeps its listed role, name and page", async () => {
     const submit: Target = {
       point: { x: 560, y: 1266 },
       bbox: { x: 400, y: 1226, w: 320, h: 80 },
       source: "dom",
       role: "button",
       name: "Submit",
+      url: "file:///config/eval/form.html",
     };
     const nodes: number[] = [];
     const cdp = {
@@ -543,6 +544,8 @@ describe("elements", () => {
     );
     expect((await findTarget(d, { node: 90, role: "button", name: "Send" })).target).toBeNull();
     expect((await findTarget(d, { node: 91, role: "button", name: "Submit" })).target).toBeNull();
-    expect(nodes).toEqual([90, 90, 91]);
+    const elsewhere = { node: 90, role: "button", name: "Submit", url: "https://shop.example/" };
+    expect((await findTarget(d, elsewhere)).target).toBeNull();
+    expect(nodes).toEqual([90, 90, 91, 90]);
   });
 });

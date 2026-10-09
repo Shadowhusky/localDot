@@ -83,7 +83,9 @@ const INTERACTIVE = new Set([
 ]);
 // Roles whose value is what the field shows.
 const VALUED = new Set(["textbox", "searchbox", "combobox", "slider", "spinbutton", "PopUpButton"]);
-const MAX_CANDIDATES = 400;
+// Box models are read this many at a time, up to a page's first MAX_BOXED interactive elements.
+const BOX_BATCH = 400;
+const MAX_BOXED = 4000;
 
 interface AxNode {
   ignored?: boolean;
@@ -432,10 +434,12 @@ export class ChromiumPerception {
     });
     const shown = target?.bbox && visiblePart(target.bbox, origin, m);
     if (!target || !shown) return null;
+    const checked = ax && stateOf(ax, false).checked;
     return {
       ...target,
       bbox: shown,
       point: { x: Math.round(shown.x + shown.w / 2), y: Math.round(shown.y + shown.h / 2) },
+      ...(checked ? { checked } : {}),
     };
   }
 
@@ -462,22 +466,27 @@ export class ChromiumPerception {
       seen.add(id);
       return true;
     });
-    const boxes = await Promise.all(
-      candidates.slice(0, MAX_CANDIDATES).map((n) =>
-        cdp
-          .send<{ model: { border: number[] } }>("DOM.getBoxModel", {
-            backendNodeId: n.backendDOMNodeId,
-          })
-          .catch(() => null),
-      ),
-    );
-    const shown = candidates
-      .flatMap((n, i) => {
+    // Document order is not screen order: on a page scrolled down, what is in view comes late.
+    const boxed = candidates.slice(0, MAX_BOXED);
+    const shown: { n: AxNode; bbox: Rect }[] = [];
+    for (let start = 0; start < boxed.length; start += BOX_BATCH) {
+      const batch = boxed.slice(start, start + BOX_BATCH);
+      const boxes = await Promise.all(
+        batch.map((n) =>
+          cdp
+            .send<{ model: { border: number[] } }>("DOM.getBoxModel", {
+              backendNodeId: n.backendDOMNodeId,
+            })
+            .catch(() => null),
+        ),
+      );
+      for (const [i, n] of batch.entries()) {
         const box = boxes[i];
         const bbox = box && visiblePart(quadToRect(box.model.border, origin, m.dpr), origin, m);
-        return bbox ? [{ n, bbox }] : [];
-      })
-      .sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x);
+        if (bbox) shown.push({ n, bbox });
+      }
+    }
+    shown.sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x);
     const elements = await Promise.all(
       shown.slice(0, limit).map(async ({ n, bbox }): Promise<WireElement> => {
         const role = n.role?.value ?? "";
@@ -501,7 +510,12 @@ export class ChromiumPerception {
         };
       }),
     );
-    return { url: m.url, origin, elements, truncated: shown.length > limit };
+    return {
+      url: m.url,
+      origin,
+      elements,
+      truncated: shown.length > limit || candidates.length > boxed.length,
+    };
   }
 
   async #password(cdp: CdpOperation, backendNodeId: number): Promise<boolean> {

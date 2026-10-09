@@ -179,6 +179,8 @@ export const FindRequest = z.object({
   node: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   role: z.string().max(64).optional(),
   app: z.string().max(128).optional(),
+  // A node: the page it was listed on. Another page's node with the same number is not it.
+  url: z.string().max(2048).optional(),
 });
 export type FindRequest = z.infer<typeof FindRequest>;
 

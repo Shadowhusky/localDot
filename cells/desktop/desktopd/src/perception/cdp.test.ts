@@ -252,6 +252,31 @@ describe("ChromiumPerception against a scripted DevTools endpoint", () => {
     await cdp.close();
   });
 
+  it("lists what is in view on a long page scrolled down, past its first 400 elements", async () => {
+    const above = 450;
+    const { port } = await scriptedChromium({
+      "Accessibility.enable": () => ({}),
+      "Runtime.evaluate": metrics,
+      "Accessibility.getFullAXTree": () => ({
+        nodes: Array.from({ length: above + 3 }, (_, i) => ({
+          backendDOMNodeId: i + 1,
+          role: { value: "link" },
+          name: { value: `Link ${i + 1}` },
+        })),
+      }),
+      "DOM.getBoxModel": (p) => {
+        const node = p.backendNodeId as number;
+        return node > above ? quad(40, 100 + (node - above) * 50) : quad(40, -5000 + node);
+      },
+      "DOM.describeNode": () => ({ node: { attributes: [] } }),
+    });
+    const cdp = new ChromiumPerception({ port, originProvider: async () => ({ x: 0, y: 228 }) });
+    const page = await cdp.elements(win, 10);
+    expect(page.elements.map((e) => e.name)).toEqual(["Link 451", "Link 452", "Link 453"]);
+    expect(page.truncated).toBe(false);
+    await cdp.close();
+  });
+
   it("finds an element by its node only while some of it is in view, cut to the view", async () => {
     const boxes: Record<number, ReturnType<typeof quad>> = { 1: quad(40, 660), 2: quad(40, 700) };
     const { port } = await scriptedChromium({
@@ -259,7 +284,12 @@ describe("ChromiumPerception against a scripted DevTools endpoint", () => {
       "Runtime.evaluate": metrics,
       "Accessibility.getPartialAXTree": (p) => ({
         nodes: [
-          { backendDOMNodeId: p.backendNodeId, role: { value: "button" }, name: { value: "Go" } },
+          {
+            backendDOMNodeId: p.backendNodeId,
+            role: { value: "button" },
+            name: { value: "Go" },
+            properties: [{ name: "checked", value: { value: "false" } }],
+          },
         ],
       }),
       "DOM.getBoxModel": (p) => boxes[p.backendNodeId as number],
@@ -279,6 +309,7 @@ describe("ChromiumPerception against a scripted DevTools endpoint", () => {
       name: "Go",
       bbox: { x: 80, y: 1548, w: 200, h: 52 },
       point: { x: 180, y: 1574 },
+      checked: "false",
     });
     expect(await cdp.node(win, 2)).toBeNull();
     expect(origins[0]).toBe(2);

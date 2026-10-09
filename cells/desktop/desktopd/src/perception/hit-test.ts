@@ -212,7 +212,8 @@ function frontChromium(windows: HelperWindow[]): HelperWindow | undefined {
   return windows.find((w) => appToolkit(w.cls) === "chromium" && !w.overrideRedirect);
 }
 
-// A page element by its node, only while it keeps the role and name it was listed with.
+// A page element by its node, only while it keeps the role and name it was listed with, on the
+// page it was listed on.
 async function nodeTarget(
   deps: PerceptionDeps,
   req: FindRequest & { node: number },
@@ -223,7 +224,8 @@ async function nodeTarget(
   const same =
     target &&
     (req.role === undefined || (target.role ?? "") === req.role) &&
-    (req.name === undefined || (target.name ?? "") === req.name);
+    (req.name === undefined || (target.name ?? "") === req.name) &&
+    (req.url === undefined || target.url === req.url);
   return same && win
     ? { target, window: win.id, windowFrame: frameOf(win), ms: Math.round(performance.now() - t0) }
     : { target: null, window: null, ms: Math.round(performance.now() - t0) };
