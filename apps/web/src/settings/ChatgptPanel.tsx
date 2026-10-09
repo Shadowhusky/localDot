@@ -61,7 +61,7 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
   const cancelReason =
     account.blocked || account.busy?.startsWith("cancel_") ? "Cancelling…" : undefined;
   return (
-    <section className="settings-card settings-chatgpt" aria-labelledby="chatgpt-title">
+    <section className="settings-chatgpt" aria-labelledby="chatgpt-title">
       <header className="settings-card-head">
         <div>
           <h4 id="chatgpt-title" className="settings-card-title">

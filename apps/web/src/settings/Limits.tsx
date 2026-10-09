@@ -1,5 +1,6 @@
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
+import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -43,39 +44,45 @@ export function CheckIns({
   onChange(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
 }) {
   return (
-    <div className="settings-autonomy-group">
-      <h4 className="settings-group-title">Check in with me</h4>
-      <p className="settings-note settings-check-ins-intro">
+    <div>
+      <GroupHead title="Check in with me" />
+      <Group>
+        {CHECK_INS.map((row) => {
+          const current = value[row.key];
+          return (
+            <div key={row.key} className="settings-check-in">
+              <Switch
+                className="ui-group-row"
+                label={row.label}
+                description={row.description}
+                checked={current.on}
+                onCheckedChange={(on) => onChange(row.key, { ...current, on })}
+              />
+              <Collapse open={current.on}>
+                <Field label={row.field} inline className="ui-group-row">
+                  <TextField
+                    size="sm"
+                    inputMode="numeric"
+                    maxLength={6}
+                    autoComplete="off"
+                    suffix={row.unit}
+                    value={current.value}
+                    onChange={(event) =>
+                      onChange(row.key, {
+                        ...current,
+                        value: event.target.value.replace(/\D/g, ""),
+                      })
+                    }
+                  />
+                </Field>
+              </Collapse>
+            </div>
+          );
+        })}
+      </Group>
+      <GroupNote>
         Off unless you turn them on. Each count starts again when you send a message.
-      </p>
-      {CHECK_INS.map((row) => {
-        const current = value[row.key];
-        return (
-          <div key={row.key} className="settings-check-in">
-            <Switch
-              label={row.label}
-              description={row.description}
-              checked={current.on}
-              onCheckedChange={(on) => onChange(row.key, { ...current, on })}
-            />
-            <Collapse open={current.on}>
-              <Field label={row.field} className="settings-check-in-field">
-                <TextField
-                  size="sm"
-                  inputMode="numeric"
-                  maxLength={6}
-                  autoComplete="off"
-                  suffix={row.unit}
-                  value={current.value}
-                  onChange={(event) =>
-                    onChange(row.key, { ...current, value: event.target.value.replace(/\D/g, "") })
-                  }
-                />
-              </Field>
-            </Collapse>
-          </div>
-        );
-      })}
+      </GroupNote>
     </div>
   );
 }
@@ -88,37 +95,42 @@ export function SpendingLimits({
   onChange(next: SpendingDraft): void;
 }) {
   return (
-    <div className="settings-spending">
-      <Switch
-        label="Spending limit"
-        description={
-          value.on
-            ? "dot pauses and asks you when it reaches a limit."
-            : "Off: dot never stops or warns you about cost."
-        }
-        checked={value.on}
-        onCheckedChange={(on) => onChange({ ...value, on })}
-      />
-      <Collapse open={value.on}>
-        <div className="settings-price-fields">
-          <Field label="Per task" description="Applies to new tasks.">
+    <div>
+      <Group>
+        <Switch
+          className="ui-group-row"
+          label="Spending limit"
+          description={value.on ? "On: dot pauses and asks you at a limit" : "Off: no limit"}
+          checked={value.on}
+          onCheckedChange={(on) => onChange({ ...value, on })}
+        />
+        <Collapse open={value.on}>
+          <Field label="Per task" inline className="ui-group-row">
             <MoneyField
+              size="sm"
               value={value.task}
               maxLength={9}
               placeholder="No limit"
               onValueChange={(task) => onChange({ ...value, task })}
             />
           </Field>
-          <Field label="Per day" description="Shared by every task.">
+          <Field label="Per day" inline className="ui-group-row">
             <MoneyField
+              size="sm"
               value={value.day}
               maxLength={9}
               placeholder="No limit"
               onValueChange={(day) => onChange({ ...value, day })}
             />
           </Field>
-        </div>
-      </Collapse>
+          <GroupRow label="When it's reached" trailing="Pause and ask me" />
+        </Collapse>
+      </Group>
+      <GroupNote>
+        {value.on
+          ? "A task limit applies to new tasks; the day limit is shared by every task."
+          : "Turn on to set a limit per task or per day. When dot reaches it, it pauses and asks you."}
+      </GroupNote>
     </div>
   );
 }
