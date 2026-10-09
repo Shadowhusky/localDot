@@ -1,5 +1,5 @@
 /* Replay: the task list, the recorded stage with its scrubber and transport, and Activity. Below
-   1680 px the list moves into a sheet; below 760 px Activity drops under the transport. */
+   1880 px the list moves into a sheet; below 700 px Activity drops under the transport. */
 .replay {
   grid-row: -2;
   display: grid;
@@ -35,8 +35,9 @@
   padding: 0 calc(var(--spacing) * 2) var(--spacing);
   color: var(--color-fg-3);
   font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
-  letter-spacing: var(--text-micro--letter-spacing);
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
 }
 
 .replay-day-list {
@@ -122,7 +123,7 @@
 
 .replay-task-meta {
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .replay-task-verdict {
@@ -182,7 +183,7 @@
   gap: calc(var(--spacing) * 2);
   padding: 0 calc(var(--spacing) * 2);
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 /* The search stays in reach at the top of the list it searches, in the rail and in the sheet. */
@@ -246,6 +247,12 @@
   min-width: 0;
 }
 
+/* The task's name gives way to Continue conversation beside it. */
+.replay-library-slot {
+  display: flex;
+  min-width: 0;
+}
+
 .replay-library-trigger {
   max-width: 100%;
 }
@@ -255,6 +262,7 @@
 }
 
 .replay-library-trigger-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -308,9 +316,9 @@
   max-width: min(360px, calc(100% - var(--spacing) * 8));
   padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
   border-radius: var(--radius-lg);
-  background-color: var(--color-hud-solid);
+  background-color: var(--color-glass-solid);
   box-shadow: var(--shadow-overlay);
-  backdrop-filter: blur(var(--blur-hud));
+  backdrop-filter: blur(var(--blur-glass));
   translate: -50% 0;
 }
 
@@ -330,21 +338,19 @@
   translate: -50% 0;
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    translate var(--dur-spring) var(--ease-spring),
+    translate var(--dur-default) var(--ease-spring),
     visibility 0s;
 }
 
 .replay-gap-title {
   color: var(--color-fg-1);
-  font:
-    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 .replay-gap-body,
 .replay-error {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .replay-gap-body {
@@ -486,7 +492,7 @@
   box-shadow: var(--shadow-thumb);
   translate: -50% -50%;
   scale: 0;
-  transition: scale var(--dur-spring) var(--ease-spring);
+  transition: scale var(--dur-default) var(--ease-spring);
 }
 
 .replay-scrub:is(:hover, :focus-visible, [data-dragging]) .replay-knob {
@@ -501,7 +507,7 @@
   width: 208px;
   padding: var(--spacing);
   border-radius: var(--radius-lg);
-  background-color: var(--color-hud-solid);
+  background-color: var(--color-glass-solid);
   box-shadow: var(--shadow-overlay);
   pointer-events: none;
   translate: -50% 0;
@@ -518,7 +524,7 @@
   scale: 1;
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    scale var(--dur-spring) var(--ease-spring);
+    scale var(--dur-default) var(--ease-spring);
 }
 
 .replay-preview > :is(img, .replay-image-empty) {
@@ -534,7 +540,7 @@
   gap: calc(var(--spacing) * 2);
   padding: calc(var(--spacing) * 1.5) var(--spacing) 2px;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .replay-preview-meta > .num {
@@ -615,7 +621,7 @@
 .replay-time {
   flex: none;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .replay-now {
@@ -682,7 +688,7 @@
   gap: calc(var(--spacing) * 2);
   min-width: 0;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   white-space: nowrap;
 }
 
@@ -754,10 +760,11 @@
   top: calc(var(--spacing) * 2);
   padding: 2px calc(var(--spacing) * 2);
   border-radius: var(--radius-sm);
-  background-color: var(--color-hud-solid);
+  background-color: var(--color-glass-solid);
   color: var(--color-fg-1);
   font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
 }
 
 .replay-compare-label.before {
@@ -779,17 +786,17 @@
 .bar .title-note {
   flex: none;
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   white-space: nowrap;
 }
 
-@media (width < 1180px) {
+@media (width < 1100px) {
   .bar .title-note {
     display: none;
   }
 }
 
-@media (width < 760px) {
+@media (width < 700px) {
   .replay[data-library] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -804,7 +811,9 @@
     padding-top: 0;
   }
 
+  /* Watch is a tap away in the bar above, so Back keeps only its chevron and the task its room. */
   .replay-export-text,
+  .replay-back-text,
   .replay-library-trigger-text[data-phone="hidden"] {
     display: none;
   }

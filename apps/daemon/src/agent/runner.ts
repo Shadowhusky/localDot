@@ -35,6 +35,7 @@ import {
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
 import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
+import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
@@ -86,6 +87,7 @@ export interface AgentRunnerDeps {
   catalog(): Catalog | undefined;
   memory: Pick<MemoryStore, "readBoth">;
   transcripts: TranscriptStore;
+  conversations?: Pick<Conversations, "current" | "earlier" | "adopt">;
   installSkills(cellId: string, signal: AbortSignal): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
@@ -122,6 +124,8 @@ interface Runtime {
   containment?: Promise<void>;
   safety?: SafetyController;
   backoff?: AbortController;
+  // Ended from its wait for a follow-up, because the user moved to another conversation.
+  released?: boolean;
 }
 class CleanupUncertain extends Error {}
 function uncertain(error: unknown): boolean {
@@ -277,6 +281,17 @@ export class AgentRunner {
       const cell = this.#ready(cellId);
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
+      // A conversation record that can't be read never keeps a task from starting.
+      let continues: string | undefined;
+      let earlier: string[] = [];
+      try {
+        continues = this.deps.conversations?.current() ?? undefined;
+        earlier = continues ? (this.deps.conversations?.earlier(continues) ?? []) : [];
+      } catch {
+        console.error("the earlier conversation could not be read");
+        continues = undefined;
+        earlier = [];
+      }
       const id = this.deps.eventLog.createSession(task.slice(0, 200));
       const session = new AgentSession(
         id,
@@ -286,6 +301,7 @@ export class AgentRunner {
         settings.autonomy,
         new RulesStore(this.deps.home),
       );
+      session.earlier = earlier;
       const rt: Runtime = {
         session,
         selection,
@@ -302,6 +318,7 @@ export class AgentRunner {
           screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
           os: "linux",
           title: task.slice(0, 200),
+          ...(continues ? { continues } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
         this.#safety(rt);
@@ -318,10 +335,31 @@ export class AgentRunner {
         this.#runtime.delete(id);
         throw error;
       }
+      try {
+        this.deps.conversations?.adopt(id);
+      } catch {
+        console.error("the current conversation could not be saved");
+      }
       return session;
     } finally {
       this.#starting.delete(cellId);
     }
+  }
+  // Ends a finished task that waits for a follow-up, so the next message starts a new task in
+  // whichever conversation is current. A task still at work is left alone and refused.
+  async release(signal?: AbortSignal): Promise<void> {
+    if (this.#starting.size) throw new AgentError(409, "A task is starting.");
+    const waiting = [...this.#runtime.values()].filter((rt) => !rt.session.stopped);
+    if (
+      waiting.some((rt) => rt.session.status !== "idle" || rt.session.controlHeld || !rt.idleWait)
+    )
+      throw new AgentError(409, "Finish or stop the current task first.");
+    for (const rt of waiting) {
+      rt.released = true;
+      rt.idleWait?.abort();
+    }
+    const settled = Promise.all(waiting.map((rt) => this.deps.live.settled(rt.session.id)));
+    await (signal ? abortable(settled, signal) : settled);
   }
   get(id: string): AgentSession | undefined {
     return this.sessions.get(id);
@@ -780,6 +818,7 @@ export class AgentRunner {
           try {
             if (!(await session.waitForUser(this.deps.idleMs ?? IDLE_MS, idleWait.signal))) break;
           } catch (error) {
+            if (rt.released) break;
             if (!idleWait.signal.aborted || rt.authResumeAfter === undefined) throw error;
           } finally {
             if (rt.idleWait === idleWait) rt.idleWait = undefined;
@@ -950,6 +989,7 @@ export class AgentRunner {
           limits: this.deps.limits ?? DEFAULT_AGENT_LIMITS,
           resume,
           inboxAfter: session.delivered,
+          ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

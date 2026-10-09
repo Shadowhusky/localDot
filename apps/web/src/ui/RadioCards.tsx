@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { type ReactNode, useId } from "react";
+import { Badge } from "./Badge.tsx";
 import { useFieldControl } from "./Field.tsx";
 import { Icon } from "./Icon.tsx";
 import { pressHandlers } from "./press.ts";
@@ -8,6 +9,8 @@ export interface RadioCardOption {
   value: string;
   label: string;
   description?: ReactNode;
+  // A short tag after the label, such as "Recommended".
+  tag?: string;
   // A small picture of the choice, such as a theme's colours, drawn inside the card.
   preview?: ReactNode;
   disabledReason?: string;
@@ -72,14 +75,18 @@ export function RadioCards({
                 if (!option.disabledReason) onValueChange(option.value);
               }}
             />
+            <span className="ui-radio-mark" aria-hidden="true" />
             {option.preview !== undefined && (
               <span className="ui-radio-card-preview" aria-hidden="true">
                 {option.preview}
               </span>
             )}
             <span className="ui-choice-text">
-              <span id={labelId} className="ui-choice-label">
-                {option.label}
+              <span className="ui-radio-card-title">
+                <span id={labelId} className="ui-choice-label">
+                  {option.label}
+                </span>
+                {option.tag && <Badge>{option.tag}</Badge>}
               </span>
               {note && (
                 <span id={noteId} className="ui-choice-note">
@@ -87,7 +94,9 @@ export function RadioCards({
                 </span>
               )}
             </span>
-            <Icon name="check" className="ui-radio-card-check" />
+            <span className="ui-radio-card-check" aria-hidden="true">
+              <Icon name="check" size={12} strokeWidth={2.4} />
+            </span>
           </label>
         );
       })}

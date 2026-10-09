@@ -29,7 +29,7 @@ test("compositor latency and tearing at 2x and 1x", async ({ page }) => {
     await page.goto(`${daemon.origin}/#token=${daemon.token}`);
     // A fragment-only navigation does not reload the Theatre after an externally created cell.
     await page.reload();
-    await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
+    await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 300_000 });
     await expect(page.locator("canvas.stage-canvas")).toHaveAttribute(
       "data-size",
       `${1280 * scale}x${800 * scale}`,

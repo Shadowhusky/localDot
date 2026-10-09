@@ -42,7 +42,7 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Turn on" }).first().click();
-  await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 300_000 });
   const cells = (await (await fetch(`${daemon.origin}/api/cells`, { headers: auth })).json()) as {
     id: string;
   }[];

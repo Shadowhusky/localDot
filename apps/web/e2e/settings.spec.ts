@@ -243,7 +243,7 @@ for (const width of [1280, 390])
   test(`sealed configuration and nested Keys ownership at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 800 });
     const audit = await load(page);
-    if (width < 1180) await page.getByRole("tab", { name: "Conversation" }).click();
+    if (width < 1100) await page.getByRole("tab", { name: "Conversation" }).click();
     const draft = page.getByLabel("New task");
     await draft.fill("Prepare a sample report later.");
     await page.getByRole("button", { name: "Connect a model" }).click();

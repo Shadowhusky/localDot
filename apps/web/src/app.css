@@ -1,222 +1,196 @@
-/* Below this width the rails give way to the stage, so the HUD and the caption keep their room
-   (with both rails, the HUD's widest state was clipped below ~880 px). */
-@custom-media --rails-collapse (width < 1180px);
+/* The page (design-v2 §8): the stage placed first, the top bar over its column and the rail beside
+   it; below 1100 px the rail goes under the stage, and a phone drops the top bar. Every region keeps
+   its box whatever the task does. */
+@custom-media --wide (width >= 1880px);
+@custom-media --tablet (700px <= width < 1100px);
+@custom-media --phone (width < 700px);
 
 .app {
   display: grid;
-  grid-template-rows: var(--spacing-bar) auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--rail-w);
+  grid-template-rows: var(--bar-h) minmax(0, 1fr);
   height: 100dvh;
   min-height: 0;
+  padding-right: var(--rail-inset);
   overflow: hidden;
+  background-color: var(--color-void);
 }
 
-.theatre-content {
+.watch {
   display: contents;
 }
 
-.watch-content {
-  display: contents;
-}
-.watch-content[hidden],
-.task-bar[hidden] {
+.watch[hidden] {
   display: none;
 }
 
-.task-controls-area {
-  min-height: 0;
-  max-height: 50dvh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+.app > .bar {
+  grid-area: 1 / 1;
 }
 
-.mascot {
-  flex: none;
-}
-
-.mascot .body {
-  fill: var(--color-avatar-body);
-}
-
-.mascot .eye {
-  fill: var(--color-avatar-eye);
-}
-
-.bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  padding: 0 var(--spacing-gutter);
-}
-
-.bar-l,
-.bar-r {
+.stage-col {
+  grid-area: 2 / 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-bar-gap);
-}
-
-.bar-r {
-  justify-content: flex-end;
-  color: var(--color-text-2);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-bar-glyph-gap);
-  color: var(--color-text-2);
-  font-weight: 600;
-  font-size: 12.5px;
-}
-
-.brand .mascot {
-  width: var(--spacing-mascot-bar);
-  height: var(--spacing-mascot-bar);
-}
-
-.title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13.5px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--color-text);
-}
-
-.modes {
-  display: flex;
-  gap: var(--spacing-modes-gap);
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--color-text-3);
-}
-
-.modes button {
-  position: relative;
-}
-
-/* A full-height hit area, so touch targets reach 44 px without moving the text. */
-.modes button::before {
-  content: "";
-  position: absolute;
-  inset: 50% calc(-0.5 * var(--spacing-modes-gap)) auto;
-  height: var(--spacing-bar);
-  translate: 0 -50%;
-}
-
-.modes button {
-  border: 0;
-  background: none;
-  color: inherit;
-  padding: 0;
-  font: inherit;
-  cursor: pointer;
-}
-.modes button:disabled {
-  cursor: default;
-}
-
-.modes button.on {
-  color: var(--color-text);
-}
-
-.modes button.on::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: calc(-1 * var(--spacing-mark-drop));
-  translate: -50% 0;
-  width: var(--spacing-mark);
-  height: var(--spacing-mark);
-  border-radius: var(--radius-full);
-  background: var(--color-text);
-}
-
-.live {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-bar-glyph-gap);
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.live b {
-  width: var(--spacing-lamp);
-  height: var(--spacing-lamp);
-  border-radius: var(--radius-full);
-  background: var(--color-text-3);
-}
-
-.live.on b {
-  background: var(--color-text);
-}
-
-/* The free row, also where the phone's pane tabs are hidden, so the rails never grow with their
-   content. */
-.house {
-  grid-row: -2;
-  display: grid;
-  grid-template-columns: minmax(220px, var(--spacing-rail)) minmax(0, 1fr) minmax(
-      220px,
-      var(--spacing-rail)
-    );
-  column-gap: var(--spacing-gutter);
-  padding: 0 var(--spacing-edge) var(--spacing-edge);
   min-height: 0;
+  padding: calc(var(--stage-top) - var(--bar-h)) var(--gutter) 0;
 }
 
+/* The stage is as wide as the column allows, or as the height leaves room for under the band. */
+.stage-col > .stage-frame {
+  flex: 1;
+  width: min(100%, (100dvh - var(--stage-top) - var(--rail-inset) - var(--band-min)) * 1.6);
+}
+
+.rail-chat {
+  grid-area: 1 / 2 / 3 / 3;
+  margin-block: var(--rail-inset);
+}
+
+.app > .replay {
+  grid-area: 2 / 1 / 3 / -1;
+}
+
+@media (--wide) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) 320px var(--rail-w);
+    column-gap: var(--rail-inset);
+  }
+
+  .rail-activity {
+    grid-area: 1 / 2 / 3 / 3;
+    margin-block: var(--rail-inset);
+  }
+
+  .rail-chat {
+    grid-area: 1 / 3 / 3 / 4;
+  }
+}
+
+/* A tablet: the stage across the column, the rail under it filling what is left. */
+@media (--tablet) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--bar-h) auto minmax(0, 1fr);
+    padding-right: 0;
+  }
+
+  .stage-col > .stage-frame {
+    flex: none;
+    width: min(100%, (100dvh - var(--stage-top) - var(--band-min) - 240px) * 1.6);
+  }
+
+  .rail-chat {
+    grid-area: 3 / 1;
+    margin: 0 var(--rail-inset) var(--rail-inset);
+  }
+
+  .app > .replay {
+    grid-area: 2 / 1 / -1 / -1;
+  }
+}
+
+/* A phone: no top bar; the island hangs on a stage near the top, the thread fills the rest. */
+@media (--phone) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    padding-right: 0;
+  }
+
+  .app > .bar {
+    display: none;
+  }
+
+  .stage-col {
+    grid-area: 1 / 1;
+    padding: calc(24px + env(safe-area-inset-top)) 8px 0;
+  }
+
+  .stage-col > .stage-frame {
+    flex: none;
+    width: 100%;
+  }
+
+  .stage-col .narration {
+    left: 84px;
+  }
+
+  .rail-chat {
+    --rail-surface: var(--color-void);
+    grid-area: 2 / 1;
+    margin: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .rail-chat > .rail-head {
+    height: 48px;
+    padding-inline: 16px 8px;
+  }
+
+  .rail-chat .thread-dock {
+    padding-inline: 8px;
+  }
+
+  .app > .replay {
+    grid-area: 1 / 1 / -1 / -1;
+  }
+}
+
+/* Panels that list things down a column: Activity, and Replay's library. */
 .rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding-top: var(--spacing-rail-top);
-  color: var(--color-text);
+  color: var(--color-fg-1);
 }
 
 .rail-h {
   display: flex;
   justify-content: space-between;
-  margin-bottom: var(--spacing-rail-gap);
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  color: var(--color-text-3);
+  margin-bottom: 14px;
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.stage-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding-bottom: var(--spacing-gutter);
-  min-width: 0;
+.rail-h h2 {
+  font-size: inherit;
+  font-weight: inherit;
 }
 
+.history-note {
+  margin-top: 8px;
+  color: var(--color-fg-2);
+  font-size: 12px;
+}
+
+/* A stage anywhere: the live one and Replay's. */
 .stage {
   position: relative;
-  width: min(100%, calc((100vh - var(--spacing-stage-reserve)) * 1.6));
-  aspect-ratio: 16 / 10;
-  border-radius: var(--radius-stage);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-stage);
   overflow: hidden;
 }
 
 .stage-veil {
   display: grid;
   place-items: center;
-  padding: 0 var(--spacing-gutter);
+  padding: 0 var(--gutter);
   text-align: center;
-  background: var(--color-hud-solid);
-  color: var(--color-text-2);
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  background-color: var(--color-glass-solid);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-title-3) / var(--text-title-3--line-height) var(--font-ui);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--duration-veil) var(--ease-veil);
+}
+
+.stage-veil.on,
+.stage-veil[role="alert"] {
+  opacity: 1;
 }
 
 .stage > .screen-label {
@@ -227,8 +201,8 @@
   max-width: calc(100% - 24px);
   padding: 6px 10px;
   border-radius: 8px;
-  background: var(--color-hud-solid);
-  color: var(--color-text-2);
+  background-color: var(--color-glass-solid);
+  color: var(--color-fg-2);
   font-size: 12px;
   pointer-events: none;
 }
@@ -239,7 +213,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  border-radius: var(--radius-stage);
+  border-radius: inherit;
 }
 
 .stage > canvas {
@@ -255,91 +229,6 @@
   opacity: 0.55;
 }
 
-.hud {
-  position: absolute;
-  left: 50%;
-  top: var(--spacing-hud-top);
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-hud-x);
-  height: var(--spacing-pill);
-  padding: 0 var(--spacing-hud-inset) 0 var(--spacing-hud-x);
-  border-radius: var(--radius-full);
-  background: var(--color-hud);
-  -webkit-backdrop-filter: blur(var(--blur-hud)) saturate(140%);
-  backdrop-filter: blur(var(--blur-hud)) saturate(140%);
-  box-shadow: var(--shadow-hud);
-  white-space: nowrap;
-  z-index: 4;
-}
-
-.hud .st {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-hud-glyph-gap);
-  font-size: 13.5px;
-  font-weight: 500;
-  letter-spacing: -0.005em;
-}
-
-.hud .mascot {
-  width: var(--spacing-mascot-hud);
-  height: var(--spacing-mascot-hud);
-}
-
-.hud .a {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-button-glyph-gap);
-  height: var(--spacing-button);
-  padding: 0 var(--spacing-hud-x);
-  border-radius: var(--radius-full);
-  background: var(--color-hud-button);
-  font-weight: 500;
-  font-size: 12.5px;
-}
-
-/* A disabled button stays focusable (aria-disabled), so it can't drop focus mid-request. */
-.hud .a[aria-disabled="true"] {
-  color: var(--color-text-2);
-  cursor: default;
-}
-
-.hud .sq {
-  width: var(--spacing-stop);
-  height: var(--spacing-stop);
-  border-radius: var(--radius-stop);
-  background: currentColor;
-}
-
-.caption {
-  margin-top: var(--spacing-caption-top);
-  max-width: min(100%, var(--spacing-caption));
-  overflow-wrap: anywhere;
-  text-wrap: balance;
-  text-align: center;
-  font-size: 15px;
-  line-height: 1.45;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--color-text);
-}
-
-.caption span {
-  color: var(--color-text-3);
-  font-weight: 400;
-  margin-right: var(--spacing-caption-gap);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .hud {
-    background: var(--color-hud-solid);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-}
-
 /* Selkies' client runs here only to decode; the stage paints its frames. */
 .desktop-frame {
   position: absolute;
@@ -352,319 +241,9 @@
   pointer-events: none;
 }
 
-.stage-veil.on,
-.stage-veil[role="alert"] {
-  opacity: 1;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .stage > canvas,
   .stage > .stage-veil {
     transition: none;
-  }
-}
-
-@media (--rails-collapse) {
-  .house {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .app {
-    grid-template-rows: var(--spacing-bar) auto auto minmax(0, 1fr);
-  }
-  .pane-tabs {
-    display: flex;
-  }
-  .pane:not([data-selected="true"]) {
-    display: none;
-  }
-  .house {
-    padding: 0 12px max(12px, env(safe-area-inset-bottom));
-  }
-  .pane .rail {
-    height: 100%;
-    padding-top: 12px;
-  }
-  .task-bar {
-    padding: 4px 12px 8px;
-  }
-  .task-bar .hud {
-    max-width: 100%;
-    border-radius: 14px;
-    flex-wrap: wrap;
-  }
-  .task-bar .hud .st {
-    min-width: 0;
-    flex: 1;
-  }
-  .task-bar .hud .st > span:first-of-type {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .task-connection {
-    display: none;
-  }
-  .stage,
-  .stage-col.manual-column > .takeover-panel {
-    width: 100%;
-  }
-  .caption {
-    margin-top: 14px;
-    font-size: 14px;
-  }
-  /* The stage keeps the middle of its pane whatever the caption under it says, so a caption that
-     wraps onto another line never moves it. */
-  .pane > .stage-col:not(.manual-column) {
-    display: grid;
-    grid-template-rows: 1fr auto 1fr;
-    grid-template-columns: minmax(0, 1fr);
-    justify-items: center;
-  }
-  .pane > .stage-col:not(.manual-column) > .stage {
-    grid-row: 2;
-  }
-  .pane > .stage-col:not(.manual-column) > .caption {
-    grid-row: 3;
-    align-self: start;
-  }
-}
-
-.stage > .rim {
-  position: absolute;
-  inset: -2px;
-  border-radius: calc(var(--radius-stage) + 2px);
-  pointer-events: none;
-  box-shadow:
-    0 0 0 2px var(--color-xenon),
-    0 0 28px 2px var(--color-xenon-a40);
-  z-index: 3;
-}
-.hud .t {
-  color: var(--color-text-2);
-  font-size: 12px;
-}
-
-.hud .a[disabled] {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.keys-btn {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 14px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--color-text-2);
-}
-
-.keys-btn:focus-visible {
-  outline: var(--focus-width) solid var(--color-text-2);
-  outline-offset: 1px;
-}
-
-.keys-btn:hover,
-.keys-btn[aria-expanded="true"] {
-  background: var(--color-hud-button);
-  color: var(--color-text);
-}
-
-/* Wide, the inspector covers the bar's right end but for its top inset, where a pressed button
-   would show through. */
-@media (width >= 760px) {
-  .keys-btn[aria-expanded="true"] {
-    background: none;
-  }
-}
-
-.keys-btn .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-text-3);
-}
-
-.keys-btn.alert {
-  color: var(--color-text);
-}
-
-.keys-btn.alert .dot {
-  background: none;
-  box-shadow: inset 0 0 0 1.5px var(--color-text);
-}
-
-.keys-btn {
-  white-space: nowrap;
-}
-@media (width < 760px) {
-  .bar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    column-gap: var(--spacing-bar-gap);
-    padding: 0 12px;
-  }
-  .bar .title {
-    display: none;
-  }
-  .modes {
-    justify-self: start;
-    gap: 0;
-    padding: 2px;
-    border-radius: 8px;
-    background: var(--color-surface);
-  }
-  .modes button {
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 6px;
-  }
-  .modes button::before {
-    inset-inline: 0;
-  }
-  .modes button.on {
-    background: var(--color-surface-2);
-    box-shadow: inset 0 1px 0 var(--color-key-bevel);
-  }
-  .modes button.on::after {
-    content: none;
-  }
-}
-@media (width < 560px) {
-  .brand-name {
-    display: none;
-  }
-}
-@media (width < 480px) {
-  .bar-r > .live {
-    display: none;
-  }
-}
-
-@media (width < 760px) {
-  .hud.paused {
-    width: calc(100% - 24px);
-    max-width: 360px;
-    height: auto;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    padding: 12px;
-    border-radius: 20px;
-  }
-
-  .hud.paused .st {
-    grid-column: 1 / -1;
-    justify-content: center;
-  }
-
-  .hud.paused .a {
-    justify-content: center;
-    padding-inline: 8px;
-  }
-}
-
-/* The workspace panes stay mounted. Phone navigation changes visibility, never stream owners. */
-.pane {
-  min-width: 0;
-  min-height: 0;
-}
-.pane > .rail,
-.pane > .stage-col {
-  height: 100%;
-}
-.pane-tabs {
-  display: none;
-  gap: 4px;
-  padding: 0 12px 8px;
-}
-.pane-tabs button {
-  min-height: 44px;
-  min-width: 0;
-  flex: 1;
-  padding: 8px;
-  border-radius: 10px;
-  color: var(--color-text-2);
-  font-size: 12px;
-}
-.pane-tabs button[aria-selected="true"] {
-  background: var(--color-surface-2);
-  color: var(--color-text);
-}
-.pane-waiting {
-  margin-left: 5px;
-  color: var(--color-text);
-}
-.task-bar {
-  min-width: 0;
-  min-height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px var(--spacing-edge) 12px;
-}
-.task-bar .hud {
-  position: static;
-  transform: none;
-  flex: none;
-  height: auto;
-  min-height: 44px;
-  padding: 4px 6px 4px 14px;
-}
-.task-bar .hud .a {
-  min-height: 44px;
-  height: auto;
-}
-.task-bar .hud.paused {
-  width: auto;
-  display: flex;
-  max-width: none;
-}
-.task-connection {
-  color: var(--color-text-2);
-  font-size: 12px;
-  white-space: nowrap;
-}
-.rail-h h2 {
-  font-size: inherit;
-  font-weight: inherit;
-}
-.history-note {
-  font-size: 12px;
-  color: var(--color-text-2);
-  margin-top: 8px;
-}
-.keys-btn {
-  min-height: 44px;
-}
-@media (--rails-collapse) {
-  .pane-tabs {
-    display: flex;
-  }
-  .task-bar {
-    padding: 4px 12px 8px;
-  }
-  .task-bar .hud {
-    flex: 1;
-    max-width: 100%;
-    flex-wrap: wrap;
-    border-radius: 14px;
-    gap: 8px;
-  }
-  .task-bar .hud .st {
-    flex: 1;
-    min-width: 0;
-  }
-  .task-bar .hud .st > span:first-of-type {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .task-connection {
-    display: none;
-  }
-  .bar-r {
-    gap: 4px;
   }
 }

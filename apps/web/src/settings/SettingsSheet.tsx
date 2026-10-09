@@ -321,14 +321,14 @@ export function SettingsSheet(props: SettingsSheetProps) {
       footer={footer}
     >
       <div id="settings-sheet-body" className="settings-body">
-        {phone && (
+        {(phone || props.stop) && (
           // What Stop reports stays after Stop itself has gone.
           <div className="settings-stop">
             {props.stop && (
               <div className="settings-inline">
                 <p className="settings-note">Your computer</p>
                 <Button
-                  icon="square"
+                  icon="stop"
                   disabledReason={props.stop.enabled ? undefined : "Not available right now"}
                   onClick={() => props.stop?.run()}
                 >
@@ -336,7 +336,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
                 </Button>
               </div>
             )}
-            {props.taskControls}
+            {phone && props.taskControls}
           </div>
         )}
         {props.loading ? (

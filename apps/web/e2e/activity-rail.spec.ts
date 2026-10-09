@@ -32,7 +32,7 @@ async function open(engine: keyof typeof ENGINES, options: BrowserContextOptions
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1180)
+  if ((options.viewport?.width ?? 0) < 1100)
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
   const rail = page.getByRole("complementary", { name: "Plan and steps" });
   await expect(rail.locator("[data-current]")).toHaveCount(1);

@@ -1,5 +1,5 @@
-/* First run lies over the 16:10 stage, so turning the computer on never moves the stage: inside it
-   on a wide screen, over the whole computer pane on a phone. dot and the one action stay put on the
+/* First run lies over the 16:10 stage, so turning the computer on never moves the stage: over the stage
+   on a wide screen, over the stage and the band on a phone. dot and the one action stay put on the
    left; the steps scroll on their own on the right. */
 .welcome-setup {
   position: absolute;
@@ -11,16 +11,12 @@
   box-shadow: var(--shadow-stage);
   color: var(--color-fg-1);
   container-type: size;
-  transition: opacity var(--dur-sheet) var(--ease-enter);
+  transition: opacity var(--dur-fade) var(--ease-enter);
 }
 
 .ui-presence[data-leaving] > .welcome-setup {
   opacity: 0;
   transition: opacity var(--dur-exit) var(--ease-exit);
-}
-
-.stage-col:has(> .ui-presence > .welcome-setup) {
-  position: relative;
 }
 
 .welcome-layout {
@@ -35,7 +31,7 @@
   }
 }
 
-.stage-col:has(.welcome-setup) > .caption {
+.stage-frame:has(.welcome-setup) .narration {
   visibility: hidden;
 }
 
@@ -56,9 +52,9 @@
 
 .welcome-title {
   font:
-    var(--text-display--font-weight) var(--text-display) / var(--text-display--line-height)
+    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-display--letter-spacing);
+  letter-spacing: var(--text-title-1--letter-spacing);
 }
 
 .welcome-lede {
@@ -75,10 +71,10 @@
 
 /* Holds its line while empty, so the hint arriving moves nothing. */
 .welcome-note {
-  min-height: var(--text-footnote--line-height);
+  min-height: var(--text-callout--line-height);
   margin-top: calc(var(--spacing) * 3);
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   text-wrap: balance;
 }
 
@@ -120,9 +116,7 @@
 
 .welcome-step-title {
   grid-area: title;
-  font:
-    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 .welcome-step-action {
@@ -133,7 +127,7 @@
   grid-area: detail;
   margin-top: 2px;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
 }
 

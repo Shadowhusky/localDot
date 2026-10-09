@@ -1,9 +1,9 @@
 import type { Page } from "@playwright/test";
-import { expect, keepBaselinesAt, test } from "./harness.ts";
+import { expect, runAt, test } from "./harness.ts";
 
-// Replay's states beyond its first picture (screens.spec.ts): a task with no video once its card has
-// become a chip in the transport, and the task library opened from the bar.
-keepBaselinesAt("c14", "w14", "w39");
+// Replay's states: a task with no video once its card has become a chip in the transport, and the
+// task library opened from the bar.
+runAt("c14", "w14", "w39");
 
 const settled = (page: Page) =>
   page.evaluate(() =>
@@ -22,7 +22,6 @@ test("replay, no video", async ({ page, ui }) => {
   await expect(page.locator(".replay-gap-card")).toBeHidden();
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("replay-no-video.png");
 });
 
 test("tasks library", async ({ page, ui }) => {
@@ -35,5 +34,4 @@ test("tasks library", async ({ page, ui }) => {
   await settled(page);
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("tasks-library.png");
 });

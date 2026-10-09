@@ -13,7 +13,7 @@ test.afterAll(async () => {
 
 async function expectFrames(page: Page) {
   const canvas = page.locator("canvas.stage-canvas");
-  await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 300_000 });
   await expect
     .poll(async () => Number(await canvas.getAttribute("data-frames")), { timeout: 60_000 })
     .toBeGreaterThan(0);

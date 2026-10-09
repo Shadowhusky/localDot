@@ -38,6 +38,7 @@ import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
+import { Conversations } from "./conversation.ts";
 import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
@@ -83,6 +84,7 @@ export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
     settings = new SettingsStore(d.home),
     catalog = new CatalogStore(d.home);
+  const conversations = new Conversations(d.home, d.eventLog);
   const transcripts = new TranscriptStore(d.home),
     png = new FramePng(d.frames, d.gateway),
     outputs = new OutputStore(d.home),
@@ -359,6 +361,7 @@ export function createAgent(d: AgentWiringDeps) {
     catalog: () => catalog.get(),
     memory,
     transcripts,
+    conversations,
     installSkills,
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
@@ -555,6 +558,7 @@ export function createAgent(d: AgentWiringDeps) {
         }
       : undefined,
     runner,
+    conversations,
     settings,
     catalog,
     keyd: d.keyd,

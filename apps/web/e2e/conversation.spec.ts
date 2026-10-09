@@ -43,7 +43,7 @@ async function open(
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1180)
+  if ((options.viewport?.width ?? 0) < 1100)
     await page.getByRole("tab", { name: /^Conversation/ }).click();
   const thread = page.getByRole("region", { name: "Conversation history" });
   await expect(thread.locator(".thread-row").first()).toBeVisible();

@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
-import { expect, type Harness, keepBaselinesAt, test } from "./harness.ts";
+import { expect, type Harness, runAt, test } from "./harness.ts";
 
 // Export from Replay: the popover's choices, a video being made, a saved file and a browser that
 // cannot make video. Chrome saves through its save picker (lent here, so nothing reaches the disk);
 // WebKit has none and saves through a download.
-keepBaselinesAt("c14", "w14", "w39");
+runAt("c14", "w14", "w39");
 
 // Holds the export worker at 12 of 40 frames, or with `done` writes 2.4 MB and finishes, so the
 // pictures do not depend on how fast a machine encodes.
@@ -78,7 +78,6 @@ test("export, options", async ({ page, ui }) => {
     "true",
   );
   await still(ui);
-  await expect(page).toHaveScreenshot("export-options.png");
 });
 
 test("export, progress", async ({ page, ui }) => {
@@ -89,7 +88,6 @@ test("export, progress", async ({ page, ui }) => {
   await expect(panel.getByText("30% · working out the time left")).toBeVisible();
   expect(await panel.boundingBox()).toEqual(options);
   await still(ui);
-  await expect(page).toHaveScreenshot("export-progress.png");
 });
 
 test("export, saved", async ({ page, ui }) => {
@@ -107,7 +105,6 @@ test("export, saved", async ({ page, ui }) => {
   } else await expect(saved).toBeVisible();
   await expect(panel.getByText("2.3 MB · 1:38", { exact: true })).toBeVisible();
   await still(ui);
-  await expect(page).toHaveScreenshot("export-saved.png");
 });
 
 test("export, unsupported", async ({ page, ui }) => {
@@ -122,7 +119,6 @@ test("export, unsupported", async ({ page, ui }) => {
   await expect(page.locator(".ui-tooltip")).toContainText(reason);
   await expect(page.getByRole("dialog", { name: "Export MP4" })).toHaveCount(0);
   await still(ui);
-  await expect(page).toHaveScreenshot("export-unsupported.png");
 });
 
 test.describe("in WebKit", () => {

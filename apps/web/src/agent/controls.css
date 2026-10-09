@@ -1,4 +1,4 @@
-@custom-media --phone (width < 760px);
+@custom-media --phone (width < 700px);
 
 .control-status {
   border: 1px solid var(--color-line);
@@ -59,8 +59,8 @@
 }
 .takeover-panel h3 {
   margin: 0;
-  font-size: var(--text-title);
-  line-height: var(--text-title--line-height);
+  font-size: var(--text-title-3);
+  line-height: var(--text-title-3--line-height);
   font-weight: 600;
 }
 .takeover-panel p {

@@ -1,7 +1,9 @@
 import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
 import {
   type DragEvent,
+  memo,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -25,7 +27,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
-import { TextArea } from "../ui/TextArea.tsx";
+import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
 import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
@@ -54,12 +56,8 @@ export interface ComposerProps {
   keysOpen: boolean;
   receiveKey: KeyIntake["receive"];
   configured?: boolean;
-  // The main model's name, offered on a new task as the way to change it.
-  model?: string;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
-  // The running task's Stop, while there is one.
-  stop?: { run(): void; busy: boolean; enabled: boolean };
 }
 export interface Delivery {
   readonly id: number;
@@ -119,6 +117,51 @@ const editable = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])");
 const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+// What the composer shows of its text: whether there is any, and its length once that shows.
+interface TextShape {
+  readonly blank: boolean;
+  readonly length: number;
+}
+const shapeOf = (input: HTMLTextAreaElement): TextShape => ({
+  blank: !input.value.trim(),
+  length: input.value.length > NEAR ? input.value.length : 0,
+});
+
+type FieldEvents = Pick<
+  TextAreaProps,
+  "onInput" | "onPaste" | "onKeyDown" | "onCompositionStart" | "onCompositionEnd"
+>;
+// The text lives here and only here. It renders when what it says changes, never per keystroke
+// and never with the task's updates.
+const ComposerField = memo(function ComposerField({
+  label,
+  placeholder,
+  unavailable,
+  describedBy,
+  events,
+}: {
+  label: string;
+  placeholder: string;
+  unavailable: boolean;
+  describedBy?: string;
+  events: FieldEvents;
+}) {
+  return (
+    <TextArea
+      bare
+      className="composer-field"
+      aria-label={label}
+      placeholder={placeholder}
+      maxRows={8}
+      maxLength={LIMIT}
+      autoComplete="off"
+      readOnly={unavailable}
+      aria-disabled={unavailable || undefined}
+      aria-describedby={describedBy}
+      {...events}
+    />
+  );
+});
 
 // A control that comes and goes along the row: it grows in where it sits, and on its way out it
 // shrinks away still showing what it last did, out of reach.
@@ -144,8 +187,9 @@ export function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [length, setLength] = useState(0);
-  const [blank, setBlank] = useState(true);
+  const [text, setText] = useState<TextShape>({ blank: true, length: 0 });
+  const shown = useRef(text);
+  const problemShown = useRef(problem);
   const [menu, setMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -175,6 +219,7 @@ export function Composer(props: ComposerProps) {
   useLayoutEffect(() => {
     current.current = props;
     guardOwner.current = guard;
+    problemShown.current = problem;
   });
   useLayoutEffect(() => {
     const previous = identity.current;
@@ -284,10 +329,18 @@ export function Composer(props: ComposerProps) {
     return false;
   }, [delivery, messages]);
 
-  const measure = (input: HTMLTextAreaElement) => {
-    setLength(input.value.length);
-    setBlank(!input.value.trim());
-  };
+  const measure = useCallback((input: HTMLTextAreaElement) => {
+    const next = shapeOf(input);
+    if (next.blank === shown.current.blank && next.length === shown.current.length) return;
+    shown.current = next;
+    setText(next);
+  }, []);
+  // A key taken out, or discarded, changes the text under the composer.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a notice's change is the trigger.
+  useLayoutEffect(() => {
+    const input = form.current?.querySelector("textarea");
+    if (input) measure(input);
+  }, [guard.notice, measure]);
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
     announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
@@ -500,8 +553,62 @@ export function Composer(props: ComposerProps) {
 
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
   if (!choosing && menu) setMenu(false);
+  const typing = useRef({ submit, touch, choosing });
+  useLayoutEffect(() => {
+    typing.current = { submit, touch, choosing };
+  });
+  const events = useMemo<FieldEvents>(
+    () => ({
+      onCompositionStart: () => {
+        composing.current = true;
+      },
+      onCompositionEnd: () => {
+        composing.current = false;
+      },
+      onInput: (event) => {
+        revision.current += 1;
+        guardOwner.current.input(event.currentTarget, event.nativeEvent);
+        measure(event.currentTarget);
+        if (problemShown.current !== null) setProblem(null);
+      },
+      onPaste: (event) => {
+        const input = event.currentTarget;
+        if (input.readOnly) return;
+        event.preventDefault();
+        const pasted = event.clipboardData.getData("text/plain");
+        if (
+          pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
+          LIMIT
+        )
+          input.value = " ".repeat(LIMIT + 1); // Bounded overflow sentinel, never a truncated key.
+        else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
+        revision.current += 1;
+        guardOwner.current.check(input);
+        measure(input);
+        if (problemShown.current !== null) setProblem(null);
+      },
+      onKeyDown: (event) => {
+        const { submit, touch, choosing } = typing.current;
+        if (
+          touch ||
+          event.key !== "Enter" ||
+          event.shiftKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.nativeEvent.isComposing ||
+          composing.current
+        )
+          return;
+        event.preventDefault();
+        // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
+        if (event.altKey && !choosing) return;
+        if (event.currentTarget.value.trim()) submit(event.altKey);
+      },
+    }),
+    [measure],
+  );
   const connect = mode === "new" && props.configured === false;
-  const near = length > NEAR && length <= LIMIT;
+  const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
   const reason = blockedReason(props, online, mode);
   const sendReason = sending
@@ -513,7 +620,7 @@ export function Composer(props: ComposerProps) {
         : (reason ??
           (uploads.blocked
             ? "Wait for your files to finish uploading."
-            : blank
+            : text.blank
               ? "Write a message first."
               : undefined));
   const attachReason = guard.notice
@@ -521,8 +628,15 @@ export function Composer(props: ComposerProps) {
     : sending || uncertain
       ? "Wait until your message is sent."
       : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
-  const sendLabel =
-    mode === "new" ? "Start task" : mode === "followup" ? "Send follow-up" : "Send now";
+  // A message to a conversation at rest starts its next task, but reads as any other message.
+  const newConversation = mode === "new" && !props.agent.sessionId;
+  const sendLabel = newConversation
+    ? "Start task"
+    : mode === "new"
+      ? "Send"
+      : mode === "followup"
+        ? "Send follow-up"
+        : "Send now";
   const note =
     mode === "new"
       ? undefined
@@ -613,61 +727,12 @@ export function Composer(props: ComposerProps) {
         <Collapse open={rows.length > 0} className="composer-files">
           <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
         </Collapse>
-        <TextArea
-          bare
-          className="composer-field"
-          aria-label={mode === "new" ? "New task" : "Message"}
-          placeholder={mode === "new" ? "Ask dot to do something…" : "Message dot…"}
-          maxRows={8}
-          maxLength={LIMIT}
-          autoComplete="off"
-          readOnly={unavailable}
-          aria-disabled={unavailable || undefined}
-          aria-describedby={guard.notice ? keyNotice : undefined}
-          onCompositionStart={() => {
-            composing.current = true;
-          }}
-          onCompositionEnd={() => {
-            composing.current = false;
-          }}
-          onInput={(event) => {
-            revision.current += 1;
-            guardOwner.current.check(event.currentTarget);
-            measure(event.currentTarget);
-            setProblem(null);
-          }}
-          onPaste={(event) => {
-            const input = event.currentTarget;
-            if (input.readOnly) return;
-            event.preventDefault();
-            const pasted = event.clipboardData.getData("text/plain");
-            if (
-              pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
-              LIMIT
-            )
-              input.value = " ".repeat(LIMIT + 1); // Bounded overflow sentinel, never a truncated key.
-            else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
-            revision.current += 1;
-            guardOwner.current.check(input);
-            measure(input);
-            setProblem(null);
-          }}
-          onKeyDown={(event) => {
-            if (
-              touch ||
-              event.key !== "Enter" ||
-              event.shiftKey ||
-              event.ctrlKey ||
-              event.metaKey ||
-              event.nativeEvent.isComposing ||
-              composing.current
-            )
-              return;
-            event.preventDefault();
-            // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
-            if (event.altKey && !choosing) return;
-            if (event.currentTarget.value.trim()) submit(event.altKey);
-          }}
+        <ComposerField
+          label={newConversation ? "New task" : "Message"}
+          placeholder={newConversation ? "Ask dot to do something" : "Message dot"}
+          unavailable={!!unavailable}
+          describedBy={guard.notice ? keyNotice : undefined}
+          events={events}
         />
         <div className="composer-bar">
           <FileButton
@@ -678,44 +743,11 @@ export function Composer(props: ComposerProps) {
             disabledReason={attachReason}
           />
           <div className="composer-hint">
-            {mode === "new" && props.configured !== false && props.model ? (
-              <Button
-                variant="quiet"
-                size="sm"
-                className="composer-model"
-                aria-label={`Model: ${props.model}. Change in Settings`}
-                onClick={(event) => props.onSettings?.(event.currentTarget)}
-              >
-                <span className="composer-model-name">{props.model}</span>
-                <Icon name="chevron-down" size={12} />
-              </Button>
-            ) : (
-              note && <span className="composer-note">{note}</span>
-            )}
+            {note && <span className="composer-note">{note}</span>}
           </div>
           <Pop shown={near}>
             {near && (
-              <span className="composer-count num">{`${(LIMIT - length).toLocaleString()} left`}</span>
-            )}
-          </Pop>
-          <Pop shown={!!props.stop}>
-            {props.stop && (
-              <IconButton
-                className="composer-stop"
-                variant="secondary"
-                size={touch ? 32 : 28}
-                icon="square"
-                label="Stop task"
-                kbd={["Mod", "Shift", "."]}
-                disabledReason={
-                  props.stop.busy
-                    ? "Stopping…"
-                    : props.stop.enabled
-                      ? undefined
-                      : "Reconnecting to the task…"
-                }
-                onClick={props.stop.run}
-              />
+              <span className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</span>
             )}
           </Pop>
           <Pop shown={choosing}>
@@ -766,7 +798,7 @@ export function Composer(props: ComposerProps) {
               type="submit"
               className="composer-send"
               variant="primary"
-              size={touch ? 32 : 28}
+              size={32}
               icon="arrow-up"
               label={sendLabel}
               kbd={touch ? undefined : ["Enter"]}

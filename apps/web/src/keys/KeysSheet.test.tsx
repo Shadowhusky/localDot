@@ -643,17 +643,28 @@ describe("KeysSheet", () => {
     expect(screen.getByText("Copied")).toBeTruthy();
   });
 
-  it("names network protection's state on the Keys button, where only a hollow dot shows it", () => {
+  it("names network protection's state on the Keys button, where only the amber point shows it", () => {
     const health = {
       online: true,
       audit: { ok: true },
       hairpin: { state: "unknown" as const, addresses: 0 },
     };
     render(
-      <TopBar title="t" live={false} keys={keyStatus(health)} keysOpen={false} onKeys={() => {}} />,
+      <TopBar
+        title="t"
+        mode="watch"
+        replayEnabled={false}
+        onMode={() => {}}
+        keys={keyStatus(health)}
+        keysOpen={false}
+        onKeys={() => {}}
+        settingsOpen={false}
+        onSettings={() => {}}
+      />,
     );
     const button = screen.getByRole("button", { name: "Keys, network protection checking" });
-    expect(button.textContent).toBe("Keys");
+    expect(button.textContent).toBe("");
+    expect(button.querySelector(".ui-icon-button-attention")).toBeTruthy();
   });
 
   it("sits beside the page and closes on Escape from inside it", () => {
@@ -767,7 +778,7 @@ describe("KeysSheet", () => {
 
   it("keeps Stop on a phone, and what Stop reports after Stop has gone", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query.includes("760px"),
+      matches: query.includes("700px"),
       media: query,
       addEventListener() {},
       removeEventListener() {},

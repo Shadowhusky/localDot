@@ -67,7 +67,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     border-radius: var(--radius-lg);
-    background-color: var(--color-overlay);
+    background-color: var(--color-popover);
     box-shadow: var(--shadow-overlay);
     color: var(--color-fg-1);
     font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
@@ -75,8 +75,8 @@
     scrollbar-color: var(--color-control-pressed) transparent;
     transition:
       opacity var(--dur-hover) var(--ease-enter),
-      scale var(--dur-sheet) var(--ease-spring),
-      translate var(--dur-sheet) var(--ease-spring);
+      scale var(--dur-default) var(--ease-spring),
+      translate var(--dur-default) var(--ease-spring);
   }
 
   .ui-layer[data-closing] > .ui-popup {
@@ -139,28 +139,29 @@
 
   .ui-popover-title {
     font:
-      var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
-      var(--font-ui);
+      var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
   }
 
   .ui-menu {
     min-width: calc(var(--spacing) * 50);
     max-width: min(calc(var(--spacing) * 80), calc(100vw - var(--spacing) * 4));
-    padding: var(--spacing);
+    padding: calc(var(--spacing) * 1.5);
   }
 
   .ui-menu-item {
     display: flex;
     align-items: center;
-    gap: calc(var(--spacing) * 2);
+    gap: calc(var(--spacing) * 2.5);
     width: 100%;
-    min-height: calc(var(--spacing) * 8);
-    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    min-height: calc(var(--spacing) * 9);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 2)
+      calc(var(--spacing) * 2.5);
     border: 0;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-row);
     background-color: transparent;
     color: var(--color-fg-1);
-    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    font: var(--text-row) / var(--text-row--line-height) var(--font-ui);
+    letter-spacing: var(--text-row--letter-spacing);
     text-align: start;
     cursor: default;
     user-select: none;
@@ -173,7 +174,7 @@
   }
 
   .ui-menu-item:focus {
-    background-color: var(--color-control-hover);
+    background-color: var(--color-selected);
   }
 
   .ui-menu-item[aria-disabled="true"]:focus {
@@ -191,7 +192,7 @@
 
   /* An item without an icon keeps its label in line with those of the items that have one. */
   .ui-menu:has(.ui-menu-icon) .ui-menu-item:not(:has(> .ui-menu-icon)) {
-    padding-inline-start: calc(var(--spacing) * 8);
+    padding-inline-start: calc(var(--spacing) * 9.5);
   }
 
   .ui-menu-text {
@@ -214,13 +215,14 @@
   /* fg-3 is too faint on the overlay surface, so secondary text there is fg-2. */
   .ui-menu-reason {
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .ui-menu-kbd {
     margin-inline-start: auto;
     padding-inline-start: calc(var(--spacing) * 4);
     color: var(--color-fg-2);
+    font-size: var(--text-callout);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -236,16 +238,17 @@
     flex-shrink: 0;
     height: 1px;
     border: 0;
-    margin: var(--spacing) calc(var(--spacing) * -1);
-    background-color: var(--color-hairline);
+    margin: calc(var(--spacing) * 1.25) calc(var(--spacing) * 2);
+    background-color: var(--color-separator);
   }
 
   .ui-menu-group-label {
-    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) var(--spacing);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5) var(--spacing);
     color: var(--color-fg-2);
     font:
-      var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
-    letter-spacing: var(--text-micro--letter-spacing);
+      var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
   }
 
   /* Sheet. */
@@ -254,36 +257,71 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background-color: var(--color-raised);
+    background-color: var(--color-overlay);
     box-shadow: var(--shadow-overlay);
     color: var(--color-fg-1);
     font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
     transition:
       opacity var(--dur-fade) var(--ease-enter),
-      translate var(--dur-spring) var(--ease-spring),
-      scale var(--dur-spring) var(--ease-spring);
+      translate var(--dur-default) var(--ease-spring),
+      scale var(--dur-default) var(--ease-spring);
   }
 
   .ui-sheet[data-side="inspector"] {
-    top: calc(var(--spacing) * 2);
-    right: calc(var(--spacing) * 2);
-    bottom: calc(var(--spacing) * 2);
-    width: clamp(calc(var(--spacing) * 110), 36vw, calc(var(--spacing) * 140));
-    max-width: calc(100vw - var(--spacing) * 4);
+    top: var(--rail-inset);
+    right: var(--rail-inset);
+    bottom: var(--rail-inset);
+    width: 600px;
+    max-width: calc(100vw - var(--rail-inset) * 2);
     border-radius: var(--radius-xl);
   }
 
-  /* The surface runs on below the screen's edge, so a spring that overshoots never shows a gap. */
+  /* The surface runs on below the screen's edge, so a spring that overshoots never shows a gap.
+     Detents: fit hugs its content; medium leaves the stage in view (top 214); large covers all but
+     the top 40 and pushes the page back. Holding both, it is sized for large and rests in medium
+     174 px lower (sheet-drag.ts DETENT_TOP holds the same numbers). */
   .ui-sheet[data-side="bottom"] {
     --_bleed: calc(var(--spacing) * 12);
+    --_top: var(--sheet-large-top);
     right: 0;
     bottom: calc(var(--_bleed) * -1);
     left: 0;
     width: min(100%, calc(var(--spacing) * 160));
-    max-height: calc(100dvh - var(--spacing) * 10 - env(safe-area-inset-top) + var(--_bleed));
+    max-height: calc(100dvh - var(--_top) - env(safe-area-inset-top) + var(--_bleed));
     margin-inline: auto;
     padding-bottom: var(--_bleed);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+    transition:
+      opacity var(--dur-fade) var(--ease-enter),
+      translate var(--dur-gentle) var(--ease-spring),
+      scale var(--dur-gentle) var(--ease-spring);
+  }
+
+  .ui-sheet[data-side="bottom"][data-detents="medium"] {
+    --_top: var(--sheet-medium-top);
+  }
+
+  .ui-sheet[data-side="bottom"]:not([data-detents="fit"]) {
+    height: calc(100dvh - var(--_top) - env(safe-area-inset-top) + var(--_bleed));
+  }
+
+  .ui-sheet[data-side="bottom"][data-detents~="large"][data-detent="medium"] {
+    translate: 0 calc(var(--sheet-medium-top) - var(--sheet-large-top));
+  }
+
+  /* At the large detent the page behind recedes, as a stack of sheets does. */
+  #root {
+    transform-origin: 50% 0;
+    transition:
+      scale var(--dur-gentle) var(--ease-spring),
+      border-radius var(--dur-gentle) var(--ease-spring);
+  }
+
+  :root:has(.ui-layer:not([data-closing]) > .ui-sheet[data-side="bottom"][data-detent="large"])
+    #root {
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    scale: 0.94;
   }
 
   .ui-sheet[data-behind] {
@@ -305,15 +343,15 @@
     opacity: 0;
     translate: calc(var(--_nudge) * 6) 0;
     transition:
-      opacity var(--dur-exit) var(--ease-exit),
-      translate var(--dur-exit) var(--ease-exit);
+      opacity var(--dur-sheet-exit) var(--ease-exit),
+      translate var(--dur-sheet-exit) var(--ease-exit);
   }
 
   .ui-layer[data-closing] > .ui-sheet[data-side="bottom"] {
     translate: 0 calc(100% * var(--_motion));
     transition:
       opacity var(--dur-exit) var(--ease-exit),
-      translate var(--dur-sheet) var(--ease-exit);
+      translate var(--dur-sheet-exit) var(--ease-exit);
   }
 
   /* Kit controls raise their faces (z-index 1) over their neighbours' reach, so each region keeps
@@ -336,10 +374,10 @@
     flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
-    background-color: var(--color-raised);
+    background-color: var(--color-overlay);
     transition:
       opacity var(--dur-fade) var(--ease-enter),
-      translate var(--dur-sheet) var(--ease-spring);
+      translate var(--dur-default) var(--ease-spring);
   }
 
   @starting-style {
@@ -363,7 +401,7 @@
     pointer-events: none;
     transition:
       opacity var(--dur-exit) var(--ease-exit),
-      translate var(--dur-sheet) var(--ease-spring);
+      translate var(--dur-default) var(--ease-spring);
   }
 
   .ui-sheet-page[data-leaving][data-direction="back"] {
@@ -376,14 +414,14 @@
     visibility: hidden;
     transition:
       opacity var(--dur-exit) var(--ease-exit),
-      translate var(--dur-sheet) var(--ease-spring),
-      visibility 0s linear var(--dur-sheet);
+      translate var(--dur-default) var(--ease-spring),
+      visibility 0s linear var(--dur-default);
   }
 
   .ui-sheet[data-side="bottom"][data-resizing] {
     transition:
-      height var(--dur-sheet) var(--ease-spring),
-      translate var(--dur-spring) var(--ease-spring);
+      height var(--dur-default) var(--ease-spring),
+      translate var(--dur-gentle) var(--ease-spring);
   }
 
   .ui-sheet-handle {
@@ -398,24 +436,27 @@
 
   .ui-sheet-grabber {
     width: calc(var(--spacing) * 9);
-    height: calc(var(--spacing) * 1.25);
+    height: 5px;
     margin: calc(var(--spacing) * 1.5) auto 0;
     border-radius: var(--radius-full);
-    background-color: var(--color-fg-4);
+    background-color: var(--color-grabber);
   }
 
   .ui-sheet-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: calc(var(--spacing) * 3);
-    padding: calc(var(--spacing) * 4) calc(var(--spacing) * 3) calc(var(--spacing) * 3)
-      calc(var(--spacing) * 5);
+    min-height: 60px;
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5) calc(var(--spacing) * 3)
+      calc(var(--spacing) * 6);
     border-bottom: 1px solid transparent;
     transition: border-color var(--dur-hover) var(--ease-standard);
   }
 
   .ui-sheet[data-side="bottom"] .ui-sheet-header {
+    min-height: 52px;
     padding-top: calc(var(--spacing) * 2);
+    padding-bottom: calc(var(--spacing) * 2);
   }
 
   .ui-sheet[data-under-top] .ui-sheet-header {
@@ -448,15 +489,42 @@
     padding-top: var(--spacing);
   }
 
+  /* A phone sheet with Done: the title centred, Done at the trailing edge. */
+  .ui-sheet-header:has(> .ui-sheet-done) {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    padding-inline: calc(var(--spacing) * 2);
+  }
+
+  .ui-sheet-header:has(> .ui-sheet-done) > .ui-sheet-heading {
+    grid-column: 2;
+    justify-items: center;
+    padding-top: 0;
+    text-align: center;
+  }
+
+  .ui-sheet-done {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .ui-sheet-done.ui-button {
+    color: var(--color-fg-1);
+    font-size: var(--text-title-2);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--text-title-2--letter-spacing);
+  }
+
   .ui-sheet-title {
     font:
-      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
-    letter-spacing: var(--text-title--letter-spacing);
+      var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
   }
 
   .ui-sheet-description {
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .ui-sheet-body {
@@ -464,18 +532,88 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: var(--spacing) calc(var(--spacing) * 5) calc(var(--spacing) * 5);
+    padding: var(--spacing) calc(var(--spacing) * 6) calc(var(--spacing) * 6);
     /* The gutter is kept whether or not the content overflows, so nothing shifts when it starts to,
        and comes out of the padding beside it (Sheet.tsx measures it), so the content ends where the
        header's and footer's do. */
-    padding-inline-end: max(0px, calc(var(--spacing) * 5 - var(--_gutter, 0px)));
+    padding-inline-end: max(0px, calc(var(--spacing) * 6 - var(--_gutter, 0px)));
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: var(--color-control-pressed) transparent;
   }
 
-  .ui-sheet[data-side="bottom"] .ui-sheet-body:last-child {
+  /* An inspector with a sidebar: a 176 px index beside the content column, the one scroller. */
+  .ui-sheet-main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .ui-sheet-main:has(> .ui-sheet-sidebar) {
+    display: grid;
+    grid-template-columns: 176px minmax(0, 1fr);
+  }
+
+  .ui-sheet-main:has(> .ui-sheet-sidebar) > .ui-sheet-body {
+    padding-inline-start: calc(var(--spacing) * 3);
+  }
+
+  .ui-sheet[data-side="bottom"] .ui-sheet-main:last-child > .ui-sheet-body {
     padding-bottom: calc(var(--spacing) * 5 + env(safe-area-inset-bottom));
+  }
+
+  .ui-sheet-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--spacing) calc(var(--spacing) * 3);
+  }
+
+  .ui-sheet-nav-item {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: calc(var(--spacing) * 2.5);
+    height: calc(var(--spacing) * 8);
+    padding: 0 calc(var(--spacing) * 2.5);
+    border: 0;
+    border-radius: var(--radius-row);
+    background-color: transparent;
+    color: var(--color-fg-2);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
+    text-align: start;
+    transform: none;
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      color var(--dur-hover) var(--ease-standard);
+  }
+
+  @media (hover: hover) {
+    .ui-sheet-nav-item:hover {
+      background-color: var(--color-state-hover);
+      color: var(--color-fg-1);
+    }
+  }
+
+  .ui-sheet-nav-item[aria-current="true"] {
+    background-color: var(--color-selected);
+    color: var(--color-fg-1);
+  }
+
+  .ui-sheet[data-side="bottom"][data-detents~="large"][data-detent="medium"]
+    .ui-sheet-main
+    > .ui-sheet-body {
+    padding-bottom: calc(
+      var(--spacing) *
+      5 +
+      var(--sheet-medium-top) -
+      var(--sheet-large-top) +
+      env(safe-area-inset-bottom)
+    );
   }
 
   .ui-sheet-footer {
@@ -484,7 +622,7 @@
     align-items: center;
     justify-content: flex-end;
     gap: calc(var(--spacing) * 2);
-    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 5);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
     border-top: 1px solid transparent;
     transition:
       border-color var(--dur-hover) var(--ease-standard),
@@ -535,7 +673,7 @@
     pointer-events: auto;
     transition:
       opacity var(--dur-fade) var(--ease-enter) calc(var(--dur-press) / 2),
-      translate var(--dur-spring) var(--ease-spring);
+      translate var(--dur-default) var(--ease-spring);
   }
 
   .ui-sheet[data-side="bottom"] .ui-sheet-prompt {
@@ -579,14 +717,14 @@
     width: min(100%, calc(var(--spacing) * 90));
     padding: calc(var(--spacing) * 5);
     border-radius: var(--radius-xl);
-    background-color: var(--color-raised);
+    background-color: var(--color-overlay);
     box-shadow: var(--shadow-overlay);
     color: var(--color-fg-1);
     font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
     transition:
       opacity var(--dur-hover) var(--ease-enter),
-      scale var(--dur-sheet) var(--ease-spring),
-      translate var(--dur-sheet) var(--ease-spring);
+      scale var(--dur-default) var(--ease-spring),
+      translate var(--dur-default) var(--ease-spring);
   }
 
   .ui-dialog[data-anchored] {
@@ -632,8 +770,9 @@
 
   .ui-dialog-title {
     font:
-      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
-    letter-spacing: var(--text-title--letter-spacing);
+      var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-3--letter-spacing);
   }
 
   .ui-dialog-description {
@@ -679,6 +818,10 @@
 
     .ui-layer[data-closing] > .ui-sheet[data-side="bottom"] {
       opacity: 0;
+    }
+
+    #root {
+      transition: none;
     }
   }
 

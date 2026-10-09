@@ -44,8 +44,10 @@ declare global {
 
 // Each test gets a page that fails it on a page error, a CSP violation or any request that leaves
 // the fixture's origin, which is aborted.
-export const test = base.extend<{ ui: Harness }>({
-  ui: async ({ page }, use) => {
+export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
+  // The page's clock stands still; a test of real frames and timers turns it off.
+  fixedClock: [true, { option: true }],
+  ui: async ({ page, fixedClock }, use) => {
     const probe: Probe = { errors: [], csp: [], external: [] };
     let fixture: UiFixture | undefined;
     let paused = false;
@@ -68,7 +70,7 @@ export const test = base.extend<{ ui: Harness }>({
       probe.external.push(url.href);
       return route.abort();
     });
-    await page.clock.setFixedTime(PAGE_NOW);
+    if (fixedClock) await page.clock.setFixedTime(PAGE_NOW);
     const boot = async (scenario: UiScenarioName) => {
       fixture = await startUiFixture(
         { QA_SCENARIO: scenario, QA_NOW: FIXTURE_START },
@@ -106,11 +108,9 @@ export const test = base.extend<{ ui: Harness }>({
       },
       settle: () => settle(page),
       async still() {
-        await page
-          .locator(".hud .mascot .dot, .welcome-hero .dot, .sign-in .dot")
-          .evaluateAll((dots) => {
-            for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
-          });
+        await page.locator(".welcome-hero .dot, .sign-in .dot").evaluateAll((dots) => {
+          for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
+        });
       },
     });
     // Taken before the fixture stops: requests cut off by the shutdown are not the page's fault.
@@ -142,13 +142,17 @@ async function settle(page: Page) {
   });
 }
 
-// Screenshot baselines are kept for these projects of the matrix only.
-export function keepBaselinesAt(...projects: string[]) {
+// The composer, on a phone once its Conversation tab is chosen.
+export async function composer(page: Page) {
+  // The rail opens on the chat; on a phone it sits under the stage.
+  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
+  return page.getByRole("form", { name: "Message dot" });
+}
+
+// A spec's flows run at these projects of the matrix only.
+export function runAt(...projects: string[]) {
   test.beforeEach(() => {
-    test.skip(
-      !projects.includes(test.info().project.name),
-      `Baselines are kept at ${projects.join(" and ")}`,
-    );
+    test.skip(!projects.includes(test.info().project.name), `Runs at ${projects.join(" and ")}`);
   });
 }
 

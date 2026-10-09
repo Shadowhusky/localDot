@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EarlierTurns } from "./conversation.ts";
 import {
   AgentState,
   Heartbeat,
@@ -102,6 +103,8 @@ export const BootConfig = z.object({
   resume: z.boolean(),
   // The highest durably acknowledged inbox sequence, not the last item fetched.
   inboxAfter: z.number().int().nonnegative(),
+  // What was said earlier in the conversation this task continues.
+  earlier: EarlierTurns.optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 

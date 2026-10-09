@@ -1,0 +1,201 @@
+/* The stage frame (design-v2 §10.18, §8): the 16:10 box placed first, its rim, the light it spills
+   on the floor, and the band under it. Its width is set by the layout (app.css). */
+.stage-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+.stage-box {
+  position: relative;
+  flex: none;
+  aspect-ratio: 16 / 10;
+}
+
+.stage-box > .stage {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-stage);
+}
+
+/* Light on the floor below the stage: neutral, xenon while dot has the computer, porcelain while
+   you do. Gradients cannot fade into each other, so each is its own layer. */
+.stage-spill {
+  position: absolute;
+  top: 100%;
+  left: 4%;
+  right: 4%;
+  height: 170px;
+  pointer-events: none;
+}
+
+.stage-spill > i,
+.stage-rim > i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--dur-light-out) var(--ease-standard);
+}
+
+.stage-spill > [data-light="none"] {
+  background: var(--spill);
+  opacity: 1;
+}
+
+.stage-spill > [data-light="dot"] {
+  background: var(--spill-xenon);
+}
+
+.stage-spill > [data-light="you"] {
+  background: var(--spill-you);
+}
+
+/* The rim is the control indicator: a hairline when nobody acts, xenon for dot, porcelain for you.
+   It is always mounted and only its light fades: 400 ms in, 300 ms out. */
+.stage-rim {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--rim-none);
+  pointer-events: none;
+}
+
+.stage-rim > [data-light="dot"] {
+  box-shadow: var(--rim-xenon), var(--rim-xenon-glow);
+}
+
+.stage-rim > [data-light="you"] {
+  box-shadow: var(--rim-you), var(--rim-you-glow);
+}
+
+.stage-frame[data-light="dot"] :is(.stage-rim, .stage-spill) > [data-light="dot"],
+.stage-frame[data-light="you"] :is(.stage-rim, .stage-spill) > [data-light="you"] {
+  opacity: 1;
+  transition-duration: var(--dur-light-in);
+}
+
+.stage-frame:not([data-light="none"]) .stage-spill > [data-light="none"] {
+  opacity: 0;
+}
+
+.stage-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-stage-dim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-dim) var(--ease-standard);
+}
+
+.stage-dim[data-on] {
+  opacity: 1;
+}
+
+/* Under the island, over the picture, never in the page's flow. */
+.stage-notices {
+  position: absolute;
+  top: calc(var(--island-h) / 2 + 8px);
+  left: 50%;
+  z-index: var(--layer-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  width: min(480px, 100% - 32px);
+  translate: -50% 0;
+  pointer-events: none;
+}
+
+.stage-notices > * {
+  pointer-events: auto;
+}
+
+.stage-band {
+  position: relative;
+  flex: 1;
+  min-height: var(--band-min);
+}
+
+/* The curtain takes the stage's own box, so turning the computer on never moves it. */
+.stage-curtain {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 5;
+  aspect-ratio: 16 / 10;
+  pointer-events: none;
+}
+
+.stage-curtain > * {
+  pointer-events: auto;
+}
+
+@media (width < 700px) {
+  /* On a phone the curtain covers the stage and the band, so there is never an empty band. */
+  .stage-curtain {
+    inset: 0;
+    aspect-ratio: auto;
+  }
+}
+
+/* dot's narration: beside dot's place in the band, its centre level with dot's. */
+.narration {
+  position: absolute;
+  top: 12px;
+  left: 92px;
+  display: flex;
+  align-items: center;
+  width: min(600px, 100% - 116px);
+  height: 72px;
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-narration) / var(--text-narration--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-narration--letter-spacing);
+}
+
+.narration[data-speaker="system"] {
+  color: var(--color-fg-2);
+}
+
+.narration-line {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-speaker {
+  margin-right: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+}
+
+@keyframes narration-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (width < 700px) {
+  .narration {
+    top: 4px;
+    width: calc(100% - 108px);
+    height: 80px;
+  }
+
+  .narration-line {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+}

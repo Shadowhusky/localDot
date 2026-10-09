@@ -21,7 +21,7 @@ test("a new task after Stop asks for no images from the stopped task", async ({ 
   await page.getByTestId("hud-stop-session").click();
   await expect(page.getByText("Stopped. Your computer is paused.")).toBeVisible();
   await page.getByRole("button", { name: "Resume computer" }).first().click();
-  const task = page.getByRole("textbox", { name: "New task" });
+  const task = page.getByRole("textbox", { name: "Message" });
   await expect(task).toBeEnabled();
   await task.fill("Make a new sample report");
   await task.press("Enter");

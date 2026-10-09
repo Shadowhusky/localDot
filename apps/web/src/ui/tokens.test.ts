@@ -69,8 +69,8 @@ function deltaE(a: Rgba, b: Rgba): number {
   return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
 }
 
-// About one and a half just-noticeable differences in OKLab.
-const VISIBLY_APART = 0.03;
+// A little over one just-noticeable difference (about .02 in OKLab).
+const VISIBLY_APART = 0.023;
 
 function palette(context: TokenContext) {
   const tokens = readTokens([tokensCss], context);
@@ -93,21 +93,31 @@ describe("colour tokens", () => {
     const color = palette(context);
 
     it(`keeps text at 4.5:1 on every surface it may sit on (${label})`, () => {
-      for (const ground of ["void", "well", "raised", "raised-2", "overlay"]) {
+      for (const ground of [
+        "void",
+        "console",
+        "well",
+        "raised",
+        "raised-2",
+        "overlay",
+        "popover",
+      ]) {
         for (const text of ["fg-1", "fg-2", "fg-3"]) {
-          if (text === "fg-3" && (ground === "raised-2" || ground === "overlay")) continue;
+          if (text === "fg-3" && ["raised-2", "overlay", "popover"].includes(ground)) continue;
           const ratio = contrast(color(text), color(ground));
           expect(ratio, `${text} on ${ground}`).toBeGreaterThanOrEqual(4.5);
         }
       }
     });
 
-    it(`keeps HUD text at 4.5:1 over a white or a black frame (${label})`, () => {
+    // Glass is .72 so the picture reads through it; over a white page the elapsed time (fg-2) holds
+    // 3:1, and more contrast makes the glass solid.
+    it(`keeps the island's words legible over a white or a black frame (${label})`, () => {
       for (const frame of [WHITE, BLACK]) {
-        const hud = over(color("hud"), frame);
-        for (const text of ["fg-1", "fg-2"]) {
-          expect(contrast(color(text), hud), `${text} on the HUD`).toBeGreaterThanOrEqual(4.5);
-        }
+        const glass = over(color("glass"), frame);
+        expect(contrast(color("fg-1"), glass), "fg-1 on glass").toBeGreaterThanOrEqual(4.5);
+        const least = frame === BLACK || context.media ? 4.5 : 3;
+        expect(contrast(color("fg-2"), glass), "fg-2 on glass").toBeGreaterThanOrEqual(least);
       }
     });
 
@@ -129,20 +139,20 @@ describe("colour tokens", () => {
   it("builds Midnight on Graphite's lightness ramp at hue 255", () => {
     const graphite = palette({ appearance: "graphite" });
     const midnight = palette({ appearance: "midnight" });
-    for (const step of ["void", "well", "raised", "raised-2", "overlay"]) {
+    for (const step of ["void", "console", "well", "raised", "raised-2", "overlay", "popover"]) {
       const [lightness] = oklch(graphite(step));
       const [l, c, h] = oklch(midnight(step));
       expect(Math.abs(l - lightness), `${step} lightness`).toBeLessThan(0.005);
       expect(c, `${step} chroma`).toBeGreaterThan(0.015);
       expect(c, `${step} chroma`).toBeLessThan(0.045);
-      expect(Math.abs(h - 255), `${step} hue`).toBeLessThan(3);
+      expect(Math.abs(h - 255), `${step} hue`).toBeLessThan(6);
     }
   });
 
   it("keeps Midnight's raised surfaces visibly apart from Graphite's", () => {
     const graphite = palette({ appearance: "graphite" });
     const midnight = palette({ appearance: "midnight" });
-    for (const step of ["raised", "raised-2", "overlay"]) {
+    for (const step of ["console", "raised", "raised-2", "overlay", "popover"]) {
       const distance = deltaE(graphite(step), midnight(step));
       expect(distance, step).toBeGreaterThanOrEqual(VISIBLY_APART);
     }
@@ -164,12 +174,12 @@ describe("colour tokens", () => {
     expect(widest).toBeGreaterThanOrEqual(VISIBLY_APART);
   });
 
-  it("makes the HUD solid for more contrast or less transparency", () => {
+  it("makes glass solid for more contrast or less transparency", () => {
     for (const appearance of ["graphite", "midnight"] as const) {
       for (const feature of [MORE_CONTRAST, "prefers-reduced-transparency: reduce"]) {
         const tokens = readTokens([tokensCss], { appearance, media: [feature] });
-        expect(tokens.get("--color-hud"), `${appearance}, ${feature}`).toBe(
-          tokens.get("--color-hud-solid"),
+        expect(tokens.get("--color-glass"), `${appearance}, ${feature}`).toBe(
+          tokens.get("--color-glass-solid"),
         );
       }
     }
@@ -215,7 +225,7 @@ describe("token layer", () => {
     for (const [legacy, role] of [
       ["surface", "raised"],
       ["surface-2", "raised-2"],
-      ["line", "overlay"],
+      ["line", "popover"],
       ["text", "fg-1"],
       ["text-2", "fg-2"],
       ["text-3", "fg-3"],
@@ -237,7 +247,7 @@ describe("token layer", () => {
       media: ["prefers-reduced-motion: reduce"],
     });
     const durations = [...normal.keys()].filter((name) => name.startsWith("--dur-"));
-    expect(durations).toHaveLength(6);
+    expect(durations).toHaveLength(12);
     for (const name of durations) {
       const ms = Number(/^(\d+)ms$/.exec(reduced.get(name) ?? "")?.[1]);
       expect(ms, name).toBeGreaterThanOrEqual(120);

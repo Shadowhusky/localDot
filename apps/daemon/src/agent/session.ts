@@ -119,6 +119,8 @@ export class AgentSession {
   toolToken: string | undefined;
   lastFrameId: string | undefined;
   tainted = false;
+  // What was said earlier in the conversation this task continues.
+  earlier: readonly string[] = [];
   toolCalls = 0;
   plan: PlanItem[] = [];
   readonly abort = new AbortController();

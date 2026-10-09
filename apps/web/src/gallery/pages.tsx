@@ -2,10 +2,12 @@ import type { ComponentType } from "react";
 import { Dot } from "../dot/Dot.tsx";
 import type { DotState } from "../dot/engine/states.ts";
 import { Glyph } from "../dot/Glyph.tsx";
-import { StageColumn } from "../shell/StageColumn.tsx";
+import { Caption } from "../shell/Caption.tsx";
+import { StageFrame } from "../shell/StageFrame.tsx";
 import { FeedbackPage } from "../ui/gallery/FeedbackPage.tsx";
 import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
+import { SystemPage } from "./SystemPage.tsx";
 
 export interface GalleryPage {
   id: string;
@@ -59,17 +61,20 @@ const STAGES = [
   { label: "Paused", caption: "Paused.", paused: true },
 ];
 
-// The real StageColumn around a still frame. The frame stands in for Stage, so the rim Stage draws
-// while dot has control is drawn here.
+// The real stage frame around a still frame, which stands in for Stage.
 function StagePage() {
   return (
     <div className="gallery-stages">
       {STAGES.map(({ label, caption, control = false, paused = false }) => (
         <figure key={label}>
-          <StageColumn live frozen={paused} control={control} caption={caption}>
+          <StageFrame
+            live
+            frozen={paused}
+            light={control ? "dot" : "none"}
+            band={<Caption text={caption} speaker="dot" />}
+          >
             <StillFrame />
-            {control && <div className="rim" aria-hidden="true" />}
-          </StageColumn>
+          </StageFrame>
           <figcaption>{label}</figcaption>
         </figure>
       ))}
@@ -78,6 +83,12 @@ function StagePage() {
 }
 
 export const GALLERY_PAGES: GalleryPage[] = [
+  {
+    id: "system",
+    title: "System",
+    about: "Tokens and kit controls, as frame S0 of the master design",
+    Page: SystemPage,
+  },
   { id: "dot", title: "dot", about: "Every state at hero and badge size", Page: DotPage },
   { id: "stage", title: "Stage", about: "The lit stage around a still frame", Page: StagePage },
   {

@@ -23,8 +23,10 @@ export interface SelectProps {
   items?: readonly PickerItem[];
   groups?: readonly PickerGroup[];
   placeholder?: string;
-  // 32 px, or 36 px inside a sheet; 44 px on a touch screen either way.
+  // 32 px, or 36 px in a form; 44 px on a touch screen either way.
   size?: "md" | "lg";
+  // A control face, or inline in a grouped list: just the value and a chevron, no box.
+  appearance?: "field" | "inline";
   className?: string;
   id?: string;
   "aria-label"?: string;
@@ -42,6 +44,7 @@ export function Select({
   groups,
   placeholder = "Choose…",
   size = "md",
+  appearance = "field",
   className,
   "aria-label": ariaLabel,
   ...props
@@ -110,6 +113,7 @@ export function Select({
         id={control.id}
         className={clsx("ui-field-box ui-select-trigger", className)}
         data-size={size}
+        data-appearance={appearance}
         data-open={open ? "" : undefined}
         data-invalid={control.invalid ? "" : undefined}
         data-unavailable={unavailable ? "" : undefined}
@@ -129,7 +133,7 @@ export function Select({
         <span className="ui-select-value" data-placeholder={selected || value ? undefined : ""}>
           {selected?.label ?? (value || placeholder)}
         </span>
-        <Icon name="chevron-down" className="ui-select-chevron" />
+        <Icon name="chevrons-up-down" size={14} className="ui-select-chevron" />
       </button>
       <PickerPopup
         open={open}

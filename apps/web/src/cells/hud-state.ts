@@ -146,7 +146,7 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
   }
   switch (cell.stream.connection) {
     case "live":
-      return hud("live", "Live", "Your computer is live.", "stop");
+      return hud("live", "Ready", "Your computer is live.", "stop");
     case "stalled":
     case "disconnected":
       return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");

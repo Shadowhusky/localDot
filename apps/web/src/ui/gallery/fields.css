@@ -26,8 +26,8 @@
 
   .fields-marker {
     color: var(--color-fg-3);
-    font-size: var(--text-footnote);
-    line-height: var(--text-footnote--line-height);
+    font-size: var(--text-callout);
+    line-height: var(--text-callout--line-height);
   }
 
   .fields-swatch {
@@ -87,11 +87,11 @@
 
   .fields-sheet-state {
     color: var(--color-fg-2);
-    font-size: var(--text-footnote);
-    line-height: var(--text-footnote--line-height);
+    font-size: var(--text-callout);
+    line-height: var(--text-callout--line-height);
   }
 
-  @media (width < 760px) {
+  @media (width < 700px) {
     .fields-grid,
     .fields-columns {
       grid-template-columns: minmax(0, 1fr);

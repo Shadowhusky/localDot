@@ -9,7 +9,7 @@
 
   .overlays-status {
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .overlays-form {
@@ -26,7 +26,7 @@
   .overlays-inline-title {
     color: var(--color-fg-2);
     font:
-      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
       var(--font-ui);
   }
 
@@ -103,7 +103,7 @@
 
   .overlays-key span {
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .overlays-inline {

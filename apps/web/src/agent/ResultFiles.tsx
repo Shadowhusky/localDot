@@ -14,6 +14,8 @@ interface Selection {
   file: FileRow;
   api: ApiClient;
   sessionId: string;
+  // The task whose file it is: an earlier task's result keeps its own.
+  task: string;
   abort: AbortController;
 }
 export type FileState = "busy" | "done" | "failed";
@@ -118,6 +120,7 @@ export function useResultDownloads(
         file,
         api: owner.api,
         sessionId: owner.sessionId,
+        task: owner.results.find((result) => result.id === resultId)?.sessionId ?? owner.sessionId,
         abort: new AbortController(),
       };
       if (!present(owner.results, record)) return false;
@@ -137,7 +140,7 @@ export function useResultDownloads(
         // The model's arbitrary path is never a fetch target; only this session's validated name is used.
         const blob = await downloadResult(
           record.api,
-          record.sessionId,
+          record.task,
           record.file.name,
           record.abort.signal,
         );

@@ -403,14 +403,23 @@ describe("settings inspector", () => {
     expect(screen.getAllByRole("img", { name: "Changed" })).toHaveLength(1);
     expect(screen.getByText("Passwords, codes and card details")).toBeTruthy();
   });
-  it("carries Stop on a phone, where the sheet covers the page, and leaves it to the page elsewhere", () => {
+  it("offers Shut down on every size, and on a phone also the task's Stop and how it went", () => {
+    const shutDown = vi.fn();
+    const view = render(
+      <SettingsSheet
+        {...props()}
+        stop={{ label: "Shut down", enabled: true, run: shutDown }}
+        taskControls={<p>Stopping…</p>}
+      />,
+    );
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Shut down" }));
+    expect(shutDown).toHaveBeenCalledOnce();
+    expect(within(sheet()).queryByText("Stopping…")).toBeNull();
+    view.unmount();
     const run = vi.fn();
     const stop = { label: "Stop", enabled: true, run };
-    const view = render(<SettingsSheet {...props()} stop={stop} />);
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
-    view.unmount();
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(width < 760px)",
+      matches: query === "(width < 700px)",
       media: query,
       addEventListener: () => {},
       removeEventListener: () => {},
