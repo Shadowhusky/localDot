@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -6,6 +6,7 @@ import { vi } from "vitest";
 import { OutputStore } from "../../agent/output-store.ts";
 import { EventLog } from "../../event-log.ts";
 import { FrameStore } from "../../gateway/frames.ts";
+import type { MacOpener } from "../open-on-mac.ts";
 import { type Converter, Previews } from "../previews.ts";
 import { deliverableRoutes } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
@@ -24,6 +25,16 @@ export function deliverablesFixture(opts: { converter?: Converter } = {}) {
   const log = new EventLog(home);
   const outputs = new OutputStore(home);
   const app = new Hono();
+  const downloads = join(home, "mac-downloads");
+  mkdirSync(downloads);
+  const launched: string[] = [];
+  const quarantined: string[] = [];
+  const opener: MacOpener = {
+    downloads,
+    platform: "darwin",
+    quarantine: async (p) => void quarantined.push(p),
+    launch: async (p) => void launched.push(p),
+  };
   const convert = vi.fn<Converter["convert"]>(async () => "computer_off" as const);
   deliverableRoutes(app, {
     home,
@@ -32,6 +43,7 @@ export function deliverablesFixture(opts: { converter?: Converter } = {}) {
     scanner: new TaskScanner(log),
     previews: new Previews(home, opts.converter ?? { convert }),
     frames: new FrameStore(home),
+    opener,
   });
   const task = (title = "Monthly report") => {
     const id = log.createSession(title);
@@ -55,5 +67,5 @@ export function deliverablesFixture(opts: { converter?: Converter } = {}) {
     });
   };
   const get = (path: string) => app.request(`http://127.0.0.1:${PORT}${path}`);
-  return { home, log, outputs, app, task, result, get, convert };
+  return { home, log, outputs, app, task, result, get, convert, downloads, launched, quarantined };
 }

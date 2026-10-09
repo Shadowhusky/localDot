@@ -4,18 +4,23 @@ import {
   type FileVersion,
   FileVersionsReply,
   fileKind,
+  OpenOnMacReply,
+  OpenOnMacRequest,
   PREVIEW_LIMITS,
   ProofReply,
   ULID_PATTERN,
   unifiedDiff,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { DownloadError, downloadFile } from "../agent/download.ts";
 import { outputNameProblem, outputPath } from "../agent/output-store.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
 import { fileVersions } from "./lineage.ts";
+import { isLoopbackRequest } from "./loopback.ts";
+import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
 import type { Previews } from "./previews.ts";
 import { resultProof } from "./proof.ts";
 import { StoredFiles } from "./stored.ts";
@@ -28,6 +33,7 @@ export interface DeliverablesDeps {
   scanner: Pick<TaskScanner, "scan">;
   previews: Pick<Previews, "preview">;
   frames: Pick<FrameStore, "path">;
+  opener: MacOpener;
 }
 
 const SECURE = {
@@ -152,5 +158,36 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
         results: scan.results.slice(-64).map((r) => resultProof(r, exists)),
       }),
     );
+  });
+  app.post(`${file}/open`, bodyLimit({ maxSize: 1024 }), async (c) => {
+    // Checked first: nothing is read or written for a request that came through a front.
+    if (!isLoopbackRequest(c, deps.port))
+      return c.text("Open on Mac works only in localDot on this Mac.", 403);
+    const { id, name } = c.req.param() as { id: string; name: string };
+    let body: { version: number | null };
+    try {
+      body = OpenOnMacRequest.parse(await c.req.json());
+    } catch {
+      return c.text("invalid request body", 400);
+    }
+    const versions = await versionsOf(id, name);
+    const chosen = versions.find(
+      (v) => v.sessionId === id && v.version === body.version && v.available,
+    );
+    const rel = chosen && outputPath(id, name, chosen.version);
+    if (!chosen || !rel) return c.text("That file is no longer available.", 404);
+    const scan = await deps.scanner.scan(id);
+    try {
+      const opened = await openOnMac(
+        deps.opener,
+        stored.path(rel),
+        { name, label: chosen.label, newest: chosen === versions.at(-1) },
+        { title: scan?.title ?? null, sessionId: id },
+      );
+      return c.json(OpenOnMacReply.parse({ path: opened.shown, reused: opened.reused }));
+    } catch (error) {
+      if (error instanceof OpenRefused) return c.text(error.message, error.status);
+      throw error;
+    }
   });
 }
