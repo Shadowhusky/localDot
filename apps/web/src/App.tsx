@@ -129,7 +129,7 @@ const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
-const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
+const CONFIRMING_LINE = "Checking that your last input reached the computer…";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -980,8 +980,8 @@ function Theatre({ api }: { api: ApiClient }) {
     blocked: takeBlocked,
     taking: controls.taking,
   });
-  const unconfirmed = agent.snapshot?.manualControl === "unconfirmed";
-  const handBack = useHandBack({ takeover, controls, drained: manual.drained, unconfirmed });
+  const confirming = agent.snapshot?.manualControl === "unconfirmed";
+  const handBack = useHandBack({ takeover, controls, drained: manual.drained });
   const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
   const replacement = safety.replacement?.phase;
   // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
@@ -990,8 +990,8 @@ function Theatre({ api }: { api: ApiClient }) {
     ? ""
     : phone && approvalView && approval
       ? decisionWords(approval).line
-      : yours && unconfirmed
-        ? UNCONFIRMED_LINE
+      : yours && confirming
+        ? CONFIRMING_LINE
         : yours && phone
           ? PHONE_CONTROL_LINE
           : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
