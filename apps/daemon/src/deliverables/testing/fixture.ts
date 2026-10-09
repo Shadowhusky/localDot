@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
+import { vi } from "vitest";
 import { OutputStore } from "../../agent/output-store.ts";
 import { EventLog } from "../../event-log.ts";
+import { type Converter, Previews } from "../previews.ts";
 import { deliverableRoutes } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
 
@@ -15,13 +17,20 @@ export function cleanFixtures(): void {
 }
 // A daemon home with the deliverable routes on a bare Hono app (the /api token guard is
 // createApp's and is tested with the app's wiring).
-export function deliverablesFixture() {
+export function deliverablesFixture(opts: { converter?: Converter } = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-deliverables-"));
   homes.push(home);
   const log = new EventLog(home);
   const outputs = new OutputStore(home);
   const app = new Hono();
-  deliverableRoutes(app, { home, port: PORT, eventLog: log, scanner: new TaskScanner(log) });
+  const convert = vi.fn<Converter["convert"]>(async () => "computer_off" as const);
+  deliverableRoutes(app, {
+    home,
+    port: PORT,
+    eventLog: log,
+    scanner: new TaskScanner(log),
+    previews: new Previews(home, opts.converter ?? { convert }),
+  });
   const task = (title = "Monthly report") => {
     const id = log.createSession(title);
     log.append(id, {
@@ -44,5 +53,5 @@ export function deliverablesFixture() {
     });
   };
   const get = (path: string) => app.request(`http://127.0.0.1:${PORT}${path}`);
-  return { home, log, outputs, app, task, result, get };
+  return { home, log, outputs, app, task, result, get, convert };
 }
