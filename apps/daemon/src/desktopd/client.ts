@@ -20,13 +20,19 @@ import {
 } from "@localdot/protocol";
 import type { DesktopdEndpoint } from "../cells/types.ts";
 
+// Its message reaches dot and the user, so it says what the computer did; status and path are for
+// the code that handles it.
 export class DesktopdError extends Error {
   constructor(
     readonly status: number,
-    message: string,
+    readonly detail: string,
     readonly path: string,
   ) {
-    super(`desktopd ${status || "unreachable"} on ${path}: ${message}`);
+    super(
+      status
+        ? `The computer could not do that: ${detail}`
+        : `The computer is not answering: ${detail}`,
+    );
     this.name = "DesktopdError";
   }
 }

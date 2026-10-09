@@ -1,3 +1,5 @@
+import { TOOL_NAMES } from "@localdot/protocol";
+import { workingRules } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { codexInstructions } from "./instructions.ts";
 import { CODEX_TOOL_DESCRIPTIONS } from "./mcp-tools.ts";
@@ -21,6 +23,18 @@ describe("Codex developer instructions", () => {
     ])
       expect(text).toContain(piece);
     expect(text).not.toContain("m.sock");
+  });
+  it("names every localdot tool and follows dot's rules for batched inputs, briefly", () => {
+    const text = codexInstructions({
+      memory: { user: "", memory: "" },
+      skills: [],
+      today: new Date("2026-10-09T12:00:00Z"),
+    });
+    expect(text).toContain(TOOL_NAMES.join(", "));
+    expect(text).toContain("browser_upload");
+    expect(text).toContain(workingRules("batch"));
+    expect(text.length).toBeLessThan(4200);
+    expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("lists skills as files in the task computer, with no host paths", () => {
     const text = codexInstructions({

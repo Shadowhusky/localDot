@@ -1,4 +1,13 @@
-import { clipText, type FindRequest, type Point, type Rect, type Target } from "@localdot/protocol";
+import {
+  checkedOf,
+  clipText,
+  type ElementState,
+  type FindRequest,
+  type Point,
+  type Rect,
+  type Target,
+  type WireElement,
+} from "@localdot/protocol";
 import { WebSocket } from "ws";
 import type { HelperWindow } from "./hit-test.ts";
 
@@ -49,6 +58,68 @@ export function pickTarget(targets: PageTarget[], win: HelperWindow): PageTarget
   const matches = pages.filter((t) => t.title === title);
   if (matches.length === 1) return matches[0];
   return matches.length === 0 && pages.length === 1 ? pages[0] : undefined;
+}
+
+// What a person can click, type into or choose on a page.
+const INTERACTIVE = new Set([
+  "button",
+  "link",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "switch",
+  "slider",
+  "spinbutton",
+  "tab",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "listbox",
+  "treeitem",
+  "PopUpButton",
+]);
+// Roles whose value is what the field shows.
+const VALUED = new Set(["textbox", "searchbox", "combobox", "slider", "spinbutton", "PopUpButton"]);
+// Box models are read this many at a time, up to a page's first MAX_BOXED interactive elements.
+const BOX_BATCH = 400;
+const MAX_BOXED = 4000;
+
+interface AxNode {
+  ignored?: boolean;
+  backendDOMNodeId?: number;
+  role?: { value?: string };
+  name?: { value?: string };
+  value?: { value?: unknown };
+  properties?: { name: string; value: { value?: unknown } }[];
+}
+
+function stateOf(node: AxNode, secret: boolean): ElementState {
+  const property = (name: string) => node.properties?.find((p) => p.name === name)?.value.value;
+  const checked = checkedOf(property("checked"));
+  const expanded = property("expanded");
+  const value = node.value?.value;
+  return {
+    ...(VALUED.has(node.role?.value ?? "") && !secret && value !== undefined && value !== ""
+      ? { value: clipText(String(value), 200) }
+      : {}),
+    ...(checked ? { checked } : {}),
+    ...(property("disabled") === true ? { disabled: true as const } : {}),
+    ...(typeof expanded === "boolean" ? { expanded } : {}),
+  };
+}
+
+// The part of a box inside the page's viewport, or undefined when none of it is.
+function visiblePart(box: Rect, origin: Point, m: PageMetrics): Rect | undefined {
+  const right = origin.x + Math.round((m.innerWidth ?? 0) * m.dpr);
+  const bottom = origin.y + Math.round((m.innerHeight ?? 0) * m.dpr);
+  const x0 = Math.max(box.x, origin.x);
+  const y0 = Math.max(box.y, origin.y);
+  const x1 = Math.min(box.x + box.w, right);
+  const y1 = Math.min(box.y + box.h, bottom);
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : undefined;
 }
 
 const METRICS =
@@ -176,7 +247,7 @@ export class ChromiumPerception {
   readonly #port: number;
   readonly #fetchImpl: typeof fetch;
   readonly #WebSocketImpl: typeof WebSocket;
-  readonly #originProvider?: (win: HelperWindow) => Promise<Point | undefined>;
+  readonly #originProvider?: (win: HelperWindow, dpr: number) => Promise<Point | undefined>;
   readonly #origins = new Map<number, { key: string; point: Point }>();
   #sessions = new Map<string, CdpSession>();
 
@@ -185,7 +256,7 @@ export class ChromiumPerception {
       port?: number;
       fetchImpl?: typeof fetch;
       WebSocketImpl?: typeof WebSocket;
-      originProvider?: (win: HelperWindow) => Promise<Point | undefined>;
+      originProvider?: (win: HelperWindow, dpr: number) => Promise<Point | undefined>;
     } = {},
   ) {
     this.#port = opts.port ?? 9222;
@@ -198,7 +269,7 @@ export class ChromiumPerception {
     const key = `${win.x},${win.y},${win.w},${win.h},${metrics.dpr},${metrics.chromeW},${metrics.chromeH}`;
     const saved = this.#origins.get(win.id);
     if (saved?.key === key) return saved.point;
-    const native = await this.#originProvider?.(win);
+    const native = await this.#originProvider?.(win, metrics.dpr);
     if (this.#originProvider && !native) throw new Error("browser content origin unavailable");
     const point = native ?? contentOrigin(win, metrics);
     this.#origins.set(win.id, { key, point });
@@ -343,6 +414,116 @@ export class ChromiumPerception {
       role: hit.role?.value,
       name: hit.name?.value,
     });
+  }
+
+  // A page element by its DevTools node, where it is now; null once none of it is in view.
+  async node(win: HelperWindow, backendNodeId: number): Promise<Target | null> {
+    const { cdp } = await this.#session(win);
+    const m = await this.#metrics(cdp);
+    const origin = await this.#origin(win, m);
+    const tree = await cdp
+      .send<{ nodes: AxNode[] }>("Accessibility.getPartialAXTree", {
+        backendNodeId,
+        fetchRelatives: false,
+      })
+      .catch(() => ({ nodes: [] as AxNode[] }));
+    const ax = tree.nodes.find((n) => n.backendDOMNodeId === backendNodeId) ?? tree.nodes[0];
+    const target = await this.#describe(cdp, backendNodeId, win, origin, m.dpr, m.url, undefined, {
+      role: ax?.role?.value ?? "",
+      name: ax?.name?.value ?? "",
+    });
+    const shown = target?.bbox && visiblePart(target.bbox, origin, m);
+    if (!target || !shown) return null;
+    const checked = ax && stateOf(ax, false).checked;
+    return {
+      ...target,
+      bbox: shown,
+      point: { x: Math.round(shown.x + shown.w / 2), y: Math.round(shown.y + shown.h / 2) },
+      ...(checked ? { checked } : {}),
+    };
+  }
+
+  // The page's interactive elements at least partly in view, in document order, with their
+  // DevTools nodes; boxes cut to the viewport.
+  async elements(
+    win: HelperWindow,
+    limit: number,
+  ): Promise<{
+    url: string | undefined;
+    // Where the page starts: Chromium's own controls are above it.
+    origin: Point;
+    elements: WireElement[];
+    truncated: boolean;
+  }> {
+    const { cdp } = await this.#session(win);
+    const m = await this.#metrics(cdp);
+    const origin = await this.#origin(win, m);
+    const tree = await cdp.send<{ nodes: AxNode[] }>("Accessibility.getFullAXTree", {});
+    const seen = new Set<number>();
+    const candidates = tree.nodes.filter((n) => {
+      const id = n.backendDOMNodeId;
+      if (n.ignored || !id || seen.has(id) || !INTERACTIVE.has(n.role?.value ?? "")) return false;
+      seen.add(id);
+      return true;
+    });
+    // Document order is not screen order: on a page scrolled down, what is in view comes late.
+    const boxed = candidates.slice(0, MAX_BOXED);
+    const shown: { n: AxNode; bbox: Rect }[] = [];
+    for (let start = 0; start < boxed.length; start += BOX_BATCH) {
+      const batch = boxed.slice(start, start + BOX_BATCH);
+      const boxes = await Promise.all(
+        batch.map((n) =>
+          cdp
+            .send<{ model: { border: number[] } }>("DOM.getBoxModel", {
+              backendNodeId: n.backendDOMNodeId,
+            })
+            .catch(() => null),
+        ),
+      );
+      for (const [i, n] of batch.entries()) {
+        const box = boxes[i];
+        const bbox = box && visiblePart(quadToRect(box.model.border, origin, m.dpr), origin, m);
+        if (bbox) shown.push({ n, bbox });
+      }
+    }
+    shown.sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x);
+    const elements = await Promise.all(
+      shown.slice(0, limit).map(async ({ n, bbox }): Promise<WireElement> => {
+        const role = n.role?.value ?? "";
+        const secret =
+          (role === "textbox" || role === "searchbox") &&
+          (await this.#password(cdp, n.backendDOMNodeId as number));
+        const name = n.name?.value ?? "";
+        const state = stateOf(n, secret);
+        return {
+          point: { x: Math.round(bbox.x + bbox.w / 2), y: Math.round(bbox.y + bbox.h / 2) },
+          bbox,
+          source: "dom",
+          role: clipText(role, 64),
+          ...(name ? { name: clipText(name, 64) } : {}),
+          app: clipText(win.cls, 128),
+          window: clipText(win.title, 256),
+          ...(m.url ? { url: clipText(m.url, 2048) } : {}),
+          ...(secret ? { secret: true } : {}),
+          node: n.backendDOMNodeId as number,
+          ...(Object.keys(state).length ? { state } : {}),
+        };
+      }),
+    );
+    return {
+      url: m.url,
+      origin,
+      elements,
+      truncated: shown.length > limit || candidates.length > boxed.length,
+    };
+  }
+
+  async #password(cdp: CdpOperation, backendNodeId: number): Promise<boolean> {
+    const node = await cdp
+      .send<{ node: { attributes?: string[] } }>("DOM.describeNode", { backendNodeId })
+      .catch(() => ({ node: {} as { attributes?: string[] } }));
+    const attrs = node.node.attributes ?? [];
+    return attrs.some((a, i) => i % 2 === 0 && a === "type" && attrs[i + 1] === "password");
   }
 
   async focused(win: HelperWindow): Promise<Target | null> {

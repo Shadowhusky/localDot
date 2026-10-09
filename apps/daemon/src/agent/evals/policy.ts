@@ -53,6 +53,47 @@ export const drag = (from: [number, number], to: [number, number]): OracleCall =
     coordinate: to.map(Math.round),
   },
 ];
+
+// Inputs in one computer call, with one screenshot at the end.
+export const batch = (...steps: OracleCall[]): OracleCall => [
+  "computer",
+  { action: "batch", steps: steps.map(([, input]) => input) },
+];
+export const read = (): OracleCall => ["browser_read", {}];
+export const act = (
+  action: string,
+  ref: string,
+  extra: Record<string, unknown> = {},
+): OracleCall => ["browser_act", { action, ref, ...extra }];
+export const find = (text: string): OracleCall => ["find", { text }];
+
+const QUOTED = String.raw`"(?:[^"\\]|\\.)*"`;
+const ELEMENT = new RegExp(String.raw`^(e\d+) (\S+) (${QUOTED})`);
+const CONTROL = new RegExp(
+  String.raw`^- (.+?) (${QUOTED})(?: in ${QUOTED})? at \((\d+), (\d+)\) \[`,
+);
+
+const linesOf = (view: OracleView, tool: string) =>
+  view.results.filter((r) => r.name === tool).flatMap((r) => r.text.split("\n"));
+
+// The ref the turn's browser_read gave an element.
+export function refOf(view: OracleView, role: string, name: string): string | undefined {
+  for (const line of linesOf(view, "browser_read")) {
+    const m = ELEMENT.exec(line);
+    if (m && m[2] === role && JSON.parse(m[3] as string) === name) return m[1];
+  }
+  return undefined;
+}
+
+// Where the turn's find says to click the control with this name.
+export function foundAt(view: OracleView, name: string): [number, number] | undefined {
+  for (const line of linesOf(view, "find")) {
+    const m = CONTROL.exec(line);
+    if (m && JSON.parse(m[2] as string) === name) return [Number(m[3]), Number(m[4])];
+  }
+  return undefined;
+}
+
 // A stroke along a path: press, move through every point, release.
 export const stroke = (points: [number, number][]): OracleCall[] => {
   const [first, ...rest] = points.map(([x, y]) => [Math.round(x), Math.round(y)]);

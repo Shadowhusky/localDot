@@ -16,5 +16,7 @@ export const Target = z.object({
   mark: z.number().int().nonnegative().optional(),
   secret: z.boolean().optional(),
   editable: z.boolean().optional(),
+  // A check box's, radio button's or switch's tick as it was read.
+  checked: z.enum(["true", "false", "mixed"]).optional(),
 });
 export type Target = z.infer<typeof Target>;

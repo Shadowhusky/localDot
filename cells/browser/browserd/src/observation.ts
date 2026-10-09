@@ -36,6 +36,13 @@ const lookupSchema = schema.discriminatedUnion("kind", [
     role: schema.string().max(64).optional(),
     app: schema.string().max(128).optional(),
   }),
+  // A listed element by its node, while it keeps the role and name it was listed with.
+  schema.strictObject({
+    kind: schema.literal("node"),
+    node: schema.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    role: schema.string().max(64).optional(),
+    name: schema.string().max(256).optional(),
+  }),
 ]);
 const hitSchema = schema.object({
   backendNodeId: schema.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -275,6 +282,14 @@ export class BrowserObservation {
         const pick = async (snapshot: Awaited<ReturnType<typeof read>>) => {
           const projection = snapshot.projection;
           if (query.kind === "focused") return { target: projection.focused };
+          if (query.kind === "node") {
+            const target = projection.targetOf(query.node);
+            const same =
+              target &&
+              (query.role === undefined || target.role === query.role) &&
+              (query.name === undefined || target.name === query.name);
+            return { target: same ? target : null };
+          }
           if (query.kind === "find") {
             const matches = projection.targets.filter(
               (target) =>

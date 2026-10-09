@@ -2,6 +2,8 @@ import { finished } from "node:stream/promises";
 import {
   BrowserNavigateResult,
   BrowserReadResult,
+  ElementsRequest,
+  ElementsResult,
   FileChangeResult,
   FileListResult,
   FileReadResult,
@@ -307,6 +309,16 @@ export class DesktopdTools {
     );
     if (receipt.taskId !== request.taskId)
       throw new DesktopdError(502, "browser task changed", "/browser/task");
+  }
+  // Controls by name across the desktop's windows, or the front Chromium page's elements.
+  elements(request: ElementsRequest, signal?: AbortSignal): Promise<ElementsResult> {
+    return this.#json(
+      "/elements",
+      ElementsRequest.parse(request),
+      ElementsResult.parse,
+      signal,
+      10_000,
+    );
   }
   browserNavigate(url: string, signal?: AbortSignal): Promise<BrowserNavigateResult> {
     return this.#json("/browser/navigate", { url }, BrowserNavigateResult.parse, signal, 20_000);

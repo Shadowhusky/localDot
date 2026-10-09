@@ -1,9 +1,10 @@
-import type { Point, Rect } from "@localdot/protocol";
+import type { Point, Rect, Target, WireElement } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { XHelper } from "../x/helper.ts";
 import type { ChromiumPerception } from "./cdp.ts";
 import type { CuaDriver } from "./driver.ts";
 import {
+  findElements,
   findTarget,
   focusedTarget,
   type HelperWindow,
@@ -11,6 +12,7 @@ import {
   LOOKUP_BUDGET_MS,
   NATIVE_BUDGET_MS,
   type PerceptionDeps,
+  pageElements,
 } from "./hit-test.ts";
 import type {
   NativeAccessibility,
@@ -429,5 +431,121 @@ describe("findTarget", () => {
     const d = deps([panel, win(4, "Thunar", 1, 78, 1280, 960)], native);
     expect((await findTarget(d, { name: "Search" })).target).toBeNull();
     expect(native.asked.map((a) => a.win)).toEqual([4]);
+  });
+});
+
+describe("elements", () => {
+  const chromium = win(4, "Chromium", 0, 54, 2560, 1414, { frame: [0, 54, 2560, 1414] });
+  const dialog = win(1, "Org.xfce.mousepad", 180, 376, 926, 526, { title: "Find and Replace" });
+  const pageElement = (name: string, node: number, y = 700): WireElement => ({
+    point: { x: 900, y },
+    bbox: { x: 800, y: y - 20, w: 200, h: 40 },
+    source: "dom",
+    role: "button",
+    name,
+    node,
+  });
+  const page = (elements: WireElement[], over: Record<string, unknown> = {}) =>
+    ({
+      elements: async () => ({
+        url: "file:///config/eval/form.html",
+        origin: { x: 0, y: 228 },
+        elements,
+        truncated: false,
+      }),
+      deviceScaleFactor: async () => 2,
+      ...over,
+    }) as unknown as ChromiumPerception;
+
+  it("finds controls by part of their names, whole names first, top window first", async () => {
+    const native = fakeNative({
+      tree: (w) =>
+        w.id === 1
+          ? {
+              elements: [
+                el("label", "Replace with:", { x: 102, y: 230, w: 108, h: 26 }),
+                el("push button", "Replace", { x: 347, y: 412, w: 94, h: 27 }),
+                el("check box", "Replace all in:", { x: 102, y: 374, w: 110, h: 26 }),
+                el("push button", "Close", { x: 447, y: 412, w: 94, h: 27 }),
+              ],
+            }
+          : { elements: [el("menu", "Unreplaceable", { x: 1, y: 1, w: 10, h: 10 })] },
+    });
+    const d = deps([dialog, win(2, "Org.xfce.mousepad", 2, 104, 1280, 960)], native);
+    const found = await findElements(d, { text: "replace", limit: 10 });
+    expect(found.elements.map((e) => e.name)).toEqual([
+      "Replace",
+      "Replace with:",
+      "Replace all in:",
+      "Unreplaceable",
+    ]);
+    expect(found.elements[0]).toMatchObject({ role: "push button", window: "Find and Replace" });
+    const buttons = await findElements(d, { text: "replace", role: "button", limit: 10 });
+    expect(buttons.elements.map((e) => e.name)).toEqual(["Replace"]);
+    expect((await findElements(d, { text: "replace", limit: 1 })).truncated).toBe(true);
+  });
+
+  it("takes a Chromium page's elements from CDP and only the browser's own controls from its tree", async () => {
+    const native = fakeNative({
+      tree: () => ({
+        elements: [
+          el("push button", "Reload", { x: 78, y: 73, w: 34, h: 34 }, { space: "chrome" }),
+          // The tree's copy of a page element, in other units: it would land in the wrong place.
+          el("push button", "Submit page", { x: 400, y: 350, w: 100, h: 20 }, { space: "chrome" }),
+        ],
+      }),
+    });
+    const d = deps([chromium], native, { cdp: page([pageElement("Submit page", 90)]) });
+    const found = await findElements(d, { text: "e", limit: 10 });
+    expect(found.elements.map((e) => [e.name, e.node])).toEqual([
+      ["Submit page", 90],
+      ["Reload", undefined],
+    ]);
+    const blind = deps([chromium], native, {
+      cdp: page([], { elements: async () => Promise.reject(new Error("no page")) }),
+    });
+    expect((await findElements(blind, { text: "e", limit: 10 })).elements).toEqual([]);
+  });
+
+  it("lists the front Chromium page's elements with its address", async () => {
+    const d = deps([dialog, chromium], undefined, {
+      cdp: page([pageElement("Submit", 90), pageElement("Search", 91, 300)]),
+    });
+    expect(await pageElements(d, { page: true, limit: 10 })).toMatchObject({
+      url: "file:///config/eval/form.html",
+      elements: [{ node: 90 }, { node: 91 }],
+      truncated: false,
+    });
+    expect(await pageElements(deps([dialog]), { page: true })).toEqual({
+      elements: [],
+      truncated: false,
+    });
+  });
+
+  it("finds a page element by its node only while it keeps its listed role, name and page", async () => {
+    const submit: Target = {
+      point: { x: 560, y: 1266 },
+      bbox: { x: 400, y: 1226, w: 320, h: 80 },
+      source: "dom",
+      role: "button",
+      name: "Submit",
+      url: "file:///config/eval/form.html",
+    };
+    const nodes: number[] = [];
+    const cdp = {
+      node: async (_w: HelperWindow, node: number) => {
+        nodes.push(node);
+        return node === 90 ? submit : null;
+      },
+    } as unknown as ChromiumPerception;
+    const d = deps([dialog, chromium], undefined, { cdp });
+    expect((await findTarget(d, { node: 90, role: "button", name: "Submit" })).target).toEqual(
+      submit,
+    );
+    expect((await findTarget(d, { node: 90, role: "button", name: "Send" })).target).toBeNull();
+    expect((await findTarget(d, { node: 91, role: "button", name: "Submit" })).target).toBeNull();
+    const elsewhere = { node: 90, role: "button", name: "Submit", url: "https://shop.example/" };
+    expect((await findTarget(d, elsewhere)).target).toBeNull();
+    expect(nodes).toEqual([90, 90, 91, 90]);
   });
 });

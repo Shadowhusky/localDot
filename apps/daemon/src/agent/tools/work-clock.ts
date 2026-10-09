@@ -1,4 +1,4 @@
-import type { ShellInput } from "@localdot/protocol";
+import { type ComputerAction, computerWorkMs, type ShellInput } from "@localdot/protocol";
 import type { AgentSession } from "../session.ts";
 
 const WORK_MS = 120_000;
@@ -44,7 +44,11 @@ export function startWorkClock(
 ): WorkClock | undefined {
   if (tool === "ask_user" || tool === "request_takeover") return undefined;
   const allowance =
-    tool === "shell" ? (((input as ShellInput).timeout_sec ?? 120) + 10) * 1000 : WORK_MS;
+    tool === "shell"
+      ? (((input as ShellInput).timeout_sec ?? 120) + 10) * 1000
+      : tool === "computer"
+        ? computerWorkMs(input as ComputerAction)
+        : WORK_MS;
   return new WorkClock(
     allowance,
     () =>

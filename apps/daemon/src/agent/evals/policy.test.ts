@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { OracleView } from "./oracle.ts";
-import { click, colourExtent, ellipse, findBlock, scripted, stroke } from "./policy.ts";
+import {
+  batch,
+  click,
+  colourExtent,
+  ellipse,
+  findBlock,
+  foundAt,
+  key,
+  refOf,
+  scripted,
+  stroke,
+} from "./policy.ts";
 import { capabilityLanded, noopPolicy, TASKS } from "./tasks.ts";
 
 const view = (over: Partial<OracleView> = {}): OracleView => ({
@@ -114,6 +125,43 @@ describe("frame helpers", () => {
   });
 });
 
+describe("reading tool answers", () => {
+  it("batches inputs into one computer call", () => {
+    expect(batch(click(1, 2), key("Tab"))).toEqual([
+      "computer",
+      {
+        action: "batch",
+        steps: [
+          { action: "left_click", coordinate: [1, 2] },
+          { action: "key", text: "Tab" },
+        ],
+      },
+    ]);
+  });
+
+  it("takes a ref from the turn's read and a point from its find, by exact name", () => {
+    const v = view({
+      results: [
+        {
+          name: "browser_read",
+          ok: true,
+          text: 'Elements:\ne7 button "Reserve \\"Dune\\"" [1, 2, 3, 4]\ne8 button "Reserve" [1, 2, 3, 4]',
+        },
+        {
+          name: "find",
+          ok: true,
+          text: '- push button "Close all" in "Find" at (5, 6) [1, 2, 3, 4]\n- push button "Close" in "Find" at (7, 8) [1, 2, 3, 4]',
+        },
+      ],
+    });
+    expect(refOf(v, "button", 'Reserve "Dune"')).toBe("e7");
+    expect(refOf(v, "button", "Reserve")).toBe("e8");
+    expect(refOf(v, "link", "Reserve")).toBeUndefined();
+    expect(foundAt(v, "Close")).toEqual([7, 8]);
+    expect(foundAt(v, "Open")).toBeUndefined();
+  });
+});
+
 describe("tasks", () => {
   it("requires the drag and modifier-click tasks to pass now that the brain accepts them", () => {
     expect(capabilityLanded("drag")).toBe(true);
@@ -127,14 +175,18 @@ describe("tasks", () => {
 
   it("keeps every hand-off ceiling at or below the baseline", () => {
     // One hand-off per typed text in the 2026-10-08 baseline; gimp-draw-shape types one name.
+    // The tasks added since start with none.
     const baseline: Record<string, number> = {
       "gimp-draw-shape": 1,
       "gimp-pick-colour": 2,
       "calc-fill": 2,
       "web-form": 2,
+      "web-form-batch": 0,
+      "web-refs": 0,
       "files-drag-drop": 0,
       "files-multi-select": 0,
       "text-keyboard": 2,
+      "text-find": 0,
     };
     expect(TASKS.map((t) => t.id).sort()).toEqual(Object.keys(baseline).sort());
     for (const t of TASKS) expect(t.maxHandoffs, t.id).toBeLessThanOrEqual(baseline[t.id] ?? 0);
