@@ -7,6 +7,7 @@ import { OutputStore } from "../../agent/output-store.ts";
 import type { AgentSession } from "../../agent/session.ts";
 import type { EventLog } from "../../event-log.ts";
 import type { FrameStore } from "../../gateway/frames.ts";
+import type { PageQuieter } from "../page-quieter.ts";
 import { type Converter, Previews } from "../previews.ts";
 import type { DeliverablesDeps, ReviseDeps } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
@@ -21,6 +22,7 @@ export interface DeliverablesFixture {
   session(): AgentSession | undefined;
   // Starts a task linked to the version it revises, as the runner does.
   start?(task: string, revises: ReviseLink): Promise<{ id: string }>;
+  quieter?: PageQuieter;
 }
 // A page image stands in for LibreOffice: the fixture has no real computer.
 const page = sharp({ create: { width: 1240, height: 1754, channels: 3, background: "#ffffff" } })
@@ -56,6 +58,7 @@ export function deliverablesDeps(f: DeliverablesFixture): Omit<DeliverablesDeps,
       launch: async (path) => void f.effects.push(`open:${path.slice(downloads.length + 1)}`),
     },
     ...(f.start ? { revise: fakeRevise(f, f.start) } : {}),
+    ...(f.quieter ? { quieter: f.quieter } : {}),
   };
 }
 // The copy into the computer is recorded, not made: the fixture has no real computer.

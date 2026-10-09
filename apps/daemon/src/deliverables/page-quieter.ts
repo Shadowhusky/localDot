@@ -1,49 +1,85 @@
+import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
 
 declare const __LOCALDOT_PACKAGED__: boolean | undefined;
 
 const PACKAGED = typeof __LOCALDOT_PACKAGED__ === "boolean" && __LOCALDOT_PACKAGED__;
-// From source the worker loads the protocol's TypeScript, which has more in it than types.
-const WORKER = PACKAGED
-  ? { entry: new URL("./quiet-page-worker.mjs", import.meta.url), execArgv: [] }
+// From source the reader loads the protocol's TypeScript, which has more in it than types.
+const READER = PACKAGED
+  ? { entry: new URL("./quiet-page-worker.mjs", import.meta.url), flags: [] }
   : {
       entry: new URL("./quiet-page-worker.ts", import.meta.url),
-      execArgv: ["--experimental-transform-types", "--no-warnings"],
+      flags: ["--experimental-transform-types", "--no-warnings"],
     };
-// The largest page that may be served, a dense 5 MB table, takes about a second and 250 MB.
-const HEAP = { maxOldGenerationSizeMb: 384, maxYoungGenerationSizeMb: 32, stackSizeMb: 4 };
+// The CPU limit is the kernel's, so a reading that spends it was too much work however busy the
+// Mac was, and one cut short by the clock alone was only slowed down.
+const LIMITED = 'ulimit -t "$1" && shift && exec "$0" "$@"';
 const KEPT_CHARS = 16 * 1024 * 1024;
 const KEPT_PAGES = 64;
+// A page of the largest size served, written out again with every character escaped.
+const OUTPUT_BYTES = 48 * 1024 * 1024;
 
 export interface QuieterLimits {
+  // Whole seconds of CPU a reading may spend, its collector's threads included. The largest page
+  // served, a dense 5 MB table, takes about 3.
+  cpu: number;
+  // How long a reading may take, however busy the Mac is.
   time: number;
+  // The reader's heap, in MB; the dense 5 MB table takes about 250.
+  heap: number;
   running: number;
   waiting: number;
 }
 export type Quieted =
   | { body: string }
   | { refused: "not shown" | "too complex" | "busy" | "stopped" };
+interface Read {
+  quieted: Quieted;
+  // Whether the next opening of the same page would come to the same.
+  lasting: boolean;
+}
+export type LaunchReader = (limits: QuieterLimits) => ChildProcess;
 
 const NOT_SHOWN: Quieted = { refused: "not shown" };
 const TOO_COMPLEX: Quieted = { refused: "too complex" };
+const BUSY: Quieted = { refused: "busy" };
 const STOPPED: Quieted = { refused: "stopped" };
 
 const size = (quieted: Quieted) => ("body" in quieted ? quieted.body.length : 0);
 
-// Pages are quieted in a worker each, as parse5 has paths that grow with the square of a page's
-// size without nesting deep or building much, and run for minutes on a few megabytes. A worker
-// past its time or heap is ended and the page refused; so is one whose request is gone. What a
-// page came to is kept by its content, so a HEAD and each later opening never read it again.
+export const launchReader: LaunchReader = (limits) =>
+  spawn(
+    "/bin/sh",
+    [
+      "-c",
+      LIMITED,
+      process.execPath,
+      String(limits.cpu),
+      ...READER.flags,
+      `--max-old-space-size=${limits.heap}`,
+      "--max-semi-space-size=16",
+      fileURLToPath(READER.entry),
+    ],
+    { env: {}, stdio: ["pipe", "pipe", "ignore"], windowsHide: true },
+  );
+
+// Pages are quieted in a process each, as parse5 has paths that grow with the square of a page's
+// size without nesting deep or building much, and run for minutes on a few megabytes; one past its
+// heap aborts only itself. A reader past its CPU or time is killed and the page refused; so is one
+// whose request is gone. What a page came to is kept by its content, so a HEAD and each later
+// opening never read it again, unless it came to nothing for a passing reason.
 export class PageQuieter {
   readonly #limits: QuieterLimits;
+  readonly #launch: LaunchReader;
   #running = 0;
   readonly #waiting = new Set<() => void>();
   readonly #kept = new Map<string, Quieted>();
   #keptChars = 0;
 
-  constructor(limits: Partial<QuieterLimits> = {}) {
-    this.#limits = { time: 2000, running: 2, waiting: 8, ...limits };
+  constructor(limits: Partial<QuieterLimits> = {}, launch: LaunchReader = launchReader) {
+    this.#limits = { cpu: 5, time: 10_000, heap: 384, running: 2, waiting: 8, ...limits };
+    this.#launch = launch;
   }
 
   get running(): number {
@@ -58,12 +94,13 @@ export class PageQuieter {
       this.#kept.set(key, kept);
       return kept;
     }
-    if (!(await this.#turn(signal))) return signal.aborted ? STOPPED : { refused: "busy" };
+    if (!(await this.#turn(signal))) return signal.aborted ? STOPPED : BUSY;
     try {
       // The request may have gone while this waited for its turn; its abort will not come again.
-      const quieted = signal.aborted ? STOPPED : await this.#read(html, signal);
-      if (quieted !== STOPPED) this.#keep(key, quieted);
-      return quieted;
+      if (signal.aborted) return STOPPED;
+      const read = await this.#read(html, signal);
+      if (read.lasting) this.#keep(key, read.quieted);
+      return read.quieted;
     } finally {
       this.#running--;
       const [next] = this.#waiting;
@@ -96,33 +133,51 @@ export class PageQuieter {
     });
   }
 
-  // Settles only once the worker has exited.
-  #read(html: string, signal: AbortSignal): Promise<Quieted> {
+  // Settles only once the reader has exited, or could not start.
+  #read(html: string, signal: AbortSignal): Promise<Read> {
     return new Promise((resolve) => {
-      const worker = new Worker(WORKER.entry, {
-        workerData: html,
-        execArgv: WORKER.execArgv,
-        env: {},
-        resourceLimits: HEAP,
-      });
-      let answer: Quieted | undefined;
-      let ended: Quieted | undefined;
-      const end = (why: Quieted) => {
+      let child: ChildProcess;
+      try {
+        child = this.#launch(this.#limits);
+      } catch {
+        resolve({ quieted: BUSY, lasting: false });
+        return;
+      }
+      const output: Buffer[] = [];
+      let bytes = 0;
+      let ended: Read | undefined;
+      let settled = false;
+      const end = (why: Read) => {
         ended ??= why;
-        void worker.terminate().catch(() => {});
+        child.kill("SIGKILL");
       };
-      const late = setTimeout(() => end(TOO_COMPLEX), this.#limits.time);
-      const stop = () => end(STOPPED);
-      signal.addEventListener("abort", stop, { once: true });
-      worker.on("message", (message: unknown) => {
-        if (!ended) answer = typeof message === "string" ? { body: message } : NOT_SHOWN;
-      });
-      worker.on("error", () => end(TOO_COMPLEX));
-      worker.once("exit", () => {
+      const late = setTimeout(() => end({ quieted: BUSY, lasting: false }), this.#limits.time);
+      const stop = () => end({ quieted: STOPPED, lasting: false });
+      const settle = (read: Read) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(late);
         signal.removeEventListener("abort", stop);
-        resolve(answer ?? ended ?? TOO_COMPLEX);
+        resolve(read);
+      };
+      signal.addEventListener("abort", stop, { once: true });
+      child.stdout?.on("data", (part: Buffer) => {
+        bytes += part.byteLength;
+        if (bytes > OUTPUT_BYTES) end({ quieted: TOO_COMPLEX, lasting: false });
+        else output.push(part);
       });
+      // A reader that ends early leaves the rest of the page unwritten.
+      child.stdin?.on("error", () => {});
+      child.once("error", () => {
+        if (child.pid === undefined) settle({ quieted: BUSY, lasting: false });
+        else end({ quieted: BUSY, lasting: false });
+      });
+      child.once("close", (code, cause) => {
+        if (ended) return settle(ended);
+        if (cause === "SIGXCPU") return settle({ quieted: TOO_COMPLEX, lasting: true });
+        settle(code === 0 ? answer(output) : { quieted: TOO_COMPLEX, lasting: false });
+      });
+      child.stdin?.end(html, "utf8");
     });
   }
 
@@ -138,4 +193,13 @@ export class PageQuieter {
       this.#keptChars -= size(was);
     }
   }
+}
+
+function answer(output: Buffer[]): Read {
+  try {
+    const said: unknown = JSON.parse(Buffer.concat(output).toString("utf8"));
+    if (typeof said === "string") return { quieted: { body: said }, lasting: true };
+    if (said === null) return { quieted: NOT_SHOWN, lasting: true };
+  } catch {}
+  return { quieted: TOO_COMPLEX, lasting: false };
 }

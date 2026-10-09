@@ -34,6 +34,7 @@ import { fileText, screenLine } from "./excerpt.ts";
 import { fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
+import type { PageQuieter } from "./page-quieter.ts";
 import { previewFileRoutes } from "./preview-files.ts";
 import { PreviewLinks } from "./preview-links.ts";
 import type { Previews } from "./previews.ts";
@@ -52,6 +53,7 @@ export interface DeliverablesDeps {
   frames: Pick<FrameStore, "path">;
   opener: MacOpener;
   revise?: ReviseDeps;
+  quieter?: PageQuieter;
 }
 export interface ReviseDeps {
   start(
@@ -86,7 +88,7 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
     );
   const file = "/api/agent/sessions/:id/files/:name";
   const links = new PreviewLinks();
-  previewFileRoutes(app, { home: deps.home, port: deps.port, links });
+  previewFileRoutes(app, { home: deps.home, port: deps.port, links, quieter: deps.quieter });
   for (const path of [
     `${file}/*`,
     "/api/agent/sessions/:id/proof",

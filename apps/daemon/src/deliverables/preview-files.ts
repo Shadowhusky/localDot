@@ -73,10 +73,15 @@ const masked = (text: string): Quieted => ({ body: maskText(text) });
 // bytes. Media and PDFs answer byte ranges.
 export function previewFileRoutes(
   app: Hono,
-  deps: { home: string; port: number; links: Pick<PreviewLinks, "resolve"> },
+  deps: {
+    home: string;
+    port: number;
+    links: Pick<PreviewLinks, "resolve">;
+    quieter?: PageQuieter;
+  },
 ): void {
   const stored = new StoredFiles(deps.home);
-  const quieter = new PageQuieter();
+  const quieter = deps.quieter ?? new PageQuieter();
   app.on(["GET", "HEAD"], "/file-previews/:ticket/:name", async (c) => {
     const ticket = c.req.param("ticket");
     const sessionId = deps.links.resolve(ticket);
