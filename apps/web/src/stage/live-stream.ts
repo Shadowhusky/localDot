@@ -1,0 +1,392 @@
+import type { ApiClient } from "../lib/api.ts";
+import { forgetOldTickets } from "./client-storage.ts";
+import { type FrameSource, tapVideoTrack } from "./frame-source.ts";
+
+export interface StreamTarget {
+  api: ApiClient;
+  // The computer whose screen this is: the desktop, or the browser that the desktop parents.
+  cellId: string;
+  surface: "desktop" | "browser";
+  parentId?: string;
+}
+
+// What the stage holds of a stream: nothing yet, its live picture, or its last picture kept while
+// the stream reconnects.
+export type StreamPicture = "none" | "live" | "held";
+
+const POLL_MS = 250;
+export const STALE_MS = 10_000;
+// A stream outlives its stage this long, for a remount, a visit to Replay or the other screen.
+export const KEEP_MS = 60_000;
+// A shorter reconnect says nothing.
+export const HELD_AFTER_MS = 1_000;
+// A tap that shows nothing this soon asks the encoder for a key frame.
+export const FIRST_FRAME_MS = 400;
+const KEYFRAME_EVERY_MS = 1_000;
+const KEYFRAME_TRIES = 3;
+// The decoder runs ahead of a tap that presents nothing: the tap is taken again, then the client.
+export const TAP_STALL_MS = 3_000;
+const MINT_RETRY_MS = { min: 1_000, max: 15_000 };
+const TICKET_PATH = /^\/cells\/[^/]+\/(?:desktop|browser)\/[A-Za-z0-9_-]{22}\/$/;
+const OPEN = 1;
+// HAVE_CURRENT_DATA: the client's video has shown a frame.
+const SHOWING = 2;
+
+interface Client {
+  frame: HTMLIFrameElement;
+  path: string;
+  // When the client last had a video element, or was made.
+  seenAt: number;
+  tapped: string | null;
+  decoded: number;
+  // When its decoder last produced a frame.
+  advancedAt: number;
+}
+
+// Selkies' objects live in the client's realm, so they are read by shape.
+interface ClientVideo {
+  tagName?: string;
+  srcObject: unknown;
+  readyState?: number;
+  getVideoPlaybackQuality?(): { totalVideoFrames: number };
+}
+
+interface Transport {
+  readyState?: number;
+  send?(data: string): void;
+}
+
+function look(client: Client | null) {
+  let doc: Document | null = null;
+  let transport: Transport | null | undefined;
+  try {
+    doc = client?.frame.contentDocument ?? null;
+    transport = (client?.frame.contentWindow as { selkiesTransport?: Transport | null } | null)
+      ?.selkiesTransport;
+  } catch {}
+  const element = doc?.getElementById("videoStream") as ClientVideo | null | undefined;
+  const video = element?.tagName === "VIDEO" ? element : null;
+  const stream = video?.srcObject as { getVideoTracks?: () => { id: string }[] } | null | undefined;
+  const track =
+    typeof stream?.getVideoTracks === "function" ? stream.getVideoTracks()[0] : undefined;
+  return { video, track, transport };
+}
+
+let host: HTMLElement | null = null;
+// Clients live outside every stage, so moving or remounting the stage never reloads them.
+function clientHost(): HTMLElement {
+  if (host?.isConnected) return host;
+  host = document.createElement("div");
+  host.className = "stage-clients";
+  host.setAttribute("aria-hidden", "true");
+  host.setAttribute("inert", "");
+  document.body.append(host);
+  return host;
+}
+
+// One screen's stream, independent of React: Selkies' client in a hidden iframe, its ticket, and the
+// tap that hands its frames to the stage. A reconnect replaces the client only once a fresh one
+// shows a frame, so the stage keeps its last picture meanwhile.
+export class LiveStream {
+  readonly target: StreamTarget;
+  listed: () => readonly string[] = () => [];
+  #current: Client | null = null;
+  #next: Client | null = null;
+  #sink: ((source: FrameSource) => void) | null = null;
+  #timer: ReturnType<typeof setInterval> | undefined;
+  #closed = false;
+  #replacing = false;
+  #mintFailures = 0;
+  #mintAt = 0;
+  #polledAt = 0;
+  #patience = STALE_MS;
+  #presentedAt = 0;
+  #retapped = false;
+  #awaiting = false;
+  #tappedAt = 0;
+  #keyframeAt = 0;
+  #keyframes = 0;
+  #hadPicture = false;
+  #troubleSince: number | null = null;
+  #picture: StreamPicture = "none";
+  #listeners = new Set<() => void>();
+
+  constructor(target: StreamTarget) {
+    this.target = target;
+  }
+
+  get picture(): StreamPicture {
+    return this.#picture;
+  }
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  // Hands every new tap to `sink`, starting with one of the client already streaming, if any.
+  connect(sink: (source: FrameSource) => void): () => void {
+    this.#sink = sink;
+    if (this.#current) this.#current.tapped = null;
+    this.#polledAt = Date.now();
+    clearInterval(this.#timer);
+    this.#timer = setInterval(() => this.#poll(), POLL_MS);
+    this.#poll();
+    return () => {
+      if (this.#sink !== sink) return;
+      this.#sink = null;
+      clearInterval(this.#timer);
+      this.#timer = undefined;
+    };
+  }
+
+  // The stage presented a frame of this stream.
+  presented(): void {
+    this.#hadPicture = true;
+    this.#presentedAt = Date.now();
+    this.#awaiting = false;
+    this.#retapped = false;
+    this.#troubleSince = null;
+    this.#show("live");
+  }
+
+  // The daemon may have restarted, which ends its tickets: a different ticket gets a new client.
+  renew(): void {
+    void this.#mint().then((path) => {
+      if (path && path !== (this.#next ?? this.#current)?.path) this.#prepare(path);
+    });
+  }
+
+  // The page is visible again: its frames are taken afresh.
+  refresh(): void {
+    if (this.#current) this.#current.tapped = null;
+    this.#poll();
+  }
+
+  // A thawed page can hold an obsolete backlog: a fresh client takes over once it streams.
+  replace(): void {
+    if (this.#replacing) return;
+    this.#replacing = true;
+    void this.#mint().then((path) => {
+      this.#replacing = false;
+      if (path) this.#prepare(path);
+    });
+  }
+
+  close(): void {
+    this.#closed = true;
+    this.#sink = null;
+    clearInterval(this.#timer);
+    this.#current?.frame.remove();
+    this.#next?.frame.remove();
+    this.#current = this.#next = null;
+    this.#listeners.clear();
+  }
+
+  async #mint(): Promise<string | null> {
+    const { api, cellId, surface, parentId } = this.target;
+    this.#mintAt = Date.now();
+    try {
+      const { path, cellId: physicalId } = await api.post<{ path?: unknown; cellId?: string }>(
+        surface === "browser"
+          ? `/api/cells/${parentId}/browser-stream-ticket`
+          : `/api/cells/${cellId}/stream-ticket`,
+      );
+      if (this.#closed) return null;
+      if (
+        typeof path !== "string" ||
+        !path.startsWith(`/cells/${cellId}/${surface}/`) ||
+        (surface === "browser" && physicalId !== cellId) ||
+        !TICKET_PATH.test(path)
+      ) {
+        this.#mintFailures++;
+        return null;
+      }
+      this.#mintFailures = 0;
+      forgetOldTickets({ cellId, livePath: path, listed: this.listed() });
+      return path;
+    } catch {
+      this.#mintFailures++;
+      return null;
+    }
+  }
+
+  #prepare(path: string): void {
+    if (this.#closed) return;
+    this.#next?.frame.remove();
+    const frame = document.createElement("iframe");
+    frame.className = "desktop-frame";
+    frame.title = "Desktop stream client";
+    frame.setAttribute("inert", "");
+    frame.src = `${path}#shared`;
+    clientHost().append(frame);
+    this.#next = { frame, path, seenAt: Date.now(), tapped: null, decoded: 0, advancedAt: 0 };
+    this.#poll();
+  }
+
+  #poll(): void {
+    if (this.#closed || !this.#sink) return;
+    const now = Date.now();
+    // A hidden page shows nothing, and its throttled timers are not a suspension.
+    if (document.visibilityState === "hidden") {
+      this.#polledAt = now;
+      return;
+    }
+    // Timers that stopped this long mean a suspended page, whose socket may hold an old backlog.
+    if (now - this.#polledAt >= STALE_MS) this.replace();
+    this.#polledAt = now;
+    this.#promote(now);
+    const client = this.#current;
+    const retry = Math.min(MINT_RETRY_MS.max, MINT_RETRY_MS.min * 2 ** this.#mintFailures);
+    if (!client && !this.#next && now - this.#mintAt >= retry) this.replace();
+    const { video, track, transport } = look(client);
+    let delivering = false;
+    if (client && !video) {
+      // An error page, or a client that never loaded; one that keeps failing is given longer.
+      if (now - client.seenAt >= this.#patience) {
+        client.seenAt = now;
+        this.#patience = Math.min(KEEP_MS, this.#patience * 2);
+        this.replace();
+      }
+    } else if (client && video) {
+      client.seenAt = now;
+      this.#patience = STALE_MS;
+      const decoded = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+      if (decoded > client.decoded) client.advancedAt = now;
+      client.decoded = decoded;
+      // The decoder has run on well past the last frame the stage presented.
+      const stalled = client.advancedAt - this.#presentedAt >= TAP_STALL_MS;
+      if (track && track.id !== client.tapped) this.#tap(client, video, now);
+      else if (track && stalled && !this.#retapped) {
+        this.#retapped = true;
+        this.#tap(client, video, now);
+      } else if (track && stalled && now - this.#presentedAt >= STALE_MS) {
+        this.#presentedAt = now;
+        this.replace();
+      } else delivering = !!track && !stalled && !this.#awaiting;
+    }
+    if (transport && transport.readyState !== OPEN) delivering = false;
+    if (this.#awaiting && now - this.#tappedAt >= FIRST_FRAME_MS) this.#keyframe(transport, now);
+    if (delivering) this.#troubleSince = null;
+    else this.#troubleSince ??= now;
+    this.#show(
+      !this.#hadPicture
+        ? "none"
+        : this.#troubleSince !== null && now - this.#troubleSince >= HELD_AFTER_MS
+          ? "held"
+          : "live",
+    );
+  }
+
+  // A prepared client takes over once its video shows a frame, or at once when the current client
+  // has nothing to show.
+  #promote(now: number): void {
+    const next = this.#next;
+    if (!next) return;
+    const fresh = look(next);
+    if ((fresh.track && (fresh.video?.readyState ?? 0) >= SHOWING) || !look(this.#current).track) {
+      this.#current?.frame.remove();
+      this.#current = next;
+      this.#next = null;
+    } else if (now - next.seenAt >= STALE_MS) {
+      next.frame.remove();
+      this.#next = null;
+    }
+  }
+
+  #tap(client: Client, video: ClientVideo, now: number): void {
+    const source = tapVideoTrack(video);
+    if (!source) return;
+    client.tapped = source.trackId;
+    this.#presentedAt = now;
+    this.#tappedAt = now;
+    this.#awaiting = true;
+    this.#keyframes = 0;
+    if (this.#sink) this.#sink(source);
+    else source.stop();
+  }
+
+  // Selkies accepts a viewer's key frame request; its encoder otherwise sends only what changed, so
+  // a fresh tap of a still screen would wait for the next change.
+  #keyframe(transport: Transport | null | undefined, now: number): void {
+    if (this.#keyframes >= KEYFRAME_TRIES || now - this.#keyframeAt < KEYFRAME_EVERY_MS) return;
+    if (transport?.readyState !== OPEN || typeof transport.send !== "function") return;
+    this.#keyframeAt = now;
+    this.#keyframes++;
+    try {
+      transport.send("REQUEST_KEYFRAME");
+    } catch {}
+  }
+
+  #show(picture: StreamPicture): void {
+    if (picture === this.#picture) return;
+    this.#picture = picture;
+    for (const listener of this.#listeners) listener();
+  }
+}
+
+interface Held {
+  stream: LiveStream;
+  holders: number;
+  timer?: ReturnType<typeof setTimeout>;
+  close(): void;
+}
+
+const held = new WeakMap<ApiClient, Map<string, Held>>();
+const closers = new Set<() => void>();
+const keyOf = (target: StreamTarget) =>
+  `${target.surface}/${target.cellId}/${target.parentId ?? ""}`;
+
+// The stream a stage that remounts can show at once, held or kept.
+export function findStream(target: StreamTarget): LiveStream | undefined {
+  return held.get(target.api)?.get(keyOf(target))?.stream;
+}
+
+// The stream of a screen, shared by every stage that shows it. Its last holder lets it go at once
+// (its computer stopped) or after `keepMs` (the stage may come back).
+export function holdStream(
+  target: StreamTarget,
+  listed: () => readonly string[],
+): { stream: LiveStream; release(keepMs: number): void } {
+  const key = keyOf(target);
+  const map = held.get(target.api) ?? new Map<string, Held>();
+  held.set(target.api, map);
+  let found = map.get(key);
+  if (!found) {
+    const stream = new LiveStream(target);
+    const fresh: Held = {
+      stream,
+      holders: 0,
+      close: () => {
+        clearTimeout(fresh.timer);
+        closers.delete(fresh.close);
+        if (map.get(key) === fresh) map.delete(key);
+        stream.close();
+      },
+    };
+    closers.add(fresh.close);
+    map.set(key, fresh);
+    stream.replace();
+    found = fresh;
+  }
+  const own = found;
+  clearTimeout(own.timer);
+  own.holders++;
+  own.stream.listed = listed;
+  let released = false;
+  return {
+    stream: own.stream,
+    release(keepMs) {
+      if (released) return;
+      released = true;
+      if (--own.holders > 0) return;
+      if (keepMs > 0) own.timer = setTimeout(own.close, keepMs);
+      else own.close();
+    },
+  };
+}
+
+// Closes every stream, held or kept.
+export function closeStreams(): void {
+  for (const close of [...closers]) close();
+}

@@ -680,6 +680,7 @@ const STATES: Record<string, Status> = {
   "off, task open": underTask(computerIn({ state: "stopped" })),
   "failed, task open": underTask(computerIn(FAILED)),
   "fenced, task open": underTask(computerIn(FENCED)),
+  "reconnecting, task running": underTask(stream("stalled")),
   "task stopping": statusFor({ computer: live, task: typing(), stop: "stopping" }),
   "stop unconfirmed": statusFor({ computer: live, task: typing(), stop: "unconfirmed" }),
   approval: at([...start(), approvalRequest(1500)]),
@@ -743,6 +744,8 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["off, task open", "computer", "Stopped", "sleeping", null, "system"],
   ["failed, task open", "computer", "Failed", "error", "blocked", "system"],
   ["fenced, task open", "computer", "Unavailable", "error", "blocked", "system"],
+  // A reconnect leaves dot in charge, but the label says why the picture holds still.
+  ["reconnecting, task running", "acting", "Reconnecting…", "acting", "working", "dot"],
   // 2–4. Approval, question, takeover.
   ["approval", "approval", "Needs your OK", "waiting", "needs_you", "system"],
   ["question", "question", "Has a question", "waiting", "needs_you", "dot"],
@@ -885,7 +888,10 @@ describe("one status model for every surface (T10)", () => {
 
   it("gives dot control only while it works and the app allows it", () => {
     expect(statusFor({ computer: live, task: typing(), mayControl: false }).control).toBe(false);
-    const working = ["acting", "just acted", "thinking", "observing", "working", "pausing"];
+    const working = [
+      ...["acting", "just acted", "thinking", "observing", "working", "pausing"],
+      "reconnecting, task running",
+    ];
     const stopping = ["task stopping", "stop unconfirmed"];
     for (const [name, status] of Object.entries(STATES))
       expect(status.control, name).toBe([...working, ...stopping].includes(name));

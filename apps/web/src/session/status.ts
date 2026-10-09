@@ -365,12 +365,15 @@ export function statusFor({
   const row: StatusRow = stop
     ? "stopping"
     : (shown?.row ?? (computer.phase === "live" ? "ready" : "computer"));
+  // A reconnecting stream holds its last picture still, so the label says why, task or not.
   const label =
     stop === "stopping"
       ? "Stopping…"
       : stop === "unconfirmed"
         ? "Stop unconfirmed"
-        : (shown ?? computer).label;
+        : computer.phase === "reconnecting"
+          ? computer.label
+          : (shown ?? computer).label;
   const actions: HudAction[] =
     stop || (held && held.phase !== "finished")
       ? [

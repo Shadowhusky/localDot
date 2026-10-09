@@ -1861,6 +1861,19 @@ routes.post("/__qa/pause-uncertain", (c) => {
   session.uncertainSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
+let screenRevision = 0;
+// dot selects the desktop again, as a new task, a screen switch and a hand-back each do.
+routes.post("/__qa/screen", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("screen.switch", {
+    screen: "desktop",
+    cellId,
+    geometry: { w: 2560, h: 1600, scale: 2 },
+    by: "daemon",
+    revision: ++screenRevision,
+  });
+  return c.json({ ok: true });
+});
 routes.post("/__qa/step-end", (c) => {
   if (!session || !liveStep) return c.text("no open step", 409);
   endLiveStep();

@@ -69,6 +69,7 @@ import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { Announcer } from "./ui/Announcer.tsx";
@@ -364,8 +365,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
     wasSettingsOpen.current = settings.open;
   }, [settings.open, keysOpen]);
-  const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
+  const [picture, setPicture] = useState<StreamPicture>("none");
   const conversation = useConversation(api);
   const session = useLiveSession(
     api,
@@ -401,6 +402,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const selectedScreen = agent.model.screen ?? agent.snapshot?.screen;
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
+  const hud = hudFor({
+    cell,
+    status,
+    pending,
+    picture: physicalStageCell === cell ? picture : "none",
+  });
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
   const [railView, setRailView] = useState<RailView>("chat");
@@ -518,10 +525,10 @@ function Theatre({ api }: { api: ApiClient }) {
         : physicalStageCell;
   // The displayed screen owns video visibility. Parent lifecycle controls still
   // use the desktop HUD, even when only the separate browser has a live viewer.
-  const stageHud = hudFor({ cell: stageCell, status, pending });
+  const stageHud = hudFor({ cell: stageCell, status, pending, picture });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
-      ? hudFor({ cell: stageCell, status, pending })
+      ? stageHud
       : hud;
   const facts = taskFacts(agent.model);
   const now = useNowMs(
@@ -775,7 +782,7 @@ function Theatre({ api }: { api: ApiClient }) {
         <main className="stage-col" aria-label="Computer">
           <StageFrame
             light={appStatus.control ? "dot" : manualLive ? "you" : "none"}
-            live={stageHud.live}
+            live={stageHud.live || stageHud.phase === "reconnecting"}
             frozen={!!stageHud.paused}
             curtain={
               <Presence show={curtain.up}>
@@ -848,6 +855,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               reconnects={reconnects + browserScreen.reconnects}
               listed={listed}
+              onPicture={setPicture}
               manual={
                 takeover && manualGeometry && !agent.model.ended
                   ? {
