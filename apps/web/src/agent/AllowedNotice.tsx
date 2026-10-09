@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { allowedLine, undoAllowedLabel } from "../copy/autonomy.ts";
 import { Button } from "../ui/Button.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
+import { markdownToPlain } from "./markdown.ts";
 import type { ApprovalOutcome } from "./model.ts";
 import type { AllowedChoice } from "./useSafety.ts";
 
@@ -38,7 +39,9 @@ export function AllowedNotice({
     ? undone
       ? "Undone. You'll be asked again next time."
       : allowedLine(choice.actionClass, choice.option)
-    : (confirmed?.note ?? null);
+    : confirmed?.note
+      ? markdownToPlain(confirmed.note)
+      : null;
   const undoable = saved && !undone;
   const failed = undoable && choice.undo === "failed" ? " Couldn't undo. Try again." : "";
   // A removed or hidden Undo never reports pointer-leave or blur.

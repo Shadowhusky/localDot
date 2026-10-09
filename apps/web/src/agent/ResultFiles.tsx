@@ -19,6 +19,7 @@ import { Card, FileRow } from "../ui/Card.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
+import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
 type ResultFile = AgentResult["files"][number];
 // The stored version a download fetches, by the task that handed it over and its number.
@@ -308,7 +309,11 @@ export function ResultCard({
   );
   return (
     <section className="result-card" aria-label="Task result">
-      <p className="result-summary">{result.summary}</p>
+      {result.summary && (
+        <div className="result-summary">
+          <SafeMarkdown text={result.summary} />
+        </div>
+      )}
       {files.length > 0 && (
         <Card variant="file" className="result-files">
           {downloadAll && (

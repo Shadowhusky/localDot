@@ -6,6 +6,7 @@ import type { StepRowView } from "../session/session-view.ts";
 import { past } from "../session/status.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
+import { markdownToPlain } from "./markdown.ts";
 import type { AgentChange, AgentModel, AgentStep } from "./model.ts";
 
 export type ActivityFilter = "all" | "screen" | "tools";
@@ -228,7 +229,7 @@ export function entryView(
   const title = intent ?? what;
   const failed = state === "failed" || state === "skipped";
   const reason = failed
-    ? (agent?.note ??
+    ? ((agent?.note && markdownToPlain(agent.note)) ??
       computer?.reason ??
       (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
     : state === "todo"
