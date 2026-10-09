@@ -808,6 +808,19 @@ describe("ChatGPT runner lifecycle", () => {
     expect(off.secrets).not.toHaveBeenCalled();
   });
 
+  it("asks where data goes when the saved keys can't be read, instead of not checking", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    expect(f.secrets).toHaveBeenCalledOnce();
+    session.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    expect(await session.purpose?.check(leak, new AbortController().signal)).toMatchObject({
+      allow: false,
+      why: expect.stringMatching(/^The purpose check couldn't tell/),
+    });
+  });
+
   it("does not start after the request is canceled during account preflight", async () => {
     const f = setup(),
       gate = deferred<ChatgptStatus>(),

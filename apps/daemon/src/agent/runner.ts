@@ -47,7 +47,7 @@ import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
 import { gatewayCompletion } from "./safety/judge-model.ts";
 import { jevJudge, modelJudge } from "./safety/judges.ts";
-import { judgeChoice, PurposeGate, type PurposeJudge } from "./safety/purpose.ts";
+import { judgeChoice, PurposeGate, type PurposeJudge, unreadableJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { taintMemory } from "./safety/taint.ts";
@@ -268,7 +268,8 @@ export class AgentRunner {
           : this.deps.live.settled(current));
       }
       let selection: ModelSelection;
-      let keys: KeydRecord[] = [];
+      // Undefined when the saved keys couldn't be read.
+      let keys: KeydRecord[] | undefined = [];
       if (settings.main?.provider === CHATGPT) {
         for (const role of ["main", "fast", "local"] as const) {
           const choice = settings[role];
@@ -295,9 +296,13 @@ export class AgentRunner {
           model: settings.main.model,
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
-        // The plan's own models need no key; only a Jev key can check where data goes.
+        // The plan's own models need no key; only a Jev key can check where data goes. Keys that
+        // can't be read leave the check unable to answer, never off.
         if (settings.purposeCheck !== "off")
-          keys = (await this.deps.keyd.secrets().catch(() => [])).filter(isJevKey);
+          keys = await this.deps.keyd.secrets().then(
+            (all) => all.filter(isJevKey),
+            () => undefined,
+          );
         signal?.throwIfAborted();
       } else {
         keys = await this.deps.keyd.secrets();
@@ -407,7 +412,12 @@ export class AgentRunner {
       this.#starting.delete(cellId);
     }
   }
-  #judge(rt: Runtime, settings: AgentSettings, keys: KeydRecord[]): PurposeJudge | undefined {
+  #judge(
+    rt: Runtime,
+    settings: AgentSettings,
+    keys: KeydRecord[] | undefined,
+  ): PurposeJudge | undefined {
+    if (!keys) return unreadableJudge;
     const fast =
       rt.selection.kind === "api"
         ? rt.selection.roles.find((role) => role.role === "fast")
