@@ -55,8 +55,11 @@ export class BrowserWarmer {
       this.#failures.delete(parent);
       return;
     }
+    // A computer may restart its own browser only after a stop it could not confirm; while a
+    // stop is queued the holder is the computer itself and starting would jump ahead of it.
     const holder = this.deps.browser.profileHolder();
-    if ((holder !== undefined && holder !== parent) || !this.deps.available(parent)) return;
+    const ownFailedStop = holder === parent && this.deps.browser.get(parent)?.state === "failed";
+    if ((holder !== undefined && !ownFailedStop) || !this.deps.available(parent)) return;
     this.#starting.add(parent);
     void this.deps.browser.start(parent).then(
       () => {

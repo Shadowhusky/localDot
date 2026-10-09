@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
-import type { CellSummary } from "../cells/types.ts";
+import type { CellState, CellSummary } from "../cells/types.ts";
 import { BrowserWarmer, type BrowserWarmerDeps, WARM_SWEEP_MS } from "./warmer.ts";
 
 const A = "01JXYZ0000000000000000000A",
@@ -22,6 +22,7 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
   const cellListeners = new Set<(entry: CellSummary) => void>();
   const browserListeners = new Set<(parent: string) => void>();
   const running = new Set<string>();
+  const states = new Map<string, CellState>();
   let holder: string | undefined;
   const start = vi.fn(async (parent: string) => {
     running.add(parent);
@@ -41,7 +42,10 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
       start,
       endpoints: (parent) =>
         running.has(parent) ? ({ parentCellId: parent } as ReadyBrowser) : undefined,
-      get: () => undefined,
+      get: (parent) => {
+        const state = states.get(parent);
+        return state ? { id: parent, parentCellId: parent, state } : undefined;
+      },
       profileHolder: () => holder,
       subscribe: (listener) => {
         browserListeners.add(listener);
@@ -62,9 +66,10 @@ function fixture(cells: CellSummary[] = [cell(A)]) {
       if (holder === parent) holder = undefined;
       for (const listener of browserListeners) listener(parent);
     },
-    hold(parent: string | undefined, live = true) {
+    hold(parent: string | undefined, live = true, state?: CellState) {
       holder = parent;
       if (parent && live) running.add(parent);
+      if (parent && state) states.set(parent, state);
     },
   };
 }
@@ -116,10 +121,18 @@ describe("the web browser starts with its computer", () => {
 
   it("starts its own computer's browser again while an unconfirmed stop still holds the sign-ins", async () => {
     const f = fixture([cell(A), cell(B)]);
-    f.hold(A, false);
+    f.hold(A, false, "failed");
     warm(f.deps);
     await vi.waitFor(() => expect(f.start).toHaveBeenCalledWith(A));
     expect(f.start).not.toHaveBeenCalledWith(B);
+  });
+
+  it("never starts ahead of its own computer's queued stop", async () => {
+    const f = fixture([cell(A)]);
+    f.hold(A, false, "stopping");
+    warm(f.deps);
+    await vi.advanceTimersByTimeAsync(WARM_SWEEP_MS * 2);
+    expect(f.start).not.toHaveBeenCalled();
   });
 
   it("retries a failed start with backoff and gives up while the computer is off", async () => {
