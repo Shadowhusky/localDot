@@ -11,6 +11,10 @@ vi.mock("./pixi-presenter.ts", () => ({
         return state.presented;
       },
       frameSize: { w: 1280, h: 800 },
+      get hasFrame() {
+        return state.pending !== state.painted;
+      },
+      fades: () => [],
       present(frame: VideoFrame & { name: string }) {
         state.pending = frame.name;
         state.presented += 1;

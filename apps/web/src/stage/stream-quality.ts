@@ -20,6 +20,8 @@ export interface QualitySample {
 }
 
 export const FRAMERATES = [60, 45, 30, 24, 18, 12] as const;
+// A touch device shows the stream a few inches wide and runs on a battery: it asks for no more.
+export const HANDHELD_FRAMERATE = 30;
 // x264 CRF: each step up saves about a fifth of the bit rate, and the picture softens. Still
 // screens are sharpened again by Selkies' paint-over whatever the step.
 export const CRFS = [25, 28, 31, 34, 37, 41] as const;
@@ -54,9 +56,19 @@ const ORDER: Record<StreamPreference, Record<Cause, readonly Knob[]>> = {
   smooth: { link: ["crf", "framerate"], device: ["crf", "framerate"] },
 };
 
+// The most frames a second this viewer asks for.
+export function framerateCeiling(
+  matches: (query: string) => boolean = (query) =>
+    typeof matchMedia === "function" && matchMedia(query).matches,
+): number {
+  return matches("(pointer: coarse)") ? HANDHELD_FRAMERATE : FRAMERATES[0];
+}
+
 export class QualityController {
   #preference: StreamPreference;
-  #framerate = 0;
+  // The step the frame rate starts from and never rises above.
+  readonly #top: number;
+  #framerate: number;
   #crf = 0;
   // The steps down, latest last, each with its cause: a step comes back once its cause has cleared,
   // the latest such first.
@@ -69,15 +81,18 @@ export class QualityController {
   // Seconds since the last step up, while that step is still on trial.
   #probe: number | null = null;
 
-  constructor(preference: StreamPreference = "auto") {
+  constructor(preference: StreamPreference = "auto", maxFramerate: number = FRAMERATES[0]) {
     this.#preference = preference;
+    const top = FRAMERATES.findIndex((fps) => fps <= maxFramerate);
+    this.#top = top < 0 ? FRAMERATES.length - 1 : top;
+    this.#framerate = this.#top;
   }
 
   // A new choice starts again from full quality, giving what it prefers to give as needed.
   prefer(preference: StreamPreference): void {
     if (preference === this.#preference) return;
     this.#preference = preference;
-    this.#framerate = 0;
+    this.#framerate = this.#top;
     this.#crf = 0;
     this.#lowered.length = 0;
     this.#bad = 0;
@@ -153,7 +168,7 @@ export class QualityController {
 
   #raise(at: number): void {
     const [step] = this.#lowered.splice(at, 1);
-    if (step?.knob === "framerate") this.#framerate = Math.max(0, this.#framerate - 1);
+    if (step?.knob === "framerate") this.#framerate = Math.max(this.#top, this.#framerate - 1);
     else if (step?.knob === "crf") this.#crf = Math.max(0, this.#crf - 1);
     this.#clear.link = 0;
     this.#clear.device = 0;
