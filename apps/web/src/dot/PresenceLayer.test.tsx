@@ -50,12 +50,12 @@ afterEach(() => {
 describe("the presence layer", () => {
   it("keeps dot on screen when the user goes back from Replay to Watch", async () => {
     const view = render(<Screen replay />);
-    const frame = view.container.querySelector<HTMLElement>(".presence-frame");
+    const frame = document.querySelector<HTMLElement>(".presence-frame");
     expect(frame?.dataset.shown).toBe("");
-    expect(frame?.style.transform).toContain("translate3d(1072.00px, 229.00px, 0)");
+    expect(frame?.parentElement?.classList.contains("replay-says-dot")).toBe(true);
     view.rerender(<Screen replay={false} />);
     await act(async () => {});
     expect(frame?.dataset.shown).toBe("");
-    expect(frame?.style.transform).toContain("translate3d(8.00px, 716.00px, 0)");
+    expect(frame?.parentElement?.classList.contains("narrator-dock")).toBe(true);
   });
 });

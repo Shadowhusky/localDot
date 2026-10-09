@@ -21,7 +21,7 @@ export interface PresenceLayerProps {
   line: string;
 }
 
-// The one live dot (design-v2 §10.17), mounted once at the app's root and drawn over the place that
+// The one live dot (design-v2 §10.17), mounted once at the app's root and resting in the place that
 // keeps room for it: the hero on the curtain, the dock beside the stage or the island's badge. While
 // Replay is open it plays the recording's dot instead of the live one.
 export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
