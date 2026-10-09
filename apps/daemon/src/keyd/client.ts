@@ -72,7 +72,7 @@ export function privateSocketProblem(socketPath: string): string | undefined {
   }
 }
 
-export type CellRole = "brain" | "desktop" | "browser" | "judge";
+export type CellRole = "brain" | "desktop" | "browser" | "judge" | "connector";
 
 export interface OpenCellRequest {
   cellId: string;

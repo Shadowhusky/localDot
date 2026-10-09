@@ -26,6 +26,7 @@ import {
 } from "@localdot/protocol";
 import type { Catalog } from "@localdot/providers";
 import type { CellSummary } from "../cells/types.ts";
+import { NO_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
@@ -136,6 +137,8 @@ export interface AgentRunnerDeps {
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
   memory: Pick<MemoryStore, "bootMemory">;
+  // The connected apps' tools a task is shown, as the user's settings stand when its model starts.
+  connectors?(): TaskConnectors;
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
@@ -1133,6 +1136,7 @@ export class AgentRunner {
         await session.waitForTools();
         await this.deps.waitForUploads(session.cellId, session.abort.signal);
         await this.#online(session);
+        session.connectors = this.deps.connectors?.() ?? NO_CONNECTORS;
         const epoch = rt.epoch;
         let code: number | undefined;
         try {
@@ -1371,6 +1375,7 @@ export class AgentRunner {
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
           ...(session.recent.length ? { recent: [...session.recent] } : {}),
           ...(session.run ? { run: session.run } : {}),
+          ...(session.connectors.specs.length ? { connectors: [...session.connectors.specs] } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

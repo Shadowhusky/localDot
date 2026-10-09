@@ -196,6 +196,23 @@ describe("private Codex MCP capability", () => {
     expect(denied).toHaveProperty("error");
     expect(f.calls).toEqual([]);
   });
+  it("lists the task's connected apps' tools after the v1 table", async () => {
+    const f = await fixture({}, false);
+    const spec = {
+      name: "linear__list_issues",
+      app: "Linear",
+      description: "Linear (the user's connected app): List issues.",
+      inputSchema: { type: "object", properties: { team: { type: "string" } } },
+    };
+    f.session.connectors = { specs: [spec], get: () => undefined };
+    const reply = await f.c.request("tools/list", {});
+    const tools = (reply.result as { tools: { name: string; description: string }[] }).tools;
+    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES, "linear__list_issues"]);
+    expect(tools.at(-1)).toMatchObject({
+      description: spec.description,
+      inputSchema: spec.inputSchema,
+    });
+  });
   it("captures one full-frame turn basis, ignores caller basedOn and preserves it after newer results", async () => {
     const f = await fixture();
     f.session.lastFrameId = ulid();

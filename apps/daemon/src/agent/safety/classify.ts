@@ -169,6 +169,8 @@ export function classify(facts: RiskFacts): readonly ActionClass[] {
       return shell(facts.command ?? "", facts.signedIn === true);
     case "navigate":
       return navigation(facts);
+    case "connector":
+      return [facts.connector?.actionClass ?? "unknown"];
     default:
       return facts.drop === undefined ? input(facts) : drag(facts);
   }

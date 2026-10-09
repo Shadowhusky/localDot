@@ -1,6 +1,7 @@
 import {
   type BrowserNavigateInput,
   clipText,
+  isConnectorToolName,
   isToolName,
   type PeopleInput,
   TOOL_INPUTS,
@@ -10,6 +11,8 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
+import type { TaskConnectorTool } from "../../connectors/hub.ts";
+import { splitIntent } from "../../connectors/intent.ts";
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
@@ -25,6 +28,7 @@ import {
 import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
+import { connectorFacts, connectorTool } from "./connector.ts";
 import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
@@ -102,7 +106,9 @@ export async function dispatchTool(
 ): Promise<DispatchOutcome> {
   if (!generation) return { status: 200, result: fail("No active brain generation.") };
   let queuedInput = rawInput;
-  if (isToolName(name)) {
+  if (isConnectorToolName(name) && rawInput && typeof rawInput === "object")
+    queuedInput = freezeExecutionInput(rawInput);
+  else if (isToolName(name)) {
     const parsed = TOOL_INPUTS[name].safeParse(rawInput);
     if (!parsed.success)
       return {
@@ -186,6 +192,8 @@ async function dispatchAdmitted(
     };
     ctx.check();
     if (!isToolName(name)) {
+      const entry = isConnectorToolName(name) ? session.connectors.get(name) : undefined;
+      if (entry) return await dispatchConnector(deps, ctx, entry, rawInput, redact);
       blocked(session, redact(name), "think", "Unknown tool", "not a v1 tool");
       return { status: 404, result: fail(`There is no tool named ${redact(clipText(name, 64))}.`) };
     }
@@ -427,4 +435,106 @@ async function dispatchAdmitted(
     ctx?.screen?.finish();
     lease?.finish();
   }
+}
+
+// A connected app's tool: still on, arguments as its schema says, within the user's limit and the
+// policy, then the same checks as any step: read-only tools run, changes ask with the exact
+// arguments, and what goes out passes the purpose check.
+async function dispatchConnector(
+  deps: DispatchDeps,
+  ctx: ToolCallContext,
+  entry: TaskConnectorTool,
+  rawInput: unknown,
+  redact: Redactor,
+): Promise<DispatchOutcome> {
+  const { session } = ctx;
+  const refuse = (title: string, note: string): DispatchOutcome => {
+    blocked(session, entry.exposed, "app", title, note);
+    return { status: 200, result: fail(note) };
+  };
+  const hub = deps.tools.connectors;
+  const access = hub?.access(entry);
+  if (!hub || !access)
+    return refuse(
+      `${entry.app} is off`,
+      `${entry.app} or this tool is turned off. Do it another way or ask the user.`,
+    );
+  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput))
+    return { status: 400, result: fail(`Invalid ${entry.exposed} input: an object is needed.`) };
+  const { intent, args } = splitIntent(entry, rawInput as Record<string, unknown>);
+  const problem = hub.check(entry, args);
+  if (problem)
+    return {
+      status: 400,
+      result: fail(`Invalid ${entry.exposed} input: ${redact(clipText(problem, 1000))}`),
+    };
+  session.toolCalls += 1;
+  session.actionsSinceUser += 1;
+  const limit = session.actionLimit ?? deps.maxToolCalls;
+  if (limit !== undefined && session.actionsSinceUser > limit) {
+    session.actionLimitReached = true;
+    blocked(session, entry.exposed, "app", "Action limit", `reached your limit of ${limit}`);
+    return {
+      status: 200,
+      result: {
+        ok: false,
+        final: true,
+        content: [
+          {
+            type: "text",
+            text: `This task reached the user's limit of ${limit} actions. Stop; the user will tell you when to continue.`,
+          },
+        ],
+      },
+    };
+  }
+  const frozen = freezeExecutionInput(args);
+  const decision = await deps.policy?.decide({
+    sessionId: session.id,
+    tool: entry.exposed,
+    input: frozen,
+    tainted: session.tainted,
+  });
+  ctx.check();
+  if (decision && decision.kind !== "act") {
+    const note = redact(
+      decision.kind === "ask" ? `needs approval: ${decision.reason}` : decision.reason,
+    );
+    blocked(session, entry.exposed, "app", `Refused ${entry.app}`, note);
+    return { status: 200, result: fail(`Refused by localDot's rules: ${note}`) };
+  }
+  ctx.permit = await authorizePrepared(ctx, {
+    tool: entry.exposed,
+    input: frozen,
+    target: null,
+    facts: connectorFacts(entry, access.actionClass),
+    revalidate: async () => {
+      ctx.check();
+      return hub.access(entry) !== undefined;
+    },
+  });
+  ctx.check();
+  if (!ctx.permit)
+    return {
+      status: 200,
+      result: fail("This action was not authorized. Do not retry it automatically."),
+    };
+  const result = await connectorTool(deps.tools, ctx, entry, frozen, intent);
+  if (session.stopped)
+    return {
+      status: 200,
+      result: {
+        ok: false,
+        final: true,
+        content: [{ type: "text", text: "The task has stopped. Do not retry the operation." }],
+      },
+    };
+  ctx.check();
+  return {
+    status: 200,
+    result: {
+      ...result,
+      content: result.content.map((c) => (c.type === "text" ? { ...c, text: redact(c.text) } : c)),
+    },
+  };
 }

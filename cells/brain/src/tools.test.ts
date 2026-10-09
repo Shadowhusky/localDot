@@ -197,4 +197,34 @@ describe("routine runs", () => {
     expect(systemPrompt(bootConfig({ run }), binding(), [], new Date())).toContain("# This run");
     expect(systemPrompt(bootConfig(), binding(), [], new Date())).not.toContain("# This run");
   });
+  it("adds the user's connected apps' tools as the daemon described them, and names the apps", async () => {
+    const connectors = [
+      {
+        name: "linear__list_issues",
+        app: "Linear",
+        description: "Linear (the user's connected app): List issues.",
+        inputSchema: {
+          type: "object",
+          properties: { team: { type: "string" }, intent: { type: "string" } },
+          required: ["team"],
+        },
+      },
+    ];
+    const tools = toolSet(binding(), connectors);
+    const linear = tools.linear__list_issues;
+    expect(linear?.description).toBe("Linear (the user's connected app): List issues.");
+    expect(linear?.execute).toBeUndefined();
+    expect(await asSchema(linear?.inputSchema).jsonSchema).toMatchObject({
+      properties: { team: { type: "string" } },
+      required: ["team"],
+    });
+    const prompt = systemPrompt(
+      { ...bootConfig(), connectors },
+      binding(),
+      [],
+      new Date("2026-10-09T00:00:00Z"),
+    );
+    expect(prompt).toContain("# Connected apps\nThe user connected Linear.");
+    expect(systemPrompt(bootConfig(), binding(), [], new Date())).not.toContain("Connected apps");
+  });
 });

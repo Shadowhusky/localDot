@@ -2,6 +2,7 @@ import {
   BrowserAction,
   ComputerAction,
   ComputerStep,
+  type ConnectorToolSpec,
   FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
@@ -105,7 +106,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
 };
 
 export interface McpToolDescriptor {
-  name: ToolName;
+  // A v1 tool, or a connected app's tool by dot's name for it.
+  name: ToolName | string;
   description: string;
   inputSchema: Record<string, unknown>;
 }
@@ -128,6 +130,17 @@ export function codexTools(
           ? CodexBrowserActInput
           : TOOL_INPUTS[name],
     ),
+  }));
+}
+
+// The connected apps' tools a task was shown, on the same server as localDot's own.
+export function connectorDescriptors(connectors: {
+  readonly specs: readonly ConnectorToolSpec[];
+}): McpToolDescriptor[] {
+  return connectors.specs.map((spec) => ({
+    name: spec.name,
+    description: spec.description,
+    inputSchema: spec.inputSchema,
   }));
 }
 

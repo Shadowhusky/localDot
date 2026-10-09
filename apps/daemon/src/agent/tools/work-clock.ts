@@ -1,7 +1,14 @@
-import { type ComputerAction, computerWorkMs, type ShellInput } from "@localdot/protocol";
+import {
+  type ComputerAction,
+  computerWorkMs,
+  isConnectorToolName,
+  type ShellInput,
+} from "@localdot/protocol";
 import type { AgentSession } from "../session.ts";
 
 const WORK_MS = 120_000;
+// A connected app that runs on this Mac may first have to start and fetch its program.
+const CONNECTOR_WORK_MS = 300_000;
 const TICK_MS = 1000;
 
 type WaitingSession = Pick<AgentSession, "pendingApproval" | "controlHeld" | "pendingAsk">;
@@ -48,7 +55,9 @@ export function startWorkClock(
       ? (((input as ShellInput).timeout_sec ?? 120) + 10) * 1000
       : tool === "computer"
         ? computerWorkMs(input as ComputerAction)
-        : WORK_MS;
+        : isConnectorToolName(tool)
+          ? CONNECTOR_WORK_MS
+          : WORK_MS;
   return new WorkClock(
     allowance,
     () =>

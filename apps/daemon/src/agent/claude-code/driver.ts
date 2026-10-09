@@ -17,7 +17,7 @@ import {
   ULID_PATTERN,
   ulid,
 } from "@localdot/protocol";
-import { type McpCallResult, toCallToolResult } from "../codex/mcp-tools.ts";
+import { connectorDescriptors, type McpCallResult, toCallToolResult } from "../codex/mcp-tools.ts";
 import type { NativePauseReceipt } from "../codex/native-pause.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
@@ -580,7 +580,7 @@ export class ClaudeCodeDriver {
         .then(async (): Promise<McpCallResult> => {
           if (!current()) return inactive();
           if (!admitting || session.safetyPause) return paused();
-          if (!isToolName(name))
+          if (!isToolName(name) && !session.connectors.get(name))
             return { isError: true, content: [text("Only localDot's tools are available.")] };
           const steps = (args as { steps?: unknown } | null)?.steps;
           if (name === "computer" && Array.isArray(steps) && steps.length > MAX_BATCH_STEPS)
@@ -777,7 +777,7 @@ export class ClaudeCodeDriver {
           launch,
           model,
           instructions: redact(d.instructions(session)),
-          server: localdotServer(call),
+          server: localdotServer(call, () => connectorDescriptors(session.connectors)),
           abort,
           spawn,
         }),

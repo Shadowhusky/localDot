@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONNECTOR_TOOL_NAME_PATTERN } from "./connectors.ts";
 import { DesktopUploadFile } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { UPLOAD_BYTES } from "./quarantine.ts";
@@ -164,8 +165,16 @@ const Destination = z
   .max(262)
   .regex(DESTINATION_PATTERN)
   .refine((value) => Number(value.slice(value.lastIndexOf(":") + 1)) <= 65535, "port");
-const placed = (value: { scope: AlwaysScope; site?: string; app?: string; destination?: string }) =>
+const placed = (value: {
+  scope: AlwaysScope;
+  site?: string;
+  app?: string;
+  destination?: string;
+  tool?: string;
+}) =>
   (value.scope === "site") === (value.site !== undefined) &&
+  // A yes for one connector tool lasts the task, and covers that tool only.
+  (value.tool === undefined || value.scope === "task") &&
   // A connection's rule may name the program as well as its destination.
   (value.scope === "app"
     ? value.app !== undefined
@@ -181,6 +190,7 @@ export const AlwaysOption = z
     site: Origin.optional(),
     app: safeText(128).optional(),
     destination: Destination.optional(),
+    tool: z.string().regex(CONNECTOR_TOOL_NAME_PATTERN).optional(),
   })
   .refine(placed, "a site, app or destination goes only with its own scope");
 export type AlwaysOption = z.infer<typeof AlwaysOption>;

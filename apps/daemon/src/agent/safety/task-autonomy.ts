@@ -9,6 +9,8 @@ export class TaskAutonomy {
   readonly #allowed = new Map<ActionClass, RuleChange>();
   // Connections allowed for this task, by destination: one yes never opens every port.
   readonly #destinations = new Map<string, RuleChange>();
+  // Connected apps' tools allowed for this task, by dot's name for each.
+  readonly #tools = new Map<string, RuleChange>();
   constructor(
     private readonly rules?: Pick<RulesStore, "matches" | "add"> &
       Partial<Pick<RulesStore, "trusts">>,
@@ -23,6 +25,8 @@ export class TaskAutonomy {
     return this.rules?.trusts?.(host) === true;
   }
   relaxes(actionClass: ActionClass, place: Place): boolean {
+    if (place.tool !== undefined)
+      return ALWAYS_SCOPES[actionClass].includes("task") && this.#tools.has(place.tool);
     const scopes = ALWAYS_SCOPES[actionClass];
     const forTask =
       actionClass === "network"
@@ -39,6 +43,12 @@ export class TaskAutonomy {
     approvalId: string,
   ): RuleChange | undefined {
     if (!ALWAYS_SCOPES[actionClass].includes(option.scope)) return undefined;
+    if (option.tool !== undefined) {
+      if (option.scope !== "task" || this.#tools.has(option.tool)) return undefined;
+      const change = { scope: option.scope, actionClass, label: option.label, tool: option.tool };
+      this.#tools.set(option.tool, change);
+      return change;
+    }
     if (option.scope === "task" && actionClass === "network") {
       if (option.destination === undefined || this.#destinations.has(option.destination))
         return undefined;

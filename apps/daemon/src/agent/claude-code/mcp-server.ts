@@ -26,12 +26,17 @@ export function localdotTools(): McpToolDescriptor[] {
 }
 
 // localDot's tools, served inside the daemon: each call is answered by the daemon's own checks.
-export function localdotServer(call: LocaldotCall): McpSdkServerConfigWithInstance {
+export function localdotServer(
+  call: LocaldotCall,
+  more: () => McpToolDescriptor[] = () => [],
+): McpSdkServerConfigWithInstance {
   const instance = new McpServer(
     { name: LOCALDOT_SERVER, version: "1.0.0" },
     { capabilities: { tools: {} } },
   );
-  instance.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: localdotTools() }));
+  instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: [...localdotTools(), ...more()],
+  }));
   instance.server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
     call(request.params.name, request.params.arguments ?? {}, extra.signal),
   );

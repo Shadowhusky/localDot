@@ -33,7 +33,9 @@ export type RiskFacts = {
     | "files_delete"
     | "memory_write"
     // dot changes when it works: pauses a routine or schedules a follow-up.
-    | "schedule";
+    | "schedule"
+    // A tool of one of the user's connected apps.
+    | "connector";
   // Filled from the daemon's own session state when the action is decided.
   screen?: ScreenName;
   signedIn?: boolean;
@@ -50,7 +52,17 @@ export type RiskFacts = {
   command?: string;
   destination?: string;
   schedule?: { title: string; fields: [string, string][] };
+  connector?: ConnectorFacts;
 };
+// A connected app's tool: whose it is, dot's name for it, and what it asks as.
+export interface ConnectorFacts {
+  readonly app: string;
+  readonly tool: string;
+  readonly exposed: string;
+  readonly actionClass: ActionClass;
+  // Where its arguments go, when known.
+  readonly host?: string;
+}
 export type RiskDecision = {
   actionClass: ActionClass;
   mode: AutonomyMode;

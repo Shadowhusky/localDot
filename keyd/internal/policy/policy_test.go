@@ -71,10 +71,11 @@ func TestDenyList(t *testing.T) {
 
 func TestRoles(t *testing.T) {
 	cases := map[Role]Policy{
-		Brain:   {Role: Brain, Gateway: true},
-		Desktop: {Role: Desktop, Web: true},
-		Browser: {Role: Browser, Web: true},
-		Judge:   {Role: Judge, Bound: true},
+		Brain:     {Role: Brain, Gateway: true},
+		Desktop:   {Role: Desktop, Web: true},
+		Browser:   {Role: Browser, Web: true},
+		Judge:     {Role: Judge, Bound: true},
+		Connector: {Role: Connector, Web: true},
 	}
 	for role, want := range cases {
 		got, err := ForRole(role)

@@ -1,4 +1,4 @@
-import { ApprovalRequestDraft, type ToolName, UploadApproval } from "@localdot/protocol";
+import { ApprovalRequestDraft, clipText, type ToolName, UploadApproval } from "@localdot/protocol";
 import { repeatsWhileHeld } from "@localdot/protocol/keys";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
@@ -9,6 +9,9 @@ import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } fr
 import { PausedStepError } from "./step-barrier.ts";
 
 const MAX_DESTINATIONS = 64;
+// A card holds 16 rows: the app, the tool and the purpose check's destination leave the rest for
+// the arguments, the last of which gathers any that don't fit.
+const ARGUMENT_ROWS = 13;
 
 export interface EffectPermit {
   // The user approved a card for this exact effect, rather than the policy letting it act.
@@ -16,7 +19,8 @@ export interface EffectPermit {
   consume(input: unknown, target: unknown): boolean;
 }
 export interface PreparedEffect {
-  readonly tool: ToolName;
+  // A v1 tool, or a connected app's tool by dot's name for it.
+  readonly tool: ToolName | string;
   readonly input: unknown;
   readonly target: unknown;
   readonly facts: RiskFacts;
@@ -36,7 +40,7 @@ export function freezeExecutionInput<T>(input: T): T {
 }
 // Every value goes on the card whole; the broker, not this list, decides what a card can carry.
 export function approvalDraft(
-  tool: ToolName,
+  tool: ToolName | string,
   input: unknown,
   facts: RiskFacts,
   decision: RiskDecision,
@@ -47,6 +51,18 @@ export function approvalDraft(
   const object = input as Record<string, unknown> | null;
   const fields: [string, string][] = [...card.fields];
   const add = (key: string, value: string) => fields.push([key, redact(value)]);
+  if (facts.connector) {
+    // An app's tool: exactly what dot would send it, every argument whole.
+    add("App", facts.connector.app);
+    add("Tool", facts.connector.tool);
+    const args = Object.entries(object ?? {});
+    const shown = args.length > ARGUMENT_ROWS ? args.slice(0, ARGUMENT_ROWS - 1) : args;
+    const value = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null, 2));
+    for (const [key, v] of shown) add(clipText(key, 80), value(v));
+    if (shown.length < args.length)
+      add("More", JSON.stringify(Object.fromEntries(args.slice(shown.length)), null, 2));
+    return ApprovalRequestDraft.parse({ ...card, fields });
+  }
   fields.push(["Tool", tool]);
   if (tool === "computer" && object?.action && typeof object.action === "object") {
     const action = object.action as Record<string, unknown>;

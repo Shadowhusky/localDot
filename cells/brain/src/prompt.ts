@@ -1,6 +1,7 @@
 import type { BootConfig, ModelBinding } from "@localdot/protocol";
 import {
   CHECK_MEMORY_FIRST,
+  connectedAppsSection,
   type ScreenHands,
   thisRunSection,
   workingRules,
@@ -63,7 +64,7 @@ ${escapeMemory(boot.memory.user.trim())}
 </user_file>
 <user_file name="MEMORY.md">
 ${escapeMemory(boot.memory.memory.trim())}
-</user_file>${recent}${skills}${planText}${thisRunSection(boot.run)}`;
+</user_file>${recent}${skills}${connectedAppsSection((boot.connectors ?? []).map((c) => c.app))}${planText}${thisRunSection(boot.run)}`;
 }
 
 function escapeMemory(text: string): string {

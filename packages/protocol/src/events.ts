@@ -116,7 +116,7 @@ export const PlanUpdate = event("plan.update", z.object({ id: z.string(), status
 export const StepStart = event(
   "step.start",
   z.object({
-    kind: z.enum(["gui", "shell", "file", "browser", "ask", "think"]),
+    kind: z.enum(["gui", "shell", "file", "browser", "ask", "think", "app"]),
     planItem: z.string().optional(),
     // The model's own line for the user about the call this step starts, as plain text.
     intent: boundedText(INTENT_CHARS).optional(),
