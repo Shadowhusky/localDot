@@ -408,13 +408,13 @@ export class DotEngine {
     };
   }
 
-  // An upper bound on how fast anything visible is moving, in frame units per second; a renderer
-  // slows down while it is calm. Breathing and the talk-bob render at the calm frame rate.
   // When the next scheduled move (a blink, a glance) starts.
   nextEventAt(): number {
     return this.queue[0]?.t ?? Number.POSITIVE_INFINITY;
   }
 
+  // An upper bound on how fast anything visible is moving, in frame units per second; a renderer
+  // slows down while it is calm. Breathing and the talk-bob render at the calm frame rate.
   activity(t: number): number {
     this.advance(t);
     const rich = this.rich && !this.reduced;
