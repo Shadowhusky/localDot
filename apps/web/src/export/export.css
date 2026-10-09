@@ -53,7 +53,7 @@
   overflow: hidden;
   border-radius: var(--radius-sm);
   background-color: var(--color-well);
-  box-shadow: inset 0 0 0 0.5px var(--color-hairline);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
 .export-preview > :is(img, .replay-image-empty) {
@@ -74,7 +74,10 @@
   border-radius: var(--radius-xs);
   background-color: color-mix(in oklab, var(--color-glass-solid) 92%, transparent);
   color: var(--color-fg-1);
-  font: var(--font-weight-medium) 0.5625rem / 0.75rem var(--font-ui);
+  font:
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
   white-space: nowrap;
   text-overflow: ellipsis;
   opacity: 0;
@@ -205,10 +208,6 @@
 
 .export-speed-field {
   width: calc(var(--spacing) * 17);
-}
-
-.export-speed-field input {
-  text-align: end;
 }
 
 .export-more {
