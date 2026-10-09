@@ -1,4 +1,9 @@
-import { SealedSecret, SecretId, surrogateEnvClash, surrogateEnvName } from "@localdot/protocol";
+import {
+  SECRET_ID_PATTERN,
+  SealedSecret,
+  surrogateEnvClash,
+  surrogateEnvName,
+} from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type KeydClient, KeydError, KeydUnavailableError } from "./client.ts";
@@ -82,12 +87,14 @@ export function keyRoutes(app: Hono, { keyd, monitor, afterChange }: KeyRoutesDe
   });
 
   app.delete("/api/keys/:id", async (c) => {
-    const id = SecretId.safeParse(c.req.param("id"));
-    if (!id.success) return refuse(c, 400, "bad-request", "not a key name");
+    // The name pattern only: a key whose name was reserved after it was added (webpush-vapid)
+    // must still be removable.
+    const id = c.req.param("id");
+    if (!SECRET_ID_PATTERN.test(id)) return refuse(c, 400, "bad-request", "not a key name");
     return withKeyd(c, () =>
       mutate(async () => {
-        if (!(await keyd.deleteSecret(id.data))) return refuse(c, 404, "not-found", "no such key");
-        await notifyChange(id.data);
+        if (!(await keyd.deleteSecret(id))) return refuse(c, 404, "not-found", "no such key");
+        await notifyChange(id);
         return c.body(null, 204);
       }),
     );

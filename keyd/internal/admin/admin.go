@@ -41,6 +41,7 @@ type Server struct {
 	Version  string
 	Hairpin  *netguard.Public
 	Service  *ServiceProcessIdentity
+	Push     Pusher
 }
 
 func (s *Server) Handler() http.Handler {
@@ -64,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/llm/routes/{route}/models", s.getModels)
 	mux.HandleFunc("PUT /v1/llm/routes/{route}/models", s.setModels)
 	mux.HandleFunc("GET /v1/events", s.events)
+	mux.HandleFunc("GET /v1/push/key", s.pushKey)
+	mux.HandleFunc("POST /v1/push/send", s.pushSend)
 	return mux
 }
 
@@ -145,7 +148,7 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	rec := vault.Record{ID: id, Kind: body.Kind, Provider: body.Provider, BaseURL: body.BaseURL, Hosts: body.Hosts,
 		Header: body.Header, Format: body.Format, Methods: body.Methods, Paths: body.Paths}
-	if !vault.ValidID(id) {
+	if !vault.Writable(id) {
 		fail(w, http.StatusBadRequest, "bad-request", fmt.Sprintf("secret id %q is not allowed", id))
 		return
 	}

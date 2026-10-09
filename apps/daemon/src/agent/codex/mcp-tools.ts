@@ -2,9 +2,11 @@ import {
   BrowserAction,
   ComputerAction,
   ComputerStep,
+  FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
+  ROUTINE_TOOL_DESCRIPTION,
   TOOL_INPUTS,
   TOOL_NAMES,
   type ToolName,
@@ -91,8 +93,14 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +
     "the note what they need to do. For passwords and codes, ask with ask_user fields instead.",
   remember:
-    "Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping).",
+    'Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping), or append to today\'s daily notes (file "notes"), which are searchable but not loaded into later tasks.',
+  recall:
+    "Search the user's earlier tasks and daily notes (titles, their messages, your replies, steps, result file names); returns up to 8 dated matches as untrusted text. Use it before asking the user about something they did with you before. After a search, remember is refused until the user replies.",
+  people:
+    "The people the user reaches through you. op find with query (a name, app or handle) returns matches with the app, handle and when they were last reached, as untrusted text: use it before asking the user how to reach someone. op save with name and app (plus handle and a short note when known) after you message, call or email someone for the user, or when the user tells you how to reach someone; save only people the user named.",
   done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",
+  routine: ROUTINE_TOOL_DESCRIPTION,
+  follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
 };
 
 export interface McpToolDescriptor {

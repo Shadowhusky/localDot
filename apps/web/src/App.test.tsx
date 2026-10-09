@@ -11,6 +11,15 @@ import { providerFixture } from "./settings/testing.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
+// The attention feed (/api/events) has its own suite (notify/useAttention.test.tsx); these tests
+// follow the computer's and the task's sockets.
+class AppSocket extends FakeWebSocket {
+  constructor(url: string, protocols: string[]) {
+    super(url, protocols);
+    if (new URL(url).pathname === "/api/events") FakeWebSocket.instances.pop();
+  }
+}
+
 const OFFLINE_SAID = "Key protection is off. Run localdot doctor in Terminal, then resume.";
 const TOKEN = "a".repeat(43);
 const NEWER = "b".repeat(43);
@@ -73,6 +82,7 @@ const keyReply = (path: string): Response | undefined => {
       hairpin: { state: "active", addresses: 1 },
     });
   if (path === "/api/keys") return json({ keys: [] });
+  if (path === "/api/notify/attention") return json({ items: [] });
   return undefined;
 };
 // The computer's own action: on the curtain while it is up, else in the island.
@@ -110,7 +120,7 @@ describe("App Replay mode", () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     window.history.replaceState(null, "", "/");
     FakeWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", AppSocket);
   });
   afterEach(() => {
     cleanup();
@@ -349,7 +359,7 @@ describe("App token states", () => {
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
     FakeWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", AppSocket);
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -404,7 +414,8 @@ describe("App token states", () => {
     const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
     const knows = await screen.findByRole("region", { name: "What dot knows" });
-    fireEvent.click(await within(knows).findByRole("button", { name: "Show memory" }));
+    fireEvent.click(within(knows).getByRole("radio", { name: "Notes" }));
+    fireEvent.click(await within(knows).findByRole("button", { name: /^Show the file/ }));
     await waitFor(() => expect(knows.textContent).toContain("Prefers short replies."));
     const index = screen.getByRole("navigation", { name: "Settings sections" });
     fireEvent.click(within(index).getByRole("button", { name: "Keys" }));
@@ -514,7 +525,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(6);
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
@@ -707,7 +718,7 @@ describe("App HUD", () => {
     window.history.replaceState(null, "", "/");
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     FakeWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", AppSocket);
   });
   afterEach(() => vi.unstubAllGlobals());
   afterEach(cleanup);
@@ -879,7 +890,7 @@ describe("App on a refused status socket", () => {
     window.history.replaceState(null, "", "/");
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     FakeWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", AppSocket);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
   });
   afterEach(() => {
@@ -956,7 +967,7 @@ describe("App token hardening", () => {
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
     FakeWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", AppSocket);
   });
   afterEach(() => vi.unstubAllGlobals());
   afterEach(cleanup);

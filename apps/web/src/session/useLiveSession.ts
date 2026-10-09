@@ -18,6 +18,8 @@ export interface LiveSession {
   ended: boolean;
   // The task shown is the conversation's latest, and no computer is running it.
   resting: boolean;
+  // Which task to show is settled: the conversation is read and the computer has said what it runs.
+  known: boolean;
   stop(): void;
   check(): void;
 }
@@ -57,6 +59,7 @@ export function useLiveSession(
   choice = 0,
 ): LiveSession {
   const [shown, setShown] = useState<Shown | null>(null);
+  const [known, setKnown] = useState(false);
   // The computer that has answered whether it runs a task.
   const [answered, setAnswered] = useState<string | null>(null);
   const [agentFeed] = useState(createAgentFeed);
@@ -99,6 +102,7 @@ export function useLiveSession(
       if (asking) return;
       // A task the computer runs takes the page on opening, and keeps it once it ends.
       if (working) applied.current = resting;
+      setKnown(true);
     }
     if (working) return;
     applied.current = resting;
@@ -310,6 +314,7 @@ export function useLiveSession(
     version,
     ended: owned && (ended || atRest),
     resting: atRest,
+    known,
     stop,
     check,
   };

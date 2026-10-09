@@ -42,6 +42,7 @@ import type { ActionGateway } from "../gateway/gateway.ts";
 import type { KillSwitch } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "../keyd/client.ts";
+import { JudgeCell } from "../keyd/judge-cell.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
@@ -67,16 +68,21 @@ import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
+import { PeopleStore } from "./people.ts";
 import type { ToolPolicy } from "./policy.ts";
 import { PrivateFiles } from "./private-files.ts";
+import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
+import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
+import type { ToolDeps } from "./tools/deps.ts";
 import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
+import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
 export interface AgentWiringDeps {
@@ -98,18 +104,33 @@ export interface AgentWiringDeps {
   killSwitch: Pick<KillSwitch, "stopSession" | "isBusy">;
   keydPorts: PortRange;
   policy?: ToolPolicy;
+  routines?: RoutineToolPort;
   toolPort?: number;
   codex?: { realHome: string; user: string };
   claudeCode?: { realHome: string };
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
+  // Earlier tasks for the recall tool, from the search index.
+  recall?: ToolDeps["recall"];
+  notesChanged?(file: string): void;
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
+// A native harness hands memory to the model here.
+function tainting<T extends { user: string; memory: string }>(session: AgentSession, memory: T): T {
+  taintMemory(session.taint, memory);
+  return memory;
+}
+
 export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
+    people = new PeopleStore(d.home),
     settings = new SettingsStore(d.home),
     catalog = new CatalogStore(d.home);
+  const recentActivity = new RecentActivity({
+    log: d.eventLog,
+    isLive: (id) => d.live.cellOf(id) !== undefined,
+  });
   const conversations = new Conversations(d.home, d.eventLog);
   const transcripts = new TranscriptStore(d.home),
     png = new FramePng(d.frames, d.gateway),
@@ -204,6 +225,10 @@ export function createAgent(d: AgentWiringDeps) {
     range: d.keydPorts,
     desktopPorts: () => d.cells.reservedKeydPorts(),
     ...(d.toolPort === undefined ? {} : { toolPort: d.toolPort }),
+  });
+  const judgeCell = new JudgeCell({
+    keyd: d.keyd,
+    ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
   const skills = () => listSkills(BUILTIN_SKILLS, join(d.home, "skills"));
   const installSkills = async (cellId: string, signal: AbortSignal): Promise<SkillSummary[]> => {
@@ -313,9 +338,12 @@ export function createAgent(d: AgentWiringDeps) {
       },
       png,
       memory,
+      people,
+      ...(d.recall ? { recall: d.recall } : {}),
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
       stopForUncertainty: (session, reason) => runner.contain(session, reason),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
+      ...(d.routines ? { routines: d.routines } : {}),
     },
   };
   // A native harness's first look at the task computer: one full screenshot of the selected screen.
@@ -363,6 +391,7 @@ export function createAgent(d: AgentWiringDeps) {
       const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
       check();
       session.tainted = true;
+      session.taintScreen(screen?.selection.screen ?? "desktop");
       session.lastFrameId = frame.frameId;
       session.freshLook();
       return { frameId: frame.frameId, full: true as const, png: full };
@@ -395,9 +424,11 @@ export function createAgent(d: AgentWiringDeps) {
           observe,
           instructions: (session) =>
             codexInstructions({
-              memory: memory.readBoth(),
+              memory: tainting(session, memory.bootMemory()),
+              recent: session.recent,
               skills: runner.skillsOf(session.id),
               today: new Date(),
+              ...(session.run ? { run: session.run } : {}),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
@@ -479,9 +510,11 @@ export function createAgent(d: AgentWiringDeps) {
         transcripts,
         instructions: (session) =>
           claudeCodeInstructions({
-            memory: memory.readBoth(),
+            memory: tainting(session, memory.bootMemory()),
+            recent: session.recent,
             skills: runner.skillsOf(session.id),
             today: new Date(),
+            ...(session.run ? { run: session.run } : {}),
           }),
         redactorFor: (session) => forText(session),
       })
@@ -500,6 +533,7 @@ export function createAgent(d: AgentWiringDeps) {
     settings: () => settings.get(),
     catalog: () => catalog.get(),
     memory,
+    recentActivity,
     transcripts,
     conversations,
     installSkills,
@@ -509,6 +543,7 @@ export function createAgent(d: AgentWiringDeps) {
     ...(claudeDriver && claudeSetup
       ? { claudeCode: { driver: claudeDriver, status: () => claudeSetup.status() } }
       : {}),
+    jev: (secretId, body, signal) => judgeCell.post(secretId, body, signal),
     ...(driver && auth
       ? {
           codex: {
@@ -727,6 +762,10 @@ export function createAgent(d: AgentWiringDeps) {
     catalog,
     keyd: d.keyd,
     memory,
+    notesChanged: d.notesChanged,
+    people,
+    recentActivity: () => recentActivity.list(),
+    sessionInfo: (ids) => d.eventLog.sessionInfo(ids),
     skills,
     canChangeMemory: () =>
       [...runner.sessions.values()].every(
@@ -847,6 +886,7 @@ export function createAgent(d: AgentWiringDeps) {
           ),
           ...containments,
           runner.close(),
+          judgeCell.close(),
           ...activeClients.map((tools) => tools.close()),
           ...retiring,
         ]);

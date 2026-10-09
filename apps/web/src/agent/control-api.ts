@@ -145,6 +145,12 @@ export function resumeTask(api: ApiClient, sessionId: string, signal: AbortSigna
 }
 export function undoMemory(api: ApiClient, changeId: string, signal: AbortSignal) {
   if (!ULID_PATTERN.test(changeId)) throw new ControlFailure(false);
+  // Memory refuses every change while the user has control: a 503 here changed nothing.
+  const refused = (error: unknown) => {
+    throw error instanceof ControlFailure && error.status === 503
+      ? new ControlFailure(false, 503)
+      : error;
+  };
   return controlRequest(
     api,
     `/api/agent/memory/${changeId}/undo`,
@@ -165,7 +171,7 @@ export function undoMemory(api: ApiClient, changeId: string, signal: AbortSignal
         throw new ControlFailure(true);
       return value.changeId;
     },
-  );
+  ).catch(refused);
 }
 export function loadKnowledge<T>(
   api: ApiClient,

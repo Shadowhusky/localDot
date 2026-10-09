@@ -18,6 +18,8 @@ export interface SocketOptions {
 
 export interface SocketHandle {
   close(): void;
+  // Sends on the open connection; false while there is none. Nothing is queued.
+  send(data: string): boolean;
 }
 
 // Reconnects with doubling backoff until close(). The daemon selects localdot.v1 and never the
@@ -28,14 +30,17 @@ export function openSocket(opts: SocketOptions): SocketHandle {
   let delay = backoff.min;
   let closed = false;
   let ws: WebSocket | null = null;
+  let live: WebSocket | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const connect = () => {
     if (closed) return;
     let opened = false;
-    ws = new Impl(opts.url, opts.protocols);
+    const socket = new Impl(opts.url, opts.protocols);
+    ws = socket;
     ws.onopen = () => {
       opened = true;
+      live = socket;
       delay = backoff.min;
       opts.handlers.onOpen?.();
     };
@@ -43,6 +48,7 @@ export function openSocket(opts: SocketOptions): SocketHandle {
     ws.onerror = () => {};
     ws.onclose = () => {
       ws = null;
+      live = null;
       opts.handlers.onClose?.();
       if (closed) return;
       if (!opened) opts.handlers.onRefused?.();
@@ -58,6 +64,11 @@ export function openSocket(opts: SocketOptions): SocketHandle {
       closed = true;
       clearTimeout(timer);
       ws?.close();
+    },
+    send(data) {
+      if (!live) return false;
+      live.send(data);
+      return true;
     },
   };
 }

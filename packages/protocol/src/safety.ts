@@ -81,6 +81,7 @@ export const AutonomyPolicy = ownPolicy
   .pipe(z.union([policyObject, legacyPolicyObject]))
   .readonly();
 export type AutonomyPolicy = z.infer<typeof AutonomyPolicy>;
+// Balanced asks only before acting as the user; the purpose check covers everything else.
 export const BALANCED_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
   reading: "act",
   browsing: "act",
@@ -89,15 +90,28 @@ export const BALANCED_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
   send: "ask",
   post: "ask",
   delete: "ask",
-  download_execute: "ask",
+  download_execute: "act",
   system_settings: "ask",
-  memory: "ask",
+  memory: "act",
 });
 export const CAREFUL_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
   ...BALANCED_AUTONOMY,
   computer: "ask",
+  download_execute: "ask",
+  memory: "ask",
 });
 export const DEFAULT_AUTONOMY = BALANCED_AUTONOMY;
+// Balanced as saved before the purpose check, when it also asked before running downloaded
+// programs and saving to memory. A policy saved as that preset reads as today's Balanced.
+const EARLIER_BALANCED: Readonly<AutonomyPolicy> = Object.freeze({
+  ...BALANCED_AUTONOMY,
+  download_execute: "ask",
+  memory: "ask",
+});
+export function currentAutonomy(policy: AutonomyPolicy): AutonomyPolicy {
+  const same = EDITABLE_ACTION_CLASSES.every((key) => policy[key] === EARLIER_BALANCED[key]);
+  return same ? BALANCED_AUTONOMY : policy;
+}
 export const ACTION_CLASS_LABELS: Readonly<Record<ActionClass, string>> = Object.freeze({
   reading: "Read and look",
   browsing: "Browse websites",
@@ -200,6 +214,10 @@ export const ApprovalCardDraft = z.strictObject({
   actionClass: ActionClass,
   risk: z.enum(["medium", "high"]),
   title: safeText(200),
+  // One sentence on why this asks.
+  why: safeText(300).optional(),
+  // A purpose check's ask: the hosts the step would send what dot read to.
+  destinations: z.array(z.string().min(1).max(253)).min(1).max(64).optional(),
   fields: approvalFields(APPROVAL_FIELD_CHARS),
   partial: z
     .array(

@@ -258,6 +258,14 @@ export function useSettings(
     const d = current.current.draft;
     if (d) edit({ ...d, checkIns: { ...d.checkIns, [key]: next } });
   };
+  const purposeCheck = (on: boolean) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, purposeCheck: on });
+  };
+  const recentActivity = (on: boolean) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, recentActivity: on });
+  };
   const save = async () => {
     const owner = current.current,
       captured = owner.draft,
@@ -462,6 +470,8 @@ export function useSettings(
     },
     spending,
     checkIn,
+    purposeCheck,
+    recentActivity,
     save,
     refresh,
     reload,

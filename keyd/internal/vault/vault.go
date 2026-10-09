@@ -62,6 +62,15 @@ var (
 	reservedIDs = []string{"lmstudio", "ollama"}
 )
 
+// PushKeyID names the Keychain item that holds keyd's own Web Push (VAPID) key. No user secret may
+// take it; an index that already names it still opens, and the push signer refuses to use the item.
+const PushKeyID = "webpush-vapid"
+
+// Writable reports whether a user secret may be stored under id.
+func Writable(id string) bool {
+	return ValidID(id) && id != PushKeyID
+}
+
 // ValidID reports whether id can name a secret.
 func ValidID(id string) bool {
 	return idPattern.MatchString(id) && !slices.Contains(reservedIDs, id)
@@ -165,7 +174,7 @@ func Open(store Store, path string) (*Vault, error) {
 // that cannot be ensured, the secret fails closed instead: its value is deleted when the index on
 // disk may name either binding, and its record leaves memory when a value that must go cannot.
 func (v *Vault) Put(rec Record, value []byte) error {
-	if !ValidID(rec.ID) {
+	if !Writable(rec.ID) {
 		return fmt.Errorf("secret id %q: want 1-64 of a-z 0-9 _ - starting with a letter or digit, not a reserved name", rec.ID)
 	}
 	if !validKind(rec.Kind) {

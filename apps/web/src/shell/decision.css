@@ -231,7 +231,13 @@
    scrim, and never higher than the band, so the stage and dot stay in sight above it. With the
    keyboard up the band has folded into the island, so only the stage stays. */
 .decision-sheet {
-  --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + var(--band-min));
+  --_above: calc(
+    var(--stage-top) +
+    env(safe-area-inset-top) +
+    (100vw - 16px) /
+    1.6 +
+    var(--band-min)
+  );
   position: fixed;
   right: 0;
   bottom: var(--_keyboard, 0px);
@@ -249,7 +255,7 @@
 }
 
 .decision-sheet[data-keyboard] {
-  --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
+  --_above: calc(var(--stage-top) + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
 }
 
 /* Held sideways a phone has little height: the sheet keeps a readable width, and its body scrolls

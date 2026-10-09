@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import type { Options, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
-import { parseEvent, TOOL_NAMES, type ToolResult, ulid } from "@localdot/protocol";
+import { MAX_BATCH_STEPS, parseEvent, TOOL_NAMES, type ToolResult, ulid } from "@localdot/protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -287,6 +287,24 @@ describe("Claude Code driver", () => {
     await until(() => f.states().filter((s) => s.state === "thinking").length >= 2);
     await fake.call("computer", click);
     expect(basis()).toBe(f.frames[2]);
+    await fake.call("done", { summary: "ok" });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+  });
+
+  it("takes at most eight steps in a batch, as the ChatGPT plan does", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    const steps = Array.from({ length: MAX_BATCH_STEPS + 1 }, () => ({
+      action: "key",
+      keys: ["Tab"],
+    }));
+    const before = f.dispatch.mock.calls.length;
+    expect(await fake.call("computer", { action: "batch", steps })).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: expect.stringContaining("split it in two") }],
+    });
+    expect(f.dispatch.mock.calls.length).toBe(before);
     await fake.call("done", { summary: "ok" });
     expect(await result).toBe(CLAUDE_CODE_DONE);
   });

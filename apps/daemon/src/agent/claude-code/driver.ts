@@ -11,6 +11,7 @@ import {
   earlierRecord,
   type InboxItem,
   isToolName,
+  MAX_BATCH_STEPS,
   type PauseSnapshot,
   type ToolResult,
   ULID_PATTERN,
@@ -581,6 +582,12 @@ export class ClaudeCodeDriver {
           if (!admitting || session.safetyPause) return paused();
           if (!isToolName(name))
             return { isError: true, content: [text("Only localDot's tools are available.")] };
+          const steps = (args as { steps?: unknown } | null)?.steps;
+          if (name === "computer" && Array.isArray(steps) && steps.length > MAX_BATCH_STEPS)
+            return {
+              isError: true,
+              content: [text(`A batch takes at most ${MAX_BATCH_STEPS} steps; split it in two.`)],
+            };
           let toolInput = args;
           if (
             (name === "computer" || name === "browser_act") &&

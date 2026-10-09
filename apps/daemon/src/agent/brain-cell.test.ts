@@ -242,8 +242,18 @@ describe("BrainCells", () => {
       name: "AbortError",
     });
     await expect(f.cells.open({ ...options(), pricing: { v: 1, routes: [] } })).rejects.toThrow();
+    for (const secrets of [["Bad Key"], ["provider", "provider"]])
+      await expect(f.cells.open({ ...options(), secrets })).rejects.toThrow(
+        "invalid brain secrets",
+      );
     expect(f.calls).toEqual([]);
     expect(f.cells.reservedPorts()).toEqual([]);
+  });
+  it("leaves a key stored under a since-reserved name to keyd", async () => {
+    const f = fixture();
+    const cell = await f.cells.open({ ...options(), secrets: ["webpush-vapid"] });
+    expect(f.keydCells.size).toBe(1);
+    await f.cells.close(cell);
   });
   it("closes a committed keyd open when its reply is lost", async () => {
     const f = fixture();

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelRole, RoleChoice } from "./choices.ts";
 import { AUTOSAVE_MS, SettingsSheet, type SettingsSheetProps } from "./SettingsSheet.tsx";
+import { knownFixture } from "./testing.ts";
 
 afterEach(() => {
   cleanup();
@@ -91,9 +92,25 @@ describe("settings inspector", () => {
       reloadSkills: vi.fn(),
       rereadMemory: vi.fn(),
     };
+    const fact = {
+      id: "01JXYZ0000000000000000AAAA",
+      file: "MEMORY.md" as const,
+      text: "Prefers short replies.",
+      source: { kind: "user" as const },
+      at: "2026-10-08",
+      pinned: false,
+      revision: "0123456789abcdef",
+    };
     render(
-      <SettingsSheet {...props()} knowledge={knowledge} section="knowledge" sectionRequest={1} />,
+      <SettingsSheet
+        {...props()}
+        knowledge={knowledge}
+        known={knownFixture({ files: { "USER.md": [], "MEMORY.md": [fact] } })}
+        section="knowledge"
+        sectionRequest={1}
+      />,
     );
+    act(() => screen.getByRole("radio", { name: "Notes" }).click());
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "What dot knows" }));
     expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
       "Prefers short replies.",

@@ -4,8 +4,11 @@ import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
 import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
 import { handoffFor } from "./handoff.ts";
+import { outboundOf, type PurposeVerdict } from "./purpose.ts";
 import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } from "./risk.ts";
 import { PausedStepError } from "./step-barrier.ts";
+
+const MAX_DESTINATIONS = 64;
 
 export interface EffectPermit {
   // The user approved a card for this exact effect, rather than the policy letting it act.
@@ -87,6 +90,16 @@ export function approvalDraft(
     if (typeof object.old_text === "string") add("Old text", object.old_text);
     if (typeof object.new_text === "string") add("New text", object.new_text);
     if (typeof object.text === "string" && tool === "remember") add("Memory", object.text);
+    if (typeof object.query === "string" && (tool === "recall" || tool === "people"))
+      add("Search", object.query);
+    if (tool === "people")
+      for (const [key, label] of [
+        ["name", "Name"],
+        ["app", "App"],
+        ["handle", "Handle"],
+        ["note", "Note"],
+      ] as const)
+        if (typeof object[key] === "string") add(label, object[key]);
   }
   return ApprovalRequestDraft.parse({
     ...card,
@@ -154,8 +167,10 @@ export async function authorizePrepared(
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;
   }
-  if (decision.mode === "ask") {
+  const purpose = decision.mode === "act" ? await purposeCheck(ctx, prepared, input) : undefined;
+  if (decision.mode === "ask" || purpose) {
     const draft = approvalDraft(prepared.tool, input, prepared.facts, decision, ctx.redact, upload);
+    const acting = actingFacts(ctx, prepared.facts);
     const outcome = await ctx.session.requestApproval(
       {
         sessionId: ctx.session.id,
@@ -165,10 +180,29 @@ export async function authorizePrepared(
         digest,
         targetDigest,
       },
-      ApprovalRequestDraft.parse({
-        ...draft,
-        always: alwaysOptions(decision.actionClass, actingFacts(ctx, prepared.facts), ctx.redact),
-      }),
+      ApprovalRequestDraft.parse(
+        purpose
+          ? {
+              ...draft,
+              title: purpose.title,
+              why: purpose.why,
+              ...(purpose.destinations.length
+                ? { destinations: purpose.destinations.slice(0, MAX_DESTINATIONS) }
+                : {}),
+              fields: [
+                ["Destination", purpose.destinations.join("\n") || "Not named in this step"],
+                ...draft.fields,
+              ],
+              // A yes reaches these hosts for this task, never a kind of step. One for a host
+              // nothing names covers only this step.
+              always: purpose.destinations.length
+                ? alwaysOptions(decision.actionClass, acting, ctx.redact).filter(
+                    (option) => option.scope === "task",
+                  )
+                : [],
+            }
+          : { ...draft, always: alwaysOptions(decision.actionClass, acting, ctx.redact) },
+      ),
       {
         signal: ctx.signal,
         check: () => ctx.check(),
@@ -197,7 +231,7 @@ export async function authorizePrepared(
   }
   ctx.check();
   return Object.freeze({
-    approved: decision.mode === "ask",
+    approved: decision.mode === "ask" || purpose !== undefined,
     consume(nextInput: unknown, nextTarget: unknown): boolean {
       ctx.check();
       if (actionDigest(nextInput) !== inputDigest || actionDigest(nextTarget) !== targetDigest)
@@ -206,13 +240,31 @@ export async function authorizePrepared(
     },
   });
 }
+// A step the policy lets run still asks when it would carry what the task read to a host outside
+// the task's purpose. Only a yes for that host covers it, never one for a kind of step.
+async function purposeCheck(
+  ctx: ToolCallContext,
+  prepared: PreparedEffect,
+  input: unknown,
+): Promise<Extract<PurposeVerdict, { allow: false }> | undefined> {
+  const gate = ctx.session.purpose;
+  if (!gate) return undefined;
+  const acting = actingFacts(ctx, prepared.facts);
+  const verdict = await gate.check(outboundOf(prepared.tool, input, acting), ctx.signal);
+  ctx.check();
+  return verdict.allow ? undefined : verdict;
+}
 // The card's words for gateway verbs that are not plain English on their own.
 const VERBS: Record<string, string> = {
   down: "hold down a mouse button",
   up: "release a mouse button",
   move: "move the pointer",
 };
-export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
+export function toolRisk(
+  tool: ToolName,
+  raw: unknown,
+  routineName?: (routineId: string) => string | undefined,
+): RiskFacts | undefined {
   const input = raw as Record<string, unknown>;
   switch (tool) {
     case "computer":
@@ -233,10 +285,33 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
       return { operation: "navigate", destination: String(input.url) };
     case "remember":
       return { operation: "memory_write" };
+    case "recall":
+      return { operation: "files_read" };
+    case "people":
+      return { operation: input.op === "save" ? "memory_write" : "files_read" };
     case "done":
       return {
         operation:
           Array.isArray(input.files) && input.files.length > 0 ? "files_write" : "files_read",
+      };
+    case "routine": {
+      if (input.op !== "pause") return undefined;
+      const id = String(input.routine_id ?? "");
+      return {
+        operation: "schedule",
+        schedule: { title: "Pause a routine", fields: [["Routine", routineName?.(id) ?? id]] },
+      };
+    }
+    case "follow_up_at":
+      return {
+        operation: "schedule",
+        schedule: {
+          title: "Follow up later",
+          fields: [
+            ["When", String(input.at).replace("T", " ")],
+            ["Note", String(input.note)],
+          ],
+        },
       };
     default:
       return undefined; // Metadata and direct user questions grant no native execution.

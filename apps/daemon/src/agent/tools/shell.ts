@@ -85,6 +85,7 @@ export async function shellTool(
     } else consume(ctx.redact(rawFallback), "stdout");
     flush();
     ctx.session.tainted = true;
+    if (model) ctx.session.taint.add("files", "command output", model);
     const ok = done.exitCode === 0 && !done.timedOut;
     append(ctx, "tool.end", { ok, ...(done.exitCode !== null ? { exitCode: done.exitCode } : {}) });
     append(ctx, "step.end", { status: ok ? "ok" : "failed" });

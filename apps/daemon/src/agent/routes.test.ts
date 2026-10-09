@@ -1241,7 +1241,7 @@ it("requires an empty resume/undo body and rechecks paused ownership and memory 
   const change = f.memory.apply(SESSION, "MEMORY.md", "append", "First remembered fact");
   const undoPath = `/api/agent/memory/${change.changeId}/undo`;
   f.deps.canChangeMemory = () => false;
-  expect((await f.send("POST", undoPath)).status).toBe(409);
+  expect((await f.send("POST", undoPath)).status).toBe(503);
   expect(f.memory.readBoth().memory).toContain("First remembered fact");
   f.deps.canChangeMemory = () => true;
   expect((await f.send("POST", undoPath, { changeId: SESSION })).status).toBe(400);

@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import type { CellSummary } from "../cells/types.ts";
-import { type AccountsDeps, accountsRoutes, signInSites, siteOf } from "./accounts.ts";
+import { siteOf } from "../sites.ts";
+import { type AccountsDeps, accountsRoutes, signInSites } from "./accounts.ts";
 
 const parent = "01JXYZ0000000000000000000A";
 const endpoint = { parentCellId: parent, instance: "i-1" } as ReadyBrowser;

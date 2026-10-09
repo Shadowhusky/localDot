@@ -11,16 +11,20 @@ import {
   stampAccount,
   stampNative,
 } from "@localdot/codex-harness";
-import { ulid } from "@localdot/protocol";
+import { type ScreenName, ulid } from "@localdot/protocol";
+import { CHECK_MEMORY_FIRST } from "@localdot/protocol/guidance";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ScreenController, ScreenScope } from "../browser/screen-controller.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
 import { LiveSessions } from "../gateway/live.ts";
+import type { ClaudeCodeDriverDeps } from "./claude-code/driver.ts";
 import type { CodexAuthOwnerDeps } from "./codex/auth-owner.ts";
 import type { CodexDriverDeps } from "./codex/driver.ts";
 import type { McpEndpointInput } from "./codex/mcp-endpoint.ts";
 import { SANDBOX_REASONS } from "./codex/setup.ts";
+import { MemoryStore } from "./memory.ts";
 import { AgentSession } from "./session.ts";
 import type { ToolApiDeps } from "./tool-api.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
@@ -28,6 +32,7 @@ import { type AgentWiringDeps, createAgent } from "./wiring.ts";
 const m = vi.hoisted(() => ({
   owner: undefined as CodexAuthOwnerDeps | undefined,
   driver: undefined as CodexDriverDeps | undefined,
+  claude: undefined as ClaudeCodeDriverDeps | undefined,
   tool: undefined as ToolApiDeps | undefined,
   toolApp: undefined as ReturnType<typeof import("./tool-api.ts")["createToolApi"]> | undefined,
   endpoints: [] as McpEndpointInput[],
@@ -92,6 +97,17 @@ vi.mock("./codex/driver.ts", async (original) => ({
   CodexDriver: class {
     constructor(d: CodexDriverDeps) {
       m.driver = d;
+    }
+    run(...args: unknown[]) {
+      return m.run(...args);
+    }
+  },
+}));
+vi.mock("./claude-code/driver.ts", async (original) => ({
+  ...(await original<typeof import("./claude-code/driver.ts")>()),
+  ClaudeCodeDriver: class {
+    constructor(d: ClaudeCodeDriverDeps) {
+      m.claude = d;
     }
     run(...args: unknown[]) {
       return m.run(...args);
@@ -170,6 +186,7 @@ beforeEach(() => {
     fn.mockReset();
   m.owner = undefined;
   m.driver = undefined;
+  m.claude = undefined;
   m.tool = undefined;
   m.toolApp = undefined;
   m.endpoints.length = 0;
@@ -215,7 +232,9 @@ afterEach(async () => {
   }
   vi.restoreAllMocks();
 });
-function setup(options: { codex?: boolean; unsafe?: boolean; record?: unknown } = {}) {
+function setup(
+  options: { codex?: boolean; claude?: boolean; unsafe?: boolean; record?: unknown } = {},
+) {
   const base = mkdtempSync("/tmp/ld12-wire-"),
     home = join(base, "daemon"),
     realHome = join(base, "real-home");
@@ -285,6 +304,7 @@ function setup(options: { codex?: boolean; unsafe?: boolean; record?: unknown } 
     keydPorts: { from: 4791, to: 4796 },
     toolPort: 0,
     ...(options.codex === false ? {} : { codex: { realHome, user: "fixture" } }),
+    ...(options.claude ? { claudeCode: { realHome } } : {}),
   };
   const agent = createAgent(deps);
   fixtures.push({ agent, log, base });
@@ -607,6 +627,41 @@ describe("ChatGPT production integration", () => {
       signal: expect.any(AbortSignal),
     });
   });
+  it("taints the task with the screen a ChatGPT turn starts on, when the user is signed in there", async () => {
+    const f = setup();
+    f.deps.sessionScreens = {
+      install: vi.fn(),
+      manual: vi.fn(),
+      bind: vi.fn(() => ({ cellId: f.cellId })),
+    } as unknown as AgentWiringDeps["sessionScreens"];
+    await f.agent.start();
+    const observeOn = async (screen: ScreenName) => {
+      const s = f.session();
+      s.attachScreens({
+        activate: async () => ({}),
+        lease: (scope: ScreenScope) => ({
+          selection: { screen, cellId: f.cellId, geometry: null, revision: 1 },
+          signal: scope.signal,
+          check: () => scope.check(),
+          finish() {},
+        }),
+        takeOver: async () => {},
+        close: async () => {},
+      } as unknown as ScreenController);
+      const g = s.beginBrain();
+      await s.prepareScreens(g);
+      await required(m.driver).observe(s, g, g.signal);
+      return s;
+    };
+    const browser = await observeOn("browser");
+    expect(
+      f.log
+        .read(browser.id)
+        .filter((event) => event.type === "safety.taint")
+        .map((event) => event.data),
+    ).toEqual([{ kind: "screen", origin: "browser screen" }]);
+    expect((await observeOn("desktop")).taint.tainted).toBe(false);
+  });
   it.each(["endpoint", "generation", "control", "keyd", "busy", "pause"])(
     "rejects a capture when %s changes while the gateway is pending",
     async (change) => {
@@ -665,6 +720,66 @@ describe("ChatGPT production integration", () => {
     const wait = vi.spyOn(f.agent.runner, "waitForAuthResume").mockResolvedValue();
     await required(m.driver).waitForAuthResume?.(s);
     expect(wait).toHaveBeenCalledExactlyOnceWith(s);
+  });
+});
+
+describe("Claude Code production integration", () => {
+  it("taints a Claude Code task as a ChatGPT one: its memory, its first screen and every call", async () => {
+    const f = setup({ claude: true });
+    f.deps.sessionScreens = {
+      install: vi.fn(),
+      manual: vi.fn(),
+      bind: vi.fn(() => ({ cellId: f.cellId })),
+    } as unknown as AgentWiringDeps["sessionScreens"];
+    await f.agent.start();
+    const claude = required(m.claude);
+    expect(claude.observe).toBe(required(m.driver).observe);
+    new MemoryStore(f.home).apply(ulid(), "MEMORY.md", "append", "Account 4417-1234-5678");
+    const s = f.session();
+    s.recent = [{ title: "Pay the <gas> bill", outcome: "done", day: "2026-10-08" }];
+    const prompt = claude.instructions(s);
+    expect(prompt).toContain(CHECK_MEMORY_FIRST);
+    expect(prompt).toContain("Account 4417-1234-5678");
+    expect(prompt).toContain("Pay the &lt;gas&gt; bill");
+    expect(s.taint.overlap("my account 4417-1234-5678").overlaps).toBe(true);
+
+    s.attachScreens({
+      activate: async () => ({}),
+      lease: (scope: ScreenScope) => ({
+        selection: { screen: "browser", cellId: f.cellId, geometry: null, revision: 1 },
+        signal: scope.signal,
+        check: () => scope.check(),
+        finish() {},
+      }),
+      takeOver: async () => {},
+      close: async () => {},
+    } as unknown as ScreenController);
+    const g = s.beginBrain();
+    await s.prepareScreens(g);
+    await claude.observe(s, g, g.signal);
+    expect(
+      f.log
+        .read(s.id)
+        .filter((event) => event.type === "safety.taint")
+        .map((event) => event.data),
+    ).toEqual([
+      { kind: "memory", origin: "MEMORY.md" },
+      { kind: "screen", origin: "browser screen" },
+    ]);
+
+    const remembered = await claude.dispatch(
+      s,
+      g,
+      "remember",
+      ulid(),
+      { file: "MEMORY.md", op: "append", text: "Account 4417-1234-5678" },
+      g.signal,
+    );
+    expect(remembered.ok).toBe(false);
+    expect(m.dispatch).toHaveBeenCalledOnce();
+    expect(f.policy.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: s.id, tool: "remember", tainted: true }),
+    );
   });
 });
 

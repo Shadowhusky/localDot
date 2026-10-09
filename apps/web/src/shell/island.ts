@@ -136,6 +136,10 @@ export function takeSlot(status: Status, { decision = null, blocked, taking }: T
   return { primary: false, ...(blocked ? { reason: blocked } : {}) } satisfies TakeSlot;
 }
 
+// The island's top in the stage's px: its own height and a gap over the stage's top edge, so it never
+// covers the picture.
+export const islandTop = (height: number, gap: number) => -(height + gap);
+
 // The space the decision keeps from a ring on a field dot will fill.
 const RING_CLEARANCE_PX = 12;
 

@@ -13,22 +13,32 @@ export async function rememberTool(
     return fail(
       "Memory can only be saved from the user's own request or reply. Ask the user to confirm the fact first.",
     );
+  if (input.file === "notes" && input.op !== "append")
+    return fail('Daily notes are append-only. Use op "append".');
   try {
     ctx.check();
-    const change = deps.memory.apply(
-      ctx.session.id,
-      input.file,
-      input.op,
-      ctx.redact(input.text),
-      input.old_text === undefined ? undefined : ctx.redact(input.old_text),
-    );
+    const change =
+      input.file === "notes"
+        ? deps.memory.appendNote(ctx.session.id, ctx.redact(input.text))
+        : deps.memory.apply(
+            ctx.session.id,
+            input.file,
+            input.op,
+            ctx.redact(input.text),
+            input.old_text === undefined ? undefined : ctx.redact(input.old_text),
+          );
     ctx.check();
     append(ctx, "memory.change", {
       file: change.file,
       patch: change.patch,
       changeId: change.changeId,
     });
-    return { ok: true, content: [text(`Saved to ${input.file}.`)] };
+    return {
+      ok: true,
+      content: [
+        text(input.file === "notes" ? "Saved to today's notes." : `Saved to ${input.file}.`),
+      ],
+    };
   } catch (error) {
     if (error instanceof MemoryError) return fail(ctx.redact(error.message));
     return contain(deps, ctx, "memory_write_uncertain");

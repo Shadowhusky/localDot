@@ -1,6 +1,7 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { presetOf } from "../copy/autonomy.ts";
 import { dollars } from "../copy/format.ts";
+import type { DeviceState } from "../notify/this-device.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { SpendingDraft } from "./settings-form.ts";
 
@@ -10,6 +11,7 @@ export type SettingsSection =
   | "rules"
   | "spending"
   | "appearance"
+  | "notifications"
   | "knowledge"
   | "accounts"
   | "keys"
@@ -28,6 +30,7 @@ export const SECTIONS: readonly SectionInfo[] = [
   { id: "rules", title: "Always allow", icon: "check-circle" },
   { id: "spending", title: "Spending", icon: "chart" },
   { id: "appearance", title: "Appearance", icon: "contrast" },
+  { id: "notifications", title: "Notifications", icon: "bell" },
   { id: "knowledge", title: "What dot knows", icon: "book" },
   { id: "accounts", title: "Accounts", icon: "globe" },
   { id: "keys", title: "Keys", icon: "key-round" },
@@ -72,4 +75,11 @@ export function spendingValue(spending: SpendingDraft | undefined, plan: boolean
 
 export function countValue(count: number | undefined): string {
   return count ? String(count) : "";
+}
+
+export function notificationsValue(device: DeviceState | null | undefined): string {
+  if (device?.kind === "on") return "On";
+  if (device?.kind === "off") return "Off";
+  if (device?.kind === "needs-home-screen") return "Set up";
+  return "";
 }

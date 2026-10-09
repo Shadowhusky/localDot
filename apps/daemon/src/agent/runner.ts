@@ -2,13 +2,19 @@ import { setTimeout as delay } from "node:timers/promises";
 import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
+  type AutonomyPolicy,
   BootConfig,
   type CheckIns,
   type ClaudeCodeStatus,
   DEFAULT_AGENT_LIMITS,
+  freezeAutonomy,
+  isJevKey,
   type KeydRecord,
   type ModelBinding,
+  type RecentLine,
   SESSION_PAUSE_REASONS,
+  SessionOrigin,
+  SessionRun,
   type SkillSummary,
   STALL,
   type TakeComputerReply,
@@ -43,10 +49,15 @@ import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
+import type { RecentActivity } from "./recent-activity.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
+import { gatewayCompletion } from "./safety/judge-model.ts";
+import { jevJudge, modelJudge } from "./safety/judges.ts";
+import { judgeChoice, PurposeGate, type PurposeJudge, unreadableJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
+import { taintMemory } from "./safety/taint.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
@@ -77,6 +88,18 @@ export interface TerminalTaskSnapshot {
   readonly toolCalls: number;
   readonly models?: TaskModelSelection;
 }
+export interface TaskStartOptions {
+  readonly origin?: SessionOrigin;
+  // Replaces the user's autonomy for this task.
+  readonly autonomy?: AutonomyPolicy;
+  // Replaces the user's task budget for this task.
+  readonly budgetUSD?: number;
+  // Marks the session unattended: approval cards wait this long, then the step is refused.
+  readonly approvalWindowMs?: number;
+  // 0..IDLE_MS; routines pass 0 so the task ends right after done.
+  readonly idleMs?: number;
+  readonly run?: SessionRun;
+}
 export class AgentError extends Error {
   constructor(
     readonly status: 400 | 404 | 409 | 503,
@@ -104,7 +127,8 @@ export interface AgentRunnerDeps {
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
-  memory: Pick<MemoryStore, "readBoth">;
+  memory: Pick<MemoryStore, "bootMemory">;
+  recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
     Partial<Pick<Conversations, "title">>;
@@ -116,6 +140,8 @@ export interface AgentRunnerDeps {
   limits?: AgentLimits;
   sleep?(ms: number, signal: AbortSignal): Promise<void>;
   idleMs?: number;
+  // Asks Jev, through keyd, with the named key.
+  jev?(secretId: string, body: unknown, signal: AbortSignal): Promise<unknown>;
   codex?: {
     driver: Pick<CodexDriver, "run"> &
       Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">>;
@@ -157,6 +183,7 @@ interface Runtime {
   backoff?: AbortController;
   // Ended from its wait for a follow-up, because the user moved to another conversation.
   released?: boolean;
+  idleMs?: number;
 }
 class CleanupUncertain extends Error {}
 function uncertain(error: unknown): boolean {
@@ -252,9 +279,42 @@ export class AgentRunner {
       throw new AgentError(409, "the computer is paused or changing state");
     return cell;
   }
-  async start(cellId: string, task: string, signal?: AbortSignal): Promise<AgentSession> {
+  async start(
+    cellId: string,
+    task: string,
+    signal?: AbortSignal,
+    options: TaskStartOptions = {},
+  ): Promise<AgentSession> {
     if (!ULID_PATTERN.test(cellId) || !task.trim() || task.length > 8000)
       throw new AgentError(400, "invalid task");
+    const origin =
+      options.origin === undefined ? undefined : SessionOrigin.safeParse(options.origin);
+    if (origin && !origin.success) throw new AgentError(400, "invalid task origin");
+    const run = options.run === undefined ? undefined : SessionRun.safeParse(options.run);
+    if (run && !run.success) throw new AgentError(400, "invalid task run");
+    const budget = options.budgetUSD;
+    if (
+      budget !== undefined &&
+      !(Number.isFinite(budget) && budget > 0 && budget <= 10_000 && Math.round(budget * 1e6) >= 1)
+    )
+      throw new AgentError(400, "invalid task budget");
+    const idle = options.idleMs;
+    if (idle !== undefined && !(Number.isSafeInteger(idle) && idle >= 0 && idle <= IDLE_MS))
+      throw new AgentError(400, "invalid idle time");
+    const window = options.approvalWindowMs;
+    if (
+      window !== undefined &&
+      !(Number.isSafeInteger(window) && window >= 60_000 && window <= 14_400_000)
+    )
+      throw new AgentError(400, "invalid approval window");
+    let autonomyOverride: AutonomyPolicy | undefined;
+    if (options.autonomy !== undefined) {
+      try {
+        autonomyOverride = freezeAutonomy(options.autonomy);
+      } catch {
+        throw new AgentError(400, "invalid task autonomy");
+      }
+    }
     this.#ready(cellId);
     signal?.throwIfAborted();
     if (this.#starting.has(cellId)) throw new AgentError(409, "a task is already starting");
@@ -274,6 +334,8 @@ export class AgentRunner {
           : this.deps.live.settled(current));
       }
       let selection: ModelSelection;
+      // Undefined when the saved keys couldn't be read.
+      let keys: KeydRecord[] | undefined = [];
       try {
         checkPlanChoices(settings);
       } catch (error) {
@@ -304,7 +366,7 @@ export class AgentRunner {
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
       } else {
-        const keys = await this.deps.keyd.secrets();
+        keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
         const roles = this.resolveRoles(keys, settings);
         // Settings saved while keyd was away reach it here, before the task's first model call.
@@ -316,36 +378,62 @@ export class AgentRunner {
           kind: "api",
           roles,
           pricing: pricingOf(roles),
-          ...(settings.taskBudgetUSD === undefined
+          ...((budget ?? settings.taskBudgetUSD) === undefined
             ? {}
-            : { initialBudget: settings.taskBudgetUSD }),
+            : { initialBudget: budget ?? settings.taskBudgetUSD }),
         };
       }
+      // A plan's own models need no key; only a Jev key can check where data goes. Keys that
+      // can't be read leave the check unable to answer, never off.
+      if (native(selection) && settings.purposeCheck !== "off")
+        keys = await this.deps.keyd.secrets().then(
+          (all) => all.filter(isJevKey),
+          () => undefined,
+        );
       signal?.throwIfAborted();
       const cell = this.#ready(cellId);
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
-      // A conversation record that can't be read never keeps a task from starting.
+      // A conversation record that can't be read never keeps a task from starting. A routine's
+      // run is its own thread: it neither continues nor takes over the user's conversation.
       let continues: string | undefined;
       let earlier: string[] = [];
-      try {
-        continues = this.deps.conversations?.current() ?? undefined;
-        earlier = continues ? (this.deps.conversations?.earlier(continues) ?? []) : [];
-      } catch {
-        console.error("the earlier conversation could not be read");
-        continues = undefined;
-        earlier = [];
-      }
-      const id = this.deps.eventLog.createSession(task.slice(0, 200));
+      if (!origin)
+        try {
+          continues = this.deps.conversations?.current() ?? undefined;
+          earlier = continues ? (this.deps.conversations?.earlier(continues) ?? []) : [];
+        } catch {
+          console.error("the earlier conversation could not be read");
+          continues = undefined;
+          earlier = [];
+        }
+      let recent: RecentLine[] = [];
+      if (settings.recentActivity !== "off" && this.deps.recentActivity)
+        try {
+          recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
+        } catch {
+          console.error("recent activity could not be read");
+        }
+      const title = (
+        origin?.success && origin.data.kind === "routine" ? origin.data.name : task
+      ).slice(0, 200);
+      const id = this.deps.eventLog.createSession(title);
       const session = new AgentSession(
         id,
         cellId,
         task,
         this.deps.eventLog,
-        settings.autonomy,
+        autonomyOverride ?? settings.autonomy,
         new RulesStore(this.deps.home),
+        {
+          ...(window !== undefined ? { approvalTtlMs: window } : {}),
+          ...(run?.success ? { run: run.data } : {}),
+        },
       );
       session.earlier = earlier;
+      // dot's earlier replies may repeat what a page said: they never unlock memory writes.
+      if (earlier.length) session.tainted = true;
+      session.recent = recent;
       session.actionLimit = settings.checkIns?.actions;
       const rt: Runtime = {
         session,
@@ -355,7 +443,15 @@ export class AgentRunner {
         epoch: 0,
         initialized: false,
         serial: Promise.resolve(),
+        ...(idle !== undefined ? { idleMs: idle } : {}),
       };
+      const judge = this.#judge(rt, settings, keys);
+      session.purpose = new PurposeGate({
+        taint: session.taint,
+        purpose: () => session.currentPurpose,
+        judge: () => judge,
+        trusted: (host) => session.taskAutonomy.trusts(host),
+      });
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
       try {
@@ -363,10 +459,14 @@ export class AgentRunner {
         session.append("session.start", {
           screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
           os: "linux",
-          title: task.slice(0, 200),
+          title,
           ...(continues ? { continues } : {}),
+          ...(origin?.success ? { origin: origin.data } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
+        if (recent.length)
+          session.taint.add("memory", "recent activity", recent.map((r) => r.title).join("\n"));
         this.#safety(rt);
         this.deps.live.start(
           cellId,
@@ -381,15 +481,46 @@ export class AgentRunner {
         this.#runtime.delete(id);
         throw error;
       }
-      try {
-        this.deps.conversations?.adopt(id);
-      } catch {
-        console.error("the current conversation could not be saved");
-      }
+      if (!origin)
+        try {
+          this.deps.conversations?.adopt(id);
+        } catch {
+          console.error("the current conversation could not be saved");
+        }
       return session;
     } finally {
       this.#starting.delete(cellId);
     }
+  }
+  #judge(
+    rt: Runtime,
+    settings: AgentSettings,
+    keys: KeydRecord[] | undefined,
+  ): PurposeJudge | undefined {
+    if (!keys) return unreadableJudge;
+    const fast =
+      rt.selection.kind === "api"
+        ? rt.selection.roles.find((role) => role.role === "fast")
+        : undefined;
+    const choice = judgeChoice(settings.purposeCheck, keys, fast !== undefined);
+    const jev = this.deps.jev;
+    if (choice?.kind === "jev" && jev)
+      return jevJudge((body, signal) => jev(choice.secretId, body, signal));
+    if (choice?.kind !== "model" || !fast) return undefined;
+    return modelJudge(
+      gatewayCompletion(
+        () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
+        () => (rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined),
+      ),
+    );
+  }
+  // A parked (approval, question, takeover, budget) or idle task ends here without the kill
+  // switch: no revoke and no freeze. The runner's own finally block appends session.end.
+  end(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session || session.stopped) return false;
+    session.stop();
+    return true;
   }
   // Ends a finished task that waits for a follow-up, so the next message starts a new task in
   // whichever conversation is current. A task still at work is left alone and refused.
@@ -955,7 +1086,7 @@ export class AgentRunner {
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {
-            const idleMs = this.deps.idleMs ?? IDLE_MS;
+            const idleMs = rt.idleMs ?? this.deps.idleMs ?? IDLE_MS;
             let asked = await session.waitForUser(idleMs, idleWait.signal);
             // While the user has the computer, a finished task waits for them rather than the clock.
             while (!asked && session.controlHeld) {
@@ -1125,6 +1256,8 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
+        const memory = this.deps.memory.bootMemory();
+        taintMemory(session.taint, memory);
         const boot = BootConfig.parse({
           sessionId: session.id,
           task: session.task,
@@ -1134,12 +1267,14 @@ export class AgentRunner {
             ...(models.local ? { local: models.local } : {}),
           },
           proxy: { url: brain.proxyUrl, token: brain.proxyToken },
-          memory: this.deps.memory.readBoth(),
+          memory,
           skills,
           limits: this.deps.limits ?? rt.limits,
           resume,
           inboxAfter: session.delivered,
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
+          ...(session.recent.length ? { recent: [...session.recent] } : {}),
+          ...(session.run ? { run: session.run } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

@@ -5,6 +5,7 @@ import type {
   AutonomyPolicy,
   BrowserReadResult,
   FileChangeResult,
+  SessionRun,
   ShellChunk,
   ShellDone,
 } from "@localdot/protocol";
@@ -12,11 +13,13 @@ import { CAREFUL_AUTONOMY, ulid } from "@localdot/protocol";
 import { EventLog } from "../../event-log.ts";
 import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
 import { MemoryStore } from "../memory.ts";
+import { PeopleStore } from "../people.ts";
 import { actPolicy, type ToolPolicy } from "../policy.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import { createToolApi } from "../tool-api.ts";
 import type { ToolDeps } from "../tools/deps.ts";
+import type { RoutineToolPort } from "../tools/routine.ts";
 import { TranscriptStore } from "../transcript.ts";
 
 export const TOOL_TOKEN = "t".repeat(43);
@@ -41,6 +44,9 @@ export function toolHarness(
     askTimeoutMs?: number;
     autoApprove?: boolean;
     autonomy?: AutonomyPolicy;
+    approvalTtlMs?: number;
+    run?: SessionRun;
+    routines?: RoutineToolPort;
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), "local dot's tool api-"));
@@ -53,6 +59,11 @@ export function toolHarness(
     "Find the weather",
     eventLog,
     opts.autonomy ?? CAREFUL_AUTONOMY,
+    undefined,
+    {
+      ...(opts.approvalTtlMs ? { approvalTtlMs: opts.approvalTtlMs } : {}),
+      ...(opts.run ? { run: opts.run } : {}),
+    },
   );
   session.beginBrain();
   session.toolToken = TOOL_TOKEN;
@@ -159,6 +170,7 @@ export function toolHarness(
     }),
     png: { png: async (_s, frameId) => Buffer.from(`png:${frameId}`) },
     memory: new MemoryStore(home),
+    people: new PeopleStore(home),
     saveOutput: async (_s, name, source, scope) => {
       scope.check();
       const bytes = Buffer.from(await new Response(source).arrayBuffer());
@@ -169,6 +181,7 @@ export function toolHarness(
     stopForUncertainty: async () => {},
     sleep: async () => {},
     ...(opts.askTimeoutMs ? { askTimeoutMs: opts.askTimeoutMs } : {}),
+    ...(opts.routines ? { routines: opts.routines } : {}),
   };
   const transcripts = new TranscriptStore(home);
   const app = createToolApi({

@@ -5,9 +5,11 @@ import type {
   AskRequestField,
   PageElement,
   PauseSnapshot,
+  RecentLine,
   RuleChange,
 } from "@localdot/protocol";
 import {
+  APPROVAL_TIMEOUT_MS,
   type ApprovalCard,
   type AutonomyPolicy,
   askValueProblem,
@@ -16,6 +18,7 @@ import {
   freezeAutonomy,
   InboxItem,
   type InboxReply,
+  SessionRun,
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
@@ -29,9 +32,11 @@ import {
   type ApprovalChecks,
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
+import type { Purpose, PurposeGate } from "./safety/purpose.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
+import { TaskTaint } from "./safety/taint.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import { SecretAnswers } from "./secret-answers.ts";
 import type { TranscriptStore } from "./transcript.ts";
@@ -168,12 +173,27 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
+export interface AgentSessionOptions {
+  // An unattended run (a routine): approval cards and questions wait this long, then the step is
+  // refused.
+  readonly approvalTtlMs?: number;
+  readonly run?: SessionRun;
+}
+
 // Daemon-owned state outlives any brain or HTTP request. In particular, retirement cancels the
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly taskAutonomy: TaskAutonomy;
+  // What private data the task has read, and the check on where it may go; the runner installs
+  // the check, and a session without one keeps only the policy's own checks.
+  readonly taint: TaskTaint;
+  purpose: PurposeGate | undefined;
+  // The user's own words for this task: the request and every message since.
+  readonly requests: string[];
   readonly #approvals: ApprovalBroker;
+  readonly #approvalWindowMs: number | undefined;
+  readonly #run: SessionRun | undefined;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
   });
@@ -187,19 +207,26 @@ export class AgentSession {
   boot: BootConfig | undefined;
   toolToken: string | undefined;
   lastFrameId: string | undefined;
+  // Something other than the user reached the model since the user last spoke.
+  #tainted = false;
+  // Something other than the user has reached the model in this task: what dot plans after that
+  // may follow a page's instructions, so the purpose check keeps the plan from before.
+  #heardOthers = false;
   // The elements the last browser_read listed, by ref, with the screen, tab and page it read.
   pageRefs:
     | { cellId: string; tabId?: string; url: string; elements: ReadonlyMap<string, PageElement> }
     | undefined;
-  tainted = false;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
+  // The user's last few tasks when this one started.
+  recent: readonly RecentLine[] = [];
   toolCalls = 0;
   // The user's optional hard stop: the most tool calls between two of their messages.
   actionLimit: number | undefined;
   actionsSinceUser = 0;
   actionLimitReached = false;
-  plan: PlanItem[] = [];
+  #plan: PlanItem[] = [];
+  #trustedPlan: readonly string[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
   // Notes to dot that are not the user's words: they never wake a task waiting for them.
@@ -247,10 +274,18 @@ export class AgentSession {
     readonly task: string,
     private readonly eventLog: Pick<EventLog, "append">,
     autonomy?: AutonomyPolicy,
-    rules?: Pick<RulesStore, "matches" | "add">,
+    rules?: Pick<RulesStore, "matches" | "add"> & Partial<Pick<RulesStore, "trusts">>,
+    options: AgentSessionOptions = {},
   ) {
+    const ttl = options.approvalTtlMs;
+    if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 60_000 || ttl > 14_400_000))
+      throw new RangeError("approval window must be between one minute and four hours");
+    this.#approvalWindowMs = ttl;
+    this.#run = options.run === undefined ? undefined : SessionRun.parse(options.run);
     this.#autonomy = freezeAutonomy(autonomy);
     this.taskAutonomy = new TaskAutonomy(rules);
+    this.taint = new TaskTaint((source) => this.append("safety.taint", source));
+    this.requests = [task];
     this.#approvals = new ApprovalBroker(
       Date.now,
       (card) => {
@@ -269,25 +304,63 @@ export class AgentSession {
         this.append("approval.request", { ...data, kind, preview: { fields } });
         this.#publishState(this.safetyPause ? "paused" : "waiting_user", "approval");
       },
-      ({ always, ...resolution }) => {
+      ({ always, destinations, ...resolution }) => {
         if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
           this.setStatus("running");
         let change: RuleChange | undefined;
         let note = resolution.note;
         try {
-          change =
-            always &&
-            this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+          // Yes for this task on a purpose ask reaches only the hosts it named, never a kind of step.
+          if (destinations) {
+            if (always?.option.scope === "task") this.purpose?.allow(destinations);
+          } else
+            change =
+              always &&
+              this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
         } catch (error) {
           note = `Approved once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
         }
         this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
         if (change) this.append("rule.created", change);
       },
+      ttl ?? APPROVAL_TIMEOUT_MS,
     );
+  }
+  get unattended(): boolean {
+    return this.#approvalWindowMs !== undefined;
+  }
+  get approvalWindowMs(): number | undefined {
+    return this.#approvalWindowMs;
+  }
+  get run(): SessionRun | undefined {
+    return this.#run;
   }
   get autonomy(): Readonly<AutonomyPolicy> {
     return this.#autonomy;
+  }
+  get tainted(): boolean {
+    return this.#tainted;
+  }
+  set tainted(value: boolean) {
+    this.#tainted = value;
+    if (value) this.#heardOthers = true;
+  }
+  get plan(): PlanItem[] {
+    return this.#plan;
+  }
+  set plan(items: PlanItem[]) {
+    this.#plan = items;
+    // The earlier conversation holds dot's own replies, which may repeat what a page said.
+    if (!this.#heardOthers && !this.earlier.length)
+      this.#trustedPlan = items.map((item) => item.text);
+  }
+  get currentPurpose(): Purpose {
+    return { request: [...this.requests], plan: [...this.#trustedPlan] };
+  }
+  // What a screen where the user is signed in shows is private; any other screen's is not.
+  taintScreen(screen: ScreenName, host?: string, text?: string): void {
+    if (this.taskAutonomy.signedIn(screen))
+      this.taint.add("screen", host ?? `${screen} screen`, text);
   }
   get pendingApproval(): ApprovalCard | undefined {
     return this.#approvals.pending(this.id);
@@ -851,6 +924,7 @@ export class AgentSession {
     this.#seq = item.seq;
     this.#inbox.push(item);
     if (kind !== "resume") {
+      this.requests.push(text);
       this.tainted = false;
       this.actionsSinceUser = 0;
       this.actionLimitReached = false;

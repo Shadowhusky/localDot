@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
+import type { CSSProperties } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Status, StatusRow } from "../session/status.ts";
 import { HudIsland, type HudIslandProps } from "./HudIsland.tsx";
@@ -136,7 +137,7 @@ it("drops a decision under the ring on a field dot will fill, and hangs it back 
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
     this: HTMLElement,
   ) {
-    return box(this, { "island-row": 40, "island-card": 276 });
+    return box(this, { "island-row": 40, "island-card": 300 });
   });
   vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) {
     return box(this, { "stage-box": 1024 });
@@ -156,19 +157,21 @@ it("drops a decision under the ring on a field dot will fill, and hangs it back 
       ],
     };
     const asking = props({ status: status("question", "Needs your answer", 2) });
+    const gap = { "--island-gap": "8px" } as CSSProperties;
     const view = render(
-      <div className="stage-box">
+      <div className="stage-box" style={gap}>
         <HudIsland {...asking} fields={fields} decision={<p>Sign in to your mail</p>} />
       </div>,
     );
     const anchor = document.querySelector<HTMLElement>(".island-anchor");
-    // The ring's foot is 324.2 px down the stage; the decision's top goes 12 under it, from -22.
+    // The ring's foot is 324.2 px down the stage; the decision's top goes 12 under it, from -50: the
+    // island 40 and its gap 8 over the stage, and the header's 2.
     expect(Number.parseFloat(anchor?.style.getPropertyValue("--_lower") ?? "")).toBeCloseTo(
-      358.2,
+      386.2,
       6,
     );
     view.rerender(
-      <div className="stage-box">
+      <div className="stage-box" style={gap}>
         <HudIsland {...asking} fields={fields} />
       </div>,
     );
@@ -178,7 +181,7 @@ it("drops a decision under the ring on a field dot will fill, and hangs it back 
   }
 });
 
-it("shrinks to the full screen shape inside the picture, with Take control as an icon and a way out", () => {
+it("shrinks to the full screen shape, with Take control as an icon and a way out", () => {
   const onExitFull = vi.fn();
   const view = render(<HudIsland {...props({ full: true, onExitFull })} />);
   const anchor = document.querySelector(".island-anchor");
@@ -194,14 +197,12 @@ it("shrinks to the full screen shape inside the picture, with Take control as an
     <HudIsland
       {...props({
         full: true,
-        rise: true,
         shape: "control",
         status: status("control", "You're in control"),
         onExitFull,
       })}
     />,
   );
-  expect(anchor?.hasAttribute("data-risen")).toBe(false);
   expect(screen.getByRole("button", { name: "Hand back" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Exit full screen" })).toBeTruthy();
 
