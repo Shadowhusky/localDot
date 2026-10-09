@@ -872,7 +872,7 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   // A Stop that paused the computer names what happened, and leaves the computer's own controls.
   ["frozen by Stop", "computer", "Stopped", "resting", null, "system"],
   // A running task whose feed has been out of touch for a moment keeps its row and says so.
-  ["out of touch", "acting", "Reconnecting…", "reconnecting", "working", "system"],
+  ["out of touch", "acting", "Reconnecting…", "reconnecting", "working", "dot"],
   // 1. The computer is not live, or nothing runs on it. A computer that is off, failing or not
   // up yet holds the row over an open task; a late picture or a list check does not.
   ["checking", "computer", "Checking…", "waking", null, "system"],

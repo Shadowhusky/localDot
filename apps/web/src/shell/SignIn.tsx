@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { copyBlocked, useCopy } from "../agent/useCopy.ts";
 import { Dot } from "../dot/Dot.tsx";
-import { IconButton } from "../ui/IconButton.tsx";
+import { CommandChip } from "./CommandChip.tsx";
 import "./sign-in.css";
 
 export type SignInState = "first" | "checking" | "expired" | "signed-out";
@@ -39,25 +38,10 @@ export function SignIn({ state }: { state: SignInState }) {
         <p className="sign-in-message" role={state === "first" ? "status" : "alert"}>
           {MESSAGES[state]}
         </p>
-        <Command text={COMMAND} />
+        <CommandChip text={COMMAND} size="lg" className="sign-in-command" />
         <p className="sign-in-foot">Each link works once, for one minute.</p>
       </div>
     </main>
-  );
-}
-
-function Command({ text }: { text: string }) {
-  const { state, copy } = useCopy();
-  return (
-    <div className="sign-in-command">
-      <code>{text}</code>
-      <IconButton
-        icon={state === "copied" ? "check" : "copy"}
-        label={state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : "Copy"}
-        disabledReason={copyBlocked(text)}
-        onClick={() => copy(text)}
-      />
-    </div>
   );
 }
 
