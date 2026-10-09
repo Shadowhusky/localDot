@@ -219,6 +219,7 @@ const browserWarmer = new BrowserWarmer({
   cells: orchestrator,
   browser,
   available: browserAvailable,
+  report: (message) => console.error(message),
 });
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
@@ -357,6 +358,7 @@ agent = createAgent({
     registry,
     downloads,
     pendingStop: (sessionId) => killSwitch.pendingStop(sessionId),
+    report: (message) => console.error(message),
     now: () => clock.nowMicros(),
   }),
   home,

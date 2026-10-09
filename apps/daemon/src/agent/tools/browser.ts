@@ -41,7 +41,7 @@ export function opensInWebBrowser(url: URL): boolean {
 }
 
 export const DESKTOP_FALLBACK =
-  "The web browser couldn't start, so this page opened in the desktop's Chromium, where sign-ins aren't kept.";
+  "The web browser couldn't start, so this page opened in the desktop's Chromium, which doesn't keep sign-ins: don't sign in there.";
 
 function selectedBrowser(ctx: ToolCallContext) {
   screenContext(ctx);

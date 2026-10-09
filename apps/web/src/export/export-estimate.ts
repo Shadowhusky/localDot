@@ -92,6 +92,15 @@ export function storedCalibration(): Calibration {
   }
 }
 
+// Every finished export teaches the estimate, so a taught one means this browser has exported.
+export function hasExported(): boolean {
+  try {
+    return localStorage.getItem(CALIBRATION_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function keepCalibration(calibration: Calibration): void {
   try {
     localStorage.setItem(CALIBRATION_KEY, JSON.stringify(calibration));

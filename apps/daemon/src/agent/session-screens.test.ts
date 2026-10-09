@@ -1098,7 +1098,7 @@ describe("session-owned screen authority", () => {
       expect(refused.result.ok).toBe(false);
       expect(refused.result.final).toBeUndefined();
       expect(refused.result.content).toContainEqual(
-        expect.objectContaining({ text: expect.stringContaining("web browser isn't available") }),
+        expect.objectContaining({ text: expect.stringContaining("web browser couldn't open") }),
       );
       expect(JSON.stringify(refused.result.content)).not.toMatch(/signed-in|starting|again/u);
       expect(f.session.stopped).toBe(false);

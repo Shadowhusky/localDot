@@ -9,6 +9,7 @@ import {
   ScreenName,
   ScreenSwitchData,
 } from "../../../../packages/protocol/src/screens.ts";
+import { BrowserLifecycleError } from "../cells/browser-ledger.ts";
 import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClient, BrowserClientError, type BrowserScope } from "./client.ts";
 import type { DownloadCollection } from "./download-pump.ts";
@@ -57,7 +58,10 @@ export interface ScreenControllerDeps {
   readonly parentCellId: string;
   readonly desktopGeometry: ScreenGeometry;
   desktopReady(): boolean;
-  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
+  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get"> &
+    Partial<Pick<BrowserOrchestrator, "health">>;
+  // Why the web browser could not be shown, for the daemon's log.
+  report?(message: string): void;
   // The browser outlives sessions, so its control revisions are counted across them.
   revision?(instance: string): number;
   client?(endpoint: ReadyBrowser): Client;
@@ -87,7 +91,7 @@ export class ScreenUnavailableError extends Error {
         ? "The desktop isn't ready right now. Try switching to it again in a moment."
         : starting
           ? "The web browser is still starting. Try switching to it again in a few seconds."
-          : "The web browser isn't available. Carry on with the desktop, which has none of the user's sign-ins, or tell the user what you couldn't do.",
+          : "The web browser couldn't open. Don't sign in on the desktop's Chromium, which doesn't keep sign-ins: try the web browser later, or tell the user what you couldn't do.",
     );
     this.name = "ScreenUnavailableError";
   }
@@ -206,6 +210,27 @@ export class ScreenController {
   async switchTo(screen: ScreenName, raw: ScreenScope): Promise<ScreenSwitchData> {
     if (!ScreenName.safeParse(screen).success) return Promise.reject(new ScreenControlError());
     return this.#switch(screen, this.#scope(raw), false);
+  }
+
+  // The user's own hold opens a page in the web browser for them before they take it. The grant
+  // for this one navigation ends at the takeover that follows; nothing else may use it.
+  async openForUser(url: string, raw: ScreenScope): Promise<void> {
+    const scope = this.#scope(raw);
+    if (this.#held || this.#ownerGeneration !== undefined) throw new ScreenControlError();
+    await this.#switch("browser", scope, false, "daemon");
+    const lease = this.lease(scope);
+    try {
+      const { client, permit, tabId } = this.browserAccess(lease);
+      await client.navigate(permit, tabId, url, lease);
+    } catch (error) {
+      // The web browser is showing; the user can still go to the page themselves.
+      scope.check();
+      this.deps.report?.(
+        `the page couldn't open in the web browser: ${error instanceof BrowserClientError ? error.message : "unknown"}`,
+      );
+    } finally {
+      lease.finish();
+    }
   }
 
   // The session's manual lease is required in addition to the physical user grant.
@@ -431,7 +456,12 @@ export class ScreenController {
     return this.#closing;
   }
 
-  #switch(screen: ScreenName, scope: ScreenScope, handback: boolean): Promise<ScreenSwitchData> {
+  #switch(
+    screen: ScreenName,
+    scope: ScreenScope,
+    handback: boolean,
+    by: ScreenSwitchData["by"] = handback ? "daemon" : "agent",
+  ): Promise<ScreenSwitchData> {
     const epoch = this.#epoch;
     const guard = () => {
       scope.check();
@@ -501,7 +531,7 @@ export class ScreenController {
             cellId,
             geometry,
             revision: this.#selection.revision + 1,
-            by: handback ? "daemon" : "agent",
+            by,
           });
           const selection = Object.freeze({
             screen,
@@ -543,7 +573,7 @@ export class ScreenController {
           this.#selection = selection;
           this.#ownerGeneration = scope.generation;
           return result;
-        } catch {
+        } catch (error) {
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
             await this.#revoke().catch(() => this.#retireBrowser());
           } else if (handback || integrity) {
@@ -554,6 +584,16 @@ export class ScreenController {
             // The agent asked for a screen that is unavailable. That is an ordinary tool
             // failure once no grant this call requested can still be live.
             if (granted) await this.#revoke().catch(() => this.#retireBrowser());
+            if (screen === "browser")
+              this.deps.report?.(
+                `the web browser couldn't be shown: ${
+                  error instanceof BrowserClientError ||
+                  error instanceof BrowserLifecycleError ||
+                  error instanceof ScreenControlError
+                    ? error.message
+                    : "unknown"
+                }`,
+              );
             throw new ScreenUnavailableError(
               screen,
               this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
@@ -609,25 +649,46 @@ export class ScreenController {
   }
 
   async #prepare(scope: BrowserScope): Promise<BrowserOwner> {
-    const endpoint = await this.deps.browser.start(this.deps.parentCellId);
-    if (
-      endpoint.parentCellId !== this.deps.parentCellId ||
-      endpoint.browserCellId === endpoint.parentCellId
-    )
-      throw new ScreenControlError();
-    if (!this.#browser || this.#browser.endpoint.instance !== endpoint.instance) {
-      this.#browser?.client.close();
-      this.#browser = {
-        endpoint: structuredClone(endpoint),
-        client: this.deps.client?.(endpoint) ?? new BrowserClient(endpoint),
-        revision: 0,
-      };
+    for (let restarted = false; ; restarted = true) {
+      const endpoint = await this.deps.browser.start(this.deps.parentCellId);
+      if (
+        endpoint.parentCellId !== this.deps.parentCellId ||
+        endpoint.browserCellId === endpoint.parentCellId
+      )
+        throw new ScreenControlError();
+      if (!this.#browser || this.#browser.endpoint.instance !== endpoint.instance) {
+        this.#browser?.client.close();
+        this.#browser = {
+          endpoint: structuredClone(endpoint),
+          client: this.deps.client?.(endpoint) ?? new BrowserClient(endpoint),
+          revision: 0,
+        };
+      }
+      scope.check();
+      const owner = this.#browser;
+      try {
+        await owner.client.health(this.#browserScope(owner, scope));
+        scope.check();
+        return owner;
+      } catch (error) {
+        scope.check();
+        // A running browser that no longer answers as ready is started again, once.
+        const answer = restarted
+          ? "ready"
+          : await this.deps.browser.health?.(this.deps.parentCellId);
+        scope.check();
+        if (answer !== "unready" && answer !== "silent") throw error;
+        this.deps.report?.("the web browser stopped working; starting it again");
+        owner.client.close();
+        if (this.#browser === owner) this.#browser = undefined;
+        // Only the browser that failed is stopped, never one started since.
+        if (
+          this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance
+        )
+          await this.deps.browser.stop(this.deps.parentCellId);
+        scope.check();
+      }
     }
-    scope.check();
-    const owner = this.#browser;
-    await owner.client.health(this.#browserScope(owner, scope));
-    scope.check();
-    return owner;
   }
   #revoke(): Promise<void> {
     const owner = this.#browser;

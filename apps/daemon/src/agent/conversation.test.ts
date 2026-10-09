@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ConversationList,
   ConversationSnapshot,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
@@ -120,6 +121,39 @@ describe("the current conversation", () => {
       ids.push(previous);
     }
     expect(f.open().chain(ids[4] as string, 3)).toEqual({ sessions: ids.slice(2), more: true });
+  });
+});
+
+describe("the list of conversations", () => {
+  it("groups each task under the newest task that continues it, newest conversation first", async () => {
+    const f = setup();
+    const trip = await f.task("Plan the trip\nsomewhere warm");
+    await tick();
+    const hotel = f.start("Trip to Lisbon", trip);
+    f.say(hotel, "Book the hotel");
+    f.end(trip, "done");
+    f.end(hotel, "stopped");
+    await tick();
+    f.start("Scripted demo");
+    const dog = await f.task("Draw a dog");
+    f.end(dog, "error");
+    const live = await f.task("Tidy my Downloads");
+    const listed = f.open().list();
+    expect(listed.map((entry) => entry.sessions)).toEqual([[live], [dog], [hotel, trip]]);
+    expect(listed[2]).toMatchObject({
+      sessionId: hotel,
+      title: "Trip to Lisbon",
+      said: "Plan the trip",
+      ended: "stopped",
+    });
+    expect(listed.map((entry) => entry.ended)).toEqual([null, "error", "stopped"]);
+    expect(ConversationList.parse({ conversations: listed })).toBeTruthy();
+  });
+
+  it("lists no more than it is asked for", async () => {
+    const f = setup();
+    for (let n = 0; n < 4; n++) await f.task(`Task ${n}`);
+    expect(f.open().list(2)).toHaveLength(2);
   });
 });
 
@@ -260,6 +294,16 @@ describe("conversation routes", () => {
     expect(f.conversations.current()).toBe(current);
     const same = await f.send("POST", "/api/conversation/continue", { sessionId: current });
     expect(same.status).toBe(200);
+  });
+
+  it("lists the recent conversations", async () => {
+    const f = routes();
+    const older = await f.task("Plan the trip");
+    const newer = await f.task("Book the hotel", older);
+    const reply = await f.send("GET", "/api/conversations");
+    expect(reply.status).toBe(200);
+    const { conversations } = ConversationList.parse(await reply.json());
+    expect(conversations.map((entry) => entry.sessions)).toEqual([[newer, older]]);
   });
 
   it("refuses to continue a recording that does not exist", async () => {

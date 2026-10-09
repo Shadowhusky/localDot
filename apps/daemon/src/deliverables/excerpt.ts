@@ -1,4 +1,12 @@
-import { fileExtension, type JsonPreview, PREVIEW_LIMITS, scanKeyLike } from "@localdot/protocol";
+import {
+  fileExtension,
+  type JsonPreview,
+  KEY_SCAN_CHARS,
+  PREVIEW_LIMITS,
+  scanKeyLike,
+  type TextFileReply,
+  VIEWER_LIMITS,
+} from "@localdot/protocol";
 
 const L = PREVIEW_LIMITS;
 // Control and direction-override characters would let a file disguise its own excerpt.
@@ -24,9 +32,18 @@ export function screenLine(line: string): string {
     out = `${out.slice(0, m.start)}••••${out.slice(m.end)}`;
   return out.replace(HIDDEN, "\uFFFD");
 }
+// A whole document as it may be shown, however long its lines: every token shaped like a key (the
+// shortest is 35 characters) masked, hidden characters marked.
+export function maskText(text: string): string {
+  return text
+    .replace(/AQ\.[A-Za-z0-9_.-]+|[A-Za-z0-9_-]{35,}/g, (token) =>
+      token.length > KEY_SCAN_CHARS || scanKeyLike(token).matches.length > 0 ? "••••" : token,
+    )
+    .replace(HIDDEN, "�");
+}
 // Cut in UTF-16 units (what the schema counts) without splitting a character.
-function visible(text: string, max: number): string {
-  const clean = screenLine(text);
+export function visible(text: string, max: number, screen = screenLine): string {
+  const clean = screen(text);
   if (clean.length <= max) return clean;
   let out = "";
   for (const ch of clean) {
@@ -106,4 +123,37 @@ export function boundedJson(preview: JsonPreview): string {
       value = { ...value, rows: value.rows.slice(0, -1), truncated: true };
     else return JSON.stringify({ kind: "none", reason: "too_large" });
   }
+}
+
+// A text file for the full preview: its first lines, or for a log its last, masked as excerpts are.
+export function fileText(
+  bytes: Uint8Array,
+  fileBytes: number,
+  from: "start" | "end",
+): TextFileReply {
+  const complete = fileBytes <= bytes.byteLength;
+  let body = bytes;
+  // A tail may begin inside a character: its continuation bytes are dropped.
+  if (from === "end" && !complete) {
+    let skip = 0;
+    while (skip < 3 && ((body[skip] ?? 0) & 0xc0) === 0x80) skip++;
+    body = body.subarray(skip);
+  }
+  const text = decodeHead(body, complete || from === "end");
+  if (text === undefined) return { kind: "none", reason: "binary" };
+  const all = text.split(/\r\n|\r|\n/);
+  if (!complete) {
+    // The line at the cut is partial.
+    if (from === "end") all.shift();
+    else all.pop();
+  }
+  const L = VIEWER_LIMITS;
+  const shown = from === "end" ? all.slice(-L.textLines) : all.slice(0, L.textLines);
+  return {
+    kind: "text",
+    from,
+    lines: shown.map((line) => visible(line, L.textLineChars, maskText)),
+    truncated:
+      !complete || all.length > L.textLines || shown.some((l) => l.length > L.textLineChars),
+  };
 }

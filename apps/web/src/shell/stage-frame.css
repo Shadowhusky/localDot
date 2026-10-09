@@ -24,6 +24,29 @@
   box-shadow: var(--shadow-stage);
 }
 
+/* Back from Replay, Watch fades up in its place; its rail keeps its own spring. */
+.watch > .stage-col {
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+@starting-style {
+  .watch > :is(.stage-col, .rail-panel) {
+    opacity: 0;
+  }
+}
+
+/* The page's entrance (design-v2 §7): until everything it shows is read, the stage stays dark under
+   the curtain, so the picture never shows through a curtain still fading in; it comes up as the
+   curtain lifts. */
+.stage-box > :is(.stage, .stage-rim, .stage-spill) {
+  transition: opacity var(--dur-curtain) var(--ease-standard);
+}
+
+.app[data-entering] .stage-box > :is(.stage, .stage-rim, .stage-spill) {
+  opacity: 0;
+  transition: none;
+}
+
 /* Light on the floor below the stage: neutral, xenon while dot has the computer, porcelain while
    you do. Gradients cannot fade into each other, so each is its own layer. */
 .stage-spill {
@@ -213,6 +236,47 @@
 .narration-speaker {
   margin-right: calc(var(--spacing) * 2);
   color: var(--color-fg-3);
+}
+
+.narration-flow {
+  display: contents;
+}
+
+/* A tip's one step follows its words, on their last line when there is room. */
+.narration[data-act] {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.narration[data-act] .narration-flow {
+  display: block;
+}
+
+.narration[data-act] :is(.narration-text, .narration-line) {
+  display: inline;
+  height: auto;
+}
+
+.narration-act {
+  position: relative;
+  display: inline-flex;
+  margin-inline-start: calc(var(--spacing) * 2);
+  vertical-align: middle;
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-act[data-leaving] {
+  opacity: 0;
+}
+
+/* Under reduced motion a greeting or tip changes at once. */
+@media (prefers-reduced-motion: reduce) {
+  .narration[data-idle] :is(.narration-line, .narration-act) {
+    transition: none;
+    animation: none;
+  }
 }
 
 @keyframes narration-in {
@@ -629,6 +693,17 @@
     var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
     var(--font-ui);
   letter-spacing: var(--text-title-1--letter-spacing);
+}
+
+/* The words come in under dot once what the computer is doing is known. */
+:is(.curtain-title, .curtain-sub, .curtain-act) {
+  transition: opacity var(--dur-text-in) var(--ease-standard);
+}
+
+@starting-style {
+  :is(.curtain-title, .curtain-sub, .curtain-act) {
+    opacity: 0;
+  }
 }
 
 .curtain-sub {

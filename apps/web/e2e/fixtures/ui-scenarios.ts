@@ -43,6 +43,15 @@ export const UI_SCENARIOS = {
     step: "cell/starting",
   },
   ready: { about: "The computer is on with no task", boot: { QA_SESSION: "0" }, step: "cell/live" },
+  "slow-keys": {
+    about: "Setup is finished, but the key layer answers almost a second late",
+    boot: { QA_SESSION: "0", QA_SLOW_KEYS: "900" },
+    step: "cell/live",
+  },
+  conversations: {
+    about: "A finished task in a conversation of three, with past conversations from the fortnight",
+    boot: { QA_PHASE: "finished", QA_EARLIER: "2", QA_PAST: "1" },
+  },
   "chatgpt-plan": {
     about: "The main model runs on a signed-in ChatGPT plan; the computer is on with no task",
     boot: { QA_SESSION: "0", QA_SETTINGS: "chatgpt", QA_CHATGPT: "signed_in" },

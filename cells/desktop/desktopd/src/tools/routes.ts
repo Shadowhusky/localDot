@@ -34,7 +34,7 @@ import { inspectUploadSource, readUploadSource } from "./upload-source.ts";
 export interface ToolRouteDeps {
   home: string;
   env: NodeJS.ProcessEnv;
-  browser: Pick<PageBrowser, "read" | "navigate">;
+  browser: Pick<PageBrowser, "read" | "navigate"> & Partial<Pick<PageBrowser, "page">>;
   maxFetchBytes?: number;
   maxPutBytes?: number;
   runShell?: typeof runShell;
@@ -289,6 +289,14 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
           createOnly === "1",
         ),
       );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+  app.get("/browser/page", async (c) => {
+    if (!deps.browser.page) return c.text("page address is unavailable", 503);
+    try {
+      return c.json(await deps.browser.page(c.req.raw.signal));
     } catch (error) {
       return failure(c, error);
     }

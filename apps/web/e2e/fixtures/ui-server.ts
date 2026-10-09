@@ -915,6 +915,69 @@ function seedLongTask(s: AgentSession) {
   );
 }
 
+// QA_PAST=1 seeds past conversations, from earlier today back over the last fortnight, each ending
+// its own way, for the list of conversations.
+function backdated<T>(msAgo: number, make: () => T): T {
+  const Before = globalThis.Date;
+  const offset = -msAgo;
+  globalThis.Date = class extends Before {
+    constructor(...given: unknown[]) {
+      super(...((given.length ? given : [Before.now() + offset]) as [number]));
+    }
+    static now() {
+      return Before.now() + offset;
+    }
+  } as DateConstructor;
+  try {
+    return make();
+  } finally {
+    globalThis.Date = Before;
+  }
+}
+const HOUR = 3_600_000;
+const PAST: { ago: number; asks: string[]; ending: "done" | "stopped" | "error" | null }[] = [
+  {
+    ago: 2 * HOUR,
+    asks: ["Compare flights to Lisbon for the first week of May", "Book the 9:40 one"],
+    ending: "done",
+  },
+  {
+    ago: 5 * HOUR,
+    asks: ["Rename the holiday photos by the date they were taken"],
+    ending: "stopped",
+  },
+  {
+    ago: 26 * HOUR,
+    asks: ["Summarise the Q3 board deck into five bullet points"],
+    ending: "error",
+  },
+  { ago: 30 * HOUR, asks: ["Find a plumber near me with good reviews"], ending: "done" },
+  { ago: 80 * HOUR, asks: ["Clean up my Downloads folder", "Also empty the bin"], ending: "done" },
+  { ago: 220 * HOUR, asks: ["Draft a reply to the landlord about the boiler"], ending: null },
+];
+if (env.QA_PAST === "1")
+  for (const { ago, asks, ending } of PAST) {
+    let continues: string | undefined;
+    asks.forEach((ask, n) => {
+      continues = backdated(ago - n * 600_000, () => {
+        const id = log.createSession(asks[0]);
+        const append = (type: string, data: Record<string, unknown>) =>
+          log.append(id, { agent: "main", type, data } as never);
+        append("session.start", {
+          screen: { w: 2560, h: 1600, scale: 2 },
+          os: "linux",
+          title: asks[0],
+          ...(continues ? { continues } : {}),
+        });
+        append("message.user", { messageId: ulid(), kind: "task", text: ask });
+        append("message.assistant", { messageId: ulid(), text: "Done. Here is what I found." });
+        const last = n === asks.length - 1;
+        if (!last || ending) append("session.end", { reason: last ? ending : "done" });
+        return id;
+      });
+    });
+  }
+
 // QA_EARLIER earlier tasks of the same conversation come before the seeded one.
 let earlier: string | undefined;
 for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
@@ -1593,6 +1656,14 @@ const routes = createApp({
   },
 });
 deliverableScenarios(routes, deliverablesFixture);
+// QA_SLOW_KEYS=<ms> answers the key layer that much later, as a key layer still waking up does.
+const slowKeys = Number(env.QA_SLOW_KEYS ?? 0);
+if (slowKeys > 0)
+  for (const path of ["/api/keyd", "/api/keys"])
+    routes.use(path, async (_c, next) => {
+      await new Promise((resolve) => setTimeout(resolve, slowKeys));
+      await next();
+    });
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)

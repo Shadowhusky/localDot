@@ -16,7 +16,12 @@ import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexCleanupError } from "./codex/driver.ts";
 import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import {
+  AgentError,
+  AgentRunner,
+  type AgentRunnerDeps,
+  SIGN_IN_BROWSER_WAIT_MS,
+} from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -250,6 +255,146 @@ describe("the user's own hold on the computer", () => {
     f.state.paused = true;
     await expect(f.runner.hold(f.cellId)).rejects.toThrow(AgentError);
     expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+});
+
+// Sign-ins made in the desktop's own browser are not kept, so Settings > Accounts opens the site in
+// the web browser and puts the user in control there.
+describe("signing in to a site from Settings", () => {
+  function screens(f: ReturnType<typeof setup>, fail = false) {
+    const opened: string[] = [];
+    const closed = vi.fn(async () => {});
+    f.deps.installSession = (session) =>
+      session.attachScreens({
+        openForUser: vi.fn(async (url: string) => {
+          if (fail) throw new Error("the web browser couldn't start");
+          opened.push(url);
+        }),
+        takeOver: vi.fn(async () => {}),
+        finish: vi.fn(async () => {}),
+        close: closed,
+        selection: { screen: "browser" },
+      } as never);
+    return { opened, closed };
+  }
+
+  it("opens the site's sign-in page in the web browser, then hands it to the user", async () => {
+    const f = setup();
+    const browser = screens(f);
+    const { sessionId, requestId } = await f.runner.signIn(
+      f.cellId,
+      "google.com",
+      "https://accounts.google.com/",
+    );
+    expect(browser.opened).toEqual(["https://accounts.google.com/"]);
+    const session = f.runner.get(sessionId);
+    if (!session) throw new Error("fixture missing hold");
+    expect(session.pendingTakeover).toBe(requestId);
+    expect(f.runner.holds(sessionId)).toBe(true);
+    expect(f.log.read(sessionId)[0]).toBeDefined();
+    expect(f.log.listSessions().find((entry) => entry.id === sessionId)?.title).toBe(
+      "Sign in to google.com",
+    );
+    await until(() => session.manualControl === "ready");
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(sessionId);
+    expect(browser.closed).not.toHaveBeenCalled();
+  });
+
+  it("takes over from the user's own hold of the computer", async () => {
+    const f = setup();
+    const browser = screens(f);
+    const first = await f.runner.hold(f.cellId);
+    const held = f.runner.get(first.sessionId);
+    if (!held) throw new Error("fixture missing hold");
+    await until(() => held.manualControl === "ready");
+    const next = await f.runner.signIn(f.cellId, "github.com", "https://github.com/login");
+    expect(next.sessionId).not.toBe(first.sessionId);
+    expect(f.live.get(f.cellId)).toBe(next.sessionId);
+    expect(browser.opened).toEqual(["https://github.com/login"]);
+    f.runner.get(next.sessionId)?.stop();
+    await f.live.settled(next.sessionId);
+  });
+
+  it("ends a finished task waiting for a follow-up, and leaves a task at work alone", async () => {
+    const f = setup();
+    screens(f);
+    const rest = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => rest.status === "idle");
+    const reply = await f.runner.signIn(f.cellId, "x.com", "https://x.com/i/flow/login");
+    expect(rest.stopped).toBe(true);
+    f.runner.get(reply.sessionId)?.stop();
+    await f.live.settled(reply.sessionId);
+    const working = deferred<number>();
+    f.run.mockImplementationOnce(() => working.promise);
+    const task = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => f.run.mock.calls.length === 2);
+    await expect(f.runner.signIn(f.cellId, "x.com", "https://x.com/")).rejects.toThrow(AgentError);
+    expect(task.stopped).toBe(false);
+    expect(f.live.get(f.cellId)).toBe(task.id);
+    working.resolve(0);
+    task.stop();
+    await f.live.settled(task.id);
+  });
+
+  it("ends the hold without stopping the computer when the web browser can't open", async () => {
+    const f = setup();
+    const browser = screens(f, true);
+    const failure = await f.runner
+      .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AgentError);
+    expect((failure as AgentError).status).toBe(503);
+    await until(() => f.live.get(f.cellId) === undefined);
+    expect(browser.closed).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the user in control of the desktop when the web browser can't start", async () => {
+    const f = setup();
+    const browser = screens(f);
+    const startBrowser = vi.fn(async () => {
+      throw new Error("the web browser couldn't start");
+    });
+    f.deps.startBrowser = startBrowser;
+    const first = await f.runner.hold(f.cellId);
+    const held = f.runner.get(first.sessionId);
+    if (!held) throw new Error("fixture missing hold");
+    await until(() => held.manualControl === "ready");
+    const failure = await f.runner
+      .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+      .catch((error: unknown) => error);
+    expect((failure as AgentError).status).toBe(503);
+    expect(startBrowser).toHaveBeenCalledWith(f.cellId);
+    expect(browser.opened).toEqual([]);
+    expect(held.stopped).toBe(false);
+    expect(held.manualControl).toBe("ready");
+    expect(f.live.get(f.cellId)).toBe(first.sessionId);
+    held.stop();
+    await f.live.settled(first.sessionId);
+  });
+
+  it("says to try again while the web browser is still starting, and lets it go on", async () => {
+    const f = setup();
+    screens(f);
+    const starting = deferred<void>();
+    f.deps.startBrowser = vi.fn(() => starting.promise);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const signing = f.runner
+        .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(SIGN_IN_BROWSER_WAIT_MS);
+      expect(((await signing) as AgentError).status).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(f.live.get(f.cellId)).toBeUndefined();
+    starting.resolve();
+    const reply = await f.runner.signIn(f.cellId, "google.com", "https://accounts.google.com/");
+    expect(f.live.get(f.cellId)).toBe(reply.sessionId);
+    f.runner.get(reply.sessionId)?.stop();
+    await f.live.settled(reply.sessionId);
   });
 });
 

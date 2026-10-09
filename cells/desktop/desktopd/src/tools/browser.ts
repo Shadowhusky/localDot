@@ -1,5 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { type BrowserNavigateResult, type BrowserReadResult, webUrl } from "@localdot/protocol";
+import {
+  type BrowserNavigateResult,
+  type BrowserPageResult,
+  type BrowserReadResult,
+  webUrl,
+} from "@localdot/protocol";
 import { WebSocket } from "ws";
 import { CdpSession, type PageTarget } from "../perception/cdp.ts";
 
@@ -183,6 +188,11 @@ export class PageBrowser {
       signal.removeEventListener("abort", abort);
       cdp?.close();
     }
+  }
+
+  // The front page's address from Chromium's target list: nothing runs in the page.
+  async page(signal = AbortSignal.timeout(5000)): Promise<BrowserPageResult> {
+    return { url: (await this.#page(signal)).url };
   }
 
   read(maxChars: number, signal?: AbortSignal): Promise<BrowserReadResult> {

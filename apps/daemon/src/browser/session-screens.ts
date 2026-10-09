@@ -22,15 +22,21 @@ export class SessionScreens {
   constructor(
     private readonly deps: {
       cells: Pick<CellApi, "get" | "subscribe" | "stop">;
-      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
+      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get"> &
+        Partial<Pick<BrowserOrchestrator, "health">>;
       streams: BrowserStreams;
       recordings: Pick<ScreenRecordings, "attach" | "fence">;
       registry: Pick<DesktopdRegistry, "for">;
       downloads?: Pick<BrowserDownloadCollector, "collect">;
       pendingStop?(sessionId: string): Promise<StopOutcome> | undefined;
+      report?(message: string): void;
       now(): number;
     },
   ) {}
+
+  async startBrowser(cellId: string): Promise<void> {
+    await this.deps.browser.start(cellId);
+  }
 
   install(session: AgentSession, cell: CellSummary): void {
     if (session.cellId !== cell.id) throw new Error("The session computer changed.");
@@ -50,6 +56,7 @@ export class SessionScreens {
           );
         },
         browser: this.deps.browser,
+        ...(this.deps.report ? { report: this.deps.report } : {}),
         revision: (instance) => this.#revision(instance),
         downloads: this.deps.downloads
           ? (endpoint, binding, owner) => {

@@ -169,6 +169,37 @@ describe("persistent browser lifecycle", () => {
     expect(f.controller.endpoints(f.parent.id)?.browserd.token).not.toBe("changed");
   });
 
+  it("tells whether the running browser still answers as ready", async () => {
+    const f = fixture();
+    expect(await f.controller.health(f.parent.id)).toBeUndefined();
+    const ready = await f.controller.start(f.parent.id);
+    expect(await f.controller.health(f.parent.id)).toBe("ready");
+    const probe = vi.mocked(f.deps.probe);
+    if (!probe) throw new Error("the probe is missing");
+    probe.mockResolvedValueOnce({
+      browserCellId: ready.browserCellId,
+      parentCellId: ready.parentCellId,
+      instance: ready.instance,
+      ready: false,
+      holder: "user",
+      width: 1280,
+      height: 800,
+    });
+    expect(await f.controller.health(f.parent.id)).toBe("unready");
+    probe.mockResolvedValueOnce({
+      browserCellId: ready.browserCellId,
+      parentCellId: ready.parentCellId,
+      instance: randomUUID(),
+      ready: true,
+      holder: "user",
+      width: 1280,
+      height: 800,
+    });
+    expect(await f.controller.health(f.parent.id)).toBe("unready");
+    probe.mockRejectedValueOnce(new Error("connection refused"));
+    expect(await f.controller.health(f.parent.id)).toBe("silent");
+  });
+
   it("serializes concurrent starts into one profile and one running browser", async () => {
     const f = fixture();
     const [first, second] = await Promise.all([

@@ -55,6 +55,7 @@ export async function buildRuntime({ output, version, sandboxArchive }) {
     entryPoints: {
       cli: join(WORKSPACE, "apps/cli/src/main.ts"),
       daemon: join(WORKSPACE, "apps/daemon/src/main.ts"),
+      "quiet-page-worker": join(WORKSPACE, "apps/daemon/src/deliverables/quiet-page-worker.ts"),
       "release-verification-worker": join(
         WORKSPACE,
         "apps/cli/src/install/release-verification-worker.ts",

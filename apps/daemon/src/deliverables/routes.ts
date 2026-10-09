@@ -8,12 +8,17 @@ import {
   OpenOnMacReply,
   OpenOnMacRequest,
   PREVIEW_LIMITS,
+  PreviewLinkReply,
   ProofReply,
   ReviseReply,
   ReviseRequest,
+  TableFileReply,
+  TextFileReply,
   ULID_PATTERN,
   ulid,
   unifiedDiff,
+  VIEWER_LIMITS,
+  viewerKind,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -25,13 +30,17 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
-import { screenLine } from "./excerpt.ts";
+import { fileText, screenLine } from "./excerpt.ts";
 import { fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
+import { previewFileRoutes } from "./preview-files.ts";
+import { PreviewLinks } from "./preview-links.ts";
 import type { Previews } from "./previews.ts";
 import { resultProof } from "./proof.ts";
+import { sheetTable } from "./sheet-file.ts";
 import { StoredFiles } from "./stored.ts";
+import { delimitedTable } from "./table-file.ts";
 import type { TaskScanner } from "./task-scan.ts";
 
 export interface DeliverablesDeps {
@@ -76,7 +85,13 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
       name,
     );
   const file = "/api/agent/sessions/:id/files/:name";
-  for (const path of [`${file}/*`, "/api/agent/sessions/:id/proof"])
+  const links = new PreviewLinks();
+  previewFileRoutes(app, { home: deps.home, port: deps.port, links });
+  for (const path of [
+    `${file}/*`,
+    "/api/agent/sessions/:id/proof",
+    "/api/agent/sessions/:id/preview-link",
+  ])
     app.use(path, async (c, next) => {
       const id = c.req.param("id") ?? "";
       if (!ULID_PATTERN.test(id)) return c.text("invalid task id", 400);
@@ -126,6 +141,53 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
         "x-localdot-preview": preview.madeBy,
       });
     return c.body(preview.json, 200, { ...SECURE, "content-type": "application/json" });
+  });
+  // The address the full preview loads this task's pictures, pages, PDFs and media from.
+  app.post("/api/agent/sessions/:id/preview-link", (c) =>
+    c.json(
+      PreviewLinkReply.parse({ base: `/file-previews/${links.issue(c.req.param("id"))}/` }),
+      200,
+      { "cache-control": "no-store" },
+    ),
+  );
+  app.get(`${file}/text`, (c) => {
+    const { id, name } = c.req.param() as { id: string; name: string };
+    const version = versionParam(c);
+    if (version === undefined) return c.text("invalid version", 400);
+    const rel = outputPath(id, name, version);
+    const from = c.req.query("from") === "end" ? "end" : "start";
+    const read =
+      rel &&
+      (from === "end"
+        ? stored.tail(rel, VIEWER_LIMITS.textBytes)
+        : stored.head(rel, VIEWER_LIMITS.textBytes));
+    const reply: TextFileReply = read
+      ? fileText("tail" in read ? read.tail : read.head, read.size, from)
+      : { kind: "none", reason: "missing" };
+    return c.json(TextFileReply.parse(reply));
+  });
+  app.get(`${file}/table`, async (c) => {
+    const { id, name } = c.req.param() as { id: string; name: string };
+    const version = versionParam(c);
+    const sheet = Number(c.req.query("sheet") ?? 0);
+    if (
+      version === undefined ||
+      !Number.isInteger(sheet) ||
+      sheet < 0 ||
+      sheet >= VIEWER_LIMITS.sheets
+    )
+      return c.text("invalid request", 400);
+    const kind = viewerKind(name);
+    if (kind !== "table" && kind !== "sheet") return c.text("not a table", 400);
+    const rel = outputPath(id, name, version);
+    const cap = kind === "table" ? VIEWER_LIMITS.tableCountBytes : VIEWER_LIMITS.sheetBytes;
+    const read = rel && stored.head(rel, cap + 1);
+    let reply: TableFileReply;
+    if (!read) reply = { kind: "none", reason: "missing" };
+    else if (kind === "table") reply = delimitedTable(name, read.head.subarray(0, cap), read.size);
+    else if (read.size > cap) reply = { kind: "none", reason: "too_large" };
+    else reply = await sheetTable(name, read.head, sheet, c.req.raw.signal);
+    return c.json(TableFileReply.parse(reply));
   });
   app.get(`${file}/compare`, async (c) => {
     const { id, name } = c.req.param() as { id: string; name: string };

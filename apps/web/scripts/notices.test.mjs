@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeNotices } from "./notices.mjs";
+import { writeNotices, writePdfNotice } from "./notices.mjs";
 
 const webDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(webDir, "../..");
@@ -92,6 +92,20 @@ describe("build license notices", () => {
     const lock = readFileSync(join(root, "pnpm-lock.yaml"), "utf8");
     const versions = [...lock.matchAll(/^ {2}mediabunny@([^:]+):/gm)].map((x) => x[1]);
     expect([...new Set(versions)]).toEqual(["1.61.0"]);
+  });
+});
+
+describe("the PDF renderer's notice", () => {
+  it("ships pdf.js's own license under its exact version", () => {
+    const outDir = dir();
+    const receipt = writePdfNotice({ webDir, outDir });
+    expect(receipt.files).toEqual(["licenses/pdfjs-dist-6.3.289.txt"]);
+    const text = readFileSync(join(outDir, receipt.files[0]), "utf8");
+    expect(text).toContain("pdfjs-dist 6.3.289");
+    expect(text).toContain("Apache License");
+    expect(
+      JSON.parse(readFileSync(join(webDir, "package.json"), "utf8")).dependencies["pdfjs-dist"],
+    ).toBe("6.3.289");
   });
 });
 

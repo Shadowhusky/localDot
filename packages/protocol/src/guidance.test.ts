@@ -44,7 +44,9 @@ describe("dot's working rules", () => {
       "Prefer a password or code to a QR code",
       "Use request_takeover only for a CAPTCHA, a device approval",
       "then wait for them to hand control back",
-      "a link a desktop app opens there has none of the user's sign-ins, so open it with browser_navigate",
+      "it keeps no sign-ins, so nobody signs in there",
+      "Reopen links that apps open there with browser_navigate",
+      "browser_navigate opens sites there; switch_screen moves between it and the desktop",
       "never get around it with tunnels, proxies or port forwards",
       "never name tools or localDot's internal parts",
     ])

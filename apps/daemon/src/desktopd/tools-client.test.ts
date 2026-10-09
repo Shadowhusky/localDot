@@ -49,6 +49,7 @@ function setup(limit?: number) {
     home,
     env: { PATH: process.env.PATH },
     browser: {
+      page: async () => ({ url: "https://accounts.google.com/signin" }),
       read: async () => {
         throw new NoPageError();
       },
@@ -93,6 +94,7 @@ describe("DesktopdTools real routes", () => {
     const { tools } = setup();
     await expect(tools.readFile("../etc/passwd")).rejects.toMatchObject({ status: 400 });
     await expect(tools.browserRead()).rejects.toMatchObject({ status: 409 });
+    expect(await tools.browserPage()).toBe("https://accounts.google.com/signin");
     await expect(tools.browserNavigate("file:///etc/passwd")).rejects.toMatchObject({
       status: 400,
     });
