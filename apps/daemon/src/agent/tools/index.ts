@@ -1,21 +1,29 @@
 import {
+  type BrowserNavigateInput,
   clipText,
   isToolName,
   TOOL_INPUTS,
   type ToolName,
   type ToolResult,
   ulid,
+  webUrl,
 } from "@localdot/protocol";
+import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
-import { browserNavigateTool, browserReadTool } from "./browser.ts";
+import {
+  browserNavigateTool,
+  browserReadTool,
+  DESKTOP_FALLBACK,
+  opensInWebBrowser,
+} from "./browser.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
-import { append, fail, type ToolCallContext, type ToolDeps } from "./deps.ts";
+import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { updatePlanTool } from "./plan.ts";
@@ -221,6 +229,19 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
+    // Public pages open in the web browser, where the user's sign-ins are, by default.
+    let fellBack = false;
+    const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
+    if (page && opensInWebBrowser(page) && session.screens?.selection.screen === "desktop") {
+      try {
+        await session.switchScreen("browser", lease);
+      } catch (error) {
+        ctx.check();
+        if (!(error instanceof ScreenUnavailableError)) throw error;
+        fellBack = true;
+      }
+      ctx.check();
+    }
     if (
       ["computer", "browser_read", "browser_navigate", "browser_upload"].includes(name) &&
       session.screens
@@ -281,6 +302,7 @@ async function dispatchAdmitted(
         break;
       case "browser_navigate":
         result = await browserNavigateTool(t, ctx, input);
+        if (fellBack) result = { ...result, content: [text(DESKTOP_FALLBACK), ...result.content] };
         break;
       case "browser_upload":
         result = await browserUploadTool(t, ctx, input);

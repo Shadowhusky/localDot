@@ -20,6 +20,7 @@ import { BrowserStreams } from "../browser/streams.ts";
 import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
+import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
 import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { AgentSession } from "./session.ts";
@@ -849,6 +850,73 @@ describe("session-owned screen authority", () => {
     expect(observe.mock.calls.at(-1)?.[0].cellId).not.toBe(f.session.cellId);
     expect(navigated.result.content.some((c) => c.type === "image")).toBe(true);
     expect(desktop).not.toHaveBeenCalled();
+  });
+
+  it("opens a public page in the web browser from the desktop by switching the screen first", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f),
+      desktop = vi.spyOn(h.tools, "desktop");
+    expect(f.screens.selection.screen).toBe("desktop");
+    const navigated = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
+    expect(navigated.result.ok).toBe(true);
+    expect(f.screens.selection.screen).toBe("browser");
+    expect(f.client.navigate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      "https://mail.example.test/",
+      expect.any(Object),
+    );
+    expect(desktop).not.toHaveBeenCalled();
+    expect(f.log.read(f.session.id).some((event) => event.type === "screen.switch")).toBe(true);
+  });
+
+  it.each([
+    "http://localhost:5173/",
+    "http://127.0.0.1:8000/",
+    "https://example.test:8443/",
+    "http://printer.local/",
+    "http://intranet/",
+  ])("keeps %s on the desktop, where dot's own servers run", async (url) => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    await h.callTool("browser_navigate", { url });
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+  });
+
+  it("opens the page on the desktop with a note when the web browser cannot start", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    vi.mocked(f.deps.browser.start).mockRejectedValueOnce(new Error("browser cell stopped"));
+    const browserBinding = h.tools.bindScreen;
+    h.tools.bindScreen = (session, lease) =>
+      lease.selection.screen === "desktop"
+        ? {
+            cellId: session.cellId,
+            parentCellId: session.cellId,
+            scale: lease.selection.geometry.scale,
+            device: {} as NativeScreenBinding["device"],
+            signal: lease.signal,
+            check: () => lease.check(),
+            stream: () => NO_STREAM,
+            subscribe: () => () => {},
+          }
+        : (browserBinding?.(session, lease) as NativeScreenBinding);
+    const desktop = vi.spyOn(h.tools, "desktop");
+    const navigated = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
+    expect(navigated.result.ok).toBe(true);
+    expect(navigated.result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("web browser couldn't start"),
+    });
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(desktop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.session.stopped).toBe(false);
   });
 
   it("dispatches switch_screen through the real controller, clears the old frame and keeps shell/files on the desktop", async () => {

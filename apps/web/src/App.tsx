@@ -785,7 +785,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 {!phone && welcome}
                 {!replayId && selectedScreen && (
                   <div className="screen-label" role="status">
-                    {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}
+                    {selectedScreen.screen === "browser" ? "Web browser" : "Desktop"}
                     {selectedScreen.screen === "browser" && !browserScreen.cell && (
                       <span> · {browserScreen.error ?? "Connecting…"}</span>
                     )}

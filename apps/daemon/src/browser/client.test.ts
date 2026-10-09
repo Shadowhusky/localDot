@@ -194,9 +194,7 @@ describe("daemon browser client", () => {
       response.writeHead(302, { location: "http://127.0.0.1:1/stolen" });
       response.end("private-token-body");
     });
-    await expect(f.client.health(f.scope)).rejects.toThrow(
-      /^The signed-in browser is not responding\.$/,
-    );
+    await expect(f.client.health(f.scope)).rejects.toThrow(/^The web browser is not responding\.$/);
     expect(f.seen).toHaveLength(1);
   });
 
@@ -232,7 +230,7 @@ describe("daemon browser client", () => {
       throw new Error("private session details");
     };
     await expect(f.client.health(f.scope)).rejects.toThrow(
-      /^The signed-in browser or the selected screen changed during the request\.$/,
+      /^The web browser or the selected screen changed during the request\.$/,
     );
     expect(f.seen).toEqual([]);
   });
@@ -318,7 +316,7 @@ describe("daemon browser client", () => {
         response.end(events.map((event) => `${JSON.stringify(event)}\n`).join(""));
       });
       await expect(f.client.type(f.permit, f.tab, typeRequest, f.scope, () => {})).rejects.toThrow(
-        /^The signed-in browser sent a reply that could not be read\.$/,
+        /^The web browser sent a reply that could not be read\.$/,
       );
     },
   );

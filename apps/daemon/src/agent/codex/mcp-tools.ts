@@ -39,13 +39,14 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   files:
     "Read, write, edit (old_text must match exactly once) or list files in the virtual computer's home. " +
     "Paths are relative to the home or start with ~/.",
-  browser_read: "Read the text and structure of the page open on the selected screen.",
+  browser_read:
+    "Read the text and structure of the page open on the selected screen: the web browser or the desktop's Chromium.",
   browser_navigate:
-    "Open an http or https URL on the selected desktop or signed-in browser screen.",
+    "Open an http or https page. Public sites open in the web browser, which keeps the user's sign-ins, and the screen switches there; localhost and local addresses open in the desktop's Chromium.",
   browser_upload:
     "Assign 1–10 desktop-home files (100 MiB total maximum) to the currently open file chooser on the isolated browser screen, after explicit approval of the exact files and receiving page. This does not submit the page's form. Never retry an uncertain upload automatically.",
   switch_screen:
-    "Switch between desktop and the isolated signed-in browser. Use browser for signed-in work and request_takeover for login. Request a fresh screenshot after switching; shell and files remain on the desktop.",
+    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Use request_takeover when a site needs the user to sign in. Request a fresh screenshot after switching; shell and files remain on the desktop.",
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:
