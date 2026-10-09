@@ -8,7 +8,7 @@ const FOUND = 8;
 export const SAVE_UNNAMED =
   "Save someone only under a name the user wrote in this task, or ask the user to confirm first.";
 export const SAVE_REDIRECT =
-  "Someone by this name is already saved with another app, handle or note. Ask the user before changing how to reach them.";
+  "Someone with this name or one like it is already saved with another app, handle or note. Ask the user before changing how to reach them.";
 
 const line = (p: StoredPerson) =>
   [

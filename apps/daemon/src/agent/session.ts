@@ -265,9 +265,10 @@ export class AgentSession {
         let change: RuleChange | undefined;
         let note = resolution.note;
         try {
-          // Yes for this task on a purpose ask reaches only the hosts it named.
-          if (destinations && always?.option.scope === "task") this.purpose?.allow(destinations);
-          else
+          // Yes for this task on a purpose ask reaches only the hosts it named, never a kind of step.
+          if (destinations) {
+            if (always?.option.scope === "task") this.purpose?.allow(destinations);
+          } else
             change =
               always &&
               this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);

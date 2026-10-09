@@ -91,9 +91,12 @@ const NAME = String.raw`((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9
 const WHOLE_NAME = new RegExp(`^${NAME}$`, "i");
 // A name in the user's words; a scheme or www. before it marks it as a site.
 const MENTIONED = new RegExp(String.raw`(?<![\w.@/-])(https?:\/\/|www\.)?${NAME}`, "gi");
-// A name in a command, past a user (git@host) or a substitution ($(…).host); one right after @
-// or in a path is a file.
-const BARE = new RegExp(String.raw`(?<![\w~/@-])(?<![\w.~/@-]\.)(?:[\w.+-]+@)?${NAME}`, "gi");
+// A name in a command, past a user (git@host, an empty password's host:@) or a substitution
+// ($(…).host); one right after @ or in a path is a file.
+const BARE = new RegExp(
+  String.raw`(?<![\w~/@-])(?<![\w.~/@-]\.)(?:[\w.+-]+@|(?<=:)@)?${NAME}`,
+  "gi",
+);
 const ADDRESS = /\b[a-z][a-z0-9+.-]*:\/\/[^\s'"`<>]+/gi;
 const IP_ADDRESS = /(?<![\w.:])(?:\d{1,3}(?:\.\d{1,3}){3}|\[[\da-f:]+\])(?![\w.])/gi;
 const LOCAL_NAME = /(?<![\w.-])localhost(?![\w.-])/;
@@ -116,30 +119,44 @@ const GIT_ADDRESSED = /^(?:clone|ls-remote|archive)$/;
 const INTERPRETER =
   /^(?:python[\d.]*|perl|ruby|node|nodejs|php|deno|bun|lua[\d.]*|[gm]?awk|tclsh|Rscript)$/;
 const INLINE_FLAG = /^(?:-[A-Za-z]*[cerEp]|--(?:eval|print)|eval)$/;
-// Code that can reach another machine, or run or build code that might.
+// Code that can reach another machine, or run or build code that might: network modules and
+// calls, and the ways code runs commands or other code. Plain words (http in a pattern) are not.
 const REACHES = new RegExp(
   [
-    String.raw`socket|urllib|http|request|urlopen|fetch|\bnet\b|net::|io::|lwp|open-uri|curl|wget`,
-    "connect|smtp|ftp|telnet|imap|pop3|nntp|rpc|dns|gethostby|getaddrinfo|webbrowser",
-    "exec|eval|compile|system|popen|spawn|subprocess|child_process|proc_open|passthru",
-    "fsockopen|stream_|file_get_contents|fopen|call_user_func|create_function|ctypes|ffi",
-    String.raw`importlib|__|builtins|globals|vars\s*\(|getattr|sys\.modules|import\s*\(`,
-    String.raw`new\s+Function|\bFunction\s*\(\s*["'\x60]|globalThis|\.(?:public_)?send\s*\(|const_get|instance_eval|class_eval`,
-    String.raw`\bmethod\s*\(|(?<!\.)\bload(?:string)?\s*\(|\$\w+\s*\(|\x60|\bqx\b|%x`,
+    String.raw`socket|urllib(?!\.parse\b)|urlopen|httplib|http\.client|httpx|aiohttp|pycurl|paramiko|websocket|xmlrpc|scapy`,
+    String.raw`\b(?:import|from)\s+(?:[\w.]+\s*,\s*)*(?:http|requests|ssl|dns|asyncio|(?:ftp|smtp|telnet|imap|pop|nntp)lib)\b`,
+    String.raw`\bfetch\s*\(|xmlhttprequest|(?<!sqlite3?\.|duckdb\.)\bconnect\s*\(|create_connection|open_connection`,
+    String.raw`gethostby|getaddrinfo|get_server_certificate|webbrowser|net::|io::socket|lwp|http::|open-uri|\bmail\s*\(`,
+    String.raw`\b(?:exec(?:v|l|ve|vp|vpe|le|lp|lpe|Sync|File(?:Sync)?)?|spawn\w*|popen\w*|system|passthru|shell_exec|proc_open|pcntl_exec|os\.execute)\s*\(`,
+    String.raw`\b(?:exec|system|spawn)\s+(?:["'$@\x60]|qw\b)|(?<![\w.])compile\s*\(|(?<!\.)\beval\b|subprocess|child_process|instance_eval|class_eval|module_eval`,
+    String.raw`fsockopen|stream_socket|file_get_contents|\bfopen\s*\(|curl_\w+\s*\(|call_user_func|create_function|ctypes|\bffi\b|fiddle`,
+    String.raw`importlib|__(?:import|builtins|subclasses|globals|getattribute|loader|class|bases?|mro|dict|code)__|builtins|globals\s*\(|vars\s*\(|getattr|sys\.modules|import\s*\(`,
+    String.raw`new\s+Function|\bFunction\s*\(\s*["'\x60]|globalThis|\.(?:public_)?send\s*\(|const_get|\bmethod\s*\(|(?<!\.)\bload(?:string)?\s*\(|\$\w+\s*\(`,
     String.raw`\/dev\/(?:tcp|udp)|\/inet[46]?\/`,
     String.raw`require\s*\(\s*(?!["'](?:node:)?(?:fs|path|os|util|zlib|readline|assert|events|buffer)["']\s*\))`,
+    String.raw`\bfrom\s*["'](?!(?:node:)?(?:fs|path|os|util|zlib|readline|assert|events|buffer)["'])`,
   ].join("|"),
   "i",
 );
 // awk runs a command through a pipe; perl, ruby and tcl open one.
 const AWK_PIPE = /\|\s*getline|\|&|\bprintf?\b[^;}\n]*\|/;
 const OPEN_PIPE = /\bopen\b[^;\n]*["'][^"'\n]*\|/;
+// perl, ruby and php run a command written in backquotes (or perl's qx, ruby's %x).
+const COMMAND_QUOTE = /\x60|\bqx\b|%x/;
+const EXPANSION = /\$[{(A-Za-z_@*#?!\d-]|\x60/;
 // The shell's own network files: bash's /dev/tcp/host/port and gawk's /inet/tcp/0/host/port.
 const SPECIAL_FILE = /\/dev\/(?:tcp|udp)\/([^/\s'"]*)|\/inet[46]?\/(?:tcp|udp)\/\d+\/([^/\s'"]*)/gi;
-// A command whose program is an expansion ($c, "$CURL", $(which curl), `which curl`), found
-// where a command starts, after its assignments.
+// A redirection the shell may turn into one of those files: a /dev/ path an expansion builds
+// (> /dev/$t/host/80), or an expansion followed by /host/port (> $d/host/80).
+const EXPANDED_SPECIAL =
+  /(?<!<)[<>]{1,2}[|&]?\s*["']?(?:\/dev\/[^\s;|&<>()]*(?:\$[{(A-Za-z_@*#?!\d-]|`)|(?:\$\{[^}\s]*\}|\$\w+|\$\([^)]*\)|`[^`]*`)["']?\/[^/\s;|&<>()]+\/(?:\d+|\$\{?\w+\}?|[a-z][\w-]*)["']?(?![^\s;|&<>()]))/i;
+// A command whose program word holds an expansion ($c, cu$c, "$CURL", $(which curl), `which curl`),
+// found where a command starts, after its assignments.
 const EXPANDED_PROGRAM =
-  /(?:^|[|&;{!\n`]|(?<![$(])\((?!\()|\$\((?!\()|\b(?:then|do|else|elif|if|while|until|exec|command|builtin|eval|xargs|sudo|doas|env|nohup|setsid|nice|time|stdbuf|timeout|watch|busybox)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*["']?(?:\$[{(A-Za-z_@*#?!\d-]|`)/;
+  /(?:^|[|&;!\n`]|\{(?=\s)|(?<![$(])\((?!\()|\$\((?!\()|\b(?:then|do|else|elif|if|while|until|exec|command|builtin|eval|xargs|sudo|doas|env|nohup|setsid|nice|time|stdbuf|timeout|watch|busybox)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:[^\s;|&<>()='"`$]|''|"")*["']?(?:\$[{(A-Za-z_@*#?!\d-]|`)/;
+// A program word the shell expands as a pattern (cur?, c[u]rl, {curl,host}); not the test
+// command [ or [[.
+const PATTERNED = /[*?]|\[(?!\[?$)|\{[^{}\s]*,[^{}\s]*\}/;
 // The options of these programs whose value is a local file: a name there is never a host.
 const FILE_OPTIONS: Readonly<Record<string, { short: string; long: RegExp }>> = {
   curl: {
@@ -310,9 +327,10 @@ function placeOf(words: readonly string[], role: Role, at: number): Place {
 // Whether a name in a command line is a machine it reaches. A file name is one only where a
 // program that reaches machines takes it as an address, or nothing else explains it; a name in
 // inline code or a file option's value is never one.
-function reachesName(line: CommandLine, name: string, at: number): boolean {
-  // The path after a machine's name (git@host:repo.git, me@box:notes.md) is a file there.
-  if (/[\w-]\.[a-z][\w-]*:$/i.test(line.text.slice(0, at))) return false;
+function reachesName(line: CommandLine, name: string, at: number, user: boolean): boolean {
+  // The path after a machine's name (git@host:repo.git, me@box:notes.md) is a file there; a
+  // name with a user (host:pw@other) is the machine itself.
+  if (!user && /[\w-]\.[a-z][\w-]*:$/i.test(line.text.slice(0, at))) return false;
   const places = line.runs.flatMap((words) => {
     const role = roleOf(words);
     return words.flatMap((word, n) =>
@@ -333,21 +351,100 @@ function connects(words: readonly string[], command: string): boolean {
   const awk = /awk$/.test(name);
   const code =
     awk || args.some((word) => INLINE_FLAG.test(word))
-      ? args.join(" ")
+      ? args.filter((word) => !INLINE_FLAG.test(word)).join(" ")
       : args.every((word) => word.startsWith("-"))
         ? command
         : undefined;
   if (code === undefined) return false;
   const pipes = awk ? AWK_PIPE : /^(?:perl|ruby|tclsh)$/.test(name) ? OPEN_PIPE : undefined;
-  return REACHES.test(code) || pipes?.test(code) === true;
+  return (
+    REACHES.test(code) ||
+    pipes?.test(code) === true ||
+    (/^(?:perl|ruby|php)$/.test(name) && COMMAND_QUOTE.test(code))
+  );
 }
 
-// The line with its quoted text taken out, keeping a quoted word that starts with an expansion.
+interface Written {
+  readonly word: string;
+  readonly expands: boolean;
+}
+
+// The stages of a command line as its words are written, each knowing whether the shell expands
+// something in it; a single-quoted part never expands.
+function writtenStages(text: string): Written[][] {
+  const stages: Written[][] = [[]];
+  let word = "";
+  let expands = false;
+  let open = false;
+  const end = () => {
+    if (open) stages.at(-1)?.push({ word, expands });
+    word = "";
+    expands = false;
+    open = false;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] ?? "";
+    if (/[\s;|&<>()]/.test(c)) {
+      end();
+      if (/[;|&()]/.test(c)) stages.push([]);
+      continue;
+    }
+    open = true;
+    if (c === "\\") word += text[++i] ?? "";
+    else if (c === "'") {
+      const close = text.indexOf("'", i + 1);
+      word += text.slice(i + 1, close < 0 ? undefined : close);
+      i = close < 0 ? text.length : close;
+    } else if (c === '"')
+      for (i++; i < text.length && text[i] !== '"'; i++) {
+        if (text[i] === "\\") i++;
+        else expands ||= EXPANSION.test(text.slice(i, i + 2));
+        word += text[i] ?? "";
+      }
+    else {
+      expands ||= EXPANSION.test(text.slice(i, i + 2));
+      word += c;
+    }
+  }
+  end();
+  return stages;
+}
+
+// awk's program: its first word that is not an option or an option's value; none with -f.
+function awkProgram(args: readonly Written[]): Written | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i]?.word ?? "";
+    if (word === "--") return args[i + 1];
+    if (/^(?:-[fE]|--(?:file|exec))/.test(word)) return undefined;
+    if (/^(?:-[vFWil]|--(?:assign|field-separator|include|load))$/.test(word)) i++;
+    else if (!word.startsWith("-")) return args[i];
+  }
+  return undefined;
+}
+
+// Whether an interpreter runs inline code the shell builds ("$X", "$(cat a.py)"), which may be
+// anything.
+function expandedCode(text: string): boolean {
+  return writtenStages(text).some((words) => {
+    const at = words.findIndex(({ word }) => INTERPRETER.test(word.split("/").pop() ?? ""));
+    if (at < 0) return false;
+    const args = words.slice(at + 1);
+    const flag = args.findIndex(({ word }) => INLINE_FLAG.test(word));
+    const code = /awk$/.test(words[at]?.word ?? "")
+      ? awkProgram(args)
+      : flag < 0
+        ? undefined
+        : args[flag + 1];
+    return code?.expands === true;
+  });
+}
+
+// The line with its quoted text taken out, keeping a double-quoted word the shell expands.
 function unquoted(text: string): string {
   return text
     .replace(/'[^']*'/g, "''")
     .replace(/"((?:[^"\\]|\\.)*)"/g, (_, inner: string) =>
-      /^[$\x60]/.test(inner) ? '"$x"' : '""',
+      EXPANSION.test(inner.replace(/\\./g, "")) ? '"$x"' : '""',
     );
 }
 
@@ -374,14 +471,18 @@ function commandOutbound(command: string): Outbound[] {
   for (const line of commandLines(command)) {
     const roles = line.runs.map(roleOf);
     const network = roles.includes("network");
-    const expanded = EXPANDED_PROGRAM.test(unquoted(line.text));
-    const code = line.runs.some(
-      (words, n) => roles[n] === "interpreter" && connects(words, command),
-    );
+    const expanded =
+      EXPANDED_PROGRAM.test(unquoted(line.text)) ||
+      line.runs.some(([lead = ""]) => PATTERNED.test(lead) && !line.text.includes(`${lead})`));
+    const code =
+      expandedCode(line.text) ||
+      line.runs.some((words, n) => roles[n] === "interpreter" && connects(words, command));
     const special = [...line.text.matchAll(SPECIAL_FILE)].map(
       (match) => match[1] ?? match[2] ?? "",
     );
-    if (!network && !expanded && !code && !special.length && !roles.includes("remote")) continue;
+    const hidden = EXPANDED_SPECIAL.test(line.text);
+    if (!network && !expanded && !code && !hidden && !special.length && !roles.includes("remote"))
+      continue;
     let named = addresses(line.text) || LOCAL_NAME.test(line.text);
     for (const host of special) {
       const name = host.toLowerCase();
@@ -392,7 +493,9 @@ function commandOutbound(command: string): Outbound[] {
     }
     for (const match of line.text.matchAll(BARE)) {
       const host = (match[1] ?? "").toLowerCase();
-      if (!reachesName(line, host, match.index)) continue;
+      const after = line.text.slice(match.index + match[0].length);
+      const user = match[0].includes("@") || /^[^\s'"]*@/.test(after);
+      if (!reachesName(line, host, match.index, user)) continue;
       named = true;
       add(reachName(host));
     }
@@ -412,7 +515,7 @@ function commandOutbound(command: string): Outbound[] {
         words.some((word) => GIT_ADDRESSED.test(word)) &&
         /[$`]/.test(line.text),
     );
-    if (code || ((network || expanded || cloned) && !named && !probe)) unnamed = true;
+    if (code || hidden || ((network || expanded || cloned) && !named && !probe)) unnamed = true;
   }
   return [
     ...[...hosts].map(
@@ -506,16 +609,21 @@ function shapeOf(outbound: Outbound): OutboundShape {
   return outbound.text.includes("?") ? "web_address_with_parameters" : "web_address";
 }
 
-// The host as the judge sees it: its owner, with the names below it only when they read as a plain
-// service name (script.google.com), never when they could carry what dot read.
-function judgedName(host: string, taint: TaskTaint): string {
+const SERVICE_LABEL =
+  /^(?:www|m|api|app|apps|docs|drive|mail|inbox|calendar|contacts|maps|script|sites|photos|meet|chat|news|blog|shop|store|support|help|status|login|accounts?|auth|sso|cdn|static|assets|media|images?|files|uploads?|downloads?|storage|cloud|console|dashboard|admin|portal|dev|developers?|beta|mobile|web|search|gist|raw|pages|forum|community|wiki|music|video|translate|play|books|outlook|teams)$/;
+
+// The host as the judge sees it: its owner, with the names below it only when each is a common
+// service name (script.google.com) or a word of the request or plan, so never what dot read.
+function judgedName(host: string, purpose: Purpose): string {
   const owner = ownerOfHost(host);
   if (!owner || owner === host) return host;
-  const below = host.slice(0, -owner.length - 1);
-  const labels = below.split(".");
-  const plain =
-    labels.length <= 2 && labels.every((label) => /^[a-z]{1,20}(?:-[a-z]{1,20})?$/.test(label));
-  return plain && !taint.overlap(labels.join(" ")).overlaps ? host : owner;
+  const words = new Set(
+    [...purpose.request, ...purpose.plan].flatMap((text) =>
+      text.toLowerCase().split(/[^a-z0-9-]+/),
+    ),
+  );
+  const labels = host.slice(0, -owner.length - 1).split(".");
+  return labels.every((label) => SERVICE_LABEL.test(label) || words.has(label)) ? host : owner;
 }
 
 export interface PurposeGateDeps {
@@ -601,7 +709,9 @@ export class PurposeGate {
         hosts.catch(() => {});
         this.#derived = { key, hosts };
       }
-      const derived = await this.#derived.hosts;
+      const derived = (await this.#derived.hosts)
+        .map((named) => named.toLowerCase().replace(/\.$/, ""))
+        .filter((named) => ownerOfHost(named));
       if (derived.some((named) => covers(named, host))) {
         this.#judged.set(host, true);
         return undefined;
@@ -612,7 +722,7 @@ export class PurposeGate {
             purpose,
             {
               kind: outbound.kind,
-              destination: judgedName(host, taint),
+              destination: judgedName(host, purpose),
               method: METHOD[outbound.kind],
               bytes: Buffer.byteLength(outbound.text),
               shape: shapeOf(outbound),

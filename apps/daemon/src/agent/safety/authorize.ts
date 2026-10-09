@@ -193,11 +193,11 @@ export async function authorizePrepared(
                 ["Destination", purpose.destinations.join("\n") || "Not named in this step"],
                 ...draft.fields,
               ],
-              // A yes reaches these hosts for this task, or this site; never every site. One for a
-              // host nothing names covers only this step.
+              // A yes reaches these hosts for this task, never a kind of step. One for a host
+              // nothing names covers only this step.
               always: purpose.destinations.length
                 ? alwaysOptions(decision.actionClass, acting, ctx.redact).filter(
-                    (option) => option.scope !== "always",
+                    (option) => option.scope === "task",
                   )
                 : [],
             }
