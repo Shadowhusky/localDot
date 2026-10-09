@@ -1,8 +1,8 @@
 import { chmod, mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { availableInstallDisk, installDockerSocket } from "./host-probes.ts";
+import { availableInstallDisk, defaultDockerSockets, installDockerSocket } from "./host-probes.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -62,4 +62,16 @@ it("a missing explicitly selected socket is not replaced with another engine", a
       new AbortController().signal,
     ),
   ).rejects.toThrow("Configured Docker socket unavailable");
+});
+it("looks for the system, rootless and Docker Desktop sockets on Linux, and keeps macOS's two", () => {
+  expect(defaultDockerSockets("linux", { XDG_RUNTIME_DIR: "/run/user/1000" })).toEqual([
+    "/var/run/docker.sock",
+    "/run/user/1000/docker.sock",
+    join(homedir(), ".docker/desktop/docker.sock"),
+  ]);
+  expect(defaultDockerSockets("linux", { XDG_RUNTIME_DIR: "relative/run" })).toHaveLength(2);
+  expect(defaultDockerSockets("darwin", { XDG_RUNTIME_DIR: "/run/user/1000" })).toEqual([
+    join(homedir(), ".docker/run/docker.sock"),
+    "/var/run/docker.sock",
+  ]);
 });
