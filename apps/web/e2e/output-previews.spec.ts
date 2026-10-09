@@ -253,9 +253,13 @@ for (const width of [1280, 390]) {
       ),
     ).toBe(0);
     const rail = await showActivity(page);
+    // The plan unfolds from its strip, and folds back.
+    const strip = rail.getByRole("button", { name: /^Plan/ });
+    await strip.click();
     await expect(rail.getByRole("list", { name: "Task plan" })).toContainText(
       "Calculate monthly totals",
     );
+    await strip.click();
     const trigger = page.getByRole("button", { name: /Check report/ });
     await trigger.click();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");

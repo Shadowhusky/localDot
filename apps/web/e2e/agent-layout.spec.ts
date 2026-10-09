@@ -243,6 +243,7 @@ test("desktop, tablet, phone, keyboard and 200 percent zoom keep the stage, rail
       await expect(views).toHaveCount(0);
       await page.getByRole("button", { name: "Activity", exact: true }).click();
       const sheet = page.getByRole("dialog", { name: "Activity" });
+      await sheet.getByRole("button", { name: /^Plan/ }).click();
       await expect(sheet.getByRole("list", { name: "Task plan" })).toContainText(
         "Calculate monthly totals",
       );
