@@ -87,6 +87,8 @@ export interface Delivery {
   readonly draftText: string;
   readonly attachmentIDs: readonly number[];
   readonly files: readonly string[];
+  // The file the composer was revising when this was sent.
+  readonly revising: ReviseDraft | null;
   // When it was sent, as its row will say: while dot worked, or for after the task.
   readonly tag?: string;
   // Your messages the thread already had, so the arrival of this one can be told apart.
@@ -395,7 +397,7 @@ export function Composer(props: ComposerProps) {
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
     announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
-    if (linkFor(record.draftText, revisingNow.current)) setRevising(null);
+    if (record.revising === revisingNow.current) setRevising(null);
     uploads.acknowledge(record.attachmentIDs);
     const input = field();
     if (revision.current === record.revision && input && input.value === record.draftText) {
@@ -438,7 +440,7 @@ export function Composer(props: ComposerProps) {
   const perform = async (
     request: TextDelivery,
     capturedRevision: number,
-    shown: Pick<Delivery, "draftText" | "attachmentIDs" | "files" | "tag">,
+    shown: Pick<Delivery, "draftText" | "attachmentIDs" | "files" | "revising" | "tag">,
   ) => {
     if (pending.current) return;
     const capturedApi = current.current.api;
@@ -531,14 +533,15 @@ export function Composer(props: ComposerProps) {
       return;
     }
     // A revision goes to the revise route when the task has ended, or when it revises an older
-    // version of an open task: a follow-up would make dot edit the newest file instead.
+    // version or an earlier task's file: a follow-up would make this task edit its own file.
     const draft = revisingNow.current;
     const link = linkFor(text, draft);
-    if (link && chosen === "steer" && !draft?.newest) {
+    const elsewhere = !!link && (!draft?.newest || link.sessionId !== now.agent.sessionId);
+    if (elsewhere && chosen !== "new" && now.agent.snapshot?.status !== "idle") {
       setProblem(`Wait for dot to finish, then revise v${draft?.label}.`);
       return;
     }
-    if (link && (chosen === "new" || (chosen === "followup" && !draft?.newest))) {
+    if (link && (chosen === "new" || elsewhere)) {
       deliver(text, "new", false, link);
       return;
     }
@@ -603,6 +606,7 @@ export function Composer(props: ComposerProps) {
         draftText: text,
         attachmentIDs: attached.map((row) => row.id),
         files: attached.map((row) => fileName(row.path)),
+        revising: revisingNow.current,
         tag:
           chosen === "steer"
             ? "Sent while working"
@@ -636,6 +640,7 @@ export function Composer(props: ComposerProps) {
       draftText: previous.draftText,
       attachmentIDs: previous.attachmentIDs,
       files: previous.files,
+      revising: previous.revising,
       tag: previous.tag,
     });
   };

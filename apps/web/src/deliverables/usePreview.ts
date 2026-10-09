@@ -1,5 +1,5 @@
 import type { JsonPreview } from "@localdot/protocol";
-import { type RefObject, useEffect, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { loadPreview } from "./api.ts";
 
@@ -49,7 +49,11 @@ export function slot(signal: AbortSignal): Promise<() => void> {
   });
 }
 
+type Loaded = Extract<PreviewState, { state: "image" | "ready" }>;
+
 // Loads a file's preview once its element is within 200 px of the viewport, and only while shown.
+// Closing keeps what is shown while the file folds away; each version loads once and keeps its
+// picture until the file leaves the page.
 export function usePreview(
   api: ApiClient,
   target: RefObject<Element | null>,
@@ -59,28 +63,47 @@ export function usePreview(
   shown: boolean,
   attempt: number,
 ): PreviewState {
-  const [state, setState] = useState<PreviewState>({ state: "waiting" });
+  const key = `${sessionId}/${name}/${version ?? 0}/${attempt}`;
+  const loaded = useRef(new Map<string, Loaded>());
+  const [state, setState] = useState<{ key: string; state: PreviewState }>({
+    key,
+    state: { state: "waiting" },
+  });
   useEffect(() => {
-    void attempt;
+    const kept = loaded.current;
+    return () => {
+      for (const entry of kept.values())
+        if (entry.state === "image") URL.revokeObjectURL(entry.url);
+      kept.clear();
+    };
+  }, []);
+  useEffect(() => {
     if (!shown) return;
+    const known = loaded.current.get(key);
+    const next = known ?? { state: "waiting" as const };
+    setState((was) =>
+      was.key === key && was.state.state === next.state ? was : { key, state: next },
+    );
+    if (known) return;
     const controller = new AbortController();
-    let url: string | undefined;
     let release: (() => void) | undefined;
     const load = async () => {
       release = await slot(controller.signal);
       if (controller.signal.aborted) return;
-      setState({ state: "loading" });
-      const loaded = await loadPreview(api, sessionId, name, version, controller.signal);
+      setState({ key, state: { state: "loading" } });
+      const preview = await loadPreview(api, sessionId, name, version, controller.signal);
       if (controller.signal.aborted) return;
-      if (loaded.kind === "image") {
-        url = URL.createObjectURL(loaded.blob);
-        setState({ state: "image", url, madeBy: loaded.madeBy });
-      } else setState({ state: "ready", preview: loaded });
+      const done: Loaded =
+        preview.kind === "image"
+          ? { state: "image", url: URL.createObjectURL(preview.blob), madeBy: preview.madeBy }
+          : { state: "ready", preview };
+      loaded.current.set(key, done);
+      setState({ key, state: done });
     };
     const start = () =>
       load()
         .catch(() => {
-          if (!controller.signal.aborted) setState({ state: "error" });
+          if (!controller.signal.aborted) setState({ key, state: { state: "error" } });
         })
         .finally(() => release?.());
     const observer =
@@ -100,9 +123,8 @@ export function usePreview(
       observer?.disconnect();
       controller.abort();
       release?.();
-      if (url) URL.revokeObjectURL(url);
-      setState({ state: "waiting" });
     };
-  }, [api, target, sessionId, name, version, shown, attempt]);
-  return state;
+  }, [api, target, sessionId, name, version, shown, key]);
+  if (state.key === key) return state.state;
+  return loaded.current.get(key) ?? { state: "waiting" };
 }

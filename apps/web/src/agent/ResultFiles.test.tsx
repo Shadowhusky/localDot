@@ -239,6 +239,16 @@ describe("the result card", () => {
     expect(downloadsOf(fetchImpl).map((url) => url.split("/").at(-1))).toEqual(["a.txt", "b.txt"]);
   });
 
+  it("still lists a result's files, with nothing to do, when its task is gone", () => {
+    function Gone() {
+      const downloads = useResultDownloads(null, null, results);
+      return <ResultCard result={results[0] as AgentResult} downloads={downloads} />;
+    }
+    render(<Gone />);
+    const download = screen.getByRole("button", { name: "Download report.html" });
+    expect(download.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("12 bytes")).toBeTruthy();
+  });
   it("offers a replay of the task only when given one", () => {
     const onReplay = vi.fn();
     const result = { id: "r", summary: "Done", files: [] };

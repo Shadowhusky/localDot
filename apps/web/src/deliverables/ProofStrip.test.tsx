@@ -17,29 +17,37 @@ const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 const R = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0R";
 const F = (n: number) => `01J9ZQ3V8Y7X6W5T4S3R2Q1PF${n}`;
 afterEach(cleanup);
-const proofReply = (recording: string, checked: string | null) => ({
+const FRAMES = [
+  { role: "start", frameId: F(1), tMs: 0 },
+  { role: "change", frameId: F(2), tMs: 40_000 },
+  { role: "end", frameId: F(3), tMs: 101_000 },
+];
+const proofReply = (recording: string, checked: string | null, frames = FRAMES) => ({
   recording,
   results: [
     {
       resultId: R,
-      frames: [
-        { role: "start", frameId: F(1), tMs: 0 },
-        { role: "change", frameId: F(2), tMs: 40_000 },
-        { role: "end", frameId: F(3), tMs: 101_000 },
-      ],
+      frames,
       checked,
       startMs: 0,
       endMs: 102_000,
     },
   ],
 });
-function strip(recording: string, checked: string | null) {
+function strip(
+  recording: string,
+  checked: string | null,
+  frames = FRAMES,
+  answered: Promise<void> = Promise.resolve(),
+) {
   const api = createApi("a".repeat(43), {
     origin: "http://127.0.0.1:4750",
-    fetchImpl: async (url) =>
-      String(url).endsWith("/proof")
-        ? Response.json(proofReply(recording, checked))
-        : new Response(new Uint8Array([1]), { headers: { "content-type": "image/webp" } }),
+    fetchImpl: async (url) => {
+      if (!String(url).endsWith("/proof"))
+        return new Response(new Uint8Array([1]), { headers: { "content-type": "image/webp" } });
+      await answered;
+      return Response.json(proofReply(recording, checked, frames));
+    },
   });
   function Strip() {
     return <ProofStrip api={api} sessionId={ID} resultId={R} proof={useProof(api, ID, 1)} />;
@@ -59,6 +67,26 @@ describe("proof strip", () => {
     await screen.findByRole("button", { name: "Watch replay (1:42)" });
     expect(screen.queryByRole("button", { name: "Export proof video" })).toBeNull();
     expect(screen.queryByText(/^Checked:/)).toBeNull();
+  });
+  it("holds no room for frames before the answer, so a result without any never jumps", async () => {
+    let answer = () => {};
+    const { container } = strip(
+      "complete",
+      null,
+      [],
+      new Promise<void>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await act(async () => {});
+    expect(container.querySelector(".proof-frames")).toBeNull();
+    answer();
+    await screen.findByRole("button", { name: "Watch replay (1:42)" });
+    expect(container.querySelector(".proof-frames")).toBeNull();
+  });
+  it("offers Export proof video for a turn without screenshots, since the recording covers it", async () => {
+    strip("complete", null, []);
+    expect(await screen.findByRole("button", { name: "Export proof video" })).toBeTruthy();
   });
   it("opens Replay at the frame's moment, and Export at this result's part of the recording", async () => {
     strip("complete", null);

@@ -1244,6 +1244,48 @@ describe("revising a result file", () => {
     await waitFor(() => expect(f.requests).toHaveLength(1));
     expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/files/totals.csv/revise`);
   });
+  it("revises an earlier task's newest file in a new task linked to it, not as a follow-up", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }), {
+      agent: idle,
+      configured: true,
+    });
+    act(() => {
+      requestRevise({ link: { ...link, sessionId: otherSession }, label: 1, newest: true });
+    });
+    f.input("Revise totals.csv: add a total row");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${otherSession}/files/totals.csv/revise`,
+      body: { cellId, version: 1, text: "Revise totals.csv: add a total row" },
+    });
+  });
+  it("asks to wait before revising an earlier task's file while dot is working", async () => {
+    const f = setup();
+    act(() => {
+      requestRevise({ link: { ...link, sessionId: otherSession }, label: 2, newest: true });
+    });
+    f.input("Revise totals.csv: x");
+    f.submit();
+    expect(await screen.findByText("Wait for dot to finish, then revise v2.")).toBeTruthy();
+    expect(f.requests).toEqual([]);
+  });
+  it("lets the revising chip go once a message that no longer names the file is sent", async () => {
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(undefined, { agent: idle });
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    f.input("Thanks, that's all");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop revising totals.csv" })).toBeNull(),
+    );
+  });
   it("asks to wait before revising an older version while dot is working", async () => {
     const f = setup();
     act(() => {

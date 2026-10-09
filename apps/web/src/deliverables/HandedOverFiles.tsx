@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import { useResultDownloads } from "../agent/ResultFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
-import { Card } from "../ui/Card.tsx";
 import { DeliverableFile } from "./DeliverableFile.tsx";
 
 type Handed = { result: AgentResult; file: AgentResult["files"][number] };
@@ -18,7 +17,7 @@ export function latestFiles(results: readonly AgentResult[]): Handed[] {
   return [...latest.values()];
 }
 
-// The files a task handed over, in Activity: the same rows as in its result, closed.
+// The files a task handed over, in Activity: the same rows as in its result, closed and flat.
 export function HandedOverFiles({
   api,
   sessionId,
@@ -33,21 +32,19 @@ export function HandedOverFiles({
   const downloads = useResultDownloads(api, sessionId, results);
   const files = useMemo(() => latestFiles(results), [results]);
   return (
-    <Card variant="file" className="activity-deliverables">
-      <ul className="deliverables" aria-label="Handed over">
-        {files.map(({ result, file }) => (
-          <DeliverableFile
-            key={`${result.id}/${file.name}`}
-            api={api}
-            sessionId={result.sessionId ?? sessionId}
-            resultId={result.id}
-            file={file}
-            downloads={downloads}
-            refresh={results.length}
-            onMac={onMac}
-          />
-        ))}
-      </ul>
-    </Card>
+    <ul className="deliverables activity-deliverables" aria-label="Handed over">
+      {files.map(({ result, file }) => (
+        <DeliverableFile
+          key={`${result.id}/${file.name}`}
+          api={api}
+          sessionId={result.sessionId ?? sessionId}
+          resultId={result.id}
+          file={file}
+          downloads={downloads}
+          refresh={results.length}
+          onMac={onMac}
+        />
+      ))}
+    </ul>
   );
 }

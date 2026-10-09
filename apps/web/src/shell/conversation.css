@@ -982,10 +982,6 @@
   min-width: 0;
 }
 
-.proof-bone {
-  aspect-ratio: 8 / 5;
-}
-
 .proof-caption {
   color: var(--color-fg-3);
   font:

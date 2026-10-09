@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { count } from "../copy/format.ts";
+import { bytes, count } from "../copy/format.ts";
 import { downloadVersion, isLoopbackPage } from "../deliverables/api.ts";
 import { DeliverableFile } from "../deliverables/DeliverableFile.tsx";
 import { ProofStrip, proofOf } from "../deliverables/ProofStrip.tsx";
@@ -16,6 +16,7 @@ import { opensAtFirst } from "../deliverables/versions.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card, FileRow } from "../ui/Card.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
 
@@ -308,7 +309,7 @@ export function ResultCard({
   return (
     <section className="result-card" aria-label="Task result">
       <p className="result-summary">{result.summary}</p>
-      {files.length > 0 && api && task && (
+      {files.length > 0 && (
         <Card variant="file" className="result-files">
           {downloadAll && (
             <div className="deliverables-head">
@@ -318,7 +319,7 @@ export function ResultCard({
           )}
           <ul className="deliverables" aria-label={`Files in result ${result.id}`}>
             {files.map((file, index) =>
-              valid(file) ? (
+              valid(file) && api && task ? (
                 <DeliverableFile
                   key={`${file.name}/${file.version ?? 0}`}
                   api={api}
@@ -334,6 +335,21 @@ export function ResultCard({
                   onMac={onMac}
                   revisable={revisable}
                 />
+              ) : valid(file) ? (
+                // Without its task the file is still listed, with nothing it can do.
+                <li key={file.name} className="deliverable">
+                  <FileRow
+                    name={file.name}
+                    meta={bytes(file.bytes)}
+                    actions={
+                      <IconButton
+                        icon="download"
+                        label={`Download ${file.name}`}
+                        disabledReason="This task is no longer available."
+                      />
+                    }
+                  />
+                </li>
               ) : (
                 // biome-ignore lint/suspicious/noArrayIndexKey: an unsafe name is never shown or used as a key.
                 <li key={index} className="deliverable">

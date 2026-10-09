@@ -5,7 +5,6 @@ import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { Skeleton } from "../ui/Skeleton.tsx";
 import { ThumbnailButton } from "../ui/Thumbnail.tsx";
 import { openReplay } from "./replay-link.ts";
 import type { ProofState } from "./useProof.ts";
@@ -45,33 +44,31 @@ export function ProofStrip({
   end?: ReactNode;
 }) {
   const entry = proofOf(proof, resultId);
-  const loading = proof.state === "loading";
+  // The recording covers the whole turn, screenshots or not; under a second there is nothing to see.
   const exportable =
-    proof.state === "ready" && EXPORTABLE.has(proof.proof.recording) && !!entry?.frames.length;
+    proof.state === "ready" &&
+    EXPORTABLE.has(proof.proof.recording) &&
+    !!entry &&
+    entry.endMs - entry.startMs >= 1000;
   const frames = entry?.frames ?? [];
+  // Nothing is held for frames until the answer says there are some: most results have none.
   return (
     <section className="proof" aria-label="Proof">
-      {(loading || frames.length > 0) && (
+      {frames.length > 0 && (
         <ol className="proof-frames">
-          {loading
-            ? ["start", "change", "end"].map((role) => (
-                <li key={role} className="proof-frame">
-                  <Skeleton loading shape="block" width="100%" className="proof-bone" />
-                </li>
-              ))
-            : frames.map((frame) => (
-                <li key={frame.frameId} className="proof-frame">
-                  <ThumbnailButton
-                    label={WATCH[frame.role]}
-                    onClick={() => openReplay(sessionId, { tMs: frame.tMs })}
-                  >
-                    <ReplayImage api={api} sessionId={sessionId} frameId={frame.frameId} />
-                  </ThumbnailButton>
-                  <span className="proof-caption" aria-hidden="true">
-                    {ROLE[frame.role]}
-                  </span>
-                </li>
-              ))}
+          {frames.map((frame) => (
+            <li key={frame.frameId} className="proof-frame">
+              <ThumbnailButton
+                label={WATCH[frame.role]}
+                onClick={() => openReplay(sessionId, { tMs: frame.tMs })}
+              >
+                <ReplayImage api={api} sessionId={sessionId} frameId={frame.frameId} />
+              </ThumbnailButton>
+              <span className="proof-caption" aria-hidden="true">
+                {ROLE[frame.role]}
+              </span>
+            </li>
+          ))}
         </ol>
       )}
       {entry?.checked && (
