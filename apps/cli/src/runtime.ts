@@ -11,7 +11,8 @@ import { type DefaultContext, runDefault } from "./install/default.ts";
 import { runInstalledDoctor } from "./install/doctor.ts";
 import { runDown } from "./install/down.ts";
 import { runLogs } from "./install/logs.ts";
-import { runUp } from "./install/up.ts";
+import { runStartAtLogin } from "./install/start-at-login.ts";
+import { runUp, type UpOptions } from "./install/up.ts";
 import { runUpdate, type UpdateContext } from "./install/update.ts";
 import { runResetComputer } from "./reset-computer.ts";
 
@@ -31,7 +32,16 @@ export interface ConsoleIO {
 export interface Runtime {
   context(input: CommandContextInput): Promise<RuntimeContext>;
   default(context: DefaultContext, io: ConsoleIO): Promise<number>;
-  up(context: Pick<RuntimeContext, "home" | "signal">, io: ConsoleIO): Promise<number>;
+  up(
+    context: Pick<RuntimeContext, "home" | "signal">,
+    io: ConsoleIO,
+    options?: UpOptions,
+  ): Promise<number>;
+  startAtLogin(
+    context: Pick<RuntimeContext, "home" | "signal">,
+    operation: "on" | "off" | "status",
+    io: ConsoleIO,
+  ): Promise<number>;
   update(context: UpdateContext, io: ConsoleIO): Promise<number>;
   down(context: Pick<RuntimeContext, "home" | "signal">, io: ConsoleIO): Promise<number>;
   logs(
@@ -53,6 +63,7 @@ export const runtime: Runtime = {
   context: resolveCommandContext,
   default: runDefault,
   up: runUp,
+  startAtLogin: runStartAtLogin,
   update: runUpdate,
   down: runDown,
   logs: runLogs,

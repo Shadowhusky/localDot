@@ -6,7 +6,8 @@ export type Command =
   | { kind: "version" }
   | { kind: "open" }
   | { kind: "down" }
-  | { kind: "up" }
+  | { kind: "up"; atLogin?: true; fromLogin?: true }
+  | { kind: "start-at-login"; operation: "on" | "off" | "status" }
   | { kind: "update"; version?: string }
   | { kind: "logs"; follow: boolean }
   | { kind: "stop"; cellId?: string }
@@ -52,6 +53,17 @@ export function parseArgs(args: readonly string[]): Command | undefined {
           : "preview",
       ...(requestId ? { requestId } : {}),
     };
+  }
+  if (args[0] === "up" && args.length === 2) {
+    if (args[1] === "--at-login") return { kind: "up", atLogin: true };
+    if (args[1] === "--from-login") return { kind: "up", fromLogin: true };
+    return undefined;
+  }
+  if (args[0] === "start-at-login") {
+    const operation = args[1];
+    if (args.length !== 2 || (operation !== "on" && operation !== "off" && operation !== "status"))
+      return undefined;
+    return { kind: "start-at-login", operation };
   }
   if (args.length === 1) {
     switch (args[0]) {
@@ -99,6 +111,9 @@ export const HELP = `localDot — local computer agent
 Usage:
   localdot                      Install or start localDot and open the browser
   localdot up                   Start the installed app and print a sign-in link
+  localdot up --at-login        Start localDot and start it again whenever you log in
+  localdot start-at-login on|off|status
+                                Turn start at login on or off, or show it
   localdot update [--to <version>]
                                 Install the latest stable or an exact newer release; keep data
   localdot open                 Print a fresh, single-use sign-in link
