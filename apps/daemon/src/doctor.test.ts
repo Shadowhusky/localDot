@@ -2,10 +2,11 @@ import { createServer } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient, DockerError } from "./cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
-import { runDoctor } from "./doctor.ts";
+import { runDoctor, vaultCheck } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { KeydClient } from "./keyd/client.ts";
 import { type FakeKeyd, startFakeKeyd } from "./keyd/testing/fake-keyd.ts";
+import type { HostPlatform } from "./platform/host.ts";
 
 const images = { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" };
 describe("runDoctor's key layer checks", () => {
@@ -499,5 +500,99 @@ describe("runDoctor's probe network", () => {
     expect(byName(report)["isolated-gateway-mode"]?.detail).toBe(
       "Diagnostic network cleanup could not be confirmed. Check Docker Desktop; no other network was removed.",
     );
+  });
+});
+
+describe("runDoctor on Linux", () => {
+  const linux: HostPlatform = {
+    os: "linux",
+    arch: "x64",
+    user: "ana",
+    wsl: null,
+    systemd: true,
+    desktop: false,
+    linger: false,
+  };
+  const limits = { MemoryLimit: true, SwapLimit: true, CpuCfsQuota: true, PidsLimit: true };
+
+  it("leads with the machine and checks the engine's limits", async () => {
+    fake = await startFakeDocker({ info: { OperatingSystem: "Ubuntu 24.04.1 LTS", ...limits } });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+    });
+    expect(report.checks[0]).toMatchObject({
+      name: "host-platform",
+      ok: true,
+      detail: expect.stringContaining("enable-linger ana"),
+    });
+    expect(byName(report)["docker-limits"]).toMatchObject({ ok: true });
+    expect(report.ok).toBe(true);
+  });
+
+  it("fails an engine that would drop the computers' memory limit", async () => {
+    fake = await startFakeDocker({ info: { ...limits, MemoryLimit: false } });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+    });
+    expect(report.ok).toBe(false);
+    expect(byName(report)["docker-limits"]?.detail).toContain("cgroup_enable=memory");
+  });
+
+  it("says how to update the native engine when internal networks keep a gateway", async () => {
+    fake = await startFakeDocker({ gatewayOnInternal: true, info: limits });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      host: linux,
+    });
+    expect(byName(report)["isolated-gateway-mode"]?.detail).toContain(
+      "Update Docker Engine to version 28 or later",
+    );
+  });
+
+  it("keeps macOS as it was: no machine check and no /info request of its own", async () => {
+    const infoCalls = async (host: typeof linux) => {
+      fake = await startFakeDocker({ info: limits });
+      const report = await runDoctor({
+        docker: new DockerClient(fake.socketPath),
+        images,
+        port: await freePort(),
+        host,
+      });
+      const calls = fake.state.calls.filter((call) => call.path.endsWith("/info")).length;
+      await fake.close();
+      fake = undefined;
+      return { report, calls };
+    };
+    const mac = await infoCalls({ ...linux, os: "macos", desktop: true });
+    expect(mac.report.checks[0]?.name).toBe("docker-socket");
+    expect(byName(mac.report)["docker-limits"]).toBeUndefined();
+    expect((await infoCalls(linux)).calls).toBe(mac.calls + 1);
+  });
+});
+
+describe("vaultCheck", () => {
+  it("says where keys live and how to unlock a passphrase vault", () => {
+    expect(vaultCheck({ backend: "secret-service", state: "ready" })).toEqual({
+      name: "key-vault",
+      ok: true,
+      detail: "Saved keys are kept in your desktop keyring.",
+    });
+    expect(vaultCheck({ backend: "file", state: "ready", key: "tpm" }).detail).toContain("TPM");
+    expect(vaultCheck({ backend: "file", state: "locked", key: "passphrase" })).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("localdot unlock"),
+    });
+    expect(vaultCheck({ backend: "file", state: "setup" })).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("Choose its passphrase"),
+    });
   });
 });

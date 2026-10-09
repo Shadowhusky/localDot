@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import type { HairpinGuard, KeydStatus } from "@localdot/protocol";
+import type { HairpinGuard, KeydStatus, KeydVault } from "@localdot/protocol";
 import {
   compareApiVersions,
   DOCKER_API,
@@ -12,6 +12,13 @@ import { imageVerdict } from "./doctor-image.ts";
 import { runDoctorNetworkProbe } from "./doctor-network.ts";
 import type { DockerSocket } from "./doctor-socket.ts";
 import type { KeydClient } from "./keyd/client.ts";
+import {
+  dockerRuntime,
+  dockerRuntimeChecks,
+  isolationFix,
+  socketFix,
+} from "./platform/docker-runtime.ts";
+import { detectHost, type HostPlatform, hostChecks } from "./platform/host.ts";
 
 export interface DoctorCheck {
   name: string;
@@ -36,6 +43,8 @@ export interface DoctorDeps {
   // How long the first /version may take before the socket counts as not answering.
   versionDeadlineMs?: number;
   keyd?: Pick<KeydClient, "status">;
+  // This machine; detected when absent.
+  host?: HostPlatform;
 }
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
@@ -49,7 +58,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       ok: false,
       checks: [{ name: "interrupted", ok: false, detail: "Diagnostics interrupted." }],
     };
-  const checks = await dockerChecks(deps);
+  const host = deps.host ?? detectHost();
+  const checks = [...hostChecks(host), ...(await dockerChecks(deps, host))];
   if (deps.signal?.aborted) return { ok: false, checks };
   checks.push(await portCheck(deps.port), ...(deps.keyd ? await keydChecks(deps.keyd) : []));
   return { ok: !deps.signal?.aborted && checks.every((c) => c.ok), checks };
@@ -74,7 +84,37 @@ async function keydChecks(keyd: Pick<KeydClient, "status">): Promise<DoctorCheck
       detail: `boot ${status.bootId}, version ${status.version}${audit.ok ? "" : held}`,
     },
     hairpinCheck(status.hairpin ?? { state: "unknown", addresses: 0 }),
+    ...(status.vault && status.vault.backend !== "keychain" ? [vaultCheck(status.vault)] : []),
   ];
+}
+
+// Where saved keys live off macOS, and what to do when they wait for a passphrase.
+export function vaultCheck(vault: KeydVault): DoctorCheck {
+  const name = "key-vault";
+  if (vault.state === "setup")
+    return {
+      name,
+      ok: false,
+      detail:
+        "No keyring here, so saved keys go in an encrypted file. Choose its passphrase: localdot unlock",
+    };
+  if (vault.state === "locked")
+    return {
+      name,
+      ok: false,
+      detail: "Saved keys are locked since this machine restarted. Unlock them: localdot unlock",
+    };
+  const where =
+    vault.backend === "secret-service"
+      ? "in your desktop keyring"
+      : vault.backend === "memory"
+        ? "in memory only, until keyd stops"
+        : vault.key === "tpm"
+          ? "in an encrypted file only this machine's TPM can open"
+          : vault.key === "host"
+            ? "in an encrypted file only this machine can open"
+            : "in an encrypted file, unlocked with your passphrase";
+  return { name, ok: true, detail: `Saved keys are kept ${where}.` };
 }
 
 // Hairpin NAT: a computer that can reach this network's public address reaches the router's own
@@ -105,14 +145,10 @@ function hairpinCheck(guard: HairpinGuard): DoctorCheck {
   };
 }
 
-async function dockerChecks({
-  docker,
-  images,
-  socket,
-  probeNetwork,
-  signal,
-  versionDeadlineMs = 10_000,
-}: DoctorDeps): Promise<DoctorCheck[]> {
+async function dockerChecks(
+  { docker, images, socket, probeNetwork, signal, versionDeadlineMs = 10_000 }: DoctorDeps,
+  host: HostPlatform,
+): Promise<DoctorCheck[]> {
   let v: DockerVersion;
   try {
     const answer = await withDeadline(docker.version(), versionDeadlineMs);
@@ -123,7 +159,8 @@ async function dockerChecks({
     v = answer;
   } catch (err) {
     if (!(err instanceof DockerError && err.status === 400)) {
-      const detail = `${located(docker, socket)}: ${messageOf(err)}`;
+      const fix = socketFix(err, host);
+      const detail = `${located(docker, socket)}: ${messageOf(err)}${fix ? `. ${fix}` : ""}`;
       return [{ name: "docker-socket", ok: false, detail }, ...skipped(ENGINE_CHECKS)];
     }
     // Docker Desktop answers /version at an API version the engine refuses with a 400 and no
@@ -139,6 +176,13 @@ async function dockerChecks({
     ];
   }
   const major = Number(v.Version.split(".")[0]);
+  const runtime =
+    host.os === "macos"
+      ? null
+      : dockerRuntime(
+          await docker.request<unknown>({ method: "GET", path: "/info" }).catch(() => null),
+        );
+  const isolated = await runDoctorNetworkProbe(docker.socketPath, probeNetwork, signal);
   const checks = [
     socketCheck(docker, socket, `Engine ${v.Version}, API ${v.ApiVersion}`),
     {
@@ -151,8 +195,12 @@ async function dockerChecks({
     },
     {
       name: "isolated-gateway-mode",
-      ...(await runDoctorNetworkProbe(docker.socketPath, probeNetwork, signal)),
+      ...isolated,
+      ...(!isolated.ok && runtime
+        ? { detail: `${isolated.detail} ${isolationFix(runtime.flavor)}` }
+        : {}),
     },
+    ...(runtime ? dockerRuntimeChecks(runtime, host) : []),
   ];
   if (signal?.aborted) return [...checks, ...skipped(["image-desktop", "image-gate"])];
   return [

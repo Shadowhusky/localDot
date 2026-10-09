@@ -17,7 +17,8 @@ export type Command =
       operation: "preview" | "reset" | "status";
       requestId?: string;
     }
-  | { kind: "doctor" };
+  | { kind: "doctor" }
+  | { kind: "unlock" };
 
 // Keep the command line finite. In particular, never accept tokens, arbitrary URLs, shell text,
 // or passthrough options. The installer and service lifecycle will extend this explicit grammar.
@@ -80,6 +81,7 @@ export function parseArgs(args: readonly string[]): Command | undefined {
       case "update":
       case "stop":
       case "doctor":
+      case "unlock":
         return { kind: args[0] };
       case "logs":
         return { kind: "logs", follow: false };
@@ -130,6 +132,7 @@ Usage:
   localdot down                 Shut down managed services and computers; keep data
   localdot logs [--follow]       Read recent managed service logs, optionally follow
   localdot doctor               Check the local runtime
+  localdot unlock               Enter the passphrase that protects saved keys (Linux servers)
   localdot --version            Show this build's version
   localdot --help               Show this help
 

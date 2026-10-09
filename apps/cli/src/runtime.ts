@@ -15,6 +15,7 @@ import { runStartAtLogin } from "./install/start-at-login.ts";
 import { runUp, type UpOptions } from "./install/up.ts";
 import { runUpdate, type UpdateContext } from "./install/update.ts";
 import { runResetComputer } from "./reset-computer.ts";
+import { runUnlock, terminalPrompt } from "./unlock.ts";
 
 export interface CommandContextInput {
   home: string;
@@ -58,6 +59,7 @@ export interface Runtime {
     io: ConsoleIO,
   ): Promise<number>;
   doctor(context: RuntimeContext, io: ConsoleIO): Promise<number>;
+  unlock(context: Pick<RuntimeContext, "home" | "signal">, io: ConsoleIO): Promise<number>;
 }
 
 // Imports have no process side effects. Installation and lifecycle commands perform their own
@@ -73,6 +75,8 @@ export const runtime: Runtime = {
   open: runOpenLink,
   stop: runStop,
   resetComputer: runResetComputer,
+  unlock: (context, io) =>
+    runUnlock(context.signal, io, new KeydClient(keydSocketPath(context.home)), terminalPrompt()),
   async doctor(context, io) {
     context.signal.throwIfAborted();
     if (context.installed) return runInstalledDoctor(context, io);

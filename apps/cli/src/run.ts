@@ -68,6 +68,8 @@ export async function runCli(
       if (command.fromLogin) return await runtime.up(context, io, { fromLogin: true });
       return await runtime.up(context, io);
     }
+    if (command.kind === "unlock")
+      return await runtime.unlock({ home: localdotHome(options.env), signal: options.signal }, io);
     if (command.kind === "start-at-login")
       return await runtime.startAtLogin(
         { home: localdotHome(options.env), signal: options.signal },

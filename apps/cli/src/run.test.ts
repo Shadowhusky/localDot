@@ -23,6 +23,7 @@ function fixture(args: string[], env: NodeJS.ProcessEnv = {}) {
     stop: vi.fn(async () => 0),
     resetComputer: vi.fn(async () => 0),
     doctor: vi.fn(async () => 0),
+    unlock: vi.fn(async () => 0),
   };
   return {
     controller,
@@ -108,6 +109,18 @@ describe("operational CLI dispatch", () => {
     expect(await f.run()).toBe(0);
     expect(f.runtime[command as "open" | "stop" | "doctor"]).toHaveBeenCalledWith(
       expect.objectContaining({ port: 4891 }),
+      f.io,
+    );
+  });
+  it("routes unlock to keyd's home without resolving the daemon's context", async () => {
+    const f = fixture(["unlock"], {
+      LOCALDOT_HOME: "/private/test-home",
+      LOCALDOT_PORT: "invalid",
+    });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.context).not.toHaveBeenCalled();
+    expect(f.runtime.unlock).toHaveBeenCalledExactlyOnceWith(
+      { home: "/private/test-home", signal: f.controller.signal },
       f.io,
     );
   });

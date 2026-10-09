@@ -5,6 +5,8 @@ import { isAbsolute, normalize } from "node:path";
 export const DOCKER_API = "v1.47";
 export const DOCKER_TIMEOUT_MS = 30_000;
 
+const DOCKER_APP = process.platform === "darwin" ? "Docker Desktop" : "Docker";
+
 export class DockerError extends Error {
   constructor(
     readonly status: number,
@@ -82,14 +84,10 @@ export class DockerClient {
           err.name === "AbortError"
             ? new DockerError(
                 0,
-                `no reply within ${timeoutMs} ms; is Docker Desktop responding?`,
+                `no reply within ${timeoutMs} ms; is ${DOCKER_APP} responding?`,
                 req.path,
               )
-            : new DockerError(
-                0,
-                `${err.code ?? err.message}; is Docker Desktop running?`,
-                req.path,
-              ),
+            : new DockerError(0, `${err.code ?? err.message}; is ${DOCKER_APP} running?`, req.path),
         );
       let body: string | Buffer | undefined;
       let r: ClientRequest;
