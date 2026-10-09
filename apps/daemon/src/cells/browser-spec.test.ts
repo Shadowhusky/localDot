@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
 import { browserImagesFromEnv } from "./images.ts";
-import { gateSpec, ISOLATED_GATEWAY_OPTION, streamOptions } from "./spec.ts";
+import { desktopSpec, gateSpec, ISOLATED_GATEWAY_OPTION, streamOptions } from "./spec.ts";
 import { sampleBrowserRecord } from "./testing/sample-browser-record.ts";
+import { sampleRecord } from "./testing/sample-record.ts";
 
 describe("persistent browser container isolation", () => {
   it("mounts only the shared sign-in profile and keeps credentials and home ephemeral", () => {
@@ -46,6 +47,26 @@ describe("persistent browser container isolation", () => {
       "localdot.role": "browser",
       "localdot.parent": record.parentCellId,
     });
+  });
+
+  it("gives the computer no mount of the sign-ins and no network shared with the browser", () => {
+    const computer = sampleRecord();
+    const record = { ...sampleBrowserRecord(), parentCellId: computer.id };
+    const desktop = desktopSpec(computer, "desktop-image", streamOptions());
+    const browser = browserSpec(record, "browser-image", streamOptions(), "localdot-accounts");
+    expect(desktop.HostConfig.Mounts).toEqual([
+      { Type: "volume", Source: computer.docker.homeVolume, Target: "/config" },
+    ]);
+    expect(JSON.stringify(desktop)).not.toMatch(/accounts|profile-|remote-debugging/u);
+    expect(desktop.HostConfig).not.toHaveProperty("Binds");
+    expect(desktop.HostConfig).not.toHaveProperty("VolumesFrom");
+    expect(Object.keys(desktop.NetworkingConfig.EndpointsConfig)).not.toContain(
+      browser.HostConfig.NetworkMode,
+    );
+    expect(Object.keys(browser.NetworkingConfig.EndpointsConfig)).toEqual([
+      record.docker.internalNetwork,
+    ]);
+    expect(gateSpec(computer, "gate-image").HostConfig).not.toHaveProperty("Mounts");
   });
 
   it("uses one-shot stdin for bootstrap and exposes neither proxy material nor a debug port", () => {

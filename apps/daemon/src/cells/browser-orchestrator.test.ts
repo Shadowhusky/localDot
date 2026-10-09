@@ -173,6 +173,13 @@ describe("persistent browser lifecycle", () => {
     expect(mounted()).toEqual(
       Array(3).fill([{ Type: "volume", Source: "localdot-test-accounts", Target: "/profile" }]),
     );
+    const holders = f.docker.requests
+      .filter((request) => request.path === "/containers/create")
+      .map((request) => request.body as { Labels: Record<string, string>; HostConfig: object })
+      .filter((spec) => JSON.stringify(spec.HostConfig).includes("localdot-test-accounts"));
+    expect(new Set(holders.map((spec) => spec.Labels["localdot.role"]))).toEqual(
+      new Set(["browser"]),
+    );
   });
 
   it("moves the computer's existing browser profile into the shared one on first start", async () => {
