@@ -569,7 +569,12 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
       mcp.onerror = () => retireConnection(connection);
       mcp.setRequestHandler(ListToolsRequestSchema, () => {
         if (!validOwner() || connection.closed) throw new McpEndpointError();
-        return { tools: [...codexTools(), ...connectorDescriptors(input.session.connectors)] };
+        return {
+          tools: [
+            ...codexTools(undefined, !!input.session.research),
+            ...connectorDescriptors(input.session.connectors),
+          ],
+        };
       });
       mcp.setRequestHandler(CallToolRequestSchema, (req, extra) => {
         const capture = connection.calls.get(extra.requestId);

@@ -1,0 +1,163 @@
+import { useEffect, useState, useSyncExternalStore } from "react";
+import type { ApiClient } from "../lib/api.ts";
+import { modelLanguage } from "./language.ts";
+
+// What the browser's speech recognition offers: on this device, after a one-time download, only
+// through its online service, or nothing.
+export type BrowserSpeech = "local" | "download" | "online" | "none";
+
+export interface VoiceSupport {
+  readonly browser: BrowserSpeech;
+  // The computer's own speech model: every language, English only, or none.
+  readonly mac: "all" | "en" | null;
+}
+
+// Where speech becomes text, in the order of who hears it: this device, the user's own computer,
+// then (only when the user allows it) the browser's online service.
+export type VoiceRoute =
+  | { readonly kind: "device" | "mac" | "online" }
+  | {
+      readonly kind: "none";
+      readonly why: "checking" | "download" | "online-off" | "unsupported";
+    };
+
+export function voiceRoute(
+  support: VoiceSupport | null,
+  online: boolean,
+  language: string,
+): VoiceRoute {
+  if (!support) return { kind: "none", why: "checking" };
+  if (support.browser === "local") return { kind: "device" };
+  if (support.mac === "all" || (support.mac === "en" && modelLanguage(language) === "en"))
+    return { kind: "mac" };
+  if (online && support.browser !== "none") return { kind: "online" };
+  if (support.browser === "download") return { kind: "none", why: "download" };
+  return { kind: "none", why: support.browser === "online" ? "online-off" : "unsupported" };
+}
+
+export interface SpeechResultLike {
+  readonly isFinal: boolean;
+  readonly 0: { readonly transcript: string };
+}
+export interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  processLocally?: boolean;
+  onstart: (() => void) | null;
+  onresult: ((event: { results: ArrayLike<SpeechResultLike> }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+interface LocalOptions {
+  langs: string[];
+  processLocally: boolean;
+}
+export interface SpeechRecognitionCtor {
+  new (): SpeechRecognitionLike;
+  available?(options: LocalOptions): Promise<string>;
+  install?(options: LocalOptions): Promise<boolean>;
+}
+
+export function speechRecognition(): SpeechRecognitionCtor | undefined {
+  const scope = globalThis as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition;
+}
+
+export async function browserSpeech(language: string): Promise<BrowserSpeech> {
+  const recognition = speechRecognition();
+  if (!recognition) return "none";
+  if (typeof recognition.available !== "function") return "online";
+  try {
+    const status = await recognition.available({ langs: [language], processLocally: true });
+    if (status === "available") return "local";
+    return status === "downloadable" || status === "downloading" ? "download" : "online";
+  } catch {
+    return "online";
+  }
+}
+
+export async function macSpeech(api: ApiClient): Promise<VoiceSupport["mac"]> {
+  try {
+    const reply = await api.get<{ onMac?: { available?: boolean; englishOnly?: boolean } }>(
+      "/api/voice",
+    );
+    if (!reply.onMac?.available) return null;
+    return reply.onMac.englishOnly ? "en" : "all";
+  } catch {
+    return null;
+  }
+}
+
+const checked = new Map<string, Promise<VoiceSupport>>();
+// A download changes what the browser can do: every user of the answer asks again.
+let round = 0;
+let downloading = false;
+const listeners = new Set<() => void>();
+const changed = () => {
+  round += 1;
+  for (const listener of listeners) listener();
+};
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+function check(api: ApiClient, language: string): Promise<VoiceSupport> {
+  let found = checked.get(language);
+  if (!found) {
+    found = Promise.all([browserSpeech(language), macSpeech(api)]).then(([browser, mac]) => ({
+      browser,
+      mac,
+    }));
+    checked.set(language, found);
+  }
+  return found;
+}
+
+// The browser's one-time download of on-device speech, which needs a press to start.
+export async function downloadSpeech(language: string) {
+  const recognition = speechRecognition();
+  if (!recognition?.install || downloading) return;
+  downloading = true;
+  changed();
+  try {
+    await recognition.install({ langs: [language], processLocally: true });
+  } catch {
+    // Asked again below: the browser says how far it got.
+  } finally {
+    downloading = false;
+    checked.delete(language);
+    changed();
+  }
+}
+
+// What this browser and computer can do for a language, asked once per page and language.
+export function useVoiceSupport(api: ApiClient, language: string) {
+  const [support, setSupport] = useState<{ language: string; value: VoiceSupport } | null>(null);
+  const asked = useSyncExternalStore(subscribe, () => round);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new round asks again
+  useEffect(() => {
+    let live = true;
+    void check(api, language).then((value) => {
+      if (live) setSupport({ language, value });
+    });
+    return () => {
+      live = false;
+    };
+  }, [api, language, asked]);
+  return {
+    support: support?.language === language ? support.value : null,
+    downloading,
+    download: () => downloadSpeech(language),
+  };
+}

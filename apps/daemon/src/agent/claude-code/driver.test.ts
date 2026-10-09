@@ -2,7 +2,13 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import type { Options, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
-import { MAX_BATCH_STEPS, parseEvent, TOOL_NAMES, type ToolResult, ulid } from "@localdot/protocol";
+import {
+  MAX_BATCH_STEPS,
+  offeredTools,
+  parseEvent,
+  type ToolResult,
+  ulid,
+} from "@localdot/protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -249,7 +255,7 @@ describe("Claude Code driver", () => {
     expect(first[0]).toMatchObject({ type: "text", text: "Draw a dog" });
     expect(first[1]).toMatchObject({ type: "image", source: { media_type: "image/png" } });
     const tools = await (await fake.mcp()).listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
+    expect(tools.tools.map((tool) => tool.name)).toEqual([...offeredTools(false)]);
     await fake.call("shell", { command: "ls" });
     expect(f.dispatch).toHaveBeenLastCalledWith(
       f.session,
@@ -292,7 +298,10 @@ describe("Claude Code driver", () => {
     const result = f.run();
     const fake = await f.started();
     const tools = await (await fake.mcp()).listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual([...TOOL_NAMES, "linear__list_issues"]);
+    expect(tools.tools.map((tool) => tool.name)).toEqual([
+      ...offeredTools(false),
+      "linear__list_issues",
+    ]);
     await fake.call("linear__list_issues", { team: "ENG" });
     expect(f.dispatch).toHaveBeenLastCalledWith(
       f.session,

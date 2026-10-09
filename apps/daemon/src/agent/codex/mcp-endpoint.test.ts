@@ -11,10 +11,17 @@ import {
 import { connect, type Socket } from "node:net";
 import { basename, join } from "node:path";
 import { type CodexTurnEpoch, prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { TOOL_NAMES, type ToolResult, ulid } from "@localdot/protocol";
+import {
+  DEFAULT_RESEARCH_BUDGET,
+  offeredTools,
+  TOOL_NAMES,
+  type ToolResult,
+  ulid,
+} from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { actPolicy } from "../policy.ts";
 import { redactor } from "../redact.ts";
+import { ResearchLog } from "../research.ts";
 import { AgentSession } from "../session.ts";
 import { toolHarness } from "../testing/harness.ts";
 import { dispatchTool } from "../tools/index.ts";
@@ -187,7 +194,7 @@ describe("private Codex MCP capability", () => {
     const tools = (
       reply.result as { tools: { name: string; inputSchema: { properties: object } }[] }
     ).tools;
-    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
+    expect(tools.map((t) => t.name)).toEqual([...offeredTools(false)]);
     expect(
       Object.keys(tools.find((t) => t.name === "computer")?.inputSchema.properties ?? {}),
     ).not.toContain("basedOn");
@@ -207,11 +214,21 @@ describe("private Codex MCP capability", () => {
     f.session.connectors = { specs: [spec], get: () => undefined };
     const reply = await f.c.request("tools/list", {});
     const tools = (reply.result as { tools: { name: string; description: string }[] }).tools;
-    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES, "linear__list_issues"]);
+    expect(tools.map((t) => t.name)).toEqual([...offeredTools(false), "linear__list_issues"]);
     expect(tools.at(-1)).toMatchObject({
       description: spec.description,
       inputSchema: spec.inputSchema,
     });
+  });
+  it("lists the research tool to a research task", async () => {
+    const session = new AgentSession(ulid(), "fixture-cell", "fixture", {
+      append: (_id, event) => event as never,
+    });
+    session.research = new ResearchLog(DEFAULT_RESEARCH_BUDGET, () => {});
+    const f = await fixture({}, false, session),
+      reply = await f.c.request("tools/list", {});
+    const tools = (reply.result as { tools: { name: string }[] }).tools;
+    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
   });
   it("captures one full-frame turn basis, ignores caller basedOn and preserves it after newer results", async () => {
     const f = await fixture();

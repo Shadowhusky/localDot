@@ -289,7 +289,9 @@ export function outboundOf(tool: ToolName | string, input: unknown, facts: RiskF
         text: JSON.stringify(object),
       },
     ];
-  if (tool === "browser_navigate" && typeof object.url === "string") {
+  // A PDF research reads is fetched by its address, as a page is opened.
+  const opens = tool === "browser_navigate" || (tool === "research" && object.op === "pdf");
+  if (opens && typeof object.url === "string") {
     const url = webAddress(object.url);
     const where = url && reach(url);
     if (!where || (where.destination && !where.carried)) return [];

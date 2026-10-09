@@ -1,5 +1,5 @@
 import { GenericComputerInput } from "@localdot/protocol";
-import { workingRules } from "@localdot/protocol/guidance";
+import { researchSection, workingRules } from "@localdot/protocol/guidance";
 import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
@@ -35,6 +35,20 @@ describe("the model's advertised tools and instructions", () => {
     expect(Object.values(tools).every((tool) => tool.execute === undefined)).toBe(true);
     expect(tools.computer?.type).toBe("provider");
     expect(toolSet(binding({ computer: "anthropic-legacy" })).computer).toBeDefined();
+  });
+  it("offers research, with its rules and budget, only to a research task", () => {
+    expect(toolSet(binding()).research).toBeUndefined();
+    expect(toolSet(binding(), true).research?.description).toContain("op report");
+    const today = new Date("2026-10-09T00:00:00Z");
+    const research = systemPrompt(
+      bootConfig({ research: { sources: 30, minutes: 20 } }),
+      binding(),
+      [{ text: "Find the prices", status: "doing" }],
+      today,
+    );
+    expect(research).toContain(researchSection({ sources: 30, minutes: 20 }));
+    expect(research.indexOf("# Research mode")).toBeLessThan(research.indexOf("# Current plan"));
+    expect(systemPrompt(bootConfig(), binding(), [], today)).not.toContain("Research mode");
   });
   it("omits computer for text-only models and describes the selected coordinate space accurately", () => {
     expect(toolSet(binding({ vision: false })).computer).toBeUndefined();
@@ -210,7 +224,7 @@ describe("routine runs", () => {
         },
       },
     ];
-    const tools = toolSet(binding(), connectors);
+    const tools = toolSet(binding(), false, connectors);
     const linear = tools.linear__list_issues;
     expect(linear?.description).toBe("Linear (the user's connected app): List issues.");
     expect(linear?.execute).toBeUndefined();

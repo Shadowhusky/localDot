@@ -441,6 +441,30 @@ describe("configuration validation before explicit save", () => {
       document: { main: { provider: "ollama", model: "custom" } },
     });
   });
+  it("reads 20 sources for 15 minutes in research unless the user chose otherwise", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.research).toEqual({ sources: "20", minutes: "15" });
+    expect(validateForm(d, { main }, providerFixture())).toEqual({ ok: true, document: { main } });
+    d.research = { sources: "40", minutes: "30" };
+    expect(validateForm(d, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, research: { sources: 40, minutes: 30 } },
+    });
+    expect(formOf({ main, research: { sources: 40, minutes: 30 } }).research).toEqual({
+      sources: "40",
+      minutes: "30",
+    });
+    for (const research of [
+      { sources: "2", minutes: "15" },
+      { sources: "20", minutes: "121" },
+      { sources: "", minutes: "15" },
+    ])
+      expect(validateForm({ ...d, research }, { main }, providerFixture())).toEqual({
+        ok: false,
+        problems: ["Research reads 3 to 100 sources for 2 to 120 minutes, in whole numbers."],
+      });
+  });
   it("refuses limits and check-ins it cannot keep, without guessing", () => {
     const d = formOf({ main: { provider: "ollama", model: "custom" } });
     d.spending.on = true;

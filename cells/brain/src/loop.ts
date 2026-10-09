@@ -552,7 +552,7 @@ export class Agent {
           model: this.#model(),
           system: systemPrompt(boot, binding, this.#plan, (this.#o.now ?? (() => new Date()))()),
           messages,
-          tools: toolSet(binding, boot.connectors),
+          tools: toolSet(binding, !!boot.research, boot.connectors),
           maxOutputTokens: binding.maxOutputTokens,
           maxRetries: 0,
           abortSignal: signal,

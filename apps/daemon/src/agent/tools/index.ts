@@ -19,12 +19,7 @@ import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/aut
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
-import {
-  browserNavigateTool,
-  browserReadTool,
-  DESKTOP_FALLBACK,
-  opensInWebBrowser,
-} from "./browser.ts";
+import { browserNavigateTool, browserReadTool, DESKTOP_FALLBACK } from "./browser.ts";
 import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
@@ -37,9 +32,11 @@ import { peopleTool, saveRefusal } from "./people.ts";
 import { updatePlanTool } from "./plan.ts";
 import { recallTool } from "./recall.ts";
 import { rememberTool } from "./remember.ts";
+import { researchRefusal, researchTool, withResearchNote } from "./research.ts";
 import { followUpAtTool, routineTool } from "./routine.ts";
 import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
+import { opensInWebBrowser } from "./web-page.ts";
 import { startWorkClock } from "./work-clock.ts";
 
 export interface DispatchDeps {
@@ -74,6 +71,7 @@ const STEP_KIND: Record<ToolName, string> = {
   done: "think",
   routine: "think",
   follow_up_at: "think",
+  research: "browser",
 };
 
 function blocked(
@@ -253,6 +251,8 @@ async function dispatchAdmitted(
         ? saveRefusal(session, frozen as PeopleInput, deps.tools.people)
         : undefined;
     if (refusal) return { status: 200, result: fail(refusal) };
+    const stopped = researchRefusal(session, name, frozen);
+    if (stopped) return { status: 200, result: fail(stopped) };
     // Public pages open in the web browser, where the user's sign-ins are; local addresses
     // only resolve on the desktop.
     let fellBack = false;
@@ -389,7 +389,11 @@ async function dispatchAdmitted(
       case "follow_up_at":
         result = await followUpAtTool(t, ctx, input);
         break;
+      case "research":
+        result = await researchTool(t, ctx, input);
+        break;
     }
+    result = withResearchNote(session, name, frozen, result);
     // Containment intentionally stopped the session; its terminal refusal has no image/event.
     if (session.stopped)
       return {

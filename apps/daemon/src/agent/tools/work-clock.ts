@@ -9,6 +9,8 @@ import type { AgentSession } from "../session.ts";
 const WORK_MS = 120_000;
 // A connected app that runs on this Mac may first have to start and fetch its program.
 const CONNECTOR_WORK_MS = 300_000;
+// A PDF download and its text, or a report and its PDF.
+const RESEARCH_WORK_MS = 200_000;
 const TICK_MS = 1000;
 
 type WaitingSession = Pick<AgentSession, "pendingApproval" | "controlHeld" | "pendingAsk">;
@@ -57,7 +59,9 @@ export function startWorkClock(
         ? computerWorkMs(input as ComputerAction)
         : isConnectorToolName(tool)
           ? CONNECTOR_WORK_MS
-          : WORK_MS;
+          : tool === "research"
+            ? RESEARCH_WORK_MS
+            : WORK_MS;
   return new WorkClock(
     allowance,
     () =>

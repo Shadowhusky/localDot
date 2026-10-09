@@ -607,9 +607,18 @@
     color: var(--color-void);
   }
 
+  .ui-chip[aria-pressed="true"] > .ui-chip-icon {
+    color: inherit;
+  }
+
   .ui-chip[data-pressed] {
     scale: 0.97;
     transition-duration: var(--dur-press);
+  }
+
+  .ui-chip[aria-disabled="true"] {
+    opacity: var(--opacity-disabled);
+    cursor: default;
   }
 
   .ui-chip:focus-visible {

@@ -18,6 +18,7 @@ import {
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
 import { PlanView } from "../agent/PlanView.tsx";
+import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { usePagedRows } from "../agent/usePagedRows.ts";
@@ -72,6 +73,8 @@ const entryKey = (entry: ActivityEntry) => entry.key;
 // Long enough for a row's detail to finish opening before it is brought into view.
 const REVEAL_AFTER = 300;
 const EMPTY = emptyAgentModel();
+// dot is still at the task, so the user can still change how far it reads.
+const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
 
 function reveal(element: Element | null) {
   element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
@@ -222,6 +225,15 @@ export function ActivityRail({
             )}
             {plan.length > 0 && (
               <PlanView plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+            )}
+            {model.research && sessionId && (
+              <ResearchSources
+                research={model.research}
+                nowMs={replay ? asOfMs : nowMs}
+                working={!replay && !ended && WORKING.has(model.state?.state ?? "")}
+                api={api}
+                sessionId={sessionId}
+              />
             )}
             {cellId && !replay && (
               <BrowserDownloads

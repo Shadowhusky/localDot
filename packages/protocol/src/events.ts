@@ -5,6 +5,7 @@ import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { TaintSource } from "./purpose.ts";
+import { ResearchBudget, ResearchBudgetData, ResearchSourceData } from "./research.ts";
 import {
   MissedPolicy,
   RoutineName,
@@ -62,6 +63,8 @@ export const SessionStart = event(
     origin: SessionOrigin.optional(),
     // The handed-over file this task revises, from a task that has ended.
     revises: ReviseLink.optional(),
+    // The task is research with this budget.
+    research: ResearchBudget.optional(),
   }),
 );
 export const SessionEnd = event(
@@ -493,6 +496,10 @@ export const RoutineProposed = event(
   }),
 );
 
+// Research mode: a source dot read or recorded, by its number, and the budget it works within.
+export const ResearchSource = event("research.source", ResearchSourceData);
+export const ResearchBudgetChange = event("research.budget", ResearchBudgetData);
+
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
   SessionEnd,
@@ -542,6 +549,8 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   ModelSpend,
   SubscriptionUsage,
   RoutineProposed,
+  ResearchSource,
+  ResearchBudgetChange,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
 export type EventType = LocalDotEvent["type"];

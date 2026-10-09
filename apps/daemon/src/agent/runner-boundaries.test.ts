@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import {
   type BootConfig,
   DEFAULT_AUTONOMY,
+  DEFAULT_RESEARCH_BUDGET,
   type KeydRecord,
   RESUME_WAIT_REASON,
   type TaskPricing,
@@ -969,6 +970,42 @@ describe("routine start options", () => {
     expect(h.runner.end(session.id)).toBe(false);
   });
 });
+describe("research mode", () => {
+  it("starts with the user's research budget, records it and tells the brain", async () => {
+    const h = setup({
+      settings: {
+        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+        research: { sources: 8, minutes: 6 },
+      },
+    });
+    const session = await h.runner.start(h.cellId, "Compare heat pumps", undefined, {
+      research: true,
+    });
+    await h.ready();
+    expect(session.research?.budget).toEqual({ sources: 8, minutes: 6 });
+    expect(h.log.read(session.id).find((e) => e.type === "session.start")?.data).toMatchObject({
+      research: { sources: 8, minutes: 6 },
+    });
+    expect(h.boots[0]?.research).toEqual({ sources: 8, minutes: 6 });
+  });
+  it("uses the default budget when none is saved, and stays off unless asked", async () => {
+    const h = setup();
+    const research = await h.runner.start(h.cellId, "Compare heat pumps", undefined, {
+      research: true,
+    });
+    await h.ready();
+    expect(research.research?.budget).toEqual(DEFAULT_RESEARCH_BUDGET);
+    const other = setup();
+    const plain = await other.runner.start(other.cellId, "Book a table");
+    await other.ready();
+    expect(plain.research).toBeUndefined();
+    expect(other.boots[0]?.research).toBeUndefined();
+    expect(
+      other.log.read(plain.id).find((e) => e.type === "session.start")?.data,
+    ).not.toHaveProperty("research");
+  });
+});
+
 describe("revise link", () => {
   it("records the revised file on session.start", async () => {
     const h = setup();

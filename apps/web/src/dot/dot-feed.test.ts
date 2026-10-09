@@ -170,6 +170,8 @@ describe("the tool dot works with", () => {
     expect(of("browser_upload", "Uploading photo.jpg", "browser")).toBe("sending");
     expect(of("find", "Looking for “Save”")).toBe("looking");
     expect(of("recall", "Recall", "think")).toBe("recalling");
+    expect(of("research", "Reading a PDF from iea.org", "browser")).toBe("browsing");
+    expect(of("research", "Writing the report", "file")).toBe("typing");
     expect(of("people", "Look up Mum", "think")).toBe("recalling");
     expect(of("ask_user", "Ask", "ask")).toBe("needs-you");
     expect(toolFor("acting", step(undefined, "", "shell"), undefined)).toBe("terminal");

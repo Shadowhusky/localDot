@@ -181,6 +181,26 @@
                 "version"
               ],
               "additionalProperties": false
+            },
+            "research": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "integer",
+                  "minimum": 3,
+                  "maximum": 100
+                },
+                "minutes": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 120
+                }
+              },
+              "required": [
+                "sources",
+                "minutes"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -2406,7 +2426,8 @@
                 "memory",
                 "upload",
                 "credentials",
-                "unknown"
+                "unknown",
+                "network"
               ]
             },
             "risk": {
@@ -2535,7 +2556,8 @@
                       "task",
                       "site",
                       "app",
-                      "always"
+                      "always",
+                      "destination"
                     ]
                   },
                   "label": {
@@ -2549,6 +2571,11 @@
                   "app": {
                     "type": "string",
                     "maxLength": 128
+                  },
+                  "destination": {
+                    "type": "string",
+                    "maxLength": 262,
+                    "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\\[[0-9a-f:.]+\\]):(?:[1-9]\\d{0,4})$"
                   }
                 },
                 "required": [
@@ -2869,7 +2896,8 @@
                 "task",
                 "site",
                 "app",
-                "always"
+                "always",
+                "destination"
               ]
             },
             "label": {
@@ -2883,6 +2911,11 @@
             "app": {
               "type": "string",
               "maxLength": 128
+            },
+            "destination": {
+              "type": "string",
+              "maxLength": 262,
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\\[[0-9a-f:.]+\\]):(?:[1-9]\\d{0,4})$"
             },
             "actionClass": {
               "type": "string",
@@ -2899,7 +2932,8 @@
                 "memory",
                 "upload",
                 "credentials",
-                "unknown"
+                "unknown",
+                "network"
               ]
             },
             "id": {
@@ -2968,7 +3002,8 @@
                 "task",
                 "site",
                 "app",
-                "always"
+                "always",
+                "destination"
               ]
             },
             "label": {
@@ -2982,6 +3017,11 @@
             "app": {
               "type": "string",
               "maxLength": 128
+            },
+            "destination": {
+              "type": "string",
+              "maxLength": 262,
+              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\\[[0-9a-f:.]+\\]):(?:[1-9]\\d{0,4})$"
             },
             "actionClass": {
               "type": "string",
@@ -2998,7 +3038,8 @@
                 "memory",
                 "upload",
                 "credentials",
-                "unknown"
+                "unknown",
+                "network"
               ]
             },
             "id": {
@@ -4971,6 +5012,158 @@
             "budgetUSD",
             "approvalWindowMinutes",
             "missedPolicy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "research.source"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "passages": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "cited": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "n",
+            "url",
+            "title",
+            "passages"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "research.budget"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "integer",
+              "minimum": 3,
+              "maximum": 100
+            },
+            "minutes": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 120
+            },
+            "stopped": {
+              "type": "string",
+              "enum": [
+                "sources",
+                "time",
+                "user"
+              ]
+            }
+          },
+          "required": [
+            "sources",
+            "minutes"
           ],
           "additionalProperties": false
         }

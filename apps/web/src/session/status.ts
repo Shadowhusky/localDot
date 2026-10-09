@@ -621,3 +621,10 @@ export function statusFor({
     title: `localDot — ${label}`,
   };
 }
+
+// A message just sent shows dot thinking at once, before the task's first word arrives; the task's
+// own status replaces it as soon as it says anything.
+export function withSending(status: Status, sending: boolean): Status {
+  if (!sending || (status.row !== "ready" && status.row !== "done")) return status;
+  return { ...status, row: "thinking", label: "Thinking…", dotPose: "thinking" };
+}

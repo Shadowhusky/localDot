@@ -391,3 +391,18 @@ export function markdownToPlain(text: string): string {
   const now = revealText(line);
   return now.hidden === was.hidden && now.bidi === was.bidi ? line : text;
 }
+
+const ENDS = /[.!?…:;。！？；：]["'”’)\]」』）]*$/u;
+const WIDE_END = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]$/u;
+
+// dot's Markdown as sentences to read aloud: code and tables are left out, since they read badly,
+// and each block ends as a sentence so the voice pauses between them.
+export function markdownToSpeech(text: string): string {
+  return parseMarkdown(text)
+    .blocks.filter((block) => block.kind !== "code" && block.kind !== "table")
+    .flatMap(blockText)
+    .map((piece) => piece.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((piece) => (ENDS.test(piece) ? piece : `${piece}${WIDE_END.test(piece) ? "。" : "."}`))
+    .join(" ");
+}

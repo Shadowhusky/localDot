@@ -33,12 +33,16 @@ import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
+import { useVoice } from "../voice/useVoice.ts";
+import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
 import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
+import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
+import { looksLikeResearch, onResearchRequest, researchWait } from "./research.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
@@ -58,6 +62,8 @@ const TOUCH = "(hover: none) and (pointer: coarse)";
 const NEAR = 7000;
 // An accepted message holds its place in the thread this long at most while its own row arrives.
 const LANDING_MS = 10_000;
+// dot weighs whether a message needs research once typing pauses, never on each keystroke.
+const SUGGEST_MS = 600;
 
 export interface ComposerProps {
   api: ApiClient;
@@ -71,6 +77,8 @@ export interface ComposerProps {
   configured?: boolean;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
+  // A message is on its way (true) or failed to arrive (false), before the task says anything.
+  onSending?(on: boolean): void;
   // While dot waits on a question: a message answers it, or turns it down so dot reads the message
   // and its files.
   reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
@@ -166,12 +174,15 @@ const ComposerField = memo(function ComposerField({
   label,
   placeholder,
   unavailable,
+  listening,
   describedBy,
   events,
 }: {
   label: string;
   placeholder: string;
   unavailable: boolean;
+  // While the user talks, the words land here and the field waits for them.
+  listening: boolean;
   describedBy?: string;
   events: FieldEvents;
 }) {
@@ -184,8 +195,9 @@ const ComposerField = memo(function ComposerField({
       maxRows={8}
       maxLength={LIMIT}
       autoComplete="off"
-      readOnly={unavailable}
+      readOnly={unavailable || listening}
       aria-disabled={unavailable || undefined}
+      aria-busy={listening || undefined}
       aria-describedby={describedBy}
       {...events}
     />
@@ -227,6 +239,12 @@ export function Composer(props: ComposerProps) {
   const problemShown = useRef(problem);
   const [menu, setMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Research mode for the next task, and dot's suggestion to turn it on.
+  const [research, setResearch] = useState(false);
+  const researchNow = useRef(research);
+  researchNow.current = research;
+  const [suggested, setSuggested] = useState(false);
+  const suggestion = useRef(0);
   const form = useRef<HTMLFormElement>(null);
   const more = useRef<HTMLButtonElement>(null);
   const drags = useRef(0);
@@ -305,6 +323,18 @@ export function Composer(props: ComposerProps) {
     if (wasKeysOpen.current && !props.keysOpen) guardOwner.current.cancel();
     wasKeysOpen.current = props.keysOpen;
   }, [props.keysOpen]);
+  useEffect(() => () => window.clearTimeout(suggestion.current), []);
+  // From a phone's More menu: research the message, with the field ready for it.
+  useEffect(
+    () =>
+      onResearchRequest(() => {
+        const input = form.current?.querySelector("textarea");
+        if (!input || input.readOnly || researchWait(current.current.agent)) return;
+        setResearch(true);
+        input.focus();
+      }),
+    [],
+  );
   useEffect(() => {
     mounted.current = true;
     const changed = () => setOnline(navigator.onLine);
@@ -372,6 +402,13 @@ export function Composer(props: ComposerProps) {
     shown.current = next;
     setText(next);
   }, []);
+  const weigh = useCallback((input: HTMLTextAreaElement) => {
+    window.clearTimeout(suggestion.current);
+    suggestion.current = window.setTimeout(
+      () => setSuggested(looksLikeResearch(input.value)),
+      SUGGEST_MS,
+    );
+  }, []);
   // Revise on a file fills the message with the file's name, keeps what was typed and focuses it.
   useEffect(
     () =>
@@ -394,15 +431,47 @@ export function Composer(props: ComposerProps) {
     const input = form.current?.querySelector("textarea");
     if (input) measure(input);
   }, [guard.notice, measure]);
+  // Spoken words land in the field as typed ones do; once final they are checked like a paste.
+  const voice = useVoice({
+    api: props.api,
+    field,
+    enabled: !props.keysOpen && !props.controlBlocked,
+    live: props.layout !== "pill",
+    changed: (input, caret) => {
+      revision.current += 1;
+      if (caret !== undefined) {
+        guardOwner.current.check(input);
+        if (!touch) {
+          input.focus();
+          input.setSelectionRange(caret, caret);
+        }
+        announce("composer", "Your words are in the message.");
+      }
+      measure(input);
+      if (problemShown.current !== null) setProblem(null);
+    },
+  });
+  const talking = voice.state.phase !== "idle";
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
-    announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
+    announce(
+      "composer",
+      record.request.research
+        ? "Research started."
+        : record.request.mode === "new"
+          ? "Task started."
+          : "Sent to dot.",
+    );
+    // Research is for the task it starts; the next message is an ordinary one again.
+    if (record.request.research) setResearch(false);
     if (record.revising === revisingNow.current) setRevising(null);
     uploads.acknowledge(record.attachmentIDs);
     const input = field();
     if (revision.current === record.revision && input && input.value === record.draftText) {
       input.value = "";
       measure(input);
+      window.clearTimeout(suggestion.current);
+      setSuggested(false);
     }
   };
   // An accepted message's stand-in gives way in the same frame its own row arrives in the thread.
@@ -457,6 +526,7 @@ export function Composer(props: ComposerProps) {
     setDelivery(record);
     setProblem(null);
     outbox?.show();
+    current.current.onSending?.(true);
     const owns = (acceptedSession?: string) =>
       mounted.current &&
       pending.current === record &&
@@ -493,6 +563,7 @@ export function Composer(props: ComposerProps) {
       const failure = error instanceof DeliveryFailure ? error : new DeliveryFailure(true);
       const phase = failure.uncertain ? "uncertain" : "refused";
       setDelivery({ ...record, phase });
+      current.current.onSending?.(false);
       announce("composer", failure.uncertain ? "Not sure dot got that." : "Not sent.");
       if (failure.uncertain) pending.current = { ...record, phase };
     } finally {
@@ -501,14 +572,17 @@ export function Composer(props: ComposerProps) {
   };
   const submit = (later = false) => {
     const input = field();
-    if (!input || pending.current || composing.current || replying.current) return;
+    if (!input || pending.current || composing.current || replying.current || talking) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
       return;
     }
     const now = current.current;
-    const chosen = modeFor(now, later ? "followup" : "steer");
+    // Research starts a task of its own; at rest, a conversation's next task continues it.
+    const resting = now.agent.snapshot?.status === "idle" && !later;
+    const asked = modeFor(now, later ? "followup" : "steer");
+    const chosen = researchNow.current && asked === "followup" && resting ? "new" : asked;
     if (chosen === "new" && now.configured === false) {
       now.onSettings?.(input);
       return;
@@ -600,6 +674,7 @@ export function Composer(props: ComposerProps) {
         mode: chosen,
         text: sent,
         ...(revise ? { revise } : {}),
+        ...(chosen === "new" && !revise && researchNow.current ? { research: true as const } : {}),
       },
       revision.current,
       {
@@ -681,6 +756,7 @@ export function Composer(props: ComposerProps) {
         revision.current += 1;
         guardOwner.current.input(event.currentTarget, event.nativeEvent);
         measure(event.currentTarget);
+        weigh(event.currentTarget);
         if (problemShown.current !== null) setProblem(null);
       },
       onPaste: (event) => {
@@ -697,6 +773,7 @@ export function Composer(props: ComposerProps) {
         revision.current += 1;
         guardOwner.current.check(input);
         measure(input);
+        weigh(input);
         if (problemShown.current !== null) setProblem(null);
       },
       onKeyDown: (event) => {
@@ -717,26 +794,28 @@ export function Composer(props: ComposerProps) {
         if (event.currentTarget.value.trim()) submit(event.altKey);
       },
     }),
-    [measure],
+    [measure, weigh],
   );
   const connect = mode === "new" && props.configured === false;
   const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
   const reason = blockedReason(props, online, mode);
-  const sendReason = sending
-    ? "Sending…"
-    : uncertain
-      ? "Choose what to do with your last message first."
-      : guard.notice
-        ? "Discard the key or move it to Keys first."
-        : connect
-          ? "Choose a model first"
-          : (reason ??
-            (uploads.blocked
-              ? "Wait for your files to finish uploading."
-              : text.blank
-                ? "Write a message first."
-                : undefined));
+  const sendReason = talking
+    ? "Finish talking first."
+    : sending
+      ? "Sending…"
+      : uncertain
+        ? "Choose what to do with your last message first."
+        : guard.notice
+          ? "Discard the key or move it to Keys first."
+          : connect
+            ? "Choose a model first"
+            : (reason ??
+              (uploads.blocked
+                ? "Wait for your files to finish uploading."
+                : text.blank
+                  ? "Write a message first."
+                  : undefined));
   const attachReason = guard.notice
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
@@ -744,13 +823,22 @@ export function Composer(props: ComposerProps) {
       : (reason ?? (takeover ? "Add files once you hand back." : undefined));
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
-  const sendLabel = newConversation
-    ? "Start task"
-    : mode === "new"
-      ? "Send"
-      : mode === "followup"
-        ? "Send follow-up"
-        : "Send now";
+  const researchReason =
+    researchWait(props.agent) ?? (props.reply ? "Answer dot's question first." : undefined);
+  const researching = research && !researchReason;
+  // On a phone the line over the field folds away still saying what it last said.
+  const researchLine = !researchReason && (research || suggested);
+  const shownResearch = useRef(research);
+  if (researchLine) shownResearch.current = research;
+  const sendLabel = researching
+    ? "Start research"
+    : newConversation
+      ? "Start task"
+      : mode === "new"
+        ? "Send"
+        : mode === "followup"
+          ? "Send follow-up"
+          : "Send now";
   const note =
     mode === "new" || takeover
       ? undefined
@@ -795,6 +883,7 @@ export function Composer(props: ComposerProps) {
         ref={form}
         className="composer-card"
         data-layout={pill ? "pill" : undefined}
+        data-voice={talking || voice.notice ? "" : undefined}
         aria-label="Message dot"
         data-dragging={dragging || undefined}
         onSubmit={(event) => {
@@ -847,16 +936,30 @@ export function Composer(props: ComposerProps) {
         <Collapse open={rows.length > 0} className="composer-files">
           <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
         </Collapse>
+        {pill && (
+          <Collapse open={researchLine} className="composer-files">
+            <ResearchLine
+              on={shownResearch.current}
+              onToggle={() => {
+                setResearch((on) => !on);
+                field()?.focus();
+              }}
+            />
+          </Collapse>
+        )}
         <ComposerField
           label={newConversation ? "New task" : "Message"}
           placeholder={
-            newConversation && !pill
-              ? "Ask dot to do something"
-              : props.reply
-                ? "Answer dot"
-                : "Message dot"
+            researching
+              ? "What should dot research?"
+              : newConversation && !pill
+                ? "Ask dot to do something"
+                : props.reply
+                  ? "Answer dot"
+                  : "Message dot"
           }
           unavailable={!!unavailable}
+          listening={talking}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}
         />
@@ -870,8 +973,18 @@ export function Composer(props: ComposerProps) {
             onFiles={(files) => uploads.select(files)}
             disabledReason={attachReason}
           />
+          {!pill && (
+            <ResearchToggle
+              on={research}
+              suggested={suggested}
+              disabledReason={researchReason}
+              onToggle={() => setResearch((on) => !on)}
+            />
+          )}
           <div className="composer-hint">
-            {note && <span className="composer-note">{note}</span>}
+            <VoiceStrip voice={voice}>
+              {note && <span className="composer-note">{note}</span>}
+            </VoiceStrip>
           </div>
           <Pop shown={near}>
             {near && (
@@ -907,6 +1020,9 @@ export function Composer(props: ComposerProps) {
               Send after this task
             </MenuItem>
           </Menu>
+          <Pop shown={!pill || text.blank || talking || !!voice.notice}>
+            <VoiceButton voice={voice} size={pill ? 36 : 28} />
+          </Pop>
           <IconButton
             type="submit"
             className="composer-send"

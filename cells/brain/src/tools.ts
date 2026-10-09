@@ -14,9 +14,11 @@ import {
   GenericComputerInput,
   type ModelBinding,
   PeopleInput,
+  RESEARCH_TOOL_DESCRIPTION,
   RecallInput,
   RememberInput,
   RequestTakeoverInput,
+  ResearchInput,
   ROUTINE_TOOL_DESCRIPTION,
   RoutineToolInput,
   ShellInput,
@@ -60,7 +62,11 @@ const findTool = tool({
 
 // The v1 tool table (spec "Tools"). No tool has an execute function:
 // the loop runs every call through the daemon's tool API itself.
-export function toolSet(b: ModelBinding, connectors: readonly ConnectorToolSpec[] = []): ToolSet {
+export function toolSet(
+  b: ModelBinding,
+  research = false,
+  connectors: readonly ConnectorToolSpec[] = [],
+): ToolSet {
   const computer = b.vision ? computerTool(b) : undefined;
   return {
     // The user's connected apps' tools, as the daemon described them; it checks every call.
@@ -147,5 +153,8 @@ export function toolSet(b: ModelBinding, connectors: readonly ConnectorToolSpec[
       description: FOLLOW_UP_TOOL_DESCRIPTION,
       inputSchema: FollowUpAtInput,
     }),
+    ...(research
+      ? { research: tool({ description: RESEARCH_TOOL_DESCRIPTION, inputSchema: ResearchInput }) }
+      : {}),
   };
 }

@@ -17,6 +17,7 @@ import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
+import { requestResearch, researchWait } from "./agent/research.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
@@ -84,7 +85,14 @@ import { RowMenu } from "./routines/RowMenu.tsx";
 import { useRoutines } from "./routines/useRoutines.ts";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
+import {
+  footWork,
+  type HudAction,
+  statusFor,
+  taskFacts,
+  taskHud,
+  withSending,
+} from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
@@ -147,6 +155,13 @@ import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
 import { showToast, Toaster } from "./ui/Toast.tsx";
 import "./app.css";
+import { speechLanguage } from "./voice/language.ts";
+import { useListening } from "./voice/listening.ts";
+import { useVoicePrefs } from "./voice/prefs.ts";
+import { useReadAloud } from "./voice/read-aloud.ts";
+import { useVoiceSupport, voiceRoute } from "./voice/support.ts";
+import { browserLanguages } from "./voice/useVoice.ts";
+import { LISTENING_LINE } from "./voice/words.ts";
 
 export interface AppProps {
   fetchImpl?: typeof fetch;
@@ -303,6 +318,9 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
   link: "expired",
   code: "expired",
 };
+
+// How long a sent message shows dot thinking with no word from the task before the real status returns.
+const SENDING_HOLD_MS = 20_000;
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
@@ -545,6 +563,19 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  // Talking to dot: its listening pose and line, Settings → Voice, and replies read aloud.
+  const hearing = useListening();
+  const voicePrefs = useVoicePrefs();
+  const voiceBrowser = browserLanguages();
+  const voiceLanguage = speechLanguage(voicePrefs.value.language, voiceBrowser);
+  const voiceSupport = useVoiceSupport(api, voiceLanguage);
+  useReadAloud({
+    on: voicePrefs.value.readAloud,
+    sessionId: agent.sessionId,
+    history: !!agent.history,
+    messages: agent.model.messages,
+    language: voiceLanguage,
+  });
   // The conversation the user just chose: its thread clears at once and stays clear until the
   // chosen conversation is the one on show, so the one left behind never draws again.
   const [switching, setSwitching] = useState<{ to: string | null } | null>(null);
@@ -966,7 +997,7 @@ function Theatre({ api }: { api: ApiClient }) {
     !!session.sessionId && (agent.connection === "lost" || agent.availability === "error"),
     LINK_LOST_MS,
   );
-  const appStatus = statusFor({
+  const baseStatus = statusFor({
     computer: {
       ...computer,
       action: {
@@ -1002,6 +1033,19 @@ function Theatre({ api }: { api: ApiClient }) {
       !agent.model.pendingTakeover &&
       !agent.snapshot?.pendingTakeover,
   });
+  // From the moment a message is sent until the task's first word, dot is shown thinking.
+  const [sendingSince, setSendingSince] = useState<number | null>(null);
+  const sendingAnswered = baseStatus.row !== "ready" && baseStatus.row !== "done";
+  useEffect(() => {
+    if (sendingSince === null) return;
+    if (sendingAnswered) {
+      setSendingSince(null);
+      return;
+    }
+    const timer = setTimeout(() => setSendingSince(null), SENDING_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [sendingSince, sendingAnswered]);
+  const appStatus = withSending(baseStatus, sendingSince !== null);
   // The sheets offer Shut down, which the island leaves out; on a phone, where a sheet covers the
   // island, the task's Stop too.
   const sheetStop = appStatus.actions.find(
@@ -1374,8 +1418,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
-  const bandLine = idle ? idle.text : narration;
-  const bandSpeaker = idle ? "dot" : speaker;
+  const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
+  const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
@@ -1556,15 +1600,17 @@ function Theatre({ api }: { api: ApiClient }) {
                     line={bandLine}
                     speaker={bandSpeaker}
                     reveal={!!asked && narration === asked}
-                    forUser={!atWork(appStatus.row)}
+                    forUser={hearing || !atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
-                    idle={!!idle}
+                    idle={!hearing && !!idle}
                     action={
-                      tipAction && {
-                        label: tipAction.label,
-                        run: (trigger) => openTip(tipAction, trigger),
-                      }
+                      hearing || !tipAction
+                        ? undefined
+                        : {
+                            label: tipAction.label,
+                            run: (trigger) => openTip(tipAction, trigger),
+                          }
                     }
                     onHover={setOverBand}
                   />
@@ -1727,6 +1773,12 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: () => setConversationsOpen(true),
                       },
                       {
+                        label: "Research a question",
+                        icon: "library",
+                        disabledReason: researchWait(agent),
+                        run: requestResearch,
+                      },
+                      {
                         label: "Replay",
                         icon: "history",
                         startsGroup: true,
@@ -1826,6 +1878,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 <Composer
                   api={api}
                   cell={cell}
+                  onSending={(on) => setSendingSince(on ? Date.now() : null)}
                   known={status === "known"}
                   pending={pending !== null}
                   controlBlocked={
@@ -1879,6 +1932,15 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
+          voice={{
+            prefs: voicePrefs.value,
+            saved: voicePrefs.saved,
+            change: voicePrefs.change,
+            route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
+            browser: voiceBrowser,
+            downloading: voiceSupport.downloading,
+            download: voiceSupport.download,
+          }}
           stopNote={stopNote}
           stream={streamChoice}
           stop={sheetStopControl}
@@ -1983,6 +2045,11 @@ function Theatre({ api }: { api: ApiClient }) {
           checkIns={
             settings.draft
               ? { value: settings.draft.checkIns, change: settings.checkIn }
+              : undefined
+          }
+          research={
+            settings.draft
+              ? { value: settings.draft.research, change: settings.research }
               : undefined
           }
           purposeCheck={
@@ -2130,9 +2197,11 @@ function Theatre({ api }: { api: ApiClient }) {
                   done: false,
                   nod: setupStep,
                 }
-              : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+              : hearing
+                ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
+                : dotFeed(appStatus, session.sessionId ? session.model : null, now)
           }
-          line={onboarding.open || bandSpeaker !== "dot" ? "" : bandLine}
+          line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
         />
       )}
       <Announcer />

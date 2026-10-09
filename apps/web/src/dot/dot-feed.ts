@@ -139,6 +139,9 @@ function toolOfStep(step: StepState): DotTool | null {
       return "browsing";
     case "browser_upload":
       return "sending";
+    // Research reads PDFs like pages, and writes its report at the keyboard.
+    case "research":
+      return title.startsWith("Writing") ? "typing" : "browsing";
     case "find":
       return "looking";
     case "remember":

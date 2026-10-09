@@ -20,6 +20,7 @@ import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { routeLabel } from "../voice/words.ts";
 import { AccountsSection } from "./AccountsSection.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
@@ -35,7 +36,7 @@ import {
 } from "./choices.ts";
 import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
-import { CheckIns, SpendingLimits } from "./Limits.tsx";
+import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
 import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
@@ -51,7 +52,7 @@ import {
   sectionTitle,
   spendingValue,
 } from "./sections.ts";
-import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
+import type { CheckInKey, CheckInsDraft, ResearchDraft, SpendingDraft } from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
@@ -59,6 +60,7 @@ import type { ConnectorsView } from "./useConnectors.ts";
 import type { NotificationsView } from "./useNotifications.ts";
 import type { RulesView } from "./useRules.ts";
 import type { SignInView } from "./useSignIn.ts";
+import { type VoiceControl, VoiceSection } from "./VoiceSection.tsx";
 import "./settings.css";
 
 export type { SettingsSection } from "./sections.ts";
@@ -76,6 +78,7 @@ export interface SettingsSheetProps {
   sectionRequest?: number;
   appearance?: AppearanceControl;
   showDot?: ShowDotControl;
+  voice?: VoiceControl;
   // How this browser's live view gives way when the connection or the device slows.
   stream?: StreamPreferenceControl;
   choices: Partial<Record<ModelRole, RoleChoice>>;
@@ -113,6 +116,7 @@ export interface SettingsSheetProps {
     value: CheckInsDraft;
     change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
+  research?: { value: ResearchDraft; change(next: ResearchDraft): void };
   purposeCheck?: PurposeCheckControl;
   knowledge?: Knowledge;
   known?: WhatDotKnows;
@@ -268,6 +272,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     props.autonomy,
     props.spending?.value,
     props.checkIns?.value,
+    props.research?.value,
     props.manualPrices,
   ]);
   const canSave = !!props.save?.enabled && !props.error;
@@ -447,6 +452,7 @@ function shownSections(props: SettingsSheetProps, phone = false): SettingsSectio
     rules: !!props.rules,
     spending: !!props.spending && !planMain,
     appearance: !!props.appearance,
+    voice: !!props.voice,
     notifications: !!props.notifications,
     knowledge: !!props.knowledge && !!props.known,
     accounts: !!props.accounts,
@@ -586,6 +592,7 @@ function SectionList({
     rules: countValue(props.rules?.rules.length),
     spending: props.loading ? "" : spendingValue(props.spending?.value, planOnly(props.choices)),
     appearance: props.appearance?.value === "midnight" ? "Midnight" : "Graphite",
+    voice: props.voice ? routeLabel(props.voice.route) : "",
     notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
     connectors:
@@ -621,6 +628,7 @@ function SectionList({
           [
             "spending",
             "appearance",
+            "voice",
             "notifications",
             "knowledge",
             "accounts",
@@ -955,6 +963,9 @@ function SectionContent({
           {props.checkIns && (
             <CheckIns value={props.checkIns.value} onChange={props.checkIns.change} />
           )}
+          {props.research && (
+            <ResearchLimits value={props.research.value} onChange={props.research.change} />
+          )}
         </>
       );
     case "rules":
@@ -1002,6 +1013,8 @@ function SectionContent({
       return props.appearance ? (
         <Appearance appearance={props.appearance} showDot={props.showDot} />
       ) : null;
+    case "voice":
+      return props.voice ? <VoiceSection voice={props.voice} /> : null;
     case "notifications":
       return props.notifications ? <NotificationsSection view={props.notifications} /> : null;
     case "knowledge":

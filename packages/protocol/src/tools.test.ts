@@ -13,7 +13,13 @@ import {
   TranscriptMessage,
 } from "./tool-api.ts";
 import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
-import { GenericComputerInput, isToolName, TOOL_INPUTS, TOOL_NAMES } from "./tools.ts";
+import {
+  GenericComputerInput,
+  isToolName,
+  offeredTools,
+  TOOL_INPUTS,
+  TOOL_NAMES,
+} from "./tools.ts";
 
 const base = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "main" } as const;
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0M";
@@ -39,7 +45,11 @@ describe("the v1 tool table", () => {
       "done",
       "routine",
       "follow_up_at",
+      "research",
     ]);
+    expect(offeredTools(true)).toEqual(TOOL_NAMES);
+    expect(offeredTools(false)).toEqual(TOOL_NAMES.filter((name) => name !== "research"));
+    expect(isToolName("research")).toBe(true);
     expect(isToolName("shell")).toBe(true);
     expect(isToolName("switch_screen")).toBe(true);
     expect(isToolName("browser_upload")).toBe(true);
