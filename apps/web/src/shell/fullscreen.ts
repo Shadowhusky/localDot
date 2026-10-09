@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { placesMoved } from "../dot/places.ts";
 import { matches, REDUCED_MOTION } from "../ui/media.ts";
+import { tokenMs } from "../ui/motion.ts";
 import { STILL_MS } from "./focus.ts";
 
 // Pointer movement this near the screen's top or foot brings full screen's controls back.
@@ -56,13 +57,11 @@ function travel(element: HTMLElement, from: DOMRect) {
   const to = element.getBoundingClientRect();
   if (typeof element.animate !== "function" || !to.width || !to.height) return;
   const style = getComputedStyle(element);
-  const ms = (name: string, fallback: number) =>
-    Number.parseFloat(style.getPropertyValue(name)) || fallback;
   const start = `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
   const run = (easing: string) =>
     matches(REDUCED_MOTION)
       ? element.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: ms("--dur-fade", 150),
+          duration: tokenMs(style, "--dur-fade", 150),
           easing,
         })
       : element.animate(
@@ -70,7 +69,7 @@ function travel(element: HTMLElement, from: DOMRect) {
             { transformOrigin: "0 0", transform: start },
             { transformOrigin: "0 0", transform: "none" },
           ],
-          { duration: ms("--dur-gentle", 670), easing },
+          { duration: tokenMs(style, "--dur-gentle", 670), easing },
         );
   let motion: Animation;
   try {

@@ -18,7 +18,7 @@ import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import type { IconName } from "./icons.ts";
-import { LayerPortal, useBehind, useExit, useLayer } from "./LayerStack.tsx";
+import { LayerPortal, useBehind, useExit, useLayer, useLeaving } from "./LayerStack.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "./media.ts";
 import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
@@ -99,7 +99,8 @@ interface PageView {
 export function Sheet(props: SheetProps) {
   const root = useRef<HTMLDivElement>(null);
   const { mounted, closing } = useExit(props.open, root);
-  return mounted ? <SheetLayer {...props} root={root} closing={closing} /> : null;
+  const shown = useLeaving(props, closing);
+  return mounted ? <SheetLayer {...shown} root={root} closing={closing} /> : null;
 }
 
 function SheetLayer({

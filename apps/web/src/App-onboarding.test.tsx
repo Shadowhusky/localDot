@@ -159,7 +159,9 @@ it("offers one Turn on, on the curtain, with the island hidden under it", async 
             ? { keys: [] }
             : path === "/api/session-index"
               ? { sessions: [], next: null }
-              : [];
+              : path === "/api/conversation"
+                ? { sessions: [], more: false }
+                : [];
     return Response.json(data);
   }) as typeof fetch;
   render(<App fetchImpl={fetchImpl} />);

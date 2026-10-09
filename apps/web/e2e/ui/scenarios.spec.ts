@@ -15,6 +15,8 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   "model-ready": hud("No computer"),
   starting: hud("Starting…"),
   ready: hud("Ready"),
+  "slow-keys": hud("Ready"),
+  conversations: hud("Done"),
   "chatgpt-plan": hud("Ready"),
   running: hud("Select the Net total cell"),
   approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),

@@ -18,6 +18,7 @@ import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { isApple } from "../ui/Kbd.tsx";
+import { Presence } from "../ui/Presence.tsx";
 import { Select } from "../ui/Select.tsx";
 import "./decision.css";
 import { useKeyboardInset } from "./layout.ts";
@@ -297,15 +298,27 @@ function UploadFacts({ upload }: { upload: NonNullable<ApprovalCard["upload"]> }
 
 // A phone's decision: a sheet over the thread at its content's height, so the stage and dot stay
 // in sight above it. It rests on the keyboard while one is up.
-export function DecisionSheet({
-  label,
-  elapsedS,
-  children,
-}: {
+interface DecisionSheetProps {
   label: string;
   elapsedS: number | null;
   children: ReactNode;
-}) {
+}
+
+// A phone's decision rises from the bottom edge and, once answered, sinks back the way it came,
+// still showing what it asked until it has gone.
+export function DecisionSheetPresence({ show, ...sheet }: DecisionSheetProps & { show: boolean }) {
+  const kept = useRef(sheet);
+  if (show) kept.current = sheet;
+  return (
+    <Presence show={show}>
+      <div className="decision-sheet-hold">
+        <DecisionSheet {...kept.current} />
+      </div>
+    </Presence>
+  );
+}
+
+export function DecisionSheet({ label, elapsedS, children }: DecisionSheetProps) {
   const keyboard = useKeyboardInset();
   return (
     <div

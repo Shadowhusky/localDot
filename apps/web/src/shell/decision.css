@@ -251,7 +251,18 @@
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
   background-color: var(--color-overlay);
   box-shadow: var(--shadow-overlay);
-  animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) both;
+  animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) backwards;
+}
+
+/* Answered, it sinks back the way it rose, still showing what it asked. Its holder has no box, so
+   the kit's leaving fade lands on nothing. */
+.decision-sheet-hold {
+  display: contents;
+}
+
+.ui-presence[data-leaving] .decision-sheet {
+  translate: 0 100%;
+  transition: translate var(--dur-sheet-exit) var(--ease-exit);
 }
 
 .decision-sheet[data-keyboard] {
@@ -363,7 +374,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .decision-sheet {
-    animation: decision-sheet-fade var(--dur-fade) var(--ease-standard) both;
+    animation: decision-sheet-fade var(--dur-fade) var(--ease-standard) backwards;
+  }
+
+  .ui-presence[data-leaving] .decision-sheet {
+    opacity: 0;
+    translate: none;
+    transition: opacity var(--dur-exit) var(--ease-exit);
   }
 
   @keyframes decision-sheet-fade {

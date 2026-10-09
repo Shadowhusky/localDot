@@ -66,7 +66,9 @@ export const TopBar = memo(function TopBar({
         {title && (
           <>
             <span className="bar-sep" aria-hidden="true" />
-            <span className="bar-title">{title}</span>
+            <span key={title} className="bar-title">
+              {title}
+            </span>
           </>
         )}
         {note && <span className="title-note">{note}</span>}

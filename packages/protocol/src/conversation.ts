@@ -21,6 +21,28 @@ export type ConversationSnapshot = z.infer<typeof ConversationSnapshot>;
 export const ContinueConversation = z.strictObject({ sessionId: SessionId });
 export type ContinueConversation = z.infer<typeof ContinueConversation>;
 
+export const CONVERSATION_LIST = 50;
+// A recent conversation, named by its latest task: the one a Continue takes up.
+export const ConversationEntry = z.strictObject({
+  sessionId: SessionId,
+  // Its tasks the daemon read, newest first.
+  sessions: z.array(SessionId).min(1).max(CONVERSATION_TASKS),
+  title: z.string().max(200).nullable(),
+  // The first thing the user asked in it.
+  said: z.string().max(200).nullable(),
+  // When its latest task started.
+  startedAt: z.iso.datetime(),
+  // How its latest task ended; null while it runs, or when it was cut short.
+  ended: z.enum(["done", "stopped", "error"]).nullable(),
+});
+export type ConversationEntry = z.infer<typeof ConversationEntry>;
+
+// The recent conversations, newest first.
+export const ConversationList = z.strictObject({
+  conversations: z.array(ConversationEntry).max(CONVERSATION_LIST),
+});
+export type ConversationList = z.infer<typeof ConversationList>;
+
 // What was said before the task, one line per turn ("The user: …", "dot: …"), oldest first.
 export const EarlierTurns = z
   .array(

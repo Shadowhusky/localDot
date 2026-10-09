@@ -9,7 +9,7 @@ import {
   useRef,
 } from "react";
 import { tabbables } from "./focus.ts";
-import { LayerPortal, useExit, useLayer } from "./LayerStack.tsx";
+import { LayerPortal, useExit, useLayer, useLeaving } from "./LayerStack.tsx";
 import { type Align, place, type Side } from "./position.ts";
 
 export interface AnchoredProps {
@@ -66,7 +66,8 @@ function put(element: HTMLElement, target: HTMLElement, side: Side, align: Align
 export function Anchored(props: AnchoredProps) {
   const root = useRef<HTMLDivElement>(null);
   const { mounted, closing } = useExit(props.open, root);
-  return mounted ? <AnchoredLayer {...props} root={root} closing={closing} /> : null;
+  const shown = useLeaving(props, closing);
+  return mounted ? <AnchoredLayer {...shown} root={root} closing={closing} /> : null;
 }
 
 function AnchoredLayer({

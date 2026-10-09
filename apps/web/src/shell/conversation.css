@@ -27,9 +27,21 @@
   display: grid;
 }
 
+/* A tab switch (design-v2 §10.19) crossfades: what goes fades out at once, what comes fades in a
+   beat later, and each keeps its scroll position under the other. */
+.thread-body > :is(.thread-cover, .thread-scroll) {
+  transition:
+    opacity var(--dur-fade) var(--ease-standard) var(--dur-press),
+    visibility 0s;
+}
+
 .thread-body:not([data-covered]) > .thread-cover,
 .thread-body[data-covered] > .thread-scroll {
   visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--dur-text-out) var(--ease-exit),
+    visibility 0s var(--dur-text-out);
 }
 
 .thread-content {
