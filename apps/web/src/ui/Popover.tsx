@@ -23,7 +23,7 @@ export interface AnchoredProps {
   trap: boolean;
   initialFocus(panel: HTMLElement): HTMLElement | undefined;
   panelRef?: RefObject<HTMLDivElement | null>;
-  panelProps: HTMLAttributes<HTMLDivElement>;
+  panelProps: HTMLAttributes<HTMLDivElement> & { [data: `data-${string}`]: string | undefined };
   children: ReactNode;
 }
 
@@ -160,11 +160,20 @@ export interface PopoverProps {
   // A visible heading names the popover; without one, label does.
   title?: ReactNode;
   label?: string;
+  // A panel with a picture in it (an export's preview) takes the wider size.
+  size?: "md" | "lg";
   className?: string;
   children: ReactNode;
 }
 
-export function Popover({ title, label, className, children, ...props }: PopoverProps) {
+export function Popover({
+  title,
+  label,
+  size = "md",
+  className,
+  children,
+  ...props
+}: PopoverProps) {
   const titleId = useId();
   return (
     <Anchored
@@ -178,6 +187,7 @@ export function Popover({ title, label, className, children, ...props }: Popover
         "aria-label": title ? undefined : label,
         "aria-labelledby": title ? titleId : undefined,
         className: clsx("ui-popover", className),
+        "data-size": size,
       }}
     >
       {title && (

@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { saveFixtureModel, search } from "../settings-ui.ts";
 import type { assembledProcess } from "./assembled-process.ts";
 
 export type Assembly = Awaited<ReturnType<typeof assembledProcess>>;
@@ -19,8 +20,8 @@ export async function startSafetyTask(page: Page, f: Assembly) {
   await page.goto(f.url);
   await page.getByTestId("keys-button").click();
   const keys = page.getByRole("dialog", { name: "Keys", exact: true });
-  await keys.getByLabel("Name", { exact: true }).fill("fixture");
-  await keys.getByLabel("Provider", { exact: true }).selectOption("openai-compatible");
+  await keys.getByLabel("Label (optional)", { exact: true }).fill("fixture");
+  await search(page, keys.getByRole("combobox", { name: "Provider" }), "openai-compatible");
   await keys.getByLabel("Base URL", { exact: true }).fill("https://provider.example.test/v1");
   await keys.getByLabel("Key", { exact: true }).fill("task15-local-canary-never-real");
   await keys.getByRole("button", { name: "Save key", exact: true }).click();
@@ -28,19 +29,7 @@ export async function startSafetyTask(page: Page, f: Assembly) {
   await expect(keys.getByLabel("Key", { exact: true })).toHaveValue("");
   await keys.getByRole("button", { name: "Close keys", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Models and settings", exact: true });
-  await settings.getByLabel("main provider", { exact: true }).selectOption("openai-compatible");
-  await settings.getByLabel("main model", { exact: true }).selectOption("fixture-assembled-v1");
-  await settings.getByLabel("main key", { exact: true }).selectOption("fixture");
-  await settings.getByLabel("main Input — USD per million tokens", { exact: true }).fill("1");
-  await settings.getByLabel("main Output — USD per million tokens", { exact: true }).fill("1");
-  await settings
-    .getByRole("checkbox", { name: "Use the configured default", exact: true })
-    .uncheck();
-  await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
-  await settings.getByLabel("Work in its computer", { exact: true }).selectOption("ask");
-  await settings.getByRole("button", { name: "Save settings", exact: true }).click();
-  await expect(settings).toContainText("Saved choices");
+  const settings = await saveFixtureModel(page);
   await settings.getByRole("button", { name: "Close settings", exact: true }).click();
   await page.getByRole("button", { name: "Turn on", exact: true }).first().click();
   await showPane(page, "Conversation");

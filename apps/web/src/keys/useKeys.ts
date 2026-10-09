@@ -4,6 +4,7 @@ import type { ApiClient } from "../lib/api.ts";
 import {
   deleteKey,
   type KeydHealth,
+  KeyProblem,
   type KeyRecord,
   loadHealth,
   loadKeys,
@@ -16,6 +17,8 @@ export interface KeysController {
   keys: KeyRecord[];
   loadError: string | null;
   metadataReady?: boolean;
+  // A save or a removal is in flight; another change is refused until it settles.
+  busy: boolean;
   save(binding: SecretBinding, value: string): Promise<{ restart: boolean; key?: KeyRecord }>;
   remove(id: string): Promise<void>;
 }
@@ -23,20 +26,20 @@ export interface KeysController {
 export type KeyStatus = {
   label: string;
   state: "unknown" | "ok" | "offline" | "audit" | "guard";
-  // The button's accessible name when a hollow dot alone tells the state (the hairpin guard).
+  // The button's accessible name when a hollow dot alone tells the state (network protection).
   spoken?: string;
 };
 
-// The spec's "Key layer offline"; while keyd cannot write its audit log it swaps no key, which the
-// user sees as every keyed request failing, so that is said too; and a hairpin guard that does not
-// know the public address is never silent (the sheet says why).
+// Says when key protection is off; while keyd cannot write its audit log it swaps no key, which the
+// user sees as every keyed request failing, so that is said too; and network protection that does
+// not know the public address is never silent (the sheet says why).
 export function keyStatus(health: KeydHealth | null): KeyStatus {
   if (!health) return { label: "Keys", state: "unknown" };
-  if (!health.online) return { label: "Key layer offline", state: "offline" };
-  if (health.audit && !health.audit.ok) return { label: "Keys on hold", state: "audit" };
+  if (!health.online) return { label: "Key protection off", state: "offline" };
+  if (health.audit && !health.audit.ok) return { label: "Keys held", state: "audit" };
   if (health.hairpin?.state !== "active") {
-    const guard = health.hairpin?.state === "off" ? "off" : "unknown";
-    return { label: "Keys", state: "guard", spoken: `Keys, hairpin guard ${guard}` };
+    const guard = health.hairpin?.state === "off" ? "off" : "checking";
+    return { label: "Keys", state: "guard", spoken: `Keys, network protection ${guard}` };
   }
   return { label: "Keys", state: "ok" };
 }
@@ -47,6 +50,8 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [metadataReady, setMetadataReady] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const changing = useRef(false);
   const previousApi = useRef(api);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: saving/deleting starts a fresh poll and invalidates the previous list request
@@ -99,22 +104,38 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     };
   }, [api, everyMs, version]);
 
+  // Locked before the health lookup or sealing starts: a later removal must not reach keyd before an
+  // earlier save, which would then recreate the key.
+  const change = useCallback(async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (changing.current) throw new KeyProblem("Another key change is in progress.");
+    changing.current = true;
+    setBusy(true);
+    try {
+      return await operation();
+    } finally {
+      changing.current = false;
+      setBusy(false);
+    }
+  }, []);
+
   const save = useCallback(
-    async (binding: SecretBinding, value: string) => {
-      const { restart, key } = await saveKey(api, binding, value);
-      setVersion((v) => v + 1);
-      return { restart, key };
-    },
-    [api],
+    (binding: SecretBinding, value: string) =>
+      change(async () => {
+        const { restart, key } = await saveKey(api, binding, value);
+        setVersion((v) => v + 1);
+        return { restart, key };
+      }),
+    [api, change],
   );
 
   const remove = useCallback(
-    async (id: string) => {
-      await deleteKey(api, id);
-      setVersion((v) => v + 1);
-    },
-    [api],
+    (id: string) =>
+      change(async () => {
+        await deleteKey(api, id);
+        setVersion((v) => v + 1);
+      }),
+    [api, change],
   );
 
-  return { health, keys, loadError, metadataReady, save, remove };
+  return { health, keys, loadError, metadataReady, busy, save, remove };
 }

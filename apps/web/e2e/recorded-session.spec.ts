@@ -172,7 +172,7 @@ test("offers Jump to live while a session runs, and goes live from it", async ({
         { timeout: 10_000 },
       )
       .toBeGreaterThan(2);
-    await expect(page.getByRole("main", { name: "Session replay" })).toHaveCount(0);
+    await expect(page.getByRole("main", { name: "Replay" })).toHaveCount(0);
   } finally {
     const stopped = await daemon.request(`/api/sessions/${liveId}/stop`, { method: "POST" });
     expect(stopped.ok).toBe(true);
@@ -186,7 +186,7 @@ test("offers Jump to live while a session runs, and goes live from it", async ({
 
 test("exports the recorded session to an MP4 that decodes", async ({ page }) => {
   await openReplay(page, recordedId);
-  await expect(page.getByRole("checkbox", { name: "Skip idle" })).toBeChecked();
+  await expect(page.getByRole("switch", { name: "Skip idle" })).toBeChecked();
   const playbackDurationMs = Number(
     await page.getByRole("slider", { name: "Replay timeline" }).getAttribute("data-duration-ms"),
   );

@@ -42,18 +42,22 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
   fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));
   await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("midnight"));
   expect(localStorage.getItem(APPEARANCE_KEY)).toBe("midnight");
-  fireEvent.click(screen.getByRole("button", { name: "Review autonomy" }));
-  const dialog = await screen.findByRole("dialog", { name: "Models and settings" });
+  fireEvent.click(screen.getByRole("button", { name: "Review when dot checks with you" }));
+  const dialog = await screen.findByRole("dialog", { name: "Settings" });
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      within(dialog).getByRole("combobox", { name: "Read and look" }),
+      within(within(dialog).getByRole("radiogroup", { name: "Start from" })).getByRole("radio", {
+        name: "Balanced",
+      }),
     ),
   );
   expect(
     (within(dialog).getByRole("radio", { name: "Midnight" }) as HTMLInputElement).checked,
   ).toBe(true);
   fireEvent.click(within(dialog).getByRole("button", { name: "Close settings" }));
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Review autonomy" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Review when dot checks with you" }),
+  );
   expect(methods.every((method) => method === "GET")).toBe(true);
 });
 it("offers one Turn on control whose state the task bar and first-run footer share", async () => {

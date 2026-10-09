@@ -129,7 +129,9 @@ describe("daemon browser client", () => {
     expect(await f.client.read(f.permit, f.tab, {}, f.scope)).toEqual(reply);
     expect(bodies).toEqual([{ permit: f.permit, tabId: f.tab, request: { maxChars: 20000 } }]);
     reply = { ...(reply as object), text: "x".repeat(100001) };
-    await expect(f.client.read(f.permit, f.tab, {}, f.scope)).rejects.toThrow("reply");
+    await expect(f.client.read(f.permit, f.tab, {}, f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "reply" }),
+    );
     const count = f.seen.length;
     expect(() => f.client.read(f.permit, f.tab, { maxChars: 100001 }, f.scope)).toThrow();
     expect(f.seen).toHaveLength(count);
@@ -157,7 +159,9 @@ describe("daemon browser client", () => {
       request: { kind: "settle", request: { quietMs: 250, firstMs: 1500, timeoutMs: 3000 } },
     });
     reply = { mono: -1 };
-    await expect(f.client.clock(f.permit, f.tab, f.scope)).rejects.toThrow("reply");
+    await expect(f.client.clock(f.permit, f.tab, f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "reply" }),
+    );
     const count = f.seen.length;
     expect(() =>
       f.client.lookup({ ...f.permit, revision: 0 }, f.tab, { kind: "focused" }, f.scope),
@@ -191,7 +195,7 @@ describe("daemon browser client", () => {
       response.end("private-token-body");
     });
     await expect(f.client.health(f.scope)).rejects.toThrow(
-      /^Browser request refused: unavailable$/,
+      /^The signed-in browser is not responding\.$/,
     );
     expect(f.seen).toHaveLength(1);
   });
@@ -207,11 +211,13 @@ describe("daemon browser client", () => {
       width: 1280,
       height: 800,
     };
-    await expect(f.client.health(f.scope)).rejects.toThrow("stale");
+    await expect(f.client.health(f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "stale" }),
+    );
     const { owner: _owner, ...controlId } = f.permit;
     reply = { ...controlId, revision: 2, holder: "agent", reloaded: 0, selectionsCleared: true };
     await expect(f.client.control({ ...f.permit, holder: "agent" }, f.scope)).rejects.toThrow(
-      "stale",
+      expect.objectContaining({ code: "stale" }),
     );
     reply = { ...controlId, holder: "agent", reloaded: 1, selectionsCleared: true };
     expect((await f.client.control({ ...f.permit, holder: "agent" }, f.scope)).reloaded).toBe(1);
@@ -220,12 +226,14 @@ describe("daemon browser client", () => {
   it("rejects a mismatched action permit and revoked scope before sending", async () => {
     const f = await fixture();
     expect(() => f.client.observe({ ...f.permit, parentCellId: ulid() }, f.tab, f.scope)).toThrow(
-      "stale",
+      expect.objectContaining({ code: "stale" }),
     );
     f.scope.check = () => {
       throw new Error("private session details");
     };
-    await expect(f.client.health(f.scope)).rejects.toThrow(/^Browser request refused: stale$/);
+    await expect(f.client.health(f.scope)).rejects.toThrow(
+      /^The signed-in browser or the selected screen changed during the request\.$/,
+    );
     expect(f.seen).toEqual([]);
   });
 
@@ -238,9 +246,13 @@ describe("daemon browser client", () => {
     f.scope.check = () => {
       if (!allowed) throw new Error("fenced");
     };
-    await expect(f.client.tabs(f.scope)).rejects.toThrow("stale");
+    await expect(f.client.tabs(f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "stale" }),
+    );
     const huge = await fixture((_request, response) => send(response, "x".repeat(5000)));
-    await expect(huge.client.health(huge.scope)).rejects.toThrow("reply");
+    await expect(huge.client.health(huge.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "reply" }),
+    );
   });
 
   it("parses a bounded browser observation and strict tab list", async () => {
@@ -261,7 +273,9 @@ describe("daemon browser client", () => {
     };
     expect((await f.client.observe(f.permit, f.tab, f.scope)).frame.width).toBe(1280);
     reply = { tabs: [{ id: f.tab, ready: true, cookie: "private" }] };
-    await expect(f.client.tabs(f.scope)).rejects.toThrow("reply");
+    await expect(f.client.tabs(f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "reply" }),
+    );
   });
 
   it("consumes fragmented typing progress without returning typed text", async () => {
@@ -304,7 +318,7 @@ describe("daemon browser client", () => {
         response.end(events.map((event) => `${JSON.stringify(event)}\n`).join(""));
       });
       await expect(f.client.type(f.permit, f.tab, typeRequest, f.scope, () => {})).rejects.toThrow(
-        /^Browser request refused: reply$/,
+        /^The signed-in browser sent a reply that could not be read\.$/,
       );
     },
   );
@@ -319,15 +333,19 @@ describe("daemon browser client", () => {
         f.abort.abort();
         return new Promise(() => {});
       }),
-    ).rejects.toThrow("aborted");
+    ).rejects.toThrow(expect.objectContaining({ code: "aborted" }));
   });
 
   it("terminal client close cancels an admitted request and prevents another", async () => {
     let cancel = () => {};
     const f = await fixture(() => cancel());
     cancel = () => f.client.close();
-    await expect(f.client.health(f.scope)).rejects.toThrow("aborted");
-    await expect(f.client.health(f.scope)).rejects.toThrow("aborted");
+    await expect(f.client.health(f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "aborted" }),
+    );
+    await expect(f.client.health(f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "aborted" }),
+    );
     expect(f.seen).toHaveLength(1);
   });
 
@@ -336,6 +354,8 @@ describe("daemon browser client", () => {
     const f = await fixture((_request, response) => send(response, reply));
     reply = { ...f.id, stopped: true };
     await f.client.stop(f.scope);
-    await expect(f.client.health(f.scope)).rejects.toThrow("aborted");
+    await expect(f.client.health(f.scope)).rejects.toThrow(
+      expect.objectContaining({ code: "aborted" }),
+    );
   });
 });

@@ -51,8 +51,6 @@
   --spacing-caption: 640px;
   --spacing-caption-top: 26px;
   --spacing-caption-gap: 8px;
-  --spacing-notice: 480px;
-  --spacing-notice-gap: 8px;
   --spacing-client-frame: 2px;
   --spacing-client-frame-off: -20px;
   --radius-stage: var(--radius-lg);
@@ -75,27 +73,6 @@ body {
 button:not([aria-disabled="true"]):active {
   transform: scale(0.97);
   transition: transform var(--duration-press) var(--ease-press);
-}
-
-.notice {
-  max-width: var(--spacing-notice);
-  margin: 20vh auto 0;
-  padding: 0 var(--spacing-edge);
-  color: var(--color-text-2);
-}
-
-.notice h1 {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--color-text);
-  margin-bottom: var(--spacing-notice-gap);
-}
-
-.notice code {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--color-text);
 }
 
 @media (prefers-contrast: more) {

@@ -140,13 +140,14 @@ describe("owned explicit ChatGPT setup", () => {
       await v.current().login();
     });
     expect(reads()).toBe(before + 1);
-    expect(screen.getAllByText(off)).toEqual([screen.getByRole("alert")]);
+    expect(screen.getByRole("alert").textContent).toBe(off);
+    expect(screen.getAllByText(off)).toHaveLength(1);
     expect(document.body.textContent).not.toContain("blocked");
     expect(v.current()).toMatchObject({ verified: true, uncertain: false, canCancelLogin: false });
     expect(screen.queryByRole("button", { name: "Cancel sign-in" })).toBeNull();
     expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Sign in with code" }).disabled,
-    ).toBe(false);
+      screen.getByRole("button", { name: "Sign in with code" }).getAttribute("aria-disabled"),
+    ).toBeNull();
     f.state.post = undefined;
     await act(async () => {
       await v.current().login();
@@ -245,10 +246,9 @@ describe("owned explicit ChatGPT setup", () => {
     });
     expect(v.current().installWatching).toBe(false);
     expect(v.current().canCancelInstall).toBe(false);
-    expect(screen.getByRole("button", { name: "Sign in with code" })).toHaveProperty(
-      "disabled",
-      false,
-    );
+    expect(
+      screen.getByRole("button", { name: "Sign in with code" }).getAttribute("aria-disabled"),
+    ).toBeNull();
     expect(posts(f, "/install")).toHaveLength(1);
   });
   it("paints device material only in the current DOM, opens/copies only on explicit action", async () => {
@@ -371,7 +371,8 @@ describe("owned explicit ChatGPT setup", () => {
     const f = fixture(signedIn()),
       v = await opened(f);
     expect(v.current().canStart).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Refresh account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Account actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh account" }));
     expect(posts(f, "/refresh")).toHaveLength(0);
     expect(screen.getByRole("alertdialog").textContent).toContain("pauses current ChatGPT work");
     f.state.post = () => {
@@ -458,8 +459,8 @@ describe("owned explicit ChatGPT setup", () => {
     });
     expect(f.state.calls).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /browser|API/i })).toBeNull();
-    expect(screen.getByText(/Primary window: Unknown/)).toBeTruthy();
-    expect(screen.getByText(/Secondary window: Unknown/)).toBeTruthy();
+    expect(screen.getByText("Short limit: not reported")).toBeTruthy();
+    expect(screen.getByText("Long limit: not reported")).toBeTruthy();
   });
   it.each(["copy", "open"])(
     "checks the sign-in deadline again at explicit %s time",

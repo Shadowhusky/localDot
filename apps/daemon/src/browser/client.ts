@@ -121,9 +121,18 @@ export type BrowserLookup =
   | { kind: "hitTest"; point: Point }
   | { kind: "find"; name: string; role?: string; app?: string };
 
+// Both the model and the task timeline show these messages.
+const REFUSALS = {
+  request: "The request to the signed-in browser was not valid.",
+  stale: "The signed-in browser or the selected screen changed during the request.",
+  aborted: "The signed-in browser did not answer in time, or the request was cancelled.",
+  unavailable: "The signed-in browser is not responding.",
+  reply: "The signed-in browser sent a reply that could not be read.",
+} as const;
+
 export class BrowserClientError extends Error {
-  constructor(readonly code: "request" | "stale" | "aborted" | "unavailable" | "reply") {
-    super(`Browser request refused: ${code}`);
+  constructor(readonly code: keyof typeof REFUSALS) {
+    super(REFUSALS[code]);
     this.name = "BrowserClientError";
   }
 }

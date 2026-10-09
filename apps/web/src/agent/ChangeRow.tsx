@@ -30,7 +30,7 @@ export function ChangeRow({
   open: boolean;
   onToggle(trigger: HTMLButtonElement): void;
   onUndo?: (changeId: string) => void;
-  onReread?: () => void;
+  onReread?: (trigger: HTMLButtonElement) => void;
   status?: UndoStatus;
 }) {
   const memory = change.type === "memory";
@@ -67,7 +67,11 @@ export function ChangeRow({
             )}
             {(status === "conflict" || status === "uncertain" || status === "failed") &&
               onReread && (
-                <Button variant="quiet" size="sm" onClick={onReread}>
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  onClick={(event) => onReread(event.currentTarget)}
+                >
                   Read memory again
                 </Button>
               )}

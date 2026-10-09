@@ -5,7 +5,6 @@ import { createApi } from "../lib/api.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { ChangeRow } from "./ChangeRow.tsx";
 import { type AgentChange, type AgentStep, emptyAgentModel } from "./model.ts";
-import { SkillsView } from "./SkillsView.tsx";
 import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
 
 afterEach(cleanup);
@@ -128,14 +127,5 @@ describe("activity rows and inspection", () => {
     view.rerender(row({ change: { ...source, changeId: undefined }, changes: [] }));
     expect(screen.queryByRole("button", { name: "Undo this change" })).toBeNull();
     expect(undo).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps skills as plain history without exposing editors", () => {
-    const { container } = render(
-      <SkillsView skills={[{ name: "Report", description: "<img src=x>", source: "user" }]} />,
-    );
-    expect(container.querySelectorAll("form,input,textarea,button,img,b")).toHaveLength(0);
-    expect(screen.getByText("<img src=x>")).toBeTruthy();
-    expect(screen.getByText("Yours")).toBeTruthy();
   });
 });

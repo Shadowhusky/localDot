@@ -25,10 +25,11 @@ test("installer progress hands off once to first-run setup and settings", async 
   });
   try {
     await page.goto(f.url);
-    await expect(page.getByRole("heading", { name: "Preparing localDot" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Setting up localDot" })).toBeVisible();
     await expect(page).toHaveURL(`${f.progressOrigin}/`);
     f.channel.report({ role: "desktop", phase: "downloading", currentBytes: 50, totalBytes: 100 });
-    await expect(page.locator("#detail")).toHaveText("Downloading Desktop… 50% of this layer");
+    await expect(page.locator("#detail")).toHaveText("Downloading the desktop image…");
+    await expect(page.locator("#images-value")).toHaveText("12%");
     await page.screenshot({ path: info.outputPath("install-progress.png") });
     f.channel.starting();
     await expect(page.getByRole("heading", { name: "Starting localDot" })).toBeVisible();
@@ -37,7 +38,9 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
     await expect(page).toHaveURL(`${f.origin}/`);
     const setupBounds = await page.locator(".welcome-setup").boundingBox();
-    expect(setupBounds?.height).toBeGreaterThan((page.viewportSize()?.height ?? 0) * 0.65);
+    // Inside the stage on a wide screen; over the whole computer pane on a phone.
+    const host = (page.viewportSize()?.width ?? 0) < 760 ? ".stage-col" : ".stage";
+    expect(setupBounds).toEqual(await page.locator(host).first().boundingBox());
     await page.screenshot({ path: info.outputPath("first-run-setup.png") });
     expect(f.requests.filter((r) => r.path === "/auth/exchange-code")).toHaveLength(1);
     expect(f.requests.filter((r) => r.method !== "GET").map((r) => r.path)).toEqual([
@@ -46,12 +49,20 @@ test("installer progress hands off once to first-run setup and settings", async 
     expect(f.requests.every((r) => r.referrer === null)).toBe(true);
     await page.getByRole("radio", { name: "Midnight" }).check();
     await expect(page.locator("html")).toHaveAttribute("data-appearance", "midnight");
-    await page.getByRole("button", { name: "Review autonomy" }).click();
-    const settings = page.getByRole("dialog", { name: "Models and settings" });
+    const review = page.locator(".welcome-setup").getByRole("button", { name: "Review" });
+    await review.click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole("combobox", { name: "Read and look" })).toBeFocused();
+    await expect(
+      settings
+        .getByRole("radiogroup", { name: "Start from" })
+        .getByRole("radio", { name: "Balanced" }),
+    ).toBeFocused();
+    expect(await settings.evaluate((sheet) => sheet.scrollTop), "the header stays in place").toBe(
+      0,
+    );
     await settings.getByRole("button", { name: "Close settings" }).click();
-    await expect(page.getByRole("button", { name: "Review autonomy" })).toBeFocused();
+    await expect(review).toBeFocused();
     const start = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });
     await start.scrollIntoViewIfNeeded();
     await expect(start).toBeEnabled();
@@ -91,7 +102,7 @@ for (const phase of ["failed", "cancelled"] as const) {
       f.channel.finish(phase);
       await expect(
         page.getByRole("heading", {
-          name: phase === "failed" ? "Setup needs attention" : "Setup interrupted",
+          name: phase === "failed" ? "Setup stopped" : "Setup interrupted",
         }),
       ).toBeVisible();
       await expect(page).toHaveURL(`${f.progressOrigin}/`);

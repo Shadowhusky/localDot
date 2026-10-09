@@ -2,6 +2,7 @@
 
 import { emptyManifest, type LocalDotEvent, type SessionCard, ulid } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
@@ -206,10 +207,10 @@ describe("App Replay mode", () => {
     await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
     fireEvent.click(replayButton);
     expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
-    expect(await screen.findByRole("complementary", { name: "Recorded sessions" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^All tasks/ })).toBeTruthy();
     await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
     expect(
-      within(screen.getByRole("main", { name: "Session replay" })).getByText(
+      within(screen.getByRole("main", { name: "Replay" })).getByText(
         /This browser lacks WebCodecs/,
       ),
     ).toBeTruthy();
@@ -236,14 +237,14 @@ describe("App Replay mode", () => {
       await waitFor(() => expect(new URLSearchParams(window.location.search).has("t")).toBe(true));
       leave();
       await waitFor(() => expect(window.location.search).toBe(""));
-      expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+      expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
       expect(window.history.length).toBe(entries + 1);
     }
     fireEvent.click(replayButton);
     expect(window.history.length).toBe(entries + 1);
-    await screen.findByRole("main", { name: "Session replay" });
+    await screen.findByRole("main", { name: "Replay" });
     window.history.back();
-    await waitFor(() => expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("main", { name: "Replay" })).toBeNull());
     expect(window.location.search).toBe("");
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
   });
@@ -259,7 +260,7 @@ describe("App Replay mode", () => {
     expect(screen.getByRole("button", { name: "Pause replay" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(window.location.search).toBe("");
-    expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+    expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
   });
@@ -288,26 +289,107 @@ describe("App token states", () => {
 
   it("asks for the token when none is stored", () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    const notice = screen.getByRole("alert").textContent;
-    expect(notice).toContain("Sign in to localDot");
-    expect(notice).toContain("Run localdot open");
-    expect(notice).not.toMatch(/daemon|token/i);
+    expect(screen.getByRole("heading", { name: "Open localDot from Terminal" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(
+      "This page needs a sign-in link. Run this to get one:",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.body.textContent).toContain("localdot open");
+    expect(document.body.textContent).not.toMatch(/daemon|token|#code/i);
   });
 
-  it("makes the Theatre inert while keys are open and restores the trigger after closing", async () => {
+  it("opens Keys beside the live page and gives focus back to the trigger after closing", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     render(<App fetchImpl={noCells as typeof fetch} />);
     await screen.findAllByRole("button", { name: "Turn on" });
     const trigger = screen.getByTestId("keys-button");
     fireEvent.click(trigger);
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
-    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    fireEvent.keyDown(window, { key: "Escape" });
+    const sheet = screen.getByRole("dialog", { name: "Keys" });
+    expect(sheet.getAttribute("aria-modal")).toBe("false");
     expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(false);
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("keeps Stop computer reachable inside Keys while the Theatre is inert", async () => {
+  it("gives Keys way to Settings, so one sheet shows at a time", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    await screen.findAllByRole("button", { name: "Turn on" });
+    fireEvent.click(screen.getByTestId("keys-button"));
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
+    expect(
+      screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-labelledby")),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("keys-button"));
+    // Keys opened over Settings slides in as its page, with a way back.
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    const page = document.querySelector<HTMLElement>("[data-page='keys']") as HTMLElement;
+    expect(within(page).getByRole("button", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("asks before Keys with a typed key gives way to Settings", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    await screen.findAllByRole("button", { name: "Turn on" });
+    fireEvent.click(screen.getByTestId("keys-button"));
+    const keys = screen.getByRole("dialog", { name: "Keys" });
+    const value = within(keys).getByRole("textbox", { name: "Key" }) as HTMLInputElement;
+    fireEvent.change(value, { target: { value: "sk-typed-but-not-saved" } });
+    const review = screen.getByRole("button", { name: "Review when dot checks with you" });
+    fireEvent.click(review);
+    const prompt = within(keys).getByRole("group", { name: "Discard unsaved changes?" });
+    expect(prompt.hasAttribute("data-shown")).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    fireEvent.click(within(keys).getByRole("button", { name: "Keep editing" }));
+    expect(value.value).toBe("sk-typed-but-not-saved");
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    fireEvent.click(review);
+    fireEvent.click(within(keys).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("keeps the memory Settings showed while Keys is slid over it", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const memoryReads: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/agent/skills") return json([]);
+      if (path === "/api/agent/memory") {
+        memoryReads.push(path);
+        return json({ user: "", memory: "Prefers short replies." });
+      }
+      return noCells(input);
+    }) as typeof fetch;
+    render(<App fetchImpl={fetchImpl} />);
+    await screen.findAllByRole("button", { name: "Turn on" });
+    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    const knows = await screen.findByRole("region", { name: "What dot knows" });
+    fireEvent.click(await within(knows).findByRole("button", { name: "Show memory" }));
+    await waitFor(() => expect(knows.textContent).toContain("Prefers short replies."));
+    fireEvent.click(screen.getByTestId("keys-button"));
+    const page = document.querySelector<HTMLElement>("[data-page='keys']") as HTMLElement;
+    fireEvent.click(within(page).getByRole("button", { name: "Settings" }));
+    await waitFor(() => expect(document.querySelector("[data-page='keys']")).toBeNull());
+    expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
+      "Prefers short replies.",
+    );
+    expect(memoryReads).toHaveLength(1);
+  });
+
+  it("keeps Stop computer inside Keys on a phone, where the sheet covers the page's Stop", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: /width < (760|1180)px/.test(query),
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const { fetchImpl, calls } = daemon((call) => {
       if (call.path === "/api/cells") return json([summary("ready")]);
@@ -320,7 +402,7 @@ describe("App token states", () => {
     await screen.findByRole("button", { name: "Stop computer" });
     fireEvent.click(screen.getByTestId("keys-button"));
     const sheet = screen.getByRole("dialog", { name: "Keys" });
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
     fireEvent.click(within(sheet).getByRole("button", { name: "Stop computer" }));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
@@ -345,11 +427,11 @@ describe("App token states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
     expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe(key);
-    expect((screen.getByLabelText("Provider") as HTMLSelectElement).value).toBe("openai");
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
     expect(calls.some((call) => call.method === "POST")).toBe(false);
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
     fireEvent.click(screen.getByTestId("keys-button"));
     expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
     expect(field.value).toBe("before  after");
@@ -396,7 +478,7 @@ describe("App token states", () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const fetchImpl = vi.fn(unauthorized);
     render(<App fetchImpl={fetchImpl} />);
-    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
+    expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fetchImpl).toHaveBeenCalledTimes(5);
@@ -404,12 +486,14 @@ describe("App token states", () => {
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
+    expect(screen.getByRole("heading", { name: "Open localDot from Terminal" })).toBeTruthy();
 
     window.location.hash = "#token=abc";
     await waitFor(() => expect(window.location.hash).toBe(""));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "That link has expired or was already used.",
+    );
 
     window.location.hash = `#token=${TOKEN}`;
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2));
@@ -749,7 +833,7 @@ describe("App on a refused status socket", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     revoked = true;
     act(() => FakeWebSocket.instances[0]?.onclose?.());
-    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
+    expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami"]);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     // The unmount's or cell change's effect cleanup closes the socket; let React run it first.
@@ -839,7 +923,7 @@ describe("App token hardening", () => {
     await screen.findAllByRole("button", { name: "Turn on" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByText("Sign in to localDot")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
     expect(d.calls.filter((c) => c.path === "/api/cells").every((c) => c.token === TOKEN)).toBe(
       true,
     );
@@ -849,7 +933,7 @@ describe("App token hardening", () => {
     const d = daemon(() => new Response("unauthorized", { status: 401 }));
     window.location.hash = `#token=${NEWER}`;
     render(<App fetchImpl={d.fetchImpl} />);
-    expect(await screen.findByText(/This sign-in link was not accepted/)).toBeTruthy();
+    expect(await screen.findByText(/That link has expired or was already used/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(d.seen()).toEqual(["GET /api/whoami"]);
   });
@@ -880,8 +964,8 @@ describe("App token hardening", () => {
       oldList.resolve(new Response("unauthorized", { status: 401 }));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-      expect(screen.queryByText("Sign in to localDot")).toBeNull();
-      expect(screen.queryByText(/Your saved sign-in no longer works/)).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
+      expect(screen.queryByText(/This browser was signed out/)).toBeNull();
       expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
     },
   );
@@ -898,7 +982,7 @@ describe("App token hardening", () => {
     try {
       window.location.hash = `#token=${TOKEN}`;
       render(<App fetchImpl={d.fetchImpl} />);
-      expect(await screen.findByText("Checking the link…")).toBeTruthy();
+      expect(await screen.findByText("Signing you in…")).toBeTruthy();
       await waitFor(() => expect(answers).toBe(1));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
       act(() => vi.advanceTimersByTime(2000));
@@ -909,9 +993,34 @@ describe("App token hardening", () => {
     }
   });
 
-  it("points at the link on the origin the page was opened from", () => {
-    render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain(`${window.location.origin}/#code=…`);
-    expect(window.location.origin).not.toBe("http://127.0.0.1:4750");
+  it("paints a link's sign-in check first, never the sign-in prompt it would replace", () => {
+    window.location.hash = `#code=${TOKEN}`;
+    const html = renderToString(<App fetchImpl={noCells as typeof fetch} />);
+    expect(html).not.toContain("Open localDot from Terminal");
+    expect(html).not.toContain('role="alert"');
+    expect(html).toContain('data-state="checking"');
+    expect(window.location.hash).toBe(`#code=${TOKEN}`);
+  });
+
+  it("shows nothing while a quick sign-in checks, then says it is signing in", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const whoami = deferred<Response>();
+    window.location.hash = `#token=${TOKEN}`;
+    render(
+      <App
+        fetchImpl={
+          ((input: RequestInfo | URL) =>
+            new URL(String(input)).pathname === "/api/whoami"
+              ? whoami.promise
+              : noCells(input)) as typeof fetch
+        }
+      />,
+    );
+    expect(document.querySelector('.sign-in[data-state="checking"]')?.textContent).toBe("");
+    act(() => vi.advanceTimersByTime(599));
+    expect(screen.queryByText("Signing you in…")).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("status").textContent).toBe("Signing you in…");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

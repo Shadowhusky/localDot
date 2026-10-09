@@ -46,6 +46,24 @@ export const PROVIDER_NAMES: Record<Provider, string> = {
   "anthropic-compatible": "Anthropic-compatible",
 };
 
+// Providers with their own address first, then those that take an address the user names.
+export const PROVIDER_GROUPS: readonly { label: string; providers: readonly Provider[] }[] = [
+  {
+    label: "Providers",
+    providers: [
+      "anthropic",
+      "openai",
+      "google",
+      "xai",
+      "mistral",
+      "deepseek",
+      "groq",
+      "openrouter",
+    ],
+  },
+  { label: "Your own address", providers: ["openai-compatible", "anthropic-compatible", "azure"] },
+];
+
 export const FORMAT_NAMES: Record<HttpFormat, string> = {
   bearer: "Bearer token",
   raw: "The key as is",
@@ -130,6 +148,30 @@ export function bindingOf(d: KeyDraft): DraftCheck {
     return fail("header", "Basic auth travels in the Authorization header.");
   }
   return { ok: true, binding: { id, kind: "http", hosts, header, format: d.format } };
+}
+
+// The name a key gets when none is typed: its provider's, or the service in its first host
+// (api.weather.example gives weather), then -2, -3 and on past the names already saved.
+export function suggestedId(d: KeyDraft, taken: readonly string[]): string {
+  // Read past a scheme, port or path typed by mistake.
+  const host =
+    d.hosts
+      .toLowerCase()
+      .split(/[\s,]+/)
+      .find(Boolean)
+      ?.replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
+      .split(/[/:?#]/)[0]
+      ?.split(".")
+      .filter((label) => label && label !== "api" && label !== "www") ?? [];
+  const named = d.kind === "llm" ? d.provider : host.length > 1 ? (host[0] ?? "") : "";
+  const base =
+    named
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^[^a-z0-9]+/, "")
+      .slice(0, 60) || "web-api";
+  const used = new Set([...taken, ...RESERVED_SECRET_IDS]);
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) if (!used.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
 export const valueHint = (d: KeyDraft) =>

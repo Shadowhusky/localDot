@@ -4,6 +4,8 @@ import { Mascot } from "./Mascot.tsx";
 
 export interface TopBarProps {
   title: string;
+  // Said after the title, quieter: where a recording comes from.
+  note?: string;
   live: boolean;
   keys: KeyStatus;
   keysOpen: boolean;
@@ -17,6 +19,7 @@ export interface TopBarProps {
 
 export function TopBar({
   title,
+  note,
   live,
   keys,
   keysOpen,
@@ -36,6 +39,7 @@ export function TopBar({
           <span className="brand-name">localDot</span>
         </span>
         <span className="title">{title}</span>
+        {note && <span className="title-note">{note}</span>}
       </div>
       <nav className="modes" aria-label="Mode">
         <button

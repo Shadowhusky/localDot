@@ -12,7 +12,9 @@ export interface ExportContext {
   source: ReplaySource;
   whole: { fromMs: number; toMs: number };
   chapter: { fromMs: number; toMs: number } | null;
-  selection?: { fromMs: number; toMs: number };
+  selection: { fromMs: number; toMs: number } | null;
+  // Where the playhead was, for the picture the export opens on.
+  atMs: number;
 }
 
 export function exportContext(
@@ -46,5 +48,7 @@ export function exportContext(
     },
     whole: { fromMs: map.startMs, toMs: map.endMs },
     chapter: chapter ? { fromMs: chapter.startT, toMs: chapter.endT } : null,
+    selection: replay.selection,
+    atMs: replay.tMs,
   });
 }

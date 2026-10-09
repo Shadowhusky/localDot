@@ -92,7 +92,7 @@ function fixture(
         />
         <KeyForm
           active={keyActive}
-          disabled={disabled}
+          unavailable={disabled ? "Key protection is off" : undefined}
           intakeRef={intake}
           save={async (binding, value) => saveKey(api, binding, value, options.seal)}
         />
@@ -186,11 +186,11 @@ describe("key guard at the composer and sealed form boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(f.task.value).toBe("before  then  after");
     expect(f.keyField.value).toBe(keys[7]);
-    expect((screen.getByLabelText("Provider") as HTMLSelectElement).value).toBe("groq");
+    expect(screen.getByLabelText("Provider").textContent).toBe("Groq");
     expect(f.guard.notice).toBeNull();
     expect(f.calls).toEqual([]);
     absent(f); // DOM.value is the sole allowed remaining plaintext owner, not attributes/markup.
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Label (optional)"), { target: { value: "provider" } });
     fireEvent.submit(screen.getByRole("form", { name: "Add a key" }));
     expect(f.keyField.value).toBe("");
     await screen.findByText("Saved provider.");
@@ -215,7 +215,7 @@ describe("key guard at the composer and sealed form boundary", () => {
     });
     fireEvent.input(f.task, { target: { value: keys[0] } });
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Label (optional)"), { target: { value: "provider" } });
     fireEvent.submit(screen.getByRole("form", { name: "Add a key" }));
     await screen.findByRole("alert");
     expect(f.keyField.value).toBe("");
@@ -394,13 +394,14 @@ describe("key guard at the composer and sealed form boundary", () => {
     const intake = createRef<KeyIntake>();
     const pending = Promise.withResolvers<{ restart: boolean }>();
     const save = vi.fn(() => pending.promise);
-    const view = render(<KeyForm active disabled={false} save={save} intakeRef={intake} />);
+    const view = render(<KeyForm active save={save} intakeRef={intake} />);
     const receive = intake.current?.receive;
     expect(receive).toBeTypeOf("function");
     const source = document.createElement("input");
     for (const props of [
-      { active: true, disabled: true },
-      { active: false, disabled: false },
+      { active: true, unavailable: "Key protection is off" },
+      { active: true, busy: true },
+      { active: false },
     ]) {
       view.rerender(<KeyForm {...props} save={save} intakeRef={intake} />);
       source.value = keys[0] ?? "";
@@ -408,8 +409,8 @@ describe("key guard at the composer and sealed form boundary", () => {
       expect(source.value).toBe("");
       expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
     }
-    view.rerender(<KeyForm active disabled={false} save={save} intakeRef={intake} />);
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "provider" } });
+    view.rerender(<KeyForm active save={save} intakeRef={intake} />);
+    fireEvent.change(screen.getByLabelText("Label (optional)"), { target: { value: "provider" } });
     fireEvent.change(screen.getByLabelText("Key"), { target: { value: keys[0] } });
     fireEvent.submit(screen.getByRole("form"));
     source.value = keys[0] ?? "";

@@ -1,567 +1,851 @@
-.app.replaying {
-  grid-template-rows: var(--spacing-bar) auto minmax(0, 1fr);
-}
-.replay-house {
-  min-width: 0;
-}
-.replay-main {
-  min-width: 0;
+/* Replay: the task list, the recorded stage with its scrubber and transport, and Activity. Below
+   1680 px the list moves into a sheet; below 760 px Activity drops under the transport. */
+.replay {
+  grid-row: -2;
+  display: grid;
+  grid-template-columns: clamp(240px, 18vw, 300px) minmax(0, 1fr) var(--rail-w);
+  column-gap: calc(var(--spacing) * 6);
   min-height: 0;
+  padding: 0 calc(var(--spacing) * 4) calc(var(--spacing) * 4);
+}
+
+.replay[data-library="sheet"] {
+  grid-template-columns: minmax(0, 1fr) var(--rail-w);
+}
+
+.replay-library {
+  min-width: 0;
+}
+
+.replay-library-scroll {
+  flex: 1;
+  min-height: 0;
+  margin-inline: calc(var(--spacing) * -2);
+  padding-inline: calc(var(--spacing) * 2);
+}
+
+.replay-tasks {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  overflow: auto;
-  padding: 16px 0;
+  gap: calc(var(--spacing) * 4);
+  padding-bottom: calc(var(--spacing) * 4);
 }
-.replay-heading,
-.replay-heading > div,
-.replay-hud,
-.replay-controls {
+
+.replay-day-title {
+  padding: 0 calc(var(--spacing) * 2) var(--spacing);
+  color: var(--color-fg-3);
+  font:
+    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+}
+
+.replay-day-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.replay-task {
+  position: relative;
+  border-radius: var(--radius-md);
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+.replay-task[data-selected] {
+  background-color: var(--color-state-selected);
+}
+
+.replay-task-open {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(var(--spacing) * 3);
+  height: calc(var(--spacing) * 14);
+  padding: 0 calc(var(--spacing) * 2);
+  border-radius: inherit;
+  color: var(--color-fg-1);
+  text-decoration: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  transition: background-color var(--dur-hover) var(--ease-standard);
 }
-.replay-heading {
-  flex-wrap: wrap;
-  justify-content: space-between;
-  row-gap: 8px;
+
+@media (hover: hover) {
+  .replay-task-open:hover {
+    background-color: var(--color-state-hover);
+  }
 }
-.replay-title {
-  flex: 1 1 240px;
-  min-width: 0;
+
+.replay-task-open:active {
+  background-color: var(--color-state-pressed);
+  transition-duration: var(--dur-press);
 }
-.replay-heading-actions {
-  margin-left: auto;
+
+.replay-task-open:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
 }
-.replay-heading h1 {
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
+
+.replay-task-cover {
+  flex: none;
+  width: 72px;
+  height: 45px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
-.replay-tag,
-.replay-hud > span:first-child {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-2);
-}
-/* The Activity rail beside the replay draws its own rows. */
-.replay-house button:not(.activity-rail *),
-.replay-house select,
-.replay-delete-dialog button {
-  border: 1px solid var(--color-line);
-  border-radius: 7px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  padding: 6px 10px;
-  font: inherit;
-  cursor: pointer;
-}
-/* WebKit ignores the size of a native menulist, so the select draws its own box and chevron. */
-.replay-house select {
-  appearance: none;
-  align-self: stretch;
-  padding-right: 28px;
-  background:
-    var(--icon-chevron-down) no-repeat right 8px center / 12px 12px,
-    var(--color-surface);
-}
-@media (pointer: coarse) {
-  .replay-house select,
-  .replay-controls button,
-  .replay-heading button,
-  .replay-session-card .replay-session-delete {
-    min-height: 44px;
-  }
-  .replay-house select {
-    font-size: 16px;
-  }
-}
-.replay-house button:disabled:not(.activity-rail *),
-.replay-house button[aria-disabled="true"]:not(.activity-rail *),
-.replay-delete-dialog button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.replay-stage {
-  position: relative;
-  flex: 1;
-  min-height: 240px;
-  max-height: 70dvh;
-  isolation: isolate;
-}
-.stage.replay-stage {
-  height: 100%;
+
+.replay-task-cover > :is(img, .replay-image-empty) {
+  display: block;
   width: 100%;
-  min-height: 240px;
+  height: 100%;
+  object-fit: cover;
 }
-.replay-hud {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 24px);
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: var(--color-hud);
-  backdrop-filter: blur(var(--blur-hud));
-  font-size: 12px;
-  pointer-events: none;
+
+.replay-task-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
 }
-.replay-hud strong {
+
+.replay-task-title {
   overflow: hidden;
-  white-space: nowrap;
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
   text-overflow: ellipsis;
-}
-.replay-hud > span:last-child {
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-2);
 }
-.replay-gap-card {
+
+.replay-task-meta {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.replay-task-verdict {
+  flex: none;
+  color: var(--color-fg-3);
+  transition: opacity var(--dur-hover) var(--ease-standard);
+}
+
+.replay-task-verdict[data-state="failed"] {
+  color: var(--color-fg-1);
+}
+
+/* The verdict and the row's actions share the end slot: pointing at, focusing or choosing the row
+   swaps one for the other in place. A touch screen shows both, side by side. */
+.replay-task-more {
   position: absolute;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-width: calc(100% - 32px);
-  width: 360px;
-  padding: 18px;
-  border: 1px solid var(--color-hud-line);
-  border-radius: 10px;
-  background: var(--color-hud);
-  backdrop-filter: blur(var(--blur-hud));
+  right: calc(var(--spacing) * 2);
+  display: flex;
+  opacity: 0;
+  translate: 0 -50%;
+  transition: opacity var(--dur-hover) var(--ease-standard);
 }
-.replay-gap-card p {
-  color: var(--color-text-2);
-  margin-top: 6px;
+
+.replay-task:is(:hover, :focus-within, [data-selected]) .replay-task-more,
+.replay-task-more[data-open] {
+  opacity: 1;
 }
-.replay-caption {
-  min-height: 1.5em;
-  text-align: center;
-  color: var(--color-text-2);
+
+.replay-task:is(:hover, :focus-within, [data-selected]) .replay-task-verdict,
+.replay-task:has(.replay-task-more[data-open]) .replay-task-verdict {
+  opacity: 0;
 }
-.replay-error {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
-  padding: 10px;
-  background: var(--color-hud-solid);
-  border-radius: 8px;
+
+@media (pointer: coarse) {
+  .replay-task-open {
+    padding-inline-end: calc(var(--spacing) * 10);
+  }
+
+  .replay-task .replay-task-more,
+  .replay-task .replay-task-verdict {
+    opacity: 1;
+  }
 }
-.replay-controls {
-  border: 0;
+
+.replay-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  height: calc(var(--spacing) * 14);
+  padding: 0 calc(var(--spacing) * 2);
+}
+
+.replay-tasks-note {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  padding: 0 calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+/* The search stays in reach at the top of the list it searches, in the rail and in the sheet. */
+.replay-library-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: calc(var(--spacing) * 3);
+  background-color: var(--color-void);
+}
+
+.ui-sheet .replay-library-search {
+  background-color: var(--color-raised);
+}
+
+/* The stage column: the bar, the picture, the scrubber and the transport keep one width, the
+   picture's, with the bar level with the rails' headings. */
+.replay-main {
+  --_chrome: calc(var(--spacing) * 46);
+  --_w: min(100cqw, (100cqh - var(--_chrome)) * 1.6);
+  container: replay-main / size;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
   min-width: 0;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0;
+  min-height: 0;
+  padding-top: var(--spacing);
 }
-.replay-controls label {
-  display: inline-flex;
-  align-self: stretch;
-  gap: 6px;
+
+.replay-main > * {
+  width: var(--_w);
+  flex: none;
+}
+
+/* Too short for a 640 px picture, the transport takes two rows, so the picture leaves room for the
+   second: 584 = 640 / 1.6 + the 184 px of chrome. */
+@container replay-main (height < 584px) {
+  .replay-main > * {
+    width: min(100cqw, (100cqh - var(--_chrome) - var(--spacing) * 6) * 1.6);
+  }
+}
+
+.replay-bar {
+  display: flex;
   align-items: center;
-  font-size: 12px;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  height: calc(var(--spacing) * 10);
 }
-.replay-time {
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--color-text-2);
+
+.replay-back {
+  margin-inline-start: calc(var(--spacing) * -2);
 }
-.replay-export {
-  display: inline-flex;
+
+.replay-bar-end {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
 }
-.replay-export > span {
-  font-size: 12px;
-  color: var(--color-text-2);
+
+.replay-library-trigger {
+  max-width: 100%;
 }
-.replay-speed-label {
+
+.replay-library-trigger > .ui-button-content {
+  min-width: 0;
+}
+
+.replay-library-trigger-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The top bar names the task beside a phone's width; on a phone the trigger names it instead. */
+.replay-library-trigger-text[data-phone=""] {
+  display: none;
+}
+
+.replay-frame {
+  position: relative;
+  aspect-ratio: 16 / 10;
+}
+
+.replay-frame > .stage.replay-stage {
   width: 100%;
-  min-height: 1.5em;
-  color: var(--color-text-2);
-  font-size: 12px;
+  height: 100%;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-well);
+  isolation: isolate;
 }
+
+/* Outside the stage, which clips: it rings the picture while dot has control at the playhead. */
+.replay-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 2px var(--color-xenon),
+    0 0 28px 2px var(--color-xenon-a40);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.replay-rim[data-on] {
+  opacity: 1;
+}
+
+.replay-image-empty {
+  background-color: var(--color-well);
+}
+
+/* Docked at the foot of the picture, on solid HUD material, so it reads over any frame. */
+:is(.replay-gap-card, .replay-error) {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(var(--spacing) * 4);
+  left: 50%;
+  width: max-content;
+  max-width: min(360px, calc(100% - var(--spacing) * 8));
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-hud-solid);
+  box-shadow: var(--shadow-overlay);
+  backdrop-filter: blur(var(--blur-hud));
+  translate: -50% 0;
+}
+
+.replay-gap-card {
+  opacity: 0;
+  visibility: hidden;
+  translate: -50% var(--spacing);
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    translate var(--dur-exit) var(--ease-exit),
+    visibility var(--dur-exit);
+}
+
+.replay-gap-card[data-shown] {
+  opacity: 1;
+  visibility: visible;
+  translate: -50% 0;
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    translate var(--dur-spring) var(--ease-spring),
+    visibility 0s;
+}
+
+.replay-gap-title {
+  color: var(--color-fg-1);
+  font:
+    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.replay-gap-body,
+.replay-error {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.replay-gap-body {
+  margin-top: 2px;
+}
+
+/* The scrubber: a 40 px reach around a 4 px track that thickens to 8 under the pointer. */
 .replay-scrubber {
   position: relative;
-  padding: 10px 0;
 }
-.replay-track {
+
+.replay-scrub {
   position: relative;
-  height: 32px;
-  background: var(--color-scrub-track);
-  border-radius: 4px;
+  height: calc(var(--spacing) * 10);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   touch-action: none;
 }
-.replay-track-played {
-  position: absolute;
-  height: 2px;
-  bottom: 0;
-  left: 0;
-  background: var(--color-scrub-played);
+
+.replay-scrub[aria-disabled="true"] {
+  cursor: default;
 }
-.replay-chapter {
+
+.replay-scrub:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: var(--focus-offset);
+}
+
+/* The stretch marked with I and O: a band behind the track, bracketed at both ends. */
+.replay-selection {
   position: absolute;
-  top: 0;
-  height: 100%;
-  border-right: 1px solid var(--color-line);
+  top: calc(50% - var(--spacing) * 2);
+  height: calc(var(--spacing) * 4);
+  border-inline: 2px solid var(--color-fg-2);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-state-selected);
   pointer-events: none;
 }
-.replay-idle-band,
-.replay-gap-band {
+
+.replay-track {
+  position: absolute;
+  top: 50%;
+  inset-inline: 0;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-control);
+  translate: 0 -50%;
+  scale: 1 0.5;
+  transition: scale var(--dur-fade) var(--ease-standard);
+}
+
+.replay-scrub:is(:hover, :focus-visible, [data-dragging]) .replay-track {
+  scale: 1 1;
+}
+
+.replay-played {
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-fg-2);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.replay-idle,
+.replay-gap,
+.replay-chapter {
   position: absolute;
   inset-block: 0;
   pointer-events: none;
 }
-.replay-idle-band {
-  background: var(--color-scrub-idle);
+
+/* Skipped idle is drawn as a broken axis; time you had control as a hatch. */
+.replay-idle {
+  background-image: repeating-linear-gradient(90deg, var(--color-void) 0 1px, transparent 1px 3px);
 }
-.replay-gap-band {
-  background: repeating-linear-gradient(
-    135deg,
-    var(--color-scrub-gap),
-    var(--color-scrub-gap) 3px,
-    var(--color-scrub-track) 3px,
-    var(--color-scrub-track) 4px
-  );
+
+.replay-gap {
+  background-image: repeating-linear-gradient(135deg, var(--color-fg-4) 0 2px, transparent 2px 4px);
 }
-.replay-tick {
-  position: absolute;
-  top: 50%;
-  width: 3px;
-  height: 3px;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: var(--color-tick-quiet);
-}
-.replay-tick.attention {
-  width: 5px;
-  height: 5px;
-  border-radius: 0;
-  transform: translate(-50%, -50%) rotate(45deg);
-  background: var(--color-tick);
-}
-.replay-tick.user {
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--color-tick);
-  background: none;
-}
-.replay-tick.failure {
-  width: 7px;
-  height: 7px;
-  background: none;
-}
-.replay-tick.failure::before,
-.replay-tick.failure::after {
+
+/* Each chapter after the first opens with a 2 px gap cut out of the track. */
+.replay-chapter::before {
   content: "";
   position: absolute;
-  left: 3px;
-  width: 1.5px;
-  height: 7px;
-  background: var(--color-tick);
-  transform: rotate(45deg);
+  inset-block: 0;
+  left: -1px;
+  width: 2px;
+  background-color: var(--color-void);
 }
-.replay-tick.failure::after {
-  transform: rotate(-45deg);
+
+.replay-landmark {
+  position: absolute;
+  top: calc(50% - 12px);
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--color-danger-fg);
+  translate: -50% -50%;
+  pointer-events: none;
 }
+
+.replay-landmark:is([data-tone="attention"], [data-tone="user"])::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+}
+
+.replay-landmark[data-tone="attention"]::before {
+  background-color: var(--color-attention);
+}
+
+.replay-landmark[data-tone="user"]::before {
+  box-shadow: inset 0 0 0 1px var(--color-fg-2);
+}
+
 .replay-playhead {
   position: absolute;
-  inset-block: -5px;
+  top: 50%;
+  left: 0;
   width: 2px;
-  background: var(--color-text);
+  height: 16px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-fg-1);
+  translate: -50% -50%;
   pointer-events: none;
 }
-.replay-hover {
+
+.replay-knob {
   position: absolute;
-  z-index: 4;
-  bottom: calc(100% + 6px);
-  width: 180px;
-  transform: translateX(-50%);
-  padding: 8px;
-  background: var(--color-hud-solid);
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-fg-1);
+  box-shadow: var(--shadow-thumb);
+  translate: -50% -50%;
+  scale: 0;
+  transition: scale var(--dur-spring) var(--ease-spring);
+}
+
+.replay-scrub:is(:hover, :focus-visible, [data-dragging]) .replay-knob {
+  scale: 1;
+}
+
+.replay-preview {
+  position: absolute;
+  z-index: 3;
+  bottom: calc(100% - var(--spacing));
+  left: 0;
+  width: 208px;
+  padding: var(--spacing);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-hud-solid);
+  box-shadow: var(--shadow-overlay);
   pointer-events: none;
-  box-shadow: var(--shadow-hud);
+  translate: -50% 0;
+  transform-origin: bottom center;
+  opacity: 0;
+  scale: 0.96;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    scale var(--dur-exit) var(--ease-exit);
 }
-.replay-image-empty {
-  background: var(--color-surface-2);
+
+.replay-preview[data-shown] {
+  opacity: 1;
+  scale: 1;
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    scale var(--dur-spring) var(--ease-spring);
 }
-.replay-hover img,
-.replay-hover .replay-image-empty {
+
+.replay-preview > :is(img, .replay-image-empty) {
+  display: block;
   width: 100%;
-  aspect-ratio: 8 / 5;
-  object-fit: contain;
-  display: block;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: var(--radius-md);
 }
-.replay-hover span {
-  display: block;
-  color: var(--color-text-2);
-  font-size: 12px;
-}
-.replay-sessions {
-  overflow-y: auto;
-  gap: 12px;
-  padding-right: 4px;
-}
-.replay-session-list {
+
+.replay-preview-meta {
   display: flex;
-  flex-direction: column;
-  flex: none;
-  gap: 12px;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 1.5) var(--spacing) 2px;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
-.replay-session-card {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--color-line);
-  border-radius: 9px;
+
+.replay-preview-meta > .num {
+  color: var(--color-fg-1);
+}
+
+.replay-preview-label {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transport: one 48 px row, playback on the left, how it plays on the right. Where the row is
+   too narrow for both, how it plays takes a second row. */
+.replay-transport {
+  container: replay-transport / inline-size;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing) calc(var(--spacing) * 4);
+  min-height: calc(var(--spacing) * 12);
+}
+
+.replay-transport-main,
+.replay-transport-side {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.replay-transport-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.replay-transport-side {
   flex: none;
 }
-.replay-session-card.selected {
-  border-color: var(--color-text-2);
+
+.replay-no-video {
+  flex: none;
 }
-.replay-session-card .replay-session-open {
+
+@container replay-transport (width < 640px) {
+  .replay-transport-side {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+}
+
+/* While an export runs with its popover put away, its ring stands where the icon was. */
+.replay-export .ui-button-content {
+  position: relative;
+}
+
+.replay-export .ui-icon,
+.replay-export-ring {
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.replay-export-ring {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: flex;
+  opacity: 0;
+  translate: 0 -50%;
+}
+
+.replay-export[data-ring] .ui-icon {
+  opacity: 0;
+}
+
+.replay-export[data-ring] .replay-export-ring {
+  opacity: 1;
+}
+
+.replay-time {
+  flex: none;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.replay-now {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  width: 100%;
-  gap: 4px;
-  border: 0;
-  border-radius: 0;
-  text-align: left;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  white-space: nowrap;
 }
-.replay-session-open > img,
-.replay-session-open > .replay-image-empty {
-  display: block;
-  width: 100%;
-  aspect-ratio: 8 / 5;
-  object-fit: contain;
-  border-radius: 4px;
-  margin-bottom: 4px;
+
+.replay-now-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.replay-session-open strong {
-  overflow-wrap: anywhere;
-  font-weight: 500;
+
+.replay-now-idle {
+  flex: none;
+  color: var(--color-fg-3);
 }
-.replay-session-open time,
-.replay-session-open span {
-  font-size: 11px;
-  color: var(--color-text-2);
+
+.replay-speed {
+  width: calc(var(--spacing) * 18);
 }
-.replay-session-card .replay-session-delete {
-  align-self: flex-start;
-  border: 0;
-  margin: 0 6px 6px;
-  font-size: 11px;
-  color: var(--color-text-2);
+
+.replay-skip {
+  white-space: nowrap;
 }
+
+.replay-toggle {
+  display: flex;
+  border-radius: var(--radius-md);
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+.replay-toggle[data-on] {
+  background-color: var(--color-state-selected);
+}
+
+/* Before and after, over the picture. */
 .replay-compare {
   position: absolute;
   z-index: 3;
   inset: 0;
-  border-radius: var(--radius-stage);
-  background: var(--color-void);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-color: var(--color-well);
 }
-.replay-compare header {
-  padding: 8px 12px;
+
+.replay-compare-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 3);
 }
+
+.replay-compare-title {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  white-space: nowrap;
+}
+
+.replay-compare-step {
+  overflow: hidden;
+  color: var(--color-fg-1);
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+}
+
 .replay-compare-images {
   position: relative;
   flex: 1;
   min-height: 0;
-  touch-action: none;
   cursor: ew-resize;
+  touch-action: none;
 }
-.replay-compare-images > img,
-.replay-compare-images > .replay-image-empty,
+
+.replay-compare-images > :is(img, .replay-image-empty),
 .replay-compare-before,
-.replay-compare-before > img,
-.replay-compare-before > .replay-image-empty {
+.replay-compare-before > :is(img, .replay-image-empty) {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
+
+.replay-compare-images:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
 .replay-compare-divider {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 24px;
-  transform: translateX(-50%);
-  cursor: ew-resize;
-  touch-action: none;
+  inset-block: 0;
   display: grid;
   place-items: center;
+  width: 28px;
+  translate: -50% 0;
+  pointer-events: none;
 }
+
 .replay-compare-divider::before {
-  position: absolute;
   content: "";
+  position: absolute;
   inset-block: 0;
-  left: 11px;
+  left: 50%;
   width: 2px;
-  background: var(--color-text);
+  background-color: var(--color-fg-1);
+  translate: -50% 0;
 }
-.replay-compare-divider > span {
-  z-index: 1;
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  padding: 3px;
-  border-radius: 5px;
+
+.replay-compare-handle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-fg-1);
+  box-shadow: var(--shadow-thumb);
+  color: var(--color-void);
 }
+
 .replay-compare-label {
   position: absolute;
-  top: 8px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: var(--color-hud-solid);
+  top: calc(var(--spacing) * 2);
+  padding: 2px calc(var(--spacing) * 2);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-hud-solid);
+  color: var(--color-fg-1);
+  font:
+    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
 }
+
 .replay-compare-label.before {
-  left: 8px;
+  left: calc(var(--spacing) * 2);
 }
+
 .replay-compare-label.after {
-  right: 8px;
+  right: calc(var(--spacing) * 2);
 }
+
 .replay-compare-empty {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
+  bottom: calc(var(--spacing) * 4);
+  left: calc(var(--spacing) * 4);
+  color: var(--color-fg-2);
 }
-.replay-delete-dialog {
-  position: fixed;
-  inset: 0;
-  margin: auto;
-  width: min(440px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  padding: 20px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: 12px;
-  overflow: auto;
+
+/* The top bar names the recording, and says where it comes from where there is room. */
+.bar .title-note {
+  flex: none;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  white-space: nowrap;
 }
-.replay-delete-dialog::backdrop {
-  background: var(--color-edge);
-}
-.replay-delete-dialog h2 {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-.replay-delete-content {
-  overflow-wrap: anywhere;
-  color: var(--color-text-2);
-}
-.replay-delete-dialog footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-}
-/* app.css loads after this sheet, so the layout overrides of .house and .rail name both classes. */
+
 @media (width < 1180px) {
-  .app.replaying {
-    grid-template-rows: var(--spacing-bar) auto minmax(0, 1fr);
-  }
-  .house.replay-house {
-    grid-template-columns: 190px minmax(0, 1fr);
-    overflow-y: auto;
-  }
-  .replay-house > .rail.r {
-    grid-column: 2;
-  }
-  .replay-sessions {
-    grid-row: 1 / 3;
-  }
-  .replay-main {
-    min-height: 520px;
-    overflow: visible;
-  }
-}
-@media (width < 680px) {
-  .house.replay-house {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .replay-heading-actions {
-    flex: 1 1 100%;
-    justify-content: space-between;
-  }
-  .rail.replay-sessions {
-    flex: none;
-    overflow: visible;
-    padding: 12px 0 0;
-  }
-  .replay-session-list {
-    flex-direction: row;
-    gap: 8px;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-  }
-  .replay-session-card {
-    width: 160px;
-    scroll-snap-align: start;
-  }
-  .replay-session-open > img,
-  .replay-session-open > .replay-image-empty {
+  .bar .title-note {
     display: none;
   }
-  .replay-session-open strong {
-    font-size: 12px;
+}
+
+@media (width < 760px) {
+  .replay[data-library] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    row-gap: calc(var(--spacing) * 2);
+    padding-inline: calc(var(--spacing) * 4);
   }
+
   .replay-main {
-    flex: none;
-    min-height: 520px;
+    --_w: 100%;
+    container-type: normal;
+    gap: calc(var(--spacing) * 2);
     padding-top: 0;
   }
-  .replay-house > .rail.r {
-    flex: none;
+
+  .replay-export-text,
+  .replay-library-trigger-text[data-phone="hidden"] {
+    display: none;
   }
-  .replay-hud {
-    gap: 6px;
-    font-size: 11px;
+
+  .replay-library-trigger-text[data-phone=""] {
+    display: inline;
+  }
+
+  .replay > .activity-rail {
+    min-height: 0;
+    padding-top: calc(var(--spacing) * 2);
   }
 }
-@media (prefers-reduced-transparency: reduce) {
-  .replay-hud,
+
+@media (prefers-reduced-motion: reduce) {
+  .replay-track,
+  .replay-knob {
+    transition: none;
+  }
+
+  .replay-preview,
   .replay-gap-card {
-    background: var(--color-hud-solid);
+    translate: -50% 0;
+    scale: 1;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :is(.replay-gap-card, .replay-error) {
     backdrop-filter: none;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .replay-playhead,
-  .replay-compare-before,
-  .replay-compare-divider {
-    transition: none;
-    animation: none;
+
+@media (forced-colors: active) {
+  .replay-rim[data-on] {
+    outline: 3px solid Highlight;
   }
-}
-.replay-screen-picker {
-  display: flex;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-.replay-screen-picker button[aria-pressed="true"] {
-  background: var(--color-surface);
-  color: var(--color-text);
-  box-shadow: inset 0 0 0 1px currentColor;
+
+  .replay-played,
+  .replay-playhead,
+  .replay-knob {
+    background-color: Highlight;
+  }
 }

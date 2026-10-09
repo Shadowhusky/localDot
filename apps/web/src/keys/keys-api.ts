@@ -66,7 +66,7 @@ export async function saveKey(
   const send = async () => {
     const health = await loadHealth(api);
     if (!health.online || !health.sealKey)
-      throw new KeyProblem("The key layer is offline: start keyd.");
+      throw new KeyProblem("Key protection is off, so the key wasn't saved.");
     const sealed = await seal(health.sealKey, bound, value);
     const raw = await api.post<unknown>("/api/keys", { binding: bound, sealed });
     const parsed = z
@@ -110,7 +110,7 @@ export function problemText(err: unknown): string {
   if (err instanceof ApiError) {
     const body = parse(err.message);
     if (body?.message) return sentence(body.message);
-    if (err.status === 503) return "The key layer is offline: start keyd.";
+    if (err.status === 503) return "Key protection is off, so the key wasn't saved.";
   }
   return "Something went wrong saving the key. Try again.";
 }

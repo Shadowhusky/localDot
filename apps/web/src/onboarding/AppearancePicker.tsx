@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { RadioCards } from "../ui/RadioCards.tsx";
 import type { Appearance } from "./appearance.ts";
 import "./onboarding.css";
 
@@ -7,39 +7,27 @@ export interface AppearanceControl {
   saved: boolean;
   change(value: Appearance): void;
 }
+
+const NAMES: Record<Appearance, string> = { graphite: "Graphite", midnight: "Midnight" };
+
 export function AppearancePicker({
   appearance,
-  inSettings = false,
+  "aria-label": label,
 }: {
   appearance: AppearanceControl;
-  inSettings?: boolean;
+  "aria-label"?: string;
 }) {
-  const group = useId();
   return (
-    <fieldset className="appearance-picker">
-      <legend>Theme</legend>
-      <div className="appearance-options">
-        {(["graphite", "midnight"] as const).map((value) => (
-          <label key={value} className="appearance-option">
-            <input
-              type="radio"
-              name={group}
-              value={value}
-              checked={appearance.value === value}
-              onChange={() => appearance.change(value)}
-            />
-            <span className={`appearance-tile ${value}`} aria-hidden="true" />
-            <span>{value === "graphite" ? "Graphite" : "Midnight"}</span>
-          </label>
-        ))}
-      </div>
-      <p>
-        {!appearance.saved
-          ? "Applied for this visit. This browser could not save your preference."
-          : inSettings
-            ? "Applies to this browser."
-            : "Applies to this browser. Change it in Settings."}
-      </p>
-    </fieldset>
+    <RadioCards
+      layout="tiles"
+      aria-label={label}
+      value={appearance.value}
+      onValueChange={(value) => appearance.change(value === "midnight" ? "midnight" : "graphite")}
+      options={(["graphite", "midnight"] as const).map((value) => ({
+        value,
+        label: NAMES[value],
+        preview: <span className="appearance-swatch" data-appearance={value} />,
+      }))}
+    />
   );
 }

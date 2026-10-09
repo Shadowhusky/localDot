@@ -144,4 +144,44 @@ describe("useKeys", () => {
     expect(calls).toContain("DELETE /api/keys/weather");
     expect(calls.filter((c) => c === "GET /api/keys")).toHaveLength(3);
   });
+
+  it("lets only the first of two changes through, and is busy until it settles", async () => {
+    const binding = {
+      id: "weather",
+      kind: "http",
+      hosts: ["api.example.com"],
+      header: "Authorization",
+      format: "bearer",
+    } as const;
+    for (const first of ["save", "remove"] as const) {
+      const sealing = Promise.withResolvers<{ key: typeof record; restart: boolean }>();
+      const saved = vi.spyOn(keysApi, "saveKey").mockReturnValue(sealing.promise);
+      const deleting = Promise.withResolvers<void>();
+      const deleted = vi.spyOn(keysApi, "deleteKey").mockReturnValue(deleting.promise);
+      const { api } = server((path) => (path === "/api/keyd" ? health() : { keys: [record] }));
+      const { result, unmount } = renderHook(() => useKeys(api, 100));
+      await flush();
+      const save = () =>
+        result.current.save({ ...binding, hosts: [...binding.hosts] }, "value-123");
+      const remove = () => result.current.remove("weather");
+      let winner: Promise<unknown> = Promise.resolve();
+      let loser: Promise<unknown> = Promise.resolve();
+      act(() => {
+        winner = first === "save" ? save() : remove();
+        loser = first === "save" ? remove() : save();
+      });
+      await expect(loser).rejects.toBeInstanceOf(keysApi.KeyProblem);
+      expect(result.current.busy).toBe(true);
+      expect(saved).toHaveBeenCalledTimes(first === "save" ? 1 : 0);
+      expect(deleted).toHaveBeenCalledTimes(first === "remove" ? 1 : 0);
+      await act(async () => {
+        sealing.resolve({ key: record, restart: false });
+        deleting.resolve();
+        await winner;
+      });
+      expect(result.current.busy).toBe(false);
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
 });

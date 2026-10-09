@@ -10,8 +10,9 @@ export interface IconButtonProps
   extends Omit<ComponentProps<"button">, "disabled" | "children" | "aria-label"> {
   label: string;
   icon: IconName;
-  size?: 24 | 28 | 32;
-  // Quiet draws only its icon; the filled ones are round.
+  size?: 24 | 28 | 32 | 36;
+  // Quiet draws only its icon; the filled ones are round. Primary is the one main action of its
+  // group, such as Send or Play.
   variant?: "quiet" | "primary" | "secondary";
   kbd?: readonly string[];
   // Unavailable while set. The button keeps focus and gives this as its description and tooltip.

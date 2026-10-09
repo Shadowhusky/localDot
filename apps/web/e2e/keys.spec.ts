@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { type RunningDaemon, startDaemon } from "./daemon.ts";
+import { search } from "./settings-ui.ts";
 
 declare global {
   interface Window {
@@ -62,11 +63,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await page.getByTestId("keys-button").click();
   const sheet = page.getByRole("dialog", { name: "Keys" });
   await expect(sheet).toBeVisible();
-  await expect(sheet.getByText("No keys yet.")).toBeVisible();
-  // The underlying computer cannot receive focus or input while keys are open.
-  const start = page.getByRole("button", { name: "Turn on", includeHidden: true }).first();
-  await start.evaluate((button: HTMLButtonElement) => button.focus());
-  await expect(start).not.toBeFocused();
+  await expect(sheet.getByText("No keys yet")).toBeVisible();
 
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await page.keyboard.press("Escape");
@@ -75,8 +72,8 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await page.getByTestId("keys-button").click();
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
 
-  await sheet.getByRole("button", { name: "Web API" }).click();
-  await sheet.getByLabel("Name", { exact: true }).fill("weather");
+  await sheet.getByRole("radio", { name: "Web API" }).click();
+  await sheet.getByLabel("Label (optional)", { exact: true }).fill("weather");
   await sheet.getByLabel("Hosts", { exact: true }).fill("api.weather.example");
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   const waiting = Promise.withResolvers<void>();
@@ -92,16 +89,20 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await waiting.promise;
   try {
     await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
-    await expect(sheet.getByLabel("Name", { exact: true })).toBeDisabled();
-    await sheet.getByRole("button", { name: "Close keys" }).focus();
-    await page.keyboard.press("Shift+Tab");
-    await expect(sheet.getByRole("button", { name: "Close keys" })).toBeFocused();
+    await expect(sheet.getByLabel("Label (optional)", { exact: true })).toHaveAttribute(
+      "readonly",
+      "",
+    );
   } finally {
     release.resolve();
   }
-  await expect(sheet.getByRole("status")).toHaveText("Saved weather.");
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    "Saved weather.",
+  );
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
-  await expect(sheet.getByText("api.weather.example · Authorization")).toBeVisible();
+  await expect(sheet.locator(".keys-row[data-id='weather']")).toContainText(
+    "api.weather.example, Authorization",
+  );
   await page.unroute("**/api/keys");
   await expect(sheet).toHaveCSS("opacity", "1");
   await page.screenshot({ path: "e2e/out/keys-sheet.png" });
@@ -124,14 +125,18 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
 
   // A base URL with non-ASCII text goes as the URL parser writes it, so the binding Chrome seals
   // is byte for byte the one keyd rebuilds.
-  await sheet.getByRole("button", { name: "Model provider" }).click();
-  await sheet.getByLabel("Name", { exact: true }).fill("books");
-  await sheet.getByLabel("Provider").selectOption("openai-compatible");
+  await sheet.getByRole("radio", { name: "Model provider" }).click();
+  await search(page, sheet.getByRole("combobox", { name: "Provider" }), "openai-compatible");
+  await sheet.getByLabel("Label (optional)", { exact: true }).fill("books");
   await sheet.getByLabel("Base URL").fill("https://bücher.example/openai/v1");
   await sheet.getByLabel("Key", { exact: true }).fill(`${VALUE}-2`);
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("status")).toHaveText("Saved books.");
-  await expect(sheet.getByText("OpenAI-compatible · xn--bcher-kva.example")).toBeVisible();
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    "Saved books.",
+  );
+  await expect(sheet.locator(".keys-row[data-id='books']")).toContainText(
+    "OpenAI-compatible, xn--bcher-kva.example",
+  );
   expect(posted).toHaveLength(2);
   expect(posted[1]).not.toContain(VALUE);
   await sheet.getByRole("button", { name: "Remove books" }).click();
@@ -139,7 +144,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
 
   await sheet.getByRole("button", { name: "Remove weather" }).click();
   await sheet.getByRole("button", { name: "Confirm remove weather" }).click();
-  await expect(sheet.getByText("No keys yet.")).toBeVisible();
+  await expect(sheet.getByText("No keys yet")).toBeVisible();
   const keys = await (
     await fetch(`${daemon.origin}/api/keys`, {
       headers: { authorization: `Bearer ${daemon.token}` },
@@ -168,11 +173,12 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   await page.getByTestId("keys-button").click();
   const sheet = page.getByRole("dialog", { name: "Keys" });
   const id = "a".repeat(64);
-  await sheet.getByLabel("Name", { exact: true }).fill(id);
+  await sheet.getByLabel("Label (optional)", { exact: true }).fill(id);
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("status")).toHaveText(`Saved ${id}.`);
-  await expect(sheet).toHaveCSS("transform", "none");
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    `Saved ${id}.`,
+  );
   const bounds = await sheet.boundingBox();
   expect(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 375).toBe(true);
   expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -184,24 +190,25 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   await page.screenshot({ path: "e2e/out/keys-narrow.png" });
   await remove.click();
   await sheet.getByRole("button", { name: `Confirm remove ${id}` }).click();
-  await expect(sheet.getByText("No keys yet.")).toBeVisible();
+  await expect(sheet.getByText("No keys yet")).toBeVisible();
 });
 
-test("say the key layer is offline when keyd stops", async ({ page }) => {
+test("say key protection is off when keyd stops", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 760 });
   await page.goto(`${daemon.origin}/#token=${daemon.token}`);
   await expect(page.getByTestId("keys-button")).toHaveText("Keys");
   await daemon.keyd.stop();
-  await expect(page.getByTestId("keys-button")).toHaveText("Key layer offline", {
+  await expect(page.getByTestId("keys-button")).toHaveText("Key protection off", {
     timeout: 15_000,
   });
   await page.getByTestId("keys-button").click();
   const sheet = page.getByRole("dialog", { name: "Keys" });
-  await expect(sheet.getByRole("alert")).toContainText("The key layer is offline");
-  await expect(sheet.getByRole("button", { name: "Save key" })).toBeDisabled();
-  await expect(sheet.getByRole("button", { name: "Close keys" })).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(sheet.getByRole("button", { name: "Close keys" })).toBeFocused();
+  await expect(sheet.getByText("Keys can't be saved or used until it's back on.")).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Save key" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(sheet.getByLabel("Key", { exact: true })).toHaveAttribute("readonly", "");
   await expect(sheet).toHaveCSS("opacity", "1");
   await page.screenshot({ path: "e2e/out/keys-offline.png" });
 });

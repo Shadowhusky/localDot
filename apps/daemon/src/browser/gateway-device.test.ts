@@ -220,7 +220,7 @@ describe("leased browser gateway device", () => {
     };
     const progress = vi.fn();
     await expect(f.device.client.type({ ...request, window: 9 }, progress)).rejects.toThrow(
-      "request",
+      expect.objectContaining({ code: "request" }),
     );
     expect(f.client.type).not.toHaveBeenCalled();
     f.onReply(() => f.abort.abort());
@@ -241,6 +241,6 @@ describe("leased browser gateway device", () => {
         ...f.options,
         permit: { ...f.options.permit, browserCellId: ulid() },
       }),
-    ).toThrow("stale");
+    ).toThrow(expect.objectContaining({ code: "stale" }));
   });
 });

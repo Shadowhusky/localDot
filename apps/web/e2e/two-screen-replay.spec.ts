@@ -95,7 +95,7 @@ test("switches actual decoded recordings at the same time and retains private ga
   expect(await actualIndex(desktop)).toBe(
     desktop.frames.findLast((frame) => frame.tMicros <= 2500000)?.index,
   );
-  await page.getByRole("button", { name: "Browser", exact: true }).click();
+  await page.getByRole("radio", { name: "Browser", exact: true }).click();
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
   await expect(page.getByRole("slider", { name: "Replay timeline" })).toHaveAttribute(
     "aria-valuenow",
@@ -108,7 +108,7 @@ test("switches actual decoded recordings at the same time and retains private ga
   await page.screenshot({ path: "e2e/out/two-screen-browser.png" });
   await seek(page, 4500);
   await expect(page.getByText("Nothing was recorded while you were in control.")).toBeVisible();
-  await page.getByRole("button", { name: "Desktop", exact: true }).click();
+  await page.getByRole("radio", { name: "Desktop", exact: true }).click();
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
   await expect(page.getByRole("slider", { name: "Replay timeline" })).toHaveAttribute(
     "aria-valuenow",
@@ -124,7 +124,7 @@ test("exports the chosen browser track as decodable MP4 and omits its private in
   page,
 }) => {
   await open(page);
-  await page.getByRole("button", { name: "Browser", exact: true }).click();
+  await page.getByRole("radio", { name: "Browser", exact: true }).click();
   await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready");
   const requests: string[] = [];
   page.on("request", (request) => {
@@ -189,20 +189,12 @@ test("exports the chosen browser track as decodable MP4 and omits its private in
   expect(requests.every((url) => new URL(url).searchParams.get("screen") === "browser")).toBe(true);
 });
 
-test("keeps a missing browser track selected and blank without borrowing the desktop", async ({
+test("offers no screen switch when the browser track is missing, and keeps the desktop", async ({
   page,
 }) => {
   rmSync(join(home, "sessions", desktop.sessionId, "recording-browser"), { recursive: true });
   await open(page);
   await seek(page, 3000);
-  await page.getByRole("button", { name: "Browser", exact: true }).click();
-  await page.waitForFunction(() => window.__localdot?.replay?.status() === "no-video");
-  await expect(page.getByRole("button", { name: "Browser", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await seek(page, 3000);
-  expect(
-    await page.evaluate(() => window.__localdot?.replay?.probe({ op: "thumb", w: 16, h: 16 })),
-  ).toBeNull();
+  await expect(page.getByRole("radiogroup", { name: "Recording screen" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__localdot?.replay?.status())).toBe("ready");
 });

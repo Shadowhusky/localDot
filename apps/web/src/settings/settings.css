@@ -1,390 +1,442 @@
-.settings-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 29;
-  background: var(--color-shade-hud);
+/* The Settings inspector: flat sections on the sheet's surface, one scroller (the sheet's body).
+   It lays kit parts out and never restyles them: the kit's layer comes after this one. */
+.settings-body {
+  display: grid;
+  gap: calc(var(--spacing) * 8);
+  padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
 }
-.settings-backdrop[hidden] {
+
+.settings-loading {
+  width: 100%;
+}
+
+.settings-stop {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  padding-bottom: calc(var(--spacing) * 4);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.settings-stop:empty {
   display: none;
 }
-.settings-sheet {
-  position: fixed;
-  inset: var(--spacing-edge) auto var(--spacing-edge) 50%;
-  transform: translateX(-50%);
-  width: min(680px, calc(100% - 2 * var(--spacing-edge)));
+
+.settings-section {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  scroll-margin-top: calc(var(--spacing) * 4);
+}
+
+.settings-section-title {
+  font:
+    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+  letter-spacing: var(--text-title--letter-spacing);
+}
+
+.settings-group-title {
+  color: var(--color-fg-3);
+  font:
+    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+}
+
+.settings-note,
+.settings-label {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.settings-label {
+  font-weight: var(--font-weight-medium);
+}
+
+.settings-error {
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  z-index: 30;
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-stage);
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
-.settings-sheet[hidden] {
-  display: none;
+
+.settings-error > .ui-icon {
+  flex: none;
+  margin-top: calc(var(--spacing) * 0.5);
+  color: var(--color-danger-fg);
 }
-.settings-sheet header,
-.settings-actions,
-.settings-catalog {
+
+.settings-inline {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 7);
 }
-.settings-sheet h2 {
-  font-size: 17px;
-  font-weight: 600;
-}
-.settings-heading {
-  flex: none;
-  padding: var(--spacing-gutter);
-  padding-bottom: 12px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-line);
-}
-.settings-body {
-  min-height: 0;
-  overflow: auto;
-  padding: 8px var(--spacing-gutter) var(--spacing-gutter);
-}
+
 .settings-actions {
-  margin-top: 8px;
-}
-.settings-sheet p {
-  color: var(--color-text-2);
-  margin: 8px 0;
-}
-.settings-sheet label {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 10px 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
 }
-.settings-sheet select,
-.settings-sheet button,
-.settings-sheet input:not([type="checkbox"], [type="radio"]) {
-  min-height: 36px;
-  min-width: 36px;
-  max-width: 100%;
-  font: inherit;
-  color: var(--color-text);
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  padding: 0 12px;
-  background: var(--color-surface-2);
+
+/* A role or an account: a block between hairlines, never a box inside the sheet. */
+.settings-card {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  padding-top: calc(var(--spacing) * 4);
+  border-top: 1px solid var(--color-hairline);
 }
-/* WebKit ignores min-height on a native menulist, so selects draw their own box and chevron. */
-.settings-sheet select {
-  appearance: none;
-  height: 36px;
-  padding-right: 32px;
-  background:
-    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
-    var(--color-surface-2);
-  text-overflow: ellipsis;
+
+.settings-section-title + .settings-card {
+  padding-top: 0;
+  border-top: 0;
 }
-.settings-sheet input[type="checkbox"] {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--color-text);
+
+.settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
 }
-.settings-sheet input:disabled,
-.settings-sheet select:disabled,
-.settings-sheet button:disabled,
-.settings-sheet button[aria-disabled="true"] {
-  opacity: 0.6;
-}
-.role-editor {
-  margin: 20px 0;
-  padding: 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
+
+.settings-card-head > div {
+  display: grid;
+  gap: calc(var(--spacing) * 0.5);
   min-width: 0;
 }
-.role-editor legend {
-  padding: 0 6px;
-  font-weight: 600;
+
+.settings-card-title {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
 }
-.settings-sheet .role-enabled,
-.settings-sheet .role-switch {
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
+
+.settings-card-note {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
-.chatgpt-login input {
-  font-family: monospace;
-  letter-spacing: 0.08em;
-}
-.settings-sheet .safety-settings label {
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 8px 0;
-}
-.settings-sheet .safety-settings select {
-  flex: none;
-  width: 128px;
-  min-height: 36px;
-}
-.settings-problems ul {
-  margin: 0 0 8px;
-  padding-left: 18px;
-  color: var(--color-text);
-}
-.settings-problems li + li {
-  margin-top: 4px;
-}
-.settings-commit {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
-.settings-sheet .settings-save,
-.settings-sheet .settings-discard button:first-child {
-  background: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-void);
-  font-weight: 600;
-}
-.settings-discard {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 12px var(--spacing-gutter);
-  border-top: 1px solid var(--color-line);
-  background: var(--color-surface);
-}
-.settings-sheet .settings-discard p {
-  margin: 0;
-  color: var(--color-text);
-  font-weight: 500;
-}
-.settings-discard div {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-.settings-sheet .model-capability,
-.settings-sheet .provider-note {
-  color: var(--color-text);
-}
-.safety-presets {
+
+.settings-card-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: calc(var(--spacing) * 2);
-  margin: calc(var(--spacing) * 3) 0 0;
+  gap: calc(var(--spacing) * 3);
+  padding-bottom: var(--spacing);
 }
-.settings-sheet .safety-presets button {
+
+.settings-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* The button lines up with the picker, under the field's label. */
+.settings-add-key {
+  margin-top: calc(var(--text-footnote--line-height) + var(--spacing) * 1.5);
+}
+
+.settings-price {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.settings-price-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--spacing) * 3);
+}
+
+.settings-autonomy,
+.settings-autonomy-group,
+.settings-knowledge,
+.settings-spending,
+.settings-download,
+.settings-account,
+.settings-signin {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+}
+
+.settings-autonomy {
+  gap: calc(var(--spacing) * 4);
+}
+
+.settings-autonomy-group {
+  gap: 0;
+}
+
+.settings-autonomy-group > .settings-group-title {
+  padding-bottom: calc(var(--spacing) * 1);
+}
+
+/* A label and its three choices on one line; a phone puts the choices under the label. */
+.settings-autonomy-row {
+  min-height: calc(var(--spacing) * 11);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.settings-locked {
+  display: grid;
+  list-style: none;
+}
+
+.settings-locked li {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
-  min-height: 44px;
-  padding: 0 calc(var(--spacing) * 3.5);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-2);
-  text-align: left;
-  transition:
-    background var(--duration-press) var(--ease-press),
-    border-color var(--duration-press) var(--ease-press),
-    color var(--duration-press) var(--ease-press);
+  gap: calc(var(--spacing) * 2);
+  min-height: calc(var(--spacing) * 11);
+  border-top: 1px solid var(--color-hairline);
+  color: var(--color-fg-2);
 }
-.settings-sheet .safety-presets button::after {
-  content: "";
+
+.settings-locked .ui-icon {
   flex: none;
-  width: 5px;
-  height: 10px;
-  margin: calc(var(--spacing) * -0.75) 2px 0 0;
-  border: solid currentColor;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+  color: var(--color-fg-3);
+}
+
+.settings-locked-mode {
+  margin-left: auto;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.settings-preset-notes {
+  display: grid;
+}
+
+.settings-preset-notes > span {
+  grid-area: 1 / 1;
+}
+
+.settings-preset-notes > span:not([data-shown]) {
   visibility: hidden;
 }
-.settings-sheet .safety-presets button[aria-pressed="true"] {
-  border-color: var(--color-text-2);
-  background: var(--color-surface-2);
-  color: var(--color-text);
-  font-weight: 600;
+
+.settings-autonomy-hint {
+  padding-top: calc(var(--spacing) * 2);
 }
-.settings-sheet .safety-presets button[aria-pressed="true"]::after {
-  visibility: visible;
+
+.settings-rules-intro {
+  padding-bottom: calc(var(--spacing) * 2);
 }
-@media (hover: hover) {
-  .settings-sheet .safety-presets button:hover:not(:disabled, [aria-pressed="true"]) {
-    color: var(--color-text);
-    border-color: var(--color-text-3);
-  }
+
+.settings-rules-banner {
+  padding-bottom: calc(var(--spacing) * 2);
 }
-.settings-sheet .safety-preset-note {
-  margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 3);
-}
-.safety-locked {
+
+.settings-rules {
   display: grid;
-  gap: calc(var(--spacing) * 2);
-  margin: calc(var(--spacing) * 3) 0 0;
-  padding: calc(var(--spacing) * 3) 0 0;
-  list-style: none;
-  border-top: 1px solid var(--color-line);
-}
-.settings-sheet .safety-locked li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
-  min-height: 36px;
-}
-.settings-sheet .safety-locked li span:last-child {
-  flex: none;
-  color: var(--color-text-2);
-  text-align: right;
-}
-.settings-sheet .safety-hint {
-  margin: calc(var(--spacing) * 2) 0 0;
-  color: var(--color-text-3);
-  font-size: var(--text-footnote);
-  line-height: var(--text-footnote--line-height);
-}
-.safety-rules ul {
-  margin: calc(var(--spacing) * 2) 0 0;
-  padding: 0;
   list-style: none;
 }
-.settings-sheet .safety-rules li {
+
+.settings-rules li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--spacing) calc(var(--spacing) * 3);
-  padding: calc(var(--spacing) * 2.5) 0;
+  gap: 0 calc(var(--spacing) * 2);
+  min-height: calc(var(--spacing) * 11);
+  padding-block: calc(var(--spacing) * 1.5);
+  border-top: 1px solid var(--color-hairline);
 }
-.settings-sheet .safety-rules li + li {
-  border-top: 1px solid var(--color-line);
-}
-.safety-rule-text {
+
+.settings-rule-text {
   display: grid;
   min-width: 0;
-  overflow-wrap: anywhere;
-}
-.safety-rule-where {
-  color: var(--color-text-2);
-  font-size: var(--text-footnote);
-  line-height: var(--text-footnote--line-height);
-}
-.settings-sheet .safety-rules li p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--color-text);
-  font-size: var(--text-footnote);
-  line-height: var(--text-footnote--line-height);
-}
-.safety-rules-problem {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
-  margin: calc(var(--spacing) * 2) 0;
-}
-.settings-sheet .safety-rules-message {
-  flex: 1 1 240px;
-  margin: 0;
-  color: var(--color-text);
-}
-.settings-sheet .safety-rules-failed {
-  flex: 1 0 100%;
-  margin: 0;
-  color: var(--color-text);
-}
-@media (width < 600px) {
-  .settings-sheet {
-    inset: 0;
-    width: 100%;
-    transform: none;
-    border-radius: 0;
-  }
-  .settings-actions,
-  .settings-catalog {
-    flex-wrap: wrap;
-  }
-  .settings-discard div {
-    flex: 1 0 100%;
-  }
-  .settings-discard button {
-    flex: 1;
-  }
-  /* Two lines either way, so switching presets never moves the rows below. */
-  .settings-sheet .safety-preset-note {
-    min-height: 3.1em;
-  }
 }
 
-.chatgpt-panel h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+.settings-rule-where {
+  overflow: hidden;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.chatgpt-actions {
+
+.settings-rule-failed {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 8px 0;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
-.chatgpt-panel > button {
-  margin: 4px 8px 4px 0;
+
+.settings-rule-failed > .ui-icon {
+  flex: none;
+  color: var(--color-danger-fg);
 }
-.chatgpt-usage {
-  margin: 12px 0 0;
-  padding: 0 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
+
+.settings-skills {
+  display: grid;
+  list-style: none;
+}
+
+.settings-skills li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 1) calc(var(--spacing) * 2);
+  padding-block: calc(var(--spacing) * 2);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.settings-skill-name {
+  font-weight: var(--font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.settings-skill-description {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.settings-well {
+  padding: calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-hint {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.settings-hint > .ui-icon {
+  flex: none;
+  margin-top: calc(var(--spacing) * 0.5);
+  color: var(--color-danger-fg);
+  visibility: hidden;
+}
+
+.settings-hint[data-alert] {
+  color: var(--color-fg-1);
+}
+
+.settings-hint[data-alert] > .ui-icon {
+  visibility: visible;
+}
+
+.settings-signin[hidden] {
+  display: none;
+}
+
+.settings-messages:empty {
+  display: none;
+}
+
+.settings-messages {
+  display: grid;
+  gap: var(--spacing);
+}
+
+.settings-account-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
   min-width: 0;
 }
 
-.chatgpt-panel progress {
-  display: block;
-  width: 100%;
-  margin: 8px 0 16px;
+.settings-monogram {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--spacing) * 8);
+  height: calc(var(--spacing) * 8);
+  border-radius: var(--radius-full);
+  background-color: var(--color-control);
+  color: var(--color-fg-1);
+  font:
+    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
 }
-.chatgpt-confirm {
-  padding: 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  margin: 12px 0;
+
+.settings-account-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
 }
-.chatgpt-confirm h4 {
-  margin: 0;
-  font-weight: 600;
+
+.settings-account-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-@media (pointer: coarse) {
-  .settings-sheet select,
-  .settings-sheet button,
-  .settings-sheet input:not([type="checkbox"], [type="radio"]) {
-    min-height: 44px;
-    min-width: 44px;
+
+.settings-footer {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+  min-height: calc(var(--spacing) * 8);
+}
+
+.settings-footer-status {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.settings-footer-status[data-error],
+.settings-footer-line {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.settings-problems {
+  padding-left: calc(var(--spacing) * 4);
+  color: var(--color-fg-1);
+}
+
+.settings-footer-status[data-error] {
+  color: var(--color-fg-1);
+}
+
+.settings-footer-status[data-error] > .ui-icon {
+  flex: none;
+  color: var(--color-danger-fg);
+}
+
+@media (width < 760px) {
+  .settings-autonomy-row {
+    padding-block: calc(var(--spacing) * 3);
   }
-  /* Below 16px, iOS zooms the page into a focused field and leaves it zoomed. */
-  .settings-sheet select,
-  .settings-sheet input:not([type="checkbox"], [type="radio"]) {
-    font-size: 16px;
+
+  .settings-autonomy-row > .ui-segmented {
+    flex-basis: 100%;
   }
-  .settings-sheet select,
-  .settings-sheet .safety-settings select {
-    height: 44px;
-    min-height: 44px;
+
+  .settings-price-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .settings-sheet .safety-settings select {
-    width: auto;
+
+  .settings-footer {
+    flex-wrap: wrap;
   }
-  .settings-sheet .role-enabled,
-  .settings-sheet .role-switch {
-    min-height: 44px;
+
+  .settings-footer-status {
+    flex-basis: 100%;
+  }
+
+  .settings-footer > .ui-button {
+    flex: 1;
   }
 }

@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
+import { choose, nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // Vendor presets and plans in Settings, in Chrome at desktop width and in WebKit on a phone,
@@ -66,8 +67,10 @@ for (const run of runs) {
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
       await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = page.getByRole("dialog", { name: "Models and settings" });
-      await expect(sheet.getByRole("combobox", { name: "main provider" })).toBeEnabled();
+      const sheet = settingsSheet(page);
+      await expect(
+        roleCard(sheet, "main").getByRole("combobox", { name: "Provider", exact: true }),
+      ).toBeEnabled();
       return { page, sheet, press };
     }
     const savedSettings = async () =>
@@ -79,54 +82,67 @@ for (const run of runs) {
 
     test("lists each vendor with its catalog models, and binds a plan's key to its address", async () => {
       const { page, sheet, press } = await settings();
-      const provider = sheet.getByRole("combobox", { name: "main provider" });
-      const model = sheet.getByRole("combobox", { name: "main model" });
+      const main = roleCard(sheet, "main");
+      const provider = main.getByRole("combobox", { name: "Provider", exact: true });
+      const model = main.getByRole("combobox", { name: "Model", exact: true });
       for (const id of OFFERED) {
-        await provider.selectOption(id);
+        await search(page, provider, id);
+        await press(model);
         await expect(
-          model.locator("option:not([disabled]):not([value=''])").first(),
+          page
+            .getByRole("listbox", { name: "Model" })
+            .locator('[role=option]:not([aria-disabled="true"])')
+            .first(),
           id,
         ).toBeAttached();
+        await page.keyboard.press("Escape");
+        await expect(model).toHaveAttribute("aria-expanded", "false");
       }
-      await expect(provider.locator('optgroup[label="Plans"] > option')).toHaveText([
-        "MiniMax Token Plan",
-        "Alibaba Token Plan",
-        "Alibaba Coding Plan",
-      ]);
-      await provider.selectOption({ label: "MiniMax Token Plan" });
-      await model.selectOption("MiniMax-M3");
+      await press(provider);
+      await expect(
+        page
+          .getByRole("listbox", { name: "Provider" })
+          .getByRole("group", { name: "Plans" })
+          .locator(".ui-option-label"),
+      ).toHaveText(["MiniMax Token Plan", "Alibaba Token Plan", "Alibaba Coding Plan"]);
+      await page.keyboard.press("Escape");
+      await search(page, provider, "minimax-coding-plan");
+      await expect(provider).toHaveText("MiniMax Token Plan");
+      await choose(page, model, /MiniMax-M3( ·|$)/);
 
-      await press(sheet.getByRole("button", { name: "Add key for main" }));
-      const keys = page.getByRole("dialog", { name: "Keys" });
-      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue(
-        "openai-compatible",
+      await press(main.getByRole("button", { name: "Add key", exact: true }));
+      const keys = nestedKeys(page);
+      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveText(
+        "OpenAI-compatible",
       );
       await expect(keys.getByLabel("Base URL", { exact: true })).toHaveValue(
         "https://api.minimax.io/v1",
       );
-      await keys.getByLabel("Name", { exact: true }).fill("token-plan");
+      await keys.getByLabel("Label (optional)", { exact: true }).fill("token-plan");
       await keys.getByLabel("Key", { exact: true }).fill("fixture-token-plan-value");
       await press(keys.getByRole("button", { name: "Save key" }));
       await expect(keys.getByText("Saved token-plan.")).toBeVisible();
-      await press(keys.getByRole("button", { name: "Close keys" }));
-      await expect(sheet.getByRole("combobox", { name: "main key" })).toHaveValue("token-plan");
+      await press(keys.getByRole("button", { name: "Settings", exact: true }));
+      await expect(keys).toHaveCount(0);
+      await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(
+        "token-plan",
+      );
 
-      // A plan uses its own limits: no per-token price, and no dollar ceiling.
+      // A plan uses its own limits: no per-token price, and no dollar limit.
+      await expect(main.getByText("Uses your plan's limits.", { exact: true })).toBeVisible();
       await expect(
-        sheet
-          .getByRole("group", { name: "Main" })
-          .getByText("Uses your plan's limits. Use a key from this plan, not a pay-as-you-go key."),
+        main.getByText("Use a key from this plan, not a pay-as-you-go key."),
       ).toBeVisible();
       await expect(
         sheet
-          .getByRole("group", { name: "Task spending ceiling" })
-          .getByText("Uses your plan's limits.", { exact: true }),
+          .getByRole("region", { name: "Spending" })
+          .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
-      await expect(sheet.getByText(/USD per million tokens/)).toHaveCount(0);
-      const save = sheet.getByRole("button", { name: "Save settings" });
+      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
+      const save = sheet.getByRole("button", { name: "Save", exact: true });
       await expect(save).toBeEnabled();
       await press(save);
-      await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
       expect((await savedSettings()).main).toEqual({
         provider: "minimax-coding-plan",
         model: "MiniMax-M3",
@@ -135,29 +151,39 @@ for (const run of runs) {
     });
 
     test("says why the GLM Coding Plan is not available, and never saves it", async () => {
-      const { page, sheet } = await settings();
+      const { page, sheet, press } = await settings();
       const puts: string[] = [];
       page.on("request", (r) => {
         if (r.method() === "PUT" && r.url().endsWith("/api/agent/settings")) puts.push(r.url());
       });
-      const provider = sheet.getByRole("combobox", { name: "main provider" });
-      await expect(provider.locator('optgroup[label="Not available here"] > option')).toHaveText([
-        "GLM Coding Plan — not available here",
-        "Kimi For Coding — not available here",
-        "Ark Coding Plan — not available here",
+      const main = roleCard(sheet, "main");
+      const provider = main.getByRole("combobox", { name: "Provider", exact: true });
+      await press(provider);
+      const refused = page
+        .getByRole("listbox", { name: "Provider" })
+        .getByRole("group", { name: "Not available here" })
+        .getByRole("option");
+      await expect(refused.locator(".ui-option-label")).toHaveText([
+        "GLM Coding Plan",
+        "Kimi For Coding",
+        "Ark Coding Plan",
       ]);
-      await provider.selectOption({ label: "GLM Coding Plan — not available here" });
+      await expect(refused.locator(".ui-option-note")).toHaveText(
+        Array(3).fill("Not available here"),
+      );
+      await press(refused.first());
+      await expect(provider).toHaveText("GLM Coding Plan");
       const reason = sheet.getByText(GLM_PLAN, { exact: true });
       await expect(reason).toBeVisible();
       await expect(provider).toHaveAttribute(
         "aria-describedby",
         (await reason.getAttribute("id")) as string,
       );
-      await expect(sheet.getByRole("combobox", { name: "main model" })).toHaveCount(0);
-      await expect(sheet.getByRole("combobox", { name: "main key" })).toHaveCount(0);
-      await expect(sheet.getByRole("button", { name: "Add key for main" })).toHaveCount(0);
-      await expect(sheet.getByRole("button", { name: "Save settings" })).toBeDisabled();
-      await expect(sheet.locator("#settings-problems")).toContainText(
+      await expect(main.getByRole("combobox", { name: "Model" })).toHaveCount(0);
+      await expect(main.getByRole("combobox", { name: "Key" })).toHaveCount(0);
+      await expect(main.getByRole("button", { name: "Add key" })).toHaveCount(0);
+      await expect(sheet.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      await expect(sheet.locator(".settings-problems")).toContainText(
         "Main: choose a provider that is available here.",
       );
       expect(puts).toEqual([]);

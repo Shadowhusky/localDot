@@ -220,7 +220,7 @@ describe("configuration validation before explicit save", () => {
     };
     expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toEqual({
       ok: false,
-      problems: ["The default task budget is unavailable. Enter an explicit ceiling."],
+      problems: ["No default limit is set. Choose Custom and enter a limit per task."],
     });
     // One key cannot be the plan for main and pay as you go for fast.
     const shared = formOf({
@@ -329,7 +329,7 @@ describe("configuration validation before explicit save", () => {
     d.budget = "abc";
     expect(validateForm(d, {}, providerFixture())).toEqual({
       ok: false,
-      problems: ["Local: choose a valid model ID.", "Enter an explicit task ceiling in USD."],
+      problems: ["Local: choose a valid model ID.", "Enter a limit per task in US dollars."],
     });
     delete d.choices.main;
     expect(validateForm(d, {}, providerFixture())).toMatchObject({
@@ -337,7 +337,7 @@ describe("configuration validation before explicit save", () => {
       problems: [
         "Choose a main provider and model.",
         "Local: choose a valid model ID.",
-        "Enter an explicit task ceiling in USD.",
+        "Enter a limit per task in US dollars.",
       ],
     });
   });

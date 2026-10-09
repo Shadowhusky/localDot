@@ -104,9 +104,9 @@ test("Replay after Approve once shows dot back at work, not still waiting", asyn
     .getByRole("navigation", { name: "Mode" })
     .getByRole("button", { name: "Replay", exact: true })
     .click();
-  const replay = page.getByRole("main", { name: "Session replay" });
+  const replay = page.getByRole("main", { name: "Replay" });
   await expect(replay).toBeVisible();
-  const time = replay.locator(".replay-hud span").last();
+  const time = replay.getByRole("status", { name: "Replay time" });
   await expect(time).not.toHaveText(/\/ 0:00$/);
   // Jump to the end of the recording, which is after the approval.
   await expect(async () => {
@@ -115,7 +115,7 @@ test("Replay after Approve once shows dot back at work, not still waiting", asyn
   }).toPass();
   // The readout shows whole seconds, so one more 10 s step lands on the very end.
   await page.keyboard.press("l");
-  await expect(replay.locator(".replay-hud strong")).toHaveText(
+  await expect(replay.locator(".replay-now-label")).toHaveText(
     /^(Working|Select the Net total cell)$/,
   );
   await expect(replay.locator(".replay-stage.control")).toHaveCount(1);
@@ -139,16 +139,16 @@ test("Replay reads a Pause as pausing until the step it waits on ends, as live d
   const pausedMs = (events.find((e) => e.data.state === "paused")?.t ?? 0) / 1000;
   const endedMs = (events.findLast((e) => e.type === "step.end")?.t ?? 0) / 1000;
   expect(endedMs - pausedMs).toBeGreaterThan(500);
-  const replay = page.getByRole("main", { name: "Session replay" });
+  const replay = page.getByRole("main", { name: "Replay" });
   const at = async (tMs: number) => {
     await page.goto(`${origin}/?replay=${sessionId}&t=${Math.ceil(tMs)}#token=${TOKEN}`);
     await expect(replay).toBeVisible();
   };
   await at((pausedMs + endedMs) / 2);
-  await expect(replay.locator(".replay-hud strong")).toHaveText("Pausing after this step");
+  await expect(replay.locator(".replay-now-label")).toHaveText("Pausing after this step");
   await expect(replay.locator(".replay-stage.control")).toHaveCount(1);
   await at(endedMs + 1);
-  await expect(replay.locator(".replay-hud strong")).toHaveText("Paused");
+  await expect(replay.locator(".replay-now-label")).toHaveText("Paused");
   await expect(replay.locator(".replay-stage.control")).toHaveCount(0);
 });
 

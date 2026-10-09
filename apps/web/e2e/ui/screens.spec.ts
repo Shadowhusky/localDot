@@ -4,14 +4,6 @@ import { expect, keepBaselinesAt, test } from "./harness.ts";
 // (--update-snapshots) and reviews the new image.
 keepBaselinesAt("c14", "w39");
 
-test("onboarding", async ({ page, ui }) => {
-  await ui.open("first-run");
-  await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
-  await ui.settle();
-  await ui.still();
-  await expect(page).toHaveScreenshot("onboarding.png");
-});
-
 test("watch, running", async ({ page, ui }) => {
   await ui.open("running");
   await expect(page.getByTestId("hud-status")).toHaveText("Select the Net total cell");
@@ -44,7 +36,7 @@ test("settings", async ({ page, ui }) => {
   await ui.open("ready");
   await ui.picture();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: /main model/i })).toBeVisible();
+  await expect(page.getByText("All changes saved", { exact: true })).toBeVisible();
   await ui.settle();
   await ui.still();
   await expect(page).toHaveScreenshot("settings.png");

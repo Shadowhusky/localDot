@@ -3,7 +3,7 @@ import { emptyModel } from "@localdot/stage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExportIn, ExportOut } from "./export-protocol.ts";
 import { startExport } from "./exporter.ts";
-import type { ExportSink } from "./sink.ts";
+import { type ExportSink, ExportTooLongError, LONG_EXPORT } from "./sink.ts";
 
 vi.mock("../stage/theme.ts", () => ({ readTheme: () => ({}) }));
 
@@ -110,6 +110,13 @@ describe("export file ownership", () => {
     expect(worker.messages.some((message) => message.type === "ack")).toBe(false);
     expect(sink.abort).toHaveBeenCalledOnce();
     expect(sink.close).not.toHaveBeenCalled();
+  });
+  it("says a long export needs another browser when the download path fills", async () => {
+    const { sink, handle, worker } = setup();
+    sink.write.mockRejectedValue(new ExportTooLongError());
+    worker.emit(chunk());
+    expect(await handle.done).toEqual({ type: "error", message: LONG_EXPORT });
+    expect(sink.abort).toHaveBeenCalledOnce();
   });
   it("rejects completion before its chunks have been written", async () => {
     const { sink, handle, worker } = setup();

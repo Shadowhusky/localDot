@@ -105,6 +105,45 @@ function liveFixture() {
   };
 }
 
+describe("a stretch marked for export", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  it("marks in and out at the playhead, starts over past the other end, and Escape clears it", async () => {
+    const fixture = liveFixture();
+    const onGoLive = vi.fn();
+    const hook = renderHook(() =>
+      useReplay(fixture.api, fixture.sessionId, fixture.stage, { onGoLive }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    const run = (command: Parameters<typeof hook.result.current.run>[0]) =>
+      act(() => hook.result.current.run(command));
+    expect(hook.result.current.selection).toBeNull();
+    act(() => hook.result.current.seek(1000, "exact"));
+    run({ kind: "mark", edge: "in" });
+    expect(hook.result.current.selection).toEqual({ fromMs: 1000, toMs: 5000 });
+    act(() => hook.result.current.seek(3000, "exact"));
+    run({ kind: "mark", edge: "out" });
+    expect(hook.result.current.selection).toEqual({ fromMs: 1000, toMs: 3000 });
+    act(() => hook.result.current.seek(4000, "exact"));
+    run({ kind: "mark", edge: "in" });
+    expect(hook.result.current.selection).toEqual({ fromMs: 4000, toMs: 5000 });
+    act(() => hook.result.current.seek(2000, "exact"));
+    run({ kind: "mark", edge: "out" });
+    expect(hook.result.current.selection).toEqual({ fromMs: 0, toMs: 2000 });
+    run({ kind: "exit" });
+    expect(hook.result.current.selection).toBeNull();
+    expect(onGoLive).not.toHaveBeenCalled();
+    run({ kind: "exit" });
+    expect(onGoLive).toHaveBeenCalledOnce();
+    hook.unmount();
+  });
+});
+
 describe("live replay ownership", () => {
   it("keeps the timestamp across track changes and refuses late messages from retired sources", async () => {
     const f = liveFixture();

@@ -101,13 +101,20 @@ async function open(f: ReturnType<typeof fixture>) {
   const button = screen.getByRole("button", { name: "Replay" });
   await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
   fireEvent.click(button);
-  await screen.findByRole("button", { name: "Delete Newest notes" });
+  await screen.findByRole("heading", { name: "Newest notes" });
   return button;
 }
+async function tasks() {
+  if (!screen.queryByRole("dialog", { name: "Tasks" }))
+    fireEvent.click(await screen.findByRole("button", { name: /^All tasks/ }));
+  return within(await screen.findByRole("dialog", { name: "Tasks" }));
+}
 async function remove(title: string) {
-  fireEvent.click(screen.getByRole("button", { name: `Delete ${title}` }));
+  fireEvent.click(await (await tasks()).findByRole("button", { name: `More for ${title}` }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Delete recording/ }));
+  const confirm = await screen.findByRole("alertdialog", { name: "Delete this task's recording?" });
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Delete session" }));
+    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   });
 }
 const replayParam = () => new URLSearchParams(window.location.search).get("replay");
@@ -140,16 +147,15 @@ it("browser Back never reopens a recording deleted after a Watch round-trip", as
   const f = fixture();
   enterApp();
   const button = await open(f);
-  const rail = screen.getByRole("complementary", { name: "Recorded sessions" });
-  fireEvent.click(within(rail).getByText("Older notes").closest("button") as HTMLButtonElement);
+  fireEvent.click(await (await tasks()).findByRole("link", { name: /^Older notes/ }));
   await waitFor(() => expect(replayParam()).toBe(f.cards[1]?.id));
   await watch();
   fireEvent.click(button);
-  await screen.findByRole("button", { name: "Delete Older notes" });
+  await screen.findByRole("heading", { name: "Newest notes" });
   await remove("Older notes");
   expect(f.deleted).toEqual([f.cards[1]?.id]);
   expect(await travel(-1)).toBeNull();
-  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
   expect(await travel(-1)).toBeNull();
   expect(window.location.pathname).toBe("/before");
 });
@@ -159,7 +165,7 @@ it("deleting the open recording replaces its entry so Back and Forward never reo
   const button = await open(f);
   await watch();
   fireEvent.click(button);
-  await screen.findByRole("button", { name: "Delete Newest notes" });
+  await screen.findByRole("heading", { name: "Newest notes" });
   const entries = window.history.length;
   await remove("Newest notes");
   expect(window.history.length).toBe(entries);
@@ -168,14 +174,14 @@ it("deleting the open recording replaces its entry so Back and Forward never reo
   for (const delta of [-1, -1, 1, 1, 1]) visited.push(await travel(delta));
   expect(visited).not.toContain(f.cards[0]?.id);
   expect(window.location.pathname).toBe("/");
-  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
 });
 it("keeps remaining history reachable after deleting the selected newest session", async () => {
   const f = fixture();
   const button = await open(f);
   await remove("Newest notes");
   expect(f.deleted).toEqual([f.cards[0]?.id]);
-  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
   expect(
     button.hasAttribute("disabled"),
     "remaining older recording must still be reachable from Replay",
@@ -188,7 +194,6 @@ it("keeps remaining history reachable after deleting the selected newest session
 it("deleting an older unselected session leaves the selected newest replay available", async () => {
   const f = fixture();
   await open(f);
-  await screen.findByRole("button", { name: "Delete Older notes" });
   await remove("Older notes");
   expect(f.deleted).toEqual([f.cards[1]?.id]);
   expect(new URLSearchParams(window.location.search).get("replay")).toBe(f.cards[0]?.id);

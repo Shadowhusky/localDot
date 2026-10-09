@@ -43,7 +43,7 @@
   .ui-status-arc {
     transform-box: view-box;
     transform-origin: 8px 8px;
-    animation: ui-spin 1.2s linear infinite;
+    animation: ui-spin var(--loop-turn) linear infinite;
   }
 
   .ui-status-check {
@@ -198,6 +198,16 @@
     border-radius: var(--radius-full);
     background-color: var(--color-control-pressed);
     background-clip: padding-box;
+  }
+
+  /* No box of its own; what it holds fades out unless its own stylesheet says how it leaves. */
+  .ui-presence {
+    display: contents;
+  }
+
+  .ui-presence[data-leaving] > * {
+    opacity: 0;
+    transition: opacity var(--dur-exit) var(--ease-exit);
   }
 
   @media (--coarse) {

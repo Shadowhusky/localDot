@@ -64,13 +64,14 @@ const position = async (page: Page) =>
 
 test("plays, scrubs and steps through a seeded session", async ({ page }) => {
   await openReplay(page);
-  await page.getByRole("combobox", { name: "Playback speed" }).selectOption("4");
+  await page.getByRole("combobox", { name: "Playback speed" }).click();
+  await page.getByRole("option", { name: "4×" }).click();
   await page.getByRole("button", { name: "Play replay" }).click();
   await page.waitForTimeout(3000);
   await page.getByRole("button", { name: "Pause replay" }).click();
   expect(await position(page)).toBeGreaterThanOrEqual(8000);
   await seek(page, 10_100);
-  await expect(page.locator(".replay-hud strong")).toContainText("Typing a sample");
+  await expect(page.locator(".replay-now-label")).toContainText("Typing a sample");
   const track = await bounds(page.getByRole("slider", { name: "Replay timeline" }));
   const before = await position(page);
   await page.mouse.move(track.x + track.width * 0.7, track.y + track.height / 2);
@@ -81,7 +82,7 @@ test("plays, scrubs and steps through a seeded session", async ({ page }) => {
   await expect
     .poll(async () => {
       const playhead = await bounds(page.locator(".replay-playhead"));
-      return Math.abs(playhead.x - (track.x + track.width * 0.3));
+      return Math.abs(playhead.x + playhead.width / 2 - (track.x + track.width * 0.3));
     })
     .toBeLessThanOrEqual(1);
   const released = await position(page);
@@ -100,7 +101,7 @@ test("plays, scrubs and steps through a seeded session", async ({ page }) => {
 
 test("skips idle by default and says so", async ({ page }) => {
   await openReplay(page);
-  const skip = page.getByRole("checkbox", { name: "Skip idle" });
+  const skip = page.getByRole("switch", { name: "Skip idle" });
   await expect(skip).toBeChecked();
   await seek(page, 4000);
   await expect(page.locator(".replay-speed-label")).toHaveText("Idle skipped");
@@ -159,7 +160,7 @@ test("compares before and after", async ({ page }) => {
   await screenshot(page, "compare");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("region", { name: "Before and after comparison" })).toHaveCount(0);
-  await expect(page.getByRole("main", { name: "Session replay" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Replay" })).toBeVisible();
 });
 
 test("reduced motion: the playhead jumps and the compare wipe does not animate", async ({

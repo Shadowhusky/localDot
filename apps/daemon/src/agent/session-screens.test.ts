@@ -874,6 +874,55 @@ describe("session-owned screen authority", () => {
     expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(false);
   });
 
+  it.each(["cannot start", "has no ready tab yet"] as const)(
+    "keeps the task and the computer running when the signed-in browser %s",
+    async (failure) => {
+      const f = fixture(true);
+      await f.ready();
+      const h = tools(f);
+      if (failure === "cannot start")
+        vi.mocked(f.deps.browser.start).mockRejectedValueOnce(new Error("browser cell stopped"));
+      else f.client.tabs.mockResolvedValueOnce({ tabs: [{ id: randomUUID(), ready: false }] });
+      const refused = await h.callTool("switch_screen", { screen: "browser" });
+      expect(refused.result.ok).toBe(false);
+      expect(refused.result.final).toBeUndefined();
+      expect(refused.result.content).toContainEqual(
+        expect.objectContaining({ text: expect.stringContaining("signed-in browser") }),
+      );
+      expect(f.session.stopped).toBe(false);
+      expect(f.physicalStop).not.toHaveBeenCalled();
+      expect(f.holder()).toBe("user");
+      expect(f.screens.selection.screen).toBe("desktop");
+      expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(true);
+    },
+  );
+
+  it("returns to the desktop when the signed-in browser stops answering, retiring only the browser", async () => {
+    const f = fixture(true);
+    await f.browser();
+    const h = tools(f);
+    f.client.control.mockRejectedValueOnce(new Error("browser stopped answering"));
+    const back = await h.callTool("switch_screen", { screen: "desktop" });
+    expect(back.result.ok).toBe(true);
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.session.stopped).toBe(false);
+    expect(f.physicalStop).not.toHaveBeenCalled();
+  });
+
+  it("still stops the task and its computer when the browser grant can neither be revoked nor retired", async () => {
+    const f = fixture(true);
+    await f.browser();
+    const h = tools(f);
+    f.client.control.mockRejectedValueOnce(new Error("browser stopped answering"));
+    vi.mocked(f.deps.browser.stop).mockRejectedValueOnce(new Error("shutdown unconfirmed"));
+    const back = await h.callTool("switch_screen", { screen: "desktop" });
+    expect(back.result).toMatchObject({ ok: false, final: true });
+    expect(f.session.stopped).toBe(true);
+    await f.session.screensSettled().catch(() => {});
+    expect(f.physicalStop).toHaveBeenCalledWith(f.session.cellId);
+  });
+
   it("discards page text that returns after takeover and drains the browser-reading tool", async () => {
     const f = fixture();
     await f.browser();

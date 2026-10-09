@@ -341,12 +341,14 @@ describe("ui guard rules", () => {
     expect([...seeded].sort()).toEqual(Object.keys(RULES).sort());
   });
 
-  it("allows a stylesheet only in the kit, the galleries and the planned shell and dot sheets", () => {
+  it("allows a stylesheet only in the kit, the galleries and the planned shell, Replay, Export and dot sheets", () => {
     for (const path of [
       "src/ui/a.css",
       "src/ui/gallery/a.css",
       "src/gallery/a.css",
       "src/dot/dot.css",
+      "src/replay/replay.css",
+      "src/export/export.css",
       "src/shell/stage-frame.css",
       "src/shell/hud.css",
       "src/shell/layout.css",
@@ -355,10 +357,20 @@ describe("ui guard rules", () => {
       "src/shell/phone.css",
       "src/shell/conversation.css",
       "src/shell/decision.css",
+      "src/settings/settings.css",
+      "src/keys/keys.css",
     ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual([]);
     }
-    for (const path of ["src/agent/a.css", "src/shell/misc.css", "src/shell/x/hud.css"]) {
+    for (const path of [
+      "src/agent/a.css",
+      "src/shell/misc.css",
+      "src/shell/x/hud.css",
+      "src/settings/other.css",
+      "src/keys/other.css",
+      "src/replay/other.css",
+      "src/export/other.css",
+    ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual(["stray-stylesheet"]);
     }
   });

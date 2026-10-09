@@ -1,10 +1,14 @@
-import { LLM_PROVIDERS, SessionIndexPage, ULID_PATTERN } from "@localdot/protocol";
+import {
+  DEFAULT_AUTONOMY,
+  LLM_PROVIDERS,
+  SessionIndexPage,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
-import { KnowledgeView } from "./agent/KnowledgeView.tsx";
 import { SafetyControls } from "./agent/SafetyControls.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
@@ -17,22 +21,29 @@ import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
+import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
-import { exchangeInstallCode, type InstallLink, takeInstallLink } from "./lib/install-link.ts";
+import {
+  exchangeInstallCode,
+  type InstallLink,
+  linkArrived,
+  takeInstallLink,
+} from "./lib/install-link.ts";
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
-import { ReplayView } from "./replay/ReplayView.tsx";
+import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
 import { statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
-import { SettingsSheet } from "./settings/SettingsSheet.tsx";
+import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
@@ -40,10 +51,13 @@ import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ConversationRail } from "./shell/ConversationRail.tsx";
 import { Hud } from "./shell/Hud.tsx";
 import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
+import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { Announcer } from "./ui/Announcer.tsx";
+import { PHONE, useMediaQuery } from "./ui/media.ts";
+import { Presence } from "./ui/Presence.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -59,6 +73,9 @@ export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
   const [candidate, setCandidate] = useState<InstallLink | null>(null);
   const [rejected, setRejected] = useState<Rejected>(null);
+  // A link in the address is read in an effect, after the first paint; until then that paint is the
+  // check it will start, not a sign-in prompt.
+  const [arriving, setArriving] = useState(linkArrived);
   const tokenOwner = useRef(token);
   const linkOwner = useRef<InstallLink | null>(null);
   const exchange = useRef<{ code: string; promise: Promise<string> } | null>(null);
@@ -76,6 +93,7 @@ export function App({ fetchImpl }: AppProps) {
     };
     window.addEventListener("hashchange", onHashChange);
     onHashChange();
+    setArriving(false);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
@@ -165,15 +183,16 @@ export function App({ fetchImpl }: AppProps) {
   );
 
   if (api) return <Theatre key={token} api={api} />;
-  if (candidate) {
-    return (
-      <p className="notice" role="status">
-        Checking the link…
-      </p>
-    );
-  }
-  return <NoToken rejected={rejected} />;
+  if (candidate || arriving) return <SignIn state="checking" />;
+  return <SignIn state={SIGN_IN[rejected ?? "none"]} />;
 }
+
+const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
+  none: "first",
+  stored: "signed-out",
+  link: "expired",
+  code: "expired",
+};
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
@@ -182,6 +201,11 @@ function Theatre({ api }: { api: ApiClient }) {
     return selected && ULID_PATTERN.test(selected) ? selected : null;
   });
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
+  const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
+  // An export keeps going when Replay closes or moves to another task.
+  const [exportJob] = useState(createExportJob);
+  useEffect(() => () => exportJob.dispose(), [exportJob]);
   const [historyRevision, setHistoryRevision] = useState(0);
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
@@ -223,8 +247,16 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
   } = useCell(api);
   const keys = useKeys(api);
-  const [keysOpen, setKeysOpen] = useState(false);
+  // Keys shows on its own sheet, or slid over Settings while Settings is open.
+  const [keysIn, setKeysIn] = useState<"sheet" | "settings" | null>(null);
+  const keysOpen = keysIn !== null;
   const settings = useSettings(api, [], !keysOpen);
+  const settingsOpen = useRef(settings.open);
+  settingsOpen.current = settings.open;
+  const openKeys = useCallback(() => setKeysIn(settingsOpen.current ? "settings" : "sheet"), []);
+  useEffect(() => {
+    if (!settings.open) setKeysIn((now) => (now === "settings" ? null : now));
+  }, [settings.open]);
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
@@ -255,7 +287,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] = useState<"models" | "autonomy">("models");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
   const keysOrigin = useRef<HTMLElement | null>(null);
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const keyRequest = useRef(0);
@@ -263,25 +295,37 @@ function Theatre({ api }: { api: ApiClient }) {
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
-  const showSettings = (trigger: HTMLElement, section: "models" | "autonomy" = "models") => {
-    settingsOrigin.current = trigger;
-    setSettingsSection(section);
-    settings.show();
+  const keysDiscard = useRef<((then: () => void) => void) | null>(null);
+  const showSettings = (trigger: HTMLElement, section: SettingsSection = "models") => {
+    const open = () => {
+      settingsOrigin.current = trigger;
+      setSettingsSection(section);
+      if (keysIn === "sheet") {
+        keysOrigin.current = null;
+        setKeysIn(null);
+      }
+      settings.show();
+    };
+    // One sheet at a time: Keys on its own gives way to Settings, after asking if a key is typed.
+    if (keysIn === "sheet" && keysDiscard.current) keysDiscard.current(open);
+    else open();
   };
-  const receiveKey = useCallback<KeyIntake["receive"]>((source, provider) => {
-    keysOrigin.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    keyCapture.current = null;
-    flushSync(() => {
-      setKeyPreset(undefined);
-      setKeysOpen(true);
-    });
-    return keysIntake.current?.receive(source, provider) ?? false;
-  }, []);
+  const receiveKey = useCallback<KeyIntake["receive"]>(
+    (source, provider) => {
+      keysOrigin.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      keyCapture.current = null;
+      flushSync(() => {
+        setKeyPreset(undefined);
+        openKeys();
+      });
+      return keysIntake.current?.receive(source, provider) ?? false;
+    },
+    [openKeys],
+  );
   const wasOpen = useRef(false);
-  const closeKeys = useCallback(() => setKeysOpen(false), []);
+  const closeKeys = useCallback(() => setKeysIn(null), []);
   useEffect(() => {
-    // Restore only after the render has removed inert from the Theatre.
     if (wasOpen.current && !keysOpen) {
       if (keysOrigin.current?.isConnected && !keysOrigin.current.closest("[inert], [hidden]"))
         keysOrigin.current.focus();
@@ -337,6 +381,7 @@ function Theatre({ api }: { api: ApiClient }) {
     media.addEventListener("change", changed);
     return () => media.removeEventListener("change", changed);
   }, []);
+  const phone = useMediaQuery(PHONE);
   const controls = useTaskControls({
     api,
     cell,
@@ -359,11 +404,15 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
-  const knowledge = useKnowledge(
-    api,
-    agent.sessionId,
-    !!agent.sessionId && (!narrow || pane === "activity") && !keysOpen && !settings.open,
-  );
+  const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const { rereadMemory } = settingsKnowledge;
+  // A memory change's "Read memory again" opens Settings on what dot knows, read afresh.
+  const [readMemory, setReadMemory] = useState(false);
+  useEffect(() => {
+    if (!readMemory || !settings.open) return;
+    setReadMemory(false);
+    rereadMemory();
+  }, [readMemory, settings.open, rereadMemory]);
   useEffect(() => {
     if (agent.model.pendingTakeover) setPointerMode("click");
   }, [agent.model.pendingTakeover]);
@@ -484,14 +533,59 @@ function Theatre({ api }: { api: ApiClient }) {
     () => (session.sessionId ? timelineRows(stepRows(session.model), session.model.keyUses) : []),
     [session.sessionId, session.model, session.version],
   );
+  const keyUses = session.model.keyUses;
+  const uses = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const use of keyUses)
+      if (use.decision === "allow") counts[use.secretId] = (counts[use.secretId] ?? 0) + 1;
+    return counts;
+  }, [keyUses]);
+  // One panel, on its own sheet or slid over Settings when Settings is open.
+  const keysPanel = {
+    keys,
+    intakeRef: keysIntake,
+    preset: keyPreset,
+    uses,
+    onSaved: (key: KeyRecord, request: number) => {
+      const context = keyCapture.current;
+      if (context?.request === request) void settings.keySaved(context.capture, key);
+    },
+    stop: sheetStopControl,
+    taskControls: <StopControl controls={controls} />,
+  };
   useEffect(() => {
     document.title = appStatus.title;
   }, [appStatus.title]);
+  // On a phone it covers the computer pane, over a stage that stays where the computer appears.
+  const welcome = (
+    <Presence show={!replayId && status === "known" && !cell && listed.length === 0}>
+      <WelcomeSetup
+        modelReady={mainReady}
+        loading={settings.phase === "loading" || !settings.saved}
+        modelLabel={
+          mainChoice
+            ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
+            : undefined
+        }
+        autonomy={settings.saved?.autonomy}
+        appearance={appearance}
+        starting={pending !== null}
+        canStart={appStatus.actions.some((action) => action.kind === "start" && action.enabled)}
+        onSettings={showSettings}
+        onStart={guardStart}
+      />
+    </Presence>
+  );
   return (
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
-      <div className="theatre-content" inert={keysOpen || settings.open}>
+      <div className="theatre-content">
         <TopBar
-          title={session.model.title ?? "Your computer"}
+          title={
+            replayId
+              ? (shownRecording?.title ?? RECORDED_TASK)
+              : (session.model.title ?? "Your computer")
+          }
+          note={shownRecording?.note}
           live={stageHud.live}
           mode={replayId ? "replay" : "watch"}
           replayEnabled={!!(replayId || newestReplayId)}
@@ -502,7 +596,7 @@ function Theatre({ api }: { api: ApiClient }) {
             keysOrigin.current = keysButton.current;
             keyCapture.current = null;
             setKeyPreset(undefined);
-            setKeysOpen(true);
+            openKeys();
           }}
           keysRef={keysButton}
           settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
@@ -672,26 +766,9 @@ function Theatre({ api }: { api: ApiClient }) {
                 frozen={!!stageHud.paused}
                 control={appStatus.control}
                 caption={appStatus.caption.text}
+                cover={phone ? welcome : undefined}
               >
-                {!replayId && status === "known" && !cell && listed.length === 0 && (
-                  <WelcomeSetup
-                    modelReady={mainReady}
-                    loading={settings.phase === "loading" || !settings.saved}
-                    modelLabel={
-                      mainChoice
-                        ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
-                        : undefined
-                    }
-                    autonomy={settings.saved?.autonomy}
-                    appearance={appearance}
-                    starting={pending !== null}
-                    canStart={appStatus.actions.some(
-                      (action) => action.kind === "start" && action.enabled,
-                    )}
-                    onSettings={showSettings}
-                    onStart={guardStart}
-                  />
-                )}
+                {!phone && welcome}
                 {!replayId && selectedScreen && (
                   <div className="screen-label" role="status">
                     {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}
@@ -747,7 +824,6 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
                 models={agent.snapshot?.models}
                 modelName={modelName}
-                knowledge={<KnowledgeView knowledge={knowledge} />}
                 memoryAction={(change) => {
                   const status =
                     controls.status?.kind === "memory" && controls.status.target === change.changeId
@@ -767,9 +843,10 @@ function Theatre({ api }: { api: ApiClient }) {
                                 : "failed"
                               : "ready",
                     onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
-                    onReread: () => {
+                    onReread: (trigger) => {
                       controls.recheck();
-                      knowledge.rereadMemory();
+                      setReadMemory(true);
+                      showSettings(trigger, "knowledge");
                     },
                   };
                 }}
@@ -795,6 +872,8 @@ function Theatre({ api }: { api: ApiClient }) {
               setHistoryRevision(historyOwner.current);
               if (id === replayId) selectReplay(null, "replace");
             }}
+            onTitle={setRecorded}
+            exportJob={exportJob}
             visible={!keysOpen && !settings.open && !safety.approval}
           />
         )}
@@ -803,8 +882,9 @@ function Theatre({ api }: { api: ApiClient }) {
         focusSection={settingsSection}
         appearance={appearance}
         taskControls={<StopControl controls={controls} />}
+        stop={sheetStopControl}
         open={settings.open}
-        suspended={keysOpen}
+        keysPage={keysIn === "settings" ? { ...keysPanel, onBack: closeKeys } : undefined}
         choices={settings.draft?.choices ?? {}}
         chatgpt={settings.chatgpt}
         subscriptionModels={settings.subscriptionModels}
@@ -824,12 +904,16 @@ function Theatre({ api }: { api: ApiClient }) {
                     ? "stale"
                     : "ready"
         }
+        catalogAt={settings.index?.catalog?.fetchedAt}
         dirty={settings.dirty}
         busy={settings.busy}
         loading={settings.phase === "loading" || !settings.draft}
         error={settings.error}
         validation={settings.validation}
-        onClose={settings.close}
+        onClose={() => {
+          settings.close();
+          setKeysIn(null);
+        }}
         onChange={settings.change}
         onKeys={(role, providerId, trigger) => {
           const provider = providerById(providerId);
@@ -851,7 +935,7 @@ function Theatre({ api }: { api: ApiClient }) {
             provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
             ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
           });
-          setKeysOpen(true);
+          setKeysIn("settings");
         }}
         onRefresh={() => void settings.refresh()}
         onReload={settings.reload}
@@ -867,7 +951,9 @@ function Theatre({ api }: { api: ApiClient }) {
         )}
         onPrice={settings.changePrice}
         autonomy={settings.draft?.autonomy}
+        savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
         onAutonomy={settings.changeAutonomy}
+        knowledge={settingsKnowledge}
         rules={rules}
         budget={
           settings.draft
@@ -879,41 +965,14 @@ function Theatre({ api }: { api: ApiClient }) {
               }
             : undefined
         }
-        stop={sheetStopControl}
       />
       <KeysSheet
-        taskControls={<StopControl controls={controls} />}
-        intakeRef={keysIntake}
-        open={keysOpen}
-        keys={keys}
+        {...keysPanel}
+        open={keysIn === "sheet"}
         onClose={closeKeys}
-        preset={keyPreset}
-        onSaved={(key, request) => {
-          const context = keyCapture.current;
-          if (context?.request === request) void settings.keySaved(context.capture, key);
-        }}
-        stop={sheetStopControl}
+        discardRef={keysDiscard}
       />
       <Announcer />
     </div>
-  );
-}
-
-const REJECTED: Record<Exclude<Rejected, null>, string> = {
-  stored: "Your saved sign-in no longer works.",
-  link: "This sign-in link was not accepted.",
-  code: "This sign-in link could not be used.",
-};
-
-function NoToken({ rejected }: { rejected: Rejected }) {
-  return (
-    <section className="notice" role="alert">
-      <h1>Sign in to localDot</h1>
-      <p>
-        {rejected ? `${REJECTED[rejected]} ` : ""}Run <code>localdot open</code> where localDot is
-        installed, then open its sign-in link here as <code>{window.location.origin}/#code=…</code>{" "}
-        within one minute. Each link works once.
-      </p>
-    </section>
   );
 }

@@ -301,11 +301,12 @@ test("Keys keeps keyboard focus, an accessible Stop and reduced-preference rende
   await keys.click();
   const dialog = page.getByRole("dialog", { name: "Keys" });
   await expect(dialog).toBeVisible();
-  expect(await page.locator(".theatre-content").getAttribute("inert")).not.toBeNull();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
   await page.getByTestId("keys-button").evaluate((element) => element.focus());
   expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  // A kit button: 32 px under a mouse, with a hit area 6 px past each edge; 44 px under touch.
   const stop = dialog.getByRole("button", { name: "Stop computer", exact: true });
-  expect((await stop.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  expect((await stop.boundingBox())?.height).toBeGreaterThanOrEqual(32);
   for (let index = 0; index < 20; index++) {
     await page.keyboard.press("Tab");
     expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
@@ -363,7 +364,7 @@ test("composer submits once and moves a recognised key without a task request", 
   const keys = page.getByRole("dialog", { name: "Keys" });
   await expect(keys).toBeVisible();
   await expect(keys.getByLabel("Key", { exact: true })).toHaveValue(key);
-  await expect(keys.getByRole("combobox", { name: "Provider", exact: true })).toHaveValue("openai");
+  await expect(keys.getByRole("combobox", { name: "Provider", exact: true })).toHaveText("OpenAI");
   await page.keyboard.press("Escape");
   await keys.getByRole("button", { name: "Discard" }).click();
   await expect(draft).toHaveValue("before  after");

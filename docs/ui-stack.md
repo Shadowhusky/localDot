@@ -464,7 +464,8 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
 - **Visual baselines.** `e2e/ui/overlays.spec.ts` runs on T01's harness over the Overlays page of its
   gallery (`/gallery/#overlays`) and keeps `ui-sheet-inspector` (c14), `ui-sheet-bottom` (w39) and
   `ui-dialog-destructive` (both).
-- **Not yet.** Select and Combobox on this stack (see "Pickers open through this stack"), with T08's
+- **Not yet.** Select and Combobox drawn on `Anchored` and `Sheet` (see "Pickers open through this
+  stack"; they already register with it while open, so a trapping sheet leaves their focus alone), with T08's
   Playwright scenarios (a), (b) and (f) and the `ui-select-*` and `ui-combobox-search` baselines.
   G3a on iOS Safari: Playwright's WebKit sends no touch moves, so a content drag from the top, the
   `<html>` scroll lock against rubber-banding, the fixed bottom sheet with the keyboard up and the 48 px

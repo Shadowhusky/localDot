@@ -152,7 +152,7 @@ describe("colour tokens", () => {
     const tokens = readTokens([tokensCss]);
     const bands = (appearance: string) => {
       const tile = cssBlocks(onboardingCss).find(
-        (block) => block.selector === `.appearance-tile.${appearance}`,
+        (block) => block.selector === `.appearance-swatch[data-appearance="${appearance}"]`,
       );
       const names = [...(tile?.body ?? "").matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
       return names.map((name) => rgba(tokens.get(name as string) ?? `no ${name}`));
@@ -265,7 +265,7 @@ describe("focus", () => {
           rules.push({ path, selector: selector.replace(/\s+/g, " "), body });
       }
     }
-    expect(rules.map((rule) => rule.path)).toContain("onboarding/onboarding.css");
+    expect(rules.map((rule) => rule.path)).toContain("agent/safety.css");
     return rules;
   }
 
