@@ -113,7 +113,7 @@ describe("advanced values", () => {
       toMs: 50,
       speed: 3,
       skipIdle: true,
-      captions: true,
+      captions: false,
       overlays: false,
       size: { w: 1280, h: 800 },
       fps: 15,

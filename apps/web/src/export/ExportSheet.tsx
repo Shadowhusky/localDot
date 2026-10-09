@@ -393,8 +393,8 @@ export function ExportSheet({
               </Field>
               <Switch
                 className="ui-group-row"
-                label="Captions"
-                description="The step under way, at the foot of the picture"
+                label="Show the current step"
+                description="A small caption at the foot of the video"
                 checked={choices.captions}
                 onCheckedChange={(captions) => choose({ captions })}
               />
