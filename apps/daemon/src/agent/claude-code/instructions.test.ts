@@ -27,6 +27,7 @@ describe("Claude Code's instructions", () => {
       "- 2026-10-08 · done · Send Henry the report",
       "# This run",
       "Claude Code's own tools are switched off",
+      "Give every computer, browser_act and shell call its intent, in that voice.",
       "newest full screenshot you had seen",
     ])
       expect(text).toContain(piece);

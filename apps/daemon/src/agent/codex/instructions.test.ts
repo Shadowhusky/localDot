@@ -2,7 +2,7 @@ import { TOOL_NAMES } from "@localdot/protocol";
 import { workingRules } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { codexInstructions } from "./instructions.ts";
-import { CODEX_TOOL_DESCRIPTIONS } from "./mcp-tools.ts";
+import { CODEX_TOOL_DESCRIPTIONS, codexTools } from "./mcp-tools.ts";
 
 describe("Codex developer instructions", () => {
   it("names recall and people, and shows recent activity as escaped context", () => {
@@ -95,6 +95,23 @@ describe("Codex developer instructions", () => {
     expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(
       "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
     );
+  });
+});
+
+describe("dot's line for the user", () => {
+  it("is asked of every computer, browser_act and shell call, with the field its tools carry", () => {
+    const text = codexInstructions({
+      memory: { user: "", memory: "" },
+      skills: [],
+      today: new Date(),
+    });
+    expect(text).toContain(
+      "Give every computer, browser_act and shell call its intent, in that voice.",
+    );
+    for (const tool of codexTools().filter((row) =>
+      ["computer", "browser_act", "shell"].includes(row.name),
+    ))
+      expect(JSON.stringify(tool.inputSchema)).toContain('"intent":{"description":"For the user');
   });
 });
 

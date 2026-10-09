@@ -42,6 +42,17 @@ export const MODEL_SCREEN = { width: 1280, height: 800 } as const;
 
 // Schemas are flat objects with optional fields, never unions: Gemini refuses some JSON Schema
 // shapes (S5: draft-07 tuples), and one shape per tool keeps every provider on the same wire.
+
+// dot's line for the user about one call, shown beside dot and in Activity. Optional and roomy, so
+// a model that writes too much never loses the call; the daemon cuts it to INTENT_CHARS.
+export const INTENT_CHARS = 120;
+const intent = z
+  .string()
+  .max(500)
+  .optional()
+  .describe(
+    'For the user: what you are doing and why, at most 12 words, present tense, such as "Opening Telegram to send your message".',
+  );
 const STEP_ACTIONS = [
   "left_click",
   "right_click",
@@ -100,6 +111,7 @@ export const GenericComputerInput = z.object({
   region: z.array(z.number()).length(4).optional(),
   // batch: these steps in order, with one screenshot at the end.
   steps: z.array(GenericComputerStep).min(1).max(MAX_BATCH_STEPS).optional(),
+  intent,
 });
 export type GenericComputerInput = z.infer<typeof GenericComputerInput>;
 
@@ -154,6 +166,7 @@ export const ComputerAction = z.object({
   steps: z.array(ComputerStep).min(1).max(MAX_BATCH_ACTIONS).optional(),
   // The screenshot the model based this action on (the freshness check, spec "Harness rules").
   basedOn: z.string().regex(ULID_PATTERN).optional(),
+  intent,
 });
 export type ComputerAction = z.infer<typeof ComputerAction>;
 
@@ -168,6 +181,7 @@ export const ShellInput = z.object({
   command: z.string().min(1).max(8000),
   cwd: z.string().max(1024).optional(),
   timeout_sec: z.number().int().min(1).max(600).optional(),
+  intent,
 });
 export type ShellInput = z.infer<typeof ShellInput>;
 
@@ -209,6 +223,7 @@ export const BrowserActInput = z.object({
   submit: z.boolean().optional(),
   scroll_direction: z.enum(["up", "down", "left", "right"]).optional(),
   scroll_amount: z.number().int().min(1).max(30).optional(),
+  intent,
 });
 export type BrowserActInput = z.infer<typeof BrowserActInput>;
 // What the daemon runs: the coordinate in model pixels, and the screenshot it was chosen on.
