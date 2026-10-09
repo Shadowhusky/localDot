@@ -9,14 +9,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
+import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
-import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
+import { useHandBack } from "./agent/useHandBack.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -62,6 +63,7 @@ import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
+import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheet, QuestionDecision } from "./shell/DecisionIsland.tsx";
@@ -90,7 +92,7 @@ import { IconButton } from "./ui/IconButton.tsx";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
-import { Toaster } from "./ui/Toast.tsx";
+import { showToast, Toaster } from "./ui/Toast.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -98,14 +100,16 @@ export interface AppProps {
 }
 
 type Rejected = "stored" | "link" | "code" | null;
-// What the rail shows: the chat, Activity laid over it, or the controls dot handed over.
-type RailView = "chat" | "activity" | "takeover";
+// What the rail shows: the chat, or Activity laid over it.
+type RailView = "chat" | "activity";
 
 const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
 const OPENING_MAX_MS = 2000;
 const FROM_WATCH = { fromWatch: true };
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
+const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
+const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -485,31 +489,29 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const yours = !!takeover && takeover === heldByUser(agent.model);
   const manualLive =
-    !!takeover &&
-    controls.canInput &&
-    physicalStageCell?.state === "ready" &&
-    !physicalStageCell.paused;
+    yours && controls.canInput && physicalStageCell?.state === "ready" && !physicalStageCell.paused;
   const manual = useManualChannel(
     api,
     manualLive ? agent.sessionId : null,
     manualLive ? (takeover?.requestId ?? null) : null,
     agent.reconcile,
   );
-  // The rail opens on the hand-over's controls when dot hands the computer over; once it is handed
-  // back, the rail goes back to the chat.
-  const takeoverShown = useRef<string | null>(null);
+  const { send: sendManual } = manual;
+  // A right-click on a phone is for the next tap only.
+  const sendToComputer = useCallback(
+    (input: Parameters<typeof sendManual>[0]) => {
+      sendManual(input);
+      if (input.kind === "click" && input.button === "right") setPointerMode("click");
+    },
+    [sendManual],
+  );
   useEffect(() => {
-    const requestId = takeover?.requestId;
-    if (!requestId || requestId === takeoverShown.current) return;
-    takeoverShown.current = requestId;
-    setRailView("takeover");
-  }, [takeover?.requestId]);
+    if (pasteRefused) showToast({ title: pasteRefused, tone: "danger" });
+  }, [pasteRefused]);
   const shownView: RailView =
-    (railView === "takeover" && !takeover) ||
-    (railView === "activity" && (layout === "wide" || phone))
-      ? "chat"
-      : railView;
+    railView === "activity" && (layout === "wide" || phone) ? "chat" : railView;
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -730,9 +732,6 @@ function Theatre({ api }: { api: ApiClient }) {
       attention: shownView !== "chat" && !!agent.model.pendingAsk,
     },
     ...(wide || phone ? [] : [{ value: "activity", label: "Activity" }]),
-    ...(takeover && !agent.model.ended
-      ? [{ value: "takeover", label: "Your turn", attention: shownView !== "takeover" }]
-      : []),
   ];
   const activity = (
     <ActivityRail
@@ -777,29 +776,6 @@ function Theatre({ api }: { api: ApiClient }) {
       api={api}
     />
   );
-  const handover = takeover && !agent.model.ended && (
-    <div
-      className="takeover-scroll ui-scroll-area"
-      data-shown={shownView === "takeover" || undefined}
-    >
-      <TakeoverPanel
-        key={takeover.requestId}
-        takeover={takeover}
-        controls={{ ...controls, canInput: manualLive }}
-        visible={!replayId && shownView === "takeover" && !keysOpen && !settings.open}
-        manualStatus={agent.snapshot?.manualControl}
-        receiveKey={receiveKey}
-        screen={manualGeometry}
-        pointerMode={pointerMode}
-        onPointerMode={setPointerMode}
-        send={manual.send}
-        drained={manual.drained}
-        typing={typing}
-        onKeyboard={(on) => stage.current?.keyboard(on)}
-        refused={pasteRefused}
-      />
-    </div>
-  );
   const shape = islandShape(appStatus, curtain.up || opening);
   const sheetsClosed = !keysOpen && !settings.open;
   const decision = replayId
@@ -838,19 +814,36 @@ function Theatre({ api }: { api: ApiClient }) {
               />
             </QuestionDecision>
           );
+  // Take control works whatever dot is doing: it does an approval's step instead of dot, takes the
+  // computer dot handed over, or takes it from dot at work, at rest or paused.
   const take = () => {
-    if (decision !== "approval" || !approval) {
-      setRailView("takeover");
+    if (decision === "approval" && approval) {
+      if (!safety.canApprove || safety.pending) return;
+      void safety.answerApproval({
+        approvalId: approval.approvalId,
+        generation: approval.generation,
+        revision: approval.revision,
+        decision: "take_control",
+      });
       return;
     }
-    if (!safety.canApprove || safety.pending) return;
-    void safety.answerApproval({
-      approvalId: approval.approvalId,
-      generation: approval.generation,
-      revision: approval.revision,
-      decision: "take_control",
-    });
+    void controls.take();
   };
+  const takeBlocked = !agent.sessionId
+    ? "Ask dot something first, then take over whenever you like"
+    : controls.canTake
+      ? undefined
+      : safety.pause && safety.pause.phase !== "paused"
+        ? "Wait for the pause to settle"
+        : "Wait a moment";
+  const takeState = takeSlot(appStatus, {
+    decision,
+    blocked: takeBlocked,
+    taking: controls.taking,
+  });
+  const unconfirmed = agent.snapshot?.manualControl === "unconfirmed";
+  const handBack = useHandBack({ takeover, controls, drained: manual.drained, unconfirmed });
+  const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
   const replacement = safety.replacement?.phase;
   // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
   // is a sheet below, dot asks it aloud.
@@ -858,10 +851,14 @@ function Theatre({ api }: { api: ApiClient }) {
     ? ""
     : phone && approvalView && approval
       ? decisionWords(approval).line
-      : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-        ? appStatus.caption.text
-        : "";
-  const speaker = phone && approvalView ? "dot" : appStatus.caption.speaker;
+      : yours && unconfirmed
+        ? UNCONFIRMED_LINE
+        : yours && phone
+          ? PHONE_CONTROL_LINE
+          : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+            ? appStatus.caption.text
+            : "";
+  const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const pause = pauseSlot({
     pause: safety.pause,
     canPause: safety.canPause,
@@ -916,7 +913,7 @@ function Theatre({ api }: { api: ApiClient }) {
         <main className="stage-col" aria-label="Computer">
           <ErrorBoundary>
             <StageFrame
-              light={appStatus.control ? "dot" : manualLive ? "you" : "none"}
+              light={appStatus.control ? "dot" : yours ? "you" : "none"}
               live={stageHud.live}
               frozen={!!stageHud.paused}
               curtain={
@@ -958,11 +955,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     shape={shape}
                     badge={place === "badge"}
                     pause={pause}
-                    take={takeSlot(appStatus, decision)}
+                    take={takeState}
+                    handBack={handBack.slot}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStopTask={taskStop}
                     onTake={take}
+                    onHandBack={() => void handBack.run()}
                     onComputer={onComputer}
                     decision={grown}
                     notices={
@@ -982,17 +981,22 @@ function Theatre({ api }: { api: ApiClient }) {
                 </>
               }
               band={
-                <NarratorBand
-                  line={narration}
-                  speaker={speaker}
-                  showDot={showDot.value}
-                  note={focus && stepCount ? `Step ${stepCount}` : undefined}
-                />
+                <>
+                  <NarratorBand
+                    line={narration}
+                    speaker={speaker}
+                    showDot={showDot.value}
+                    note={focus && stepCount ? `Step ${stepCount}` : undefined}
+                  />
+                  {yours && !phone && !focus && (
+                    <ControlStrip send={sendToComputer} blocked={inputBlocked} />
+                  )}
+                </>
               }
               side={
                 focus && (
                   <FocusControls
-                    take={takeSlot(appStatus, decision)}
+                    take={takeState}
                     pause={shape === "task" ? pause : null}
                     stop={appStatus.actions.find((action) => action.kind === "stop-task")}
                     onTake={take}
@@ -1023,12 +1027,12 @@ function Theatre({ api }: { api: ApiClient }) {
                 reconnects={reconnects + browserScreen.reconnects}
                 listed={listed}
                 manual={
-                  takeover && manualGeometry && !agent.model.ended
+                  yours && manualGeometry && !agent.model.ended
                     ? {
                         enabled: manualLive,
                         screen: manualGeometry,
                         pointer: pointerMode,
-                        send: manual.send,
+                        send: sendToComputer,
                         onTyping: setTyping,
                         onRefused: setPasteRefused,
                       }
@@ -1124,17 +1128,30 @@ function Theatre({ api }: { api: ApiClient }) {
               }
               covered={shownView !== "chat"}
               cover={
-                <>
-                  {!wide && !phone && (
-                    <div
-                      className="rail-cover-activity"
-                      data-shown={shownView === "activity" || undefined}
-                    >
-                      {activity}
-                    </div>
-                  )}
-                  {handover}
-                </>
+                !wide &&
+                !phone && (
+                  <div
+                    className="rail-cover-activity"
+                    data-shown={shownView === "activity" || undefined}
+                  >
+                    {activity}
+                  </div>
+                )
+              }
+              tools={
+                phone &&
+                yours && (
+                  <ControlTools
+                    send={sendToComputer}
+                    blocked={inputBlocked}
+                    typing={typing}
+                    onKeyboard={(on) => stage.current?.keyboard(on)}
+                    rightClick={pointerMode === "right"}
+                    onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                    handBack={handBack.slot}
+                    onHandBack={() => void handBack.run()}
+                  />
+                )
               }
               recovery={
                 <TaskRecovery

@@ -66,6 +66,51 @@ describe("the conversation's order", () => {
     };
     expect(threadItems([], [question]).map((item) => item.kind)).toEqual(["question"]);
   });
+
+  it("marks where the computer changed hands, and only a hand-back the user made", () => {
+    const took = ulidAt(1_000);
+    const items = threadItems(
+      [message("Download it", 1), message("It needs your password.", 2, "assistant")],
+      [],
+      [],
+      [
+        {
+          requestId: took,
+          reason: "other",
+          note: "",
+          by: "user",
+          seq: 3,
+          time: 1_000,
+          end: { requestId: took, by: "user" },
+          endSeq: 5,
+          endTime: 2_000,
+        },
+        {
+          requestId: ulidAt(3_000),
+          reason: "login",
+          note: "Sign in",
+          seq: 6,
+          time: 3_000,
+          taken: { seq: 7, time: 3_500 },
+          end: { requestId: ulidAt(3_000), by: "stop" },
+          endSeq: 8,
+        },
+        { requestId: ulidAt(4_000), reason: "login", note: "Sign in again", seq: 9, time: 4_000 },
+      ],
+    );
+    expect(
+      items.map((item) => (item.kind === "control" ? `${item.took}@${item.at}` : item.key)),
+    ).toEqual([
+      "message-Download it",
+      "message-It needs your password.",
+      "true@1000",
+      "false@2000",
+      "true@3500",
+    ]);
+    expect(threadRows(items).every((row) => row.item.kind !== "control" || !row.separator)).toBe(
+      true,
+    );
+  });
 });
 
 describe("the work line of each turn", () => {
@@ -112,6 +157,21 @@ describe("the work line of each turn", () => {
     expect(second).toEqual({ usd: 0.02, estimated: false });
     const free = withWork(items, [step("a", 2000)], false, [call(2500, 0)]);
     expect(free.find((item) => item.kind === "work")?.spend).toBeUndefined();
+  });
+
+  it("keeps the line with dot's part of the turn, before the computer changes hands", () => {
+    const taken = ulidAt(5_000);
+    const items = threadItems(
+      [message("Download it", 1)],
+      [],
+      [],
+      [{ requestId: taken, reason: "other", note: "", by: "user", seq: 2, time: 5_000 }],
+    );
+    expect(withWork(items, [step("Open", 1_500)], true).map((item) => item.kind)).toEqual([
+      "message",
+      "work",
+      "control",
+    ]);
   });
 
   it("holds a live line on the latest turn before any step, and none on a turn that only talked", () => {

@@ -273,6 +273,75 @@
   gap: calc(var(--spacing) * 2.5);
 }
 
+/* While the user has the computer (design-v2 §11 F): the control strip at the band's right, under
+   the stage's right edge, with what a keyboard and mouse on this side can't do directly. Nothing
+   appears above or below the stage. */
+.control-strip {
+  position: absolute;
+  top: calc(var(--spacing) * 6.5);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  height: 44px;
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-raised);
+  box-shadow:
+    var(--shadow-raised),
+    0 0 0 1px var(--color-hairline);
+  animation: control-strip-in var(--dur-fade) var(--ease-standard) both;
+}
+
+.control-strip > .ui-button {
+  --_quiet-fg: var(--color-fg-1);
+}
+
+.control-strip > .ui-button svg {
+  color: var(--color-fg-2);
+}
+
+.control-strip-chevron {
+  margin-left: calc(var(--spacing) * -0.5);
+}
+
+@keyframes control-strip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The line beside dot leaves the strip its room. */
+.stage-band:has(.control-strip) .narration {
+  width: min(600px, 100% - var(--line-x) - var(--control-strip-w) - calc(var(--spacing) * 6));
+}
+
+.type-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--spacing) * 3);
+  width: min(320px, 100vw - 48px);
+}
+
+.type-text > .ui-field {
+  align-self: stretch;
+}
+
+.type-text-field {
+  -webkit-text-security: disc;
+}
+
+@media (--phone) {
+  .control-strip {
+    display: none;
+  }
+
+  .type-text {
+    width: auto;
+  }
+}
+
 /* The curtain (design-v2 §4, §11 A–B): the stage's own box while there is no picture. dot sleeps in
    its pool of light over one porcelain action. */
 .curtain {

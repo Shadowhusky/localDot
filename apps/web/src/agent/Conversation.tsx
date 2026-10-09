@@ -36,6 +36,7 @@ import {
   type ThreadKind,
   type ThreadRow,
   threadRows,
+  timeLabel,
   type WorkStep,
 } from "./thread.ts";
 import { reducedMotion, useFollowScroll } from "./useFollowScroll.ts";
@@ -222,6 +223,17 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       then.onReplay === thread.onReplay &&
       then.replayTask === thread.replayTask,
   },
+  control: {
+    draw: ({ item }) => (
+      <p className="thread-divider">
+        <span>
+          {item.took ? "You took control" : "You handed back"}
+          {item.at !== undefined && <time className="num"> · {timeLabel(item.at)}</time>}
+        </span>
+      </p>
+    ),
+    same: (was, now) => was.took === now.took && was.at === now.at,
+  },
   work: {
     draw: ({ item, thread }) => (
       <LiveWorkLine
@@ -320,6 +332,8 @@ export interface ConversationProps {
   // Beside the composer, as a phone's toolbar holds it: before it and after it.
   lead?: ReactNode;
   trail?: ReactNode;
+  // In the toolbar's place, the composer and what is beside it hidden but kept, so a draft survives.
+  tools?: ReactNode;
   // The composer stays at the foot however short the column gets, as a phone's toolbar does.
   pinned?: boolean;
   // Another view of the task (Activity) laid over the thread, above the foot, so the composer
@@ -353,6 +367,7 @@ export function Conversation({
   answer,
   lead,
   trail,
+  tools,
   pinned = false,
   cover,
   covered = false,
@@ -832,11 +847,12 @@ export function Conversation({
           </Collapse>
           {answer}
           <div className="thread-toolbar">
-            {lead}
-            <div className="thread-composer" hidden={asking}>
+            {!tools && lead}
+            <div className="thread-composer" hidden={asking || !!tools}>
               {composer}
             </div>
-            {trail}
+            {!tools && trail}
+            {tools}
           </div>
         </Outbox.Provider>,
         dockHost,

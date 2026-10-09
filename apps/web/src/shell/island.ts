@@ -2,15 +2,17 @@ import type { PauseSnapshot } from "@localdot/protocol";
 import type { Status } from "../session/status.ts";
 
 // The island's fixed shapes; within one, its width never changes. Ready: the computer is on and
-// free. Task: a task holds it, with every slot. Computer: the computer is off, starting or stuck,
-// with the computer's own action until the curtain carries it. Hidden: the curtain covers the
-// stage, or nothing is known yet.
-export type IslandShape = "hidden" | "ready" | "task" | "computer";
+// free. Task: a task holds it, with every slot. Control: the user has the computer, and Hand back
+// stands where Take control was. Computer: the computer is off, starting or stuck, with the
+// computer's own action until the curtain carries it. Hidden: the curtain covers the stage, or
+// nothing is known yet.
+export type IslandShape = "hidden" | "ready" | "task" | "control" | "computer";
 
 const ON = new Set<Status["computer"]>(["live", "connecting", "reconnecting"]);
 
 export function islandShape(status: Status, curtain: boolean): IslandShape {
   if (curtain || status.computer === "checking") return "hidden";
+  if (status.row === "control") return "control";
   if (status.actions.some((action) => action.kind === "stop-task")) return "task";
   return ON.has(status.computer) ? "ready" : "computer";
 }
@@ -60,7 +62,11 @@ export function pauseSlot({
       if (canResume) return { kind: "continue" };
       return {
         kind: "continue",
-        reason: budgetHeld ? "Raise this task's limit first" : "Continue isn't available yet",
+        reason: handedOver
+          ? "You have the computer"
+          : budgetHeld
+            ? "Raise this task's limit first"
+            : "Continue isn't available yet",
       };
   }
 }
@@ -92,12 +98,23 @@ export interface TakeSlot {
   // dot has asked for the user: Take control becomes the island's porcelain action.
   primary: boolean;
   reason?: string;
+  busy?: boolean;
 }
 
-// While dot waits on an approval, Take control answers it: the user does the step themselves.
-export const takeSlot = (status: Status, decision: IslandDecision = null): TakeSlot =>
-  status.row === "takeover"
-    ? { primary: true }
-    : decision === "approval"
-      ? { primary: false }
-      : { primary: false, reason: "dot hands you the computer when it needs you" };
+export interface TakeInput {
+  decision?: IslandDecision;
+  // Why the user can't take the computer just now, or nothing when they can.
+  blocked?: string;
+  // The computer is on its way to the user.
+  taking?: boolean;
+}
+
+// Take control works whatever dot is doing. dot handing the computer over makes it the porcelain
+// action; while dot waits on an approval it answers that approval: the user does the step
+// themselves.
+export function takeSlot(status: Status, { decision = null, blocked, taking }: TakeInput = {}) {
+  if (status.row === "takeover") return { primary: true } satisfies TakeSlot;
+  if (decision === "approval") return { primary: false } satisfies TakeSlot;
+  if (taking) return { primary: false, busy: true } satisfies TakeSlot;
+  return { primary: false, ...(blocked ? { reason: blocked } : {}) } satisfies TakeSlot;
+}

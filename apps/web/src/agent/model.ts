@@ -59,7 +59,14 @@ export type AgentQuestion = EventOf<"ask.request">["data"] & {
   readonly answer?: EventOf<"ask.answer">["data"];
 };
 export type AgentTakeover = EventOf<"takeover.request">["data"] & {
+  readonly seq?: number;
+  // Wall-clock ms of the hand-over and of its end.
+  readonly time?: number;
+  // When the user took the computer dot handed over.
+  readonly taken?: { readonly seq: number; readonly time: number };
   readonly end?: EventOf<"takeover.end">["data"];
+  readonly endSeq?: number;
+  readonly endTime?: number;
 };
 export interface AgentChange {
   readonly id: string;
@@ -153,6 +160,12 @@ export interface AgentModel {
   readonly historyTruncated: boolean;
   readonly activity?: string;
 }
+// The hand-over the user holds the computer under: one they asked for, or dot's once they took it.
+export function heldByUser(model: AgentModel): AgentTakeover | undefined {
+  const held = model.pendingTakeover ? model.takeovers.get(model.pendingTakeover) : undefined;
+  return held && (held.by === "user" || held.taken) ? held : undefined;
+}
+
 export function emptyAgentModel(): AgentModel {
   return {
     lastSeq: -1,

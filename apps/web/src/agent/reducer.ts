@@ -4,6 +4,7 @@ import {
   type LocalDotEvent,
   microsToMs,
   STALL,
+  ulidTime,
 } from "@localdot/protocol";
 import {
   type AgentConnection,
@@ -383,17 +384,45 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = {
         ...next,
         pendingTakeover: e.data.requestId,
-        takeovers: put(model.takeovers, e.data.requestId, { ...e.data }, L.takeovers),
+        takeovers: put(
+          model.takeovers,
+          e.data.requestId,
+          {
+            ...e.data,
+            seq: model.takeovers.get(e.data.requestId)?.seq ?? e.seq,
+            time: ulidTime(e.id),
+          },
+          L.takeovers,
+        ),
         historyTruncated: next.historyTruncated || model.takeovers.size >= L.takeovers,
       };
       break;
+    case "control.change": {
+      const held = model.pendingTakeover ? model.takeovers.get(model.pendingTakeover) : undefined;
+      if (e.data.holder === "user" && held && !held.taken)
+        next = {
+          ...next,
+          takeovers: put(
+            model.takeovers,
+            held.requestId,
+            { ...held, taken: { seq: e.seq, time: ulidTime(e.id) } },
+            L.takeovers,
+          ),
+        };
+      break;
+    }
     case "takeover.end": {
       const old = model.takeovers.get(e.data.requestId);
       next = {
         ...next,
         pendingTakeover: model.pendingTakeover === e.data.requestId ? null : model.pendingTakeover,
         takeovers: old
-          ? put(model.takeovers, e.data.requestId, { ...old, end: { ...e.data } }, L.takeovers)
+          ? put(
+              model.takeovers,
+              e.data.requestId,
+              { ...old, end: { ...e.data }, endSeq: e.seq, endTime: ulidTime(e.id) },
+              L.takeovers,
+            )
           : model.takeovers,
       };
       break;

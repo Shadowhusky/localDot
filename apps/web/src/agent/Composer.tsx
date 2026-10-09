@@ -639,7 +639,7 @@ export function Composer(props: ComposerProps) {
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
       ? "Wait until your message is sent."
-      : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
+      : (reason ?? (takeover ? "Add files once you hand back." : undefined));
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
   const sendLabel = newConversation
@@ -650,15 +650,13 @@ export function Composer(props: ComposerProps) {
         ? "Send follow-up"
         : "Send now";
   const note =
-    mode === "new"
+    mode === "new" || takeover
       ? undefined
-      : takeover
-        ? "You keep control of the computer"
-        : props.agent.snapshot?.status === "paused"
-          ? TRIES_AGAIN.has(props.agent.model.state?.reason)
-            ? "Sending tries the model again"
-            : "Sending won't resume the task"
-          : undefined;
+      : props.agent.snapshot?.status === "paused"
+        ? TRIES_AGAIN.has(props.agent.model.state?.reason)
+          ? "Sending tries the model again"
+          : "Sending won't resume the task"
+        : undefined;
   const notices = [
     problem && { text: problem, alert: true },
     uploads.problem && { text: uploads.problem, alert: true },

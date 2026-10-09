@@ -4,6 +4,7 @@ import {
   keyLikePresent,
   QuestionAnswerRequest,
   StopOutcome,
+  TakeControlReply,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
@@ -192,6 +193,17 @@ export function answerQuestion(
   if (!value.success || (value.data.text && keyLikePresent(value.data.text)))
     throw new ControlFailure(false);
   return controlRequest(api, `${sessionPath(sessionId)}/answer`, value.data, 204, signal, empty);
+}
+// The user takes the computer, whatever dot is doing; the reply names the control to hand back.
+export function takeControl(api: ApiClient, sessionId: string, signal: AbortSignal) {
+  return controlRequest(
+    api,
+    `${sessionPath(sessionId)}/takeover`,
+    undefined,
+    202,
+    signal,
+    (text) => TakeControlReply.parse(JSON.parse(text)).requestId,
+  );
 }
 export function returnControl(
   api: ApiClient,

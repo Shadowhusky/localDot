@@ -396,6 +396,8 @@
   --stage-top: 76px;
   --band-min: 112px;
   --island-h: 40px;
+  --island-rise: 48px;
+  --control-strip-w: 288px;
   --sheet-medium-top: 214px;
   --sheet-large-top: 40px;
 }

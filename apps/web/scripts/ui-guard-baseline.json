@@ -2,9 +2,6 @@
   "src/agent/ActivityRow.tsx": {
     "native-control": 1
   },
-  "src/agent/TakeoverPanel.tsx": {
-    "banned-copy": 1
-  },
   "src/agent/UsageFooter.tsx": {
     "native-control": 1
   },

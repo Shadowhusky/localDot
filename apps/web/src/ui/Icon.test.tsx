@@ -18,6 +18,7 @@ const PLANNED: IconName[] = [
   "chevron-down",
   "chevron-up",
   "hand",
+  "hand-back",
   "stop",
   "pause",
   "play",

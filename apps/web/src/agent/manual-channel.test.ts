@@ -148,3 +148,27 @@ it("closes the stream while the page is hidden, drops what is typed meanwhile, a
   view.unmount();
   expect(second.closed).toBe(true);
 });
+
+it("forgets input waiting on a dropped socket once the user's control ends before it reopens", async () => {
+  vi.useFakeTimers();
+  const api = createApi("a".repeat(43), { origin: "http://127.0.0.1:4768" }),
+    session = ulid();
+  const view = renderHook(
+    (ids: { request: string | null }) => useManualChannel(api, session, ids.request, vi.fn()),
+    { initialProps: { request: ulid() as string | null } },
+  );
+  const first = FakeWebSocket.instances[0] as FakeWebSocket;
+  first.open();
+  act(() => first.drop(1006));
+  view.result.current.send({ kind: "text", text: "stale" });
+  view.rerender({ request: null });
+  act(() => vi.advanceTimersByTime(5000));
+  expect(FakeWebSocket.instances).toHaveLength(1);
+  expect(await view.result.current.drained(10)).toBe(true);
+  view.result.current.send({ kind: "text", text: "late" });
+  view.rerender({ request: ulid() });
+  const next = FakeWebSocket.instances[1] as FakeWebSocket;
+  next.open();
+  expect(next.sent).toEqual([]);
+  view.unmount();
+});

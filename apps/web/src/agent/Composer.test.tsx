@@ -395,7 +395,8 @@ describe("composer delivery ownership and draft handling", () => {
     f.update({ agent: { ...agent, snapshot: { ...snapshot, status: "paused" } } });
     expect(screen.getByText("Sending won't resume the task")).toBeTruthy();
     f.update({ agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } } });
-    expect(screen.getByText("You keep control of the computer")).toBeTruthy();
+    // While the user has the computer, the composer stays quiet about it: the island says so.
+    expect(screen.queryByText("Sending won't resume the task")).toBeNull();
   });
   it("offers no choice of when to send once the task is idle, so Option-Return does nothing", async () => {
     const f = setup(undefined, { agent: { ...agent, snapshot: { ...snapshot, status: "idle" } } });
@@ -712,7 +713,7 @@ describe("the composer's controls", () => {
       agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } },
     });
     expect(reasonOf(screen.getByRole("button", { name: "Attach files" }))).toContain(
-      "Add files once you return control to dot.",
+      "Add files once you hand back.",
     );
     f.input("Use the second sheet");
     f.submit();

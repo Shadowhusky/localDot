@@ -119,15 +119,35 @@ it("makes Take control the porcelain action when dot hands the computer over", (
   expect(takeSlot(statusFor({ computer: live, task: task("takeover", "waiting") }))).toEqual({
     primary: true,
   });
-  const working = takeSlot(statusFor({ computer: live, task: task("acting") }));
-  expect(working.primary).toBe(false);
-  expect(working.reason).toBeTruthy();
+});
+
+it("offers Take control whatever dot is doing, and says why only when it can't be had", () => {
+  for (const row of ["acting", "thinking", "paused", "question"] as const)
+    expect(
+      takeSlot(
+        statusFor({ computer: live, task: task(row, row === "acting" ? "running" : "waiting") }),
+      ),
+    ).toEqual({ primary: false });
+  expect(takeSlot(statusFor({ computer: live, task: null }))).toEqual({ primary: false });
+  const working = statusFor({ computer: live, task: task("acting") });
+  expect(takeSlot(working, { blocked: "Wait a moment" })).toEqual({
+    primary: false,
+    reason: "Wait a moment",
+  });
+  expect(takeSlot(working, { taking: true })).toEqual({ primary: false, busy: true });
 });
 
 it("lets Take control answer an approval: the user does the step themselves", () => {
   const waiting = statusFor({ computer: live, task: task("approval", "waiting") });
-  expect(takeSlot(waiting, "approval")).toEqual({ primary: false });
-  expect(takeSlot(waiting).reason).toBeTruthy();
+  expect(takeSlot(waiting, { decision: "approval", blocked: "Wait" })).toEqual({ primary: false });
+});
+
+it("gives the user's control its own shape, with Hand back in Take control's place", () => {
+  const yours = statusFor({ computer: live, task: task("control", "waiting") });
+  expect(islandShape(yours, false)).toBe("control");
+  expect(islandShape(yours, true)).toBe("hidden");
+  expect(yours.actions.map((action) => action.kind)).toEqual(["stop-task"]);
+  expect(yours.control).toBe(false);
 });
 
 describe("islandDecision", () => {

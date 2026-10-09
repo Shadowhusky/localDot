@@ -15,13 +15,14 @@ import {
   resumeTask,
   returnControl,
   stopTask,
+  takeControl,
   undoMemory,
 } from "./control-api.ts";
-import type { AgentFeed } from "./model.ts";
+import { type AgentFeed, heldByUser } from "./model.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 export interface ControlStatus {
-  readonly kind: "answer" | "handback" | "budget" | "resume" | "memory";
+  readonly kind: "answer" | "take" | "handback" | "budget" | "resume" | "memory";
   readonly target: string;
   readonly phase: "sending" | "checking" | "refused" | "uncertain";
   readonly message: string;
@@ -166,16 +167,18 @@ export function useTaskControls(props: Props) {
         !!props.agent.model.ended ||
         (record.kind === "answer"
           ? props.agent.model.pendingAsk !== record.target
-          : record.kind === "handback"
-            ? props.agent.model.pendingTakeover !== record.target
-            : record.kind === "memory"
-              ? props.agent.model.changes.some((change) => change.undoes === record.target)
-              : record.kind === "resume"
-                ? props.agent.snapshot?.status !== "paused"
-                : record.kind === "budget"
-                  ? props.agent.snapshot?.status !== "paused" ||
-                    (!!props.agent.snapshot?.pause && props.agent.snapshot.budgetHold !== "task")
-                  : false);
+          : record.kind === "take"
+            ? !!heldByUser(props.agent.model)
+            : record.kind === "handback"
+              ? props.agent.model.pendingTakeover !== record.target
+              : record.kind === "memory"
+                ? props.agent.model.changes.some((change) => change.undoes === record.target)
+                : record.kind === "resume"
+                  ? props.agent.snapshot?.status !== "paused"
+                  : record.kind === "budget"
+                    ? props.agent.snapshot?.status !== "paused" ||
+                      (!!props.agent.snapshot?.pause && props.agent.snapshot.budgetHold !== "task")
+                    : false);
       const reread = record.recheck !== undefined && record.recheck !== props.agent.snapshot;
       if (
         absent ||
@@ -290,6 +293,19 @@ export function useTaskControls(props: Props) {
     return perform("answer", body.askId, (record) =>
       answerQuestion(record.api, record.sessionId, body, record.abort.signal),
     );
+  };
+  // Whatever dot is doing, or the computer dot handed over. dot's Pause, mid-change, settles first;
+  // a held one stays held under the user's control.
+  const takeReady = (now = current.current) =>
+    available(now) &&
+    !operation.current &&
+    !heldByUser(now.agent.model) &&
+    (now.agent.snapshot?.pause?.phase ?? "paused") === "paused";
+  const take = (): Promise<boolean> => {
+    if (!takeReady()) return Promise.resolve(false);
+    return perform("take", "", async (record) => {
+      await takeControl(record.api, record.sessionId, record.abort.signal);
+    });
   };
   const handback = (requestId: string, note?: string): Promise<boolean> => {
     const now = current.current;
@@ -427,6 +443,7 @@ export function useTaskControls(props: Props) {
     status,
     stopStatus,
     answer,
+    take,
     handback,
     raiseBudget,
     resume,
@@ -446,6 +463,8 @@ export function useTaskControls(props: Props) {
           Boolean((props.cell && props.agent.sessionId) || stopScope.current)
         : false,
     canAnswer: available(props) && !operation.current && !props.agent.model.pendingTakeover,
+    canTake: takeReady(props),
+    taking: operation.current?.kind === "take",
     canInput:
       available(props) &&
       !operation.current &&
