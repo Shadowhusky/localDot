@@ -5,6 +5,7 @@ import type {
   AutonomyPolicy,
   BrowserReadResult,
   FileChangeResult,
+  SessionRun,
   ShellChunk,
   ShellDone,
 } from "@localdot/protocol";
@@ -41,6 +42,8 @@ export function toolHarness(
     askTimeoutMs?: number;
     autoApprove?: boolean;
     autonomy?: AutonomyPolicy;
+    approvalTtlMs?: number;
+    run?: SessionRun;
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), "local dot's tool api-"));
@@ -53,6 +56,11 @@ export function toolHarness(
     "Find the weather",
     eventLog,
     opts.autonomy ?? CAREFUL_AUTONOMY,
+    undefined,
+    {
+      ...(opts.approvalTtlMs ? { approvalTtlMs: opts.approvalTtlMs } : {}),
+      ...(opts.run ? { run: opts.run } : {}),
+    },
   );
   session.beginBrain();
   session.toolToken = TOOL_TOKEN;
