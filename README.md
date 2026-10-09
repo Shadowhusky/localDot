@@ -1,326 +1,332 @@
-# localDot
+<p align="center">
+  <img src="docs/readme/dot.png" width="120" alt="dot, a small white ball with two dark eyes">
+</p>
 
-An open-source, localhost-first personal assistant that works inside its own isolated virtual
-computer and shows exactly what it is doing, action by action.
+<h1 align="center">localDot</h1>
 
-Status: early development.
+<p align="center">
+  <b>An assistant with its own computer. It lives on your Mac, and you can watch it work.</b>
+</p>
 
-The [browser workspace guide](docs/browser-workspace.md) covers the M7 author draft's separate
-web browser, manual sign-in, reviewed downloads and approved uploads. Final integration
-and independent review are pending.
+<p align="center">
+  <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-3fb5de"></a>
+  <img alt="macOS on Apple silicon" src="https://img.shields.io/badge/macOS-Apple%20silicon-555">
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-555">
+</p>
 
-## Development
+<p align="center">
+  <img src="docs/readme/tour.gif" width="880" alt="A sample task: dot works through a spreadsheet, narrating each step, asks before sending an email, then hands over two files">
+</p>
+<p align="center">
+  <sub>Twenty seconds of a sample task: dot works through a spreadsheet, stops to ask before
+  sending anything as you, then hands over the files. <a href="docs/readme/tour.mp4">MP4 version</a>.</sub>
+</p>
 
-The shipping CLI is an author draft pending independent review and installed acceptance.
-For a managed installation, `localdot update` checks for the latest stable release;
-`localdot update --to 1.2.3-rc.2` selects an exact version (including a release candidate).
-Both recover interrupted updates first and authenticate the exact release before activation.
-Updates preserve recorded installation settings and refuse downgrades. An already-current
-release is checked through `localdot up` before reporting readiness. After an interrupted
-update, run `localdot up` to check or recover the installed app before retrying.
+## What it is
 
-Managed `localdot doctor` currently verifies installation authority, resources, all four image
-pins, gateway isolation and the authenticated app port. It requests fresh self-tests for idle,
-running computers and rejects incomplete or changing computer inventories. Failed checks contain
-the affected computer. The synthetic credential-canary exercise is implemented in the author
-candidate, including owned cleanup and leak-scanner controls; independent review and a successful
-live installed diagnostic run are still required.
+localDot is an assistant that does real work on a computer. It clicks, types, drags, reads web
+pages and runs code. It just doesn't do any of that on *your* computer.
 
-Needs Node 24+ and pnpm 10. After `pnpm install`, the root scripts are:
+dot (that's the assistant) gets a small, isolated computer of its own. It runs in containers on
+your Mac, and you watch it live in a browser tab or on your phone. You can take over at any
+moment, and every task is recorded, so you can scrub back through it later.
 
-- `pnpm test`: the Vitest suites of the apps, packages and scripts
-- `pnpm typecheck`: `tsc --noEmit` in each app and package
-- `pnpm format`, then `pnpm lint`: Biome
-- `pnpm hygiene`: scans the files git tracks or would add for key-shaped secrets and private names
-- `pnpm build:app-package <input.json> <new-output-directory>`: builds and audits a local app
-  archive; see the [release packaging guide](docs/release-packaging.md) for inputs and remaining
-  release gates
+Think of it as giving a new assistant their own desk, rather than your laptop and your passwords.
 
-Run the daemon with `pnpm --filter @localdot/daemon start`. It listens on `http://127.0.0.1:4750`
-(`LOCALDOT_PORT` sets another port) and keeps its state in `~/.localdot` (`LOCALDOT_HOME` sets
-another home). One daemon runs per home. The install token is in `<home>/daemon-token`, and auth is
-cookie-free: HTTP requests send `Authorization: Bearer <token>`, and WebSocket clients offer the
-subprotocols `localdot.v1, localdot.token.<token>`.
+Three things we cared about most:
 
-## Images and the live desktop
+- **You can see everything.** The live screen, a one-line note from dot on what it's doing and
+  why, and a full list of every step, including the ones that failed.
+- **Your keys never reach the model.** The agent only ever holds stand-ins. A small key service
+  on your Mac adds the real key on the way out, and only for the hosts that key belongs to.
+- **Nothing leaves without a reason.** All traffic goes through one gate. Sending as you, paying,
+  passwords and uploads always ask first. Ordinary work on its own computer just runs.
 
-- `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`
-  and builds `localdot/desktop:dev`. The first desktop build takes about 10–25 minutes.
-- `pnpm --filter @localdot/daemon doctor` checks Docker Desktop (Engine 28+), the images and
-  the daemon port.
-- Build the UI with `pnpm --filter @localdot/web build`, start the daemon, then open its
-  `#token=` link. **Start computer** creates an isolated desktop, gate and named home volume.
-  The live stream reaches Chrome through the daemon. **Stop computer** shuts it down while
-  keeping the home volume for the next start. During a session, **Stop** freezes it;
-  **Resume computer** continues it with fresh key stand-ins.
-- The desktop has the WhiteSur light theme, a menu bar and a Plank dock. Pinned versions and
-  licenses are in `cells/desktop/THIRD-PARTY.md`.
-- `LOCALDOT_DOCKER_TESTS=1 pnpm test:docker` runs the Docker suites.
-  `LOCALDOT_DOCKER_TESTS=1 pnpm --filter @localdot/web e2e` checks the live desktop in installed
-  Google Chrome, including Stop/Start, Stop/Resume, key management and daemon restart recovery.
-- `LOCALDOT_MEASURE=1 pnpm --filter @localdot/web e2e --grep measure` records frame rate and CPU.
-  The stream defaults to 4:2:0 H.264, which every browser decodes; iPhones and iPads cannot decode
-  4:4:4. `LOCALDOT_STREAM_FULLCOLOR=1` streams 4:4:4 for sharper coloured text in desktop Chrome.
-  Both modes keep the stream setting locked in the client. Results and screenshots are in
-  `apps/web/e2e/out/`.
-- Processes that need to stop the daemon should run `node --import tsx src/main.ts` from
-  `apps/daemon`; pnpm's start command does not forward SIGTERM.
-- `apps/web/vendor/selkies` is the pinned MPL-2.0 client served by the daemon. The cell supplies
-  stream data; the client code comes from the local installation.
+## A quick tour
 
-The token fragment is removed from the visible URL after loading. Browser history may retain
-the original install link, so treat that link as a credential.
+> The screens below come from a test build with sample data. No real accounts were harmed.
 
-## Replay
+### Watch
 
-Sessions record locally even when nobody is watching. Open **Replay** and choose a session in
-the history rail to scrub its video, inspect the step timeline, compare before/after screenshots,
-change speed, or skip idle stretches. A running session offers **Jump to live**.
+<img src="docs/readme/watch.png" alt="localDot in Chrome: the computer's screen in the middle with a spreadsheet open, a status island above it, dot narrating below, and the chat on the right">
 
-Space plays or pauses; K pauses; Left/Right choose steps; J/L move ten seconds; `[`/`]` change
-speed from ½× to 8×; B opens the before/after comparison. **Export MP4** saves the chosen range
-with the pointer and overlays, optional captions, and the selected speed. Use desktop Chrome
-with file-picker and H.264 encoding support.
+The picture is dot's computer, live. The island on top says what's happening and keeps Pause,
+Stop and Take control within reach. dot sits under the picture and tells you what it's doing in
+plain words. The chat is on the right, and you can type into it while dot works.
 
-Recordings live in `~/.localdot/sessions/<id>/recording/`. Takeover stretches are never recorded.
-By default, finalized videos expire after 30 days or when the completed-video budget exceeds
-20 GiB, oldest first; events and captured screenshots remain. `LOCALDOT_RECORDING=0` disables
-new video recordings. See [the Replay guide](docs/replay.md) for privacy, retention settings,
-recovery, export details, and the browser acceptance commands.
+### Activity
 
-## keyd
+<img src="docs/readme/activity.png" alt="The Activity tab: the plan, a list of steps with timings and results, and the files that changed">
 
-`keyd/` contains the Go key service. It holds real credentials, gives cells scoped
-surrogates, checks outbound destinations, scrubs credential reflections, and
-enforces task and daily model budgets. Its admin API uses a private Unix socket.
+The plan, every step with what it did and how long it took (failures and blocked requests
+included), and the files it changed. If something went sideways, this is where you find out
+which step, and why.
 
-From `keyd/`, run `go test -race ./...` or build with
-`go build -o bin/keyd ./cmd/keyd`. For a local instance with an in-memory vault,
-run `bin/keyd -home /tmp/localdot-keyd-demo -vault memory -natpmp off -stun off`. The admin socket is
-`/tmp/localdot-keyd-demo/keyd/admin.sock`; cell listeners use ports 4760–4789.
-`bin/keyd verify-audit /tmp/localdot-keyd-demo/keyd/audit.jsonl` checks the audit
-chain. Use a short home path because macOS limits Unix socket path lengths.
+### It asks, right where you are
 
-The Go toolchain is pinned in `keyd/go.mod`. Tests use local fake providers and
-make no paid model calls. The optional
-`KEYD_KEYCHAIN_TEST=1 go test ./internal/vault -run LoginKeychain` exercises the
-macOS login Keychain with disposable test entries.
+<img src="docs/readme/approval.png" alt="An approval card over the computer: Send this as you? with the target, the site, and buttons for Don't send and Send">
 
-keyd learns and denies the network's public IPv4 address to block connections
-back through the router. It asks the router first (NAT-PMP); if the router has
-no public answer, it asks the configured STUN server (Cloudflare by default).
-`-stun off` disables that fallback; `-natpmp off -stun off` disables discovery.
-The admin status reports whether this guard is active, unknown or off. It retries
-unknown addresses every 30 seconds for four rounds, then every five minutes,
-refreshes known addresses every five minutes, and checks for a changed gateway
-every 30 seconds. Tests use local fake routers and STUN servers.
+Sending as you, paying, passwords, uploads and account changes stop and ask. The card says
+exactly what will happen, and your answer can cover just this once, the whole task, the site, or
+always. Clicking around on its own computer doesn't ask. Nobody wants to approve thirty clicks an
+hour.
 
-## Keys
+<img src="docs/readme/ask.png" alt="dot asks for a sign-in inside the chat: username and password fields, with a note that dot types the password into the site and never sees it">
 
-In development, start keyd in its own terminal before the daemon. `pnpm keyd` builds
-`keyd/bin/keyd` and runs it on `~/.localdot` (or `LOCALDOT_HOME`), keeping saved keys in the macOS
-login Keychain. `pnpm keyd -vault memory` keeps them in memory for that run. The daemon reaches it
-at `<home>/keyd/admin.sock` and refuses a socket other users could reach. Until keyd runs,
-computers do not start and the top bar says **Key layer offline**. The daemon's
-`LOCALDOT_KEYD_PORTS` (default `4760-4789`) must match keyd's `-ports`.
+When dot needs a sign-in, the form shows up in the chat (or as a sheet on your phone). You type
+the password, localDot puts it into the page, and the model never sees it.
 
-Add keys with the Theatre's **Keys** button. The page seals each value to keyd's key for the
-current boot using WebCrypto; the daemon relays the sealed copy. Desktop shells receive scoped
-stand-ins for **Web/API keys**, named `LOCALDOT_KEY_<NAME>` (for example, `open-weather` becomes
-`LOCALDOT_KEY_OPEN_WEATHER`). Those stand-ins work through keyd for the hosts and header
-bound to the key. keyd inserts the saved value into allowed outbound HTTPS requests and scrubs
-credential reflections from responses. The cell's web traffic reaches keyd through its gate.
+### Take over any time
 
-**Stop** revokes the computer's stand-ins and freezes it. If freezing fails, it closes the
-computer's keyd listener and stops its containers. **Resume computer** revokes again and refreshes
-the stand-ins while the computer is still frozen; it requires keyd to be running. Existing
-processes keep their revoked values: start a new shell or reload `/etc/localdot/cell/surrogates.sh`
-to use the fresh stand-ins. If keyd has restarted, resuming starts a fresh desktop with the same home volume. The Keys sheet and
-`pnpm --filter @localdot/daemon run doctor` report whether keyd knows this network's public address,
-which it refuses to dial (the hairpin guard).
+<img src="docs/readme/control.png" alt="You're in control: the island shows Hand back, dot waits under the picture, and a toolbar offers keys, typing and full screen">
 
-`LOCALDOT_KEYD_TESTS=1 pnpm test:keyd` runs the daemon's suites against a real keyd built from
-`keyd/`, using the Go toolchain pinned in `keyd/go.mod`. `LOCALDOT_KEYD_BIN` selects an existing
-binary. These suites use local fake providers and an in-memory vault; their listeners default to
-`4791-4797` (`LOCALDOT_TEST_KEYD_PORTS` selects another range).
+Press **Take control** and the computer is yours: mouse, keyboard, paste, the lot. dot can't see
+or touch anything until you hand it back, and that stretch isn't recorded. Full screen is one
+click away when you want the whole display.
 
-With Docker Desktop, the built gate and desktop images, and internet access, run:
+### On your phone
 
-```sh
-LOCALDOT_DOCKER_TESTS=1 pnpm test:docker apps/daemon/src/keyd/cell-egress.docker.test.ts
-LOCALDOT_DOCKER_TESTS=1 pnpm test:docker apps/daemon/src/keyd/canary.docker.test.ts
-```
+<img src="docs/readme/phone.png" alt="Three phone screens: watching a task, a sign-in sheet, and Replay with the step list">
 
-The egress suite probes the production cell, gate and keyd path. The canary suite plants a fake
-key, exercises that path, and scans readable process memory, environments, command lines and
-written files for raw and encoded key material. It also checks the clipboard and container/keyd
-logs. Positive controls and coverage thresholds check that the scan can detect planted material.
-The suite also checks that Stop freezes the
-cell and that Resume replaces revoked stand-ins. These Docker suites and browser e2e tests run
-locally; CI runs the host tests, Go checks and real-keyd integration suites.
+Same app, laid out for a thumb. Put localDot on your tailnet and it works from anywhere, and it
+will nudge your phone when dot needs you.
 
-## The agent
+### Replay and export
 
-Build `localdot/brain:dev` with `cells/brain/build.sh`, alongside the gate and desktop images.
-The agent runs in a separate brain cell. Model traffic passes through keyd; tools pass through
-the daemon's authenticated tool API at `127.0.0.1:4751`. Computer actions use the same action
-gateway and event log as the live desktop. **Stop** revokes access and freezes the computer.
-During a requested login takeover, the agent cannot observe or act until explicit hand-back;
-a follow-up message does not hand control back.
+<img src="docs/readme/export.png" alt="Replay with the Export video sheet: a preview with dot under the picture, a filmstrip with trim handles, and the Quality, Fast and Showcase presets">
 
-The chat and model picker are Part 5b work. The core API uses the existing install-token
-Authorization header and JSON request bodies:
+Every task is recorded locally. Scrub through it, compare before and after for any step, skip
+the idle bits. Export trims to the part you want and comes with presets: **Quality**, **Fast**
+(small and quick) and **Showcase**, which puts dot and its lines into the video. Exports run on
+your Mac, so closing the tab doesn't cancel them.
 
-- `GET /api/agent/providers` lists providers, catalog models, capabilities and available key IDs.
-  `POST /api/agent/catalog/refresh` refreshes the models.dev catalog.
-- `GET` and `PUT /api/agent/settings` read or replace settings. `main` drives the task, optional
-  `fast` handles summaries, and optional `local` provides a fallback. A role choice contains
-  `provider`, `model`, and a stored `key` ID for remote providers. LM Studio and Ollama need no
-  key; keyd reaches them on `127.0.0.1:1234` and `:11434` respectively.
-- Remote models missing a catalog price need an explicit `price` object containing both
-  `inputUSDPerMTok` and `outputUSDPerMTok` (finite values from 0 to 10000, at least one positive).
-  Optional `taskBudgetUSD` sets the initial spending limit. Each task keeps its selected models
-  and immutable price table across brain restarts and follow-ups; editing settings affects new tasks.
-- `POST /api/cells/<id>/agent` with `{"task":"…"}` starts on a ready computer and returns a
-  `sessionId`. Follow-ups use `POST /api/agent/sessions/<id>/messages` with
-  `{"kind":"followup","text":"…"}`; use `"steer"` to redirect current work. Do not automatically
-  resend a mutation if its reply is lost: reconcile the session and event log first.
-- Questions and hand-back require the current `askId` or `requestId` from the session snapshot.
-  Completed files are downloaded from `/api/agent/sessions/<id>/files/<name>`, as attachments.
+### What it made
 
-Memory lives in `<home>/memory/USER.md` and `MEMORY.md` (normally under `~/.localdot`). Skills
-are `SKILL.md` directories under `<home>/skills/` and this repository's `skills/`; task startup
-copies them into the computer's `~/.skills/`. Memory is context, including assistant-written
-notes, rather than a source of new user instructions.
+<img src="docs/readme/done.png" alt="A finished task: the summary, two files with inline previews, a start and an end screenshot, and Watch replay">
 
-`pnpm test` covers the model loop, transport fixtures and host Tool API integration without
-paid calls. The separate agent real-cell suites require both `LOCALDOT_DOCKER_TESTS=1` and
-`LOCALDOT_TASK15_TESTS=1`. They use a build-tag-only keyd with an owned loopback TLS provider and
-a public fake canary; no external provider or real key is used. Ordinary Docker suites skip
-these cases. Build the brain and gate images first, then run:
+When dot finishes you get the files with previews (images, PDFs, HTML in a sandbox, text, code,
+CSV and spreadsheets, audio and video), a before and after screenshot as proof of work, and
+**Revise** for when it's nearly right. Revised files keep their versions, with Compare.
 
-```sh
-go -C keyd build -tags localdot_acceptance -o /tmp/localdot-agent-keyd-fixture ./internal/acceptancefixture
-LOCALDOT_DOCKER_TESTS=1 LOCALDOT_TASK15_TESTS=1 \
-  LOCALDOT_KEYD_BIN=/tmp/localdot-agent-keyd-fixture \
-  LOCALDOT_TASK15_BRAIN_IMAGE=localdot/brain:dev \
-  LOCALDOT_TASK15_GATE_IMAGE=localdot/gate:dev \
-  pnpm test:docker apps/daemon/src/agent/brain-cell.docker.test.ts \
-    apps/daemon/src/agent/containment.docker.test.ts \
-    apps/daemon/src/agent/task-pricing.docker.test.ts
-```
+### Routines
 
-All ten cases must pass. These suites reserve ports 4792–4796 and create uniquely owned
-containers, networks and temporary homes. They cover the standard bundled brain loop,
-isolation and Stop containment, plus immutable spending across brain replacement and a keyd
-process restart. The pricing case uses a bounded real-image request worker to fit its initial
-$5 reservation; it does not replace the standard-loop acceptance. Missing explicit fixture
-configuration fails once both flags are enabled.
+<img src="docs/readme/routines.png" alt="Left: dot proposes a routine called Morning bills in the chat. Right: the Routines list with schedules">
 
-### Optional live provider checks
+Checking the same three sites every weekday at 8:30? dot can offer to turn a task into a routine,
+or you can write one yourself. Routines run while localDot is running, with the same checks, and
+you choose what happens when you're away.
 
-Live computer-use acceptance remains pending until explicitly run with a funded account or an
-already loaded local model. Ordinary host tests and `LOCALDOT_KEYD_TESTS=1 pnpm test:keyd`
-skip all live provider cases. To opt in, also set `LOCALDOT_LLM_TESTS` to a comma-separated subset
-of `anthropic,openai,google,lmstudio` and select just this file:
+### First run and Settings
 
-```sh
-LOCALDOT_KEYD_TESTS=1 LOCALDOT_LLM_TESTS=google \
-  pnpm test:keyd apps/daemon/src/agent/providers.keyd.test.ts
-```
+<img src="docs/readme/onboarding.png" alt="The welcome screen: Hi, I'm dot, with three promises and a Get started button">
 
-Before that command, put the selected provider's key in the shell environment and set its two
-`*_CU_INPUT_USD_PER_MTOK` / `*_CU_OUTPUT_USD_PER_MTOK` variables to the model's current prices.
-Both values are required for remote models; zero is allowed on one side. The suite does not
-fetch prices or use guessed prices. The table's default model IDs are configurable test inputs,
-not claims of current model availability or successful live verification.
+Setup walks you through a model, a key or a sign-in, how careful dot should be, and turning the
+computer on. It takes about two minutes and you can skip it.
 
-| Case | Key environment variable | Model override | Price-variable prefix |
-| --- | --- | --- | --- |
-| `anthropic` | `ANTHROPIC_API_KEY` | `ANTHROPIC_CU_MODEL` (default `claude-sonnet-5-5`) | `ANTHROPIC` |
-| `openai` | `OPENAI_API_KEY` | `OPENAI_CU_MODEL` (default `gpt-6-luna`) | `OPENAI` |
-| `google` | `GEMINI_API_KEY` | `GEMINI_CU_MODEL` (default `gemini-3.1-flash-lite`) | `GEMINI` |
-| `lmstudio` | none | `LMSTUDIO_CU_MODEL` (default `qwen/qwen3.8-27b`) | none; local prices are zero |
+<img src="docs/readme/settings.png" alt="Settings: models, autonomy, always allow, spending, appearance, notifications, what dot knows, accounts, keys and your computer">
 
-For example, Google's price variables are `GEMINI_CU_INPUT_USD_PER_MTOK` and
-`GEMINI_CU_OUTPUT_USD_PER_MTOK`. Each selected case seals its key into a disposable in-memory
-keyd vault, initializes a unique task with an immutable model/price snapshot and a $0.25 keyd
-budget calculated from those supplied rates, then makes one request with a 1024-token output
-cap and a 30-second deadline. It checks a returned click against a generated image; no click
-is sent to a real desktop. There are no model retries. Credentials and provider error bodies
-are not printed, and owned transports/cells/keys are closed or deleted afterward.
+Settings has the rest: models, autonomy, the things you've always allowed, spending limits (off
+until you want them), what dot remembers about you (all of it editable and deletable), the sites
+you're signed in to, and your keys.
 
-A structured provider refusal for unavailable credit records a skipped case, leaving live
-acceptance pending. Missing configuration, authentication errors, keyd budget or unpriced-model
-refusals, invalid clicks and timeouts fail. The LM Studio case calls an existing model only when
-selected and never loads, unloads or reconfigures it. Test keyd listeners use the existing
-`LOCALDOT_TEST_KEYD_PORTS` range; choose a separate free range for concurrent acceptance work.
+### The computer itself
 
-### Optional ChatGPT plan harness
+<img src="docs/readme/computer.png" alt="dot's computer: a macOS-style menu bar and dock, with Chromium showing a travel article">
 
-The optional ChatGPT harness uses the independently measured Codex **0.154.0** release on
-Apple silicon macOS. Installation is explicit; reading account or installation status does
-not download it. Its credentials live in localDot's private Codex home, separate from the
-user's `~/.codex`. The ordinary API-key providers remain available separately.
+It's Linux in containers, dressed to feel familiar: menu bar, dock, a launcher, traffic lights.
+It comes with Chromium, LibreOffice, GIMP, a code editor and a terminal. Sign-ins in its web
+browser stay put across restarts and new tasks, so you log in once.
 
-Sign-in uses an OpenAI device code. Browser callback sign-in is unavailable: the native
-macOS rule cannot restrict port 1455 to loopback without also allowing a wildcard bind.
-No broader callback profile is used. Canceling an attempt, signing out or refreshing the
-account retires existing account and task processes before changing authentication.
-An interrupted task requires explicit Resume after authentication changes.
+<img src="docs/readme/computer-launcher.png" alt="The launcher open over LibreOffice Calc, with calc typed in the search field">
 
-The release check and offline acceptance use inert credentials and owned local services:
+## Meet dot
+
+<p align="center">
+  <img src="docs/readme/dot-sequence.gif" width="820" alt="dot working through a task, its tool changing with each step: thinking, opening a web page, waiting for it to load, clicking, typing">
+</p>
+
+dot is the little white ball doing the work, and it picks up whatever the job needs. A keyboard
+when it types, a terminal when it runs code, a magnifier when it looks closely, a paper plane
+when something is going out. It glides from one to the next, waves when it needs you, and
+squints happily when it's done. It has no other hobbies.
+
+<img src="docs/readme/dot-poses.png" alt="Every one of dot's poses at hero and dock size: typing, terminal, browsing, clicking, dragging, looking, thinking, waiting, needs you, sending, saving, remembering, done and something failed">
+
+## How it works
+
+<picture>
+  <source srcset="docs/readme/system.svg" type="image/svg+xml">
+  <img src="docs/readme/system.png" alt="Pencil sketch: your browser and phone talk to the localDot daemon on your Mac. The daemon runs an isolated computer made of four containers: desktop, web browser, brain and gate. The gate leads to keyd, which holds the real keys and adds them on the way out to model providers and the web.">
+</picture>
+
+| Part | What it does |
+| --- | --- |
+| **Daemon** | The app itself, on your Mac (TypeScript on Node). Serves the web UI, runs tasks, streams the picture, records everything, and decides what needs your OK. |
+| **Desktop** | The screen you watch: a Linux desktop streamed as H.264. dot clicks, types and drags here. |
+| **Web browser** | A separate browser that keeps your sign-ins. The desktop can't read its cookies. |
+| **Brain** | The agent loop that talks to the model. It holds stand-in keys only. |
+| **Gate** | The only way out to the network. No LAN, no router, no cloud metadata. |
+| **keyd** | A small Go service that keeps your real keys (in the macOS Keychain) and swaps them in at the edge. |
+
+<picture>
+  <source srcset="docs/readme/task-loop.svg" type="image/svg+xml">
+  <img src="docs/readme/task-loop.png" alt="Pencil sketch of one task: ask, plan, act, look, narrate, replay. Act, look and narrate repeat until the task is done; when dot needs you it asks in the chat.">
+</picture>
+
+A task goes round a simple loop: act, take a fresh look at the screen, say what happened, repeat.
+dot can batch several actions into one turn and find buttons by name instead of hunting for
+pixels, which is a big part of why it got quicker (see the numbers below).
+
+## Safety
+
+<picture>
+  <source srcset="docs/readme/safety.svg" type="image/svg+xml">
+  <img src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
+</picture>
+
+What asks and what doesn't, on the default **Balanced** setting:
+
+| dot wants to… | What happens |
+| --- | --- |
+| Click, type, scroll or drag on its own computer | Just runs |
+| Open pages, read, search | Just runs |
+| Run code or a terminal command on its own computer | Just runs |
+| Send a message or email as you, or post as you | Asks first |
+| Pay for or buy something | Asks first |
+| Enter a password or another secret | Asks you to type it; the model never sees it |
+| Upload your files somewhere | Asks first |
+| Change account settings or delete data on a remote service | Asks first |
+| Send private data somewhere unrelated to the task | Asks first, when the purpose check is on |
+| Reach your LAN, your router or cloud metadata | Blocked |
+| Use an API key | Gets a stand-in; the real key is added at the edge, for that key's hosts only |
+
+**Careful** mode asks before every step except reading and browsing. Either way, your answer
+can be scoped: just this once, for this task, for this site, or always, and you can take an
+"always" back in Settings.
+
+The purpose check is optional and recommended. It looks at where data is going (the host, the
+size and shape of what's being sent, whether it overlaps private text dot has seen), never at the
+private content itself, and it only asks when something private is heading somewhere the task
+has no business going.
+
+## Numbers
+
+All measured on one Mac Studio (M3 Ultra) with sample data. Your Mac, your network and your model
+will give different numbers. They're here to show the direction, not to win an argument. The
+details are in [docs/measurements/2026-10-readme-numbers.md](docs/measurements/2026-10-readme-numbers.md).
+
+<picture>
+  <source srcset="docs/readme/chart-screenshots.svg" type="image/svg+xml">
+  <img src="docs/readme/chart-screenshots.png" alt="Bar chart: screenshots sent to the model across 7 desktop tasks fell from 107 to 50, with the same 51 turns. Drawing a shape in GIMP went from 52 to 8.">
+</picture>
+
+<picture>
+  <source srcset="docs/readme/chart-export.svg" type="image/svg+xml">
+  <img src="docs/readme/chart-export.png" alt="Bar chart: exporting a 2-minute recording took 25.7 s with the old exporter at 1080p, 5.9 s with Quality at 2560x1600 60 fps, and 1.4 s with Fast at 1280x800 15 fps.">
+</picture>
+
+<picture>
+  <source srcset="docs/readme/chart-stream.svg" type="image/svg+xml">
+  <img src="docs/readme/chart-stream.png" alt="Bar charts on a 5 Mbps, 80 ms link: new frames per second went from 10.9 to 57.3, and key press to screen while scrolling went from 1371 ms to 116 ms.">
+</picture>
+
+| What | Before | After |
+| --- | --- | --- |
+| Screenshots sent to the model, 7 desktop tasks | 107 | 50 |
+| Model turns to fill in a web form | 8 | 3 |
+| Export a 2-minute recording, Quality (2560×1600, 60 fps) | 25.7 s (old exporter, 1080p 30 fps) | 5.9 s, 13.1 MB |
+| Export a 2-minute recording, Fast (1280×800, 15 fps) | | 1.4 s, 1.7 MB |
+| New frames per second on a 5 Mbps, 80 ms link | 10.9 | 57.3 |
+| Key press to screen while scrolling, same link (median) | 1371 ms | 116 ms |
+| First frame after a page reload | | 214 ms (Chrome), 209 ms (WebKit) |
+
+## Models
+
+dot needs a main model that can use a computer, meaning it can look at a screenshot and point at
+things. A fast model for titles and quick checks is optional, and so is a local one.
+
+| Kind | Options | Good to know |
+| --- | --- | --- |
+| API keys | Anthropic, OpenAI, Google Gemini, Azure OpenAI, xAI, Mistral, DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot (Kimi), Alibaba (Qwen), Z.ai, Zhipu AI, MiniMax, Volcengine Ark, SiliconFlow | Keys live in keyd on your Mac. Prices come from the models.dev catalogue. |
+| ChatGPT plan | Sign in with a code, runs through Codex | Apple silicon Macs. localDot keeps its own Codex home, separate from yours. |
+| Claude Code (your plan) | Your own installed Claude Code | Uses your plan's limits. localDot never touches your Claude sign-in, settings or memory files. Off until you choose it. |
+| Coding and token plans | MiniMax Token Plan, Alibaba Token Plan, Alibaba Coding Plan | Some vendors only allow their coding plans inside the coding tools they list (GLM Coding Plan, Kimi For Coding, Ark Coding Plan). For those, use the vendor's API key instead. |
+| Your own endpoint | Any OpenAI-compatible or Anthropic-compatible base URL | You give it the model ID, what the model can do and what it costs. |
+| On your Mac | LM Studio, Ollama | No key, no bill, and the model calls never leave your Mac. |
+
+## Install
+
+**macOS on Apple silicon** is where localDot runs today. You'll need Docker Desktop (Engine 28
+or newer), Node 24, pnpm 10 and Go (the version pinned in `keyd/go.mod`).
 
 ```sh
-pnpm check:codex-release
-LOCALDOT_CODEX_TESTS=1 LOCALDOT_CODEX_ARCHIVE=/absolute/path/to/darwin-arm64.tgz \
-  pnpm test:codex
+git clone https://github.com/Shadowhusky/localdot.git
+cd localdot
+pnpm install
+pnpm --filter @localdot/web build
+
+# dot's computer. The desktop image takes 10-25 minutes the first time; put the kettle on.
+cells/gate/build.sh
+cells/desktop/build.sh
+cells/brain/build.sh
+pnpm --filter @localdot/browserd build
+docker build -f cells/browser/Dockerfile -t localdot/browser:dev .
 ```
 
-The first command verifies the committed source-bound offline receipt and the acceptance
-record in `harness/codex/acceptance/record.json`. The ChatGPT plan stays switched off in the
-app until that record carries a passed native sandbox stamp and a passed real-account stamp
-for the exact pin and manifest; no installation state or environment variable opens it.
-Stamps are produced on a supported Mac and copied from the output directory into
-`harness/codex/acceptance/`:
+Then, in two terminals:
 
 ```sh
-pnpm check:codex-release --run --archive /abs/codex.tgz --out /abs/new-offline-dir
-pnpm check:codex-release --native --archive /abs/codex.tgz --out /abs/new-native-dir
-pnpm check:codex-release --account --archive /abs/codex.tgz --out /abs/new-account-dir
+pnpm keyd                                 # the key service, keeps keys in your login Keychain
+pnpm --filter @localdot/daemon start      # localDot, on http://127.0.0.1:4750
 ```
 
-The offline record and the native stamp are bound to the release sources, so any change
-under `harness/codex`, `apps/daemon/src` or `packages/protocol/src` needs both rerun. The
-account stamp is bound only to the pin and its manifest. The `--account` run is the manual
-sign-in described below; ChatGPT ships device code sign-in switched off for personal
-accounts, so turn it on under ChatGPT Settings → Security first. `--native` keeps the account
-stamp of the record in `harness/codex/acceptance/`, so copy the `--account` output there first,
-then run `--run` and `--native` on the commit being released, copy their output and verify once.
+`pnpm --filter @localdot/daemon open` prints a one-time sign-in link. Open it, follow the setup,
+and turn the computer on. If something looks off, `pnpm --filter @localdot/daemon doctor`
+checks Docker, the images and the port.
 
-`pnpm test:codex` runs the 15 pinned protocol/tool probes and 10 native sandbox/encrypted-refresh
-probes on a supported Mac. The native cases require permission to create their own private
-temporary files, inert real-home canary and local listeners. They read no existing home credential
-contents. Compiler, sandbox, child-process, cleanup or unavailable-platform errors fail
-acceptance. The receipt describes offline acceptance only; real account acceptance and
-Linux runtime support remain unverified until separately demonstrated. The native socket
-rules and private filesystem permissions do not isolate arbitrary malicious processes
-already running as the same macOS user.
+**On your phone:** serve the daemon on your tailnet with
+`tailscale serve --bg --https=4750 http://127.0.0.1:4750`, start the daemon with
+`LOCALDOT_PUBLIC_ORIGIN=https://<your-mac>.<your-tailnet>.ts.net:4750`, and open the link there.
 
-Real account acceptance is a separate manual command, excluded from `pnpm test` and
-`pnpm test:codex`. Run it only when deliberately authorizing a real OpenAI sign-in:
+**Linux, Windows and servers are close.** An install script for macOS, Linux and Windows (through
+WSL 2), systemd services, a key vault for Linux (Secret Service or an encrypted file) and a
+headless mode you can use from any browser are in review. Until they land, macOS is the one we
+test.
 
-```sh
-LOCALDOT_CODEX_TESTS=1 LOCALDOT_CODEX_SIGNIN=1 \
-  LOCALDOT_CODEX_ARCHIVE=/absolute/path/to/darwin-arm64.tgz pnpm test:codex-signin
-```
+## FAQ
 
-It first cancels an owned device-code attempt, then prints a fresh OpenAI verification
-URL and one-time code. Complete that sign-in within ten minutes. The suite checks private
-ChatGPT credentials and a forced token refresh in a disposable native home, compares
-metadata of the user's existing Codex directory/auth/config without reading their
-contents, retires its processes and removes its exact private home after success.
-A failed or uncertain cleanup retains that private home and fails the test. Keep manual
-terminal output private. This command sends no model turn, quota request or usage reset;
-it has not been run as part of offline acceptance. Live model acceptance still needs a
-separate explicit opt-in.
+**Does it touch my real computer?**
+No. dot works on its own computer, in containers. It sees your files only when you attach them,
+and its results open on your Mac only when you click Open.
+
+**Could it email my boss without asking?**
+No. Sending as you always needs your OK, and the card shows exactly what's going out. Your boss
+remains blissfully unaware.
+
+**What does it cost?**
+localDot is free and MIT licensed. Models cost whatever your provider charges, and localDot shows
+what each task spent. Spending limits are there when you want them, and off until you do.
+
+**Where does my data go?**
+Screenshots and the task's text go to the model provider you chose, and dot visits the sites the
+task needs. Pick a local model and the model calls stay on your Mac.
+
+**Why is it called dot?**
+Look at it.
+
+**Can I build on it?**
+Yes. Skills are plain `SKILL.md` folders, and dot's memory is two Markdown files you can read and
+edit. See [docs/development.md](docs/development.md).
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Building, testing and running from source are
+covered in [docs/development.md](docs/development.md). Before sending a change, run
+`pnpm typecheck`, `pnpm lint`, the tests for what you touched, and `pnpm hygiene` (it scans for
+anything that looks like a key).
+
+## Licence
+
+[MIT](LICENSE). Third-party notices are in [THIRD-PARTY.md](THIRD-PARTY.md). The handwriting in
+the diagrams is Kalam, under the SIL Open Font License
+([docs/diagrams/fonts/OFL.txt](docs/diagrams/fonts/OFL.txt)).
