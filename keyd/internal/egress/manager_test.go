@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -114,6 +115,34 @@ func TestOpenValidates(t *testing.T) {
 	}
 	if _, err := m.Open(OpenRequest{CellID: "c1", Role: "desktop"}); !errors.Is(err, ErrCellExists) {
 		t.Fatalf("reopen: %v", err)
+	}
+}
+
+// The daemon's purpose check reaches its judge through a judge cell: the web API key is swapped
+// at its bound host, and nothing else on the web or the LLM gateway is reachable.
+func TestAJudgeCellReachesOnlyItsKeysHosts(t *testing.T) {
+	m, w := newManager(t)
+	seen := make(chan string, 1)
+	var hits atomic.Int32
+	w.tlsUpstream("api.example.test", echo(&hits, seen))
+	w.tlsUpstream("www.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "ok") }))
+	if _, err := m.Open(OpenRequest{CellID: "j0", Role: "judge", Secrets: []string{"anthropic"}}); err == nil {
+		t.Fatal("a judge cell took an LLM key")
+	}
+	o, err := m.Open(OpenRequest{CellID: "j1", Role: "judge", Secrets: []string{"weather"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := cellClient(w, o)
+	resp, _ := do(t, client, "POST", "https://api.example.test/v1/systemone", http.Header{"Authorization": {"Bearer " + o.Surrogates["weather"]}})
+	if got := <-seen; resp.StatusCode != 200 || got != "Bearer "+realValue {
+		t.Fatalf("judge request: %d, upstream saw %q", resp.StatusCode, got)
+	}
+	if _, connected := rawConnectWith(t, o, "www.example.test:443"); connected.StatusCode == 200 {
+		t.Fatal("a judge cell reached the web")
+	}
+	if resp, err := client.Post("http://llm.ldot/anthropic/messages", "application/json", strings.NewReader("{}")); err == nil && resp.StatusCode == 200 {
+		t.Fatal("a judge cell reached the LLM gateway")
 	}
 }
 

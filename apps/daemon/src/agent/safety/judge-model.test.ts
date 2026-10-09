@@ -1,0 +1,66 @@
+import type { ModelBinding } from "@localdot/protocol";
+import { describe, expect, it, vi } from "vitest";
+import { completionCall, gatewayCompletion } from "./judge-model.ts";
+
+const SURROGATE = `ld_ant_${"a".repeat(22)}_${"b".repeat(6)}`;
+const binding = (client: ModelBinding["client"], model = "m-1"): ModelBinding => ({
+  route: "fast-route",
+  client,
+  model,
+  surrogate: SURROGATE,
+  computer: "generic",
+  coords: "pixels",
+  vision: false,
+  reasoning: false,
+  contextTokens: 32_768,
+  maxOutputTokens: 4096,
+});
+
+describe("the fast model as judge", () => {
+  it("asks each provider in its own API, with keyd's stand-in in its own header", () => {
+    const anthropic = completionCall(binding("anthropic"), "sys", "prompt");
+    expect(anthropic).toMatchObject({
+      path: "messages",
+      headers: { "x-api-key": SURROGATE },
+      body: { model: "m-1", system: "sys", messages: [{ role: "user", content: "prompt" }] },
+    });
+    expect(anthropic.read({ content: [{ type: "text", text: '{"fits":1}' }] })).toBe('{"fits":1}');
+    const openai = completionCall(binding("openai"), "sys", "prompt");
+    expect(openai).toMatchObject({
+      path: "responses",
+      headers: { authorization: `Bearer ${SURROGATE}` },
+      body: { instructions: "sys", input: "prompt", store: false },
+    });
+    expect(openai.read({ output: [{ content: [{ type: "output_text", text: "ok" }] }] })).toBe(
+      "ok",
+    );
+    const google = completionCall(binding("google", "gemini-x"), "sys", "prompt");
+    expect(google.path).toBe("models/gemini-x:generateContent");
+    expect(google.read({ candidates: [{ content: { parts: [{ text: "g" }] } }] })).toBe("g");
+    const chat = completionCall(binding("deepseek"), "sys", "prompt");
+    expect(chat.path).toBe("chat/completions");
+    expect(chat.read({ choices: [{ message: { content: "c" } }] })).toBe("c");
+  });
+
+  it("goes through the task's keyd gateway route, and fails while no model runs", async () => {
+    const fetch = vi.fn(
+      async (_url: string, _init: unknown) =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "yes" } }] }), {
+          status: 200,
+        }),
+    );
+    const complete = gatewayCompletion(
+      () => binding("groq"),
+      () => ({ port: 4788, token: "t".repeat(43) }),
+      fetch as never,
+    );
+    expect(await complete("sys", "prompt", new AbortController().signal)).toBe("yes");
+    expect(fetch.mock.calls[0]?.[0]).toBe("http://llm.ldot/fast-route/chat/completions");
+    const idle = gatewayCompletion(
+      () => undefined,
+      () => undefined,
+      fetch as never,
+    );
+    await expect(idle("sys", "prompt", new AbortController().signal)).rejects.toThrow();
+  });
+});

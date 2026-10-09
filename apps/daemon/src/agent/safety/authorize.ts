@@ -2,8 +2,9 @@ import { ApprovalRequestDraft, type ToolName, UploadApproval } from "@localdot/p
 import { repeatsWhileHeld } from "@localdot/protocol/keys";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
-import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
+import { actingFacts, alwaysOptions, decideAutonomy, placeOf, screenOf } from "./autonomy.ts";
 import { handoffFor } from "./handoff.ts";
+import { outboundOf, type PurposeVerdict } from "./purpose.ts";
 import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } from "./risk.ts";
 import { PausedStepError } from "./step-barrier.ts";
 
@@ -128,8 +129,10 @@ export async function authorizePrepared(
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;
   }
-  if (decision.mode === "ask") {
+  const purpose = decision.mode === "act" ? await purposeCheck(ctx, prepared, input) : undefined;
+  if (decision.mode === "ask" || purpose) {
     const draft = approvalDraft(prepared.tool, input, prepared.facts, decision, ctx.redact, upload);
+    const acting = actingFacts(ctx, prepared.facts);
     const outcome = await ctx.session.requestApproval(
       {
         sessionId: ctx.session.id,
@@ -139,10 +142,20 @@ export async function authorizePrepared(
         digest,
         targetDigest,
       },
-      ApprovalRequestDraft.parse({
-        ...draft,
-        always: alwaysOptions(decision.actionClass, actingFacts(ctx, prepared.facts), ctx.redact),
-      }),
+      ApprovalRequestDraft.parse(
+        purpose
+          ? {
+              ...draft,
+              title: `Send data to ${purpose.destination}?`,
+              why: purpose.why,
+              fields: [["Destination", purpose.destination], ...draft.fields],
+              // A yes reaches this task or this site; never every site.
+              always: alwaysOptions(decision.actionClass, acting, ctx.redact).filter(
+                (option) => option.scope !== "always",
+              ),
+            }
+          : { ...draft, always: alwaysOptions(decision.actionClass, acting, ctx.redact) },
+      ),
       {
         signal: ctx.signal,
         check: () => ctx.check(),
@@ -167,10 +180,11 @@ export async function authorizePrepared(
       return undefined;
     }
     if (outcome !== "approve") return undefined;
+    if (purpose) ctx.session.purpose?.allow(purpose.destination);
   }
   ctx.check();
   return Object.freeze({
-    approved: decision.mode === "ask",
+    approved: decision.mode === "ask" || purpose !== undefined,
     consume(nextInput: unknown, nextTarget: unknown): boolean {
       ctx.check();
       if (actionDigest(nextInput) !== inputDigest || actionDigest(nextTarget) !== targetDigest)
@@ -178,6 +192,22 @@ export async function authorizePrepared(
       return permit.consume(digest);
     },
   });
+}
+// A step the policy lets run still asks when it would carry what the task read to a host outside
+// the task's purpose. A choice the user already made for this kind of step covers it.
+async function purposeCheck(
+  ctx: ToolCallContext,
+  prepared: PreparedEffect,
+  input: unknown,
+): Promise<Extract<PurposeVerdict, { allow: false }> | undefined> {
+  const gate = ctx.session.purpose;
+  if (!gate) return undefined;
+  const acting = actingFacts(ctx, prepared.facts);
+  const { actionClass } = decideAutonomy(ctx, prepared.facts);
+  if (ctx.session.taskAutonomy.relaxes(actionClass, placeOf(acting))) return undefined;
+  const verdict = await gate.check(outboundOf(prepared.tool, input, acting), ctx.signal);
+  ctx.check();
+  return verdict.allow ? undefined : verdict;
 }
 // The card's words for gateway verbs that are not plain English on their own.
 const VERBS: Record<string, string> = {

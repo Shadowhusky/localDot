@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SECRET_ID_PATTERN } from "./keyd.ts";
+import { PurposeCheck } from "./purpose.ts";
 import { AutonomyPolicy } from "./safety.ts";
 
 export const AgentModelPrice = z
@@ -60,5 +61,7 @@ export const AgentSettingsDocument = z.strictObject({
   taskBudgetUSD: BudgetUSD.optional(),
   dayBudgetUSD: BudgetUSD.optional(),
   checkIns: CheckIns.optional(),
+  // Auto when absent.
+  purposeCheck: PurposeCheck.optional(),
 });
 export type AgentSettingsDocument = z.infer<typeof AgentSettingsDocument>;

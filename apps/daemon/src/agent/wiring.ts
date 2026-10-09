@@ -30,6 +30,7 @@ import type { ActionGateway } from "../gateway/gateway.ts";
 import type { KillSwitch } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "../keyd/client.ts";
+import { JudgeCell } from "../keyd/judge-cell.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
@@ -47,6 +48,7 @@ import type { ToolPolicy } from "./policy.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
+import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
@@ -80,6 +82,12 @@ export interface AgentWiringDeps {
   quarantine?: QuarantineStore;
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
+// The Codex path hands memory to the model here.
+function tainting<T extends { user: string; memory: string }>(session: AgentSession, memory: T): T {
+  taintMemory(session.taint, memory);
+  return memory;
+}
+
 export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
     settings = new SettingsStore(d.home),
@@ -178,6 +186,10 @@ export function createAgent(d: AgentWiringDeps) {
     range: d.keydPorts,
     desktopPorts: () => d.cells.reservedKeydPorts(),
     ...(d.toolPort === undefined ? {} : { toolPort: d.toolPort }),
+  });
+  const judgeCell = new JudgeCell({
+    keyd: d.keyd,
+    ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
   const skills = () => listSkills(BUILTIN_SKILLS, join(d.home, "skills"));
   const installSkills = async (cellId: string, signal: AbortSignal): Promise<SkillSummary[]> => {
@@ -341,6 +353,9 @@ export function createAgent(d: AgentWiringDeps) {
               const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
               check();
               session.tainted = true;
+              const shown = screen?.selection.screen ?? "desktop";
+              if (session.taskAutonomy.signedIn(shown))
+                session.taint.add("screen", `${shown} screen`);
               session.lastFrameId = frame.frameId;
               return { frameId: frame.frameId, full: true, png: full };
             } finally {
@@ -350,7 +365,7 @@ export function createAgent(d: AgentWiringDeps) {
           },
           instructions: (session) =>
             codexInstructions({
-              memory: memory.readBoth(),
+              memory: tainting(session, memory.readBoth()),
               skills: runner.skillsOf(session.id),
               today: new Date(),
             }),
@@ -378,6 +393,7 @@ export function createAgent(d: AgentWiringDeps) {
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
     stopSession: (id) => d.killSwitch.stopSession(id),
+    jev: (secretId, body, signal) => judgeCell.post(secretId, body, signal),
     ...(driver && auth
       ? {
           codex: {
@@ -686,6 +702,7 @@ export function createAgent(d: AgentWiringDeps) {
           ),
           ...containments,
           runner.close(),
+          judgeCell.close(),
           ...activeClients.map((tools) => tools.close()),
           ...retiring,
         ]);

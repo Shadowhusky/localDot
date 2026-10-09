@@ -7,6 +7,7 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import { DesktopdError } from "../../desktopd/client.ts";
+import { hostOf } from "../safety/purpose.ts";
 import { untrusted } from "../untrusted.ts";
 import {
   append,
@@ -15,6 +16,7 @@ import {
   screenContext,
   type ToolCallContext,
   type ToolDeps,
+  taintScreen,
   text,
 } from "./deps.ts";
 
@@ -72,6 +74,7 @@ export async function browserReadTool(
   const page = await load();
   ctx.check();
   ctx.session.tainted = true;
+  taintScreen(ctx, hostOf(page.url), page.text);
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
   return {

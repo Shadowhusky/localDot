@@ -41,8 +41,12 @@ import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
+import { gatewayCompletion } from "./safety/judge-model.ts";
+import { jevJudge, modelJudge } from "./safety/judges.ts";
+import { judgeChoice, PurposeGate, type PurposeJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
+import { taintMemory } from "./safety/taint.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
@@ -108,6 +112,8 @@ export interface AgentRunnerDeps {
   limits?: AgentLimits;
   sleep?(ms: number, signal: AbortSignal): Promise<void>;
   idleMs?: number;
+  // Asks Jev, through keyd, with the named key.
+  jev?(secretId: string, body: unknown, signal: AbortSignal): Promise<unknown>;
   codex?: {
     driver: Pick<CodexDriver, "run"> &
       Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">>;
@@ -251,6 +257,7 @@ export class AgentRunner {
           : this.deps.live.settled(current));
       }
       let selection: ModelSelection;
+      let keys: KeydRecord[] = [];
       if (settings.main?.provider === CHATGPT) {
         for (const role of ["main", "fast", "local"] as const) {
           const choice = settings[role];
@@ -278,7 +285,7 @@ export class AgentRunner {
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
       } else {
-        const keys = await this.deps.keyd.secrets();
+        keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
         const roles = this.resolveRoles(keys, settings);
         // Settings saved while keyd was away reach it here, before the task's first model call.
@@ -330,6 +337,13 @@ export class AgentRunner {
         initialized: false,
         serial: Promise.resolve(),
       };
+      const judge = this.#judge(rt, settings, keys);
+      session.purpose = new PurposeGate({
+        taint: session.taint,
+        purpose: () => session.currentPurpose,
+        judge: () => judge,
+        trusted: (host) => session.taskAutonomy.trusts(host),
+      });
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
       try {
@@ -364,6 +378,23 @@ export class AgentRunner {
     } finally {
       this.#starting.delete(cellId);
     }
+  }
+  #judge(rt: Runtime, settings: AgentSettings, keys: KeydRecord[]): PurposeJudge | undefined {
+    const fast =
+      rt.selection.kind === "api"
+        ? rt.selection.roles.find((role) => role.role === "fast")
+        : undefined;
+    const choice = judgeChoice(settings.purposeCheck, keys, fast !== undefined);
+    const jev = this.deps.jev;
+    if (choice?.kind === "jev" && jev)
+      return jevJudge((body, signal) => jev(choice.secretId, body, signal));
+    if (choice?.kind !== "model" || !fast) return undefined;
+    return modelJudge(
+      gatewayCompletion(
+        () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
+        () => (rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined),
+      ),
+    );
   }
   // Ends a finished task that waits for a follow-up, so the next message starts a new task in
   // whichever conversation is current. A task still at work is left alone and refused.
@@ -999,6 +1030,8 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
+        const memory = this.deps.memory.readBoth();
+        taintMemory(session.taint, memory);
         const boot = BootConfig.parse({
           sessionId: session.id,
           task: session.task,
@@ -1008,7 +1041,7 @@ export class AgentRunner {
             ...(models.local ? { local: models.local } : {}),
           },
           proxy: { url: brain.proxyUrl, token: brain.proxyToken },
-          memory: this.deps.memory.readBoth(),
+          memory,
           skills,
           limits: this.deps.limits ?? rt.limits,
           resume,

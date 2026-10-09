@@ -260,8 +260,13 @@ function input(facts: RiskFacts): ActionClass[] {
       ? facts.tabbed === true
       : keys.some((key) => PATTERNS.tab.test(key)) &&
         keys.some((key) => !PATTERNS.tab.test(key) && !PATTERNS.modifier.test(key));
-  if (!identified)
+  if (!identified) {
+    // A name nothing confirmed can only add a check: an unclear press the model calls "Buy" asks
+    // as a purchase, while one it calls anything else stays unclear.
+    const claimed = named(target?.name ?? "");
+    if (claimed.length && facts.operation !== "type") return claimed;
     return facts.operation === "type" && !facts.newline && !tabbed ? ["computer"] : ["unknown"];
+  }
   const terminal = PATTERNS.terminal.test(identified.role ?? "");
   const submits =
     keys.some((key) => PATTERNS.enter.test(key) || endsLine(key)) ||

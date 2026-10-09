@@ -46,38 +46,33 @@ describe("signed-in screens of one task", () => {
     expect(task.signedIn("desktop")).toBe(true);
   });
 
+  const click = { operation: "click" } as const;
   it("decisions read the tool's own screen", () => {
-    expect(decideAutonomy(context().ctx, { operation: "click" }).mode).toBe("act");
-    expect(decideAutonomy(context("browser").ctx, { operation: "click" })).toMatchObject({
+    expect(decideAutonomy(context().ctx, click).actionClass).toBe("computer");
+    expect(decideAutonomy(context("browser").ctx, click)).toMatchObject({
       actionClass: "unknown",
-      mode: "ask",
+      mode: "act",
     });
   });
 
   it("the tool's own screen wins over the selected one, which applies when the tool has none", () => {
-    expect(decideAutonomy(context("browser", "desktop").ctx, { operation: "click" }).mode).toBe(
-      "ask",
-    );
-    expect(decideAutonomy(context("desktop", "browser").ctx, { operation: "click" }).mode).toBe(
-      "act",
-    );
-    expect(decideAutonomy(context(undefined, "browser").ctx, { operation: "click" }).mode).toBe(
-      "ask",
-    );
+    expect(decideAutonomy(context("browser", "desktop").ctx, click).actionClass).toBe("unknown");
+    expect(decideAutonomy(context("desktop", "browser").ctx, click).actionClass).toBe("computer");
+    expect(decideAutonomy(context(undefined, "browser").ctx, click).actionClass).toBe("unknown");
   });
 
-  it("commands and file changes run on the desktop, so only its sign-in makes them ask", async () => {
+  it("commands and file changes run on the desktop, so only its sign-in makes them unclear", async () => {
     const { ctx, session, asks } = context(undefined, "browser");
     const command = { operation: "shell", command: "xdotool key Return" } as const;
-    expect(decideAutonomy(ctx, command).mode).toBe("act");
-    expect(decideAutonomy(ctx, { operation: "files_write" }).mode).toBe("act");
+    expect(decideAutonomy(ctx, command).actionClass).toBe("computer");
+    expect(decideAutonomy(ctx, { operation: "files_write" }).actionClass).toBe("computer");
     session.taskAutonomy.signIn("desktop");
     expect(decideAutonomy(ctx, command)).toEqual({
       actionClass: "unknown",
-      mode: "ask",
+      mode: "act",
       risk: "medium",
     });
-    expect(decideAutonomy(ctx, { operation: "files_write" }).mode).toBe("ask");
+    expect(decideAutonomy(ctx, { operation: "files_write" }).actionClass).toBe("unknown");
     const input = { command: "xdotool key Return" };
     const facts = toolRisk("shell", input);
     if (!facts) throw new Error("shell has no facts");
@@ -88,10 +83,11 @@ describe("signed-in screens of one task", () => {
       facts,
       revalidate: async () => true,
     });
-    expect(asks).toHaveBeenCalledOnce();
+    // An unclear step runs; the purpose check covers where its data may go.
+    expect(asks).not.toHaveBeenCalled();
   });
 
-  it("a password hand-off on the desktop makes its unclear clicks ask for the rest of the task", async () => {
+  it("a password hand-off on the desktop makes its clicks unclear for the rest of the task", async () => {
     const { ctx, session, takeover } = context();
     await authorizePrepared(ctx, {
       tool: "computer",
@@ -105,7 +101,7 @@ describe("signed-in screens of one task", () => {
     });
     expect(takeover).toHaveBeenCalledOnce();
     expect(session.taskAutonomy.signedIn("desktop")).toBe(true);
-    expect(decideAutonomy(ctx, { operation: "click" }).mode).toBe("ask");
+    expect(decideAutonomy(ctx, click).actionClass).toBe("unknown");
   });
 
   it("a held Pause refuses a password hand-off or a login takeover before signing anything in", async () => {

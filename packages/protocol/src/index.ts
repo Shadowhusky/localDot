@@ -15,6 +15,7 @@ export * from "./key-like.ts";
 export * from "./keyd.ts";
 export * from "./manual-input.ts";
 export * from "./patch.ts";
+export * from "./purpose.ts";
 export * from "./recording.ts";
 export * from "./release.ts";
 export * from "./safety.ts";

@@ -21,6 +21,7 @@ export async function filesTool(
       const r = await desktop.readFile(input.path, READ_MAX_BYTES, ctx.signal);
       ctx.check();
       ctx.session.tainted = true;
+      ctx.session.taint.add("files", r.path, r.binary ? undefined : r.content);
       result = {
         ok: true,
         content: [
@@ -42,6 +43,7 @@ export async function filesTool(
       const r = await desktop.listDir(input.path, ctx.signal);
       ctx.check();
       ctx.session.tainted = true;
+      ctx.session.taint.add("files", r.path, r.entries.map((entry) => entry.name).join("\n"));
       result = {
         ok: true,
         content: [

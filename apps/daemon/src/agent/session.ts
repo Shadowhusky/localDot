@@ -28,9 +28,11 @@ import {
   type ApprovalChecks,
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
+import type { Purpose, PurposeGate } from "./safety/purpose.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
+import { TaskTaint } from "./safety/taint.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import { SecretAnswers } from "./secret-answers.ts";
 import type { TranscriptStore } from "./transcript.ts";
@@ -132,6 +134,12 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly taskAutonomy: TaskAutonomy;
+  // What private data the task has read, and the check on where it may go; the runner installs
+  // the check, and a session without one keeps only the policy's own checks.
+  readonly taint: TaskTaint;
+  purpose: PurposeGate | undefined;
+  // The user's own words for this task: the request and every message since.
+  readonly requests: string[];
   readonly #approvals: ApprovalBroker;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
@@ -198,10 +206,12 @@ export class AgentSession {
     readonly task: string,
     private readonly eventLog: Pick<EventLog, "append">,
     autonomy?: AutonomyPolicy,
-    rules?: Pick<RulesStore, "matches" | "add">,
+    rules?: Pick<RulesStore, "matches" | "add"> & Partial<Pick<RulesStore, "trusts">>,
   ) {
     this.#autonomy = freezeAutonomy(autonomy);
     this.taskAutonomy = new TaskAutonomy(rules);
+    this.taint = new TaskTaint((source) => this.append("safety.taint", source));
+    this.requests = [task];
     this.#approvals = new ApprovalBroker(
       Date.now,
       (card) => {
@@ -239,6 +249,9 @@ export class AgentSession {
   }
   get autonomy(): Readonly<AutonomyPolicy> {
     return this.#autonomy;
+  }
+  get currentPurpose(): Purpose {
+    return { request: [...this.requests], plan: this.plan.map((item) => item.text) };
   }
   get pendingApproval(): ApprovalCard | undefined {
     return this.#approvals.pending(this.id);
@@ -750,6 +763,7 @@ export class AgentSession {
     this.#seq = item.seq;
     this.#inbox.push(item);
     if (kind !== "resume") {
+      this.requests.push(text);
       this.tainted = false;
       this.actionsSinceUser = 0;
       this.actionLimitReached = false;

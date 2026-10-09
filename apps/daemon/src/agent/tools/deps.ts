@@ -8,6 +8,7 @@ import type { FramePng } from "../frame-png.ts";
 import type { MemoryStore } from "../memory.ts";
 import type { Redactor } from "../redact.ts";
 import type { EffectPermit } from "../safety/authorize.ts";
+import { screenOf } from "../safety/autonomy.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import type { Transfers } from "../transfers.ts";
 
@@ -137,6 +138,12 @@ export async function contain(
     ],
   };
 }
+// What a screen where the user is signed in shows is private; any other screen's is not.
+export function taintScreen(ctx: ToolCallContext, host?: string, text?: string): void {
+  const screen = screenOf(ctx);
+  if (ctx.session.taskAutonomy.signedIn(screen))
+    ctx.session.taint.add("screen", host ?? `${screen} screen`, text);
+}
 export async function frame(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -147,6 +154,7 @@ export async function frame(
   const png = await deps.png.png(ctx.session.id, frameId, region, ctx.signal);
   ctx.check();
   ctx.session.tainted = true;
+  taintScreen(ctx);
   if (!region) ctx.session.lastFrameId = frameId;
   return {
     type: "image",

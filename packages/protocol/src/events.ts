@@ -3,6 +3,7 @@ import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import { TaintSource } from "./purpose.ts";
 import { ActionClass, AlwaysOption, ApprovalCard, PauseSnapshot } from "./safety.ts";
 import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
@@ -352,6 +353,8 @@ export const AskRequest = event(
     declinable: z.literal(false).optional(),
   }),
 );
+// The task read private data from here; what it read is never recorded.
+export const SafetyTaint = event("safety.taint", TaintSource);
 export const SafetyPause = event(
   "safety.pause",
   z.object({ revision: z.number().int().nonnegative(), pause: PauseSnapshot.optional() }).strict(),
@@ -488,6 +491,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   AskRequest,
   AskAnswer,
   SafetyPause,
+  SafetyTaint,
   TakeoverRequest,
   TakeoverEnd,
   TaskResult,
