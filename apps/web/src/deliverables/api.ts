@@ -153,24 +153,28 @@ export async function downloadVersion(
     type: "application/octet-stream",
   });
 }
-// Each task's preview link, reused until it is near its idle lapse (the daemon's is 30 minutes).
+// Each task's preview link, kept so the next preview starts before the daemon answers, until near
+// its idle lapse (the daemon's is 30 minutes). The daemon holds links in memory only, so a kept one
+// is asked for again each time: after a restart the answer is a new link.
 const LINK_REUSE_MS = 20 * 60 * 1000;
 const previewLinks = new WeakMap<ApiClient, Map<string, { base: string; at: number }>>();
+export function keptPreviewBase(api: ApiClient, sessionId: string): string | undefined {
+  const kept = previewLinks.get(api)?.get(sessionId);
+  return kept && Date.now() - kept.at < LINK_REUSE_MS ? kept.base : undefined;
+}
 export async function previewBase(
   api: ApiClient,
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<string> {
   if (!ULID_PATTERN.test(sessionId)) throw new DeliverableError(400, "invalid task");
-  const known = previewLinks.get(api) ?? new Map<string, { base: string; at: number }>();
-  previewLinks.set(api, known);
-  const kept = known.get(sessionId);
-  if (kept && Date.now() - kept.at < LINK_REUSE_MS) return kept.base;
   const response = await request(api, `/api/agent/sessions/${sessionId}/preview-link`, {
     method: "POST",
     signal,
   });
   const { base } = PreviewLinkReply.parse(await response.json());
+  const known = previewLinks.get(api) ?? new Map<string, { base: string; at: number }>();
+  previewLinks.set(api, known);
   known.set(sessionId, { base, at: Date.now() });
   return base;
 }

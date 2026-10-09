@@ -12,7 +12,10 @@ const RESULT = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0R";
 const TICKET = "t".repeat(43);
 afterEach(cleanup);
 
-function daemon(page = '<img src="https://images.example.test/a.png"><p>hi</p>') {
+function daemon(
+  page = '<img src="https://images.example.test/a.png"><p>hi</p>',
+  tickets = () => TICKET,
+) {
   const calls: string[] = [];
   const api = createApi("a".repeat(43), {
     origin: "http://127.0.0.1:4750",
@@ -20,7 +23,7 @@ function daemon(page = '<img src="https://images.example.test/a.png"><p>hi</p>')
       const u = new URL(String(url));
       calls.push(`${u.pathname}${u.search}`);
       if (u.pathname.endsWith("/preview-link"))
-        return Response.json({ base: `/file-previews/${TICKET}/` });
+        return Response.json({ base: `/file-previews/${tickets()}/` });
       if (u.pathname.endsWith("/text"))
         return Response.json({
           kind: "text",
@@ -95,6 +98,29 @@ describe("the full preview", () => {
     expect(await screen.findByRole("region", { name: "Source of page.html" })).toBeTruthy();
   });
 
+  it("says how to have the keys back once the page holds them", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    try {
+      const { api } = daemon("<p>hi</p>");
+      viewer(api, [entry("page.html")]);
+      const frame = await screen.findByTitle("Page page.html");
+      const hint = "Click outside the page to use Esc and the arrow keys";
+      act(() => frame.focus());
+      fireEvent.blur(window);
+      expect(await screen.findByText(hint)).toBeTruthy();
+      act(() => screen.getAllByRole("button", { name: "Download" })[0]?.focus());
+      fireEvent.focus(window);
+      await waitFor(() => expect(screen.queryByText(hint)).toBeNull());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("draws an SVG as a picture, never as part of the page", async () => {
     const { api } = daemon();
     viewer(api, [entry("diagram.svg")]);
@@ -104,6 +130,20 @@ describe("the full preview", () => {
       `http://127.0.0.1:4750/file-previews/${TICKET}/diagram.svg?v=1`,
     );
     expect(document.querySelector("iframe, object, embed")).toBeNull();
+  });
+
+  it("shows a kept link at once and takes the daemon's new one after it restarts", async () => {
+    let ticket = TICKET;
+    const { api } = daemon(undefined, () => ticket);
+    viewer(api, [entry("chart.png")]);
+    const src = async () =>
+      (await screen.findByRole("img", { name: "chart.png" })).getAttribute("src");
+    expect(await src()).toContain(TICKET);
+    cleanup();
+    ticket = "r".repeat(43);
+    viewer(api, [entry("chart.png")]);
+    expect(await src()).toContain(TICKET);
+    await waitFor(async () => expect(await src()).toContain(ticket));
   });
 
   it("says a file is too large without loading it", async () => {

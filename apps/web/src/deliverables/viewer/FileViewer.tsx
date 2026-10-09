@@ -25,7 +25,7 @@ import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { matches, REDUCED_MOTION } from "../../ui/media.ts";
 import { Sheet } from "../../ui/Sheet.tsx";
-import { loadPreview, previewBase, previewUrl } from "../api.ts";
+import { keptPreviewBase, loadPreview, previewBase, previewUrl } from "../api.ts";
 import { PREVIEW_REASONS } from "../FilePreview.tsx";
 import { openHere } from "../open-here.ts";
 import { MediaView } from "./MediaView.tsx";
@@ -384,17 +384,20 @@ export function FileViewer({
   );
 }
 
+// A kept link shows the file at once; the daemon's answer replaces it if the daemon has restarted.
 function usePreviewUrl(api: ApiClient, item: Item, wanted: boolean): string | null | "failed" {
   const [url, setUrl] = useState<{ key: string; url: string | "failed" } | null>(null);
   const key = `${item.sessionId}/${item.name}/${item.version ?? 0}`;
   useEffect(() => {
     if (!wanted) return;
     const controller = new AbortController();
+    const show = (next: string) =>
+      setUrl((was) => (was?.key === key && was.url === next ? was : { key, url: next }));
+    const kept = keptPreviewBase(api, item.sessionId);
+    if (kept) show(previewUrl(api, kept, item.name, item.version));
     previewBase(api, item.sessionId, controller.signal).then(
-      (base) =>
-        !controller.signal.aborted &&
-        setUrl({ key, url: previewUrl(api, base, item.name, item.version) }),
-      () => !controller.signal.aborted && setUrl({ key, url: "failed" }),
+      (base) => !controller.signal.aborted && show(previewUrl(api, base, item.name, item.version)),
+      () => !controller.signal.aborted && !kept && show("failed"),
     );
     return () => controller.abort();
   }, [api, item.sessionId, item.name, item.version, key, wanted]);
@@ -441,11 +444,12 @@ function ViewBody({
   if (kind === "pdf")
     return (
       <Suspense fallback={<ViewerLoading label="Loading the PDF" />}>
-        <PdfView api={api} url={url} name={name} />
+        <PdfView key={url} api={api} url={url} name={name} />
       </Suspense>
     );
-  if (kind === "audio" || kind === "video") return <MediaView url={url} kind={kind} name={name} />;
-  return <PictureView src={url} name={name} />;
+  if (kind === "audio" || kind === "video")
+    return <MediaView key={url} url={url} kind={kind} name={name} />;
+  return <PictureView key={url} src={url} name={name} />;
 }
 
 // A document dot's computer drew as a page: its first page, as a picture.
