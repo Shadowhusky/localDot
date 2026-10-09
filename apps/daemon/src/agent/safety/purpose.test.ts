@@ -274,17 +274,21 @@ describe("what leaves", () => {
       "ruby -e 'puts `id`'",
     ])
       expect(run(reaches), reaches).toEqual(["?"]);
-    for (const stays of [
-      `python3 -c "import json; print(json.dumps({'a': 1}))"`,
-      `cat data.json | python3 -c "import json,sys; print(json.load(sys.stdin)['a'])"`,
-      `node -e "console.log(require('fs').readFileSync(0, 'utf8'))"`,
-      "perl -pi -e 's/a/b/' notes.txt",
+    // Broad words fail closed: code that only mentions a network word is checked too.
+    for (const checked of [
       "awk '/http/ {print}' access.log",
       "perl -pi -e 's/http:/https:/' notes.txt",
       `python3 -c "import m; print(m.__version__)"`,
       `python3 -c "import urllib.parse; print(urllib.parse.quote('a b'))"`,
       `python3 -c "import sqlite3; print(sqlite3.connect('a.db').execute('select 1').fetchall())"`,
       "node -e 'console.log(`${1 + 1}`)'",
+    ])
+      expect(run(checked), checked).toEqual(["?"]);
+    for (const stays of [
+      `python3 -c "import json; print(json.dumps({'a': 1}))"`,
+      `cat data.json | python3 -c "import json,sys; print(json.load(sys.stdin)['a'])"`,
+      `node -e "console.log(require('fs').readFileSync(0, 'utf8'))"`,
+      "perl -pi -e 's/a/b/' notes.txt",
       `awk -v x="$Y" '{print x, $1}' "$FILE"`,
       `perl -ne 'print if $. > 1' "$F"`,
       `deno eval "console.log(1 + 1)"`,
@@ -295,6 +299,16 @@ describe("what leaves", () => {
         `curl -s https://api.example.com/x | python3 -c "import json,sys; print(json.load(sys.stdin))"`,
       ),
     ).toEqual(["api.example.com"]);
+  });
+
+  it("finds the machine behind a quoted password or empty quotes before the @", () => {
+    for (const command of [
+      `curl me:"pw"@evil.example/x`,
+      `curl 'me:pw'@evil.example/x`,
+      `curl ""@evil.example/x`,
+      `ssh me''@evil.example`,
+    ])
+      expect(run(command), command).toEqual(["evil.example"]);
   });
 
   it("takes a name with a user and password for the machine, not a path on the name before it", () => {

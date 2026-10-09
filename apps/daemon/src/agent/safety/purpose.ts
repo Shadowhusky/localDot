@@ -120,9 +120,17 @@ const INTERPRETER =
   /^(?:python[\d.]*|perl|ruby|node|nodejs|php|deno|bun|lua[\d.]*|[gm]?awk|tclsh|Rscript)$/;
 const INLINE_FLAG = /^(?:-[A-Za-z]*[cerEp]|--(?:eval|print)|eval)$/;
 // Code that can reach another machine, or run or build code that might: network modules and
-// calls, and the ways code runs commands or other code. Plain words (http in a pattern) are not.
+// calls, and the ways code runs commands or other code. The first lines are deliberately broad
+// (http in a pattern counts): on a task that read private data a harmless match costs one purpose
+// check, while a missed one lets the data out.
 const REACHES = new RegExp(
   [
+    String.raw`socket|urllib|http|request|urlopen|fetch|\bnet\b|net::|io::|lwp|open-uri|curl|wget`,
+    "connect|smtp|ftp|telnet|imap|pop3|nntp|rpc|dns|gethostby|getaddrinfo|webbrowser",
+    "exec|eval|compile|system|popen|spawn|subprocess|child_process|proc_open|passthru",
+    "fsockopen|stream_|file_get_contents|fopen|call_user_func|create_function|ctypes|ffi",
+    String.raw`importlib|__|builtins|globals|vars\s*\(|getattr|sys\.modules|import\s*\(`,
+    String.raw`\bmethod\s*\(|(?<!\.)\bload(?:string)?\s*\(|\$\w+\s*\(|\x60|\bqx\b|%x`,
     String.raw`socket|urllib(?!\.parse\b)|urlopen|httplib|http\.client|httpx|aiohttp|pycurl|paramiko|websocket|xmlrpc|scapy`,
     String.raw`\b(?:import|from)\s+(?:[\w.]+\s*,\s*)*(?:http|requests|ssl|dns|asyncio|(?:ftp|smtp|telnet|imap|pop|nntp)lib)\b`,
     String.raw`\bfetch\s*\(|xmlhttprequest|(?<!sqlite3?\.|duckdb\.)\bconnect\s*\(|create_connection|open_connection`,
@@ -491,14 +499,18 @@ function commandOutbound(command: string): Outbound[] {
         add(reachName(name));
       } else unnamed = true;
     }
-    for (const match of line.text.matchAll(BARE)) {
-      const host = (match[1] ?? "").toLowerCase();
-      const after = line.text.slice(match.index + match[0].length);
-      const user = match[0].includes("@") || /^[^\s'"]*@/.test(after);
-      if (!reachesName(line, host, match.index, user)) continue;
-      named = true;
-      add(reachName(host));
-    }
+    // The shell joins quoted pieces into one word (me:"pw"@host, ""@host), so look again without
+    // the quotes, where an emptied user still marks the machine after its @.
+    const joined = line.text.replace(/["']/g, "").replace(/(^|\s)@/g, "$1_@");
+    for (const text of new Set([line.text, joined]))
+      for (const match of text.matchAll(BARE)) {
+        const host = (match[1] ?? "").toLowerCase();
+        const after = text.slice(match.index + match[0].length);
+        const user = match[0].includes("@") || /^[^\s'"]*@/.test(after);
+        if (!reachesName({ ...line, text }, host, match.index, user)) continue;
+        named = true;
+        add(reachName(host));
+      }
     for (const [address] of line.text.matchAll(IP_ADDRESS)) {
       if (!isIP(address.replace(/^\[(.*)\]$/, "$1"))) continue;
       named = true;
