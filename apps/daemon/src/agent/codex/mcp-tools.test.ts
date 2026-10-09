@@ -30,7 +30,7 @@ describe("Codex's computer tool", () => {
   });
 
   it("takes a batch's steps, never their screenshot basis", () => {
-    expect(schema.properties.steps).toMatchObject({ type: "array", maxItems: 16 });
+    expect(schema.properties.steps).toMatchObject({ type: "array", maxItems: 8 });
     expect(JSON.stringify(schema)).not.toContain("basedOn");
   });
 });

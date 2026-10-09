@@ -1,7 +1,8 @@
 import {
   BrowserAction,
   ComputerAction,
-  MAX_BATCH_ACTIONS,
+  ComputerStep,
+  MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
   TOOL_INPUTS,
@@ -14,7 +15,10 @@ import { z } from "zod";
 // The tools Codex sees: exactly the v1 table (spec "Tools"), the same schemas the daemon checks.
 // `computer` takes localDot's provider-neutral ComputerAction in model pixels; its `basedOn` is not
 // the model's to give (the endpoint uses the full-frame basis explicitly submitted for this turn).
-export const CodexComputerInput = ComputerAction.omit({ basedOn: true });
+// A Codex step is one input, so its batch takes the model's step count, not the daemon's.
+export const CodexComputerInput = ComputerAction.omit({ basedOn: true }).extend({
+  steps: z.array(ComputerStep).min(1).max(MAX_BATCH_STEPS).optional(),
+});
 export const CodexBrowserActInput = BrowserAction.omit({ basedOn: true });
 
 const W = MODEL_SCREEN.width;
@@ -35,7 +39,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
     "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
     "(region {x, y, w, h}, returns that part enlarged), cursor_position, batch (steps: up to " +
-    `${MAX_BATCH_ACTIONS} of the actions above but screenshot, zoom and cursor_position, run in order with one ` +
+    `${MAX_BATCH_STEPS} of the actions above but screenshot, zoom and cursor_position, run in order with one ` +
     "screenshot at the end; for predictable sequences such as click a field, type, press Tab, type, press " +
     "Return; it stops at a step that fails, whose target changed, or that needs the user's approval, and " +
     "says which). Each action can return a new screenshot; when the screen did not change, it says so " +
