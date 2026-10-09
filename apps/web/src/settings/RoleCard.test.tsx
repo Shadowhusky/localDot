@@ -97,6 +97,23 @@ describe("role card", () => {
     expect(within(main).queryByRole("combobox", { name: "Model" })).toBeNull();
     expect(within(main).queryByRole("combobox", { name: "Key" })).toBeNull();
   });
+  it("gives the pickers the role's notes as their description", () => {
+    const view = render(
+      <RoleCard {...base()} value={{ provider: "kimi-code-plan-global", model: "" }} />,
+    );
+    const described = (picker: HTMLElement) =>
+      (picker.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+    expect(described(combo(card("Main model"), "Provider"))).toMatch(
+      /Kimi lets this plan run only in coding tools/,
+    );
+    view.rerender(<RoleCard {...base()} />);
+    expect(described(combo(card("Main model"), "Model"))).toMatch(
+      /Can use files and the shell, not the screen\./,
+    );
+  });
   it("lets a custom endpoint take a typed model ID, say whether it sees images, its context and a flat-rate plan", () => {
     const changes: RoleChoice[] = [];
     function Form() {

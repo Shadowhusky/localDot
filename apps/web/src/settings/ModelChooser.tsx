@@ -17,6 +17,8 @@ export interface ModelChooserProps {
   value: RoleChoice;
   providers: readonly ProviderModels[];
   subscriptionModels: readonly SubscriptionModel[];
+  // The role's notes under its rows, which say what the choice means.
+  describedBy?: string;
   onChange(value: RoleChoice): void;
 }
 
@@ -51,6 +53,7 @@ export function ModelChooser({
   value,
   providers,
   subscriptionModels,
+  describedBy,
   onChange,
 }: ModelChooserProps) {
   const provider = providerById(value.provider);
@@ -72,6 +75,7 @@ export function ModelChooser({
           appearance="inline"
           value={value.provider}
           groups={providerGroups(role, value.provider)}
+          aria-describedby={describedBy}
           placeholder="Choose a provider"
           searchPlaceholder="Search providers"
           onValueChange={(id) => onChange({ provider: id, model: "" })}
@@ -103,6 +107,7 @@ export function ModelChooser({
               appearance="inline"
               value={value.model}
               items={items}
+              aria-describedby={describedBy}
               placeholder="Choose a model"
               searchPlaceholder="Search models"
               customDescription={typed ? "Use this model ID" : undefined}
