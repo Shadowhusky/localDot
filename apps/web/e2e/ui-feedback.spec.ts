@@ -102,6 +102,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await press(page.getByRole("button", { name: "Show three" }));
         await expect(toastsOf(page)).toHaveCount(1);
         const region = page.getByRole("region", { name: "Notifications" });
+        await toastsOf(page).first().waitFor();
         await settled(region);
         expect(await Promise.all(others.map(box))).toEqual(before);
 
@@ -122,6 +123,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           const { context, page, seen } = await open(browser, device);
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show a failure" }));
+          await toastsOf(page).first().waitFor();
           await settled(page.getByRole("region", { name: "Notifications" }));
           const hud = page.getByRole("toolbar", { name: "Task controls" });
           // Moved by a transform: no resize and no layout for an observer to see.
@@ -145,6 +147,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
         await press(page.getByRole("button", { name: "Show a failure" }));
         const toast = toastsOf(page).first();
+        await toastsOf(page).first().waitFor();
         await settled(page.getByRole("region", { name: "Notifications" }));
         const start = await box(toast.locator(".ui-toast-text"));
         const x = start.x + 20;
@@ -174,6 +177,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           const { context, page, seen } = await open(browser, device);
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show a failure" }));
+          await toastsOf(page).first().waitFor();
           await settled(page.getByRole("region", { name: "Notifications" }));
           const start = await box(toastsOf(page).first().locator(".ui-toast-text"));
           const x = start.x + 20;
@@ -196,6 +200,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show a failure" }));
           const region = page.getByRole("region", { name: "Notifications" });
+          await toastsOf(page).first().waitFor();
           await settled(region);
           const check = page.getByRole("button", { name: "Check again" });
           const before = await box(check);
@@ -212,10 +217,11 @@ for (const [engine, launch] of Object.entries(ENGINES))
             ),
           ).toBe("Check again");
           await expect(toastsOf(page)).toHaveCount(1);
-          // Let go, and it takes the place once the one shown has had its time.
+          // Let go, and it takes the place once the one shown, which has an action, has had six
+          // seconds on screen.
           await page.mouse.move(8, 8);
           await expect(toastsOf(page).first()).toContainText("Saved to Downloads", {
-            timeout: 4000,
+            timeout: 8000,
           });
           expect(await seen()).toEqual({ violations: [], styles: 0 });
           await context.close();
@@ -227,6 +233,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show a failure" }));
           const toast = toastsOf(page).first();
+          await toastsOf(page).first().waitFor();
           await settled(page.getByRole("region", { name: "Notifications" }));
           const start = await box(toast.locator(".ui-toast-text"));
           const x = start.x + 20;
@@ -256,6 +263,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           const { context, page, seen } = await open(browser, device);
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show one with Undo" }));
+          await toastsOf(page).first().waitFor();
           await settled(page.getByRole("region", { name: "Notifications" }));
           const undo = page.getByRole("button", { name: "Undo", exact: true });
           const before = await box(undo);
@@ -282,6 +290,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show a failure" }));
           const toast = toastsOf(page).first();
+          await toastsOf(page).first().waitFor();
           await settled(page.getByRole("region", { name: "Notifications" }));
           const cdp = await context.newCDPSession(page);
           const touchAt = (type: "touchStart" | "touchMove" | "touchEnd", px: number, py: number) =>
@@ -435,6 +444,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           // No action beside it, whose face would rightly take a press on its own side.
           await press(page.getByRole("button", { name: "Show a result" }));
+          await toastsOf(page).first().waitFor();
           await settled(page.getByRole("region", { name: "Notifications" }));
           const close = toastsOf(page).first().getByRole("button", { name: "Dismiss" });
           const face = await box(close);
@@ -577,10 +587,12 @@ for (const [engine, launch] of Object.entries(ENGINES))
           const { context, page, seen } = await open(browser, device, motion);
           await page.locator(".feedback-stage").scrollIntoViewIfNeeded();
           await press(page.getByRole("button", { name: "Show three" }));
-          await toastsOf(page).first().waitFor();
-          const toasts = await moving(page, ".ui-toast");
-          const travels = toasts.some((name) => name === "translate" || name === "scale");
-          expect(travels, motion).toBe(motion === "no-preference");
+          const toasts = (
+            await toastsOf(page)
+              .first()
+              .evaluate((element) => getComputedStyle(element).transitionProperty)
+          ).split(", ");
+          expect(toasts.includes("translate"), motion).toBe(motion === "no-preference");
           expect(toasts).toContain("opacity");
 
           await page.getByTestId("below-banner").scrollIntoViewIfNeeded();
