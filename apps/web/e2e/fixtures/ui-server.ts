@@ -579,6 +579,61 @@ function readSources(s: AgentSession, n: number) {
   return undefined;
 }
 
+// QA_ACTIVITY=research: a research task part-way through, finding pages with web_search and
+// reading them with web_fetch (a PDF with the research tool), as the daemon records them.
+function seedResearchTask(s: AgentSession) {
+  const research = s.research;
+  if (!research) return;
+  const a: Append = (type, data, step) => {
+    skew += type === "step.end" ? 1_100_000 : 320_000;
+    s.append(type, data, step);
+  };
+  const tool = (name: string, title: string) => {
+    const step = ulid();
+    a("step.start", { kind: "browser" }, step);
+    a("tool.start", { tool: name, title }, step);
+    a("tool.end", { ok: true }, step);
+    a("step.end", { status: "ok" }, step);
+  };
+  const read = (from: number, to: number) => {
+    for (const [url, title, passages] of RESEARCH_SOURCES.slice(from, to)) {
+      const site = new URL(url).hostname.replace(/^www\./, "");
+      if (url.endsWith(".pdf")) tool("research", `Reading a PDF from ${site}`);
+      else tool("web_fetch", `Read ${site}`);
+      const added = research.add(url, title);
+      if (added && passages)
+        research.quote(
+          added.source,
+          Array.from({ length: passages }, (_, i) => `Sample passage ${i + 1} from ${title}.`),
+        );
+    }
+  };
+  a("message.user", {
+    messageId: ulid(),
+    kind: "task",
+    text: "How well do air source heat pumps work in a cold UK winter, and what do they cost to run?",
+  });
+  a("agent.state", { state: "thinking" });
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "I'll split this into four questions, read widely and write you a cited report.",
+  });
+  a("plan.set", { items: RESEARCH_PLAN });
+  tool("web_search", "Searched the web for “air source heat pump performance below -15 °C”");
+  read(0, 3);
+  tool("web_search", "Searched the news for “heat pump running costs UK 2026”");
+  read(3, 6);
+  a("model.usage", {
+    role: "main",
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    inputTokens: 64_200,
+    outputTokens: 3_150,
+  });
+  s.setStatus("running");
+  a("agent.state", { state: "acting" });
+}
+
 // An ended task: what the user asked, dot's reply and result. It continues `continues`.
 function endedTask(title: string, reply: string, summary: string, continues?: string): string {
   const id = log.createSession(title);
@@ -1079,13 +1134,22 @@ for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
   );
 if (withSession && initial) {
   heldAt = base.nowMicros();
+  const researching = env.QA_ACTIVITY === "research";
   session = newSession(
-    env.QA_ACTIVITY === "long" ? "Sample · dog drawing" : "Sample · monthly report",
+    env.QA_ACTIVITY === "long"
+      ? "Sample · dog drawing"
+      : researching
+        ? "Sample · heat pump research"
+        : "Sample · monthly report",
     "Sample task",
     earlier,
+    undefined,
+    undefined,
+    researching ? DEFAULT_RESEARCH_BUDGET : undefined,
   );
   attachLive(session);
   if (env.QA_ACTIVITY === "long") seedLongTask(session);
+  else if (researching) seedResearchTask(session);
   else seedTask(session, phase === "finished");
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;

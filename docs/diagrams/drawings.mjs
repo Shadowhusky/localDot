@@ -1,4 +1,4 @@
-import { GRAPHITE, Sheet, SOFT, XENON } from "./sketch.mjs";
+import { GRAPHITE, PAPER, Sheet, SOFT, XENON } from "./sketch.mjs";
 
 const xenonFill = { fill: XENON, fillWeight: 1.6, hachureGap: 8 };
 
@@ -57,7 +57,7 @@ function box(s, x, y, w, h, title, note, options = {}) {
 }
 
 export function system() {
-  const s = new Sheet(1500, 930);
+  const s = new Sheet(1500, 1100);
   s.text("How localDot fits together", 60, 82, { size: 50, bold: true });
   s.text("(not to scale. nothing in here is to scale.)", 64, 124, { size: 24, color: SOFT });
 
@@ -70,11 +70,16 @@ export function system() {
   s.rect(370, 230, 260, 470, { strokeWidth: 2.6 });
   s.text("localDot", 500, 286, { size: 38, bold: true, anchor: "middle" });
   s.text("the daemon,\non your Mac", 500, 326, { size: 23, anchor: "middle", color: SOFT });
-  s.text("chat & tasks\nlive picture\nrecordings\napprovals\nroutines", 400, 432, {
-    size: 26,
-    leading: 1.32,
-  });
-  for (let i = 0; i < 5; i++)
+  s.text(
+    "chat & tasks\nlive picture\nrecordings\napprovals\nroutines\nweb search\nyour apps",
+    400,
+    432,
+    {
+      size: 26,
+      leading: 1.32,
+    },
+  );
+  for (let i = 0; i < 7; i++)
     s.circle(390, 424 + i * 34.3, 6, { strokeWidth: 1.5, roughness: 0.6 });
 
   s.arrow(
@@ -164,8 +169,8 @@ export function system() {
     {},
   );
 
-  cloud(s, 1210, 200, 250, 150);
-  s.text("model providers\n& the web", 1335, 290, { size: 25, bold: true, anchor: "middle" });
+  cloud(s, 1196, 188, 278, 168);
+  s.text("providers, the web\n& your apps", 1335, 284, { size: 23, bold: true, anchor: "middle" });
   s.arrow(
     [
       [1335, 540],
@@ -188,6 +193,52 @@ export function system() {
       [852, 766],
     ],
     { strokeWidth: 1.6 },
+  );
+
+  s.arrow(
+    [
+      [560, 706],
+      [566, 880],
+      [620, 948],
+      [900, 954],
+      [1200, 948],
+      [1250, 900],
+      [1258, 764],
+    ],
+    { stroke: XENON, strokeWidth: 2.6 },
+  );
+  s.text("web search & page reads: no sign-ins, no keys", 900, 936, {
+    size: 21,
+    color: SOFT,
+    anchor: "middle",
+  });
+  s.rect(754, 982, 340, 88, { strokeWidth: 1.8, strokeLineDash: [12, 9], roughness: 1.2 });
+  s.text("app cells", 924, 1019, { size: 28, bold: true, anchor: "middle" });
+  s.text("one per app that runs as a program", 924, 1051, {
+    size: 19,
+    color: SOFT,
+    anchor: "middle",
+  });
+  s.arrow(
+    [
+      [430, 706],
+      [436, 940],
+      [480, 1020],
+      [600, 1026],
+      [748, 1026],
+    ],
+    {},
+  );
+  s.text("your apps (MCP)", 600, 1012, { size: 21, color: SOFT, anchor: "middle" });
+  s.arrow(
+    [
+      [1096, 1026],
+      [1300, 1024],
+      [1386, 990],
+      [1398, 900],
+      [1400, 764],
+    ],
+    {},
   );
   return { sheet: s, title: "How localDot fits together" };
 }
@@ -329,6 +380,176 @@ export function taskLoop() {
   return { sheet: s, title: "One task, start to finish" };
 }
 
+function screen(s, cx, cy) {
+  windowDoodle(s, cx - 58, cy - 40, 116, 76);
+  cursor(s, cx + 30, cy + 22);
+}
+
+function globe(s, cx, cy) {
+  s.circle(cx, cy, 86, { strokeWidth: 2 });
+  s.ellipse(cx, cy, 38, 86, { strokeWidth: 1.4, roughness: 0.8 });
+  s.line(cx - 42, cy, cx + 42, cy, { strokeWidth: 1.4, roughness: 0.8 });
+  s.path(`M${cx - 36} ${cy - 22} Q${cx} ${cy - 30} ${cx + 36} ${cy - 22}`, { strokeWidth: 1.2 });
+  s.path(`M${cx - 36} ${cy + 22} Q${cx} ${cy + 30} ${cx + 36} ${cy + 22}`, { strokeWidth: 1.2 });
+}
+
+function terminal(s, cx, cy) {
+  s.rounded(cx - 60, cy - 42, 120, 84, 8, { strokeWidth: 2.2 });
+  s.polyline(
+    [
+      [cx - 40, cy - 16],
+      [cx - 22, cy - 2],
+      [cx - 40, cy + 12],
+    ],
+    { strokeWidth: 2.6 },
+  );
+  s.line(cx - 12, cy + 16, cx + 22, cy + 16, { strokeWidth: 2.6, stroke: XENON });
+}
+
+function page(s, x, y, w, h, options = {}) {
+  const fold = 18;
+  s.polygon(
+    [
+      [x, y],
+      [x + w - fold, y],
+      [x + w, y + fold],
+      [x + w, y + h],
+      [x, y + h],
+    ],
+    { strokeWidth: 2.2, ...options },
+  );
+  s.polyline(
+    [
+      [x + w - fold, y],
+      [x + w - fold, y + fold],
+      [x + w, y + fold],
+    ],
+    { strokeWidth: 1.6 },
+  );
+}
+
+function files(s, cx, cy) {
+  page(s, cx - 62, cy - 30, 64, 80, { fill: XENON, fillWeight: 1.4, hachureGap: 8 });
+  page(s, cx - 18, cy - 46, 70, 88, { fill: PAPER, fillStyle: "solid" });
+  for (const dy of [-14, 2, 18]) s.line(cx - 6, cy + dy, cx + 38, cy + dy, { strokeWidth: 1.6 });
+}
+
+function magnifier(s, cx, cy) {
+  s.circle(cx - 10, cy - 10, 66, { strokeWidth: 2.4 });
+  s.path(`M${cx - 30} ${cy - 18} Q${cx - 24} ${cy - 32} ${cx - 10} ${cy - 34}`, {
+    strokeWidth: 1.6,
+    stroke: XENON,
+  });
+  s.line(cx + 14, cy + 14, cx + 46, cy + 44, { strokeWidth: 5 });
+}
+
+function sources(s, cx, cy) {
+  page(s, cx - 56, cy - 44, 76, 92);
+  s.text("[1]", cx - 46, cy - 12, { size: 20, bold: true, color: XENON });
+  s.line(cx - 16, cy - 18, cx + 8, cy - 18, { strokeWidth: 1.4 });
+  s.text("[2]", cx - 46, cy + 18, { size: 20, bold: true, color: XENON });
+  s.line(cx - 16, cy + 12, cx + 8, cy + 12, { strokeWidth: 1.4 });
+  s.circle(cx + 40, cy + 2, 46, { strokeWidth: 2 });
+  s.line(cx + 56, cy + 18, cx + 72, cy + 36, { strokeWidth: 4 });
+}
+
+function microphone(s, cx, cy) {
+  s.rounded(cx - 18, cy - 48, 36, 62, 18, { strokeWidth: 2.4, ...xenonFill });
+  s.path(
+    `M${cx - 34} ${cy - 6} Q${cx - 34} ${cy + 30} ${cx} ${cy + 30} Q${cx + 34} ${cy + 30} ${cx + 34} ${cy - 6}`,
+    { strokeWidth: 2.2 },
+  );
+  s.line(cx, cy + 30, cx, cy + 48, { strokeWidth: 2.2 });
+  s.line(cx - 18, cy + 48, cx + 18, cy + 48, { strokeWidth: 2.2 });
+}
+
+function plug(s, cx, cy) {
+  s.rounded(cx - 30, cy - 22, 52, 50, 8, { strokeWidth: 2.4 });
+  s.line(cx + 22, cy - 8, cx + 46, cy - 8, { strokeWidth: 3 });
+  s.line(cx + 22, cy + 14, cx + 46, cy + 14, { strokeWidth: 3 });
+  s.path(
+    `M${cx - 30} ${cy + 3} C${cx - 62} ${cy + 3} ${cx - 48} ${cy + 46} ${cx - 76} ${cy + 44}`,
+    { strokeWidth: 2.2, stroke: XENON },
+  );
+}
+
+function clock(s, cx, cy) {
+  s.circle(cx, cy, 92, { strokeWidth: 2.4 });
+  for (const a of [0, 90, 180, 270]) {
+    const r = (a * Math.PI) / 180;
+    const [c, n] = [Math.cos(r), Math.sin(r)];
+    s.line(cx + 36 * c, cy + 36 * n, cx + 42 * c, cy + 42 * n, { strokeWidth: 2 });
+  }
+  s.line(cx, cy, cx, cy - 30, { strokeWidth: 2.6 });
+  s.line(cx, cy, cx + 22, cy + 8, { strokeWidth: 2.6, stroke: XENON });
+}
+
+function notebook(s, cx, cy) {
+  s.rect(cx - 40, cy - 46, 84, 94, { strokeWidth: 2.4 });
+  for (const dy of [-30, -10, 10, 30]) s.circle(cx - 40, cy + dy, 10, { strokeWidth: 1.4 });
+  for (const dy of [-22, -2, 18]) s.line(cx - 24, cy + dy, cx + 30, cy + dy, { strokeWidth: 1.6 });
+  s.tick(cx + 22, cy + 34, 18, { strokeWidth: 2.2, stroke: XENON });
+}
+
+function asks(s, cx, cy) {
+  s.ellipse(cx - 18, cy - 4, 82, 58, { strokeWidth: 2 });
+  s.text("?", cx - 18, cy + 10, { size: 40, bold: true, anchor: "middle" });
+  s.polyline(
+    [
+      [cx - 30, cy + 22],
+      [cx - 40, cy + 42],
+      [cx - 14, cy + 25],
+    ],
+    { strokeWidth: 2 },
+  );
+  s.rounded(cx + 34, cy + 4, 56, 38, 12, { strokeWidth: 2.2, ...xenonFill });
+  s.tick(cx + 62, cy + 22, 18, { strokeWidth: 2.4 });
+}
+
+export function capabilities() {
+  const s = new Sheet(1500, 1060);
+  s.text("What dot can do", 60, 82, { size: 50, bold: true });
+  s.text("(all of it on its own computer, all of it where you can watch.)", 64, 124, {
+    size: 24,
+    color: SOFT,
+  });
+  const cells = [
+    ["the screen", "clicks, types, drags\nand looks again", screen],
+    ["web browser", "keeps your sign-ins\nacross tasks", globe],
+    ["terminal", "runs code and\ncommands", terminal],
+    ["files", "makes them, changes\nthem, hands them over", files],
+    ["web search", "web, images, news,\nand reads public pages", magnifier],
+    ["deep research", "numbered sources,\na cited report", sources],
+    ["voice", "talk instead of typing.\nit can read replies aloud", microphone],
+    ["your apps", "connectors (MCP)\nas tools", plug],
+    ["routines", "the same task,\non a schedule", clock],
+    ["memory", "two Markdown files\nyou can edit", notebook],
+    ["asks you", "before it acts as you.\ntake over any time", asks],
+  ];
+  const w = 330;
+  const h = 268;
+  const gap = 26;
+  const x0 = 64;
+  const y0 = 170;
+  const at = (i) => [x0 + (i % 4) * (w + gap), y0 + Math.floor(i / 4) * (h + gap)];
+  cells.forEach(([name, note, doodle], i) => {
+    const [x, y] = at(i);
+    s.rect(x, y, w, h, { strokeWidth: 2, roughness: 1.2 });
+    doodle(s, x + w / 2, y + 86);
+    s.text(name, x + w / 2, y + 180, { size: 32, bold: true, anchor: "middle" });
+    s.text(note, x + w / 2, y + 214, { size: 22, anchor: "middle", color: SOFT, leading: 1.3 });
+  });
+  const [x, y] = at(cells.length);
+  dotFace(s, x + w / 2, y + 96, 104, xenonFill);
+  s.text("that's dot.", x + w / 2, y + 196, { size: 30, bold: true, anchor: "middle" });
+  s.text("it does the work.\nyou keep the say.", x + w / 2, y + 228, {
+    size: 22,
+    anchor: "middle",
+    color: SOFT,
+  });
+  return { sheet: s, title: "What dot can do" };
+}
+
 export function safety() {
   const s = new Sheet(1760, 960);
   s.text("What stands between dot and the world", 60, 82, { size: 50, bold: true });
@@ -368,7 +589,7 @@ export function safety() {
   });
 
   const lanes = [
-    { y: 540, label: "open a page, read,\nclick, type" },
+    { y: 540, label: "search, read a page,\nclick, type" },
     { y: 625, label: "send an email\nas you", stop: 0, mark: "?", note: "asks you" },
     { y: 710, label: "post your notes to\nsome random site", stop: 1, mark: "?", note: "asks you" },
     { y: 795, label: "poke the router\nat 192.168.1.1", stop: 4, mark: "x", note: "blocked" },
