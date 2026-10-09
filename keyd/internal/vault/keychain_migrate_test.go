@@ -135,11 +135,11 @@ func clearLog(t *testing.T, dir string) {
 	}
 }
 
-// lockable makes reads of the item deepseek fail while FAKE_DIR/locked exists, as a locked Keychain
-// or a timed-out helper would.
+// lockable makes reads of deepseek's first chunk fail while FAKE_DIR/locked exists, as a locked
+// Keychain or a timed-out helper would: the migration begins, and stays open at deepseek.
 func lockable(t *testing.T, k *Keychain, dir string, locked bool) {
 	t.Helper()
-	script := strings.Replace(fakeSecurity, `run "$@"`, `[ "$4" = deepseek ] && [ -f "$FAKE_DIR/locked" ] && exit 1; run "$@"`, 1)
+	script := strings.Replace(fakeSecurity, `run "$@"`, `[ "$4" = deepseek.0 ] && [ -f "$FAKE_DIR/locked" ] && exit 1; run "$@"`, 1)
 	if err := os.WriteFile(k.Path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -453,6 +453,132 @@ func TestMigrationRetiresTheUnboundHeadsItLeaves(t *testing.T) {
 		t.Fatalf("migration without its marker = %+v", m)
 	}
 	assertRefused(t, v, dir, map[string]string{"deepseek": retiredHead, "deepseek.0": chunk})
+}
+
+// tooLargeToRecord is an index led by deepseek with more records than the marker item can hold.
+func tooLargeToRecord() []Record {
+	records := []Record{deepseekRecord}
+	for i := 0; len(running(records...)) <= helperItemLimit; i++ {
+		records = append(records, Record{ID: fmt.Sprintf("filler-%d", i), Kind: KindHTTP, Hosts: []string{"api.example.test"},
+			Header: "Authorization", Format: "bearer"})
+	}
+	return records
+}
+
+// A migration that closes without binding, because the index is too large to record or an item is
+// already bound, retires the unbound heads all the same: with the marker and the bound item removed
+// and an index that names another destination, no later start binds one.
+func TestMigrationClosedWithoutBindingRetiresTheUnboundHeads(t *testing.T) {
+	for _, closing := range []string{"index too large", "an item already bound"} {
+		t.Run(closing, func(t *testing.T) {
+			k, dir := fakeKeychain(t)
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			chunk := readItem(t, dir, "deepseek.0")
+			records := tooLargeToRecord()
+			if closing == "an item already bound" {
+				records = legacyRecords
+				if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			index := writeIndex(t, beforeUpgrade, records...)
+			if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); len(m.Bound) != 0 ||
+				!slices.Contains(m.Reenter, "deepseek") || !m.Done {
+				t.Fatalf("closing migration = %+v", m)
+			}
+			if head := readItem(t, dir, "deepseek"); head != retiredHead {
+				t.Fatalf("the closed migration left deepseek's head %q", head)
+			}
+			if err := os.Remove(filepath.Join(dir, "store", "localdot-keyd-test."+markerAccount)); err != nil {
+				t.Fatal(err)
+			}
+			if err := k.Delete("weather"); err != nil && !errors.Is(err, ErrNotFound) {
+				t.Fatal(err)
+			}
+			rewriteIndex(t, index, beforeUpgrade, movedDeepseek)
+			v := openAt(t, k, index, beforeUpgrade.Add(2*time.Hour))
+			if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
+				t.Fatalf("migration without its marker = %+v", m)
+			}
+			assertRefused(t, v, dir, map[string]string{"deepseek": retiredHead, "deepseek.0": chunk})
+		})
+	}
+}
+
+// unreadable makes reads of account's item fail with status while FAKE_FAIL is read:<account>, as a
+// helper that timed out, refused or found an item it cannot read would.
+func unreadable(t *testing.T, k *Keychain, account string, status int) {
+	t.Helper()
+	check := fmt.Sprintf(`[ "$2" = read ] && [ "$FAKE_FAIL" = "read:$4" ] && exit %d; run "$@"`, status)
+	if err := os.WriteFile(k.Path, []byte(strings.Replace(fakeSecurity, `run "$@"`, check, 1)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_FAIL", "read:"+account)
+}
+
+// A head the migration cannot read, unless its item is gone or is not keyd's, may be bound, retired
+// or unbound. A start that finds no marker then neither begins nor closes the migration, so an index
+// that names only an unbound record cannot begin it over a bound item, and binds nothing.
+func TestMigrationBeginsOnlyOnceItReadsEveryHead(t *testing.T) {
+	for _, status := range []int{1, helperUnchanged} {
+		t.Run(fmt.Sprintf("exit %d", status), func(t *testing.T) {
+			k, dir := fakeKeychain(t)
+			if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
+				t.Fatal(err)
+			}
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			planted := map[string]string{"deepseek": readItem(t, dir, "deepseek"), "deepseek.0": readItem(t, dir, "deepseek.0")}
+			index := writeIndex(t, beforeUpgrade, movedDeepseek)
+			unreadable(t, k, "weather", status)
+			if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); len(m.Bound)+len(m.Reenter)+len(m.Rebound) != 0 || m.Done {
+				t.Fatalf("migration over an unreadable head = %+v", m)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "store", "localdot-keyd-test."+markerAccount)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("a migration that could not read every head wrote its marker")
+			}
+			for account, data := range planted {
+				if readItem(t, dir, account) != data {
+					t.Fatalf("a migration that could not read every head rewrote %s", account)
+				}
+			}
+			t.Setenv("FAKE_FAIL", "")
+			v := openAt(t, k, index, beforeUpgrade.Add(2*time.Hour))
+			if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
+				t.Fatalf("migration once every head reads = %+v", m)
+			}
+			assertRefused(t, v, dir, planted)
+		})
+	}
+}
+
+// A migration ends only once it has read every head of the service and retired each unbound one: a
+// head it cannot read may be unbound, and would stay bindable, so the migration stays open until it
+// reads.
+func TestMigrationEndsOnlyOnceItReadsEveryHead(t *testing.T) {
+	for _, status := range []int{1, helperUnchanged} {
+		t.Run(fmt.Sprintf("exit %d", status), func(t *testing.T) {
+			k, dir := fakeKeychain(t)
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			storeLegacy(t, k, "weather", longValue(40))
+			legacy := readItem(t, dir, "weather")
+			writeItem(t, dir, markerAccount, running(deepseekRecord))
+			index := writeIndex(t, beforeUpgrade, deepseekRecord)
+			unreadable(t, k, "weather", status)
+			if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); !slices.Equal(m.Bound, []string{"deepseek"}) || m.Done {
+				t.Fatalf("migration over an unreadable head = %+v", m)
+			}
+			if mark := markerOf(t, dir); mark.state != markerRunning || readItem(t, dir, "weather") != legacy {
+				t.Fatalf("the migration ended with marker %+v and weather %q", mark, readItem(t, dir, "weather"))
+			}
+			t.Setenv("FAKE_FAIL", "")
+			if m := openAt(t, k, index, beforeUpgrade.Add(2*time.Hour)).MigrateBindings(); len(m.Bound)+len(m.Reenter)+len(m.Rebound) != 0 || !m.Done {
+				t.Fatalf("migration once every head reads = %+v", m)
+			}
+			if mark := markerOf(t, dir); mark.state != markerDone || readItem(t, dir, "weather") != retiredHead {
+				t.Fatalf("the migration ended with marker %+v and weather %q", mark, readItem(t, dir, "weather"))
+			}
+		})
+	}
 }
 
 // A finished migration never runs again: a later start writes nothing, and its values still read.

@@ -74,17 +74,18 @@ type marker struct {
 // Every keyd binary from before bindings reads an unbound item for whatever index it is given, so
 // binding the items keyd wrote closes that, and binds each one to where keyd was already sending
 // it. A bound item is never touched. The migration begins on the first start that finds no marker
-// and no item of the service bound or retired: the marker, a Keychain item only signed keyd can
-// read, then records the binding each record of the index asked for, and only an item laid out
-// exactly as keyd lays one out, under a record whose id and binding are in that record, is bound.
-// A record whose id is there with another binding was changed outside keyd and is listed as
-// rebound, before and after the migration ends. An index changed afterwards binds nothing new, and
-// neither does another keyd home with its own index, since the record lives in the shared
-// Keychain. Every other unbound item stays refused until its value is stored again. Once the last
-// record settles, every unbound head of the service is retired and the marker is marked done, so a
-// migration cut short resumes with the same record, and a finished one never runs again, even with
-// its marker removed. Binding rewrites the item head alone, in one write, leaving the chunks as they
-// are: a crash leaves the item unbound, for the next start to bind, or bound.
+// and reads every head of the service, none bound or retired: the marker, a Keychain item only
+// signed keyd can read, then records the binding each record of the index asked for, and only an
+// item laid out exactly as keyd lays one out, under a record whose id and binding are in that
+// record, is bound. A record whose id is there with another binding was changed outside keyd and is
+// listed as rebound, before and after the migration ends. An index changed afterwards binds nothing
+// new, and neither does another keyd home with its own index, since the record lives in the shared
+// Keychain. Every other unbound item stays refused until its value is stored again. Before any
+// marker records the migration as done, whether its last record settled or it closed without
+// binding, every unbound head of the service is retired. A migration cut short resumes with the
+// same record, and a finished one never runs again, even with its marker removed. Binding rewrites
+// the item head alone, in one write, leaving the chunks as they are: a crash leaves the item
+// unbound, for the next start to bind, or bound.
 func (k *Keychain) MigrateBindings(records []Record) Migration {
 	heads := k.readHeads(records)
 	mark := k.beginMigration(records)
@@ -129,7 +130,8 @@ func (k *Keychain) readHeads(records []Record) map[string]head {
 
 // beginMigration reads the marker. A start that finds none writes one: running, with what the
 // index's records ask for, or done when an item of the service is already bound or retired, since
-// then the migration ran before and its marker was removed.
+// then the migration ran before and its marker was removed, or when the index is too large to
+// record. A migration that closes so binds nothing and retires every unbound head first.
 func (k *Keychain) beginMigration(records []Record) marker {
 	ctx, cancel := k.deadline()
 	data, err := k.find(ctx, markerAccount)
@@ -161,6 +163,9 @@ func (k *Keychain) markMigration(records []Record) marker {
 	mark := marker{state: markerRunning, asked: askedBy(records)}
 	if migratedBefore(heads) || len(mark.text()) > helperItemLimit {
 		log.Printf("keyd: the binding migration closes without binding: an item is already bound, or the index is too large")
+		if !k.retire(heads) {
+			return marker{}
+		}
 		mark = marker{state: markerDone}
 	}
 	ctx, cancel := k.deadline()
@@ -184,7 +189,8 @@ func migratedBefore(heads map[string]string) bool {
 }
 
 // serviceHeads reads the head of every item of the service that holds one, whatever the index
-// names. An item whose head cannot be read is left out: keyd cannot bind it either.
+// names. Only an item gone since the listing, or one that is not keyd's, is left out: any other
+// head that does not read may be bound, retired or unbound, so it fails the whole read.
 func (k *Keychain) serviceHeads() (map[string]string, error) {
 	ids, err := k.secretItems()
 	if err != nil {
@@ -195,21 +201,20 @@ func (k *Keychain) serviceHeads() (map[string]string, error) {
 		ctx, cancel := k.deadline()
 		text, err := k.find(ctx, id)
 		cancel()
-		if err == nil {
-			heads[id] = text
+		switch {
+		case errors.Is(err, ErrNotFound), errors.Is(err, ErrReenter):
+			continue
+		case err != nil:
+			return nil, err
 		}
+		heads[id] = text
 	}
 	return heads, nil
 }
 
-// endMigration retires every unbound head the service still holds, under any id, then records the
-// migration as done, keeping what each record asked for.
-func (k *Keychain) endMigration(mark marker) bool {
-	heads, err := k.serviceHeads()
-	if err != nil {
-		log.Printf("keyd: the binding migration could not finish: %v", err)
-		return false
-	}
+// retire rewrites each unbound head in heads as retired and reads it back, so that no later
+// migration binds it, whatever the index then says.
+func (k *Keychain) retire(heads map[string]string) bool {
 	for id, text := range heads {
 		if !legacyHeadPattern.MatchString(text) {
 			continue
@@ -226,6 +231,20 @@ func (k *Keychain) endMigration(mark marker) bool {
 			log.Printf("keyd: the binding migration could not retire secret %s: %v", id, err)
 			return false
 		}
+	}
+	return true
+}
+
+// endMigration retires every unbound head the service still holds, under any id, then records the
+// migration as done, keeping what each record asked for.
+func (k *Keychain) endMigration(mark marker) bool {
+	heads, err := k.serviceHeads()
+	if err != nil {
+		log.Printf("keyd: the binding migration could not finish: %v", err)
+		return false
+	}
+	if !k.retire(heads) {
+		return false
 	}
 	ctx, cancel := k.deadline()
 	defer cancel()

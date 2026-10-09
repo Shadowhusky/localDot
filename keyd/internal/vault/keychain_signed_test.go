@@ -236,6 +236,105 @@ func TestSignedMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
 	}
 }
 
+// A migration that closes without binding, because the index is too large to record or an item is
+// already bound, retires the unbound heads all the same: with the marker and the bound item removed
+// and an index that names another destination, no later start binds one.
+func TestSignedMigrationClosedWithoutBindingRetiresTheUnboundHeads(t *testing.T) {
+	for _, closing := range []string{"index too large", "an item already bound"} {
+		t.Run(closing, func(t *testing.T) {
+			k := newSignedKeychain(t)
+			k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+			records := tooLargeToRecord()
+			if closing == "an item already bound" {
+				records = legacyRecords
+				if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			index := writeIndex(t, beforeUpgrade, records...)
+			if m := k.open(t, index).MigrateBindings(); len(m.Bound) != 0 || !slices.Contains(m.Reenter, "deepseek") || !m.Done {
+				t.Fatalf("closing migration = %+v", m)
+			}
+			if head := k.head(t, "deepseek"); head != retiredHead {
+				t.Fatalf("the closed migration left deepseek's head %q", head)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := k.remove(ctx, markerAccount); err != nil {
+				t.Fatal(err)
+			}
+			if err := k.Delete("weather"); err != nil && !errors.Is(err, ErrNotFound) {
+				t.Fatal(err)
+			}
+			rewriteIndex(t, index, beforeUpgrade, movedDeepseek)
+			v := k.open(t, index)
+			if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
+				t.Fatalf("migration without its marker = %+v", m)
+			}
+			if _, err := v.Value("deepseek"); !errors.Is(err, ErrReenter) || k.head(t, "deepseek") != retiredHead {
+				t.Fatalf("deepseek's retired item: %v", err)
+			}
+		})
+	}
+}
+
+// addUnreadable adds an item to the service that keyd cannot read without a Keychain prompt, as one
+// an earlier keyd stored and adopt could not move: the security tool made it, so its partition list
+// does not name keyd's team.
+func (k signedKeychain) addUnreadable(t *testing.T, account, data string) {
+	t.Helper()
+	trusted := os.Getenv("KEYD_EARLIER_BIN")
+	if trusted == "" {
+		self, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		trusted = self
+	}
+	tempkeychain.Security(t, "add-generic-password", "-s", k.Service, "-a", account, "-w", data, "-T", trusted, k.path)
+	if _, err := k.find(context.Background(), account); err == nil || errors.Is(err, ErrNotFound) || errors.Is(err, ErrReenter) {
+		t.Fatalf("keyd's read of an item it cannot read: %v", err)
+	}
+}
+
+// A head keyd cannot read may be bound, retired or unbound. While one does not read, no start begins
+// the migration, so nothing is bound for an index that names another destination, and a migration
+// that runs does not end, since the head may be one it must retire.
+func TestSignedMigrationWaitsForAHeadItCannotRead(t *testing.T) {
+	t.Run("before it begins", func(t *testing.T) {
+		k := newSignedKeychain(t)
+		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+		planted := k.head(t, "deepseek")
+		k.addUnreadable(t, "aaa-unreadable", itemHead(strings.Repeat("ab", 8), 1, bindingOf(weatherRecord)))
+		v := k.open(t, writeIndex(t, beforeUpgrade, movedDeepseek))
+		if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter)+len(m.Rebound) != 0 || m.Done {
+			t.Fatalf("migration over a head keyd cannot read = %+v", m)
+		}
+		if _, err := k.find(context.Background(), markerAccount); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("a migration that could not read every head wrote its marker: %v", err)
+		}
+		if _, err := v.Value("deepseek"); !errors.Is(err, ErrReenter) || k.head(t, "deepseek") != planted {
+			t.Fatalf("deepseek's unbound item: %v", err)
+		}
+	})
+	t.Run("before it ends", func(t *testing.T) {
+		k := newSignedKeychain(t)
+		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := k.add(ctx, markerAccount, running(deepseekRecord)); err != nil {
+			t.Fatal(err)
+		}
+		k.addUnreadable(t, "aaa-unreadable", "keyd:"+strings.Repeat("ab", 8)+":1")
+		if m := k.open(t, writeIndex(t, beforeUpgrade, deepseekRecord)).MigrateBindings(); !slices.Equal(m.Bound, []string{"deepseek"}) || m.Done {
+			t.Fatalf("migration over a head keyd cannot read = %+v", m)
+		}
+		if mark, ok := parseMarker(k.head(t, markerAccount)); !ok || mark.state != markerRunning {
+			t.Fatalf("the migration ended with marker %q", k.head(t, markerAccount))
+		}
+	})
+}
+
 // Items the security tool made carry its partition, not keyd's team's, so keyd cannot read them
 // without a prompt: a staged copy and, with an earlier keyd, an item of that keyd's. Adopt counts
 // them, leaves them as they are and still moves the items after them.
