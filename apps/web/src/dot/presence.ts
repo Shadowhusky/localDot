@@ -199,7 +199,7 @@ export class Presence {
   private aim(): void {
     const me = this.centre();
     const stage = placeElement("stage")?.getBoundingClientRect();
-    if (!this.focus || !me || !stage || this.place === "hero") {
+    if (!this.focus || !me || !stage || this.place === "hero" || this.place === "intro") {
       this.view.setFocus(null);
       return;
     }

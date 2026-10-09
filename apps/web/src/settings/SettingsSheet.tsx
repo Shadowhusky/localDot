@@ -100,6 +100,8 @@ export interface SettingsSheetProps {
   // On a phone, what Stop reports, which stays after Stop itself has gone; the island says it
   // on a wider screen.
   taskControls?: ReactNode;
+  // Opens first-run setup again, from its first choice.
+  onSetup?(): void;
 }
 
 function ago(at: string | undefined, now: number): string | null {
@@ -623,6 +625,16 @@ function SectionContent({
               </Button>
             )}
           </div>
+          {props.onSetup && (
+            <Group>
+              <GroupRow
+                leading={<IconTile icon="continue" />}
+                label="Set up step by step"
+                detail="How dot thinks, its model and permissions"
+                onSelect={() => props.onSetup?.()}
+              />
+            </Group>
+          )}
         </>
       );
     }

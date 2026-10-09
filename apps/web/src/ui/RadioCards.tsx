@@ -3,6 +3,7 @@ import { type ReactNode, useId } from "react";
 import { Badge } from "./Badge.tsx";
 import { useFieldControl } from "./Field.tsx";
 import { Icon } from "./Icon.tsx";
+import type { IconName } from "./icons.ts";
 import { pressHandlers } from "./press.ts";
 
 export interface RadioCardOption {
@@ -13,6 +14,8 @@ export interface RadioCardOption {
   tag?: string;
   // A small picture of the choice, such as a theme's colours, drawn inside the card.
   preview?: ReactNode;
+  // A tile at the row's start, as in a grouped list.
+  icon?: IconName;
   disabledReason?: string;
 }
 
@@ -22,6 +25,10 @@ export interface RadioCardsProps {
   options: readonly RadioCardOption[];
   // Rows stack full width; tiles sit side by side and wrap.
   layout?: "rows" | "tiles";
+  // Where a row's radio sits: before its text, or at its end after a leading tile.
+  mark?: "start" | "end";
+  // Rows that stand on their own on a page, further in and with larger titles.
+  roomy?: boolean;
   name?: string;
   className?: string;
   "aria-label"?: string;
@@ -32,6 +39,8 @@ export function RadioCards({
   onValueChange,
   options,
   layout = "rows",
+  mark = "start",
+  roomy = false,
   name,
   className,
   "aria-label": label,
@@ -44,6 +53,8 @@ export function RadioCards({
       id={control.id}
       className={clsx("ui-radio-cards", className)}
       data-layout={layout}
+      data-mark={mark}
+      data-roomy={roomy ? "" : undefined}
       aria-label={label}
       aria-labelledby={label ? undefined : control.labelId}
       aria-describedby={control.describedBy}
@@ -76,6 +87,11 @@ export function RadioCards({
               }}
             />
             <span className="ui-radio-mark" aria-hidden="true" />
+            {option.icon && (
+              <span className="ui-tile ui-radio-card-tile" aria-hidden="true">
+                <Icon name={option.icon} size={16} />
+              </span>
+            )}
             {option.preview !== undefined && (
               <span className="ui-radio-card-preview" aria-hidden="true">
                 {option.preview}

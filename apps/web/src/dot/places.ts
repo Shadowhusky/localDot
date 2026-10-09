@@ -1,5 +1,5 @@
 // The boxes dot can sit in, and the stage it looks at, as their elements register.
-export type PlaceName = "hero" | "dock" | "badge" | "stage";
+export type PlaceName = "hero" | "dock" | "badge" | "intro" | "stage";
 
 const places = new Map<PlaceName, HTMLElement>();
 const listeners = new Set<() => void>();

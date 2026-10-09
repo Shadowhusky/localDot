@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import { choose, nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // Vendor presets and plans in Settings, in Chrome at desktop width and in WebKit on a phone,
@@ -65,6 +66,7 @@ for (const run of runs) {
       );
       const page = await context.newPage();
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
+      await skipSetup(page);
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
       await press(page.getByRole("button", { name: "Settings", exact: true }));
       const sheet = settingsSheet(page);

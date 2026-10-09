@@ -46,7 +46,10 @@ import {
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
+import { Onboarding } from "./onboarding/Onboarding.tsx";
 import { setupSteps } from "./onboarding/setup.ts";
+import { useOnboarding } from "./onboarding/useOnboarding.ts";
+import { STEP_DOT } from "./onboarding/wizard.ts";
 import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
@@ -669,13 +672,16 @@ function Theatre({ api }: { api: ApiClient }) {
     retry,
   };
   const keyboard = useKeyboardUp();
+  const setupKnown = !!settings.saved;
+  const onboarding = useOnboarding({ known: setupKnown, configured: !!settings.saved?.main });
+  const setupStep = onboarding.progress.step;
   const place = presencePlace({
     showDot: showDot.value,
     curtain: curtain.up,
     stageHidden: !!replayId,
     keyboard,
+    setup: onboarding.open,
   });
-  const setupKnown = !!settings.saved;
   const chosenKey =
     mainChoice?.provider === "chatgpt"
       ? settings.chatgpt.canStart
@@ -692,10 +698,7 @@ function Theatre({ api }: { api: ApiClient }) {
     model: mainChoice
       ? `${mainProvider?.name ?? "ChatGPT"} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
       : null,
-    permissions:
-      savedAutonomy && JSON.stringify(savedAutonomy) !== JSON.stringify(DEFAULT_AUTONOMY)
-        ? (presetOf(savedAutonomy)?.label ?? "Your own choices")
-        : null,
+    permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
@@ -867,6 +870,7 @@ function Theatre({ api }: { api: ApiClient }) {
       data-focus={focus ? "" : undefined}
       data-still={still ? "" : undefined}
       data-keyboard={keyboard ? "" : undefined}
+      data-setup={onboarding.open ? "" : undefined}
     >
       <TopBar
         title={
@@ -1095,7 +1099,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     steps={setup.steps}
                     done={setup.done}
                     onChooseModel={(event) => showSettings(event.currentTarget, "models")}
-                    onContinue={(event) => showSettings(event.currentTarget, "models")}
+                    onContinue={() => onboarding.reopen()}
                   />
                 ) : undefined
               }
@@ -1276,6 +1280,10 @@ function Theatre({ api }: { api: ApiClient }) {
               : undefined
           }
           spent={agent.model.spend}
+          onSetup={() => {
+            settings.close();
+            onboarding.reopen("thinks");
+          }}
         />
       </ErrorBoundary>
       {phone && approvalView && (
@@ -1296,11 +1304,45 @@ function Theatre({ api }: { api: ApiClient }) {
           <div className="activity-sheet">{activity}</div>
         </Sheet>
       )}
+      <Presence show={onboarding.open}>
+        <ErrorBoundary floating>
+          <Onboarding
+            api={api}
+            control={onboarding}
+            phone={phone}
+            keys={keys}
+            index={settings.index}
+            saved={settings.saved}
+            onSaved={settings.reload}
+            turnOn={
+              computerAction && computerAction.kind !== "stop"
+                ? {
+                    run: () => onComputer[computerAction.kind](),
+                    reason: computerAction.enabled ? undefined : "Wait a moment",
+                  }
+                : null
+            }
+            showDot={showDot.value}
+          />
+        </ErrorBoundary>
+      </Presence>
       {showDot.value && (
         <PresenceLayer
           place={place}
-          feed={dotFeed(appStatus, session.sessionId ? session.model : null, now)}
-          line={speaker === "dot" ? narration : ""}
+          feed={
+            onboarding.open
+              ? {
+                  state: STEP_DOT[setupStep],
+                  control: false,
+                  attention: false,
+                  focus: null,
+                  dispatched: null,
+                  done: false,
+                  nod: setupStep,
+                }
+              : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+          }
+          line={onboarding.open || speaker !== "dot" ? "" : narration}
         />
       )}
       <Announcer />
