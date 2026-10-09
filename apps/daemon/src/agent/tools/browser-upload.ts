@@ -82,7 +82,7 @@ export async function browserUploadTool(
 ): Promise<ToolResult> {
   screenContext(ctx);
   if (ctx.screen?.selection.screen !== "browser" || !ctx.session.screens)
-    return fail("Switch to the isolated browser screen and open its file picker before uploading.");
+    return fail("Switch to the web browser and open the page's file picker before uploading.");
   const browser = ctx.session.screens.browserAccess(ctx.screen);
   const desktop = deps.uploads?.desktop(ctx.session.cellId);
   if (!desktop || !deps.uploads || !browser.client.uploadChooser || !browser.client.upload)

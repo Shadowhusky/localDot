@@ -335,6 +335,7 @@ describe("ChatGPT runner lifecycle", () => {
         throw new Error("unused browser start");
       }),
       endpoints: () => undefined,
+      get: () => undefined,
       stop: vi.fn(async () => {}),
     };
     const streams = new BrowserStreams({
@@ -359,7 +360,7 @@ describe("ChatGPT runner lifecycle", () => {
       ).toMatchObject({ reason: "done" });
       expect(physicalStop).not.toHaveBeenCalled();
       expect(f.containment).not.toHaveBeenCalled();
-      expect(browser.stop).toHaveBeenCalledOnce();
+      expect(browser.stop).not.toHaveBeenCalled();
       expect(f.runner.sessions.has(session.id)).toBe(false);
     } finally {
       streams.dispose();

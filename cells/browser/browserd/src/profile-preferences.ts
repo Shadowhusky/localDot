@@ -41,6 +41,28 @@ async function directory(path: string): Promise<FileHandle> {
   }
 }
 
+// The shared profile moves between browser cells with different host names, and a cell stopped
+// without Chromium's own clean exit leaves these links behind. The daemon mounts the profile in one
+// cell at a time, so a link here is always stale, and Chromium would refuse a "profile in use".
+export async function releaseProfileLocks(profilePath: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) refuse();
+  const root = await directory(profilePath);
+  try {
+    for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+      const path = `/proc/self/fd/${root.fd}/${name}`;
+      try {
+        if (!(await lstat(path)).isSymbolicLink()) refuse();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      await unlink(path);
+    }
+  } finally {
+    await root.close();
+  }
+}
+
 /** Before Chromium starts, preserve its profile while disabling the automatic download popup.
  * All child access is relative to retained directory descriptors; profile bytes stay local.
  */

@@ -61,17 +61,17 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     browser_read: tool({
       description:
-        "Read the text and outline of the page open in the computer's Chromium. Faster than screenshots for reading.",
+        "Read the text and outline of the page open on the selected screen: the web browser or the desktop's Chromium. Faster than screenshots for reading.",
       inputSchema: BrowserReadInput,
     }),
     browser_navigate: tool({
       description:
-        "Open a URL on the selected screen (desktop or signed-in browser) and get a screenshot.",
+        "Open an http or https page and get a screenshot. Public sites open in the web browser, which keeps the user's sign-ins; localhost and local addresses open in the desktop's Chromium. The screen switches to match.",
       inputSchema: BrowserNavigateInput,
     }),
     browser_upload: tool({
       description:
-        "Assign desktop files to the currently open file chooser on the isolated browser screen. First open the page's file picker. Supply 1–10 paths inside the desktop home, at most 100 MiB total. The user must approve the exact files and receiving page. This assigns the files; a page may still require Submit. Never retry an uncertain upload automatically.",
+        "Assign desktop files to the currently open file chooser in the web browser. First open the page's file picker. Supply 1–10 paths inside the desktop home, at most 100 MiB total. The user must approve the exact files and receiving page. This assigns the files; a page may still require Submit. Never retry an uncertain upload automatically.",
       inputSchema: BrowserUploadInput,
     }),
     update_plan: tool({
@@ -81,7 +81,7 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     switch_screen: tool({
       description:
-        "Switch between the desktop and the isolated signed-in browser. Use browser for signed-in work and request_takeover for login. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
+        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Use request_takeover when a site needs the user to sign in. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
       inputSchema: SwitchScreenInput,
     }),
     ask_user: tool({

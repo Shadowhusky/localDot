@@ -6,11 +6,11 @@ export async function switchScreenTool(
   input: SwitchScreenInput,
 ): Promise<ToolResult> {
   ctx.check();
-  if (!ctx.session.screens) return fail("The signed-in browser is unavailable in this session.");
+  if (!ctx.session.screens) return fail("The web browser is unavailable in this session.");
   append(ctx, "step.start", { kind: "browser" });
   append(ctx, "tool.start", {
     tool: "switch_screen",
-    title: input.screen === "browser" ? "Switching to signed-in browser" : "Switching to desktop",
+    title: input.screen === "browser" ? "Switching to the web browser" : "Switching to the desktop",
   });
   // No old screen lease is held here: the controller drains native work and revokes
   // its previous grant before recording and publishing the newly selected screen.
@@ -22,7 +22,7 @@ export async function switchScreenTool(
     ok: true,
     content: [
       text(
-        `Selected ${selected.screen === "browser" ? "the signed-in browser" : "the desktop"}. Request a fresh screenshot before GUI input. Shell and files still operate on the desktop.`,
+        `Selected ${selected.screen === "browser" ? "the web browser" : "the desktop"}. Request a fresh screenshot before GUI input. Shell and files still operate on the desktop.`,
       ),
     ],
   };
