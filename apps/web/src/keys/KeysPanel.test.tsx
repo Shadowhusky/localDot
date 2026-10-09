@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ApiClient, createApi } from "../lib/api.ts";
 import { TopBar } from "../shell/TopBar.tsx";
+import { Sheet } from "../ui/Sheet.tsx";
 import { type KeyField, KeyForm, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
-import { KeysSheet, type KeysSheetProps } from "./KeysSheet.tsx";
+import { KeysPanel, type KeysPanelProps } from "./KeysPanel.tsx";
 import type { KeyRecord } from "./keys-api.ts";
 import * as keysApi from "./keys-api.ts";
 import { type KeysController, keyStatus, useKeys } from "./useKeys.ts";
@@ -56,6 +57,21 @@ function controller(over: Partial<KeysController> = {}): KeysController {
   };
 }
 
+type KeysSheetProps = Omit<KeysPanelProps, "active" | "onHolding"> & {
+  open: boolean;
+  onClose(): void;
+};
+
+// Keys as Settings holds it: on a sheet that asks before closing loses a typed key.
+function KeysSheet({ open, onClose, ...panel }: KeysSheetProps) {
+  const [holding, setHolding] = useState(false);
+  return (
+    <Sheet open={open} onClose={onClose} dirty={holding} title="Keys" closeLabel="Close keys">
+      <KeysPanel {...panel} active={open} onHolding={setHolding} />
+    </Sheet>
+  );
+}
+
 // The real hook over a fake daemon, so the lock that orders key changes is the one the app uses.
 const daemon: ApiClient = createApi("test", {
   origin: "http://127.0.0.1:4790",
@@ -74,6 +90,7 @@ const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const provider = () => screen.getByRole("combobox", { name: "Provider" });
 const type = (name: string, value: string) => fireEvent.change(field(name), { target: { value } });
 const saveButton = () => screen.getByRole("button", { name: "Save key" });
+const openForm = () => fireEvent.click(screen.getByRole("button", { name: "Add key" }));
 const unavailable = (button: HTMLElement) => button.getAttribute("aria-disabled") === "true";
 const prompt = () => screen.getByText("Discard unsaved changes?").closest("fieldset");
 function chooseProvider(text: string) {
@@ -83,7 +100,7 @@ function chooseProvider(text: string) {
   fireEvent.keyDown(search, { key: "Enter" });
 }
 
-describe("KeysSheet", () => {
+describe("Keys", () => {
   it("does not clear a later preset or select its key from an older sealed save", async () => {
     const held = Promise.withResolvers<{ restart: boolean; key: KeyRecord }>();
     const save = vi.fn(() => held.promise),
@@ -288,7 +305,7 @@ describe("KeysSheet", () => {
       />,
     );
     const row = screen.getByText("weather").closest("li");
-    expect(row?.querySelector(".keys-row-text")?.textContent).toMatch(
+    expect(row?.querySelector(".ui-group-row-text")?.textContent).toMatch(
       /^weatherapi\.weather\.example, Authorization, Added .*3.*, Used 2× this task$/,
     );
     expect(row?.hasAttribute("data-fresh")).toBe(true);
@@ -340,6 +357,7 @@ describe("KeysSheet", () => {
     const deleted = vi.spyOn(keysApi, "deleteKey").mockResolvedValue(undefined);
     const { rerender } = render(<Live open onClose={() => {}} />);
     await screen.findByText("weather");
+    openForm();
     type(LABEL, "weather");
     type("Key", "fake-private-value");
     fireEvent.submit(screen.getByRole("form"));
@@ -351,6 +369,7 @@ describe("KeysSheet", () => {
     expect(deleted).not.toHaveBeenCalled();
     rerender(<Live open={false} onClose={() => {}} />);
     rerender(<Live open onClose={() => {}} />);
+    if (!screen.queryByRole("form")) openForm();
     expect(field(LABEL).readOnly).toBe(true);
     expect(unavailable(saveButton())).toBe(true);
     await act(async () => {
@@ -368,6 +387,7 @@ describe("KeysSheet", () => {
     const saved = vi.spyOn(keysApi, "saveKey");
     render(<Live open onClose={() => {}} />);
     await screen.findByText("weather");
+    openForm();
     type(LABEL, "weather");
     type("Key", "fake-private-value");
     fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
@@ -388,6 +408,7 @@ describe("KeysSheet", () => {
     vi.spyOn(keysApi, "deleteKey").mockReturnValue(deleting.promise);
     render(<Live open onClose={() => {}} />);
     await screen.findByText("weather");
+    openForm();
     type(LABEL, "books");
     type("Key", "fake-private-value");
     fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
@@ -601,7 +622,7 @@ describe("KeysSheet", () => {
     fireEvent.click(removeButton);
     fireEvent.click(removeButton);
     expect(remove).not.toHaveBeenCalled();
-    expect(unavailable(saveButton())).toBe(true);
+    expect(unavailable(screen.getByRole("button", { name: "Add key" }))).toBe(true);
     expect(document.body.textContent).not.toMatch(/\bkeyd\b|hairpin/i);
   });
 
@@ -667,16 +688,6 @@ describe("KeysSheet", () => {
     expect(button.querySelector(".ui-icon-button-attention")).toBeTruthy();
   });
 
-  it("sits beside the page and closes on Escape from inside it", () => {
-    const onClose = vi.fn();
-    render(<KeysSheet open keys={controller()} onClose={onClose} />);
-    const sheet = screen.getByRole("dialog", { name: "Keys" });
-    expect(sheet.getAttribute("aria-modal")).toBe("false");
-    expect(sheet.contains(document.activeElement)).toBe(true);
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-    expect(onClose).toHaveBeenCalledOnce();
-  });
-
   it("keeps the sheet and the choice when Escape comes from the provider picker", () => {
     const onClose = vi.fn();
     render(<KeysSheet open keys={controller()} onClose={onClose} />);
@@ -722,6 +733,39 @@ describe("KeysSheet", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("opens the form on Add key, and Cancel clears it and folds it away", () => {
+    render(<KeysSheet open keys={controller({ keys: [weather] })} onClose={() => {}} />);
+    expect(screen.queryByRole("form")).toBeNull();
+    openForm();
+    type("Key", "fake-private-value");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("form")).toBeNull();
+    openForm();
+    expect(field("Key").value).toBe("");
+  });
+
+  it("opens the form for a key handed over from elsewhere", () => {
+    const intake = createRef<KeyIntake>();
+    render(
+      <KeysSheet
+        open
+        keys={controller({ keys: [weather] })}
+        onClose={() => {}}
+        intakeRef={intake}
+      />,
+    );
+    const source = document.createElement("input");
+    source.value = "fake-private-value";
+    let taken = false;
+    act(() => {
+      taken = intake.current?.receive(source, "openai") ?? false;
+    });
+    expect(taken).toBe(true);
+    expect(source.value).toBe("");
+    expect(field("Key").value).toBe("fake-private-value");
+    expect(provider().textContent).toBe("OpenAI");
+  });
+
   it("reports whether its key field holds a key", () => {
     const fieldRef = createRef<KeyField>();
     const onHolding = vi.fn();
@@ -758,47 +802,6 @@ describe("KeysSheet", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Web API" }));
     plain("Hosts");
     plain("Header");
-  });
-
-  it("returns focus to its opener when it closes", () => {
-    const sheet = (open: boolean) => (
-      <>
-        <button type="button">Open keys</button>
-        <KeysSheet open={open} keys={controller()} onClose={() => {}} />
-      </>
-    );
-    const view = render(sheet(false));
-    const opener = screen.getByRole("button", { name: "Open keys" });
-    opener.focus();
-    view.rerender(sheet(true));
-    expect(document.activeElement).not.toBe(opener);
-    view.rerender(sheet(false));
-    expect(document.activeElement).toBe(opener);
-  });
-
-  it("keeps Stop on a phone, and what Stop reports after Stop has gone", () => {
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query.includes("700px"),
-      media: query,
-      addEventListener() {},
-      removeEventListener() {},
-    }));
-    const run = vi.fn();
-    const report = <p>Stopped. Your computer is off.</p>;
-    const { rerender } = render(
-      <KeysSheet
-        open
-        keys={controller()}
-        onClose={() => {}}
-        stop={{ label: "Stop computer", enabled: true, run }}
-        taskControls={report}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Stop computer" }));
-    expect(run).toHaveBeenCalledOnce();
-    rerender(<KeysSheet open keys={controller()} onClose={() => {}} taskControls={report} />);
-    expect(screen.queryByRole("button", { name: "Stop computer" })).toBeNull();
-    expect(screen.getByText("Stopped. Your computer is off.")).toBeTruthy();
   });
 
   it("names each remove button with its visible label", () => {

@@ -20,7 +20,6 @@ describe("setup steps", () => {
       "Key",
       "Model",
       "Permissions",
-      "Phone",
     ]);
     expect(steps.find((step) => step.id === "model")?.detail).toBe("Needed to start");
   });

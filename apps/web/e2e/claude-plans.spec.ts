@@ -7,6 +7,7 @@ import {
   test,
 } from "@playwright/test";
 import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 const SENTENCE =
@@ -63,6 +64,7 @@ for (const run of runs) {
         const sent = `${r.url()} ${r.postData() ?? ""}`;
         if (/sk-ant-o[ar]t/.test(sent)) carried.push(`${r.method()} ${new URL(r.url()).pathname}`);
       });
+      await skipSetup(page);
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
       return { page, press, carried };

@@ -88,26 +88,367 @@
   width: 100%;
 }
 
+/* A theme's tile: its house with the lit stage in it, as the app itself looks in that theme. */
+.ui-radio-card-preview:has(> .appearance-swatch) {
+  align-self: stretch;
+}
+
 .appearance-swatch {
+  position: relative;
   display: block;
-  width: calc(var(--spacing) * 10);
-  height: calc(var(--spacing) * 7);
-  border-radius: var(--radius-xs);
+  width: 100%;
+  height: calc(var(--spacing) * 16);
+  overflow: hidden;
+  border-radius: var(--radius-row);
   box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
+.appearance-swatch::after {
+  position: absolute;
+  inset: 22% 18%;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(135deg, var(--color-porcelain-top), var(--color-porcelain-bottom));
+  content: "";
+}
+
 .appearance-swatch[data-appearance="graphite"] {
-  background: linear-gradient(
-    to bottom,
-    var(--graphite-raised-2) 0 40%,
-    var(--graphite-void) 40% 100%
-  );
+  background: linear-gradient(180deg, var(--graphite-void), var(--graphite-raised-2));
 }
 
 .appearance-swatch[data-appearance="midnight"] {
-  background: linear-gradient(
-    to bottom,
-    var(--midnight-raised-2) 0 40%,
-    var(--midnight-void) 40% 100%
-  );
+  background: linear-gradient(180deg, var(--midnight-void), var(--midnight-raised-2));
+}
+
+.ui-radio-card:has(.appearance-swatch[data-appearance="midnight"]) {
+  background-color: var(--midnight-raised);
+}
+
+/* First-run setup (design-v2 §11 A0): the house with a soft beam, the progress, dot, one column and
+   a footer that stays where it is from step to step. It covers the app, which stays mounted. */
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-island);
+  display: flex;
+  flex-direction: column;
+  background: var(--setup-light), var(--color-void);
+  color: var(--color-fg-1);
+  animation: onboarding-in var(--dur-default) var(--ease-standard) backwards;
+}
+
+.ui-presence[data-leaving] > .onboarding {
+  opacity: 0;
+  transition: opacity var(--dur-gentle) var(--ease-standard);
+}
+
+@keyframes onboarding-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.onboarding-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--bar-h);
+  padding: 0 var(--gutter);
+}
+
+.onboarding-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--color-scrollbar) transparent;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+}
+
+.onboarding-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(560px, calc(100% - var(--gutter) * 2));
+  margin-inline: auto;
+  padding-bottom: calc(var(--spacing) * 6);
+}
+
+.onboarding-progress {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-height: 28px;
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.onboarding-progress[data-hidden] {
+  visibility: hidden;
+}
+
+.onboarding-bars {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-bar-step {
+  width: 40px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-track-strong);
+  transition: background-color var(--dur-default) var(--ease-standard);
+}
+
+.onboarding-bar-step[data-state="done"] {
+  background-color: var(--color-fg-2);
+}
+
+.onboarding-bar-step[data-state="current"] {
+  background-color: var(--color-fg-1);
+}
+
+.onboarding-step {
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.onboarding-dot {
+  display: block;
+  flex: none;
+  width: 128px;
+  height: 128px;
+  margin-top: calc(var(--spacing) * 5);
+}
+
+.onboarding-column {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 464px;
+  margin-top: calc(var(--spacing) * 3);
+  transition: opacity var(--dur-text-in) var(--ease-standard);
+}
+
+.onboarding-column[data-leaving] {
+  opacity: 0;
+  transition-duration: var(--dur-text-out);
+}
+
+.onboarding-title {
+  margin: 0;
+  text-align: center;
+  font:
+    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-1--letter-spacing);
+  text-wrap: balance;
+}
+
+.onboarding-title:focus {
+  outline: none;
+}
+
+.onboarding-sub {
+  max-width: 470px;
+  margin: calc(var(--spacing) * 1.5) auto 0;
+  color: var(--color-fg-2);
+  text-align: center;
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
+  text-wrap: pretty;
+}
+
+.onboarding-content {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 3.5);
+  margin-top: calc(var(--spacing) * 7);
+}
+
+.onboarding-note {
+  margin: calc(var(--spacing) * -0.5) 0 0;
+  color: var(--color-fg-3);
+  text-align: center;
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.onboarding-problem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 1.5);
+  margin: calc(var(--spacing) * 4) 0 0;
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.onboarding-footer {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  width: 100%;
+}
+
+.onboarding-back {
+  padding-inline-start: calc(var(--spacing) * 3);
+}
+
+.onboarding-primary {
+  min-width: 140px;
+  margin-inline-start: auto;
+}
+
+.onboarding-model .ui-group-row-label,
+.onboarding-fast .ui-choice-label {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  font-size: var(--text-row);
+  line-height: var(--text-row--line-height);
+}
+
+.onboarding-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.onboarding-chips + .onboarding-secret {
+  margin-top: calc(var(--spacing) * 1.5);
+}
+
+.onboarding-secret .ui-input {
+  -webkit-text-security: disc;
+}
+
+.onboarding-saved {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.onboarding-link {
+  margin: calc(var(--spacing) * 2) 0 0;
+  text-align: center;
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.onboarding-link a {
+  color: var(--color-fg-1);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: calc(var(--spacing) * 0.5);
+}
+
+.onboarding-host {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  margin-inline-start: calc(var(--spacing) * 1.5);
+  padding: 0 calc(var(--spacing) * 1.25);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-control);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  vertical-align: 1px;
+}
+
+.onboarding-center {
+  display: flex;
+  justify-content: center;
+}
+
+.onboarding-summary-value {
+  color: var(--color-fg-1);
+}
+
+/* A phone: a header row with Back, the bars and Later; dot 96; the column flowing under it; and the
+   one primary action, full width, at the bottom. */
+.onboarding[data-layout="phone"] {
+  background: var(--setup-light-phone), var(--color-void);
+}
+
+.onboarding-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  margin-top: calc(var(--spacing) * 2 + env(safe-area-inset-top));
+  padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 4);
+}
+
+.onboarding-head > .ui-icon-button {
+  --_icon-fg: var(--color-fg-1);
+  margin-inline-start: calc(var(--spacing) * -3);
+}
+
+.onboarding-head-spacer {
+  width: 44px;
+}
+
+.onboarding-head .onboarding-progress {
+  min-height: 0;
+  margin: 0;
+}
+
+.onboarding-head .onboarding-bar-step {
+  width: 36px;
+}
+
+.onboarding[data-layout="phone"] .onboarding-page {
+  width: calc(100% - var(--spacing) * 8);
+}
+
+.onboarding[data-layout="phone"] .onboarding-dot {
+  width: 96px;
+  height: 96px;
+  margin-top: calc(var(--spacing) * 2);
+}
+
+.onboarding[data-layout="phone"] .onboarding-column {
+  min-height: 0;
+  margin-top: calc(var(--spacing) * 2.5);
+}
+
+.onboarding[data-layout="phone"] .onboarding-sub {
+  font-size: var(--text-title-3);
+  letter-spacing: var(--text-title-3--letter-spacing);
+}
+
+.onboarding[data-layout="phone"] .onboarding-content {
+  margin-top: calc(var(--spacing) * 4.5);
+}
+
+.onboarding-foot {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4)
+    calc(var(--spacing) * 6 + env(safe-area-inset-bottom));
+}
+
+.onboarding-foot .onboarding-primary {
+  width: 100%;
+  margin: 0;
+}
+
+/* The app under setup: kept mounted, out of sight and out of reach until setup lets it in. */
+.app[data-setup] > :is(.bar, .watch, .replay, .replay-failed) {
+  visibility: hidden;
 }

@@ -59,6 +59,9 @@ export function PresenceLayer({ place, feed, line }: PresenceLayerProps) {
   useEffect(() => {
     if (feed.done) presence.current?.view.react("success");
   }, [feed.done]);
+  useEffect(() => {
+    if (feed.nod) presence.current?.view.react("acknowledged");
+  }, [feed.nod]);
 
   useEffect(() => {
     const p = presence.current;

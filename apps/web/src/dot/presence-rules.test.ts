@@ -26,4 +26,11 @@ describe("where the one live dot is", () => {
       for (const keyboard of [false, true])
         expect(presencePlace({ ...LIVE, showDot: false, curtain, keyboard })).toBeNull();
   });
+
+  it("sits above first-run setup, over whatever the app would show, unless it is off", () => {
+    for (const curtain of [false, true])
+      for (const stageHidden of [false, true])
+        expect(presencePlace({ ...LIVE, setup: true, curtain, stageHidden })).toBe("intro");
+    expect(presencePlace({ ...LIVE, setup: true, showDot: false })).toBeNull();
+  });
 });

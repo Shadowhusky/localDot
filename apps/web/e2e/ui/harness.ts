@@ -2,6 +2,7 @@ import { test as base, expect, type Locator, type Page } from "@playwright/test"
 import sharp from "sharp";
 import { startUiFixture, TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
 import type { UiScenarioName } from "../fixtures/ui-scenarios.ts";
+import { skipSetup } from "../skip-setup.ts";
 
 // The fixture daemon's wall clock starts here and the page's stands still a minute later, so the
 // dates and durations the UI prints are the same on every run.
@@ -53,6 +54,7 @@ export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
     let paused = false;
     page.on("pageerror", (error) => probe.errors.push(error.message));
     await page.exposeFunction("recordCspViolation", (text: string) => probe.csp.push(text));
+    await skipSetup(page);
     await page.addInitScript(() => {
       document.addEventListener("securitypolicyviolation", (event) => {
         // WebKit reports the stylesheet Playwright adds to take a screenshot with no source file,

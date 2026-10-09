@@ -201,6 +201,15 @@
     ),
     linear-gradient(180deg, #17181c 0%, #111215 60%, #0d0e10 100%);
   --curtain-shade: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.35));
+  /* First-run setup: the house with a soft beam from above and a faint pool where dot sits. */
+  --setup-light:
+    radial-gradient(ellipse 34% 60% at 50% -6%, rgba(255, 255, 255, 0.06), transparent 70%),
+    radial-gradient(ellipse 30% 22% at 50% 30%, rgba(255, 255, 255, 0.035), transparent 70%);
+  --setup-light-phone: radial-gradient(
+    ellipse 60% 40% at 50% -4%,
+    rgba(255, 255, 255, 0.06),
+    transparent 70%
+  );
   --color-progress-track: rgba(255, 255, 255, 0.1);
   --color-progress-fill: rgba(238, 239, 241, 0.75);
 

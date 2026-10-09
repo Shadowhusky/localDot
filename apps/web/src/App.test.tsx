@@ -335,64 +335,25 @@ describe("App token states", () => {
     expect(document.body.textContent).not.toMatch(/daemon|token|#code/i);
   });
 
-  it("opens Keys beside the live page and gives focus back to the trigger after closing", async () => {
+  it("opens Settings at Keys over a dimmed page and gives focus back to the trigger after closing", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     render(<App fetchImpl={noCells as typeof fetch} />);
     await screen.findAllByRole("button", { name: "Turn on" });
     const trigger = screen.getByTestId("keys-button");
     fireEvent.click(trigger);
-    const sheet = screen.getByRole("dialog", { name: "Keys" });
-    expect(sheet.getAttribute("aria-modal")).toBe("false");
-    expect(document.querySelector(".watch")?.hasAttribute("inert")).toBe(false);
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
+    expect(within(sheet).getByRole("region", { name: "Keys" })).toBeTruthy();
+    const index = within(sheet).getByRole("navigation", { name: "Settings sections" });
+    expect(within(index).getByRole("button", { name: "Keys" }).getAttribute("aria-current")).toBe(
+      "true",
+    );
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("gives Keys way to Settings, so one sheet shows at a time", async () => {
-    window.localStorage.setItem(TOKEN_KEY, TOKEN);
-    render(<App fetchImpl={noCells as typeof fetch} />);
-    await screen.findAllByRole("button", { name: "Turn on" });
-    fireEvent.click(screen.getByTestId("keys-button"));
-    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
-    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
-    expect(
-      screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-labelledby")),
-    ).toHaveLength(1);
-    fireEvent.click(screen.getByTestId("keys-button"));
-    // Keys opened over Settings slides in as its page, with a way back.
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    const page = document.querySelector<HTMLElement>("[data-page='keys']") as HTMLElement;
-    expect(within(page).getByRole("button", { name: "Settings" })).toBeTruthy();
-  });
-
-  it("asks before Keys with a typed key gives way to Settings", async () => {
-    window.localStorage.setItem(TOKEN_KEY, TOKEN);
-    render(<App fetchImpl={noCells as typeof fetch} />);
-    await screen.findAllByRole("button", { name: "Turn on" });
-    fireEvent.click(screen.getByTestId("keys-button"));
-    const keys = screen.getByRole("dialog", { name: "Keys" });
-    const value = within(keys).getByRole("textbox", { name: "Key" }) as HTMLInputElement;
-    fireEvent.change(value, { target: { value: "sk-typed-but-not-saved" } });
-    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
-    const review = within(bar).getByRole("button", { name: "Settings" });
-    fireEvent.click(review);
-    const prompt = within(keys).getByRole("group", { name: "Discard unsaved changes?" });
-    expect(prompt.hasAttribute("data-shown")).toBe(true);
-    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
-    fireEvent.click(within(keys).getByRole("button", { name: "Keep editing" }));
-    expect(value.value).toBe("sk-typed-but-not-saved");
-    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
-    fireEvent.click(review);
-    fireEvent.click(within(keys).getByRole("button", { name: "Discard" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
-    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-  });
-
-  it("keeps the memory Settings showed while Keys is slid over it", async () => {
+  it("keeps the memory Settings showed while going to Keys in the same sheet", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const memoryReads: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL) => {
@@ -411,17 +372,16 @@ describe("App token states", () => {
     const knows = await screen.findByRole("region", { name: "What dot knows" });
     fireEvent.click(await within(knows).findByRole("button", { name: "Show memory" }));
     await waitFor(() => expect(knows.textContent).toContain("Prefers short replies."));
-    fireEvent.click(screen.getByTestId("keys-button"));
-    const page = document.querySelector<HTMLElement>("[data-page='keys']") as HTMLElement;
-    fireEvent.click(within(page).getByRole("button", { name: "Settings" }));
-    await waitFor(() => expect(document.querySelector("[data-page='keys']")).toBeNull());
+    const index = screen.getByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(index).getByRole("button", { name: "Keys" }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
       "Prefers short replies.",
     );
     expect(memoryReads).toHaveLength(1);
   });
 
-  it("keeps Shut down inside Keys on a phone, where the sheet covers the page", async () => {
+  it("keeps Shut down in Settings on a phone, where the sheet covers the page", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: /width < (700|1100)px/.test(query),
       media: query,
@@ -439,8 +399,10 @@ describe("App token states", () => {
     render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Connecting…"));
     fireEvent.click(screen.getByTestId("keys-button"));
-    const sheet = screen.getByRole("dialog", { name: "Keys" });
-    expect(sheet.getAttribute("aria-modal")).toBe("true");
+    const keys = screen.getByRole("dialog", { name: "Keys" });
+    expect(keys.getAttribute("aria-modal")).toBe("true");
+    fireEvent.click(within(keys).getByRole("button", { name: "Settings" }));
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
     fireEvent.click(within(sheet).getByRole("button", { name: "Shut down" }));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
@@ -463,15 +425,15 @@ describe("App token states", () => {
     fireEvent.input(field, { target: { value: `before ${key} after` } });
     expect(field.value).toBe("before  after");
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
-    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe(key);
-    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
+    const keys = () => screen.getByRole("region", { name: "Keys" });
+    expect((within(keys()).getByLabelText("Key") as HTMLInputElement).value).toBe(key);
+    expect(within(keys()).getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
     expect(calls.some((call) => call.method === "POST")).toBe(false);
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
     fireEvent.click(screen.getByTestId("keys-button"));
-    expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
+    expect((within(keys()).getByLabelText("Key") as HTMLInputElement).value).toBe("");
     expect(field.value).toBe("before  after");
   });
 

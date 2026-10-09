@@ -245,6 +245,11 @@ export const ICONS = {
     ["path", { d: "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" }],
     ["path", { d: "M2 12h20" }],
   ],
+  "message-circle": [["path", { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z" }]],
+  code: [
+    ["path", { d: "m16 18 6-6-6-6" }],
+    ["path", { d: "m8 6-6 6 6 6" }],
+  ],
   monitor: [
     ["rect", { width: "20", height: "14", x: "2", y: "3", rx: "2" }],
     ["line", { x1: "8", x2: "16", y1: "21", y2: "21" }],
@@ -363,6 +368,19 @@ export const ICONS = {
     ["circle", { cx: "12", cy: "12", r: "9.5" }],
     ["path", { d: "M12 16v-4.5" }],
     ["path", { d: "M12 8h.01" }],
+  ],
+  chart: [
+    ["path", { d: "M3 3v18h18" }],
+    ["path", { d: "M18 17V9" }],
+    ["path", { d: "M13 17V5" }],
+    ["path", { d: "M8 17v-3" }],
+  ],
+  "file-text": [
+    ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }],
+    ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }],
+    ["path", { d: "M16 13H8" }],
+    ["path", { d: "M16 17H8" }],
+    ["path", { d: "M10 9H8" }],
   ],
 } as const satisfies Record<string, IconNode>;
 
