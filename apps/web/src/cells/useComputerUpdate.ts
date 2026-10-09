@@ -19,14 +19,16 @@ const PLAIN = new Set([
   "Wait for dot to finish, or stop the task first.",
   "Hand back the computer first.",
   "Your computer couldn't be updated. It's back as it was.",
+  "Your computer couldn't be updated. Turn it on to keep using it.",
   "The update didn't finish. Turn on your computer to finish it.",
+  "localDot can't read its update records. Restart localDot, then turn on your computer.",
   "The new version isn't on this Mac yet.",
   "This computer is too old to update.",
   "The key layer didn't answer. Try again in a moment.",
 ]);
 
 export function describeUpdateError(status: number | null, text: string): string {
-  if (status === null) return "localDot's daemon isn't answering. Check that it's running.";
+  if (status === null) return "localDot isn't answering. Check that it's running.";
   if (status === 409 && PLAIN.has(text)) return text;
   if (status === 502) return `${DOCKER_DOWN}, then try again.`;
   return "Your computer couldn't be updated. Try again.";
@@ -37,6 +39,8 @@ export interface ComputerUpdate {
   available: boolean;
   busy: boolean;
   error: string | null;
+  // Why Update has to wait: dot is at work, or the user holds the computer.
+  waitReason?: string;
   run(): void;
 }
 
@@ -140,11 +144,11 @@ export function useUpdateNotice(cell: CellSummary | null, idle: boolean, update:
       notice(id, false);
       shown.current = null;
     }
-    if (!ready) {
+    if (!ready || !idle) {
       dismissToast(READY);
       return;
     }
-    if (!idle || shown.current === id || noticed(id)) return;
+    if (shown.current === id || noticed(id)) return;
     shown.current = id;
     notice(id, true);
     showToast({

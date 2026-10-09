@@ -239,5 +239,8 @@ describe("hudFor", () => {
       caption: "The update didn't finish. Turn on your computer to finish it.",
       action: { kind: "start", enabled: true },
     });
+    const unreadable =
+      "localDot can't read its update records. Restart localDot, then turn on your computer.";
+    expect(hudFor(known(cell("failed", "none", unreadable))).caption).toBe(unreadable);
   });
 });

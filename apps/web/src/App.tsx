@@ -687,11 +687,14 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
-  useUpdateNotice(
-    cell,
-    hud.phase === "live" && (!task || task.phase === "finished"),
-    computerUpdate,
-  );
+  // The daemon refuses an Update in these cases too; the button says so before it is pressed.
+  const updateWait =
+    agent.snapshot?.holder === true || yours
+      ? "Hand back the computer first"
+      : task && task.phase !== "finished"
+        ? "Wait for dot to finish"
+        : undefined;
+  useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -1293,6 +1296,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               computerReady={cell?.state === "ready" && !cell.paused}
+              computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
                 agent.sessionId && (agent.model.ended || task?.phase === "finished")
@@ -1461,7 +1465,7 @@ function Theatre({ api }: { api: ApiClient }) {
           stream={streamChoice}
           taskControls={<StopControl controls={controls} />}
           stop={sheetStopControl}
-          update={computerUpdate}
+          update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
           open={settings.open}
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}

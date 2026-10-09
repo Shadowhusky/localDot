@@ -657,7 +657,13 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
         )
       }
       trailing={
-        <Button size="sm" variant="primary" busy={update.busy} onClick={update.run}>
+        <Button
+          size="sm"
+          variant="primary"
+          busy={update.busy}
+          disabledReason={update.busy ? undefined : update.waitReason}
+          onClick={update.run}
+        >
           Update
         </Button>
       }

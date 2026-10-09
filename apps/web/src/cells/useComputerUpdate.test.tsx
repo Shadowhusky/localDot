@@ -81,7 +81,12 @@ it("passes on only the daemon's own plain refusals", () => {
     "Your computer couldn't be updated. Try again.",
   );
   expect(kit.describeUpdateError(502, "docker 500 on /containers/x")).toContain("Docker");
-  expect(kit.describeUpdateError(null, "")).toContain("daemon isn't answering");
+  expect(kit.describeUpdateError(null, "")).toBe(
+    "localDot isn't answering. Check that it's running.",
+  );
+  expect(
+    kit.describeUpdateError(409, "Your computer couldn't be updated. Turn it on to keep using it."),
+  ).toBe("Your computer couldn't be updated. Turn it on to keep using it.");
 });
 
 it("sends one update at a time and stays busy until the daemon answers", async () => {
@@ -125,6 +130,20 @@ it("says once that a new version is ready, only while dot is not at work", async
   kit = { ...(await import("../ui/Toast.tsx")), ...(await import("./useComputerUpdate.ts")) };
   render(<Shell api={api} computer={cell({ updateAvailable: true })} />);
   await settle();
+  expect(toasts().join()).not.toContain(kit.UPDATE_READY);
+});
+
+it("takes the notice back when dot starts working", async () => {
+  const { api } = control();
+  const view = render(<Shell api={api} computer={cell({ updateAvailable: true })} />);
+  await settle();
+  expect(toasts()[0]).toContain(kit.UPDATE_READY);
+  view.rerender(<Shell api={api} computer={cell({ updateAvailable: true })} idle={false} />);
+  await settle(10_000);
+  expect(toasts().join()).not.toContain(kit.UPDATE_READY);
+  // Once said, it stays said: Settings keeps the Update row.
+  view.rerender(<Shell api={api} computer={cell({ updateAvailable: true })} />);
+  await settle(10_000);
   expect(toasts().join()).not.toContain(kit.UPDATE_READY);
 });
 

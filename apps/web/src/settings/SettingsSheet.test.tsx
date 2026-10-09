@@ -553,6 +553,27 @@ describe("settings inspector", () => {
     expect(within(sheet()).queryByText(/new version/)).toBeNull();
   });
 
+  it("holds Update, saying why, while dot works or you hold the computer", () => {
+    const run = vi.fn();
+    render(
+      <SettingsSheet
+        {...props()}
+        update={{
+          available: true,
+          busy: false,
+          error: null,
+          waitReason: "Wait for dot to finish",
+          run,
+        }}
+      />,
+    );
+    const button = within(sheet()).getByRole("button", { name: "Update" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button);
+    expect(run).not.toHaveBeenCalled();
+    expect(within(sheet()).getByText("A new version of your computer is ready")).toBeTruthy();
+  });
+
   it("offers Auto, Sharp and Smooth for the stream in Your computer, on every size", () => {
     const change = vi.fn();
     const stream = { value: "auto" as const, saved: true, change };
