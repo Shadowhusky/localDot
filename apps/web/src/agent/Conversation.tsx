@@ -83,6 +83,8 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
 interface ThreadContext {
   announce(text: string): void;
   downloads: ResultDownloads;
+  // How many results the thread holds: another one changes the versions of files already shown.
+  results: number;
   ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk: string | null;
   // The fields of the question dot is waiting on, drawn under it.
@@ -211,6 +213,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         <ResultCard
           result={item.result}
           downloads={thread.downloads}
+          refresh={thread.results}
           onReplay={earlier ? replay && (() => replay(earlier)) : thread.onReplay}
         />
       );
@@ -218,6 +221,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
     same: (was, now, then, thread) =>
       was.result === now.result &&
       then.downloads === thread.downloads &&
+      then.results === thread.results &&
       then.onReplay === thread.onReplay &&
       then.replayTask === thread.replayTask,
   },
@@ -652,6 +656,7 @@ export function Conversation({
   const thread: ThreadContext = {
     announce,
     downloads,
+    results: results.length,
     ended,
     pendingAsk,
     ask,

@@ -77,21 +77,27 @@ export function usePreview(
         setState({ state: "image", url, madeBy: loaded.madeBy });
       } else setState({ state: "ready", preview: loaded });
     };
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        observer.disconnect();
-        load()
-          .catch(() => {
-            if (!controller.signal.aborted) setState({ state: "error" });
-          })
-          .finally(() => release?.());
-      },
-      { rootMargin: "200px" },
-    );
-    if (target.current) observer.observe(target.current);
+    const start = () =>
+      load()
+        .catch(() => {
+          if (!controller.signal.aborted) setState({ state: "error" });
+        })
+        .finally(() => release?.());
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? undefined
+        : new IntersectionObserver(
+            (entries) => {
+              if (!entries.some((entry) => entry.isIntersecting)) return;
+              observer?.disconnect();
+              void start();
+            },
+            { rootMargin: "200px" },
+          );
+    if (!observer) void start();
+    else if (target.current) observer.observe(target.current);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       controller.abort();
       release?.();
       if (url) URL.revokeObjectURL(url);
