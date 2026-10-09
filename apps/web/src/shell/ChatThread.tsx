@@ -135,7 +135,6 @@ export function ChatThread({
       api={api}
       sessionId={sessionId}
       recovery={recovery}
-      error={agent?.error}
       onReplay={onReplay}
       onReplayTask={onReplayTask}
       computerReady={computerReady}

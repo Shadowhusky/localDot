@@ -453,6 +453,42 @@
     outline-offset: calc(var(--focus-width) * -1);
   }
 
+  /* Inline: the trigger is a quiet line of 12 px text with its chevron, reaching 32 px around it. */
+  .ui-disclosure[data-inline] > .ui-disclosure-trigger {
+    display: inline-flex;
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    gap: var(--spacing);
+    border: 0;
+    border-radius: var(--radius-xs);
+  }
+
+  .ui-disclosure[data-inline] > .ui-disclosure-trigger::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--spacing) * -2);
+  }
+
+  .ui-disclosure[data-inline] > .ui-disclosure-trigger:is(:hover, [data-pressed]) {
+    background-color: transparent;
+    color: var(--color-fg-1);
+  }
+
+  .ui-disclosure[data-inline] > .ui-disclosure-trigger:focus-visible {
+    outline-offset: 2px;
+  }
+
+  .ui-detail-lines {
+    display: grid;
+    gap: var(--spacing);
+    padding: calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 0.5);
+    list-style: none;
+    color: var(--color-fg-2);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
   .ui-scroll-area {
     min-height: 0;
     overflow-x: hidden;
@@ -593,7 +629,10 @@
     overflow-wrap: anywhere;
   }
 
+  /* A detail that will not wrap (a list of sites) ellipsises in its column, never under the
+     row's trailing control. */
   .ui-group-row-detail {
+    min-width: 0;
     color: var(--color-fg-3);
     font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
     font-weight: var(--font-weight-normal);
@@ -743,6 +782,14 @@
   @media (--coarse) {
     .ui-disclosure-trigger {
       min-height: calc(var(--spacing) * 11);
+    }
+
+    .ui-disclosure[data-inline] > .ui-disclosure-trigger {
+      min-height: 0;
+    }
+
+    .ui-disclosure[data-inline] > .ui-disclosure-trigger::after {
+      inset: calc(var(--spacing) * -3.5) calc(var(--spacing) * -3);
     }
   }
 

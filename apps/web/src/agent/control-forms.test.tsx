@@ -13,7 +13,6 @@ import {
   type AgentTakeover,
   emptyAgentModel,
 } from "./model.ts";
-import { StopControl } from "./StopControl.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { useHandBack } from "./useHandBack.ts";
 import { type TaskControls, useTaskControls } from "./useTaskControls.ts";
@@ -109,23 +108,18 @@ function mount(takeover: boolean, manualControl: "ready" | "unconfirmed" = "read
       refreshCell: () => {},
     });
     const handBack = useHandBack({ takeover: control, controls, drained });
-    return (
-      <>
-        {takeover ? (
-          <ControlTools
-            send={send}
-            typing={false}
-            onKeyboard={keyboard}
-            rightClick={false}
-            onRightClick={rightClick}
-            handBack={handBack.slot}
-            onHandBack={() => void handBack.run()}
-          />
-        ) : (
-          <Ask controls={controls} />
-        )}
-        <StopControl controls={controls} />
-      </>
+    return takeover ? (
+      <ControlTools
+        send={send}
+        typing={false}
+        onKeyboard={keyboard}
+        rightClick={false}
+        onRightClick={rightClick}
+        handBack={handBack.slot}
+        onHandBack={() => void handBack.run()}
+      />
+    ) : (
+      <Ask controls={controls} />
     );
   }
   const view = render(<Parts />);

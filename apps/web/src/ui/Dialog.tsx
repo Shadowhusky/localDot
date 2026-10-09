@@ -12,6 +12,8 @@ export interface DialogProps {
   onClose(): void;
   title: ReactNode;
   description?: ReactNode;
+  // What the choice is about, as label and value pairs under the description.
+  facts?: readonly (readonly [string, ReactNode])[];
   // The control that asked. The dialog grows out of it, and on a wide screen opens beside it.
   anchor?: RefObject<HTMLElement | null>;
   // The choices, the safe one first: it takes focus, so Enter never confirms by accident.
@@ -55,6 +57,7 @@ function DialogLayer({
   onClose,
   title,
   description,
+  facts,
   anchor,
   children,
   root,
@@ -123,6 +126,16 @@ function DialogLayer({
           <p id={descriptionId} className="ui-dialog-description">
             {description}
           </p>
+        )}
+        {facts && (
+          <dl className="ui-dialog-facts">
+            {facts.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
         <div className="ui-dialog-actions">{children}</div>
       </section>
