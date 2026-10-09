@@ -60,8 +60,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a " +
     "file and you get its path) or qr (shows value as a QR code for the user's other device). Name the buttons " +
     'with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the ' +
-    "field at target ([x, y] in screen pixels), or into the field that has keyboard focus when there is no " +
-    "target; you only learn that it was provided. Answers come back by field id. If the user declines, carry on " +
+    "password box at target ([x, y] in screen pixels), or into the password box that has keyboard focus when " +
+    "there is no target; you only learn that it was provided. Answers come back by field id. If the user declines, carry on " +
     "without it.",
   request_takeover:
     "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +

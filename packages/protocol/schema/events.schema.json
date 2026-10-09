@@ -3733,6 +3733,11 @@
                           "h"
                         ],
                         "additionalProperties": false
+                      },
+                      "site": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
                       }
                     },
                     "required": [
@@ -3759,6 +3764,10 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 40
+            },
+            "declinable": {
+              "type": "boolean",
+              "const": false
             }
           },
           "required": [

@@ -920,15 +920,17 @@ describe("session-owned screen authority", () => {
             screen: "browser",
             point: { x: 800, y: 600 },
             bbox: { x: 640, y: 580, w: 320, h: 40 },
+            site: "mail.example.test",
           },
         },
       ],
     });
     f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
     expect((await asking).result.ok).toBe(true);
-    expect(f.client.input.mock.calls.at(-1)?.at(2)).toMatchObject({
-      input: { kind: "click", at: { x: 400, y: 300 } },
-    });
+    expect(f.client.input.mock.calls.slice(-2).map((call) => call.at(2))).toMatchObject([
+      { input: { kind: "click", at: { x: 400, y: 300 } } },
+      { input: { kind: "key", combo: ["ctrl", "a"] } },
+    ]);
     expect(f.client.type.mock.calls.at(-1)?.at(2)).toMatchObject({ text: secret, masked: true });
 
     f.client.type.mockClear();

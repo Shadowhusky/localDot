@@ -93,7 +93,9 @@ async function look(screen: Screen, at?: Point): Promise<NativeActionIdentity> {
   };
 }
 
-// The field as it is now, when dot asks; a message for dot when there is none to type into.
+// The field as it is now, when dot asks; a message for dot when there is none to type into. Only a
+// field that hides what is typed takes a secret: anywhere else it would show on screen and in the
+// recording, run as a command, or be read back.
 export function findSecretField(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -113,6 +115,10 @@ export function findSecretField(
       return at
         ? "There is no text field at that target. Take a screenshot and point at the field the answer goes into."
         : "No text field has keyboard focus. Click the field first, or give its point as target.";
+    if (found.target.secret !== true)
+      return at
+        ? "The field at that target shows what is typed, so a secret can't go there. Point at the password box, or hand the computer to the user."
+        : "The field with keyboard focus shows what is typed, so a secret can't go there. Give the password box's point as target, or hand the computer to the user.";
     return {
       screen: { name: screen.name, cellId: screen.cellId, revision: screen.revision },
       ...(at ? { at } : {}),
@@ -181,6 +187,17 @@ function deliver(
       )
         return false;
     }
+    // Whatever the field already holds, such as an earlier try, is replaced rather than added to.
+    await screen.device.client.input(
+      {
+        input: { kind: "key", combo: ["ctrl", "a"] },
+        holdMs: 0,
+        injector: "xtest",
+        ...(window === undefined ? {} : { window }),
+      },
+      screen.signal,
+    );
+    screen.check();
     startTyping();
     const typed = await screen.device.client.type(
       {

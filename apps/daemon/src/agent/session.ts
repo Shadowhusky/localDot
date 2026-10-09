@@ -58,6 +58,8 @@ interface Question {
   options: string[];
   allowText: boolean;
   form?: Omit<AskForm, "question">;
+  // Only an answer ends it: "Not now" is refused.
+  declinable?: boolean;
 }
 export interface TakeoverOutcome {
   note?: string;
@@ -176,6 +178,7 @@ export class AgentSession {
         options: string[];
         allowText: boolean;
         fields?: readonly AskRequestField[];
+        declinable: boolean;
         finish(a: AskAnswer): boolean;
       }
     | undefined;
@@ -393,6 +396,7 @@ export class AgentSession {
           "I repeated the same action twice. What should I change before continuing? Resume is a separate control.",
         options: ["I will change the instructions", "I want to take control"],
         allowText: true,
+        declinable: false,
       },
       0,
       undefined,
@@ -896,7 +900,7 @@ export class AgentSession {
     return this.#question(prompt, timeoutMs, step, combined, () => this.isCurrent(generation));
   }
   #question(
-    { question, options, allowText, form }: Question,
+    { question, options, allowText, form, declinable = true }: Question,
     timeoutMs: number,
     step: string | undefined,
     combined: AbortSignal,
@@ -916,6 +920,7 @@ export class AgentSession {
         if (settled) return false;
         if (answer.by === "user" && (combined.aborted || this.stopped || !ownerCurrent()))
           return false;
+        if (answer.declined && !declinable) return false;
         settled = true;
         if (timer) clearTimeout(timer);
         combined.removeEventListener("abort", aborted);
@@ -953,6 +958,7 @@ export class AgentSession {
             options: options.map((text, i) => ({ key: keys[i], text })),
             allowText,
             ...form,
+            ...(declinable ? {} : { declinable: false }),
           },
           step,
         );
@@ -969,6 +975,7 @@ export class AgentSession {
         options: keys,
         allowText,
         ...(form ? { fields: form.fields } : {}),
+        declinable,
         finish,
       };
       if (!this.safetyPause) this.status = "waiting_user";
@@ -1013,10 +1020,10 @@ export class AgentSession {
     }
     return ask.finish({ fields: record, secrets: new SecretAnswers(secrets), by: "user" });
   }
-  // "Not now": dot is told the user declined.
+  // "Not now": dot is told the user declined. A question that has no way out keeps waiting.
   decline(askId: string): boolean {
     const ask = this.#ask;
-    if (!ask || ask.askId !== askId || this.stopped) return false;
+    if (!ask || ask.askId !== askId || !ask.declinable || this.stopped) return false;
     return ask.finish({ declined: true, by: "user" });
   }
 

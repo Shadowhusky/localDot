@@ -46,6 +46,8 @@ function device() {
     calls: [] as string[],
     typed: [] as TypeRequest[],
     typeError: undefined as Error | undefined,
+    // How many characters the device says it typed, when not all of them.
+    typedCount: undefined as number | undefined,
   };
   const client = {
     hitTest: async (point: { x: number; y: number }) => {
@@ -57,8 +59,12 @@ function device() {
       return state.focus;
     },
     input: async (request: InputRequest) => {
-      const at = request.input.kind === "click" ? request.input.at : undefined;
-      state.calls.push(`click ${at?.x},${at?.y} window ${request.window}`);
+      const { input } = request;
+      if (input.kind === "key") state.calls.push(`key ${input.combo.join("+")}`);
+      else {
+        const at = input.kind === "click" ? input.at : undefined;
+        state.calls.push(`click ${at?.x},${at?.y} window ${request.window}`);
+      }
       return { pressMono: 1, presses: [1], injector: "xtest" as const, armedMono: 0 };
     },
     type: async (request: TypeRequest) => {
@@ -67,7 +73,7 @@ function device() {
       state.typed.push(request);
       return {
         done: true as const,
-        count: [...request.text].length,
+        count: state.typedCount ?? [...request.text].length,
         firstPressMono: 1,
         injector: "xtest" as const,
         armedMono: 0,
@@ -129,7 +135,12 @@ describe("ask_user with fields", () => {
           id: "password",
           kind: "secret",
           label: "Password",
-          target: { screen: "desktop", point: { x: 800, y: 600 }, bbox: PASSWORD.bbox },
+          target: {
+            screen: "desktop",
+            point: { x: 800, y: 600 },
+            bbox: PASSWORD.bbox,
+            site: "mail.example.test",
+          },
         },
       ],
     });
@@ -152,6 +163,7 @@ describe("ask_user with fields", () => {
       "hit 800,600",
       "click 800,600 window 7",
       "focused",
+      "key ctrl+a",
       "type",
     ]);
     expect(h.state.typed).toEqual([
@@ -189,7 +201,7 @@ describe("ask_user with fields", () => {
     expect(h.session.answerFields(askId, { wifi: SECRET }, (text) => text)).toBe(true);
     const { result } = await asking;
     expect(result.ok).toBe(true);
-    expect(h.state.calls).toEqual(["focused", "focused", "type"]);
+    expect(h.state.calls).toEqual(["focused", "focused", "key ctrl+a", "type"]);
     expect(h.state.typed.map((t) => t.text)).toEqual([SECRET]);
   });
 
@@ -236,6 +248,47 @@ describe("ask_user with fields", () => {
     expect(textOf(result)).toContain("There is no text field at that target");
     expect(h.session.pendingAsk).toBeUndefined();
     expect(h.events().some((e) => e.type === "ask.request")).toBe(false);
+  });
+
+  it("refuses a field that shows what is typed, by its point or by keyboard focus", async () => {
+    for (const ask of [
+      LOGIN,
+      { question: "Sign in", fields: [{ id: "password", kind: "secret", label: "Password" }] },
+    ]) {
+      const h = setup();
+      const search = { ...PASSWORD, role: "entry", name: "Search", editable: true, secret: false };
+      h.state.hit = { ...h.state.hit, target: search };
+      h.state.focus = { ...h.state.focus, target: search };
+      const { result } = await h.call(ask);
+      expect(result.ok).toBe(false);
+      expect(textOf(result)).toContain("shows what is typed, so a secret can't go there");
+      expect(h.session.pendingAsk).toBeUndefined();
+      expect(h.events().some((e) => e.type === "ask.request")).toBe(false);
+    }
+  });
+
+  it("refuses a target off the screen before looking at it", async () => {
+    const h = setup();
+    const { result } = await h.call({
+      ...LOGIN,
+      fields: [{ id: "password", kind: "secret", label: "Password", target: [1280, 300] }],
+    });
+    expect(result.ok).toBe(false);
+    expect(textOf(result)).toContain("The target (1280, 300) is outside the 1280x800 screen.");
+    expect(h.state.calls).toEqual([]);
+    expect(h.events().some((e) => e.type === "ask.request")).toBe(false);
+  });
+
+  it("says typing could not be confirmed when the device typed fewer characters", async () => {
+    const h = setup();
+    h.state.typedCount = 3;
+    const asking = h.call(LOGIN);
+    const askId = await h.asked();
+    h.session.answerFields(askId, { email: "ada@example.test", password: SECRET }, (t) => t);
+    const { result } = await asking;
+    expect(result.ok).toBe(false);
+    expect(textOf(result)).toContain("Typing the answer for password could not be confirmed");
+    expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
   it("keeps the device's own error text, which could quote the secret, out of the result and log", async () => {

@@ -322,8 +322,16 @@ export const AskRequestField = z.object({
   options: z.array(z.string().min(1).max(200)).min(1).max(6).optional(),
   length: z.number().int().min(4).max(12).optional(),
   value: z.string().min(1).max(2000).optional(),
-  // secret: where the field the answer is typed into was when dot asked, in the screen's pixels.
-  target: z.object({ screen: ScreenName, point: Point, bbox: Rect.optional() }).optional(),
+  // secret: where the field the answer is typed into was when dot asked, in the screen's pixels,
+  // and the site whose page holds it.
+  target: z
+    .object({
+      screen: ScreenName,
+      point: Point,
+      bbox: Rect.optional(),
+      site: z.string().min(1).max(255).optional(),
+    })
+    .optional(),
 });
 export type AskRequestField = z.infer<typeof AskRequestField>;
 // A request with `fields` answers per field (options is empty and allowText false); one without
@@ -340,6 +348,8 @@ export const AskRequest = event(
     fields: z.array(AskRequestField).min(1).max(MAX_ASK_FIELDS).optional(),
     submit: z.string().min(1).max(40).optional(),
     decline: z.string().min(1).max(40).optional(),
+    // Only an answer ends it: there is no way out ("Not now").
+    declinable: z.literal(false).optional(),
   }),
 );
 export const SafetyPause = event(

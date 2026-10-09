@@ -431,6 +431,26 @@ describe("ChatGPT production integration", () => {
     expect(first?.[0].policy).toBe(f.policy);
     expect(second?.[0].policy).toBe(f.policy);
   });
+  it.each([
+    ["paused", { paused: true }],
+    ["fenced", { fenced: { revision: 1 } }],
+    ["waiting on its replacement", { replacementPending: true }],
+    ["not ready", { state: "stopping" }],
+    ["held by the kill switch", {}],
+  ] as const)("gives secret typing no device while the computer is %s", async (name, patch) => {
+    const f = setup();
+    const device = { client: {} } as unknown as NonNullable<
+      ReturnType<AgentWiringDeps["registry"]["for"]>
+    >;
+    f.deps.registry.for = () => device;
+    const tools = required(m.tool).tools;
+    expect(tools.device?.(f.cellId)).toBeUndefined();
+    await f.agent.start();
+    expect(tools.device?.(f.cellId)).toBe(device);
+    if (name === "held by the kill switch") f.state.busy = true;
+    else f.change(patch);
+    expect(tools.device?.(f.cellId)).toBeUndefined();
+  });
   it("supplies a full-frame PNG and records provenance only after all checks", async () => {
     const f = setup();
     await f.agent.start();

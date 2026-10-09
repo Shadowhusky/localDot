@@ -13,6 +13,18 @@ const ASK_TIMEOUT_MS = 30 * 60_000;
 const DECLINED =
   "The user declined (Not now). Do not ask for this again unless the user brings it up; continue without it, or finish and say what is left.";
 
+// The site whose page holds the field, so the user sees where the password goes.
+function siteOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const { protocol, host } = new URL(url);
+    if (protocol !== "https:" && protocol !== "http:") return undefined;
+    return host && host.length <= 255 ? host : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function unanswered(answer: AskAnswer): ToolResult | undefined {
   if (answer.by === "pause")
     return {
@@ -83,6 +95,7 @@ async function askFields(
   const shown = (field: (typeof fields)[number]): AskRequestField => {
     const where = secrets.get(field.id);
     const target = where?.found.target;
+    const site = siteOf(target?.url);
     return {
       id: field.id,
       kind: field.kind,
@@ -97,6 +110,7 @@ async function askFields(
               screen: where.screen.name,
               point: where.at ?? target.point,
               ...(target.bbox ? { bbox: target.bbox } : {}),
+              ...(site ? { site } : {}),
             },
           }
         : {}),
