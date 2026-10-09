@@ -77,6 +77,11 @@ const PLANNED: IconName[] = [
   "file-text",
   // Routines: dot's own repeating work.
   "repeat",
+  // The full preview of a document or deck: its pages, Present, and zoom on a phone.
+  "layout-grid",
+  "presentation",
+  "zoom-in",
+  "zoom-out",
   // First-run setup: the ChatGPT plan and coding plans (design-v2 §11 A0).
   "message-circle",
   "code",

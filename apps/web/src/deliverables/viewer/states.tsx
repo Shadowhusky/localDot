@@ -6,11 +6,13 @@ function extension(name: string): string {
   return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1, dot + 5).toUpperCase() : "FILE";
 }
 
-// While a file loads: the shape of what is coming, no words that flash past.
-export function ViewerLoading({ label }: { label: string }) {
+// While a file loads: the shape of what is coming, no words that flash past. A wait long enough to
+// wonder about says what it is waiting for.
+export function ViewerLoading({ label, note }: { label: string; note?: string }) {
   return (
     <div className="viewer-center" aria-busy="true">
       <Progress label={label} className="viewer-progress" />
+      {note && <p className="viewer-loading-note">{note}</p>}
     </div>
   );
 }
@@ -41,12 +43,22 @@ export function ViewerMessage({
   );
 }
 
-// A row of controls above the file, and a note at its end; nothing when it has neither.
-export function ViewerBar({ children, note }: { children?: ReactNode; note?: ReactNode }) {
-  if (!children && !note) return null;
+// A row of controls above the file: what it can do at the start, more controls or a quiet fact
+// about it at the end; nothing when it has none.
+export function ViewerBar({
+  children,
+  note,
+  end,
+}: {
+  children?: ReactNode;
+  note?: ReactNode;
+  end?: ReactNode;
+}) {
+  if (!children && !note && !end) return null;
   return (
     <div className="viewer-bar">
       <div className="viewer-bar-controls">{children}</div>
+      {end && <div className="viewer-bar-controls viewer-bar-end">{end}</div>}
       {note && <div className="viewer-bar-note">{note}</div>}
     </div>
   );

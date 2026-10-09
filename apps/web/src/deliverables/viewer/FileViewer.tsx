@@ -4,6 +4,7 @@ import "@localdot/protocol/csp";
 import {
   canOpenOnMac,
   fileExtension,
+  isPresentation,
   type TextFormat,
   textFormat,
   VIEWER_LIMITS,
@@ -24,9 +25,9 @@ import type { ApiClient } from "../../lib/api.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { matches, REDUCED_MOTION } from "../../ui/media.ts";
+import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Sheet } from "../../ui/Sheet.tsx";
-import { keptPreviewBase, loadPreview, previewBase, previewUrl } from "../api.ts";
-import { PREVIEW_REASONS } from "../FilePreview.tsx";
+import { keptPreviewBase, previewBase, previewUrl } from "../api.ts";
 import { openHere } from "../open-here.ts";
 import { MediaView } from "./MediaView.tsx";
 import { PageView } from "./PageView.tsx";
@@ -35,10 +36,14 @@ import { entryKey, type ShownVersion, type ViewerEntry } from "./scope.tsx";
 import { ViewerLoading, ViewerMessage } from "./states.tsx";
 import { TableView } from "./TableView.tsx";
 import { TextView } from "./TextView.tsx";
+import { viewerHears } from "./viewer-keys.ts";
 import { rubberband, swipeTurn } from "./zoom.ts";
 import "./viewer.css";
 
-const PdfView = lazy(() => import("./PdfView.tsx").then((module) => ({ default: module.PdfView })));
+const PdfFile = lazy(() => import("./PdfView.tsx").then((module) => ({ default: module.PdfFile })));
+const OfficePages = lazy(() =>
+  import("./PdfView.tsx").then((module) => ({ default: module.OfficePages })),
+);
 const LARGE = ["large"] as const;
 // Past these a file shows "Too large to preview"; text and tables show their start instead.
 const CAPS: Partial<Record<ViewerKind, number>> = {
@@ -98,7 +103,7 @@ export function kindLabel(name: string): string {
     sheet: "Spreadsheet",
     audio: `${ext} audio`,
     video: `${ext} video`,
-    page: `${ext} document`,
+    page: isPresentation(name) ? `${ext} presentation` : `${ext} document`,
     details: ext ? `${ext} file` : "File",
   };
   return labels[kind];
@@ -200,17 +205,7 @@ export function FileViewer({
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       const target = event.target as HTMLElement | null;
       const host = root.current;
-      if (
-        !host ||
-        (target && target !== document.body && !host.closest(".ui-sheet")?.contains(target))
-      )
-        return;
-      if (
-        target?.closest(
-          "input, textarea, select, [contenteditable], [role=radiogroup], [role=tablist], [role=slider], video, audio",
-        )
-      )
-        return;
+      if (!host || !viewerHears(host, target)) return;
       const step = event.key === "ArrowLeft" ? -1 : 1;
       if (target && scrollsAcross(target, -step, host)) return;
       event.preventDefault();
@@ -280,6 +275,8 @@ export function FileViewer({
 
   const state = downloads.state(entry.resultId, entry.file);
   const kind = viewerKind(item.name);
+  // The arrows turn a document's own pages.
+  const paged = kind === "pdf" || kind === "page";
   const meta = [kindLabel(item.name), bytes(item.bytes), item.label ? `v${item.label}` : null]
     .filter(Boolean)
     .join(" · ");
@@ -314,7 +311,7 @@ export function FileViewer({
             icon="chevron-left"
             size={32}
             label="Previous file"
-            kbd={["←"]}
+            kbd={paged ? undefined : ["←"]}
             disabledReason={index === 0 ? "This is the first file" : undefined}
             onClick={() => go(-1)}
           />
@@ -325,7 +322,7 @@ export function FileViewer({
             icon="chevron-right"
             size={32}
             label="Next file"
-            kbd={["→"]}
+            kbd={paged ? undefined : ["→"]}
             disabledReason={index === total - 1 ? "This is the last file" : undefined}
             onClick={() => go(1)}
           />
@@ -429,9 +426,16 @@ function ViewBody({
   if (url === "failed") return <ViewerMessage name={name} title="Couldn't load the preview" />;
   if (kind === "text")
     return <TextView api={api} sessionId={sessionId} name={name} version={version} />;
-  if (kind === "table" || kind === "sheet")
+  if (kind === "table")
     return <TableView api={api} sessionId={sessionId} name={name} version={version} />;
-  if (kind === "page") return <DocumentView api={api} item={item} />;
+  if (kind === "sheet")
+    return <SheetView api={api} sessionId={sessionId} name={name} version={version} />;
+  if (kind === "page")
+    return (
+      <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
+        <OfficePages api={api} sessionId={sessionId} name={name} version={version} />
+      </Suspense>
+    );
   if (kind === "html")
     return <PageView api={api} url={url} sessionId={sessionId} name={name} version={version} />;
   if (kind === "details")
@@ -444,7 +448,7 @@ function ViewBody({
   if (kind === "pdf")
     return (
       <Suspense fallback={<ViewerLoading label="Loading the PDF" />}>
-        <PdfView key={url} api={api} url={url} name={name} />
+        <PdfFile key={url} api={api} url={url} name={name} />
       </Suspense>
     );
   if (kind === "audio" || kind === "video")
@@ -452,39 +456,30 @@ function ViewBody({
   return <PictureView key={url} src={url} name={name} />;
 }
 
-// A document dot's computer drew as a page: its first page, as a picture.
-function DocumentView({ api, item }: { api: ApiClient; item: Item }) {
-  const [page, setPage] = useState<{ url: string } | { reason: string } | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    let made: string | undefined;
-    loadPreview(api, item.sessionId, item.name, item.version, controller.signal).then(
-      (preview) => {
-        if (controller.signal.aborted) return;
-        if (preview.kind === "image") {
-          made = URL.createObjectURL(preview.blob);
-          setPage({ url: made });
-        } else
-          setPage({
-            reason:
-              preview.kind === "none" ? PREVIEW_REASONS[preview.reason] : PREVIEW_REASONS.failed,
-          });
-      },
-      () => !controller.signal.aborted && setPage({ reason: PREVIEW_REASONS.failed }),
-    );
-    return () => {
-      controller.abort();
-      if (made) URL.revokeObjectURL(made);
-    };
-  }, [api, item.sessionId, item.name, item.version]);
-  if (page === null) return <ViewerLoading label="Making a preview on your computer" />;
-  if ("reason" in page)
-    return (
-      <ViewerMessage name={item.name} title="No preview">
-        {page.reason}
-      </ViewerMessage>
-    );
+// A workbook as its table, or as the pages it would print on, which dot's computer makes.
+function SheetView(props: {
+  api: ApiClient;
+  sessionId: string;
+  name: string;
+  version: number | null;
+}) {
+  const [shown, setShown] = useState("table");
+  const lead = (
+    <SegmentedControl
+      size={28}
+      aria-label="Show"
+      value={shown}
+      items={[
+        { value: "table", label: "Table" },
+        { value: "pages", label: "Pages" },
+      ]}
+      onValueChange={setShown}
+    />
+  );
+  if (shown === "table") return <TableView {...props} lead={lead} />;
   return (
-    <PictureView src={page.url} name={item.name} caption="First page · made on your computer" />
+    <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
+      <OfficePages {...props} lead={lead} />
+    </Suspense>
   );
 }

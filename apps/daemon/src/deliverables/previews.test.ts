@@ -144,7 +144,7 @@ describe("previews", () => {
       .png()
       .toBuffer();
     const convert = vi.fn<Converter["convert"]>(async () => page);
-    const f = deliverablesFixture({ converter: { convert } });
+    const f = deliverablesFixture({ converter: { convert, pages: async () => "failed" } });
     const id = f.task();
     f.result(id, { "report.ods": "ods-bytes", "brief.docx": "docx-bytes", "scan.pdf": "%PDF-1.7" });
     for (const name of ["report.ods", "brief.docx", "scan.pdf"]) {
@@ -168,6 +168,58 @@ describe("previews", () => {
       reason: "computer_off",
     });
     expect(existsSync(join(f.home, "sessions", id, "previews", "report.ods", "1.png"))).toBe(false);
+  });
+  it("pages an office file as a PDF made on the computer, once per version", async () => {
+    const deck = Buffer.from("%PDF-1.7 24 slides");
+    const pages = vi.fn<Converter["pages"]>(async () => deck);
+    const f = deliverablesFixture({
+      converter: { convert: async () => "failed", pages },
+    });
+    const id = f.task();
+    f.result(id, { "deck.pptx": "pptx-bytes" });
+    for (const round of [1, 2]) {
+      const res = await f.get(`/api/agent/sessions/${id}/files/deck.pptx/pages?v=1`);
+      expect(res.headers.get("content-type"), `round ${round}`).toBe("application/pdf");
+      expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+      expect(Buffer.from(await res.arrayBuffer()).equals(deck)).toBe(true);
+    }
+    expect(pages).toHaveBeenCalledOnce();
+    expect(pages.mock.calls[0]?.[1]).toEqual(Buffer.from("pptx-bytes"));
+    expect(existsSync(join(f.home, "sessions", id, "previews", "deck.pptx", "1.pdf"))).toBe(true);
+    f.result(id, { "deck.pptx": "pptx-bytes v2" });
+    await f.get(`/api/agent/sessions/${id}/files/deck.pptx/pages?v=2`);
+    expect(pages).toHaveBeenCalledTimes(2);
+  });
+  it("keeps no pages it could not make, and makes none for a PDF or a picture", async () => {
+    const answers: Awaited<ReturnType<Converter["pages"]>>[] = [
+      "computer_off",
+      "too_large",
+      Buffer.from("<html>not a pdf"),
+    ];
+    const pages = vi.fn<Converter["pages"]>(async () => answers.shift() ?? "failed");
+    const f = deliverablesFixture({ converter: { convert: async () => "failed", pages } });
+    const id = f.task();
+    f.result(id, { "brief.docx": "docx", "scan.pdf": "%PDF-1.7", "chart.png": "png" });
+    const reason = async (name: string) =>
+      json(await f.get(`/api/agent/sessions/${id}/files/${name}/pages?v=1`));
+    expect(await reason("brief.docx")).toEqual({ kind: "none", reason: "computer_off" });
+    expect(await reason("brief.docx")).toEqual({ kind: "none", reason: "too_large" });
+    expect(await reason("brief.docx")).toEqual({ kind: "none", reason: "failed" });
+    expect(existsSync(join(f.home, "sessions", id, "previews", "brief.docx", "1.pdf"))).toBe(false);
+    expect(await reason("scan.pdf")).toEqual({ kind: "none", reason: "attachment" });
+    expect(await reason("chart.png")).toEqual({ kind: "none", reason: "attachment" });
+    expect(pages).toHaveBeenCalledTimes(3);
+  });
+  it("refuses to page an office file over 25 MiB without converting it", async () => {
+    const pages = vi.fn<Converter["pages"]>(async () => Buffer.from("%PDF-1.7"));
+    const f = deliverablesFixture({ converter: { convert: async () => "failed", pages } });
+    const id = f.task();
+    f.result(id, { "big.pptx": Buffer.alloc(25 * 1024 * 1024 + 1) });
+    expect(await json(await f.get(`/api/agent/sessions/${id}/files/big.pptx/pages?v=1`))).toEqual({
+      kind: "none",
+      reason: "too_large",
+    });
+    expect(pages).not.toHaveBeenCalled();
   });
   it("answers a missing version and a malformed one", async () => {
     const f = deliverablesFixture();

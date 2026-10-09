@@ -34,6 +34,7 @@ import { fileText, screenLine } from "./excerpt.ts";
 import { fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
+import type { PageQuieter } from "./page-quieter.ts";
 import { previewFileRoutes } from "./preview-files.ts";
 import { PreviewLinks } from "./preview-links.ts";
 import type { Previews } from "./previews.ts";
@@ -48,10 +49,11 @@ export interface DeliverablesDeps {
   port: number;
   eventLog: Pick<EventLog, "hasSession" | "logFile">;
   scanner: Pick<TaskScanner, "scan">;
-  previews: Pick<Previews, "preview">;
+  previews: Pick<Previews, "preview" | "pages">;
   frames: Pick<FrameStore, "path">;
   opener: MacOpener;
   revise?: ReviseDeps;
+  quieter?: PageQuieter;
 }
 export interface ReviseDeps {
   start(
@@ -86,7 +88,7 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
     );
   const file = "/api/agent/sessions/:id/files/:name";
   const links = new PreviewLinks();
-  previewFileRoutes(app, { home: deps.home, port: deps.port, links });
+  previewFileRoutes(app, { home: deps.home, port: deps.port, links, quieter: deps.quieter });
   for (const path of [
     `${file}/*`,
     "/api/agent/sessions/:id/proof",
@@ -141,6 +143,19 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
         "x-localdot-preview": preview.madeBy,
       });
     return c.body(preview.json, 200, { ...SECURE, "content-type": "application/json" });
+  });
+  // An office document as a PDF of all its pages, for the full preview to page through.
+  app.get(`${file}/pages`, async (c) => {
+    const { id, name } = c.req.param() as { id: string; name: string };
+    const version = versionParam(c);
+    if (version === undefined) return c.text("invalid version", 400);
+    const pages = await deps.previews.pages(id, name, version, c.req.raw.signal);
+    if ("pdf" in pages)
+      return c.body(new Uint8Array(pages.pdf), 200, {
+        ...SECURE,
+        "content-type": "application/pdf",
+      });
+    return c.body(pages.json, 200, { ...SECURE, "content-type": "application/json" });
   });
   // The address the full preview loads this task's pictures, pages, PDFs and media from.
   app.post("/api/agent/sessions/:id/preview-link", (c) =>
