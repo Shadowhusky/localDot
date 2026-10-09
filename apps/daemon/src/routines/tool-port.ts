@@ -100,7 +100,7 @@ export function routineToolPort(deps: {
     },
     pause(routineId) {
       const routine = deps.store.get(routineId);
-      if (!routine || routine.kind !== "routine" || routine.state !== "active") return false;
+      if (routine?.kind !== "routine" || routine.state !== "active") return false;
       deps.changed(deps.store.setState(routineId, "paused", "user"));
       return true;
     },
