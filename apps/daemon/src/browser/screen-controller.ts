@@ -681,7 +681,11 @@ export class ScreenController {
         this.deps.report?.("the web browser stopped working; starting it again");
         owner.client.close();
         if (this.#browser === owner) this.#browser = undefined;
-        await this.deps.browser.stop(this.deps.parentCellId);
+        // Only the browser that failed is stopped, never one started since.
+        if (
+          this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance
+        )
+          await this.deps.browser.stop(this.deps.parentCellId);
         scope.check();
       }
     }

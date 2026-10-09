@@ -843,8 +843,6 @@ describe("session screen coordinator", () => {
   });
 });
 
-// A web browser whose controls had failed stayed "running": every switch to it failed at once and
-// told dot to carry on with the desktop, where sign-ins aren't kept.
 describe("a web browser that stopped working", () => {
   it("is started again once when it no longer answers as ready", async () => {
     const f = fixture();
@@ -864,6 +862,24 @@ describe("a web browser that stopped working", () => {
     expect(f.deps.browser.start).toHaveBeenCalledTimes(2);
     expect(report).toHaveBeenCalledWith("the web browser stopped working; starting it again");
     expect(f.deps.contain).not.toHaveBeenCalled();
+    await controller.close();
+  });
+
+  it("leaves running a browser started since it failed", async () => {
+    const f = fixture();
+    const health = vi.fn(async () => {
+      f.replace();
+      return "unready" as const;
+    });
+    const controller = new ScreenController({
+      ...f.deps,
+      browser: { ...f.deps.browser, health },
+    });
+    f.client.health.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    const result = await controller.switchTo("browser", f.scope);
+    expect(result.screen).toBe("browser");
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(f.deps.browser.start).toHaveBeenCalledTimes(2);
     await controller.close();
   });
 

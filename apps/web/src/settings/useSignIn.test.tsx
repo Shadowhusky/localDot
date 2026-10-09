@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { AccountsSection } from "./AccountsSection.tsx";
 import type { AccountsView } from "./useAccounts.ts";
-import { type SignInView, useSignIn } from "./useSignIn.ts";
+import { SIGN_IN_WAIT_MS, type SignInView, useSignIn } from "./useSignIn.ts";
 
 afterEach(() => {
   cleanup();
@@ -15,8 +15,11 @@ const CELL = "01J00000000000000000000001";
 const SESSION = "01J00000000000000000000002";
 const REQUEST = "01J00000000000000000000003";
 
-function setup(reply: () => Promise<Response>, cell: string | null = CELL) {
-  const fetchImpl = vi.fn<typeof fetch>(reply);
+function setup(
+  reply: (signal?: AbortSignal | null) => Promise<Response>,
+  cell: string | null = CELL,
+) {
+  const fetchImpl = vi.fn<typeof fetch>((_url, init) => reply(init?.signal));
   const api = createApi("fixture", { origin: ORIGIN, fetchImpl });
   const opened = vi.fn();
   const hook = renderHook(() => useSignIn(api, cell, opened));
@@ -83,14 +86,49 @@ it("asks nothing for what isn't a site, or with the computer off", async () => {
   expect(off.hook.result.current.failure).toBe("Turn on your computer first.");
 });
 
-it("lets the page look for the web browser when the reply never came", async () => {
+it("lets the page look for the web browser when the reply doesn't come in time", async () => {
+  vi.useFakeTimers();
+  try {
+    const f = setup(
+      (signal) =>
+        new Promise<Response>((_, reject) =>
+          signal?.addEventListener("abort", () => reject(signal.reason)),
+        ),
+    );
+    let started: Promise<boolean> | undefined;
+    act(() => {
+      started = f.hook.result.current.start("github.com");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SIGN_IN_WAIT_MS);
+    });
+    expect(await started).toBe(true);
+    expect(f.opened).toHaveBeenCalledWith("github.com");
+    expect(f.hook.result.current.failure).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("says nothing opened when the daemon can't be reached", async () => {
   const f = setup(async () => {
     throw new TypeError("network went away");
   });
   await act(async () => {
-    expect(await f.hook.result.current.start("github.com")).toBe(true);
+    expect(await f.hook.result.current.start("github.com")).toBe(false);
   });
-  expect(f.opened).toHaveBeenCalledWith("github.com");
+  expect(f.opened).not.toHaveBeenCalled();
+  expect(f.hook.result.current.failure).toBe("Couldn't open the site. Try again.");
+});
+
+it("hands a failure to the caller that asked for it, not to the form", async () => {
+  const f = setup(async () => new Response("refused", { status: 503 }));
+  const failed = vi.fn();
+  await act(async () => {
+    expect(await f.hook.result.current.start("google.com", failed)).toBe(false);
+  });
+  expect(failed).toHaveBeenCalledWith("The web browser couldn't open. Try again in a moment.");
+  expect(f.hook.result.current.failure).toBeNull();
 });
 
 const ready: AccountsView = {

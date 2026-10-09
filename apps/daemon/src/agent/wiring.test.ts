@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import {
   CODEX_MANIFEST_SHA256,
@@ -336,6 +338,32 @@ function setup(
   };
 }
 
+describe("the desktop's sign-in page", () => {
+  it("is found from the page's address alone, running nothing in the user's page", async () => {
+    const f = setup();
+    const asked: string[] = [];
+    const desktopd = createServer((req, res) => {
+      asked.push(`${req.method} ${req.url}`);
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ url: "https://accounts.google.com/signin" }));
+    });
+    await new Promise<void>((resolve) => desktopd.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = desktopd.address() as AddressInfo;
+      f.deps.cells.endpoints = () => ({
+        desktopd: { baseUrl: `http://127.0.0.1:${port}`, token: "d".repeat(43) },
+        stream: { baseUrl: "http://127.0.0.1:2", authorization: "fixture" },
+      });
+      await f.agent.start();
+      const page = await f.agent.routes.desktopPage?.(f.cellId, new AbortController().signal);
+      expect(page).toBe("https://accounts.google.com/signin");
+      expect(asked).toEqual(["GET /browser/page"]);
+    } finally {
+      desktopd.close();
+    }
+  });
+});
+
 describe("ChatGPT production integration", () => {
   it("performs no eager install/account/process work, and only verifies existing installation at startup", async () => {
     const f = setup();
@@ -633,6 +661,7 @@ describe("ChatGPT production integration", () => {
       install: vi.fn(),
       manual: vi.fn(),
       bind: vi.fn(() => ({ cellId: f.cellId })),
+      startBrowser: vi.fn(async () => {}),
     } as unknown as AgentWiringDeps["sessionScreens"];
     await f.agent.start();
     const observeOn = async (screen: ScreenName) => {
@@ -730,6 +759,7 @@ describe("Claude Code production integration", () => {
       install: vi.fn(),
       manual: vi.fn(),
       bind: vi.fn(() => ({ cellId: f.cellId })),
+      startBrowser: vi.fn(async () => {}),
     } as unknown as AgentWiringDeps["sessionScreens"];
     await f.agent.start();
     const claude = required(m.claude);

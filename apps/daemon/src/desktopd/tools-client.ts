@@ -1,6 +1,7 @@
 import { finished } from "node:stream/promises";
 import {
   BrowserNavigateResult,
+  BrowserPageResult,
   BrowserReadResult,
   ElementsRequest,
   ElementsResult,
@@ -193,7 +194,10 @@ export class DesktopdTools {
   ): Promise<T> {
     const scope = this.#scope(timeout, signal);
     try {
-      const res = await this.#send(path, scope, JSON.stringify(body), "application/json");
+      const res =
+        body === undefined
+          ? await this.#send(path, scope)
+          : await this.#send(path, scope, JSON.stringify(body), "application/json");
       const text = await textBody(res, scope.signal, res.ok ? JSON_BYTES : 4096);
       if (!res.ok) throw new DesktopdError(res.status, "tool request refused", path);
       const result = parse(JSON.parse(text));
@@ -297,6 +301,10 @@ export class DesktopdTools {
   }
   browserRead(maxChars?: number, signal?: AbortSignal): Promise<BrowserReadResult> {
     return this.#json("/browser/read", { maxChars }, BrowserReadResult.parse, signal, 20_000);
+  }
+  async browserPage(signal?: AbortSignal): Promise<string> {
+    return (await this.#json("/browser/page", undefined, BrowserPageResult.parse, signal, 5000))
+      .url;
   }
   async prepareBrowser(taskId: string, signal?: AbortSignal): Promise<void> {
     const request = DesktopBrowserTask.parse({ taskId });

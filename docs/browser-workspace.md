@@ -44,10 +44,12 @@ deletes the profiles computers kept before sign-ins were shared. A site that kee
 in the saved data of another subdomain can still remember you after **Sign out**; Settings says
 so when the site is still listed, and **Sign out of all sites** removes everything.
 
-The desktop's own Chromium opens on a page saying sign-ins there aren't kept. A site typed into
+The desktop's own Chromium opens on a page saying sign-ins there aren't kept; only a window opened
+without an address shows it, and a new tab shows Chromium's usual new-tab page. A site typed into
 that page, or a sign-in page you reach there while you hold the computer, brings a notice in
 localDot offering to open the site in the web browser; nothing opens until you choose it, and the
-daemon opens only the named site's sign-in or home page.
+daemon opens only the named site's sign-in or home page. During a task, the notice says to ask
+dot instead.
 
 Links that a desktop app opens (a link in a document, `xdg-open` in the terminal) still open in
 the desktop's Chromium, which has none of your sign-ins; dot opens such an address again in the
