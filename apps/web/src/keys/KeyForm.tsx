@@ -50,6 +50,8 @@ export interface KeyFormProps {
   preset?: KeyFormPreset;
   // Whether the key field holds a key, each time that may have changed; never the key.
   onHolding?(holding: boolean): void;
+  // Offers Cancel, which clears the form, then calls this.
+  onCancel?(): void;
 }
 export interface KeyFormPreset {
   readonly requestId: number;
@@ -103,6 +105,7 @@ export function KeyForm({
   fieldRef,
   preset,
   onHolding,
+  onCancel,
 }: KeyFormProps) {
   const statusId = useId();
   // Side by side, Header and Sent as each keep a line for an error, so the pair stays level.
@@ -384,7 +387,6 @@ export function KeyForm({
         <>
           <Field label="Provider">
             <Combobox
-              size="lg"
               value={draft.provider}
               groups={PROVIDER_PICKS}
               searchPlaceholder="Search providers"
@@ -395,7 +397,6 @@ export function KeyForm({
             <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
               <TextField
                 {...PLAIN}
-                size="lg"
                 value={draft.baseURL}
                 readOnly={readOnly}
                 inputMode="url"
@@ -419,7 +420,6 @@ export function KeyForm({
           >
             <TextField
               {...PLAIN}
-              size="lg"
               value={draft.hosts}
               readOnly={readOnly}
               inputMode="url"
@@ -432,7 +432,6 @@ export function KeyForm({
             <Field label="Header" error={errorFor("header")} validates={paired}>
               <TextField
                 {...PLAIN}
-                size="lg"
                 value={draft.header}
                 readOnly={readOnly}
                 enterKeyHint="next"
@@ -442,7 +441,6 @@ export function KeyForm({
             </Field>
             <Field label="Sent as" validates={paired}>
               <Select
-                size="lg"
                 value={draft.format}
                 items={FORMAT_PICKS}
                 onValueChange={(format) => set({ format: format as HttpFormat })}
@@ -462,7 +460,6 @@ export function KeyForm({
       >
         <TextField
           {...PLAIN}
-          size="lg"
           value={draft.id}
           readOnly={readOnly}
           enterKeyHint="next"
@@ -487,7 +484,6 @@ export function KeyForm({
         <TextField
           ref={valueRef}
           {...PLAIN}
-          size="lg"
           className="keys-secret"
           readOnly={saving || busy}
           enterKeyHint="done"
@@ -528,6 +524,24 @@ export function KeyForm({
             saved && <p role="status">{saved}</p>
           )}
         </div>
+        {onCancel && (
+          <Button
+            variant="quiet"
+            disabledReason={saving ? "Wait for the key to save" : undefined}
+            onClick={() => {
+              if (valueRef.current) valueRef.current.value = "";
+              report();
+              revision.current++;
+              setDraft(EMPTY_DRAFT);
+              setProblem(null);
+              setSaved(null);
+              setTried(false);
+              onCancel();
+            }}
+          >
+            Cancel
+          </Button>
+        )}
         <Button
           type="submit"
           variant="primary"

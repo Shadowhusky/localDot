@@ -1,9 +1,25 @@
-/* The Settings inspector: flat sections on the sheet's surface, one scroller (the sheet's body).
-   It lays kit parts out and never restyles them: the kit's layer comes after this one. */
+/* Settings (design-v2 §10.10, §11 I): one 600 px inspector, a sidebar of sections over the one
+   scroll they share; on a phone a list of sections that pushes into each. It lays kit parts out and
+   never restyles them: the kit's layer comes after this one. */
 .settings-body {
   display: grid;
-  gap: calc(var(--spacing) * 8);
-  padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
+  gap: calc(var(--spacing) * 7.5);
+  padding-block: 2px calc(var(--spacing) * 2);
+}
+
+/* The last section can still scroll to the top, so every sidebar row lands its section there. */
+.settings-sheet[data-side="inspector"] .ui-sheet-body {
+  container-type: size;
+}
+
+.settings-sheet[data-side="inspector"] .settings-section:last-child {
+  min-height: calc(100cqh - var(--spacing) * 2);
+}
+
+.settings-index {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .settings-loading {
@@ -11,60 +27,55 @@
   min-height: 320px;
 }
 
-.settings-stop {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
-  padding-bottom: calc(var(--spacing) * 4);
-  border-bottom: 1px solid var(--color-hairline);
-}
-
-.settings-stop:empty {
-  display: none;
-}
-
 .settings-section {
   display: grid;
+  align-content: start;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
-  scroll-margin-top: calc(var(--spacing) * 4);
+  scroll-margin-top: var(--spacing);
 }
 
 .settings-section-title {
+  margin: calc(var(--spacing) * 1.5) 2px 2px;
   font:
-    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-title-3--letter-spacing);
+  letter-spacing: var(--text-title-2--letter-spacing);
 }
 
-.settings-group-title {
-  color: var(--color-fg-3);
-  font:
-    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-footnote--letter-spacing);
+.settings-section-title:focus-visible {
+  outline: none;
 }
 
-.settings-note,
-.settings-label {
+.settings-lede {
+  margin: 0 2px;
   color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
-.settings-label {
-  font-weight: var(--font-weight-medium);
+.settings-section-title + .settings-lede {
+  margin-top: calc(var(--spacing) * -1.5);
+  margin-bottom: var(--spacing);
 }
 
-.settings-error {
-  display: flex;
-  gap: calc(var(--spacing) * 1.5);
-  color: var(--color-fg-1);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+/* A model role: its heading, its group of rows and the note under them. */
+.settings-role {
+  display: grid;
+  min-width: 0;
 }
 
-.settings-error > .ui-icon {
+.settings-role + .settings-role[data-role="fast"] {
+  margin-top: calc(var(--spacing) * 2.5);
+}
+
+.settings-tier {
+  margin-inline-start: calc(var(--spacing) * 2);
+}
+
+/* Typed values sit at a row's end at one width, so a row never grows with what is typed. */
+.settings-body .ui-group-row .ui-text-field {
   flex: none;
-  margin-top: calc(var(--spacing) * 0.5);
-  color: var(--color-danger-fg);
+  width: 9.5rem;
 }
 
 .settings-inline {
@@ -75,6 +86,12 @@
   min-height: calc(var(--spacing) * 7);
 }
 
+.settings-catalog > .settings-lede {
+  color: var(--color-fg-3);
+  font-size: var(--text-callout);
+  line-height: var(--text-callout--line-height);
+}
+
 .settings-actions {
   display: flex;
   flex-wrap: wrap;
@@ -82,18 +99,102 @@
   gap: calc(var(--spacing) * 2);
 }
 
-/* A role or an account: a block between hairlines, never a box inside the sheet. */
-.settings-card {
+.settings-autonomy,
+.settings-rules,
+.settings-knowledge,
+.settings-accounts {
+  display: grid;
+  gap: calc(var(--spacing) * 4);
+  min-width: 0;
+}
+
+.settings-autonomy .ui-radio-card-title {
+  font-weight: var(--font-weight-semibold);
+}
+
+.settings-matrix .ui-collapse-inner {
+  display: grid;
+  gap: calc(var(--spacing) * 4);
+  padding-top: calc(var(--spacing) * 2);
+}
+
+.settings-matrix-key {
+  color: var(--color-fg-3);
+}
+
+.settings-autonomy-row > .ui-segmented {
+  flex: none;
+}
+
+.settings-locked {
+  list-style: none;
+}
+
+.settings-locked > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+}
+
+.settings-locked-mode {
+  color: var(--color-fg-2);
+  text-align: end;
+}
+
+.settings-rules-banner {
+  margin-bottom: calc(var(--spacing) * 2);
+}
+
+.settings-rule-list,
+.settings-skills,
+.settings-accounts-list {
+  list-style: none;
+}
+
+.settings-rule-failed {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  padding: var(--spacing) 0 2px calc(var(--spacing) * 10);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.settings-rule-failed > .ui-icon {
+  flex: none;
+  color: var(--color-danger-fg);
+}
+
+.settings-skill-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.settings-well {
+  margin-top: calc(var(--spacing) * 1.5);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The ChatGPT account: one raised card above the roles it stands in for. */
+.settings-chatgpt {
   display: grid;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
-  padding-top: calc(var(--spacing) * 4);
-  border-top: 1px solid var(--color-hairline);
-}
-
-.settings-section-title + .settings-card {
-  padding-top: 0;
-  border-top: 0;
+  padding: calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-group);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
 }
 
 .settings-card-head {
@@ -114,214 +215,23 @@
   font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
-.settings-card-note {
+.settings-card-note,
+.settings-note {
   color: var(--color-fg-2);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.settings-card-body {
-  display: grid;
-  gap: calc(var(--spacing) * 3);
-  padding-bottom: var(--spacing);
-}
-
-.settings-key-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: calc(var(--spacing) * 2);
-}
-
-/* The button lines up with the picker, under the field's label. */
-.settings-add-key {
-  margin-top: calc(var(--text-callout--line-height) + var(--spacing) * 1.5);
-}
-
-.settings-price {
-  display: grid;
-  gap: calc(var(--spacing) * 1.5);
-}
-
-.settings-price-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: calc(var(--spacing) * 3);
-}
-
-.settings-autonomy,
-.settings-autonomy-group,
-.settings-knowledge,
-.settings-spending,
-.settings-download,
-.settings-account,
-.settings-signin {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
-  min-width: 0;
-}
-
-.settings-autonomy {
-  gap: calc(var(--spacing) * 4);
-}
-
-.settings-autonomy-group {
-  gap: 0;
-}
-
-.settings-autonomy-group > .settings-group-title {
-  padding-bottom: calc(var(--spacing) * 1);
-}
-
-/* A label and its three choices on one line; a phone puts the choices under the label. */
-.settings-autonomy-row {
-  min-height: calc(var(--spacing) * 11);
-  border-top: 1px solid var(--color-hairline);
-}
-
-.settings-locked {
-  display: grid;
-  list-style: none;
-}
-
-.settings-locked li {
+.settings-error {
   display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  min-height: calc(var(--spacing) * 11);
-  border-top: 1px solid var(--color-hairline);
-  color: var(--color-fg-2);
-}
-
-.settings-locked .ui-icon {
-  flex: none;
-  color: var(--color-fg-3);
-}
-
-.settings-locked-mode {
-  margin-left: auto;
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-/* Each check-in is a switch row; turning one on opens its number under it. */
-.settings-check-ins-intro {
-  padding-bottom: calc(var(--spacing) * 1);
-}
-
-.settings-check-in {
-  border-top: 1px solid var(--color-hairline);
-}
-
-.settings-check-in-field {
-  max-width: calc(var(--spacing) * 52);
-  padding-bottom: calc(var(--spacing) * 3);
-}
-
-.settings-preset-notes {
-  display: grid;
-}
-
-.settings-preset-notes > span {
-  grid-area: 1 / 1;
-}
-
-.settings-preset-notes > span:not([data-shown]) {
-  visibility: hidden;
-}
-
-.settings-autonomy-hint {
-  padding-top: calc(var(--spacing) * 2);
-}
-
-.settings-rules-intro {
-  padding-bottom: calc(var(--spacing) * 2);
-}
-
-.settings-rules-banner {
-  padding-bottom: calc(var(--spacing) * 2);
-}
-
-.settings-rules {
-  display: grid;
-  list-style: none;
-}
-
-.settings-rules li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0 calc(var(--spacing) * 2);
-  min-height: calc(var(--spacing) * 11);
-  padding-block: calc(var(--spacing) * 1.5);
-  border-top: 1px solid var(--color-hairline);
-}
-
-.settings-rule-text {
-  display: grid;
-  min-width: 0;
-}
-
-.settings-rule-where {
-  overflow: hidden;
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-rule-failed {
-  display: flex;
-  grid-column: 1 / -1;
-  align-items: center;
   gap: calc(var(--spacing) * 1.5);
   color: var(--color-fg-1);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.settings-rule-failed > .ui-icon {
+.settings-error > .ui-icon {
   flex: none;
+  margin-top: calc(var(--spacing) * 0.5);
   color: var(--color-danger-fg);
-}
-
-.settings-skills {
-  display: grid;
-  list-style: none;
-}
-
-.settings-skills li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: calc(var(--spacing) * 1) calc(var(--spacing) * 2);
-  padding-block: calc(var(--spacing) * 2);
-  border-top: 1px solid var(--color-hairline);
-}
-
-.settings-skill-name {
-  font-weight: var(--font-weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.settings-skill-description {
-  grid-column: 1 / -1;
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-
-.settings-well {
-  padding: calc(var(--spacing) * 3);
-  border-radius: var(--radius-md);
-  background-color: var(--color-well);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .settings-hint {
@@ -344,6 +254,14 @@
 
 .settings-hint[data-alert] > .ui-icon {
   visibility: visible;
+}
+
+.settings-download,
+.settings-account,
+.settings-signin {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
 }
 
 .settings-signin[hidden] {
@@ -390,13 +308,36 @@
   white-space: nowrap;
 }
 
+.settings-accounts-hosts {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-accounts-slot {
+  width: calc(var(--spacing) * 18);
+}
+
+/* The status shares the row with Sign out of all, so a status or a failure moves nothing. */
+.settings-accounts-footer > .settings-lede {
+  min-width: 0;
+  color: var(--color-fg-3);
+  font-size: var(--text-callout);
+  line-height: var(--text-callout--line-height);
+}
+
+.settings-accounts-footer > .ui-button {
+  flex: none;
+}
+
+/* Only something to fix earns a footer: autosave needs no Save and no saved notice. */
 .settings-footer {
   display: flex;
   flex: 1;
   align-items: center;
   gap: calc(var(--spacing) * 2);
   min-width: 0;
-  min-height: calc(var(--spacing) * 8);
 }
 
 .settings-footer-status {
@@ -407,19 +348,10 @@
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.settings-footer-status[data-error],
-.settings-footer-line {
+.settings-footer-status[data-error] {
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 1.5);
-}
-
-.settings-problems {
-  padding-left: calc(var(--spacing) * 4);
-  color: var(--color-fg-1);
-}
-
-.settings-footer-status[data-error] {
   color: var(--color-fg-1);
 }
 
@@ -428,17 +360,67 @@
   color: var(--color-danger-fg);
 }
 
+.settings-problems {
+  padding-left: calc(var(--spacing) * 4);
+  color: var(--color-fg-1);
+}
+
+/* The island stays above an inspector's scrim, so Stop and Take control are never behind it. */
+:root:has(.ui-layer:not([data-closing]) > .ui-sheet[data-side="inspector"][data-modal])
+.island-anchor {
+  z-index: 51;
+}
+
+/* A phone: the console's own surface, 16 px gutters, iOS-spaced groups. */
+.settings-sheet[data-side="bottom"],
+.settings-sheet[data-side="bottom"] .ui-sheet-page {
+  background-color: var(--color-console);
+}
+
+.settings-sheet[data-side="bottom"] .ui-sheet-body {
+  padding-inline: calc(var(--spacing) * 4);
+}
+
+/* The grabber rides in the navigation bar's top edge, so the bar sits at the sheet's top. */
+.settings-sheet[data-side="bottom"] > .ui-sheet-handle:first-child {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: calc(var(--spacing) * 4);
+}
+
 @media (width < 700px) {
+  .settings-body {
+    gap: calc(var(--spacing) * 6.5);
+    padding-top: calc(var(--spacing) * 1.5);
+  }
+
+  .settings-section {
+    gap: calc(var(--spacing) * 6);
+  }
+
+  .settings-lede,
+  .settings-catalog > .settings-lede {
+    margin: 0 calc(var(--spacing) * 1);
+    color: var(--color-fg-3);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+
+  .settings-section > .settings-lede:first-child {
+    margin-bottom: calc(var(--spacing) * -2.5);
+  }
+
+  .settings-body .ui-group-row .ui-text-field {
+    width: 8.5rem;
+  }
+
   .settings-autonomy-row {
-    padding-block: calc(var(--spacing) * 3);
+    flex-wrap: wrap;
   }
 
   .settings-autonomy-row > .ui-segmented {
     flex-basis: 100%;
-  }
-
-  .settings-price-fields {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .settings-footer {
@@ -452,68 +434,4 @@
   .settings-footer > .ui-button {
     flex: 1;
   }
-}
-
-.settings-accounts {
-  display: grid;
-  gap: calc(var(--spacing) * 3);
-  min-width: 0;
-}
-
-.settings-accounts-list {
-  display: grid;
-  list-style: none;
-}
-
-.settings-accounts-list li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0 calc(var(--spacing) * 3);
-  min-height: calc(var(--spacing) * 13);
-  padding-block: calc(var(--spacing) * 1.5);
-  border-top: 1px solid var(--color-hairline);
-}
-
-.settings-accounts-tile {
-  display: grid;
-  place-items: center;
-  width: calc(var(--spacing) * 8);
-  height: calc(var(--spacing) * 8);
-  border-radius: var(--radius-md);
-  background-color: var(--color-well);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
-  color: var(--color-fg-2);
-}
-
-.settings-accounts-text {
-  display: grid;
-  min-width: 0;
-}
-
-.settings-accounts-site {
-  font-weight: var(--font-weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.settings-accounts-hosts {
-  display: block;
-  overflow: hidden;
-  color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-accounts-slot {
-  width: calc(var(--spacing) * 18);
-}
-
-/* The status shares the row with Sign out of all, so a status or a failure moves nothing. */
-.settings-accounts-footer > .settings-note {
-  min-width: 0;
-}
-
-.settings-accounts-footer > .ui-button {
-  flex: none;
 }

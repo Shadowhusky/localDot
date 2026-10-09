@@ -578,6 +578,38 @@
     display: none;
   }
 
+  /* Roomy rows stand on their own on a page: 12 / 16 in, a 32 px tile and titles in row type. */
+  .ui-radio-cards[data-roomy] > .ui-radio-card {
+    gap: calc(var(--spacing) * 3.5);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+  }
+
+  .ui-radio-cards[data-roomy] .ui-radio-card-tile {
+    width: calc(var(--spacing) * 8);
+    height: calc(var(--spacing) * 8);
+    border-radius: var(--radius-row);
+    color: var(--color-fg-2);
+  }
+
+  .ui-radio-cards[data-roomy] .ui-radio-card-title > .ui-choice-label {
+    font-size: var(--text-row);
+    line-height: var(--text-row--line-height);
+    letter-spacing: var(--text-row--letter-spacing);
+  }
+
+  /* A leading tile, then the text, then the radio at the row's end. */
+  .ui-radio-cards[data-mark="end"] > .ui-radio-card {
+    align-items: center;
+  }
+
+  .ui-radio-cards[data-mark="end"] .ui-radio-mark {
+    order: 1;
+  }
+
+  .ui-radio-cards[data-mark="end"] .ui-choice-text {
+    flex: 1;
+  }
+
   /* Segmented control and tabs: equal segments on a sunken track, and a raised thumb that slides
      under the chosen one. A thumb interrupted mid-slide sets off again from where it is. Segments
      fill the track edge to edge, so all of it takes a press; the thumb sits 2 px inside. */
@@ -767,6 +799,22 @@
     .ui-choice {
       min-height: calc(var(--spacing) * 11);
       align-items: center;
+    }
+  }
+
+  @media (--phone) {
+    .ui-radio-cards[data-roomy] > .ui-radio-card {
+      padding: calc(var(--spacing) * 2.75) calc(var(--spacing) * 3.5);
+    }
+
+    .ui-radio-cards[data-roomy] .ui-radio-card-title > .ui-choice-label {
+      font-size: var(--text-touch);
+      line-height: var(--text-touch--line-height);
+      letter-spacing: var(--text-touch--letter-spacing);
+    }
+
+    .ui-radio-cards[data-roomy] .ui-choice-note {
+      font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
     }
   }
 

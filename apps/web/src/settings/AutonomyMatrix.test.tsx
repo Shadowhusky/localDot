@@ -8,7 +8,7 @@ import {
 } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { AutonomyMatrix, GROUPS } from "./AutonomyMatrix.tsx";
+import { AlwaysAllowed, AutonomyMatrix, GROUPS } from "./AutonomyMatrix.tsx";
 import type { RulesView } from "./useRules.ts";
 
 afterEach(cleanup);
@@ -22,25 +22,22 @@ it("gives every class it can change exactly one row", () => {
   expect(new Set(rows).size).toBe(rows.length);
 });
 
-it("shows which preset the choices match, or Custom, in one note that keeps its room", () => {
+it("shows which preset the choices match, or that they are a mix, with what dot asks about", () => {
   const view = render(<AutonomyMatrix value={BALANCED_AUTONOMY} onChange={vi.fn()} />);
-  const note = () => document.querySelector(".settings-preset-notes > [data-shown]")?.textContent;
-  expect(preset("Balanced").getAttribute("aria-checked")).toBe("true");
-  expect(preset("Careful").getAttribute("aria-checked")).toBe("false");
-  expect(note()).toBe(
-    "Recommended: works on its own in its computer and asks before acting as you.",
-  );
+  const checked = (name: string) => (preset(name) as HTMLInputElement).checked;
+  const note = () => document.querySelector(".settings-autonomy .ui-group-note")?.textContent;
+  expect(checked("Balanced")).toBe(true);
+  expect(checked("Careful")).toBe(false);
+  expect(note()).toMatch(/^Asks before buying, sending, posting or deleting\. Uploads/);
   view.rerender(<AutonomyMatrix value={CAREFUL_AUTONOMY} onChange={vi.fn()} />);
-  expect(preset("Balanced").getAttribute("aria-checked")).toBe("false");
-  expect(preset("Careful").getAttribute("aria-checked")).toBe("true");
-  expect(note()).toBe("Asks before every step except reading and browsing.");
+  expect(checked("Balanced")).toBe(false);
+  expect(checked("Careful")).toBe(true);
   view.rerender(
     <AutonomyMatrix value={{ ...BALANCED_AUTONOMY, purchase: "handoff" }} onChange={vi.fn()} />,
   );
-  expect(preset("Balanced").getAttribute("aria-checked")).toBe("false");
-  expect(preset("Careful").getAttribute("aria-checked")).toBe("false");
-  expect(note()).toBe("Custom: your own mix of choices.");
-  expect(document.querySelectorAll(".settings-preset-notes > span")).toHaveLength(3);
+  expect(checked("Balanced")).toBe(false);
+  expect(checked("Careful")).toBe(false);
+  expect(note()).toMatch(/^Your own mix of choices\. /);
 });
 
 it("applies a preset to every class at once", () => {
@@ -55,12 +52,16 @@ it("applies a preset to every class at once", () => {
   expect(onChange).toHaveBeenLastCalledWith(BALANCED_AUTONOMY);
 });
 
-it("lists the ten classes it can change, then the locked ones as plain text", () => {
+it("lists the ten classes it can change one level deeper, then the locked ones as plain text", () => {
   render(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} />);
+  expect(screen.queryByRole("list", { name: "Always the same" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Choose for each kind of action" }));
   const names = screen
     .getAllByRole("radiogroup")
     .map(
-      (group) => document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent,
+      (group) =>
+        group.getAttribute("aria-label") ??
+        document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent,
     );
   expect(names).toEqual([
     "Start from",
@@ -91,6 +92,7 @@ it("lists the ten classes it can change, then the locked ones as plain text", ()
 
 it("hands uploads off when sending is handed off", () => {
   render(<AutonomyMatrix value={{ ...DEFAULT_AUTONOMY, send: "handoff" }} onChange={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose for each kind of action" }));
   const locked = screen.getByRole("list", { name: "Always the same" });
   expect(locked.querySelector("li")?.textContent).toBe("Upload your filesI'll do it, like sending");
 });
@@ -133,10 +135,10 @@ it("lists Always allowed choices with Remove on each", () => {
       }),
     ],
   });
-  render(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={view} />);
+  render(<AlwaysAllowed rules={view} />);
   const list = screen.getByRole("list", { name: "Always allowed" });
   const rows = within(list).getAllByRole("listitem");
-  expect(rows.map((row) => row.querySelector(".settings-rule-text")?.textContent)).toEqual([
+  expect(rows.map((row) => row.querySelector(".ui-group-row-text")?.textContent)).toEqual([
     "Send as youOn mail.example.test",
     "Work in its computerIn Notes",
   ]);
@@ -148,25 +150,17 @@ it("lists Always allowed choices with Remove on each", () => {
 });
 
 it("says when nothing is allowed yet, and when a removal is under way or failed", () => {
-  const view = render(
-    <AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={rules()} />,
-  );
+  const view = render(<AlwaysAllowed rules={rules()} />);
   expect(screen.getByText("Nothing yet. Use Always allow on a request to add one.")).toBeTruthy();
   const one = rule("01J00000000000000000000010");
   const removing = rules({ rules: [one], removing: one.id });
-  view.rerender(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={removing} />);
+  view.rerender(<AlwaysAllowed rules={removing} />);
   const remove = screen.getByRole("button", { name: /^Remove/ });
   expect(remove.getAttribute("aria-disabled")).toBe("true");
   expect(remove.getAttribute("aria-busy")).toBe("true");
   fireEvent.click(remove);
   expect(removing.remove).not.toHaveBeenCalled();
-  view.rerender(
-    <AutonomyMatrix
-      value={DEFAULT_AUTONOMY}
-      onChange={vi.fn()}
-      rules={rules({ rules: [one], failed: one.id })}
-    />,
-  );
+  view.rerender(<AlwaysAllowed rules={rules({ rules: [one], failed: one.id })} />);
   expect(screen.getByText("Couldn't remove this. Try again.")).toBeTruthy();
 });
 
@@ -178,9 +172,7 @@ it("holds every Remove and Start over while one change runs", () => {
     removing: one.id,
     unreadable: "Saved Always allow choices could not be read, so none are in use.",
   });
-  const view = render(
-    <AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={removing} />,
-  );
+  const view = render(<AlwaysAllowed rules={removing} />);
   const other = screen.getByRole("button", { name: "Remove Send as you: On chat.example.test" });
   expect(other.getAttribute("aria-disabled")).toBe("true");
   expect(other.textContent).toBe("Remove");
@@ -191,7 +183,7 @@ it("holds every Remove and Start over while one change runs", () => {
   expect(removing.remove).not.toHaveBeenCalled();
   expect(removing.reset).not.toHaveBeenCalled();
   const resetting = rules({ rules: [two], resetting: true });
-  view.rerender(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={resetting} />);
+  view.rerender(<AlwaysAllowed rules={resetting} />);
   fireEvent.click(screen.getByRole("button", { name: /^Remove/ }));
   expect(resetting.remove).not.toHaveBeenCalled();
 });
@@ -201,7 +193,7 @@ it("says when starting over failed", () => {
     unreadable: "Saved Always allow choices could not be read, so none are in use.",
     resetFailed: true,
   });
-  render(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={view} />);
+  render(<AlwaysAllowed rules={view} />);
   expect(screen.getByRole("alert").textContent).toContain("Couldn't start over. Try again.");
 });
 
@@ -209,7 +201,7 @@ it("offers to start over when the saved choices cannot be read", () => {
   const view = rules({
     unreadable: "Saved Always allow choices could not be read, so none are in use.",
   });
-  render(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={view} />);
+  render(<AlwaysAllowed rules={view} />);
   expect(screen.getByText(/could not be read/)).toBeTruthy();
   expect(screen.queryByText("Nothing yet. Use Always allow on a request to add one.")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Start over" }));
@@ -218,7 +210,7 @@ it("offers to start over when the saved choices cannot be read", () => {
 
 it("offers to try again when the list could not load", () => {
   const view = rules({ phase: "error" });
-  render(<AutonomyMatrix value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={view} />);
+  render(<AlwaysAllowed rules={view} />);
   expect(screen.getByText("Couldn't load this list.")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(view.reload).toHaveBeenCalledOnce();

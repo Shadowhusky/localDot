@@ -82,6 +82,7 @@ export interface SheetProps {
   sidebar?: ReactNode;
   // A bottom sheet closes with this word at its trailing edge, its title centred, instead of ×.
   doneLabel?: string;
+  className?: string;
   children: ReactNode;
 }
 
@@ -116,6 +117,7 @@ function SheetLayer({
   detents = FIT,
   sidebar,
   doneLabel,
+  className,
   children,
   root,
   closing,
@@ -367,7 +369,7 @@ function SheetLayer({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         inert={closing}
-        className="ui-sheet"
+        className={clsx("ui-sheet", className)}
         data-side={placement}
         data-detents={placement === "bottom" ? detents.join(" ") : undefined}
         data-detent={placement === "bottom" ? detent : undefined}
