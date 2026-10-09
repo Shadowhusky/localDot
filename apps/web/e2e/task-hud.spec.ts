@@ -67,7 +67,7 @@ test("a Pause the computer cannot confirm says so", async ({ page }) => {
   await page.getByRole("button", { name: "Pause after this step" }).click();
   await expectWaiting(page, "Paused");
   await qa(page, "pause-uncertain");
-  await expectWaiting(page, "Pause unconfirmed");
+  await expectWaiting(page, "Pause not confirmed");
   await expect(page.getByRole("button", { name: "Resume task" })).toBeDisabled();
 });
 

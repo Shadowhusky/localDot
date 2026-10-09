@@ -469,7 +469,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).status,
     ).toMatchObject({ label: "Resuming…", control: false, elapsedS: 9, actions: stopsTask });
     expect(view([...typed(), ev("safety.pause", 1100, pause("uncertain"))], 9500)).toMatchObject({
-      task: { row: "paused", phase: "waiting", label: "Pause unconfirmed" },
+      task: { row: "paused", phase: "waiting", label: "Pause not confirmed" },
       status: { actions: stopsTask, control: false, elapsedS: null },
     });
   });
@@ -902,11 +902,11 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   // 5. The user's Pause.
   ["pausing", "pausing", "Pausing after this step", "thinking", "working", "system"],
   ["paused", "paused", "Paused", "resting", null, "system"],
-  ["pause unconfirmed", "paused", "Pause unconfirmed", "resting", null, "system"],
+  ["pause unconfirmed", "paused", "Pause not confirmed", "resting", null, "system"],
   ["resuming", "resuming", "Resuming…", "thinking", "working", "system"],
   // 6. Budget or plan recovery.
-  ["spending limit", "limit", "Reached your spending limit", "waiting", "needs_you", "system"],
-  ["needs attention", "recovery", "Needs attention", "resting", "blocked", "system"],
+  ["spending limit", "limit", "Reached your spending limit", "waiting", "needs_you", "dot"],
+  ["needs attention", "recovery", "Needs attention", "resting", "blocked", "dot"],
   // 7–9. dot at work.
   ["acting", "acting", "Typing =SUM(F2:F13)", "acting", "working", "dot"],
   ["just acted", "acting", "Typed =SUM(F2:F13)", "acting", "working", "dot"],
