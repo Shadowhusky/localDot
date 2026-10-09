@@ -49,7 +49,7 @@ it.each(["hidden", "offline"] as const)(
       },
     });
     render(<Fixture api={api} />);
-    await waitFor(() => expect(screen.getByText("No skills yet.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("No skills yet")).toBeTruthy());
     const show = () => screen.getByRole("button", { name: /^Show the file/ });
     act(() => show().click());
     act(() => show().click());

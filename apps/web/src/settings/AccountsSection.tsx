@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { SignInSite } from "../../../../packages/protocol/src/accounts.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import type { AccountsView } from "./useAccounts.ts";
@@ -19,19 +20,18 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
     <div className="settings-accounts">
       <p className="settings-lede">
         Where you and dot are signed in. dot's web browser keeps these sign-ins between tasks and
-        restarts, away from the computer's own apps.
+        restarts.
       </p>
       {phase === "off" ? (
         <Group>
-          <GroupRow
-            leading={<IconTile icon="monitor" />}
-            label="Turn on your computer to see them."
-          />
+          <EmptyState icon="monitor" title="Your computer is off">
+            Turn it on to see your sign-ins.
+          </EmptyState>
         </Group>
       ) : phase === "error" ? (
         <Group>
           <GroupRow
-            label="Your sign-ins couldn't be read."
+            label="Couldn't load your sign-ins"
             trailing={
               <Button variant="quiet" size="sm" onClick={accounts.reload}>
                 Try again
@@ -41,11 +41,9 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
         </Group>
       ) : phase === "ready" && sites.length === 0 ? (
         <Group>
-          <GroupRow
-            leading={<IconTile icon="globe" />}
-            label="No sign-ins yet."
-            detail="When you or dot sign in to a site, it shows up here."
-          />
+          <EmptyState icon="globe" title="No sign-ins yet">
+            When you or dot sign in to a site, it shows up here.
+          </EmptyState>
         </Group>
       ) : (
         <Group>
@@ -68,7 +66,10 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
                       !entry ? (
                         <Skeleton loading width="24ch" />
                       ) : otherHosts(entry).length ? (
-                        <span className="settings-accounts-hosts">
+                        <span
+                          className="settings-accounts-hosts"
+                          title={otherHosts(entry).join(", ")}
+                        >
                           {otherHosts(entry).join(", ")}
                         </span>
                       ) : undefined
@@ -109,7 +110,7 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
         </p>
         <Button
           ref={clearTrigger}
-          variant="secondary"
+          variant="destructive"
           size="sm"
           busy={pending === "*"}
           disabledReason={
@@ -135,6 +136,7 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
           Cancel
         </Button>
         <Button
+          variant="destructive"
           onClick={() => {
             setConfirming(false);
             void accounts.clearAll();

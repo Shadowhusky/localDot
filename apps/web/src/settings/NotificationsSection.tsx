@@ -21,7 +21,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
     return view.failed ? (
       <Group>
         <GroupRow
-          label="Notification settings couldn't be read."
+          label="Couldn't load notifications"
           trailing={
             <Button size="sm" onClick={view.retry}>
               Try again
@@ -189,7 +189,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
         <Group>
           <Switch
             className="ui-group-row"
-            label="Show task text in notifications"
+            label="Show task text"
             description="Off: phones show only “dot needs you”. Your Mac always shows the task's title."
             checked={s.showTaskText}
             onCheckedChange={(showTaskText) => save({ showTaskText })}

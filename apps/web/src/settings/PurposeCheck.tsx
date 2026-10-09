@@ -23,7 +23,7 @@ export function purposeJudge(jevKey: boolean, choices: SettingsDraft["choices"])
   return choices.fast && !subscription(choices.main?.provider) ? "fast" : "none";
 }
 
-const WHY = "Stops dot sending what it read somewhere unrelated to your request.";
+const WHY = "Stops dot sending what it read somewhere unrelated.";
 
 export function purposeDescription({
   on,

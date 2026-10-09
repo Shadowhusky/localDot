@@ -907,6 +907,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const stopNote = stopped ? { line: stopped.title, details: stopped.details } : undefined;
   const sheetStopControl = sheetStop && {
     label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
+    task: sheetStop.kind === "stop-task",
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };

@@ -151,7 +151,7 @@ it("lists Always allowed choices with Remove on each", () => {
 
 it("says when nothing is allowed yet, and when a removal is under way or failed", () => {
   const view = render(<AlwaysAllowed rules={rules()} />);
-  expect(screen.getByText("Nothing yet. Use Always allow on a request to add one.")).toBeTruthy();
+  expect(screen.getByText("Nothing allowed yet")).toBeTruthy();
   const one = rule("01J00000000000000000000010");
   const removing = rules({ rules: [one], removing: one.id });
   view.rerender(<AlwaysAllowed rules={removing} />);
@@ -203,7 +203,7 @@ it("offers to start over when the saved choices cannot be read", () => {
   });
   render(<AlwaysAllowed rules={view} />);
   expect(screen.getByText(/could not be read/)).toBeTruthy();
-  expect(screen.queryByText("Nothing yet. Use Always allow on a request to add one.")).toBeNull();
+  expect(screen.queryByText("Nothing allowed yet")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Start over" }));
   expect(view.reset).toHaveBeenCalledOnce();
 });
@@ -211,7 +211,7 @@ it("offers to start over when the saved choices cannot be read", () => {
 it("offers to try again when the list could not load", () => {
   const view = rules({ phase: "error" });
   render(<AlwaysAllowed rules={view} />);
-  expect(screen.getByText("Couldn't load this list.")).toBeTruthy();
+  expect(screen.getByText("Couldn't load this list")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(view.reload).toHaveBeenCalledOnce();
 });

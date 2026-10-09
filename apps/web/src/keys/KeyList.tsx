@@ -1,8 +1,10 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
 import { afterMotion } from "../ui/finished.ts";
-import { Group, GroupRow, IconTile, Monogram } from "../ui/Group.tsx";
+import { Group, GroupRow, Monogram } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { matches, REDUCED_MOTION } from "../ui/media.ts";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { describeKey, PROVIDER_NAMES, type Provider } from "./binding.ts";
@@ -110,11 +112,9 @@ export function KeyList({
   if (rows.length === 0)
     return (
       <Group>
-        <GroupRow
-          leading={<IconTile icon="key-round" />}
-          label="No keys yet"
-          detail="Add one to use a model or a web API."
-        />
+        <EmptyState icon="key-round" title="No keys yet">
+          Add one to use a model or a web API.
+        </EmptyState>
       </Group>
     );
   return (
@@ -131,7 +131,7 @@ export function KeyList({
               pending === k.id ? "Removing…" : armed === k.id ? "Confirm remove" : "Remove";
             const count = uses?.[k.id] ?? 0;
             const facts = [
-              ...describeKey(k).split(" · "),
+              ...(k.kind === "http" ? [(k.hosts ?? []).join(", ")] : describeKey(k).split(" · ")),
               added(k.createdAt),
               count > 0 ? `Used ${count}× this task` : undefined,
             ].filter((fact): fact is string => Boolean(fact));
@@ -149,7 +149,7 @@ export function KeyList({
                 <GroupRow
                   className="keys-row-inner"
                   leading={<Monogram>{initial(k)}</Monogram>}
-                  label={<span className="keys-row-name">{k.id}</span>}
+                  label={<MiddleTruncate text={k.id} />}
                   detail={
                     // Each fact wraps whole, so no line starts or ends with a separator.
                     <span className="keys-row-meta">
@@ -164,7 +164,7 @@ export function KeyList({
                   trailing={
                     <Button
                       size="sm"
-                      variant={armed === k.id ? "secondary" : "quiet"}
+                      variant={armed === k.id ? "destructive" : "quiet"}
                       busy={pending === k.id}
                       disabledReason={
                         pending === k.id

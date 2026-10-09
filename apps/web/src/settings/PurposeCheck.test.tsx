@@ -32,7 +32,7 @@ describe("the purpose check row", () => {
       /Needs a Jev key or a fast model\.$/,
     );
     expect(purposeDescription({ on: false, judge: "jev" })).toBe(
-      "Stops dot sending what it read somewhere unrelated to your request.",
+      "Stops dot sending what it read somewhere unrelated.",
     );
   });
 });

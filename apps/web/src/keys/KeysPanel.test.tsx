@@ -332,7 +332,7 @@ describe("Keys", () => {
     );
     const row = screen.getByText("weather").closest("li");
     expect(row?.querySelector(".ui-group-row-text")?.textContent).toMatch(
-      /^weatherapi\.weather\.example, Authorization, Added .*3.*, Used 2× this task$/,
+      /^weatherweatherapi\.weather\.example, Added .*3.*, Used 2× this task$/,
     );
     expect(row?.hasAttribute("data-fresh")).toBe(true);
     expect(screen.getByText("anthropic").closest("li")?.textContent).toContain("Anthropic");
