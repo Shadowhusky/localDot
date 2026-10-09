@@ -24,6 +24,14 @@ import { TextField } from "../ui/TextField.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import { byDay, matchesSearch, taskMeta, taskTitle, verdictGlyph } from "./replay-view.ts";
 
+export interface ContinueTask {
+  // The current conversation's latest task: the next message already continues it.
+  current: string | null;
+  // Why no conversation can be continued now.
+  reason?: string;
+  run(sessionId: string): void;
+}
+
 export interface TaskIndex {
   cards: SessionCard[];
   more: boolean;
@@ -127,6 +135,7 @@ export function TaskList({
   selectedId,
   onSelect,
   onDeleted,
+  continueTask,
 }: {
   api: ApiClient;
   index: TaskIndex;
@@ -134,6 +143,7 @@ export function TaskList({
   selectedId: string | null;
   onSelect(id: string): void;
   onDeleted(id: string): void;
+  continueTask?: ContinueTask;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -251,6 +261,14 @@ export function TaskList({
         align="end"
         label={menuFor ? `Actions for ${taskTitle(menuFor)}` : "Task actions"}
       >
+        {continueTask && menuFor && continuable(menuFor, continueTask) && (
+          <MenuItem
+            disabledReason={continueTask.reason}
+            onSelect={() => continueTask.run(menuFor.id)}
+          >
+            Continue conversation
+          </MenuItem>
+        )}
         <MenuItem
           kbd={["Backspace"]}
           onSelect={() => {
@@ -276,6 +294,11 @@ export function TaskList({
       />
     </div>
   );
+}
+
+// A task that has ended can take its conversation up again, unless it is already where it goes on.
+export function continuable(card: Pick<SessionCard, "id" | "verdict">, task: ContinueTask) {
+  return card.verdict !== "live" && card.id !== task.current;
 }
 
 function Day({ day, children }: { day: string; children: ReactNode }) {

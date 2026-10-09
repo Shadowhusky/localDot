@@ -1,6 +1,18 @@
 /* The conversation: one scroller holding the thread, with the composer (or the answer panel) held at
    its foot. Messages, questions, results and the work line are rows of one card map. */
 
+/* New conversation floats at the rail's top right, level with its label, so it adds no row. */
+.conversation-rail {
+  position: relative;
+}
+
+.conversation-new {
+  position: absolute;
+  top: calc(var(--spacing-rail-top) - var(--spacing) * 2.5);
+  right: 0;
+  z-index: 2;
+}
+
 .thread-body {
   position: relative;
   flex: 1;

@@ -804,7 +804,9 @@
     padding-top: 0;
   }
 
+  /* Watch is a tap away in the bar above, so Back keeps only its chevron and the task its room. */
   .replay-export-text,
+  .replay-back-text,
   .replay-library-trigger-text[data-phone="hidden"] {
     display: none;
   }

@@ -25,7 +25,13 @@ import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
 import { recordedLabel, replayKey, taskTitle } from "./replay-view.ts";
 import { Scrubber } from "./Scrubber.tsx";
-import { TaskList, TasksSearch, useTaskIndex } from "./TasksLibrary.tsx";
+import {
+  type ContinueTask,
+  continuable,
+  TaskList,
+  TasksSearch,
+  useTaskIndex,
+} from "./TasksLibrary.tsx";
 import { useReplay } from "./useReplay.ts";
 import "./replay.css";
 
@@ -55,6 +61,7 @@ export function ReplayView({
   onGoLive,
   onDeleted,
   onTitle,
+  continueTask,
   exportJob: job,
   visible = true,
 }: {
@@ -65,6 +72,8 @@ export function ReplayView({
   onDeleted(id: string): void;
   // What the top bar names while this recording plays; null once Replay closes.
   onTitle?(title: RecordedTitle | null): void;
+  // Takes this task's conversation up again, in Watch.
+  continueTask?: ContinueTask;
   exportJob: ExportJob;
   visible?: boolean;
 }) {
@@ -188,6 +197,7 @@ export function ReplayView({
       selectedId={sessionId}
       onSelect={select}
       onDeleted={onDeleted}
+      continueTask={continueTask}
     />
   );
 
@@ -215,10 +225,30 @@ export function ReplayView({
       <main className="replay-main" aria-label="Replay">
         <h1 className="ui-visually-hidden">{title}</h1>
         <div className="replay-bar">
-          <Button variant="quiet" icon="chevron-left" className="replay-back" onClick={onGoLive}>
-            {live ? "Jump to live" : "Back to Watch"}
+          <Button
+            variant="quiet"
+            icon="chevron-left"
+            className="replay-back"
+            aria-label={live ? "Jump to live" : "Back to Watch"}
+            onClick={onGoLive}
+          >
+            <span className="replay-back-text">{live ? "Jump to live" : "Back to Watch"}</span>
           </Button>
           <div className="replay-bar-end">
+            {continueTask &&
+              !live &&
+              continuable({ id: sessionId, verdict: card?.verdict ?? "done" }, continueTask) && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="replay-continue"
+                  aria-label="Continue this conversation"
+                  disabledReason={continueTask.reason}
+                  onClick={() => continueTask.run(sessionId)}
+                >
+                  Continue
+                </Button>
+              )}
             {twoScreens && (
               <SegmentedControl
                 size={24}

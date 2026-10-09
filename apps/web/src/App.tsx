@@ -14,6 +14,7 @@ import { StopControl } from "./agent/StopControl.tsx";
 import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
+import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
@@ -347,7 +348,20 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [settings.open, keysOpen]);
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
-  const session = useLiveSession(api, cell, stage);
+  const conversation = useConversation(api);
+  const session = useLiveSession(
+    api,
+    cell,
+    stage,
+    status === "known" && conversation.known ? (conversation.sessions.at(-1) ?? null) : undefined,
+  );
+  const seen = useRef<string | null>(null);
+  const { reload: rereadConversation } = conversation;
+  useEffect(() => {
+    const now = `${session.sessionId}:${session.ended}`;
+    if (seen.current !== null && seen.current !== now) rereadConversation();
+    seen.current = now;
+  }, [session.sessionId, session.ended, rereadConversation]);
   useEffect(() => {
     if (session.sessionId && !session.ended) {
       setNewestReplayId(session.sessionId);
@@ -484,6 +498,15 @@ function Theatre({ api }: { api: ApiClient }) {
     (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
   );
   const task = session.sessionId ? taskHud(session.model, now, facts) : null;
+  // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
+  // the daemon says which, the choice is offered and the daemon has the last word.
+  const taskStatus = agent.snapshot?.status;
+  const conversationReason =
+    !session.ended && taskStatus && taskStatus !== "idle" && taskStatus !== "ended"
+      ? FINISH_FIRST
+      : conversation.busy
+        ? "Just a moment…"
+        : undefined;
   const computer = error ? { ...containedHud, caption: error } : containedHud;
   const appStatus = statusFor({
     computer: {
@@ -675,6 +698,12 @@ function Theatre({ api }: { api: ApiClient }) {
                     ? () => selectReplay(agent.sessionId)
                     : undefined
                 }
+                onReplayTask={selectReplay}
+                sessions={conversation.sessions}
+                newConversation={{
+                  run: () => void conversation.startNew(),
+                  reason: conversationReason,
+                }}
                 recovery={
                   <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
                 }
@@ -873,6 +902,14 @@ function Theatre({ api }: { api: ApiClient }) {
               if (id === replayId) selectReplay(null, "replace");
             }}
             onTitle={setRecorded}
+            continueTask={{
+              current: conversation.sessions.at(-1) ?? null,
+              reason: conversationReason,
+              run: (id) =>
+                void conversation.continueFrom(id).then((done) => {
+                  if (done) selectReplay(null);
+                }),
+            }}
             exportJob={exportJob}
             visible={!keysOpen && !settings.open && !safety.approval}
           />

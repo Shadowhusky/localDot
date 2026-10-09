@@ -726,7 +726,9 @@ export function Composer(props: ComposerProps) {
         </Collapse>
         <ComposerField
           label={mode === "new" ? "New task" : "Message"}
-          placeholder={mode === "new" ? "Ask dot to do something…" : "Message dot…"}
+          placeholder={
+            mode === "new" && !props.agent.sessionId ? "Ask dot to do something…" : "Message dot…"
+          }
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}

@@ -34,8 +34,10 @@ import {
   type ChatgptStatus,
   type CodexAccount,
 } from "../../../daemon/src/agent/codex/account.ts";
+import { Conversations } from "../../../daemon/src/agent/conversation.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
+import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
   approvalDraft,
   authorizePrepared,
@@ -221,6 +223,7 @@ let heldAt: number | undefined;
 const base = monotonicClock();
 const clock = { nowMicros: () => (heldAt ?? base.nowMicros()) + skew };
 const log = new EventLog(HOME, clock);
+const conversations = new Conversations(HOME, log);
 const cells = new FakeOrchestrator();
 const tickets = new TicketRegistry();
 const live = new LiveSessions();
@@ -321,6 +324,9 @@ function planSelection(): TaskModelSelection | undefined {
   );
 }
 let teardown = false;
+// How the live task ends when its run is cut: Stop records it stopped, a finished task the user
+// moved on from records it done, and a daemon that went away records nothing.
+const ending = new WeakMap<AgentSession, "done" | "crash">();
 
 function attachLive(owned: AgentSession) {
   live.start(
@@ -333,8 +339,10 @@ function attachLive(owned: AgentSession) {
           () => {
             owned.stop();
             void owned.toolsSettled().then(() => {
+              const how = ending.get(owned);
               try {
-                owned.append("session.end", { reason: "stopped" });
+                if (how !== "crash")
+                  owned.append("session.end", { reason: how === "done" ? "done" : "stopped" });
               } catch {}
               resolve();
             }, resolve);
@@ -344,7 +352,15 @@ function attachLive(owned: AgentSession) {
       }),
   );
 }
-function newSession(title: string, task: string): AgentSession {
+// Ends the live task, as the daemon does, and waits until the computer is free of it.
+async function endLive(how?: "done" | "crash") {
+  const owned = session;
+  if (!owned || owned.stopped) return;
+  if (how) ending.set(owned, how);
+  live.stop(owned.id);
+  await live.settled(owned.id);
+}
+function newSession(title: string, task: string, continues?: string): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
     cellId,
@@ -357,9 +373,32 @@ function newSession(title: string, task: string): AgentSession {
   log.append(s.id, {
     agent: "main",
     type: "session.start",
-    data: { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title },
+    data: {
+      screen: { w: 2560, h: 1600, scale: 2 },
+      os: "linux",
+      title,
+      ...(continues ? { continues } : {}),
+    },
   });
   return s;
+}
+
+// An ended task: what the user asked, dot's reply and result. It continues `continues`.
+function endedTask(title: string, reply: string, summary: string, continues?: string): string {
+  const id = log.createSession(title);
+  const append = (type: string, data: Record<string, unknown>) =>
+    log.append(id, { agent: "main", type, data } as never);
+  append("session.start", {
+    screen: { w: 2560, h: 1600, scale: 2 },
+    os: "linux",
+    title,
+    ...(continues ? { continues } : {}),
+  });
+  append("message.user", { messageId: ulid(), kind: "task", text: title });
+  append("message.assistant", { messageId: ulid(), text: reply });
+  append("task.result", { summary, files: [] });
+  append("session.end", { reason: "done" });
+  return id;
 }
 
 type Append = (type: string, data: Record<string, unknown>, step?: string) => void;
@@ -742,11 +781,23 @@ function seedLongTask(s: AgentSession) {
   );
 }
 
+// QA_EARLIER earlier tasks of the same conversation come before the seeded one.
+let earlier: string | undefined;
+for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
+  earlier = endedTask(
+    n === 0 ? "Find last month's sales table" : `Check the sample figures (${n})`,
+    n === 0
+      ? "I found **sales.xlsx** in Documents. It has one sheet with daily totals for December."
+      : "The figures add up.",
+    n === 0 ? "Found sales.xlsx in Documents." : "Checked the figures.",
+    earlier,
+  );
 if (withSession && initial) {
   heldAt = base.nowMicros();
   session = newSession(
     env.QA_ACTIVITY === "long" ? "Sample · dog drawing" : "Sample · monthly report",
     "Sample task",
+    earlier,
   );
   attachLive(session);
   if (env.QA_ACTIVITY === "long") seedLongTask(session);
@@ -754,6 +805,8 @@ if (withSession && initial) {
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;
 }
+const latestTask = session?.id ?? earlier;
+if (latestTask) conversations.adopt(latestTask);
 
 const native = new FakeDesktopd({
   type: (body) => ({
@@ -954,6 +1007,7 @@ const agent: AgentRoutesDeps = {
       dir: HOME,
     },
   ],
+  conversations,
   canChangeMemory: () => !session?.controlHeld && !killSwitch.isBusy(cellId),
   taskMutationReady: (owner) =>
     owner === session &&
@@ -968,7 +1022,9 @@ const agent: AgentRoutesDeps = {
     start: async (key, task) => {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
-      session = newSession(task.slice(0, 60), task);
+      await endLive();
+      session = newSession(task.slice(0, 60), task, conversations.current() ?? undefined);
+      conversations.adopt(session.id);
       budgetHold = undefined;
       raisedDuringPause = false;
       selection = planSelection();
@@ -988,6 +1044,11 @@ const agent: AgentRoutesDeps = {
         });
       }, 800);
       return s;
+    },
+    release: async () => {
+      if (session && !session.stopped && session.status !== "idle")
+        throw new AgentError(409, "Finish or stop the current task first.");
+      await endLive("done");
     },
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
@@ -1744,6 +1805,22 @@ routes.post("/__qa/heartbeat", (c) => {
   return c.json({ ok: true });
 });
 routes.post("/__qa/finish", () => reply(finish()));
+// The daemon goes away under the live task (no end is recorded) and comes back without it.
+routes.post("/__qa/crash", async (c) => {
+  if (!session || session.stopped) return c.text("no live task", 409);
+  await endLive("crash");
+  return c.json({ ok: true });
+});
+// A task of another conversation, ended, to continue from Replay.
+routes.post("/__qa/older-task", (c) =>
+  c.json({
+    sessionId: endedTask(
+      "Plan the team offsite",
+      "I drafted a two-day plan in **offsite.md**: Lisbon, 14–15 November.",
+      "Drafted the offsite plan in offsite.md.",
+    ),
+  }),
+);
 routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as CellKind)));
 routes.post("/__qa/chatgpt/:state", (c) => {
   const state = c.req.param("state");

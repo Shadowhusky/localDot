@@ -38,6 +38,8 @@ const PLANNED: IconName[] = [
   "copy",
   "clipboard-paste",
   "download",
+  // Not in the plan's list: New conversation.
+  "square-pen",
   "undo-2",
   "terminal",
   "file-diff",

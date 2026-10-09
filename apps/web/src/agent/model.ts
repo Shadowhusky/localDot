@@ -73,6 +73,8 @@ export interface AgentChange {
 }
 export interface AgentResult {
   readonly id: string;
+  // An earlier task's result in the conversation: its files are that task's.
+  readonly sessionId?: string;
   readonly seq?: number;
   readonly at?: number;
   readonly summary: string;

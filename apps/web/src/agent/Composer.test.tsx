@@ -807,6 +807,25 @@ describe("the composer's controls", () => {
     fireEvent.click(chip);
     expect(onSettings).toHaveBeenCalledExactlyOnceWith(chip);
   });
+  it("invites a message that continues the conversation while an ended task is on show", async () => {
+    const f = setup(
+      () => Response.json({ sessionId: "01JXYZ0000000000000000NEXT" }, { status: 202 }),
+      {
+        agent: {
+          ...agent,
+          model: { ...emptyAgentModel(), ended: { reason: "stopped" } },
+          snapshot: { sessionId, cellId, status: "ended", toolCalls: 0 },
+          fresh: false,
+        },
+      },
+    );
+    expect(f.field.getAttribute("placeholder")).toBe("Message dot…");
+    f.input("Now make it blue");
+    await act(async () => f.submit());
+    expect(f.requests).toEqual([
+      { path: `/api/cells/${cellId}/agent`, body: { task: "Now make it blue" } },
+    ]);
+  });
   it("shows a dragged file over the card and adds what is dropped", async () => {
     transfer.trustNames = true;
     setup();

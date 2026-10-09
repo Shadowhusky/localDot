@@ -22,6 +22,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   takeover: hud("Your turn"),
   budget: hud("Paused · Limit reached"),
   done: hud("Done"),
+  continued: hud("Done"),
   reconnecting: shows((page) => page.locator(".stage-veil.on")),
   paused: hud("Paused"),
   failed: hud("Failed"),

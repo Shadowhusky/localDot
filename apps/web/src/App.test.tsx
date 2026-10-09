@@ -35,7 +35,8 @@ function daemon(answer: (call: Call) => Response | Promise<Response>) {
     calls.push(call);
     return keyReply(call.path) ?? answer(call);
   }) as typeof fetch;
-  // These assertions cover cell/token traffic; key and download polling have their own suites.
+  // These assertions cover cell/token traffic; key, conversation and download reads have their own
+  // suites.
   const seen = () => calls.filter((c) => !keyReply(c.path)).map((c) => `${c.method} ${c.path}`);
   return { fetchImpl, calls, seen };
 }
@@ -59,6 +60,7 @@ const json = (body: unknown, status = 200) =>
 const keyReply = (path: string): Response | undefined => {
   if (path === `/api/cells/${CELL_ID}/quarantine`) return json({ items: [] });
   if (path === "/api/session-index") return json({ sessions: [], next: null });
+  if (path === "/api/conversation") return json({ sessions: [], more: false });
   if (path === "/api/agent/settings") return json({});
   if (path === "/api/agent/providers") return json(providerFixture());
   if (path === "/api/keyd")
@@ -481,7 +483,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
