@@ -3,10 +3,10 @@ import {
   arrowRect,
   awayFromRectEdge,
   countColour,
-  crosshairMask,
   firstChange,
   locateTemplate,
   outsideRect,
+  pointRingMask,
   type Rgba,
   ringBandMask,
 } from "./oracle-check.ts";
@@ -75,7 +75,7 @@ describe("countColour and masks", () => {
     );
   });
 
-  it("excludes the arrow's footprint and the crosshair's own pixels", () => {
+  it("excludes the arrow's footprint and the point ring's own pixels", () => {
     const out = outsideRect({ x: 10, y: 10, w: 20, h: 20 }, 2);
     expect(out(5, 5)).toBe(true);
     expect(out(9, 20)).toBe(false);
@@ -84,13 +84,11 @@ describe("countColour and masks", () => {
     expect(outsideRect(arrow, 0)(41, 60)).toBe(false);
     expect(outsideRect(arrow, 0)(30, 40)).toBe(true);
     expect(outsideRect(arrow, 0)(40, 100)).toBe(true);
-    const cross = crosshairMask(48, 48, 1);
-    expect(cross(48 + 18, 48)).toBe(true);
-    expect(cross(48, 48 - 22)).toBe(true);
-    // Diagonals miss the arms: r = 14.1 lies between the dot and the ring, r = 22.6 outside it.
-    expect(cross(48 + 10, 48 + 10)).toBe(false);
-    expect(cross(48 + 16, 48 + 16)).toBe(false);
-    expect(cross(48 + 1, 48)).toBe(true);
+    const ring = pointRingMask(48, 48, 1);
+    expect(ring(48 + 12, 48)).toBe(true);
+    expect(ring(48, 48 - 17)).toBe(true);
+    expect(ring(48 + 5, 48)).toBe(false);
+    expect(ring(48 + 20, 48)).toBe(false);
   });
 });
 
