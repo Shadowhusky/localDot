@@ -123,7 +123,7 @@ describe("Settings › Notifications", () => {
 
   it("says a machine with no screen shows no banners, and offers only phone switches", async () => {
     setup(iPhoneSafari, undefined, "none");
-    expect(await screen.findByText("No banners on this computer")).toBeTruthy();
+    expect(await screen.findByText("No banners on the computer running localDot")).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Done on phones" })).toBeTruthy();
     expect(screen.queryByRole("switch", { name: /on this (Mac|computer)$/ })).toBeNull();
     cleanup();

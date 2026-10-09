@@ -19,7 +19,7 @@ export interface NotifyRoutesDeps {
   keyd: { pushKey(): Promise<KeydPushKey> };
   ledger: Pick<AttentionLedger, "snapshot" | "seen">;
   notifier: Pick<Notifier, "test">;
-  banner: BannerKind;
+  banner(): BannerKind;
 }
 
 const MAX_BODY = 8 * 1024;
@@ -32,7 +32,7 @@ export function notifyRoutes(app: Hono, deps: NotifyRoutesDeps): void {
   });
 
   app.get("/api/notify/settings", (c) => c.json(deps.store.settings()));
-  app.get("/api/notify/host", (c) => c.json({ banner: deps.banner }));
+  app.get("/api/notify/host", (c) => c.json({ banner: deps.banner() }));
   app.put("/api/notify/settings", limit, async (c) => {
     const parsed = await body(c, NotifySettings);
     if (!parsed.success) return c.text(parsed.message, 400);

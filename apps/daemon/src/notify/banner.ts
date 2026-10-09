@@ -35,6 +35,30 @@ export function systemBannerProbe(): HostBannerProbe {
   };
 }
 
+export interface LiveBanner {
+  kind(): BannerKind;
+  notifier: MacNotifier;
+}
+
+// A Linux desktop session can begin after the daemon (lingering starts it at boot), so until a
+// screen is found, each banner and each look at Settings searches again.
+export function liveHostBanner(detect: () => HostBanner = () => hostBanner()): LiveBanner {
+  let found = detect();
+  const current = () => {
+    if (found.kind === "none") found = detect();
+    return found;
+  };
+  return {
+    kind: () => current().kind,
+    notifier: {
+      get available() {
+        return current().notifier.available;
+      },
+      show: (title, body) => current().notifier.show(title, body),
+    },
+  };
+}
+
 // macOS shows banners with osascript; a Linux desktop with notify-send over the session bus. A
 // machine nobody signs in to on a screen gets none, and Settings says so.
 export function hostBanner(

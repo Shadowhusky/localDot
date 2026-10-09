@@ -2,7 +2,7 @@ import type { AppEvents } from "../app-events.ts";
 import type { EventLog } from "../event-log.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { AttentionLedger } from "./attention.ts";
-import { type HostBanner, hostBanner } from "./banner.ts";
+import { type HostBanner, liveHostBanner } from "./banner.ts";
 import type { MacNotifier } from "./mac.ts";
 import { isRoutineRun, Notifier } from "./notifier.ts";
 import { PresenceBoard } from "./presence.ts";
@@ -34,7 +34,8 @@ export interface NotifyWiring {
 
 export function createNotify(d: NotifyWiringDeps): NotifyWiring {
   const now = d.now ?? (() => new Date());
-  const banner = d.banner ?? hostBanner();
+  const fixed = d.banner;
+  const banner = fixed ? { kind: () => fixed.kind, notifier: fixed.notifier } : liveHostBanner();
   const store = new NotifyStore(d.home, now);
   const ledger = new AttentionLedger(() => now().getTime());
   const presence = new PresenceBoard();

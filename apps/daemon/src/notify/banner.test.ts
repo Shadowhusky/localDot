@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type HostBannerProbe, hostBanner } from "./banner.ts";
+import { type HostBannerProbe, hostBanner, liveHostBanner } from "./banner.ts";
 import type { ExecFile } from "./mac.ts";
 
 function probe(
@@ -73,5 +73,36 @@ describe("hostBanner", () => {
       "none",
     );
     expect(hostBanner(probe({ platform: "win32" })).kind).toBe("none");
+  });
+});
+
+describe("liveHostBanner", () => {
+  it("finds a desktop that signs in after the daemon started", async () => {
+    const { calls, execFile } = recorder();
+    let signedIn = false;
+    const live = liveHostBanner(() =>
+      hostBanner(signedIn ? probe(desktop) : probe({ files: ["/usr/bin/notify-send"] }), {
+        execFile,
+      }),
+    );
+    expect(live.kind()).toBe("none");
+    expect(live.notifier.available).toBe(false);
+    await expect(live.notifier.show("dot needs you", "Open localDot")).resolves.toBe("unavailable");
+    signedIn = true;
+    expect(live.notifier.available).toBe(true);
+    await expect(live.notifier.show("dot needs you", "Open localDot")).resolves.toBe("shown");
+    expect(live.kind()).toBe("desktop");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("asks once a desktop is found, keeping its rate limit", () => {
+    let detections = 0;
+    const live = liveHostBanner(() => {
+      detections++;
+      return hostBanner(probe(desktop));
+    });
+    live.kind();
+    void live.notifier.available;
+    expect(detections).toBe(1);
   });
 });

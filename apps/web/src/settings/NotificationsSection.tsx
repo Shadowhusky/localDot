@@ -43,11 +43,11 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
     <>
       <p className="settings-lede">
         {banners
-          ? `dot nudges you when it needs you, finishes or fails: on this ${noun} with no tab open, and on your phone.`
+          ? `dot nudges you when it needs you, finishes or fails: on the ${noun} running localDot when no tab is open, and on your phone.`
           : "dot nudges you when it needs you, finishes or fails: on your phone, and in a tab you keep open."}
       </p>
       {!banners && (
-        <Banner icon="monitor" title="No banners on this computer">
+        <Banner icon="monitor" title="No banners on the computer running localDot">
           It has no screen of its own. Turn on notifications on your phone to hear from dot
           anywhere.
         </Banner>

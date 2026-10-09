@@ -44,7 +44,7 @@ beforeEach(() => {
         },
       },
       notifier: { test: async () => ({ mac: "shown", phones: [] }) },
-      banner: "none",
+      banner: () => "none",
     },
   });
 });
