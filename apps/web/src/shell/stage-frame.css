@@ -1,5 +1,7 @@
 /* The stage frame (design-v2 §10.18, §8): the 16:10 box placed first, its rim, the light it spills
    on the floor, and the band under it. Its width is set by the layout (app.css). */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
 .stage-frame {
   position: relative;
   display: flex;
@@ -103,7 +105,7 @@
   pointer-events: auto;
 }
 
-@media (width < 700px) {
+@media (--phone) {
   /* On a phone the curtain covers the stage and the band, so there is never an empty band. */
   .stage-curtain {
     inset: 0;
@@ -193,7 +195,7 @@
   }
 }
 
-@media (width < 700px) {
+@media (--phone) {
   .narrator {
     --dock-x: -2px;
     --dock-y: 4px;
@@ -209,6 +211,66 @@
     -webkit-line-clamp: 3;
     line-clamp: 3;
   }
+}
+
+/* Focus mode (design-v2 §8.5): the band moves into the left margin, dot over the step it is on, and
+   the task's controls stand in the right margin, each column 8 px from the picture. */
+.app[data-focus] .stage-spill {
+  display: none;
+}
+
+.app[data-focus] .stage-band,
+.stage-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  min-height: 0;
+}
+
+.app[data-focus] .stage-band {
+  right: calc(100% + 8px);
+}
+
+.stage-side {
+  left: calc(100% + 8px);
+  display: grid;
+  place-items: center;
+}
+
+.app[data-focus] .narrator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.app[data-focus] .narrator-dock {
+  position: relative;
+  top: auto;
+  left: auto;
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+.app[data-focus] .narration {
+  display: none;
+}
+
+.narrator-note {
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+}
+
+.focus-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* The curtain (design-v2 §4, §11 A–B): the stage's own box while there is no picture. dot sleeps in
@@ -346,7 +408,7 @@
     visibility 0s var(--dur-fade);
 }
 
-@media (width < 700px) {
+@media (--phone) {
   .curtain {
     --hero: 128px;
     --hero-gap: var(--spacing);

@@ -12,7 +12,8 @@ export interface MoreItem {
   disabledReason?: string;
 }
 
-// Where a phone keeps what a wider screen shows in its top bar.
+// Where a phone keeps what a wider screen shows in its top bar: at the toolbar's trailing end, its
+// menu rising from the button.
 export function MoreMenu({ items }: { items: readonly MoreItem[] }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -20,7 +21,9 @@ export function MoreMenu({ items }: { items: readonly MoreItem[] }) {
     <>
       <IconButton
         ref={button}
-        size={32}
+        size={44}
+        round
+        className="toolbar-button"
         icon="more-horizontal"
         label="More"
         {...triggerProps("menu", open)}
@@ -30,7 +33,7 @@ export function MoreMenu({ items }: { items: readonly MoreItem[] }) {
         open={open}
         onClose={() => setOpen(false)}
         anchor={button}
-        side="bottom"
+        side="top"
         align="end"
         label="More"
       >
