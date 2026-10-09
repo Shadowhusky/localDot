@@ -79,6 +79,12 @@
   --color-diff-del-bg: rgba(235, 95, 95, 0.12);
   --color-danger-fg: #f08f8f;
   --color-danger-bg: rgba(235, 95, 95, 0.12);
+  /* dot's marks over the picture (design-v2 §12): the glass of its chips, pills and keycaps, and
+     the porcelain shading of its glyph. */
+  --color-stage-glass: rgba(16, 17, 20, 0.84);
+  --color-glyph-light: #ffffff;
+  --color-glyph-mid: #d9dce0;
+  --color-glyph-shade: #9fa4ab;
 
   --color-state-hover: rgba(255, 255, 255, 0.06);
   --color-state-pressed: rgba(255, 255, 255, 0.1);
