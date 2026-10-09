@@ -76,6 +76,14 @@ class ProfilesTest(unittest.TestCase):
         self.assertFalse((self.profile() / "Cookies").exists())
         self.assertEqual((persistent / "Cookies").read_text(), "isolated-login")
 
+    def test_new_profile_draws_its_frame_from_the_gtk_theme(self):
+        self.owner.rotate(A)
+        preferences = json.loads((self.profile() / "Default" / "Preferences").read_text())
+        self.assertIs(preferences["browser"]["custom_chrome_frame"], True)
+        self.assertEqual(preferences["extensions"]["theme"]["system_theme"], 1)
+        self.owner.rotate(B)
+        self.assertTrue((self.profile() / "Default" / "Preferences").exists())
+
     def test_same_task_retry_keeps_current_cookie(self):
         first = self.owner.rotate(A)
         (self.profile() / "Cookies").write_text("current-task")

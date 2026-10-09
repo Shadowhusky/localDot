@@ -1,6 +1,6 @@
-import { DotEngine, type EyePose } from "../engine/engine.ts";
+import { DotEngine, type EyePose, type Point } from "../engine/engine.ts";
 import { clamp, smoothstep } from "../engine/math.ts";
-import type { DotState, Lod } from "../engine/states.ts";
+import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
 import { addView, type Frameable, now, removeView } from "./scheduler.ts";
@@ -219,6 +219,30 @@ export class DotView implements Frameable {
 
   setReducedMotion(on: boolean): void {
     this.engine.setReducedMotion(on, now());
+  }
+
+  react(name: Reaction): void {
+    this.engine.react(name, now());
+  }
+
+  setFocus(p: Point | null): void {
+    this.engine.setFocus(p, now());
+  }
+
+  setBias(b: Point): void {
+    this.engine.setBias(b, now());
+  }
+
+  setPlaces(places: Partial<{ composer: Point; card: Point }>): void {
+    this.engine.setPlaces(places, now());
+  }
+
+  say(ms: number): void {
+    this.engine.say(now(), ms);
+  }
+
+  hop(): void {
+    this.engine.hop(now());
   }
 
   setSize(size: number): void {

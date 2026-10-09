@@ -20,9 +20,14 @@ import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
-import { hudFor } from "./cells/hud-state.ts";
+import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { presetOf } from "./copy/autonomy.ts";
+import { dotFeed } from "./dot/dot-feed.ts";
+import { PresenceLayer } from "./dot/PresenceLayer.tsx";
+import { presencePlace } from "./dot/presence-rules.ts";
+import { useShowDot } from "./dot/show-dot.ts";
 import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
@@ -37,11 +42,12 @@ import {
 } from "./lib/install-link.ts";
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
-import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
+import { FinishSetup } from "./onboarding/FinishSetup.tsx";
+import { setupSteps } from "./onboarding/setup.ts";
 import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { statusFor, taskFacts, taskHud } from "./session/status.ts";
+import { type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
@@ -51,12 +57,14 @@ import { useAccounts } from "./settings/useAccounts.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
-import { Caption } from "./shell/Caption.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
+import { Curtain } from "./shell/Curtain.tsx";
+import { useCurtain } from "./shell/curtain.ts";
 import { HudIsland } from "./shell/HudIsland.tsx";
 import { islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
-import { useLayout } from "./shell/layout.ts";
+import { useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
+import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -206,6 +214,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
+  const showDot = useShowDot();
   const [replayId, setReplayId] = useState<string | null>(() => {
     const selected = new URLSearchParams(window.location.search).get("replay");
     return selected && ULID_PATTERN.test(selected) ? selected : null;
@@ -609,27 +618,47 @@ function Theatre({ api }: { api: ApiClient }) {
     },
     reason: conversationReason,
   };
-  const curtainUp = !replayId && status === "known" && !cell && listed.length === 0;
-  // The curtain over the stage: first-run setup.
-  const welcome = (
-    <Presence show={curtainUp}>
-      <WelcomeSetup
-        modelReady={mainReady}
-        loading={settings.phase === "loading" || !settings.saved}
-        modelLabel={
-          mainChoice
-            ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
-            : undefined
-        }
-        autonomy={settings.saved?.autonomy}
-        appearance={appearance}
-        starting={pending !== null}
-        canStart={appStatus.actions.some((action) => action.kind === "start" && action.enabled)}
-        onSettings={showSettings}
-        onStart={guardStart}
-      />
-    </Presence>
+  const curtain = useCurtain(appStatus.computer, !!replayId);
+  const computerAction = appStatus.actions.find(
+    (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
   );
+  const onComputer = {
+    start: guardStart,
+    stop: guardComputerStop,
+    resume: guardResume,
+    retry,
+  };
+  const keyboard = useKeyboardUp();
+  const place = presencePlace({
+    showDot: showDot.value,
+    curtain: curtain.up,
+    checking: curtain.up && curtain.phase === "checking",
+    stageHidden: !!replayId,
+    keyboard,
+  });
+  const setupKnown = !!settings.saved;
+  const chosenKey =
+    mainChoice?.provider === "chatgpt"
+      ? settings.chatgpt.canStart
+        ? "Signed in"
+        : null
+      : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
+        ? mainChoice.key
+        : null;
+  const savedAutonomy = settings.saved?.autonomy;
+  const setup = setupSteps({
+    provider: mainChoice?.provider === "chatgpt" ? "chatgpt" : (mainProvider ?? null),
+    key: chosenKey,
+    modelReady: mainReady,
+    model: mainChoice
+      ? `${mainProvider?.name ?? "ChatGPT"} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
+      : null,
+    permissions:
+      savedAutonomy && JSON.stringify(savedAutonomy) !== JSON.stringify(DEFAULT_AUTONOMY)
+        ? (presetOf(savedAutonomy)?.label ?? "Your own choices")
+        : null,
+    computer: !!cell || listed.length > 0,
+  });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
   const showKeys = (trigger: HTMLElement | null) => {
     keysOrigin.current = trigger;
@@ -714,8 +743,9 @@ function Theatre({ api }: { api: ApiClient }) {
       />
     </div>
   );
+  // The curtain speaks while it is up; under it the band is quiet.
   const narration =
-    appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+    !curtain.up && (appStatus.caption.speaker === "dot" || appStatus.computer !== "live")
       ? appStatus.caption.text
       : "";
   return (
@@ -724,7 +754,10 @@ function Theatre({ api }: { api: ApiClient }) {
         title={
           replayId
             ? (shownRecording?.title ?? RECORDED_TASK)
-            : (session.model.title ?? "New conversation")
+            : (session.model.title ??
+              (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                ? undefined
+                : "New conversation"))
         }
         note={shownRecording?.note}
         mode={replayId ? "replay" : "watch"}
@@ -744,11 +777,25 @@ function Theatre({ api }: { api: ApiClient }) {
             light={appStatus.control ? "dot" : manualLive ? "you" : "none"}
             live={stageHud.live}
             frozen={!!stageHud.paused}
-            curtain={welcome}
+            curtain={
+              <Presence show={curtain.up}>
+                <Curtain
+                  phase={curtain.phase}
+                  first={!cell && listed.length === 0}
+                  waking={pending === "start" || pending === "create"}
+                  caption={computer.caption}
+                  notice={error}
+                  action={computerAction}
+                  onAction={() => computerAction && onComputer[computerAction.kind]()}
+                  showDot={showDot.value}
+                />
+              </Presence>
+            }
             island={
               <HudIsland
                 status={appStatus}
-                shape={islandShape(appStatus, curtainUp)}
+                shape={islandShape(appStatus, curtain.up)}
+                badge={place === "badge"}
                 pause={pauseSlot({
                   pause: safety.pause,
                   canPause: safety.canPause,
@@ -761,12 +808,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 onContinue={() => void safety.resume()}
                 onStopTask={taskStop}
                 onTake={() => setRailView("takeover")}
-                onComputer={{
-                  start: guardStart,
-                  stop: guardComputerStop,
-                  resume: guardResume,
-                  retry,
-                }}
+                onComputer={onComputer}
               />
             }
             notices={
@@ -781,7 +823,13 @@ function Theatre({ api }: { api: ApiClient }) {
                 />
               </>
             }
-            band={<Caption text={narration} speaker={appStatus.caption.speaker} />}
+            band={
+              <NarratorBand
+                line={narration}
+                speaker={appStatus.caption.speaker}
+                showDot={showDot.value}
+              />
+            }
           >
             {!replayId && selectedScreen && (
               <div className="screen-label" role="status">
@@ -870,6 +918,16 @@ function Theatre({ api }: { api: ApiClient }) {
             onReplayTask={selectReplay}
             sessions={conversation.sessions}
             more={conversation.more}
+            start={
+              setupKnown && !mainReady ? (
+                <FinishSetup
+                  steps={setup.steps}
+                  done={setup.done}
+                  onChooseModel={(event) => showSettings(event.currentTarget)}
+                  onContinue={(event) => showSettings(event.currentTarget)}
+                />
+              ) : undefined
+            }
             covered={shownView !== "chat"}
             cover={
               <>
@@ -948,6 +1006,7 @@ function Theatre({ api }: { api: ApiClient }) {
       <SettingsSheet
         focusSection={settingsSection}
         appearance={appearance}
+        showDot={showDot}
         taskControls={<StopControl controls={controls} />}
         stop={sheetStopControl}
         open={settings.open}
@@ -1040,6 +1099,13 @@ function Theatre({ api }: { api: ApiClient }) {
         onClose={closeKeys}
         discardRef={keysDiscard}
       />
+      {showDot.value && (
+        <PresenceLayer
+          place={place}
+          feed={dotFeed(appStatus, session.sessionId ? session.model : null, now)}
+          line={appStatus.caption.speaker === "dot" ? narration : ""}
+        />
+      )}
       <Announcer />
     </div>
   );

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Settings
+Comment=Change how this computer looks and works
+Exec=xfce4-settings-manager
+Icon=localdot-controls
+Terminal=false
+StartupNotify=false

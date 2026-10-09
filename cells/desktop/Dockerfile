@@ -126,26 +126,46 @@ RUN set -eu; \
     cp /tmp/whitesur-icons/COPYING /usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING; \
     rm -rf /tmp/whitesur-icons
 
-ARG WHITESUR_WALLPAPERS_COMMIT=4fe5ae7a01f38f8ff9a25c343e0a49234c1012c9
-ARG WALLPAPER_SHA256=4a5867e8c67e04ef23e8a13ce38644053ddb3aebeb0d02706924ffdfb0d95833
-ARG WALLPAPER_LICENSE_SHA256=5a9518c6e0636dee418520a999426422aa33a2c5a0d8dedf62cadceec8d1b3c6
+# The menu bar's app name and menus (vala-panel-appmenu, LGPL-3.0; Chromium shows its menus there,
+# other apps keep theirs in the window) and the Super+Space launcher (rofi, MIT), which lists apps
+# but not itself.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      xfce4-appmenu-plugin appmenu-registrar rofi \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /usr/local/share/applications \
+ && for app in rofi rofi-theme-selector; do \
+      sed '/^\[Desktop Entry\]$/a NoDisplay=true' "/usr/share/applications/$app.desktop" \
+        > "/usr/local/share/applications/$app.desktop"; \
+    done
 
-# Wallpaper (MIT): WhiteSur-wallpapers' flat light dune in Nord colours (tag 2023-06-11), a
-# grey-blue sky over sand browns.
-RUN set -eu; \
-    src="https://raw.githubusercontent.com/vinceliuice/WhiteSur-wallpapers/${WHITESUR_WALLPAPERS_COMMIT}"; \
-    mkdir -p /usr/share/backgrounds/localdot; \
-    curl -fsSL -o /usr/share/backgrounds/localdot/mojave-nord-light.png "$src/Wallpaper-nord/Mojave-nord-light.png"; \
-    echo "${WALLPAPER_SHA256}  /usr/share/backgrounds/localdot/mojave-nord-light.png" | sha256sum -c -; \
-    curl -fsSL -o /usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE "$src/LICENSE"; \
-    echo "${WALLPAPER_LICENSE_SHA256}  /usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE" | sha256sum -c -
 COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
 
 COPY root/ /
 RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
       /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank \
+      /usr/local/bin/localdot-spotlight /usr/local/bin/localdot-menubar /usr/local/bin/libreoffice \
       /etc/s6-overlay/s6-rc.d/svc-desktopd/run /usr/local/bin/localdot-chromium \
-      /etc/s6-overlay/s6-rc.d/init-localdot-cell/run /etc/s6-overlay/s6-rc.d/svc-forwarder/run
+      /etc/s6-overlay/s6-rc.d/init-localdot-cell/run /etc/s6-overlay/s6-rc.d/svc-forwarder/run \
+ && gtk-update-icon-cache -q -f /usr/share/icons/hicolor \
+ && python3 /defaults/localdot/add-shortcut.py \
+      /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml "<Super>space" localdot-spotlight
+# Mac names for the file manager, the editors and the terminal, in the dock, the launcher
+# and the menu bar. The files are renamed in place: the dock matches Thunar's windows only through
+# the system file BAMF indexed. Only the [Desktop Entry] group is renamed; actions keep their names.
+RUN set -eu; \
+    mac_name() { \
+      f="/usr/share/applications/$1.desktop"; \
+      awk -v name="$2" '/^\[/ { main = ($0 == "[Desktop Entry]") } \
+        main && /^Name(\[[^]]*\])?=/ { if ($0 ~ /^Name=/) print "Name=" name; next } { print }' \
+        "$f" > "$f.new"; \
+      mv "$f.new" "$f"; \
+      grep -qx "Name=$2" "$f"; \
+    }; \
+    mac_name thunar Files; \
+    mac_name org.xfce.mousepad "Text Editor"; \
+    mac_name codium Code; \
+    mac_name xfce4-terminal Terminal
 RUN ln -sfn localdot-chromium /usr/local/bin/chromium \
  && ln -sfn localdot-chromium /usr/local/bin/chromium-browser
 

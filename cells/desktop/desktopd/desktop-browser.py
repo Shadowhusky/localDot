@@ -24,6 +24,8 @@ DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE = os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 TASK = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 GENERATION = re.compile(r"^[0-9a-f]{32}$")
+# A new profile draws Chromium's frame from the GTK theme, so its window buttons are the desktop's.
+PREFERENCES = b'{"browser":{"custom_chrome_frame":true},"extensions":{"theme":{"system_theme":1}}}'
 
 
 class Refused(Exception):
@@ -175,6 +177,22 @@ class Profiles:
             os.close(fd)
             raise
 
+    def seed(self, root, value):
+        folder = self.profile(root, value)
+        try:
+            os.mkdir("Default", 0o700, dir_fd=folder)
+            default = os.open("Default", DIRECTORY, dir_fd=folder)
+            try:
+                fd = os.open("Preferences", os.O_WRONLY | os.O_CREAT | os.O_EXCL | FILE, 0o600, dir_fd=default)
+                try:
+                    os.write(fd, PREFERENCES)
+                finally:
+                    os.close(fd)
+            finally:
+                os.close(default)
+        finally:
+            os.close(folder)
+
     def remove(self, root, value):
         folder = self.profile(root, value)
         remaining = [100000]
@@ -227,6 +245,7 @@ class Profiles:
             info = os.stat("profile-" + generation, dir_fd=root, follow_symlinks=False)
             current = {"version": 1, "taskId": task_id, "generation": generation,
                        "inode": inode(info), "phase": "ready", "groups": []}
+            self.seed(root, current)
             self.write(root, current)
             return {"taskId": task_id, "generation": generation}
 

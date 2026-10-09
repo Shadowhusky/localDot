@@ -8,8 +8,9 @@
   height: var(--island-h);
   translate: -50% 0;
   color: var(--color-fg-1);
+  /* It fades in a beat after the curtain starts to lift, once dot is on its way to the dock. */
   transition:
-    opacity var(--dur-dim) var(--ease-standard),
+    opacity var(--dur-dim) var(--ease-standard) var(--dur-dim),
     visibility 0s;
 }
 
@@ -59,6 +60,16 @@
   .island-row > * {
     opacity: 0;
   }
+}
+
+/* The badge draws dot's 24 px ball; its 32 px frame overhangs the slot by 4 px all round. */
+.island-badge {
+  display: block;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: calc(var(--spacing) * -1) var(--spacing) calc(var(--spacing) * -1)
+    calc(var(--spacing) * -1);
 }
 
 .island-label {

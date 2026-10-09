@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { clock } from "../copy/format.ts";
+import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction, Status } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -21,6 +22,8 @@ const STOP_KEYS = ["Mod", "Shift", "."] as const;
 export interface HudIslandProps {
   status: Status;
   shape: IslandShape;
+  // dot's place while it can't sit beside the stage, as when a phone's keyboard is up.
+  badge?: boolean;
   pause: PauseSlot;
   take: TakeSlot;
   onPause(): void;
@@ -36,6 +39,7 @@ export interface HudIslandProps {
 export function HudIsland({
   status,
   shape,
+  badge = false,
   pause,
   take,
   onPause,
@@ -76,6 +80,7 @@ export function HudIsland({
     <div className="island" data-shape={shape} inert={shape === "hidden"}>
       <span className="island-plate" ref={plate} aria-hidden="true" />
       <div className="island-row" ref={row}>
+        {badge && <PresenceSlot name="badge" className="island-badge" />}
         <span className="island-label">
           {islandAttention(status) && <span className="island-attention" aria-hidden="true" />}
           <span

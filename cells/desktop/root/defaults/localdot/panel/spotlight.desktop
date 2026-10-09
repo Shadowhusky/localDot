@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Search
+Comment=Find apps and documents
+Exec=localdot-spotlight
+Icon=localdot-search
+Terminal=false
+StartupNotify=false

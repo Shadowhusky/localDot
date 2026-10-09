@@ -535,12 +535,16 @@ describe("composer delivery ownership and draft handling", () => {
     });
     expect(f.field.disabled).toBe(false);
     f.input("Draft the monthly summary");
-    const connect = screen.getByRole("button", { name: "Connect a model" }) as HTMLButtonElement;
-    expect(connect.disabled).toBe(false);
-    fireEvent.click(connect);
-    expect(onSettings).toHaveBeenCalledExactlyOnceWith(f.field);
+    expect(screen.queryByRole("button", { name: "Connect a model" })).toBeNull();
+    const send = screen.getByRole("button", { name: "Start task" });
+    expect(send.getAttribute("aria-disabled")).toBe("true");
+    const reason = (send.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(reason).toContain("Choose a model first");
     fireEvent.keyDown(f.field, { key: "Enter" });
-    expect(onSettings).toHaveBeenCalledTimes(2);
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(f.field);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(f.field.value).toBe("Draft the monthly summary");
     expect(f.requests).toEqual([]);
