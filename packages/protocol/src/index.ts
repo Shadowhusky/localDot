@@ -1,5 +1,6 @@
 export * from "./agent-controls.ts";
 export * from "./agent-settings.ts";
+export * from "./ask.ts";
 export * from "./attention.ts";
 export * from "./brand-tokens.ts";
 export * from "./computer-reset.ts";
