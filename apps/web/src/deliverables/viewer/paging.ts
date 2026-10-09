@@ -114,7 +114,7 @@ export function modeFor(name: string, ratio: number): Mode {
 }
 
 // The sizes a page is shown at, as a share of its printed size.
-export const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
 
 // The next size up or down from `scale`, or undefined past the last.
 export function zoomStep(scale: number, direction: 1 | -1): number | undefined {

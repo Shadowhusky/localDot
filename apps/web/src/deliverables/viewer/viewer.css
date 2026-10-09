@@ -418,7 +418,7 @@
   overflow: hidden;
   border-radius: var(--radius-row);
   background-color: var(--color-paper);
-  box-shadow: var(--shadow-stage);
+  box-shadow: var(--shadow-overlay);
   will-change: transform;
 }
 
@@ -489,6 +489,32 @@
   opacity: 0;
   translate: -50% calc(var(--spacing) * 2);
   pointer-events: none;
+}
+
+/* A phone held upright shows a wide slide small; the hint goes with the controls. */
+.viewer-present-hint {
+  position: absolute;
+  bottom: calc(var(--spacing) * 21 + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  display: none;
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+  text-align: center;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+  pointer-events: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .viewer-present-hint {
+    display: block;
+  }
+}
+
+.viewer-present:not([data-controls]) .viewer-present-hint {
+  opacity: 0;
 }
 
 .viewer-present-count {

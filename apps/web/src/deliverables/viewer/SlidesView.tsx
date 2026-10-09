@@ -29,6 +29,8 @@ const MOMENTUM: SpringParams = { dampingRatio: 0.8, response: 0.35 };
 const FLICK = 300;
 // The present controls fade after this long without the pointer moving.
 const CONTROLS_MS = 2500;
+// Room between neighbouring slides beyond the stage's width, so no shadow reaches the one on show.
+const APART = 96;
 
 // A deck a slide at a time: the slide whole and centred, the arrows, a swipe or the strip moving
 // between slides, "Slide 3 of 24", and Present to fill the screen with it.
@@ -116,7 +118,7 @@ export function SlidesView({
   );
 }
 
-// The slides side by side a stage's width apart, the one on show centred. Its place is a float
+// The slides side by side a stage's width apart and more, the one on show centred. Its place is a float
 // that a spring carries to each slide from wherever it is, so a press during a glide redirects it;
 // a swipe moves it 1:1, gives less and less past either end, and is thrown on with its speed.
 function SlideTrack({
@@ -171,7 +173,7 @@ function SlideTrack({
   const paint = useCallback(() => {
     const element = stage.current;
     if (!element) return;
-    const pitch = element.clientWidth;
+    const pitch = element.clientWidth + APART;
     for (const child of element.querySelectorAll<HTMLElement>("[data-index]")) {
       const x = (Number(child.dataset.index) - place.current) * pitch;
       child.style.transform = `translate3d(${x}px, 0, 0)`;
@@ -256,7 +258,7 @@ function SlideTrack({
     }
     if (!p.decided) return;
     p.moves = [...p.moves.slice(-5), { t: event.timeStamp, x: event.clientX }];
-    const pitch = element.clientWidth || 1;
+    const pitch = element.clientWidth + APART;
     const wanted = p.from - dx / pitch;
     const over = wanted < 0 ? wanted : wanted > count - 1 ? wanted - (count - 1) : 0;
     place.current = wanted - over + rubberband(over * pitch, pitch) / pitch;
@@ -268,7 +270,7 @@ function SlideTrack({
     if (!p || p.id !== event.pointerId) return;
     event.stopPropagation();
     press.current = null;
-    const pitch = element?.clientWidth || 1;
+    const pitch = (element?.clientWidth ?? 0) + APART;
     const home = Math.round(p.from);
     if (p.decided !== true) {
       // A press that never became a swipe, or an interrupted glide, settles where it was going.
@@ -284,7 +286,9 @@ function SlideTrack({
     const velocity =
       first && last && last.t > first.t ? ((last.x - first.x) / (last.t - first.t)) * 1000 : 0;
     const turn =
-      event.type === "pointercancel" ? 0 : swipeTurn(event.clientX - p.x, velocity, pitch);
+      event.type === "pointercancel"
+        ? 0
+        : swipeTurn(event.clientX - p.x, velocity, element?.clientWidth ?? pitch);
     const to = clampPage(home + 1 + turn, count) - 1;
     glide(to, -velocity / pitch, Math.abs(velocity) > FLICK ? MOMENTUM : SETTLE);
     if (to !== slide - 1) onSlide(to + 1);
@@ -304,7 +308,8 @@ function SlideTrack({
         aria-hidden={i !== slide - 1 || undefined}
         style={{
           left: (box.w - width) / 2,
-          top: (box.h - shape.h) / 2,
+          // A little above the middle, where the eye puts the middle.
+          top: (box.h - shape.h) * 0.45,
           width,
           height: shape.h,
         }}
@@ -425,6 +430,7 @@ function Present({
           wake();
         }}
       />
+      <p className="viewer-present-hint">Turn your phone sideways for a bigger slide</p>
       <div className="viewer-present-bar">
         <IconButton
           icon="chevron-left"

@@ -7,7 +7,7 @@ import { nearby, run } from "./paging.ts";
 
 // A rail down the side holds thumbnails 96 px wide, each with its number under it; a strip along
 // the bottom holds them at one height, numbered only where there is room.
-const RAIL = { across: 96, gap: 16, pad: 20, number: 20 };
+const RAIL = { across: 96, gap: 16, pad: 32, number: 20 };
 const STRIP = { gap: 10, pad: 16 };
 // Thumbnails drawn at once, however fast the list is scrolled.
 const MOST = 48;
