@@ -294,7 +294,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }
-      for (const name of ["Skip idle", "Captions"]) {
+      for (const name of ["Skip idle", "Show the current step"]) {
         const row = exporter.locator(".ui-choice").filter({ hasText: name });
         expect((await row.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }

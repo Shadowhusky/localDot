@@ -61,7 +61,7 @@ export const DEFAULT_CHOICES: ExportChoices = {
   preset: "quality",
   custom: { size: "1080p", fps: 30, quality: "medium", format: "mp4" },
   speed: 1,
-  captions: true,
+  captions: false,
   skipIdle: true,
   overlays: true,
 };
@@ -209,7 +209,7 @@ export function parseSpeed(text: string): number | null {
   return Math.min(SPEED_LIMITS.max, Math.max(SPEED_LIMITS.min, Math.round(value * 100) / 100));
 }
 
-export const CHOICES_KEY = "localdot.export.v1";
+export const CHOICES_KEY = "localdot.export.v2";
 
 const oneOf = <T extends string | number>(list: readonly T[], value: unknown, fallback: T): T =>
   list.includes(value as T) ? (value as T) : fallback;
