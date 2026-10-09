@@ -119,7 +119,8 @@ func (s *Sender) Send(ctx context.Context, req Request) (Result, error) {
 		!urgencies[req.Urgency] || (req.Topic != "" && !topicPattern.MatchString(req.Topic)) {
 		return Result{}, ErrBadMessage
 	}
-	token, err := s.signer.SignVAPID("https://" + u.Host)
+	// The audience is the canonical origin: ServiceEndpoint allows only the default port.
+	token, err := s.signer.SignVAPID("https://" + strings.ToLower(u.Hostname()))
 	if err != nil {
 		return Result{}, err
 	}

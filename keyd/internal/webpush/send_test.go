@@ -96,15 +96,15 @@ func TestGoneSubscriptionIsReported(t *testing.T) {
 func TestRefusesEverythingButPushServices(t *testing.T) {
 	s, got, logPath := pushFixture(t, http.StatusCreated)
 	for _, endpoint := range []string{
-		"http://web.push.apple.com/x",
-		"https://web.push.apple.com:8443/x",
-		"https://evil.example/x",
-		"https://push.apple.com.evil.example/x",
-		"https://evilpush.apple.com/x",
-		"https://user@web.push.apple.com/x",
-		"https://127.0.0.1/x",
-		"https://localhost/x",
-		"https://web.push.apple.com/x#frag",
+		"http://web.push.apple.com/QGuR-refused-capability",
+		"https://web.push.apple.com:8443/QGuR-refused-capability",
+		"https://evil.example/QGuR-refused-capability",
+		"https://push.apple.com.evil.example/QGuR-refused-capability",
+		"https://evilpush.apple.com/QGuR-refused-capability",
+		"https://user@web.push.apple.com/QGuR-refused-capability",
+		"https://127.0.0.1/QGuR-refused-capability",
+		"https://localhost/QGuR-refused-capability",
+		"https://web.push.apple.com/QGuR-refused-capability#frag",
 		"not a url",
 	} {
 		if _, err := s.Send(context.Background(), Request{Endpoint: endpoint, TTL: 60, Urgency: "normal", Body: message()}); !errors.Is(err, ErrNotPushService) {
@@ -117,6 +117,27 @@ func TestRefusesEverythingButPushServices(t *testing.T) {
 	raw, _ := os.ReadFile(logPath)
 	if !strings.Contains(string(raw), `"decision":"deny"`) {
 		t.Fatal("a refusal is audited")
+	}
+	if strings.Contains(string(raw), "QGuR-refused-capability") {
+		t.Fatalf("a refusal must never log the subscription path: %s", raw)
+	}
+}
+
+func TestAudienceIsTheCanonicalOrigin(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://WEB.PUSH.APPLE.COM/x",
+		"https://web.push.apple.com:443/x",
+		"https://web.push.apple.com:/x",
+	} {
+		s, got, _ := pushFixture(t, http.StatusCreated)
+		if _, err := s.Send(context.Background(), Request{Endpoint: endpoint, TTL: 60, Urgency: "normal", Body: message()}); err != nil {
+			t.Fatalf("%s: %v", endpoint, err)
+		}
+		key, _ := s.PublicKey()
+		token := strings.SplitN(strings.TrimPrefix((*got)[0].auth, "vapid t="), ", k=", 2)[0]
+		if aud := verifyJWT(t, token, key)["aud"]; aud != "https://web.push.apple.com" {
+			t.Fatalf("%s: aud %v", endpoint, aud)
+		}
 	}
 }
 
