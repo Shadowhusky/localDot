@@ -10,7 +10,7 @@ const SKIPPED =
 
 describe("describeRequestError", () => {
   it("reports safe Resume answers without echoing arbitrary server errors or calling every 502 a Docker outage", () => {
-    const offline = "the key layer is offline: start keyd, then resume the computer";
+    const offline = "key protection is off: turn it back on, then resume the computer";
     expect(describeRequestError(new ApiError(503, offline), "resume")).toBe(
       "Key protection is off. Run localdot doctor in Terminal, then resume.",
     );
