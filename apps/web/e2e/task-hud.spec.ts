@@ -156,7 +156,7 @@ test("a question puts the question first", async ({ page }) => {
   await open(page);
   await qa(page, "ask");
   await expectWaiting(page, "Has a question");
-  await expect(page.locator(".caption")).toContainText("Which report format should I use?");
+  await expect(page.locator(".narration")).toContainText("Which report format should I use?");
 });
 
 test("a budget pause names the limit", async ({ page }) => {

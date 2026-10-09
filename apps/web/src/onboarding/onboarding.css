@@ -1,139 +1,91 @@
-/* First run lies over the 16:10 stage, so turning the computer on never moves the stage: over the stage
-   on a wide screen, over the stage and the band on a phone. dot and the one action stay put on the
-   left; the steps scroll on their own on the right. */
-.welcome-setup {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  overflow: hidden;
-  border-radius: var(--radius-stage);
-  background: var(--color-raised);
-  box-shadow: var(--shadow-stage);
-  color: var(--color-fg-1);
-  container-type: size;
-  transition: opacity var(--dur-fade) var(--ease-enter);
+/* What setup has left (design-v2 §11 A), at the top of an empty chat. */
+.thread-empty.thread-start-steps {
+  align-items: stretch;
+  margin-block: 0 auto;
+  padding-top: calc(var(--spacing) * 1.5);
+  text-align: left;
 }
 
-.ui-presence[data-leaving] > .welcome-setup {
-  opacity: 0;
-  transition: opacity var(--dur-exit) var(--ease-exit);
-}
-
-.welcome-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  height: 100%;
-}
-
-@starting-style {
-  .welcome-setup {
-    opacity: 0;
-  }
-}
-
-.stage-frame:has(.welcome-setup) .narration {
-  visibility: hidden;
-}
-
-.welcome-hero {
+.setup {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-  padding: calc(var(--spacing) * 8) calc(var(--spacing) * 6);
-  border-right: 1px solid var(--color-hairline);
-  text-align: center;
+  gap: calc(var(--spacing) * 3);
 }
 
-.welcome-hero > .dot {
-  margin-bottom: calc(var(--spacing) * 5);
+.setup-head {
+  padding-inline: calc(var(--spacing) * 0.5);
 }
 
-.welcome-title {
+.setup-head h3 {
+  color: var(--color-fg-1);
   font:
-    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
+    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-title-1--letter-spacing);
+  letter-spacing: var(--text-title-3--letter-spacing);
 }
 
-.welcome-lede {
-  max-width: 28ch;
-  margin-top: calc(var(--spacing) * 2);
-  color: var(--color-fg-2);
-  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  text-wrap: balance;
+.thread-empty .setup-head p {
+  max-width: none;
+  margin-top: var(--spacing);
 }
 
-.welcome-start {
-  margin-top: calc(var(--spacing) * 6);
-}
-
-/* Holds its line while empty, so the hint arriving moves nothing. */
-.welcome-note {
-  min-height: var(--text-callout--line-height);
-  margin-top: calc(var(--spacing) * 3);
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-  text-wrap: balance;
-}
-
-.welcome-scroll {
-  height: 100%;
-}
-
-.welcome-steps {
-  display: grid;
-  align-content: center;
-  min-height: 100%;
+.setup-group {
   margin: 0;
-  padding: calc(var(--spacing) * 6) calc(var(--spacing) * 8);
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-group);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
   list-style: none;
 }
 
-/* The glyph sits on the title's line, the detail under the title, and the control centred beside
-   the two; any choices take the full width beneath. */
-.welcome-step {
-  display: grid;
-  grid-template-columns: calc(var(--spacing) * 4) minmax(0, 1fr) auto;
-  grid-template-areas:
-    "glyph title action"
-    ". detail action"
-    ". extra extra";
+.setup-row {
+  display: flex;
   align-items: center;
-  column-gap: calc(var(--spacing) * 3);
-  padding-block: calc(var(--spacing) * 4);
-  border-top: 1px solid var(--color-hairline);
+  gap: calc(var(--spacing) * 3);
+  min-height: 44px;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3) calc(var(--spacing) * 1.5)
+    calc(var(--spacing) * 3.5);
 }
 
-.welcome-step:first-child {
-  border-top: 0;
+.setup-row + .setup-row {
+  box-shadow: inset 0 1px 0 var(--color-separator);
 }
 
-.welcome-step-glyph {
-  grid-area: glyph;
+.setup-glyph {
+  flex: none;
+  color: var(--color-fg-3);
 }
 
-.welcome-step-title {
-  grid-area: title;
-  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
-}
-
-.welcome-step-action {
-  grid-area: action;
-}
-
-.welcome-step-detail {
-  grid-area: detail;
-  margin-top: 2px;
+.setup-row[data-done] .setup-glyph {
   color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-  overflow-wrap: anywhere;
 }
 
-.welcome-step-extra {
-  grid-area: extra;
-  margin-top: calc(var(--spacing) * 3);
+.setup-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.setup-name {
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.setup-detail {
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-weight: var(--font-weight-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-continue {
+  width: 100%;
 }
 
 .appearance-swatch {
@@ -158,38 +110,4 @@
     var(--midnight-raised-2) 0 40%,
     var(--midnight-void) 40% 100%
   );
-}
-
-/* A short stage keeps the steps and the action, and lets dot go. */
-@container (height < 400px) {
-  .welcome-hero > .dot {
-    display: none;
-  }
-}
-
-/* A narrow stage stacks the action above the steps; only the steps scroll. */
-@container (width < 600px) {
-  .welcome-layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .welcome-hero {
-    padding: calc(var(--spacing) * 6) calc(var(--spacing) * 5) calc(var(--spacing) * 4);
-    border-right: 0;
-    border-bottom: 1px solid var(--color-hairline);
-  }
-
-  .welcome-hero > .dot {
-    margin-bottom: calc(var(--spacing) * 3);
-  }
-
-  .welcome-start {
-    margin-top: calc(var(--spacing) * 4);
-  }
-
-  .welcome-steps {
-    align-content: start;
-    padding: calc(var(--spacing) * 1) calc(var(--spacing) * 5) calc(var(--spacing) * 4);
-  }
 }
