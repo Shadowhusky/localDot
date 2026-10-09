@@ -371,11 +371,11 @@ function Theatre({ api }: { api: ApiClient }) {
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const [pane, setPane] = useState<TheatrePane>("computer");
   const [narrow, setNarrow] = useState(
-    () => window.matchMedia?.("(width < 1180px)").matches ?? false,
+    () => window.matchMedia?.("(width < 1100px)").matches ?? false,
   );
   useEffect(() => {
     if (!window.matchMedia) return;
-    const media = window.matchMedia("(width < 1180px)");
+    const media = window.matchMedia("(width < 1100px)");
     const changed = () => setNarrow(media.matches);
     changed();
     media.addEventListener("change", changed);

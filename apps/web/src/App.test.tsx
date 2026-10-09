@@ -385,7 +385,7 @@ describe("App token states", () => {
 
   it("keeps Stop computer inside Keys on a phone, where the sheet covers the page's Stop", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: /width < (760|1180)px/.test(query),
+      matches: /width < (700|1100)px/.test(query),
       media: query,
       addEventListener() {},
       removeEventListener() {},

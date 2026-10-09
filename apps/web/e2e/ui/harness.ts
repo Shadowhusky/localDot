@@ -142,13 +142,10 @@ async function settle(page: Page) {
   });
 }
 
-// Screenshot baselines are kept for these projects of the matrix only.
-export function keepBaselinesAt(...projects: string[]) {
+// A spec's flows run at these projects of the matrix only.
+export function runAt(...projects: string[]) {
   test.beforeEach(() => {
-    test.skip(
-      !projects.includes(test.info().project.name),
-      `Baselines are kept at ${projects.join(" and ")}`,
-    );
+    test.skip(!projects.includes(test.info().project.name), `Runs at ${projects.join(" and ")}`);
   });
 }
 

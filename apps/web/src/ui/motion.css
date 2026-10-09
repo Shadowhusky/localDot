@@ -8,8 +8,10 @@
       --dur-hover: 120ms;
       --dur-fade: 150ms;
       --dur-exit: 150ms;
-      --dur-sheet: 150ms;
-      --dur-spring: 150ms;
+      --dur-sheet-exit: 150ms;
+      --dur-snappy: 150ms;
+      --dur-default: 150ms;
+      --dur-gentle: 150ms;
     }
   }
 }

@@ -6,6 +6,7 @@ import { StageColumn } from "../shell/StageColumn.tsx";
 import { FeedbackPage } from "../ui/gallery/FeedbackPage.tsx";
 import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
+import { SystemPage } from "./SystemPage.tsx";
 
 export interface GalleryPage {
   id: string;
@@ -78,6 +79,12 @@ function StagePage() {
 }
 
 export const GALLERY_PAGES: GalleryPage[] = [
+  {
+    id: "system",
+    title: "System",
+    about: "Tokens and kit controls, as frame S0 of the master design",
+    Page: SystemPage,
+  },
   { id: "dot", title: "dot", about: "Every state at hero and badge size", Page: DotPage },
   { id: "stage", title: "Stage", about: "The lit stage around a still frame", Page: StagePage },
   {

@@ -32,6 +32,14 @@ describe("StatusGlyph", () => {
     expect(document.querySelectorAll(".ui-status-arc")).toHaveLength(1);
     expect(document.querySelectorAll(".ui-status-check")).toHaveLength(1);
   });
+
+  it("marks a step that needs you with a filled centre in its ring", () => {
+    render(<StatusGlyph state="ask" />);
+    const glyph = screen.getByRole("img", { name: "Needs you" });
+    expect(glyph.dataset.state).toBe("ask");
+    expect(glyph.querySelectorAll("circle")).toHaveLength(2);
+    expect(glyph.querySelector("circle[fill='currentColor']")).not.toBeNull();
+  });
 });
 
 describe("Disclosure", () => {
@@ -60,7 +68,7 @@ describe("Disclosure", () => {
     expect(panel?.hasAttribute("inert")).toBe(true);
     expect(screen.getByText("Inside")).toBe(inside);
     act(() => {
-      vi.advanceTimersByTime(400);
+      vi.advanceTimersByTime(600);
     });
     expect(screen.queryByText("Inside")).toBeNull();
     expect(changes).toEqual([true, false]);

@@ -360,7 +360,7 @@ for (const width of [1280, 390])
       const answer = f.session.ask("Which report format?", ["Markdown", "Plain text"], true, 0);
       await page.setViewportSize({ width, height: 900 });
       const p = await load(page, f);
-      if (width < 1180) await page.getByRole("tab", { name: /^Conversation/ }).click();
+      if (width < 1100) await page.getByRole("tab", { name: /^Conversation/ }).click();
       const askId = f.session.pendingAsk;
       await expect(page.getByRole("form", { name: "Answer dot" })).toBeVisible();
       await page.getByRole("radio", { name: "Markdown", exact: true }).check();
@@ -379,7 +379,7 @@ for (const width of [1280, 390])
         .takeover("login", "Sign in on the sample computer, then return control.")
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
-      if (width < 1180) await page.getByRole("tab", { name: /^Computer/ }).click();
+      if (width < 1100) await page.getByRole("tab", { name: /^Computer/ }).click();
       await expect(page.getByRole("button", { name: "Type text", exact: true })).toBeEnabled();
       await page.reload(); // The held takeover is restored from the daemon, never released by reload.
       await expect(page.getByRole("region", { name: "Manual control" })).toBeVisible();
@@ -416,7 +416,7 @@ for (const width of [1280, 390])
           { once: true },
         );
       });
-      if (width < 1180) await surface.tap({ position: { x: box.width / 2, y: box.height / 2 } });
+      if (width < 1100) await surface.tap({ position: { x: box.width / 2, y: box.height / 2 } });
       else await surface.click({ position: { x: box.width / 2, y: box.height / 2 } });
       await expect.poll(() => f.native.calls.length).toBe(1);
       const point = await page.evaluate(

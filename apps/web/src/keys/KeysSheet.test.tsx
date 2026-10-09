@@ -767,7 +767,7 @@ describe("KeysSheet", () => {
 
   it("keeps Stop on a phone, and what Stop reports after Stop has gone", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query.includes("760px"),
+      matches: query.includes("700px"),
       media: query,
       addEventListener() {},
       removeEventListener() {},

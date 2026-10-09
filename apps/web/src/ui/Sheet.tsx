@@ -1,3 +1,4 @@
+import { clsx } from "clsx";
 import {
   createContext,
   type ReactNode,
@@ -14,14 +15,18 @@ import { flushSync } from "react-dom";
 import { Button } from "./Button.tsx";
 import { afterMotion } from "./finished.ts";
 import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
+import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
+import type { IconName } from "./icons.ts";
 import { LayerPortal, useBehind, useExit, useLayer } from "./LayerStack.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "./media.ts";
 import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
-import { attachSheetDrag } from "./sheet-drag.ts";
+import { attachSheetDrag, detentStops, type SheetDetent } from "./sheet-drag.ts";
 
-const CURRENT_BODY = ".ui-sheet-page:not([data-held], [data-leaving]) > .ui-sheet-body";
+const CURRENT_BODY =
+  ".ui-sheet-page:not([data-held], [data-leaving]) > .ui-sheet-main > .ui-sheet-body";
+const FIT: readonly SheetDetent[] = ["fit"];
 
 // A phone keeps its keyboard down until a field is chosen.
 function fieldFor(element: HTMLElement): HTMLElement | undefined {
@@ -71,6 +76,12 @@ export interface SheetProps {
   page?: string;
   back?: SheetBack;
   footer?: ReactNode;
+  // A bottom sheet's resting heights, the first one to open at: fit alone, or medium and large.
+  detents?: readonly SheetDetent[];
+  // An inspector's index beside its content, such as SheetNavItem rows.
+  sidebar?: ReactNode;
+  // A bottom sheet closes with this word at its trailing edge, its title centred, instead of ×.
+  doneLabel?: string;
   children: ReactNode;
 }
 
@@ -102,6 +113,9 @@ function SheetLayer({
   page = "main",
   back,
   footer,
+  detents = FIT,
+  sidebar,
+  doneLabel,
   children,
   root,
   closing,
@@ -117,6 +131,9 @@ function SheetLayer({
   const placement = side === "auto" ? (phone ? "bottom" : "inspector") : side;
   const modal = asked ?? placement === "bottom";
   const [asking, setAsking] = useState(false);
+  const [detent, setDetent] = useState(detents[0] ?? "fit");
+  const resting = useRef({ detents, setDetent });
+  resting.current = { detents, setDetent };
   const latest = useRef({ dirty, asking, onClose, closing });
   latest.current = { dirty, asking, onClose, closing };
 
@@ -314,6 +331,14 @@ function SheetLayer({
       panel: sheet,
       scrim: scrimRef.current,
       body: () => sheet.querySelector<HTMLElement>(CURRENT_BODY),
+      stops: () => detentStops(resting.current.detents),
+      rest: (index) => {
+        const { detents: names, setDetent: show } = resting.current;
+        const name = names[index] ?? "fit";
+        // Written at once, so the stylesheet holds the sheet there as the drag lets go of it.
+        sheet.dataset.detent = name;
+        show(name);
+      },
       allowDismiss: () => {
         if (!latest.current.dirty) return true;
         requestClose();
@@ -324,7 +349,13 @@ function SheetLayer({
     });
   }, [placement, closing, requestClose]);
 
-  const pageProps = { closeLabel, onClose: requestClose, asking };
+  const pageProps = {
+    closeLabel,
+    onClose: requestClose,
+    asking,
+    sidebar: placement === "inspector" ? sidebar : undefined,
+    doneLabel: placement === "bottom" ? doneLabel : undefined,
+  };
   return (
     <LayerPortal kind="sheet" closing={closing} rootRef={root} className="ui-sheet-layer">
       {modal && <div ref={scrimRef} className="ui-scrim" aria-hidden="true" {...scrim} />}
@@ -338,6 +369,8 @@ function SheetLayer({
         inert={closing}
         className="ui-sheet"
         data-side={placement}
+        data-detents={placement === "bottom" ? detents.join(" ") : undefined}
+        data-detent={placement === "bottom" ? detent : undefined}
         data-modal={modal ? "" : undefined}
         data-behind={behind ? "" : undefined}
       >
@@ -392,6 +425,8 @@ interface SheetPageProps {
   closeLabel: string;
   onClose(): void;
   asking: boolean;
+  sidebar?: ReactNode;
+  doneLabel?: string;
 }
 
 // A page keeps its key while it is held or slides away, so what it holds keeps its state.
@@ -404,6 +439,8 @@ function SheetPage({
   closeLabel,
   onClose,
   asking,
+  sidebar,
+  doneLabel,
 }: SheetPageProps) {
   return (
     <div
@@ -436,14 +473,52 @@ function SheetPage({
             </p>
           )}
         </div>
-        <IconButton label={closeLabel} icon="x" onClick={onClose} />
+        {doneLabel ? (
+          <Button variant="quiet" className="ui-sheet-done" onClick={onClose}>
+            {doneLabel}
+          </Button>
+        ) : (
+          <IconButton label={closeLabel} icon="x" onClick={onClose} />
+        )}
       </header>
-      <div className="ui-sheet-body">{view.children}</div>
+      <div className="ui-sheet-main">
+        {sidebar && <div className="ui-sheet-sidebar">{sidebar}</div>}
+        <div className="ui-sheet-body">{view.children}</div>
+      </div>
       {view.footer && (
         <footer className="ui-sheet-footer" inert={asking}>
           {view.footer}
         </footer>
       )}
     </div>
+  );
+}
+
+export interface SheetNavItemProps {
+  icon: IconName;
+  label: string;
+  current?: boolean;
+  onSelect(): void;
+  className?: string;
+}
+
+// A row of an inspector's sidebar: the section it shows, lit while it is the one in view.
+export function SheetNavItem({
+  icon,
+  label,
+  current = false,
+  onSelect,
+  className,
+}: SheetNavItemProps) {
+  return (
+    <button
+      type="button"
+      className={clsx("ui-sheet-nav-item", className)}
+      aria-current={current || undefined}
+      onClick={onSelect}
+    >
+      <Icon name={icon} />
+      {label}
+    </button>
   );
 }

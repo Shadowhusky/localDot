@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Menu, MenuItem } from "./Menu.tsx";
 import { PHONE } from "./media.ts";
-import { Sheet } from "./Sheet.tsx";
+import { Sheet, SheetNavItem } from "./Sheet.tsx";
 import { Tooltip } from "./Tooltip.tsx";
 
 const SAVED = "Research assistant";
@@ -510,5 +510,51 @@ describe("Sheet pages", () => {
     ]);
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
+  });
+});
+
+describe("Sheet shapes", () => {
+  it("rests a bottom sheet in its first detent and closes it with Done", () => {
+    const onClose = vi.fn();
+    render(
+      <Sheet
+        open
+        side="bottom"
+        title="Activity"
+        detents={["medium", "large"]}
+        doneLabel="Done"
+        onClose={onClose}
+      >
+        Steps
+      </Sheet>,
+    );
+    const sheet = screen.getByRole("dialog", { name: "Activity" });
+    expect(sheet.dataset.detents).toBe("medium large");
+    expect(sheet.dataset.detent).toBe("medium");
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts an inspector's index beside its content, and never on a phone's sheet", () => {
+    const sidebar = <SheetNavItem icon="cpu" label="Models" current onSelect={() => {}} />;
+    const { unmount } = render(
+      <Sheet open side="inspector" title="Settings" sidebar={sidebar} onClose={() => {}}>
+        Content
+      </Sheet>,
+    );
+    const item = screen.getByRole("button", { name: "Models" });
+    expect(item.getAttribute("aria-current")).toBe("true");
+    expect(item.closest(".ui-sheet-main")?.querySelector(".ui-sheet-body")?.textContent).toBe(
+      "Content",
+    );
+    expect(document.querySelector(".ui-sheet")?.hasAttribute("data-detent")).toBe(false);
+    unmount();
+    render(
+      <Sheet open side="bottom" title="Settings" sidebar={sidebar} onClose={() => {}}>
+        Content
+      </Sheet>,
+    );
+    expect(screen.queryByRole("button", { name: "Models" })).toBeNull();
   });
 });

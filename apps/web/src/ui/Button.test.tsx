@@ -92,6 +92,35 @@ describe("Button", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it("turns the spinner in the icon's place while busy and keeps the label showing", () => {
+    render(
+      <Button icon="power" busy>
+        Turn on
+      </Button>,
+    );
+    const button = screen.getByRole("button", { name: "Turn on" });
+    expect(button.querySelector(".ui-button-glyph > .ui-spinner")).not.toBeNull();
+    expect(button.querySelector(".ui-button-spinner")).toBeNull();
+    expect(button.querySelectorAll("svg")).toHaveLength(1);
+  });
+
+  it("sizes its icon with the button, from 14 px at small to 20 px at the largest", () => {
+    render(
+      <>
+        <Button icon="continue" size="sm">
+          Continue
+        </Button>
+        <Button icon="power" variant="primary" size="xxl">
+          Turn on
+        </Button>
+      </>,
+    );
+    const icon = (name: string) =>
+      screen.getByRole("button", { name }).querySelector("svg")?.getAttribute("width");
+    expect(icon("Continue")).toBe("14");
+    expect(icon("Turn on")).toBe("20");
+  });
+
   it("shows the press on pointer-down and lets go on release", () => {
     render(<Button>Pause</Button>);
     const button = screen.getByRole("button", { name: "Pause" });

@@ -299,7 +299,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await press(provider, phone);
         const search = page.getByRole("combobox", { name: "Search: Main provider" });
         await expect(search).toBeVisible();
-        await page.waitForTimeout(500);
+        await settled(page);
         const at = await search.boundingBox();
         await search.fill("o");
         await search.fill("oll");
@@ -318,7 +318,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await autonomy.tap();
       const sheet = page.locator(".ui-picker-sheet");
       await expect(sheet).toBeVisible();
-      await page.waitForTimeout(500);
+      await settled(page);
       const rest = await sheet.boundingBox();
       const head = await page.locator(".ui-picker-sheet-head").boundingBox();
       if (!rest || !head) throw new Error("no sheet");

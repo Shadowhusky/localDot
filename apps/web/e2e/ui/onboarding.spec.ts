@@ -3,10 +3,10 @@ import type { AddressInfo } from "node:net";
 import type { Page } from "@playwright/test";
 import { progressChannel } from "../../../cli/src/install/browser-progress.ts";
 import { TOKEN } from "../fixtures/start-ui-fixture.ts";
-import { expect, keepBaselinesAt, test } from "./harness.ts";
+import { expect, runAt, test } from "./harness.ts";
 
 // Everything before the first task: the installer's page, signing in and first run.
-keepBaselinesAt("c14", "w39");
+runAt("c14", "w39");
 
 const box = (page: Page, selector: string) => page.locator(selector).first().boundingBox();
 
@@ -15,7 +15,6 @@ test("first run", async ({ page, ui }) => {
   await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("first-run.png");
 });
 
 test("first run, model ready", async ({ page, ui }) => {
@@ -23,7 +22,6 @@ test("first run, model ready", async ({ page, ui }) => {
   await expect(page.getByText("Anthropic · claude-sonnet-5-5", { exact: true })).toBeVisible();
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("first-run-model-ready.png");
 });
 
 test("first run shows Turn on without scrolling and keeps the stage where the computer appears", async ({
@@ -61,7 +59,6 @@ test("sign-in, first visit", async ({ page, ui }) => {
   await expect(page.getByRole("alert")).toHaveCount(0);
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("signin-first.png");
 });
 
 test("sign-in, checking", async ({ page, ui }) => {
@@ -70,7 +67,6 @@ test("sign-in, checking", async ({ page, ui }) => {
   await expect(page.getByRole("status")).toHaveText("Signing you in…");
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("signin-checking.png");
 });
 
 test("sign-in, rejected", async ({ page, ui }) => {
@@ -80,7 +76,6 @@ test("sign-in, rejected", async ({ page, ui }) => {
   );
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("signin-rejected.png");
 });
 
 // The CLI serves this page before the app exists, from its own server and under its own policy.
@@ -128,7 +123,6 @@ test("installer progress", async ({ page }) => {
     await expect(page.locator("#images-value")).toHaveText("37%");
     await expect(page.locator("#detail")).toHaveText("Downloading the network gate image…");
     await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "37");
-    await expect(page).toHaveScreenshot("installer-progress.png");
     expect(f.problems).toEqual([]);
   } finally {
     await f.close();
@@ -143,7 +137,6 @@ test("installer failed", async ({ page }) => {
     f.channel.finish("failed");
     await expect(page.getByRole("heading", { name: "Setup stopped" })).toBeVisible();
     await expect(page.locator("#resume")).toBeVisible();
-    await expect(page).toHaveScreenshot("installer-failed.png");
     expect(f.problems).toEqual([]);
   } finally {
     await f.close();

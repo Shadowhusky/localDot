@@ -2,7 +2,7 @@
   --color-surface: var(--color-raised);
   --color-surface-2: var(--color-raised-2);
   /* Dividers and field edges alike, so it keeps its old step on the ramp: one above raised-2. */
-  --color-line: var(--color-overlay);
+  --color-line: var(--color-popover);
   --color-text: var(--color-fg-1);
   --color-text-2: var(--color-fg-2);
   --color-text-3: var(--color-fg-3);
@@ -55,7 +55,7 @@
   --spacing-client-frame-off: -20px;
   --radius-stage: var(--radius-lg);
   --radius-stop: 1.5px;
-  --shadow-hud: inset 0 0 0 1px var(--color-hud-line), 0 8px 24px var(--color-shade-hud);
+  --shadow-hud: inset 0 0 0 1px var(--color-glass-line), 0 8px 24px var(--color-shade-hud);
   --duration-press: 100ms;
   --duration-lit: 400ms;
   --duration-veil: 240ms;

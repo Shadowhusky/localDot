@@ -293,7 +293,7 @@ for (const width of [1280, 390])
   }, info) => {
     await page.setViewportSize({ width, height: 800 });
     const proof = await load(page);
-    if (width < 1180) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+    if (width < 1100) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
     await page.getByLabel("Message", { exact: true }).fill("Read the two sample files");
     expect(messages).toEqual([]);
     expect(proof.downloads).toEqual([]);
@@ -313,7 +313,7 @@ for (const width of [1280, 390])
     expect(readFileSync(join(desktopHome, "Downloads", "one.txt"))).toEqual(ONE);
     expect(readFileSync(join(desktopHome, "Downloads", "two.txt"))).toEqual(TWO);
     expect(readdirSync(join(desktopHome, "Downloads")).sort()).toEqual(["one.txt", "two.txt"]);
-    if (width >= 1180)
+    if (width >= 1100)
       await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
     await page.getByRole("button", { name: "Send follow-up", exact: true }).click();
     const history = page.getByRole("region", { name: "Conversation history" });
@@ -377,7 +377,7 @@ for (const width of [1280, 390])
     const box = await stop.boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);
     expect((box?.y ?? Infinity) + (box?.height ?? Infinity)).toBeLessThanOrEqual(800);
-    if (width < 1180) await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
+    if (width < 1100) await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
     expect(proof.errors).toEqual([]);
     expect(proof.external).toEqual([]);
     const browserProof = await page.evaluate(

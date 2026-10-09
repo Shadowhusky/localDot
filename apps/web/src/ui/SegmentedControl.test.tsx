@@ -61,6 +61,27 @@ describe("SegmentedControl", () => {
     expect(track.style.getPropertyValue("--_index")).toBe("3");
   });
 
+  it("puts an amber point on a segment that needs you, without changing its name", () => {
+    render(
+      <SegmentedControl
+        aria-label="Pane"
+        size={32}
+        items={[
+          { value: "chat", label: "Chat", attention: true },
+          { value: "activity", label: "Activity" },
+        ]}
+        value="activity"
+        onValueChange={() => {}}
+      />,
+    );
+    const chat = screen.getByRole("radio", { name: "Chat" });
+    expect(chat.querySelector(".ui-segment-attention")?.getAttribute("aria-hidden")).toBe("true");
+    expect(
+      screen.getByRole("radio", { name: "Activity" }).querySelector(".ui-segment-attention"),
+    ).toBeNull();
+    expect(screen.getByRole("radiogroup").dataset.size).toBe("32");
+  });
+
   it("explains an unavailable segment and keeps its choice", () => {
     render(<Speed />);
     const fast = screen.getByRole("radio", { name: "2×" });
