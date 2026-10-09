@@ -232,7 +232,8 @@ describe("Claude Code driver", () => {
     const options = f.query.mock.calls[0]?.[0].options;
     expect(options?.settingSources).toEqual([]);
     expect(options?.tools).toEqual([]);
-    expect(options?.allowedTools).toEqual([...LOCALDOT_TOOLS]);
+    expect(options?.allowedTools).toBeUndefined();
+    expect(options?.disallowedTools).toContain("Bash");
     expect(options?.pathToClaudeCodeExecutable).toBe("/Users/person/.local/bin/claude");
     expect(options?.model).toBe("sonnet");
     expect(options?.systemPrompt).toBe("Only localdot tools.");

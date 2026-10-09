@@ -43,7 +43,7 @@ export const BUILT_IN_TOOLS: readonly string[] = Object.freeze([
   "Write",
 ]);
 
-// Anything but localDot's own server is refused, whatever asks for it.
+// Every tool call asks here: localDot's own in-process server is allowed, anything else refused.
 export const onlyLocaldot: CanUseTool = async (name, input, { mcpServer }) =>
   LOCALDOT_TOOLS.includes(name) && mcpServer?.source === "sdk" && mcpServer.name === LOCALDOT_SERVER
     ? { behavior: "allow", updatedInput: input }
@@ -74,9 +74,8 @@ export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
     strictMcpConfig: true,
     mcpServers: { [LOCALDOT_SERVER]: input.server },
     tools: [],
-    allowedTools: [...LOCALDOT_TOOLS],
     disallowedTools: [...BUILT_IN_TOOLS],
-    permissionMode: "dontAsk",
+    permissionMode: "default",
     canUseTool: onlyLocaldot,
     skills: [],
     plugins: [],

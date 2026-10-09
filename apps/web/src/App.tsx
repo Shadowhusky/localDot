@@ -350,29 +350,35 @@ function Theatre({ api }: { api: ApiClient }) {
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
+  const claudeModels = settings.claudeCode.models;
   const modelName = useCallback(
     (provider: string, id: string) =>
       (provider === "chatgpt"
         ? accountModels
-        : providerIndex?.providers.find((row) => row.id === provider)?.models
+        : provider === "claude-code"
+          ? claudeModels
+          : providerIndex?.providers.find((row) => row.id === provider)?.models
       )?.find((model) => model.id === id)?.name,
-    [providerIndex, accountModels],
+    [providerIndex, accountModels, claudeModels],
   );
   const mainChoice = settings.saved?.main;
-  const mainProvider =
-    mainChoice?.provider !== "chatgpt" && mainChoice
-      ? providerById(mainChoice.provider)
+  const mainApp =
+    mainChoice?.provider === "chatgpt" || mainChoice?.provider === "claude-code"
+      ? mainChoice.provider
       : undefined;
+  const mainProvider = !mainApp && mainChoice ? providerById(mainChoice.provider) : undefined;
   const mainReady =
     settings.mainReady &&
     (mainChoice?.provider === "chatgpt"
       ? settings.chatgpt.canStart &&
         settings.chatgpt.models.some((model) => model.id === mainChoice.model)
-      : !!mainProvider &&
-        (mainProvider.local === true ||
-          (keys.metadataReady === true &&
-            keys.health?.online === true &&
-            matchingKeys(mainProvider, keys.keys).some((key) => key.id === mainChoice?.key))));
+      : mainChoice?.provider === "claude-code"
+        ? settings.claudeCode.canStart
+        : !!mainProvider &&
+          (mainProvider.local === true ||
+            (keys.metadataReady === true &&
+              keys.health?.online === true &&
+              matchingKeys(mainProvider, keys.keys).some((key) => key.id === mainChoice?.key))));
   const keysButton = useRef<HTMLButtonElement>(null);
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -865,21 +871,20 @@ function Theatre({ api }: { api: ApiClient }) {
     setup: onboarding.open,
     full,
   });
-  const chosenKey =
-    mainChoice?.provider === "chatgpt"
-      ? settings.chatgpt.canStart
-        ? "Signed in"
-        : null
-      : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
-        ? mainChoice.key
-        : null;
+  const chosenKey = mainApp
+    ? (mainApp === "chatgpt" ? settings.chatgpt.canStart : settings.claudeCode.canStart)
+      ? "Signed in"
+      : null
+    : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
+      ? mainChoice.key
+      : null;
   const savedAutonomy = settings.saved?.autonomy;
   const setup = setupSteps({
-    provider: mainChoice?.provider === "chatgpt" ? "chatgpt" : (mainProvider ?? null),
+    provider: mainApp ?? mainProvider ?? null,
     key: chosenKey,
     modelReady: mainReady,
     model: mainChoice
-      ? `${mainProvider?.name ?? "ChatGPT"} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
+      ? `${mainProvider?.name ?? (mainApp === "claude-code" ? "Claude Code" : "ChatGPT")} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
       : null,
     permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
     computer: !!cell || listed.length > 0,
@@ -1539,6 +1544,7 @@ function Theatre({ api }: { api: ApiClient }) {
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}
           chatgpt={settings.chatgpt}
+          claudeCode={settings.claudeCode}
           subscriptionModels={settings.subscriptionModels}
           providers={settings.index?.providers ?? []}
           keys={settings.index ? pickerKeys(settings.index) : []}
@@ -1596,7 +1602,10 @@ function Theatre({ api }: { api: ApiClient }) {
               .filter(
                 (role) =>
                   needsPrice(settings.draft?.choices[role], settings.index) &&
-                  (role === "main" || settings.draft?.choices.main?.provider !== "chatgpt"),
+                  (role === "main" ||
+                    !["chatgpt", "claude-code"].includes(
+                      settings.draft?.choices.main?.provider ?? "",
+                    )),
               )
               .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
           )}

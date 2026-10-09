@@ -43,10 +43,13 @@ describe("Claude Code as dot's brain", () => {
   it("offers exactly localDot's tools over MCP, with every built-in tool off", () => {
     const { options: o, server } = options();
     expect(o.tools).toEqual([]);
-    expect(o.allowedTools).toEqual(TOOL_NAMES.map((name) => `mcp__localdot__${name}`));
+    // Nothing is approved ahead: each call goes through the gate, which knows only localDot's.
+    expect(o.allowedTools).toBeUndefined();
+    expect(o.canUseTool).toBe(onlyLocaldot);
+    expect(LOCALDOT_TOOLS).toEqual(TOOL_NAMES.map((name) => `mcp__localdot__${name}`));
     expect(o.mcpServers).toEqual({ localdot: server });
     expect(o.strictMcpConfig).toBe(true);
-    expect(o.permissionMode).toBe("dontAsk");
+    expect(o.permissionMode).toBe("default");
     for (const tool of ["Bash", "Read", "Edit", "Write", "WebFetch", "WebSearch", "Task", "Agent"])
       expect(o.disallowedTools).toContain(tool);
     expect(o.disallowedTools).toEqual(BUILT_IN_TOOLS);

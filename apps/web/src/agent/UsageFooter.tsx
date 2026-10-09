@@ -33,9 +33,14 @@ function windowName(minutes?: number): string {
   return `${count(minutes, "minute", "minutes")} window`;
 }
 
+// A plan's own app does the work: its usage is the plan's, not money.
+const planApp = (selection?: TaskModelSelection) =>
+  selection?.kind === "chatgpt" || selection?.kind === "claude-code" ? selection : undefined;
+const PLAN_NAMES = { chatgpt: "ChatGPT plan", "claude-code": "Claude plan" } as const;
+
 // Money is shown only where a task is billed per call: never for a plan.
 export const billedPerCall = (selection?: TaskModelSelection) =>
-  selection?.kind !== "chatgpt" && !(selection?.kind === "api" && selection.plan);
+  !planApp(selection) && !(selection?.kind === "api" && selection.plan);
 
 // What one model has cost this task, from the calls the feed has seen.
 function modelSpend(model: AgentModel, route: string, id: string) {
@@ -53,12 +58,12 @@ export function usageParts(
   selection?: TaskModelSelection,
   modelName?: ModelName,
 ): { main: string | undefined; figures: string } {
-  const role =
-    selection?.kind === "chatgpt"
-      ? { provider: "chatgpt", model: selection.model }
-      : selection?.kind === "api"
-        ? (selection.roles.find((row) => row.role === "main") ?? selection.roles[0])
-        : model.usage[0] && { provider: model.usage[0].route, model: model.usage[0].model };
+  const app = planApp(selection);
+  const role = app
+    ? { provider: app.kind, model: app.model }
+    : selection?.kind === "api"
+      ? (selection.roles.find((row) => row.role === "main") ?? selection.roles[0])
+      : model.usage[0] && { provider: model.usage[0].route, model: model.usage[0].model };
   const main = role && (modelName?.(role.provider, role.model) ?? role.model);
   const tokens = model.usage.reduce((sum, row) => sum + row.inputTokens + row.outputTokens, 0);
   const spent =
@@ -150,6 +155,8 @@ export function UsageDetails({
     selection?.kind === "api" ? selection.roles.filter((role) => !reported.has(role.role)) : [];
   const retry = model.retry?.data;
   const money = billedPerCall(selection);
+  const app = planApp(selection);
+  const plan = app?.kind ?? subscription?.data.provider;
   return (
     <section className="usage-details" aria-label="Task usage">
       <h3 className="usage-title">Usage</h3>
@@ -185,25 +192,28 @@ export function UsageDetails({
             </dd>
           </div>
         ))}
-        {selection?.kind === "chatgpt" && !model.usage.length && (
+        {app && !model.usage.length && (
           <div className="usage-role">
             <dt>Main</dt>
             <dd>
-              <span className="usage-model">{named("chatgpt", selection.model)}</span>
-              <span className="usage-line">ChatGPT plan · No calls yet</span>
+              <span className="usage-model">{named(app.kind, app.model)}</span>
+              <span className="usage-line">{PLAN_NAMES[app.kind]} · No calls yet</span>
             </dd>
           </div>
         )}
       </dl>
-      {!model.usage.length && !waiting.length && selection?.kind !== "chatgpt" && (
+      {!model.usage.length && !waiting.length && !app && (
         <p className="usage-note">No model calls reported yet.</p>
       )}
       {selection?.kind === "api" && selection.plan && (
         <p className="usage-note">Included in your plan. Uses your plan's limits.</p>
       )}
-      {(selection?.kind === "chatgpt" || subscription) && (
+      {plan && (
         <div className="usage-plan">
-          <h4>ChatGPT plan{subscription?.data.plan ? ` · ${subscription.data.plan}` : ""}</h4>
+          <h4>
+            {PLAN_NAMES[plan]}
+            {subscription?.data.plan ? ` · ${subscription.data.plan}` : ""}
+          </h4>
           {(["primary", "secondary"] as const).map((name) => {
             const window = subscription?.data.windows.find((row) => row.window === name);
             if (!window) return null;

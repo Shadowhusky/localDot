@@ -11,6 +11,10 @@ import { parseArgs } from "node:util";
 import {
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
+  CLAUDE_CODE_INSTALL,
+  CLAUDE_CODE_SIGN_IN,
+  CLAUDE_CODE_UPDATE,
+  type ClaudeCodeStatus,
   type KeydRecord,
   microsToMs,
   msToMicros,
@@ -143,6 +147,13 @@ let chatgptState = (env.QA_CHATGPT || undefined) as
   | undefined;
 let deviceCodeOff = false,
   signingIn: ChatgptLogin | undefined;
+// The user's own Claude Code, as its status command would report it.
+let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
+  | "not_installed"
+  | "outdated"
+  | "signed_out"
+  | "signed_in"
+  | undefined;
 let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
@@ -210,6 +221,7 @@ const SETTINGS: Record<string, AgentSettings> = {
   } as AgentSettings,
   empty: {},
   chatgpt: { main: { provider: "chatgpt", model: "sample-plan-model" } } as AgentSettings,
+  "claude-code": { main: { provider: "claude-code", model: "sonnet" } } as AgentSettings,
   plan: {
     main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
   } as AgentSettings,
@@ -1075,6 +1087,48 @@ const harness = () =>
   chatgptState && chatgptState !== "unavailable"
     ? { available: true as const }
     : { available: false as const, reason: CHATGPT_SWITCHED_OFF };
+const claudeCodeStatus = (): ClaudeCodeStatus => {
+  const checkedAt = Date.now();
+  switch (claudeCodeState) {
+    case "signed_in":
+      return {
+        state: "signed_in",
+        version: "2.1.290",
+        plan: "max",
+        models: [
+          { id: "sonnet", name: "Claude Sonnet" },
+          { id: "opus", name: "Claude Opus" },
+        ],
+        checkedAt,
+      };
+    case "signed_out":
+      return {
+        state: "signed_out",
+        version: "2.1.290",
+        reason: "Sign in to Claude Code, then check again.",
+        command: CLAUDE_CODE_SIGN_IN,
+        models: [],
+        checkedAt,
+      };
+    case "outdated":
+      return {
+        state: "outdated",
+        version: "2.1.100",
+        reason: "Update Claude Code, then check again.",
+        command: CLAUDE_CODE_UPDATE,
+        models: [],
+        checkedAt,
+      };
+    default:
+      return {
+        state: "not_installed",
+        reason: "Install Claude Code and sign in there.",
+        command: CLAUDE_CODE_INSTALL,
+        models: [],
+        checkedAt,
+      };
+  }
+};
 // What the user's direct control delivered to the fake computer, in order, with when it arrived.
 const manualInputs: { at: number; input: unknown }[] = [];
 const agent: AgentRoutesDeps = {
@@ -1262,6 +1316,14 @@ const agent: AgentRoutesDeps = {
   },
   harness,
   ...(chatgptState ? { chatgpt: { account, installer, availability: harness, setup } } : {}),
+  ...(claudeCodeState
+    ? {
+        claudeCode: {
+          status: async () => claudeCodeStatus(),
+          check: async () => claudeCodeStatus(),
+        },
+      }
+    : {}),
 };
 const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
   "deriveBits",
@@ -2357,6 +2419,14 @@ routes.post("/__qa/chatgpt/:state", (c) => {
     return c.text("unknown ChatGPT state", 400);
   chatgptState = state as NonNullable<typeof chatgptState>;
   signingIn = undefined;
+  return c.json({ ok: true });
+});
+routes.post("/__qa/claude-code/:state", (c) => {
+  const state = c.req.param("state");
+  if (!claudeCodeState) return c.text("start the fixture with QA_CLAUDE_CODE", 409);
+  if (!["not_installed", "outdated", "signed_out", "signed_in"].includes(state))
+    return c.text("unknown Claude Code state", 400);
+  claudeCodeState = state as NonNullable<typeof claudeCodeState>;
   return c.json({ ok: true });
 });
 routes.post("/__qa/chatgpt/device-code/:mode", (c) => {

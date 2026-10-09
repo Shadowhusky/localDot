@@ -322,6 +322,32 @@ describe("configuration validation before explicit save", () => {
     draft.choices.main = { provider: "ollama", model: "local" };
     expect(validateForm(draft, saved, index)).toMatchObject({ ok: false });
   });
+  it("saves Claude Code as the main model with one of its own models, and keeps the rest", () => {
+    const index = providerFixture();
+    index.keys = [];
+    const saved = {
+      main: { provider: "openai", model: "stored-paid", key: "deleted" },
+      fast: { provider: "openai", model: "stored-paid", key: "deleted" },
+      taskBudgetUSD: 8,
+    };
+    const draft = formOf(saved);
+    draft.choices.main = { provider: "claude-code", model: "sonnet" };
+    expect(validateForm(draft, saved, index, [{ id: "sonnet", name: "Sonnet" }])).toEqual({
+      ok: true,
+      document: { ...saved, main: { provider: "claude-code", model: "sonnet" } },
+    });
+    expect(validateForm(draft, saved, index)).toEqual({
+      ok: false,
+      problems: ["Main: set up Claude Code and choose one of its models."],
+    });
+    draft.choices.main = { provider: "claude-code", model: "sonnet", key: "anthropic" };
+    expect(validateForm(draft, saved, index, [{ id: "sonnet", name: "Sonnet" }])).toEqual({
+      ok: false,
+      problems: [
+        "Main: Claude Code is available for main only, without an API key or manual price.",
+      ],
+    });
+  });
   it("reports every problem at once instead of the first one", () => {
     const d = formOf({ main: { provider: "ollama", model: "custom" } });
     d.choices.local = { provider: "ollama", model: "" };

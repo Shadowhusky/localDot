@@ -11,7 +11,7 @@ import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 const SENTENCE =
-  "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+  "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";
 const PLAN_TOKEN = `sk-ant-oat01-${"Qz7_".repeat(24)}`;
 const REFRESH_TOKEN = `sk-ant-ort01-${"Pv5_".repeat(24)}`;
 const API_KEY = `sk-ant-api03-${"Rw8-".repeat(24)}`;
@@ -78,7 +78,7 @@ for (const run of runs) {
       return sheet;
     }
 
-    test("says Claude plans can't be used, under Anthropic, on a search and in Subscription", async () => {
+    test("offers Claude Code (your plan) in Subscription, and Anthropic for API keys", async () => {
       const { page, press } = await open();
       const sheet = await settings(page, press);
       const main = roleCard(sheet, "main");
@@ -87,10 +87,9 @@ for (const run of runs) {
       const list = page.getByRole("listbox", { name: "Provider" });
       const plan = list
         .getByRole("group", { name: "Subscription" })
-        .getByRole("option", { name: /^Claude Pro or Max/ });
-      await expect(plan).toHaveAttribute("aria-disabled", "true");
-      await expect(plan).toContainText("Not allowed in other apps. Use an Anthropic key.");
-      await expect(sheet.getByText(SENTENCE)).toHaveCount(0);
+        .getByRole("option", { name: /^Claude Code \(your plan\)/ });
+      await expect(plan).not.toHaveAttribute("aria-disabled", "true");
+      await expect(plan).toContainText("Uses your own Claude Code");
 
       const search = page.getByRole("combobox", { name: "Search: Provider" });
       await search.fill("claude code");
@@ -99,12 +98,11 @@ for (const run of runs) {
       await expect(anthropic).not.toHaveAttribute("aria-disabled", "true");
       await press(anthropic);
       await expect(provider).toHaveText("Anthropic");
-      const note = sheet.getByText(SENTENCE, { exact: true });
-      await expect(note).toBeVisible();
-      await expect(provider).toHaveAttribute(
-        "aria-describedby",
-        (await note.getAttribute("id")) as string,
+      const note = sheet.getByText(
+        "Uses API keys. To use your Claude plan, choose Claude Code (your plan).",
+        { exact: false },
       );
+      await expect(note).toBeVisible();
       await expect(main.getByRole("button", { name: "Add key", exact: true })).toBeVisible();
     });
 

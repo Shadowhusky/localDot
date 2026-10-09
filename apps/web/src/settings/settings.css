@@ -186,9 +186,11 @@
   overflow-wrap: anywhere;
 }
 
-/* The ChatGPT account: one raised card above the roles it stands in for. */
-.settings-chatgpt {
+/* A plan's own app (ChatGPT, Claude Code): one raised card above the roles it stands in for. */
+.settings-chatgpt,
+.settings-claude-code {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: calc(var(--spacing) * 3);
   min-width: 0;
   padding: calc(var(--spacing) * 3.5);
@@ -306,6 +308,14 @@
 .settings-step[data-state="failed"] .settings-step-detail {
   color: var(--color-fg-2);
   white-space: normal;
+}
+
+.settings-claude-todo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
 }
 
 .settings-account,

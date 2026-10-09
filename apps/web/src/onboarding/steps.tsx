@@ -23,6 +23,7 @@ import { TextField } from "../ui/TextField.tsx";
 import {
   API_PROVIDERS,
   abilityLine,
+  appKind,
   CUSTOM_PROVIDERS,
   FEATURED_API,
   hostOf,
@@ -70,10 +71,12 @@ export function WelcomeStep() {
 export function ThinksStep({
   value,
   chatgptReason,
+  claudeReason,
   onChange,
 }: {
   value: ThinkKind;
   chatgptReason?: string;
+  claudeReason?: string;
   onChange(kind: ThinkKind): void;
 }) {
   return (
@@ -98,6 +101,13 @@ export function ThinksStep({
           icon: "message-circle",
           description: "Use your ChatGPT subscription.",
           disabledReason: chatgptReason,
+        },
+        {
+          value: "claude-code",
+          label: "Claude Code (your plan)",
+          icon: "terminal",
+          description: "Uses your own Claude Code on this Mac, with your Claude plan.",
+          disabledReason: claudeReason,
         },
         {
           value: "plan",
@@ -455,15 +465,13 @@ export function ModelStep({
         )}
       </>
     );
-  const items =
-    kind === "chatgpt"
-      ? modelItems("main", undefined, "chatgpt", [], subscriptionModels, main)
-      : modelItems("main", spec, provider, models, [], main);
-  const chosen =
-    kind === "chatgpt"
-      ? subscriptionModels.find((model) => model.id === main)
-      : models.find((model) => model.id === main);
-  const capability = kind === "chatgpt" ? undefined : models.find((model) => model.id === main);
+  const items = appKind(kind)
+    ? modelItems("main", undefined, kind, [], subscriptionModels, main)
+    : modelItems("main", spec, provider, models, [], main);
+  const chosen = appKind(kind)
+    ? subscriptionModels.find((model) => model.id === main)
+    : models.find((model) => model.id === main);
+  const capability = appKind(kind) ? undefined : models.find((model) => model.id === main);
   if (!items.length)
     return (
       <Group roomy>
@@ -497,7 +505,7 @@ export function ModelStep({
           }
         />
       </Group>
-      {fastAvailable && kind !== "chatgpt" && (
+      {fastAvailable && !appKind(kind) && (
         <Group roomy>
           <Switch
             className="ui-group-row onboarding-fast"

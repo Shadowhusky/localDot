@@ -432,6 +432,7 @@ export function useTaskControls(props: Props) {
     now.agent.snapshot.budgetHold === "task";
   const budgetReady = (now = current.current) =>
     now.agent.snapshot?.models?.kind !== "chatgpt" &&
+    now.agent.snapshot?.models?.kind !== "claude-code" &&
     !now.agent.model.subscription &&
     (pausedAtBudget(now) ||
       (recoverable(now) &&

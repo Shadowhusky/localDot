@@ -30,6 +30,7 @@ import {
   validateForm,
 } from "./settings-form.ts";
 import { useChatgpt } from "./useChatgpt.ts";
+import { useClaudeCode } from "./useClaudeCode.ts";
 
 type Phase = "loading" | "ready" | "refreshing" | "error";
 export function useSettings(
@@ -45,7 +46,17 @@ export function useSettings(
     api,
     open && accountVisible && draft?.choices.main?.provider === "chatgpt",
   );
-  const subscriptionModels = providedModels.length ? providedModels : chatgpt.models;
+  // Read while it is chosen or saved, so the app knows whether a task can start on it.
+  const claudeCode = useClaudeCode(
+    api,
+    (open && draft?.choices.main?.provider === "claude-code") ||
+      saved?.main?.provider === "claude-code",
+  );
+  const subscriptionModels = providedModels.length
+    ? providedModels
+    : draft?.choices.main?.provider === "claude-code"
+      ? claudeCode.models
+      : chatgpt.models;
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
@@ -440,6 +451,7 @@ export function useSettings(
     uncertain,
     busy: busy || !!chatgpt.busy,
     chatgpt,
+    claudeCode,
     subscriptionModels,
     change,
     changePrice,
@@ -467,6 +479,7 @@ export function useSettings(
     mainReady:
       (saved?.main?.provider !== "chatgpt" ||
         (chatgpt.canStart && chatgpt.models.some((model) => model.id === saved.main?.model))) &&
+      (saved?.main?.provider !== "claude-code" || claudeCode.canStart) &&
       accepted?.ok === true &&
       !uncertain &&
       phase === "ready" &&

@@ -42,7 +42,7 @@ const found = (role: "main" | "fast" | "local", text: string) =>
     .map((row) => row.value);
 
 describe("provider choices", () => {
-  it("groups the registry with plans, the ChatGPT plan and the plans not offered", () => {
+  it("groups the registry with plans, the plan apps and the plans not offered", () => {
     expect(labels("main")).toEqual([
       "API providers",
       "Compatible providers",
@@ -63,7 +63,12 @@ describe("provider choices", () => {
     expect(item("main", "amazon-bedrock")?.disabledReason).toBe("Coming in a later release");
     expect(item("main", "chatgpt")?.disabledReason).toBeUndefined();
     expect(item("fast", "chatgpt")?.disabledReason).toBe("Main model only");
-    expect(item("main", "claude-plan")?.disabledReason).toMatch(/Anthropic key/);
+    expect(item("main", "claude-code")).toMatchObject({
+      label: "Claude Code (your plan)",
+      description: "Uses your own Claude Code",
+      disabledReason: undefined,
+    });
+    expect(item("fast", "claude-code")?.disabledReason).toBe("Main model only");
   });
   it("gives the local model only the servers on this Mac", () => {
     expect(labels("local")).toEqual(["Local servers"]);
@@ -71,14 +76,35 @@ describe("provider choices", () => {
       providerGroups("local", "").flatMap((group) => group.items.map((row) => row.value)),
     ).toEqual(["lmstudio", "ollama"]);
   });
-  it("finds Anthropic and says Claude plans can't be used on a Claude plan search", () => {
-    for (const text of ["claude", "Claude Code", "claude code token", "subscription"])
+  it("finds Anthropic and Claude Code on a Claude plan search", () => {
+    for (const text of ["claude", "Claude Code", "claude code", "subscription", "claude max"])
       expect(found("main", text), text).toEqual(
         expect.arrayContaining(
-          text === "subscription" ? ["claude-plan"] : ["anthropic", "claude-plan"],
+          ["subscription", "claude max"].includes(text)
+            ? ["claude-code"]
+            : ["anthropic", "claude-code"],
         ),
       );
     expect(found("main", "groq")).toEqual(["groq"]);
+  });
+  it("lists Claude Code's own models, and says when it no longer offers the chosen one", () => {
+    const rows = modelItems(
+      "main",
+      undefined,
+      "claude-code",
+      [],
+      [{ id: "sonnet", name: "Sonnet" }],
+      "retired",
+    );
+    expect(rows).toEqual([
+      {
+        value: "retired",
+        label: "retired",
+        disabledReason: "Your Claude Code doesn't offer it now",
+      },
+      { value: "sonnet", label: "Sonnet", description: "sonnet" },
+    ]);
+    expect(providerGroups("main", "claude-code")[0]?.label).not.toBe("Chosen before");
   });
   it("keeps a provider that is no longer offered visible, but not choosable", () => {
     const groups = providerGroups("main", "retired-provider");
