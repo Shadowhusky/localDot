@@ -34,6 +34,7 @@ export function useAccounts(api: ApiClient, cellId: string | null, visible: bool
   const [attempt, setAttempt] = useState(0);
   const retries = useRef(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new attempt is what asks again
   useEffect(() => {
     if (!visible) return;
     if (!cellId) {
