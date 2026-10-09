@@ -11,6 +11,7 @@ import {
   type KeydRecord,
   type ModelBinding,
   type RecentLine,
+  ReviseLink,
   SESSION_PAUSE_REASONS,
   SessionOrigin,
   SessionRun,
@@ -95,6 +96,8 @@ export interface TaskStartOptions {
   // 0..IDLE_MS; routines pass 0 so the task ends right after done.
   readonly idleMs?: number;
   readonly run?: SessionRun;
+  // The handed-over file this task revises, from a task that has ended.
+  readonly revises?: ReviseLink;
 }
 export class AgentError extends Error {
   constructor(
@@ -276,6 +279,9 @@ export class AgentRunner {
     if (origin && !origin.success) throw new AgentError(400, "invalid task origin");
     const run = options.run === undefined ? undefined : SessionRun.safeParse(options.run);
     if (run && !run.success) throw new AgentError(400, "invalid task run");
+    const revises =
+      options.revises === undefined ? undefined : ReviseLink.safeParse(options.revises);
+    if (revises && !revises.success) throw new AgentError(400, "invalid revised file");
     const budget = options.budgetUSD;
     if (
       budget !== undefined &&
@@ -444,6 +450,7 @@ export class AgentRunner {
           title,
           ...(continues ? { continues } : {}),
           ...(origin?.success ? { origin: origin.data } : {}),
+          ...(revises?.success ? { revises: revises.data } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));

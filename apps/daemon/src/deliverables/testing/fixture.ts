@@ -8,7 +8,7 @@ import { EventLog } from "../../event-log.ts";
 import { FrameStore } from "../../gateway/frames.ts";
 import type { MacOpener } from "../open-on-mac.ts";
 import { type Converter, Previews } from "../previews.ts";
-import { deliverableRoutes } from "../routes.ts";
+import { deliverableRoutes, type ReviseDeps } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
 
 // Only a Host value for app.request: nothing listens on it.
@@ -19,7 +19,7 @@ export function cleanFixtures(): void {
 }
 // A daemon home with the deliverable routes on a bare Hono app (the /api token guard is
 // createApp's and is tested with the app's wiring).
-export function deliverablesFixture(opts: { converter?: Converter } = {}) {
+export function deliverablesFixture(opts: { converter?: Converter; revise?: ReviseDeps } = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-deliverables-"));
   homes.push(home);
   const log = new EventLog(home);
@@ -44,6 +44,7 @@ export function deliverablesFixture(opts: { converter?: Converter } = {}) {
     previews: new Previews(home, opts.converter ?? { convert }),
     frames: new FrameStore(home),
     opener,
+    ...(opts.revise ? { revise: opts.revise } : {}),
   });
   const task = (title = "Monthly report") => {
     const id = log.createSession(title);

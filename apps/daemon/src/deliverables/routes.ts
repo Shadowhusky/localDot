@@ -4,10 +4,13 @@ import {
   type FileVersion,
   FileVersionsReply,
   fileKind,
+  keyLikePresent,
   OpenOnMacReply,
   OpenOnMacRequest,
   PREVIEW_LIMITS,
   ProofReply,
+  ReviseReply,
+  ReviseRequest,
   ULID_PATTERN,
   unifiedDiff,
 } from "@localdot/protocol";
@@ -15,6 +18,9 @@ import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { DownloadError, downloadFile } from "../agent/download.ts";
 import { outputNameProblem, outputPath } from "../agent/output-store.ts";
+import type { UploadAccess } from "../agent/routes.ts";
+import { AgentError } from "../agent/runner.ts";
+import { DesktopdError } from "../desktopd/client.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
@@ -34,6 +40,17 @@ export interface DeliverablesDeps {
   previews: Pick<Previews, "preview">;
   frames: Pick<FrameStore, "path">;
   opener: MacOpener;
+  revise?: ReviseDeps;
+}
+export interface ReviseDeps {
+  start(
+    cellId: string,
+    task: string,
+    signal: AbortSignal,
+    opts: { revises: { sessionId: string; name: string; version: number | null } },
+  ): Promise<{ id: string }>;
+  access(cellId: string, signal: AbortSignal): UploadAccess | undefined;
+  redactUserText(text: string, sessionId?: string, cellId?: string): string;
 }
 
 const SECURE = {
@@ -190,4 +207,98 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
       throw error;
     }
   });
+  if (deps.revise) reviseRoute(app, deps.home, deps.revise, versionsOf);
+}
+
+// Revising a file of a task that has ended starts a new task linked to that version.
+function reviseRoute(
+  app: Hono,
+  home: string,
+  deps: ReviseDeps,
+  versionsOf: (id: string, name: string) => Promise<FileVersion[]>,
+): void {
+  app.post(
+    "/api/agent/sessions/:id/files/:name/revise",
+    bodyLimit({ maxSize: 16 * 1024 }),
+    async (c) => {
+      const { id, name } = c.req.param() as { id: string; name: string };
+      let body: ReviseRequest;
+      try {
+        body = ReviseRequest.parse(await c.req.json());
+      } catch {
+        return c.text("invalid request body", 400);
+      }
+      if (!body.text.trim() || !body.text.isWellFormed() || body.text.includes("\0"))
+        return c.text("invalid request body", 400);
+      // The same refusal as a new task, before anything is copied: redactUserText removes only
+      // localDot's own tokens, not a pasted provider key.
+      if (keyLikePresent(body.text))
+        return c.text("Recognised API keys belong in Keys, not task text.", 400);
+      const versions = await versionsOf(id, name);
+      const chosen = versions.find(
+        (v) => v.sessionId === id && v.version === body.version && v.available,
+      );
+      if (!chosen) return c.text("That file is no longer available.", 404);
+      const folder = `Downloads/revise-${id.slice(-6).toLowerCase()}-v${chosen.label}`;
+      let access: UploadAccess | undefined;
+      try {
+        // Throws AgentError 409 while the user holds control or the computer is changing.
+        access = deps.access(body.cellId, c.req.raw.signal);
+      } catch (error) {
+        if (error instanceof AgentError)
+          return c.text("The computer can't take the file right now.", 409);
+        throw error;
+      }
+      if (!access) return c.text("Turn on your computer first.", 409);
+      let copied: string;
+      try {
+        const source = downloadFile(
+          home,
+          id,
+          name,
+          access.signal,
+          false,
+          chosen.version ?? undefined,
+        );
+        try {
+          copied = await access.tools.putFile(
+            `${folder}/${name}`,
+            source.body as ReadableStream<Uint8Array>,
+            undefined,
+            access.signal,
+            true,
+          );
+        } catch (error) {
+          void source.body?.cancel().catch(() => {});
+          if (!(error instanceof DesktopdError && error.status === 409)) throw error;
+          copied = `~/${folder}/${name}`;
+        }
+      } catch (error) {
+        if (error instanceof DownloadError) return c.text("That file is no longer available.", 404);
+        // Stop or a computer change aborts the lease mid-copy: a refusal, not a 500.
+        if (error instanceof AgentError || error instanceof DesktopdError || access.signal.aborted)
+          return c.text("The computer can't take the file right now.", 409);
+        throw error;
+      } finally {
+        access.release();
+      }
+      const task = `${body.text.trim()}\n\n(${name} v${chosen.label} is on this computer at ${copied}. Save the revised file as ${name} and hand it back with done.)`;
+      try {
+        const session = await deps.start(
+          body.cellId,
+          deps.redactUserText(task, undefined, body.cellId),
+          c.req.raw.signal,
+          { revises: { sessionId: id, name, version: chosen.version } },
+        );
+        return c.json(ReviseReply.parse({ sessionId: session.id }), 202);
+      } catch (error) {
+        if (error instanceof AgentError)
+          return c.text(
+            "The computer can't start this task now.",
+            error.status === 404 ? 409 : error.status,
+          );
+        throw error;
+      }
+    },
+  );
 }
