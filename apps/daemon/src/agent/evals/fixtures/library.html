@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>City library</title>
+    <style>
+      body {
+        margin: 0;
+        font: 18px/1.3 sans-serif;
+        color: #1b2330;
+        background: #ffffff;
+      }
+      header {
+        height: 40px;
+        background: #2f6f4f;
+        color: #ffffff;
+        font-weight: 600;
+        line-height: 40px;
+        padding-left: 40px;
+      }
+      main {
+        padding: 16px 40px;
+      }
+      form {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      input[type="search"],
+      input[type="text"],
+      select {
+        width: 320px;
+        height: 36px;
+        box-sizing: border-box;
+        font: inherit;
+      }
+      input[type="checkbox"] {
+        width: 24px;
+        height: 24px;
+        margin: 0;
+      }
+      button {
+        height: 36px;
+        font: inherit;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 44px;
+      }
+      li span {
+        width: 240px;
+      }
+      #details {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    </style>
+  </head>
+  <body>
+    <header>City library</header>
+    <main>
+      <form id="search">
+        <label for="q">Search the catalogue</label>
+        <input id="q" type="search" autocomplete="off" />
+        <button type="submit">Search</button>
+      </form>
+      <ul id="results"></ul>
+      <section id="reserve" hidden>
+        <h2 id="book">Book</h2>
+        <form id="details">
+          <label for="who">Your name</label>
+          <input id="who" type="text" autocomplete="off" />
+          <label for="branch">Pickup branch</label>
+          <select id="branch">
+            <option value="">Choose…</option>
+            <option>Central</option>
+            <option>Hilltop</option>
+            <option>Riverside</option>
+          </select>
+          <label><input id="notify" type="checkbox" /> Text me when it is ready</label>
+          <button type="submit">Confirm reservation</button>
+        </form>
+      </section>
+    </main>
+    <script>
+      const BOOKS = ["Children of Dune", "Dune", "Dune Messiah", "Emma", "Middlemarch"];
+      const value = (id) => document.getElementById(id);
+      let query = "";
+      value("search").addEventListener("submit", (e) => {
+        e.preventDefault();
+        query = value("q").value.trim();
+        const list = value("results");
+        list.replaceChildren();
+        for (const title of BOOKS.filter((b) => b.toLowerCase().includes(query.toLowerCase()))) {
+          const item = document.createElement("li");
+          const name = document.createElement("span");
+          name.textContent = title;
+          const reserve = document.createElement("button");
+          reserve.textContent = "Reserve";
+          reserve.setAttribute("aria-label", `Reserve ${title}`);
+          reserve.addEventListener("click", () => {
+            value("book").textContent = title;
+            value("reserve").hidden = false;
+          });
+          item.append(name, reserve);
+          list.append(item);
+        }
+      });
+      value("details").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const answer = {
+          query,
+          book: value("book").textContent,
+          name: value("who").value,
+          branch: value("branch").value,
+          notify: value("notify").checked,
+        };
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(new Blob([JSON.stringify(answer)], { type: "application/json" }));
+        link.download = "reservation.json";
+        document.body.append(link);
+        link.click();
+      });
+    </script>
+  </body>
+</html>
