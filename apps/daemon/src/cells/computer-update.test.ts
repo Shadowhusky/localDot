@@ -79,7 +79,13 @@ async function setup(deps: Partial<OrchestratorDeps> = {}) {
   const changes: CellSummary[] = [];
   // A fresh daemon over the same home and Docker: what a restart finds.
   const boot = () => {
-    const updates = new ComputerUpdates({ home, docker, images, stream: { fullcolor: false } });
+    const updates = new ComputerUpdates({
+      home,
+      docker,
+      images,
+      stream: { fullcolor: false },
+      ...(deps.relay ? { relay: deps.relay } : {}),
+    });
     const orchestrator = new CellOrchestrator({
       docker,
       store,
@@ -181,6 +187,24 @@ describe("CellOrchestrator.update", () => {
     expect(orchestrator.get(id)).not.toHaveProperty("updating");
     expect(orchestrator.get(id)).not.toHaveProperty("updateAvailable");
     expect(orchestrator.endpoints(id)?.desktopd.token).toBe(record.tokens.desktopd);
+  });
+
+  it("gives the new gate keyd's socket on Docker Engine", async () => {
+    const relay = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" } as const;
+    const { updates, orchestrator, id, record } = await setup({ relay: async () => relay });
+    rebuild();
+    await updates.check(record);
+    await orchestrator.update(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    const gate = fake.state.containers.get(record.docker.gate);
+    expect(gate?.image).toBe(NEW_GATE);
+    expect(gate?.body.Labels?.[UPDATE_LABEL]).toBeDefined();
+    const env = (gate?.body as { Env?: string[] } | undefined)?.Env ?? [];
+    expect(env).toContain(`LD_KEYD_SOCKET=/run/localdot/keyd/${record.keydPort}.sock`);
+    expect(env.filter((entry) => entry.startsWith("LD_TOOL_SOCKET="))).toEqual([]);
+    expect(gate?.body.HostConfig.Mounts).toEqual([
+      { Type: "bind", Source: "/h/keyd/relay", Target: "/run/localdot/keyd", ReadOnly: true },
+    ]);
   });
 
   it("adopts a container whose create reply was lost instead of making a second", async () => {

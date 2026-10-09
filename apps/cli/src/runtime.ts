@@ -1,8 +1,10 @@
+import { join } from "node:path";
 import type { ServiceConfiguration } from "../../../packages/protocol/src/install-services.ts";
 import { DockerClient } from "../../daemon/src/cells/docker.ts";
 import { imagesFromEnv } from "../../daemon/src/cells/images.ts";
 import { runDoctor } from "../../daemon/src/doctor.ts";
 import { findDockerSocket } from "../../daemon/src/doctor-socket.ts";
+import { parsePublicOrigins } from "../../daemon/src/guard.ts";
 import { KeydClient, keydSocketPath } from "../../daemon/src/keyd/client.ts";
 import { runOpenLink } from "../../daemon/src/open-link.ts";
 import { runStop } from "../../daemon/src/stop.ts";
@@ -15,6 +17,7 @@ import { runStartAtLogin } from "./install/start-at-login.ts";
 import { runUp, type UpOptions } from "./install/up.ts";
 import { runUpdate, type UpdateContext } from "./install/update.ts";
 import { runResetComputer } from "./reset-computer.ts";
+import { passphraseRecord, runUnlock, terminalPrompt } from "./unlock.ts";
 
 export interface CommandContextInput {
   home: string;
@@ -48,7 +51,7 @@ export interface Runtime {
     context: Pick<RuntimeContext, "home" | "signal"> & { follow: boolean },
     io: ConsoleIO,
   ): Promise<number>;
-  open(context: RuntimeContext, io: ConsoleIO): Promise<number>;
+  open(context: RuntimeContext, io: ConsoleIO, options: { qr?: true }): Promise<number>;
   stop(
     context: RuntimeContext & { cellId?: string; all?: boolean },
     io: ConsoleIO,
@@ -58,6 +61,7 @@ export interface Runtime {
     io: ConsoleIO,
   ): Promise<number>;
   doctor(context: RuntimeContext, io: ConsoleIO): Promise<number>;
+  unlock(context: Pick<RuntimeContext, "home" | "signal">, io: ConsoleIO): Promise<number>;
 }
 
 // Imports have no process side effects. Installation and lifecycle commands perform their own
@@ -70,9 +74,25 @@ export const runtime: Runtime = {
   update: runUpdate,
   down: runDown,
   logs: runLogs,
-  open: runOpenLink,
+  open: (context, io, options) =>
+    runOpenLink(
+      {
+        ...context,
+        publicOrigins: parsePublicOrigins(context.env.LOCALDOT_PUBLIC_ORIGIN || undefined),
+        ...options,
+      },
+      io,
+    ),
   stop: runStop,
   resetComputer: runResetComputer,
+  unlock: (context, io) =>
+    runUnlock(
+      context.signal,
+      io,
+      new KeydClient(keydSocketPath(context.home)),
+      terminalPrompt(),
+      passphraseRecord(join(context.home, "passphrase-chosen")),
+    ),
   async doctor(context, io) {
     context.signal.throwIfAborted();
     if (context.installed) return runInstalledDoctor(context, io);
@@ -85,6 +105,7 @@ export const runtime: Runtime = {
       port: context.port,
       signal: context.signal,
       keyd: new KeydClient(keydSocketPath(context.home)),
+      home: context.home,
     });
     for (const check of report.checks) {
       io.out(`${check.ok ? "ok  " : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`);

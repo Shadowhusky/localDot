@@ -1,5 +1,5 @@
+import { qrModules } from "@localdot/protocol/qr";
 import { useMemo } from "react";
-import { qrModules } from "./qr.ts";
 
 // Modules of light margin a scanner needs around the code.
 const QUIET = 4;

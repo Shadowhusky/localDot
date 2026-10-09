@@ -9,6 +9,7 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
+  BannerKind,
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   CLAUDE_CODE_INSTALL,
@@ -175,7 +176,7 @@ let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
   | "signed_out"
   | "signed_in"
   | undefined;
-let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
+let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard" | "locked";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
@@ -1426,6 +1427,7 @@ const routineChanged = (routineId: string) => {
 };
 
 // Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+// QA_BANNER=desktop|none shows Settings as on a Linux desktop or a machine with no screen.
 const pushKey = createECDH("prime256v1");
 pushKey.generateKeys();
 const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
@@ -1446,6 +1448,10 @@ const notify = createNotify({
       notified.mac.push([title, body]);
       return "shown";
     },
+  },
+  banner: {
+    kind: BannerKind.catch("mac").parse(process.env.QA_BANNER ?? "mac"),
+    notifier: { available: false, show: async () => "unavailable" },
   },
 });
 
@@ -1594,6 +1600,9 @@ routes.get("/api/keyd", (c) =>
           keydMode === "guard"
             ? { state: "unknown", addresses: 0 }
             : { state: "active", source: "router", addresses: 1 },
+        ...(keydMode === "locked"
+          ? { vault: { backend: "file", state: "locked", key: "passphrase" } }
+          : {}),
       }),
 );
 routes.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
@@ -1601,6 +1610,14 @@ routes.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
 routes.post("/api/keys", async (c) => {
+  if (keydMode === "locked")
+    return c.json(
+      {
+        error: "vault-locked",
+        message: "Saved keys are locked. On that computer, run: localdot unlock",
+      },
+      423,
+    );
   const { binding } = (await c.req.json()) as { binding: KeydRecord };
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;

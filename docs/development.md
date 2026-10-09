@@ -44,11 +44,10 @@ subprotocols `localdot.v1, localdot.token.<token>`.
 
 - `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`
   and builds `localdot/desktop:dev`. The first desktop build takes about 10–25 minutes.
-- The web browser image builds on the desktop one, from the repository root:
-  `pnpm --filter @localdot/browserd build`, then
-  `docker build -f cells/browser/Dockerfile -t localdot/browser:dev .`
-- `pnpm --filter @localdot/daemon doctor` checks Docker Desktop (Engine 28+), the images and
-  the daemon port.
+- `cells/browser/build.sh` bundles `browserd` and builds `localdot/browser:dev` on top of the
+  desktop image.
+- `pnpm --filter @localdot/daemon doctor` checks Docker (Engine 28+), the images and the daemon
+  port.
 - Build the UI with `pnpm --filter @localdot/web build`, start the daemon, then open its
   `#token=` link. **Start computer** creates an isolated desktop, gate and named home volume.
   The live stream reaches Chrome through the daemon. **Stop computer** shuts it down while

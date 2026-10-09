@@ -22,6 +22,7 @@ import type { DockerClient } from "./docker.ts";
 import type { BrowserImages } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
+import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { captureComputerResetSource } from "./reset-source.ts";
 import { newCellToken } from "./secrets.ts";
 import {
@@ -60,6 +61,8 @@ export interface BrowserOrchestratorDeps {
   docker: Docker;
   keyd: BrowserKeydClient;
   images: BrowserImages;
+  // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
+  relay?: () => Promise<GateRelay>;
   streamFullcolor?: boolean;
   parentAvailable(parentCellId: string): boolean;
   externalKeydPorts?(): Iterable<number>;
@@ -538,7 +541,10 @@ export class BrowserOrchestrator {
         this.#ledger.save(owned);
         check();
       };
-      await create("gate", gateSpec(cell, this.deps.images.gate));
+      await create(
+        "gate",
+        gateSpec(cell, this.deps.images.gate, await (this.deps.relay?.() ?? HOST_RELAY)),
+      );
       stage = "profile attachment";
       await this.#exclusive(signal, async () => {
         check();

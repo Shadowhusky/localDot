@@ -726,7 +726,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
                 checked={login.state === "on"}
                 disabledReason={
                   login.state === "unavailable"
-                    ? "Works in the installed app on a Mac"
+                    ? "Works in the installed app"
                     : login.state === undefined
                       ? "Checking…"
                       : login.busy

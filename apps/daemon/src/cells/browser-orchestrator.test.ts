@@ -542,6 +542,23 @@ describe("persistent browser lifecycle", () => {
     expect(browserEnv(opted)).toContain("LOCALDOT_STREAM_FULLCOLOR=1");
   });
 
+  it("gives the gate keyd's socket on Docker Engine", async () => {
+    const f = fixture();
+    const relay = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" } as const;
+    await new BrowserOrchestrator({ ...f.deps, relay: async () => relay }).start(f.parent.id);
+    const gate = f.docker.requests
+      .filter((request) => request.path === "/containers/create")
+      .map((request) => request.body as { Image?: string; Env?: string[]; HostConfig?: object })
+      .find((spec) => spec.Image === "test/gate:dev");
+    expect(gate?.Env).toContain("LD_KEYD_SOCKET=/run/localdot/keyd/4762.sock");
+    expect(gate?.Env?.filter((entry) => entry.startsWith("LD_TOOL_SOCKET="))).toEqual([]);
+    expect(gate?.HostConfig).toMatchObject({
+      Mounts: [
+        { Type: "bind", Source: "/h/keyd/relay", Target: "/run/localdot/keyd", ReadOnly: true },
+      ],
+    });
+  });
+
   it("retains and wipes the private handoff buffer when Stop occurs during delivery", async () => {
     const f = fixture();
     const entered = deferred();

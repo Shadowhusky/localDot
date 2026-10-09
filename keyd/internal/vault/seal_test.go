@@ -118,3 +118,25 @@ func TestOpenAcceptsWhatWebCryptoSeals(t *testing.T) {
 		}
 	}
 }
+
+// Sealed by sealPassphrase in packages/protocol/src/seal.ts with a pinned key and nonce.
+func TestOpenPassphraseAcceptsWhatWebCryptoSeals(t *testing.T) {
+	scalar, _ := hex.DecodeString("6b1f3c2a9d8e7f60514233241506f7e8d9cabbac9d8e7f6051423324150617f8")
+	priv, err := ecdh.P256().NewPrivateKey(scalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &Opener{priv: priv}
+	sealed := Sealed{
+		V:     1,
+		EPK:   "BLhfkHvMwLU1VR2xt2QbapafF0HZL1U_EABDIa8GocmgFNZqvKrR0ZinBw_bbXXvp1tZIDoT8KptqEj3qt86wj0",
+		Nonce: "AAECAwQFBgcICQoL",
+		CT:    "x5qE-Zrthy2MXfp9H6g4dhw8lZSqTTgHt9KIc5G4L85WNugGGb1NWeN4Rv0",
+	}
+	if got, err := o.OpenPassphrase(sealed); err != nil || string(got) != "correct horse battery staple" {
+		t.Fatalf("OpenPassphrase = %q, %v", got, err)
+	}
+	if _, err := o.Open(sealed, Record{ID: "anthropic", Kind: KindLLM, Provider: "anthropic"}); err == nil {
+		t.Fatal("a passphrase opened as a secret")
+	}
+}

@@ -101,6 +101,22 @@ export const HairpinGuard = z.object({
 });
 export type HairpinGuard = z.infer<typeof HairpinGuard>;
 
+// Where keyd keeps secret values: the macOS Keychain, the desktop keyring (Secret Service), or an
+// encrypted file unwrapped by this machine's TPM or host key, or by the user's passphrase. A state
+// this daemon does not know reads as locked.
+export const KeydVault = z.object({
+  backend: z.string().max(32),
+  state: z.enum(["ready", "locked", "setup"]).catch("locked"),
+  key: z.enum(["tpm", "host", "passphrase"]).optional().catch(undefined),
+  // Names a passphrase vault; one made anew has another.
+  fingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/)
+    .optional()
+    .catch(undefined),
+});
+export type KeydVault = z.infer<typeof KeydVault>;
+
 export const KeydStatus = z.object({
   service: ServiceProcessIdentity.nullish(),
   bootId: z.string().min(1),
@@ -112,6 +128,7 @@ export const KeydStatus = z.object({
   day: z.object({ date: z.string(), spentUSD: z.number() }),
   audit: z.object({ ok: z.boolean(), error: z.string().optional() }),
   hairpin: HairpinGuard.nullish(),
+  vault: KeydVault.nullish(),
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
 

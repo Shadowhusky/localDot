@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-3fb5de"></a>
-  <img alt="macOS on Apple silicon" src="https://img.shields.io/badge/macOS-Apple%20silicon-555">
+  <img alt="Runs on macOS, Linux and Windows (WSL 2)" src="https://img.shields.io/badge/runs%20on-macOS%20%7C%20Linux%20%7C%20Windows%20%28WSL%202%29-555">
   <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-555">
 </p>
 
@@ -166,7 +166,7 @@ squints happily when it's done. It has no other hobbies.
 | **Web browser** | A separate browser that keeps your sign-ins. The desktop can't read its cookies. |
 | **Brain** | The agent loop that talks to the model. It holds stand-in keys only. |
 | **Gate** | The only way out to the network. No LAN, no router, no cloud metadata. |
-| **keyd** | A small Go service that keeps your real keys (in the macOS Keychain) and swaps them in at the edge. |
+| **keyd** | A small Go service that keeps your real keys (in the macOS Keychain, your Linux keyring or an encrypted file) and swaps them in at the edge. |
 
 <picture>
   <source srcset="docs/readme/task-loop.svg" type="image/svg+xml">
@@ -256,42 +256,63 @@ things. A fast model for titles and quick checks is optional, and so is a local 
 
 ## Install
 
-**macOS on Apple silicon** is where localDot runs today. You'll need Docker Desktop (Engine 28
-or newer), Node 24, pnpm 10 and Go (the version pinned in `keyd/go.mod`).
+localDot runs on macOS, Linux and Windows (through WSL 2). dot's computer is Linux containers
+everywhere, so every platform runs the same one. You'll need Docker (Engine 28 or newer), git,
+curl and about 15 GB of disk. The installer brings its own Node.js and Go, installs nothing
+system-wide and never asks for sudo.
+
+**macOS** (Apple silicon or Intel, with Docker Desktop) and **Linux** (x86-64 or ARM64 with
+systemd, such as Ubuntu, Debian or Fedora), as your own user:
 
 ```sh
-git clone https://github.com/Shadowhusky/localdot.git
-cd localdot
-pnpm install
-pnpm --filter @localdot/web build
-
-# dot's computer. The desktop image takes 10-25 minutes the first time; put the kettle on.
-cells/gate/build.sh
-cells/desktop/build.sh
-cells/brain/build.sh
-pnpm --filter @localdot/browserd build
-docker build -f cells/browser/Dockerfile -t localdot/browser:dev .
+curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash
 ```
 
-Then, in two terminals:
+**Windows 10 (2004 or newer) or 11**, in PowerShell:
 
-```sh
-pnpm keyd                                 # the key service, keeps keys in your login Keychain
-pnpm --filter @localdot/daemon start      # localDot, on http://127.0.0.1:4750
+```powershell
+irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
 ```
 
-`pnpm --filter @localdot/daemon open` prints a one-time sign-in link. Open it, follow the setup,
-and turn the computer on. If something looks off, `pnpm --filter @localdot/daemon doctor`
-checks Docker, the images and the port.
+It turns on WSL 2 (Windows wants a restart for that, then run it again), installs Ubuntu if it
+isn't there, turns on systemd and runs the same installer inside it. Your Windows browser reaches
+localDot at `http://127.0.0.1:4750`, as if WSL weren't there at all.
 
-**On your phone:** serve the daemon on your tailnet with
-`tailscale serve --bg --https=4750 http://127.0.0.1:4750`, start the daemon with
-`LOCALDOT_PUBLIC_ORIGIN=https://<your-mac>.<your-tailnet>.ts.net:4750`, and open the link there.
+The first run builds dot's computer, which takes 10 to 30 minutes; put the kettle on. Then it
+starts localDot as your own user's services and prints a one-time sign-in link. Open it, follow
+the setup and turn the computer on. If something is missing, the installer lists all of it up
+front, with the commands to fix it, rather than one complaint at a time.
 
-**Linux, Windows and servers are close.** An install script for macOS, Linux and Windows (through
-WSL 2), systemd services, a key vault for Linux (Secret Service or an encrypted file) and a
-headless mode you can use from any browser are in review. Until they land, macOS is the one we
-test.
+- **Upgrade:** `localdot update`, or run the installer again. Settings and data stay put.
+- **Uninstall:** `localdot uninstall`. It keeps your data in `~/.localdot` and prints the commands
+  that delete it, for when you really mean it.
+- **Something looks off:** `localdot doctor` checks Docker, the images, the key service and the
+  app.
+
+**On a server with no screen:** give it a regular user with Docker access and lingering turned
+on (the [install guide](docs/install.md#preparing-a-fresh-server) has the four commands), sign
+in as that user over SSH and run the same `curl` line. localDot runs as systemd user services,
+so it keeps going after you log out. Your keys go in an encrypted file there; if a passphrase
+protects it, run `localdot unlock` after the server restarts.
+
+### Reaching it from another device
+
+localDot only listens on `127.0.0.1`, so nothing on your network can reach it directly. Keep it
+that way: don't forward its port or put it on the public internet. There are two safe ways in.
+
+- **SSH tunnel**, from your own computer: `ssh -N -L 4750:127.0.0.1:4750 you@your-server`. Run
+  `localdot open` on the server and open the link on your computer within a minute. Keep the
+  same port on both ends; localDot only answers to its own address.
+- **Tailscale**, for your phone and everything else you own: install with
+  `curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash -s -- --tailscale`,
+  or run `localdot update --tailscale`, once MagicDNS and HTTPS certificates are on in your
+  tailnet. localDot gets an HTTPS address that only your own devices can reach, and
+  `localdot open --qr` draws the sign-in link as a QR code for your phone. It never uses Tailscale Funnel, and neither should you for this port: that would
+  publish localDot to the whole internet.
+
+Everything else, from installer options and where things live to how your saved keys are kept,
+is in [Installing localDot](docs/install.md). To build and run from source instead, see
+[docs/development.md](docs/development.md).
 
 ## FAQ
 

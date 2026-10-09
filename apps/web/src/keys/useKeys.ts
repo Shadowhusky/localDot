@@ -10,6 +10,7 @@ import {
   loadKeys,
   problemText,
   saveKey,
+  vaultLocked,
 } from "./keys-api.ts";
 
 export interface KeysController {
@@ -25,7 +26,7 @@ export interface KeysController {
 
 export type KeyStatus = {
   label: string;
-  state: "unknown" | "ok" | "offline" | "audit" | "guard";
+  state: "unknown" | "ok" | "offline" | "audit" | "locked" | "guard";
   // The button's accessible name when a hollow dot alone tells the state (network protection).
   spoken?: string;
 };
@@ -37,6 +38,7 @@ export function keyStatus(health: KeydHealth | null): KeyStatus {
   if (!health) return { label: "Keys", state: "unknown" };
   if (!health.online) return { label: "Key protection off", state: "offline" };
   if (health.audit && !health.audit.ok) return { label: "Keys held", state: "audit" };
+  if (vaultLocked(health)) return { label: "Keys locked", state: "locked" };
   if (health.hairpin?.state !== "active") {
     const guard = health.hairpin?.state === "off" ? "off" : "checking";
     return { label: "Keys", state: "guard", spoken: `Keys, network protection ${guard}` };

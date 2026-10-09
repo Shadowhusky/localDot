@@ -1,4 +1,5 @@
 import { TOOL_API_PORT } from "@localdot/protocol";
+import { type GateRelay, gateRelayEnv, gateRelayMounts, HOST_RELAY } from "../cells/relay.ts";
 import { isolatedNetworkSpec } from "../cells/spec.ts";
 
 export const BRAIN_GATE_OFFSET = 10;
@@ -67,6 +68,7 @@ export function brainGateSpec(
   image: string,
   toolPort = TOOL_API_PORT,
   networkId = b.names.egressNetwork,
+  relay: GateRelay = HOST_RELAY,
 ) {
   return {
     Image: image,
@@ -76,10 +78,12 @@ export function brainGateSpec(
       `LD_INTERNAL_ADDR=${b.gateInternalIp}`,
       `LD_KEYD_PORT=${b.keydPort}`,
       `LD_TOOL_PORT=${toolPort}`,
+      ...gateRelayEnv(relay, b.keydPort, true),
     ],
     Labels: labels(b, "brain-gate"),
     HostConfig: {
       NetworkMode: networkId,
+      ...gateRelayMounts(relay, true),
       CapDrop: ["ALL"],
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],

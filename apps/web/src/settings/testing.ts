@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "@localdot/protocol";
+import { type BannerKind, DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "@localdot/protocol";
 import { capabilityOf, normalizeCatalog, PROVIDERS } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { createApi } from "../lib/api.ts";
@@ -69,7 +69,7 @@ export function knownFixture(over: Partial<WhatDotKnows> = {}): WhatDotKnows {
 }
 
 // The daemon's notification routes, in memory: settings, no phones, a test that reaches this Mac.
-export function notifyDaemonFixture(failSave = false) {
+export function notifyDaemonFixture(failSave = false, banner: BannerKind = "mac") {
   let settings: NotifySettings = DEFAULT_NOTIFY_SETTINGS;
   const calls: string[] = [];
   const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
@@ -83,6 +83,7 @@ export function notifyDaemonFixture(failSave = false) {
       return Response.json(settings);
     }
     if (path === "/api/notify/settings") return Response.json(settings);
+    if (path === "/api/notify/host") return Response.json({ banner });
     if (path === "/api/notify/subscriptions") return Response.json({ devices: [] });
     if (path === "/api/notify/test") return Response.json({ mac: "shown", phones: [] });
     if (path === "/api/install-code")

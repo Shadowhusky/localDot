@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { ServiceOwner } from "../../../../packages/protocol/src/install-services.ts";
 import { ReleaseIdentity } from "../../../../packages/protocol/src/install-update.ts";
 import { privateDirectory } from "./copy-inventory.ts";
@@ -130,12 +130,12 @@ async function verifyFile(path: string, expected: string, signal: AbortSignal) {
 }
 
 async function verifyDefinitions(definitions: Definitions, signal: AbortSignal) {
-  const directory = dirname(definitions.daemon.plist);
+  const directory = dirname(definitions.daemon.file);
   await privateDirectory(directory);
-  if (JSON.stringify((await readdir(directory)).sort()) !== '["daemon.plist","keyd.plist"]')
-    throw fail();
+  const names = [basename(definitions.daemon.file), basename(definitions.keyd.file)].sort();
+  if (JSON.stringify((await readdir(directory)).sort()) !== JSON.stringify(names)) throw fail();
   for (const role of ["keyd", "daemon"] as const)
-    await verifyFile(definitions[role].plist, definitions[role].contents, signal);
+    await verifyFile(definitions[role].file, definitions[role].contents, signal);
 }
 
 async function runtime(settings: InstallServiceSettings, create: boolean) {
@@ -228,7 +228,7 @@ export async function prepareInstalledServices(
   const settings = { ...settingsInput },
     identity = ReleaseIdentity.parse(identityInput);
   const definitions = await definitionsFor(settings, identity, signal, true);
-  const directory = dirname(definitions.daemon.plist),
+  const directory = dirname(definitions.daemon.file),
     parent = dirname(directory);
   await ensureDirectory(join(settings.state, "services"));
   await ensureDirectory(parent);
@@ -245,7 +245,7 @@ export async function prepareInstalledServices(
     for (const role of ["keyd", "daemon"] as const) {
       signal.throwIfAborted();
       const fd = await open(
-        join(temporary, `${role}.plist`),
+        join(temporary, basename(definitions[role].file)),
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         0o600,
       );
@@ -255,7 +255,11 @@ export async function prepareInstalledServices(
       } finally {
         await fd.close();
       }
-      await verifyFile(join(temporary, `${role}.plist`), definitions[role].contents, signal);
+      await verifyFile(
+        join(temporary, basename(definitions[role].file)),
+        definitions[role].contents,
+        signal,
+      );
     }
     await syncDirectory(temporary);
     signal.throwIfAborted();
@@ -293,7 +297,7 @@ export async function reopenInstalledServices(
     identity = ReleaseIdentity.parse(identityInput);
   const definitions = await definitionsFor(settings, identity, signal, false);
   await privateDirectory(join(settings.state, "services"));
-  await privateDirectory(dirname(dirname(definitions.daemon.plist)));
+  await privateDirectory(dirname(dirname(definitions.daemon.file)));
   await verifyDefinitions(definitions, signal);
   return definitions;
 }

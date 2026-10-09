@@ -1,8 +1,12 @@
-import { runServiceObservation, type ServiceCommandResult } from "./service-command.ts";
+import {
+  runServiceObservation,
+  runUnitObservation,
+  type ServiceCommandResult,
+} from "./service-command.ts";
 import { type ServiceLocation, serviceLocation } from "./service-definition.ts";
 
 const failure = () =>
-  new Error("The localDot launchd context or service state could not be confirmed.");
+  new Error("The localDot service manager context or service state could not be confirmed.");
 function output(result: ServiceCommandResult) {
   if (result.code !== 0 || result.stderr !== "" || Buffer.byteLength(result.stdout) > 128 * 1024)
     throw failure();
@@ -62,6 +66,7 @@ export async function observeServiceJob(
     location.uid,
     location.ownerId,
     location.configuration,
+    location.manager,
   )[location.role];
   if (
     Object.keys(expected).some(
@@ -69,6 +74,8 @@ export async function observeServiceJob(
     )
   )
     throw failure();
+  if (expected.manager === "systemd")
+    return parseUnitState(await runUnitObservation(expected, signal));
   const context = async () => {
     const uid = output(await runServiceObservation("manageruid", signal));
     const name = output(await runServiceObservation("managername", signal));
@@ -79,4 +86,28 @@ export async function observeServiceJob(
   await context();
   signal.throwIfAborted();
   return jobs.has(location.label) ? { pid: jobs.get(location.label) ?? null } : null;
+}
+
+/** A unit the user manager does not know is absent; a loaded one is present, with its main PID
+ * while it runs. Any other load state, or output that is not exactly these properties, is unknown.
+ */
+export function parseUnitState(result: ServiceCommandResult): { pid: number | null } | null {
+  const text = output(result);
+  if (!text.endsWith("\n")) throw failure();
+  const state = new Map<string, string>();
+  for (const line of text.slice(0, -1).split("\n")) {
+    const match = /^(LoadState|ActiveState|MainPID)=([a-z-]*|0|[1-9][0-9]*)$/.exec(line);
+    if (!match || state.has(match[1] as string)) throw failure();
+    state.set(match[1] as string, match[2] as string);
+  }
+  const load = state.get("LoadState"),
+    pid = Number(state.get("MainPID"));
+  if (state.size !== 3 || !Number.isSafeInteger(pid) || pid < 0 || pid > 0x7fff_ffff)
+    throw failure();
+  if (load === "not-found") {
+    if (pid !== 0) throw failure();
+    return null;
+  }
+  if (load !== "loaded") throw failure();
+  return { pid: pid === 0 ? null : pid };
 }

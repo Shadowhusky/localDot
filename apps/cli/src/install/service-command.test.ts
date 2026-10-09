@@ -1,9 +1,11 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  runLoginUnit,
   runServiceCommand,
   runServiceObservation,
+  runUnitObservation,
   type ServiceObservation,
   type ServiceOperation,
 } from "./service-command.ts";
@@ -64,7 +66,7 @@ it.each(["print", "bootout", "bootstrap", "kickstart"] as const)(
       promise = runServiceCommand(location, operation, new AbortController().signal);
     const args =
       operation === "bootstrap"
-        ? [operation, location.domain, location.plist]
+        ? [operation, location.domain, location.file]
         : operation === "kickstart"
           ? [operation, "-p", location.target]
           : [operation, location.target];
@@ -148,12 +150,116 @@ it("does not spawn after cancellation or with an invalid operation or target", (
     { domain: "gui/0" },
     { label: "com.apple.finder" },
     { role: "keyd" as const },
-    { plist: "/private/tmp/install/services/../daemon.plist" },
-    { plist: "/private/tmp/install/services/foreign.plist" },
+    { file: "/private/tmp/install/services/../daemon.plist" },
+    { file: "/private/tmp/install/services/foreign.plist" },
   ])
     expect(() =>
       runServiceCommand({ ...location, ...patch } as ServiceLocation, "bootout", signal),
     ).toThrow();
   expect(() => runServiceCommand(location, "kill" as ServiceOperation, signal)).toThrow();
   expect(spawn).not.toHaveBeenCalled();
+});
+
+describe("systemd user units", () => {
+  const uid = process.getuid?.() ?? 501;
+  const unit = serviceLocation(
+    "/private/tmp/install",
+    "/private/tmp/home",
+    uid,
+    "e".repeat(32),
+    "d".repeat(64),
+    "systemd",
+  ).keyd;
+  const systemctl = (args: string[]) => [
+    "/usr/bin/systemctl",
+    ["--user", ...args],
+    {
+      cwd: "/",
+      env: { PATH: "/usr/bin:/bin", LC_ALL: "C", XDG_RUNTIME_DIR: `/run/user/${uid}` },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  ];
+  // Each spawned systemctl answers in turn with [code, stdout].
+  function answers(...replies: [number, string][]) {
+    spawn.mockImplementation(() => {
+      const [code, stdout] = replies.shift() ?? [1, ""];
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: vi.fn(() => true),
+      });
+      queueMicrotask(() => {
+        child.stdout.end(stdout);
+        child.stderr.end();
+        child.emit("close", code, null);
+      });
+      return child;
+    });
+  }
+
+  it("links the unit file as bootstrap and asks this user's manager, not the environment's", async () => {
+    vi.stubEnv("XDG_RUNTIME_DIR", "/tmp/elsewhere");
+    answers([0, ""]);
+    await runServiceCommand(unit, "bootstrap", new AbortController().signal);
+    expect(spawn.mock.calls).toEqual([systemctl(["link", unit.file])]);
+  });
+
+  it("starts the unit and reports its main PID the way kickstart -p does", async () => {
+    answers([0, ""], [0, "4242\n"]);
+    expect(await runServiceCommand(unit, "kickstart", new AbortController().signal)).toEqual({
+      code: 0,
+      stdout: "4242\n",
+      stderr: "",
+    });
+    expect(spawn.mock.calls).toEqual([
+      systemctl(["start", unit.target]),
+      systemctl(["show", "--property=MainPID", "--value", unit.target]),
+    ]);
+  });
+
+  it("stops, then unlinks, as bootout; a failed stop is returned as is", async () => {
+    answers([0, ""], [0, ""]);
+    await runServiceCommand(unit, "bootout", new AbortController().signal);
+    expect(spawn.mock.calls).toEqual([
+      systemctl(["stop", unit.target]),
+      systemctl(["disable", unit.target]),
+    ]);
+    spawn.mockReset();
+    answers([5, ""]);
+    expect((await runServiceCommand(unit, "bootout", new AbortController().signal)).code).toBe(5);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes only an owned unit, and toggles only the login unit", async () => {
+    answers([0, "LoadState=loaded\n"]);
+    await runUnitObservation(unit, new AbortController().signal);
+    expect(spawn.mock.calls[0]).toEqual(
+      systemctl(["show", "--property=LoadState,ActiveState,MainPID", unit.target]),
+    );
+    expect(() =>
+      runUnitObservation({ ...unit, target: "ssh.service" }, new AbortController().signal),
+    ).toThrow();
+    expect(() => runLoginUnit("enable", unit.target, uid, new AbortController().signal)).toThrow();
+    expect(() =>
+      runLoginUnit(
+        "enable",
+        unit.target.replace(".keyd.", ".login."),
+        uid + 1,
+        new AbortController().signal,
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a location whose manager or unit was changed", () => {
+    expect(() =>
+      runServiceCommand({ ...unit, manager: "launchd" }, "print", new AbortController().signal),
+    ).toThrow();
+    expect(() =>
+      runServiceCommand(
+        { ...unit, file: "/private/tmp/foreign.service" },
+        "bootstrap",
+        new AbortController().signal,
+      ),
+    ).toThrow();
+  });
 });

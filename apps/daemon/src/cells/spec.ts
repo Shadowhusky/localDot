@@ -1,3 +1,4 @@
+import { type GateRelay, gateRelayEnv, gateRelayMounts, HOST_RELAY } from "./relay.ts";
 import type { BrowserCellRecord, CellRecord } from "./types.ts";
 
 export const ISOLATED_GATEWAY_OPTION = "com.docker.network.bridge.gateway_mode_ipv4";
@@ -63,7 +64,11 @@ export function homeVolumeSpec(name: string, cellId?: string) {
   };
 }
 
-export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) {
+export function gateSpec(
+  record: CellRecord | BrowserCellRecord,
+  image: string,
+  relay: GateRelay = HOST_RELAY,
+) {
   const d = record.docker;
   const address = record.kind === "browser" ? record.docker.browserIp : record.docker.desktopIp;
   return {
@@ -74,6 +79,7 @@ export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) 
       `LD_EGRESS_ADDR=${d.gateEgressIp}`,
       `LD_DESKTOP_ADDR=${address}`,
       `LD_KEYD_PORT=${record.keydPort}`,
+      ...gateRelayEnv(relay, record.keydPort, false),
     ],
     Labels: {
       "localdot.cell": record.id,
@@ -87,6 +93,7 @@ export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) 
         [GATE_PORTS.desktopd]: [{ HostIp: "127.0.0.1", HostPort: "" }],
         [GATE_PORTS.stream]: [{ HostIp: "127.0.0.1", HostPort: "" }],
       },
+      ...gateRelayMounts(relay, false),
       CapDrop: ["ALL"],
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],

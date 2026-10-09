@@ -10,6 +10,7 @@ import {
 import { type DockerClient, DockerError } from "../cells/docker.ts";
 import { hostAddress } from "../cells/ipv4.ts";
 import type { PortRange } from "../cells/ports.ts";
+import { type GateRelay, HOST_RELAY } from "../cells/relay.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import {
   BRAIN_GATE_OFFSET,
@@ -44,6 +45,9 @@ export interface BrainCellsDeps {
   namePrefix?: string;
   // Host backend port only. The gate's internal listener is always TOOL_API_PORT (4751).
   toolPort?: number;
+  // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
+  relay?: () => Promise<GateRelay>;
+
   pollMs?: number;
 }
 export interface BrainCell extends BrainLayout {
@@ -287,7 +291,13 @@ export class BrainCells {
       const toolToken = randomBytes(32).toString("base64url");
       await create(
         { kind: "containers", name: layout.names.gate, role: "brain-gate" },
-        brainGateSpec(layout, this.deps.images.gate, this.deps.toolPort, egressId),
+        brainGateSpec(
+          layout,
+          this.deps.images.gate,
+          this.deps.toolPort,
+          egressId,
+          await (this.deps.relay?.() ?? HOST_RELAY),
+        ),
       );
       await create(
         { kind: "containers", name: layout.names.brain, role: "brain" },

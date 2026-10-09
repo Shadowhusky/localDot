@@ -10,7 +10,7 @@ import {
   suggestedId,
   valueProblem,
 } from "../keys/binding.ts";
-import { problemText } from "../keys/keys-api.ts";
+import { keyHome, problemText } from "../keys/keys-api.ts";
 import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ChatgptPanel } from "../settings/ChatgptPanel.tsx";
@@ -454,8 +454,10 @@ export function Onboarding(props: OnboardingProps) {
               onPaste={() => requestAnimationFrame(() => void storeKey())}
             />
           );
+        const copy = KEY_COPY[draft.kind];
         return {
-          ...KEY_COPY[draft.kind],
+          title: copy.title,
+          sub: typeof copy.sub === "string" ? copy.sub : copy.sub(keyHome(keys.health)),
           body,
           primary: "Continue",
           reason,
@@ -642,14 +644,15 @@ export function Onboarding(props: OnboardingProps) {
   );
 }
 
-const KEY_COPY: Record<ThinkKind, { title: string; sub: string }> = {
+// A key's sub-line names where it is kept, from keyd's vault (keyHome).
+const KEY_COPY: Record<ThinkKind, { title: string; sub: string | ((home: string) => string) }> = {
   api: {
     title: "Add your API key",
-    sub: "Paste a key from your provider. It stays in your Mac's keychain.",
+    sub: (home) => `Paste a key from your provider. It stays ${home}.`,
   },
   plan: {
     title: "Add your plan's key",
-    sub: "Choose your plan, then paste its key. It stays in your Mac's keychain.",
+    sub: (home) => `Choose your plan, then paste its key. It stays ${home}.`,
   },
   chatgpt: {
     title: "Set up your ChatGPT plan",
@@ -665,7 +668,7 @@ const KEY_COPY: Record<ThinkKind, { title: string; sub: string }> = {
   },
   custom: {
     title: "Add your server",
-    sub: "Any OpenAI- or Anthropic-compatible server. Its key stays on this Mac.",
+    sub: (home) => `Any OpenAI- or Anthropic-compatible server. Its key stays ${home}.`,
   },
 };
 

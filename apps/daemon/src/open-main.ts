@@ -1,3 +1,4 @@
+import { parsePublicOrigins } from "./guard.ts";
 import { runOpenLink } from "./open-link.ts";
 import { localdotHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
@@ -7,12 +8,19 @@ const interrupt = () => abort.abort();
 process.once("SIGINT", interrupt);
 process.once("SIGTERM", interrupt);
 try {
-  if (process.argv.slice(2).some((arg) => arg !== "--")) {
-    console.error("Usage: localdot open");
+  const args = process.argv.slice(2).filter((arg) => arg !== "--");
+  if (args.some((arg) => arg !== "--qr") || args.length > 1) {
+    console.error("Usage: localdot open [--qr]");
     process.exitCode = 2;
   } else {
     process.exitCode = await runOpenLink(
-      { home: localdotHome(), port: parsePort(process.env.LOCALDOT_PORT), signal: abort.signal },
+      {
+        home: localdotHome(),
+        port: parsePort(process.env.LOCALDOT_PORT),
+        signal: abort.signal,
+        publicOrigins: parsePublicOrigins(process.env.LOCALDOT_PUBLIC_ORIGIN || undefined),
+        qr: args.length === 1,
+      },
       {
         out: (message) => console.log(message),
         err: (message) => console.error(message),
