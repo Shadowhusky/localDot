@@ -122,6 +122,16 @@ describe("toast queue", () => {
     expect(queue.list()[0]?.details).toEqual(["One note", "Another"]);
   });
 
+  it("keeps one with a live part until it is dismissed, and announces only its title", () => {
+    const queue = createToasts();
+    queue.show({ id: "export", title: "Exporting…", live: "42%" });
+    wait(SETTLE_MS + 60_000);
+    expect(shown(queue)).toEqual(["Exporting…"]);
+    expect(queue.list()[0]?.live).toBe("42%");
+    queue.show({ id: "export", title: "Exporting…", live: "43%" });
+    expect(queue.list()[0]?.live).toBe("42%");
+  });
+
   it("stands the time still while held, and goes on from there", () => {
     const queue = createToasts();
     queue.show({ title: "Saved to Downloads" });

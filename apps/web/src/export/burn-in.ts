@@ -10,7 +10,7 @@ const LINE_HEIGHT = 26;
 const PAD_X = 16;
 const PAD_Y = 10;
 const RADIUS = 12;
-const BOTTOM = 32;
+const EDGE = 32;
 const TEXT_W = 880;
 const CAPTION_CHARS = 60;
 const CHIP_ALPHA = 0.92;
@@ -23,15 +23,18 @@ export function burnInText(caption: string | null, gap: RecordingGapReason | nul
   return caption ? clipText(caption, CAPTION_CHARS) : null;
 }
 
-// One caption chip, bottom-centre on the HUD's solid material, in the interface's own typeface.
+// One caption chip, centred on the HUD's solid material, in the interface's own typeface: at the
+// picture's foot, or at its head while dot and its words sit in the foot's corner.
 export class ExportBurnIn extends Container {
   readonly #chip = new Graphics();
   readonly #text: Text;
   readonly #theme: StageTheme;
   readonly #height: number;
+  readonly #place: "foot" | "head";
 
-  constructor(theme: StageTheme, width: number, height: number) {
+  constructor(theme: StageTheme, width: number, height: number, place: "foot" | "head" = "foot") {
     super();
+    this.#place = place;
     const scale = width / LAYOUT_W;
     this.scale.set(scale);
     this.#height = height / scale;
@@ -62,7 +65,7 @@ export class ExportBurnIn extends Container {
     const width = this.#text.width + PAD_X * 2;
     const height = this.#text.height + PAD_Y * 2;
     const left = Math.round((LAYOUT_W - width) / 2);
-    const top = Math.round(this.#height - BOTTOM - height);
+    const top = Math.round(this.#place === "head" ? EDGE : this.#height - EDGE - height);
     this.#text.position.set(left + PAD_X, top + PAD_Y);
     this.#chip
       .clear()

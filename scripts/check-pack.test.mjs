@@ -26,6 +26,7 @@ const BASE = {
   "dist/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar": "fixture jar\n",
   "skills/office-files/SKILL.md": "# Office files\n",
   "web/dist/index.html": "<!doctype html>\n",
+  "web/dist/export.html": "<!doctype html>\n",
   "web/dist/assets/index-Ab12.js": "export {};\n",
   "web/dist/assets/licenses/mediabunny-1.61.0.txt": "Mozilla Public License Version 2.0\n",
   "web/vendor/selkies/LICENSE": "Mozilla Public License Version 2.0\n",
@@ -57,6 +58,7 @@ describe("shipping package inventory audit (without running npm)", () => {
     "skills/office-files/SKILL.md",
     "dist/sandbox-runtime/dist/cli.mjs",
     "dist/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar",
+    "web/dist/export.html",
   ])("requires the installed runtime asset %s", (path) => {
     expect(pkg({ [path]: null }).check()).toContain(`${path}: missing`);
   });

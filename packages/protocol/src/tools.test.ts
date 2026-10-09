@@ -121,6 +121,24 @@ describe("the v1 tool table", () => {
     ]).toEqual([false, false, false]);
   });
 
+  it("lets every call that acts carry dot's line for the user, described for the model", () => {
+    for (const schema of [
+      GenericComputerInput,
+      TOOL_INPUTS.computer,
+      TOOL_INPUTS.browser_act,
+      TOOL_INPUTS.shell,
+    ]) {
+      const intent = (z.toJSONSchema(schema) as { properties: Record<string, unknown> }).properties
+        .intent as { type: string; description: string };
+      expect(intent.type).toBe("string");
+      expect(intent.description).toContain("at most 12 words");
+      expect(intent.description).toContain("Opening Telegram to send your message");
+    }
+    expect(TOOL_INPUTS.shell.safeParse({ command: "ls", intent: "x".repeat(300) }).success).toBe(
+      true,
+    );
+  });
+
   it("gives Codex's computer schema no tuple or union either", () => {
     const text = JSON.stringify(z.toJSONSchema(TOOL_INPUTS.computer));
     for (const shape of ["prefixItems", "anyOf", "oneOf", "allOf"])

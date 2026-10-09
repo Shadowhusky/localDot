@@ -82,6 +82,7 @@ const keyReply = (path: string): Response | undefined => {
       hairpin: { state: "active", addresses: 1 },
     });
   if (path === "/api/keys") return json({ keys: [] });
+  if (path === "/api/exports") return new Response("not found", { status: 404 });
   if (path === "/api/notify/attention") return json({ items: [] });
   return undefined;
 };
@@ -525,7 +526,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
@@ -649,7 +650,8 @@ describe("App token states", () => {
     );
     render(<App fetchImpl={d.fetchImpl} />);
     fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
-    expect(await screen.findByText(OFFLINE_SAID)).toBeTruthy();
+    // Each line dot's band shows stays long enough to read before the next.
+    expect(await screen.findByText(OFFLINE_SAID, {}, { timeout: 2000 })).toBeTruthy();
     expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
     expect(d.seen().some((c) => c.endsWith("/start"))).toBe(false);
     act(() => FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(paused) }));
@@ -657,8 +659,7 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
-    // Each line dot's band shows stays for a second before the next.
-    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2000 });
+    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2500 });
   });
 
   it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {

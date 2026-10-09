@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.ts";
+import { MAX_OUTPUT_VERSION, ReviseLink } from "./deliverables.ts";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
@@ -16,6 +17,7 @@ import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
+import { INTENT_CHARS } from "./tools.ts";
 
 const envelope = {
   v: z.literal(1),
@@ -58,6 +60,8 @@ export const SessionStart = event(
     continues: z.string().regex(ULID_PATTERN).optional(),
     // What started this task when the user did not: a routine or a follow-up.
     origin: SessionOrigin.optional(),
+    // The handed-over file this task revises, from a task that has ended.
+    revises: ReviseLink.optional(),
   }),
 );
 export const SessionEnd = event(
@@ -110,6 +114,8 @@ export const StepStart = event(
   z.object({
     kind: z.enum(["gui", "shell", "file", "browser", "ask", "think"]),
     planItem: z.string().optional(),
+    // The model's own line for the user about the call this step starts, as plain text.
+    intent: boundedText(INTENT_CHARS).optional(),
   }),
 );
 export const StepEnd = event(
@@ -417,6 +423,7 @@ export const TaskResult = event(
           name: z.string().min(1).max(255),
           path: z.string().max(1024),
           bytes: z.number().int().nonnegative(),
+          version: z.number().int().min(1).max(MAX_OUTPUT_VERSION).optional(),
         }),
       )
       .max(32),

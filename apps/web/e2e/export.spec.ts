@@ -7,6 +7,8 @@ import type { RunningDaemon } from "./daemon.ts";
 import { type SeededHome, seedHome, startReplayDaemon } from "./seed.ts";
 
 const MARKER = `p7-privacy-marker-${Date.now().toString(36)}`;
+// These check the page's own exporter, so the daemon is given no browser to make videos with.
+const PAGE_EXPORTS = { LOCALDOT_EXPORT_BROWSER: "/nonexistent/localdot-export-browser" };
 let directory: string;
 let daemon: RunningDaemon | undefined;
 let privacy: SeededHome;
@@ -24,7 +26,7 @@ test.beforeAll(async () => {
     takeover: "60000-90000",
   });
   uiSession = seedHome({ home: privacy.home, minutes: 1, title: "Research notes" });
-  daemon = await startReplayDaemon(privacy.home);
+  daemon = await startReplayDaemon(privacy.home, PAGE_EXPORTS);
   mkdirSync("e2e/out", { recursive: true });
 });
 test.afterAll(async () => {
@@ -237,7 +239,7 @@ test("exports a 2-hour session in bounded memory (Review Focus 4, export)", asyn
   test.setTimeout(20 * 60_000);
   await daemon?.stop();
   longSession = seedHome({ home: join(directory, "long-home"), minutes: 120 });
-  daemon = await startReplayDaemon(longSession.home);
+  daemon = await startReplayDaemon(longSession.home, PAGE_EXPORTS);
   const session = await page.context().newCDPSession(page);
   await session.send("Performance.enable");
   const mainHeap = async () => {

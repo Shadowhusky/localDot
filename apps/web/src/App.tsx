@@ -41,7 +41,9 @@ import { dotFeed } from "./dot/dot-feed.ts";
 import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
+import { createHostExports } from "./export/host-exports.ts";
 import { createExportJob } from "./export/job.ts";
+import { useExportToast } from "./export/useExportToast.tsx";
 import { JEV_KEY } from "./keys/binding.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
@@ -112,7 +114,7 @@ import {
 import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
-import { narrationLine } from "./shell/narration.ts";
+import { atWork, narrationLine } from "./shell/narration.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -301,8 +303,17 @@ function Theatre({ api }: { api: ApiClient }) {
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
   // An export keeps going when Replay closes or moves to another task.
-  const [exportJob] = useState(createExportJob);
-  useEffect(() => () => exportJob.dispose(), [exportJob]);
+  // Made by the host when it can, so a video goes on when this page closes.
+  const [hostExports] = useState(() => createHostExports(api));
+  const [exportJob] = useState(() => createExportJob(hostExports));
+  useEffect(
+    () => () => {
+      exportJob.dispose();
+      hostExports.dispose();
+    },
+    [exportJob, hostExports],
+  );
+  useExportToast(exportJob);
   const [historyRevision, setHistoryRevision] = useState(0);
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
@@ -1172,7 +1183,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   appStatus.row,
                   appStatus.caption.text,
                   // Out of touch, dot's last words are old news; the caption says what is going on.
-                  linkLost ? null : agent.model.said,
+                  linkLost || !session.sessionId ? null : session.model,
+                  now,
                 )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
@@ -1366,6 +1378,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     line={narration}
                     speaker={speaker}
                     reveal={!!asked && narration === asked}
+                    forUser={!atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
                   />
@@ -1652,6 +1665,7 @@ function Theatre({ api }: { api: ApiClient }) {
             onTitle={setRecorded}
             continueTask={replayContinue}
             exportJob={exportJob}
+            hostExports={hostExports}
             visible={!settings.open && !safety.approval}
             showDot={showDot.value}
           />

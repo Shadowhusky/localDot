@@ -8,9 +8,12 @@ import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
+import { type DeliverablesDeps, deliverableRoutes } from "./deliverables/routes.ts";
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
+import type { ExportJobs } from "./exports/jobs.ts";
+import { ExportLinks, exportRoutes } from "./exports/routes.ts";
 import { type GatewayRoutesDeps, gatewayRoutes } from "./gateway/routes.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { installCodeRoutes } from "./install-code-routes.ts";
@@ -41,9 +44,11 @@ export interface AppOptions {
   search?: SearchRoutesDeps;
   recorder?: Pick<Recorder, "info" | "isLive">;
   replay?: ReplayRoutesDeps;
+  deliverables?: Omit<DeliverablesDeps, "port">;
   installCodes?: InstallCodes;
   serviceReadiness?: Pick<ManagedServiceReadiness, "snapshot">;
   doctorSelfTests?: DoctorSelfTestsDeps;
+  exports?: ExportJobs;
   notify?: NotifyRoutesDeps;
   routines?: RoutineRoutesDeps;
 }
@@ -62,9 +67,11 @@ export function createApp({
   agent,
   search,
   replay,
+  deliverables,
   installCodes,
   serviceReadiness,
   doctorSelfTests,
+  exports,
   notify,
   routines,
 }: AppOptions): Hono {
@@ -180,6 +187,8 @@ export function createApp({
   if (routines) routineRoutes(app, routines);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (replay) replayRoutes(app, replay);
+  if (deliverables) deliverableRoutes(app, { ...deliverables, port });
   if (notify) notifyRoutes(app, notify);
+  if (exports) exportRoutes(app, exports, new ExportLinks());
   return app;
 }

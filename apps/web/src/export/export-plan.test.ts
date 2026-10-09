@@ -8,7 +8,6 @@ import {
   fileSize,
   PRIVACY_NOTE,
   planExport,
-  speedText,
   validSize,
   videoLength,
 } from "./export-plan.ts";
@@ -68,12 +67,6 @@ describe("deterministic MP4 export plan", () => {
       expect(() => planExport({ ...request, speed }, model, [], [])).toThrow(RangeError);
   });
 
-  it("names speeds plainly", () => {
-    expect(speedText(2)).toBe("2×");
-    expect(speedText(0.25)).toBe("0.25×");
-    expect(speedText(1.333333)).toBe("1.33×");
-  });
-
   it("counts the moving part of the video at its speed", () => {
     const { model, request } = fixture();
     const activity = [
@@ -122,19 +115,45 @@ describe("deterministic MP4 export plan", () => {
       expect(() => planExport({ ...request, fromMs, toMs }, model, [], [])).toThrow(RangeError);
   });
 
-  it("gives captions only within chapters and respects half-open gap boundaries", () => {
+  it("burns in the band's line, each held long enough to read, and respects half-open gap boundaries", () => {
     const { model, request } = fixture();
-    model.steps.push({ id: "read", kind: "browser", startT: 1000, endT: 5000, status: "ok" });
+    for (const [id, startT, intent] of [
+      ["open", 1000, "Opening Telegram"],
+      ["find", 1500, "Finding Mum's chat"],
+    ] as const) {
+      model.stepIndex.set(id, model.steps.length);
+      model.steps.push({ id, kind: "gui", startT, endT: startT + 300, status: "ok", intent });
+    }
     const gaps = [{ from: 2_000_000, to: 4_000_000, reason: "user-control" as const }];
     const plan = planExport(request, model, [], gaps);
     expect(plan.captionAt(0)).toBeNull();
-    expect(plan.captionAt(30)).toBe("Reading page");
-    expect(plan.captionAt(150)).toBeNull();
+    expect(plan.captionAt(30)).toBe("Opening Telegram");
+    expect(plan.captionAt(45)).toBe("Opening Telegram");
+    expect(plan.captionAt(74)).toBe("Opening Telegram");
+    expect(plan.captionAt(75)).toBe("Finding Mum's chat");
+    expect(plan.captionAt(150)).toBe("Finding Mum's chat");
     expect(plan.gapAt(59)).toBeNull();
     expect(plan.gapAt(60)).toBe("user-control");
     expect(plan.gapAt(119)).toBe("user-control");
     expect(plan.gapAt(120)).toBeNull();
     expect(planExport({ ...request, captions: false }, model, [], gaps).captionAt(30)).toBeNull();
+  });
+
+  it("burns in a line for the user at once, without waiting out the last line's hold", () => {
+    const { model, request } = fixture(3000);
+    model.agentStates.push({ t: 1600, state: "error" });
+    model.stepIndex.set("open", 0);
+    model.steps.push({
+      id: "open",
+      kind: "gui",
+      startT: 1000,
+      endT: 1300,
+      status: "ok",
+      intent: "Opening Telegram",
+    });
+    const plan = planExport(request, model, [], []);
+    expect(plan.captionAt(47)).toBe("Opening Telegram");
+    expect(plan.captionAt(48)).toBe("I can't go on by myself. The chat says what to do.");
   });
 
   it("asks the encoder for more bits as the picture, the frame rate and the quality grow", () => {

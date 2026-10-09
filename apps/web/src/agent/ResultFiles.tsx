@@ -1,17 +1,36 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { bytes, count } from "../copy/format.ts";
+import { downloadVersion, isLoopbackPage } from "../deliverables/api.ts";
+import { DeliverableFile } from "../deliverables/DeliverableFile.tsx";
+import { ProofStrip, proofOf } from "../deliverables/ProofStrip.tsx";
+import { useProof } from "../deliverables/useProof.ts";
+import { opensAtFirst } from "../deliverables/versions.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
-import { Icon } from "../ui/Icon.tsx";
+import { Card, FileRow } from "../ui/Card.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
-import { Spinner } from "../ui/Spinner.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
 
-type FileRow = AgentResult["files"][number];
+type ResultFile = AgentResult["files"][number];
+// The stored version a download fetches, by the task that handed it over and its number.
+export interface DownloadVersion {
+  readonly sessionId: string;
+  readonly version: number | null;
+}
 interface Selection {
   resultId: string;
-  file: FileRow;
+  file: ResultFile;
+  // A version the user chose to look at; otherwise the file's own version.
+  version?: DownloadVersion;
   api: ApiClient;
   sessionId: string;
   // The task whose file it is: an earlier task's result keeps its own.
@@ -22,8 +41,8 @@ export type FileState = "busy" | "done" | "failed";
 // How long a finished download shows its check.
 const DONE_MS = 1500;
 
-const fileKey = (resultId: string, file: FileRow) => `${resultId}/${file.name}`;
-const valid = (file: FileRow) =>
+const fileKey = (resultId: string, file: ResultFile) => `${resultId}/${file.name}`;
+const valid = (file: ResultFile) =>
   safeTransferName(file.name) &&
   Number.isSafeInteger(file.bytes) &&
   file.bytes >= 0 &&
@@ -104,7 +123,7 @@ export function useResultDownloads(
   }, [retire]);
 
   const request = useCallback(
-    async (resultId: string, file: FileRow): Promise<boolean> => {
+    async (resultId: string, file: ResultFile, version?: DownloadVersion): Promise<boolean> => {
       const owner = current.current;
       if (
         active.current ||
@@ -122,6 +141,7 @@ export function useResultDownloads(
         sessionId: owner.sessionId,
         task: owner.results.find((result) => result.id === resultId)?.sessionId ?? owner.sessionId,
         abort: new AbortController(),
+        ...(version ? { version } : {}),
       };
       if (!present(owner.results, record)) return false;
       release();
@@ -137,13 +157,27 @@ export function useResultDownloads(
         !record.abort.signal.aborted;
       let saved = false;
       try {
-        // The model's arbitrary path is never a fetch target; only this session's validated name is used.
-        const blob = await downloadResult(
-          record.api,
-          record.task,
-          record.file.name,
-          record.abort.signal,
-        );
+        // The model's arbitrary path is never a fetch target; only this session's validated name is
+        // used. A card fetches its own version: a later result may have replaced the newest copy.
+        const chosen = record.version ?? {
+          sessionId: record.task,
+          version: record.file.version ?? null,
+        };
+        const blob =
+          chosen.version === null
+            ? await downloadResult(
+                record.api,
+                chosen.sessionId,
+                record.file.name,
+                record.abort.signal,
+              )
+            : await downloadVersion(
+                record.api,
+                chosen.sessionId,
+                record.file.name,
+                chosen.version,
+                record.abort.signal,
+              );
         if (!owns()) return false;
         const url = URL.createObjectURL(blob);
         urls.current.add(url);
@@ -198,10 +232,11 @@ export function useResultDownloads(
   // The same object until a download's state changes, so the results that show it redraw only then.
   return useMemo(
     () => ({
-      state: (resultId: string, file: FileRow) => states.get(fileKey(resultId, file)),
+      state: (resultId: string, file: ResultFile) => states.get(fileKey(resultId, file)),
       busy: [...states.values()].includes("busy"),
       request,
       cancel,
+      api,
       sessionId: api ? sessionId : null,
     }),
     [states, request, cancel, api, sessionId],
@@ -220,123 +255,145 @@ export function FileName({ name }: { name: string }) {
   );
 }
 
-function extension(name: string) {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 && name.length - dot <= 5 ? name.slice(dot + 1).toUpperCase() : "";
+export interface ResultCardProps {
+  result: AgentResult;
+  downloads: ResultDownloads;
+  // Opens the task in Replay when its proof can't be read.
+  onReplay?: () => void;
+  // Changes when the conversation gets another result, so each file's versions are read again.
+  refresh?: number;
+  onMac?: boolean;
+  // A composer is in reach to take a revision.
+  revisable?: boolean;
 }
 
+// A result: what dot says it did, the files it handed over, and the proof of the work.
 export function ResultCard({
   result,
   downloads,
   onReplay,
-}: {
-  result: AgentResult;
-  downloads: ResultDownloads;
-  onReplay?: () => void;
-}) {
+  refresh = 0,
+  onMac = isLoopbackPage(),
+  revisable = true,
+}: ResultCardProps) {
   const files = result.files;
+  const api = downloads.api;
+  const task = result.sessionId ?? downloads.sessionId;
   const all = async () => {
     for (const file of files)
       if (valid(file) && !(await downloads.request(result.id, file))) return;
   };
+  const downloadAll = files.length > 1 && (
+    <Button
+      size="sm"
+      icon="download"
+      variant="quiet"
+      aria-label={`Download all ${count(files.length, "file", "files")}`}
+      disabledReason={
+        !downloads.sessionId
+          ? "This task is no longer available."
+          : downloads.busy
+            ? "Another download is still running."
+            : undefined
+      }
+      onClick={() => void all()}
+    >
+      Download all
+    </Button>
+  );
+  const replay = onReplay && (
+    <Button variant="quiet" size="sm" icon="play" aria-label="Replay this task" onClick={onReplay}>
+      Replay
+    </Button>
+  );
   return (
     <section className="result-card" aria-label="Task result">
       <p className="result-summary">{result.summary}</p>
       {files.length > 0 && (
-        <ul className="result-files" aria-label={`Files in result ${result.id}`}>
-          {files.map((file) => {
-            const ok = valid(file);
-            const state = downloads.state(result.id, file);
-            const type = ok ? extension(file.name) : "";
-            return (
-              <li key={file.name} className="result-file" data-state={state}>
-                <span className="result-file-tile" aria-hidden="true">
-                  {type || <Icon name="file" size={16} />}
-                </span>
-                <span className="result-file-text">
-                  {ok ? <FileName name={file.name} /> : <span>Unavailable file name</span>}
-                  <span className="result-file-meta num">
-                    {!ok
-                      ? "Can't be downloaded"
-                      : state === "busy"
-                        ? "Downloading…"
-                        : state === "failed"
-                          ? "Couldn't download. Try again."
-                          : bytes(file.bytes)}
-                  </span>
-                </span>
-                <span className="result-file-action">
-                  {state === "busy" && <Spinner className="result-file-ring" />}
-                  <IconButton
-                    icon={state === "busy" ? "x" : state === "done" ? "check" : "download"}
-                    label={
-                      state === "busy"
-                        ? "Cancel download"
-                        : ok
-                          ? `Download ${file.name}`
-                          : "Unavailable file"
+        <Card variant="file" className="result-files">
+          {downloadAll && (
+            <div className="deliverables-head">
+              <span className="deliverables-count num">{count(files.length, "file", "files")}</span>
+              {downloadAll}
+            </div>
+          )}
+          <ul className="deliverables" aria-label={`Files in result ${result.id}`}>
+            {files.map((file, index) =>
+              valid(file) && api && task ? (
+                <DeliverableFile
+                  key={`${file.name}/${file.version ?? 0}`}
+                  api={api}
+                  sessionId={task}
+                  resultId={result.id}
+                  file={file}
+                  downloads={downloads}
+                  refresh={refresh}
+                  defaultOpen={opensAtFirst(
+                    files.map((f) => f.name),
+                    index,
+                  )}
+                  onMac={onMac}
+                  revisable={revisable}
+                />
+              ) : valid(file) ? (
+                // Without its task the file is still listed, with nothing it can do.
+                <li key={file.name} className="deliverable">
+                  <FileRow
+                    name={file.name}
+                    meta={bytes(file.bytes)}
+                    actions={
+                      <IconButton
+                        icon="download"
+                        label={`Download ${file.name}`}
+                        disabledReason="This task is no longer available."
+                      />
                     }
-                    data-state={state}
-                    disabledReason={
-                      state === "busy"
-                        ? undefined
-                        : !ok
-                          ? "This file can't be downloaded."
-                          : !downloads.sessionId
-                            ? "This task is no longer available."
-                            : downloads.busy
-                              ? "Another download is still running."
-                              : undefined
-                    }
-                    onClick={() => {
-                      if (state === "busy") downloads.cancel();
-                      else void downloads.request(result.id, file);
-                    }}
                   />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+                </li>
+              ) : (
+                // biome-ignore lint/suspicious/noArrayIndexKey: an unsafe name is never shown or used as a key.
+                <li key={index} className="deliverable">
+                  <FileRow name="Unavailable file" meta="Can't be downloaded" />
+                </li>
+              ),
+            )}
+          </ul>
+        </Card>
       )}
-      {(files.length > 1 || onReplay) && (
-        <div className="result-actions">
-          {onReplay && (
-            <Button
-              variant="quiet"
-              size="sm"
-              icon="play"
-              className="result-replay"
-              aria-label="Replay this task"
-              onClick={onReplay}
-            >
-              Replay
-            </Button>
-          )}
-          {files.length > 1 && (
-            <Button
-              size="sm"
-              icon="download"
-              variant="quiet"
-              className="result-all"
-              aria-label={`Download all ${count(files.length, "file", "files")}`}
-              disabledReason={
-                !downloads.sessionId
-                  ? "This task is no longer available."
-                  : downloads.busy
-                    ? "Another download is still running."
-                    : undefined
-              }
-              onClick={() => void all()}
-            >
-              Download all
-            </Button>
-          )}
-        </div>
-      )}
-      {files.length > 0 && (
-        <p className="thread-note">Files download to this device. They never open on their own.</p>
+      {api && task ? (
+        <ResultProof api={api} task={task} resultId={result.id} refresh={refresh} replay={replay} />
+      ) : (
+        replay && <div className="proof-actions">{replay}</div>
       )}
     </section>
+  );
+}
+
+function ResultProof({
+  api,
+  task,
+  resultId,
+  refresh,
+  replay,
+}: {
+  api: ApiClient;
+  task: string;
+  resultId: string;
+  refresh: number;
+  replay: ReactNode;
+}) {
+  const proof = useProof(api, task, refresh);
+  // Without its proof, the result still opens its task in Replay.
+  const missing =
+    proof.state === "failed" || (proof.state === "ready" && !proofOf(proof, resultId));
+  if (missing && !replay) return null;
+  return (
+    <ProofStrip
+      api={api}
+      sessionId={task}
+      resultId={resultId}
+      proof={proof}
+      end={missing ? replay : undefined}
+    />
   );
 }

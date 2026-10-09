@@ -543,6 +543,28 @@ describe("the tools", () => {
     });
   });
 
+  it("starts a call's step with dot's line for it, as one line of plain text", async () => {
+    const h = toolHarness();
+    h.desktop.shellDone = { exitCode: 0 };
+    await h.call("shell", {
+      command: "command -v gimp",
+      intent: `Checking\nfor paint\u0007 apps ${"and more ".repeat(20)}`,
+    });
+    await h.call("computer", { action: "screenshot", intent: "Looking at the screen" });
+    await h.call("computer", { action: "screenshot" });
+    const lines = h
+      .events()
+      .filter((e) => e.type === "step.start")
+      .map((e) => (e.type === "step.start" ? e.data.intent : undefined));
+    expect(lines).toHaveLength(3);
+    const [shell, look, quiet] = lines;
+    expect(shell).toMatch(/^Checking for paint apps and more and more .*…$/);
+    expect(shell).not.toContain("\n");
+    expect([...(shell ?? "")].length).toBeLessThanOrEqual(120);
+    expect(look).toBe("Looking at the screen");
+    expect(quiet).toBeUndefined();
+  });
+
   it("writes files with a file.change for the diff panel", async () => {
     const h = toolHarness();
     await h.call("files", { op: "write", path: "notes.md", content: "hi" });

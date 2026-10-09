@@ -20,6 +20,7 @@ import {
   microsToMs,
   msToMicros,
   type Point,
+  type ReviseLink,
   type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
@@ -72,11 +73,20 @@ import { StreamTuning } from "../../../daemon/src/cells/stream-tuning.ts";
 import { FakeOrchestrator } from "../../../daemon/src/cells/testing/fake-orchestrator.ts";
 import type { CellRecord, CellSummary } from "../../../daemon/src/cells/types.ts";
 import { monotonicClock } from "../../../daemon/src/clock.ts";
+import {
+  deliverableScenarios,
+  deliverablesDeps,
+} from "../../../daemon/src/deliverables/testing/qa-scenarios.ts";
 import { DesktopdClient } from "../../../daemon/src/desktopd/client.ts";
 import { DesktopdRegistry } from "../../../daemon/src/desktopd/registry.ts";
 import { FakeDesktopd } from "../../../daemon/src/desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../../../daemon/src/event-log.ts";
 import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
+import { ChromeRenderer } from "../../../daemon/src/exports/chrome.ts";
+import { ExportJobs } from "../../../daemon/src/exports/jobs.ts";
+import { exportsStreamRoute } from "../../../daemon/src/exports/routes.ts";
+import { ExportStore } from "../../../daemon/src/exports/store.ts";
+import { FakeRenderer } from "../../../daemon/src/exports/testing/fake-renderer.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
 import type { GuiAction } from "../../../daemon/src/gateway/gateway.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
@@ -108,7 +118,7 @@ import {
 const require = createRequire(new URL("../../../daemon/package.json", import.meta.url));
 const { getRequestListener } = require("@hono/node-server") as {
   getRequestListener(
-    fetch: (request: Request) => Response | Promise<Response>,
+    fetch: (request: Request, env: unknown) => Response | Promise<Response>,
   ): Parameters<typeof createServer>[0];
 };
 const { values: args } = parseArgs({
@@ -455,6 +465,7 @@ function newSession(
   task: string,
   continues?: string,
   origin?: SessionOrigin,
+  revises?: ReviseLink,
 ): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
@@ -474,6 +485,7 @@ function newSession(
       title,
       ...(continues ? { continues } : {}),
       ...(origin ? { origin } : {}),
+      ...(revises ? { revises } : {}),
     },
   });
   return s;
@@ -561,7 +573,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   });
   a("plan.set", { items: planItems(finished) });
   const click = ulid();
-  a("step.start", { kind: "gui", planItem: "open" }, click);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "open", intent: "Opening the monthly report to read the sales table" },
+    click,
+  );
   a(
     "action.intent",
     { verb: "click", label: "Open monthly-report.ods", risk: "none", point: { x: 1280, y: 420 } },
@@ -589,7 +605,11 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "allow",
   });
   const typing = ulid();
-  a("step.start", { kind: "gui", planItem: "calc" }, typing);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "calc", intent: "Adding up the net total for each month" },
+    typing,
+  );
   a(
     "action.intent",
     { verb: "type", label: "Type =SUM(F2:F13)", risk: "low", point: { x: 1900, y: 1300 } },
@@ -610,7 +630,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   observe(typing);
   a("step.end", { status: "ok" }, typing);
   const shell = ulid();
-  a("step.start", { kind: "shell", planItem: "calc" }, shell);
+  a(
+    "step.start",
+    { kind: "shell", planItem: "calc", intent: "Checking the totals against the raw data" },
+    shell,
+  );
   a("tool.start", { tool: "shell", title: "Check totals with csvstat" }, shell);
   a(
     "tool.output",
@@ -638,7 +662,7 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "deny",
   });
   const file = ulid();
-  a("step.start", { kind: "file", planItem: "write" }, file);
+  a("step.start", { kind: "file", planItem: "write", intent: "Writing the short report" }, file);
   a(
     "file.change",
     {
@@ -685,7 +709,15 @@ function seedTask(s: AgentSession, finished: boolean) {
     s.setStatus("running");
     a("agent.state", { state: "acting" });
     liveStep = ulid();
-    a("step.start", { kind: "gui", planItem: "calc" }, liveStep);
+    a(
+      "step.start",
+      {
+        kind: "gui",
+        planItem: "calc",
+        intent: "Checking February's net total against revenue minus returns",
+      },
+      liveStep,
+    );
     a(
       "action.intent",
       {
@@ -1198,11 +1230,17 @@ const agent: AgentRoutesDeps = {
     get sessions() {
       return new Map(session ? [[session.id, session]] : []);
     },
-    start: async (key, task) => {
+    start: async (key, task, _signal, options) => {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       await endLive();
-      session = newSession(task.slice(0, 60), task, conversations.current() ?? undefined);
+      session = newSession(
+        task.slice(0, 60),
+        task,
+        conversations.current() ?? undefined,
+        undefined,
+        options?.revises,
+      );
       conversations.adopt(session.id);
       budgetHold = undefined;
       raisedDuringPause = false;
@@ -1418,8 +1456,21 @@ const notify = createNotify({
 });
 
 let app: ReturnType<typeof createApp> | undefined;
+const deliverablesFixture = {
+  home: HOME,
+  assets: ASSETS,
+  log,
+  frames,
+  effects,
+  session: () => session,
+  start: (task: string, revises: ReviseLink) =>
+    agent.runner.start(cellId, task, undefined, { revises }),
+};
+// The node bindings pass through: Open on Mac checks the socket address.
 const server: Server = createServer(
-  getRequestListener((request) => app?.fetch(request) ?? new Response("starting", { status: 503 })),
+  getRequestListener(
+    (request, env) => app?.fetch(request, env) ?? new Response("starting", { status: 503 }),
+  ),
 );
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
@@ -1431,7 +1482,20 @@ await new Promise<void>((resolve, reject) => {
   server.listen(REQUESTED_PORT, "127.0.0.1", resolve);
 });
 const PORT = (server.address() as AddressInfo).port;
+// QA_EXPORTS=fake: videos move only when /__qa/export/* says; chrome: this computer's Chrome makes
+// them for real; otherwise the host can't make videos and Export falls back to the page.
+const exportsMode = env.QA_EXPORTS ?? "none";
+const fakeRenderer = new FakeRenderer();
+if (exportsMode !== "fake") fakeRenderer.able = null;
+const exportJobs = new ExportJobs({
+  store: new ExportStore(HOME),
+  renderer:
+    exportsMode === "chrome"
+      ? new ChromeRenderer({ origin: `http://127.0.0.1:${PORT}`, token: TOKEN })
+      : fakeRenderer,
+});
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
+  exportsStreamRoute(exportJobs),
   cellStatusRoute(cells),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
@@ -1479,6 +1543,7 @@ const routes = createApp({
   agent,
   search: { index: searchIndex, feed: searchFeed },
   recorder,
+  exports: exportJobs,
   replay: {
     home: HOME,
     eventLog: log,
@@ -1487,6 +1552,7 @@ const routes = createApp({
     thumbs: new Thumbnails(HOME, frames),
     live,
   },
+  deliverables: deliverablesDeps(deliverablesFixture),
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
   routines: {
@@ -1521,6 +1587,7 @@ const routes = createApp({
       ),
   },
 });
+deliverableScenarios(routes, deliverablesFixture);
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)
@@ -2372,6 +2439,27 @@ routes.post("/__qa/approval", async (c) => {
     }),
   );
 });
+// The video the fake renderer is making: counts it to ?done of ?total, finishes it, or fails it.
+routes.post("/__qa/export/:step", async (c) => {
+  if (exportsMode !== "fake") return reply("start the fixture with QA_EXPORTS=fake");
+  const rendering = fakeRenderer.renders.find((entry) => !entry.settled);
+  if (!rendering) return reply("no video is being made");
+  const step = c.req.param("step");
+  if (step === "progress") {
+    rendering.io.progress(Number(c.req.query("done") ?? 0), Number(c.req.query("total") ?? 0));
+    return reply(undefined);
+  }
+  if (step === "finish") {
+    await rendering.io.write(0, new Uint8Array(Number(c.req.query("bytes") ?? 1024)));
+    rendering.finish(Number(c.req.query("frames") ?? 1800));
+    return reply(undefined);
+  }
+  if (step === "fail") {
+    rendering.fail(c.req.query("message") ?? undefined);
+    return reply(undefined);
+  }
+  return reply("unknown step");
+});
 routes.post("/__qa/keys", () => reply(keySteps()));
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
@@ -2482,11 +2570,12 @@ routes.post("/__qa/stream", (c) => {
   }, 40);
   return c.json({ ok: true });
 });
-// dot thinks aloud: the narrator band speaks its latest sentence (thoughts are not kept in history).
+// dot thinks: its thoughts are never the band's line, which holds dot's last line for the user.
 routes.post("/__qa/think", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("thought.delta", {
-    text: c.req.query("text") ?? "Checking February's net total against revenue minus returns.",
+    text:
+      c.req.query("text") ?? "The Net column must be revenue minus returns. Let me check row 3.",
   });
   return c.json({ ok: true });
 });
@@ -2780,6 +2869,7 @@ const shutdown = async () => {
   teardown = true;
   for (const a of pendingApprovals) a.abort();
   try {
+    exportJobs.close();
     if (session) {
       live.stop(session.id);
       session.stop();

@@ -255,7 +255,7 @@ const ToastItem = memo(function ToastItem({ toast, onDismiss, onHold }: ToastIte
           />
         )}
         <div className="ui-toast-text">
-          <p className="ui-toast-title">{toast.title}</p>
+          <p className="ui-toast-title">{toast.live ?? toast.title}</p>
           {toast.description && <p className="ui-toast-description">{toast.description}</p>}
         </div>
         {toast.action && (

@@ -54,7 +54,16 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: pinned tools", () => {
     expect(outputOf(C, "convert", "-version")).toContain("ImageMagick");
     expect(outputOf(C, "pandoc", "--version")).toMatch(/^pandoc \d/m);
     expect(outputOf(C, "chromium-browser", "--version")).toContain("Chromium");
-    for (const tool of ["thunar", "xfce4-terminal", "mousepad", "git", "curl", "jq", "python3"]) {
+    for (const tool of [
+      "thunar",
+      "xfce4-terminal",
+      "mousepad",
+      "git",
+      "curl",
+      "jq",
+      "python3",
+      "pdftoppm",
+    ]) {
       expect(dockerExec(C, "sh", "-c", `command -v ${tool}`).status, tool).toBe(0);
     }
   });

@@ -17,12 +17,36 @@ const test = vi.hoisted(() => ({
   holdCreate: null as Promise<void> | null,
   chunk: false,
   write: null as ((chunk: { position: number; data: Uint8Array }) => Promise<void>) | null,
+  dot: null as null | {
+    options: Record<string, unknown>;
+    updates: { t: number; state: string; line: string }[];
+  },
+  viewport: [] as [number, number][],
+  burnIn: [] as unknown[][],
+  plates: [] as number[],
 }));
 vi.mock("pixi.js", () => ({ Rectangle: class {} }));
 vi.mock("./burn-in.ts", () => ({
   burnInText: (...parts: (string | null)[]) => parts.filter(Boolean).join(" ") || null,
   ExportBurnIn: class {
+    constructor(...args: unknown[]) {
+      test.burnIn.push(args.slice(1));
+    }
     draw() {}
+  },
+}));
+vi.mock("./export-dot.ts", () => ({
+  loadDotPlates: async (px: number) => {
+    test.plates.push(px);
+    return null;
+  },
+  ExportDot: class {
+    constructor(options: Record<string, unknown>) {
+      test.dot = { options, updates: [] };
+    }
+    update(t: number, presence: { feed: { state: string }; line: string }) {
+      test.dot?.updates.push({ t: Math.round(t), state: presence.feed.state, line: presence.line });
+    }
   },
 }));
 vi.mock("../stage/pixi-presenter.ts", () => ({
@@ -32,6 +56,11 @@ vi.mock("../stage/pixi-presenter.ts", () => ({
       return {
         setScreen() {},
         setCamera() {},
+        overlays: {
+          setViewport(w: number, h: number) {
+            test.viewport.push([w, h]);
+          },
+        },
         screen: { addChild() {} },
         present(frame: { close(): void }) {
           frame.close();
@@ -41,7 +70,7 @@ vi.mock("../stage/pixi-presenter.ts", () => ({
           test.sequence.push("render");
         },
         clearVideo: test.clearVideo,
-        app: { destroy: test.destroy },
+        app: { destroy: test.destroy, stage: { addChild() {} } },
       };
     },
   },
@@ -126,6 +155,8 @@ beforeEach(() => {
   test.holdCreate = null;
   test.chunk = false;
   test.write = null;
+  test.dot = null;
+  test.viewport.length = test.burnIn.length = test.plates.length = 0;
   vi.stubGlobal(
     "VideoEncoder",
     class {
@@ -136,7 +167,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-async function worker({ video = true, gap = true, autoAck = true, endMs = 200 } = {}) {
+async function worker({
+  video = true,
+  gap = true,
+  autoAck = true,
+  endMs = 200,
+  request = {} as Partial<Extract<ExportIn, { type: "start" }>["request"]>,
+  model = emptyModel(),
+} = {}) {
   const scope = {
     onmessage: null as ((event: { data: ExportIn }) => void) | null,
     close: vi.fn(),
@@ -149,7 +187,6 @@ async function worker({ video = true, gap = true, autoAck = true, endMs = 200 } 
   vi.stubGlobal("self", scope);
   await import("./export-worker.ts");
   const sessionId = "01K00000000000000000000000";
-  const model = emptyModel();
   model.startT = 0;
   model.ended = { t: endMs, reason: "done" };
   const gaps = gap ? [{ from: 50_000, to: 150_000, reason: "user-control" as const }] : [];
@@ -167,6 +204,7 @@ async function worker({ video = true, gap = true, autoAck = true, endMs = 200 } 
       fps: 30,
       quality: "high",
       format: "mp4",
+      ...request,
     },
     source: {
       sessionId,
@@ -267,5 +305,49 @@ describe("independent export worker lifecycle", () => {
     expect(test.posts.some((post) => post.type === "done")).toBe(false);
     expect(test.outputCancel).toHaveBeenCalledOnce();
     expect(test.destroy).toHaveBeenCalledOnce();
+  });
+  it("draws dot on the video's own clock from the recording, and renders every frame it lives in", async () => {
+    const model = emptyModel();
+    model.agentStates.push({ t: 0, state: "thinking" } as (typeof model.agentStates)[number]);
+    const scope = await worker({
+      video: false,
+      gap: false,
+      endMs: 2500,
+      model,
+      request: { dot: "under", size: { w: 1280, h: 940 }, speed: 2, captions: false },
+    });
+    await vi.waitFor(() => expect(scope.close).toHaveBeenCalledOnce());
+    expect(test.posts.at(-1)).toMatchObject({ type: "done", frames: 38 });
+    // The picture keeps its 16:10 above the band; overlays and the caption stay on it.
+    expect(test.viewport).toEqual([[1280, 800]]);
+    expect(test.burnIn).toEqual([[1280, 800, "foot"]]);
+    expect(test.plates).toEqual([120]);
+    expect(test.dot?.options).toMatchObject({
+      placement: "under",
+      size: { w: 1280, h: 940 },
+      t: 0,
+    });
+    const updates = test.dot?.updates ?? [];
+    expect(updates).toHaveLength(38);
+    // Video time, not session time: at 2× the recording's 2.5 s plays in 1.25 s.
+    expect(updates.slice(0, 3).map((update) => update.t)).toEqual([0, 33, 67]);
+    expect(updates.at(-1)?.t).toBe(1233);
+    expect(new Set(updates.map((update) => update.state))).toEqual(new Set(["thinking"]));
+    expect(test.sequence.filter((step) => step === "render")).toHaveLength(38);
+  });
+
+  it("puts the step caption at the picture's head while dot sits in its foot", async () => {
+    const scope = await worker({ video: false, gap: false, request: { dot: "over" } });
+    await vi.waitFor(() => expect(scope.close).toHaveBeenCalledOnce());
+    expect(test.viewport).toEqual([[1280, 800]]);
+    expect(test.burnIn).toEqual([[1280, 800, "head"]]);
+    expect(test.dot?.options).toMatchObject({ placement: "over" });
+  });
+
+  it("leaves dot out unless it is asked for", async () => {
+    const scope = await worker({ video: false, gap: false });
+    await vi.waitFor(() => expect(scope.close).toHaveBeenCalledOnce());
+    expect(test.dot).toBeNull();
+    expect(test.plates).toEqual([]);
   });
 });

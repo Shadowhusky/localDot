@@ -47,26 +47,37 @@ The export sheet displays this privacy notice:
 > This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.
 
 Review the range before sharing a video: visible documents and page contents are part of the
-picture. Export happens in your browser and writes to the file you choose. The export contains
+picture. Export happens on your computer: the daemon makes the video in a private headless browser
+that runs the same exporter as the page, and keeps it under `exports/` in the home until it is
+saved, removed or cleared. The export contains
 rendered video, including overlays and any enabled captions; it does not attach the event log,
 session ID, daemon token, home path, or identifying metadata tags. The suggested name contains
 only the local date and time. No upload endpoint is used.
 
 ## Saving an MP4
 
-Pause at the desired step and choose **Export MP4**. Select the whole session or current chapter;
-when a selection is available, it can be exported too. Choose 1×, 2×, 4×, or 8× speed, idle
-compression, captions, and an available output size: 1280×800, 1920×1200, or 2560×1600. The
-browser checks encoding support before enabling a size. The output is H.264 video at 30 fps.
+Pause at the desired step and choose **Export**. Pick Quality, Fast or Custom; the range (the
+whole session, this step, or a selection marked with I and O); and the speed (1×, 2×, 3×, or any
+speed from ¼× to 16×). More options sets resolution, frame rate, quality, MP4 or WebM, captions,
+idle skipping, and dot's pointer. Only sizes and formats the computer can encode are offered.
 
 An export captures the selected Desktop or Browser track when you open the sheet. Its label names
 that screen; browser exports add `-browser` to the suggested filename. The selected track's privacy
 gaps and the committed recording snapshot remain fixed for that export.
 
-**Save…** opens the browser's file picker. Keep the tab open while export runs. Progress shows
-completed frames and an estimated time remaining; **Cancel** asks before stopping an active
-export. Errors abort the pending write. Desktop Chrome needs `showSaveFilePicker`, WebCodecs
-H.264 encoding, and OffscreenCanvas. Unsupported browsers receive an explanation in the sheet.
+**Export** asks the computer to make the video. It keeps going if you close the page, lock the
+phone, or switch apps; the page that asked shows its progress in the sheet, on the Export button's
+ring, and in a toast under the island anywhere in the app, also after a reload. **Save video**
+downloads the finished file through a short-lived link. Replay's library lists every exported
+video, including ones other pages asked for, to save again, try again, or remove; the newest ten
+are kept for seven days, 2 GiB at most. A video that localDot's restart interrupts is marked failed
+with **Try again**.
+
+The computer needs a Chrome-family browser: Google Chrome, Chromium, or Edge, or the one
+`LOCALDOT_EXPORT_BROWSER` names. It draws with the GPU where there is one and in software where
+there is none. Without such a browser the page makes the video itself, as before, and has to
+stay open until it is saved; desktop Chrome then needs `showSaveFilePicker`, WebCodecs H.264
+encoding, and OffscreenCanvas.
 
 ## Files, retention, and disabling recording
 
@@ -85,6 +96,9 @@ sessions/<id>/
     video.mp4
     fragments.jsonl
     journal/
+exports/
+  exports.json        # The exported videos and their state.
+  <id>.mp4            # One finished video, named when it is saved.
 ```
 
 The manifest records video state, dimensions, committed fragments, activity intervals, and gaps.
@@ -113,6 +127,7 @@ locally, install Google Chrome and the pinned dependencies, then run:
 ```sh
 pnpm --filter @localdot/web build
 pnpm --filter @localdot/web e2e --project=hidpi replay-pins.spec.ts replay-ui.spec.ts export.spec.ts
+pnpm --filter @localdot/web e2e --project=hidpi host-export.spec.ts
 ```
 
 These fixtures use synthetic recordings, private daemon/keyd homes, and a fake Docker socket.

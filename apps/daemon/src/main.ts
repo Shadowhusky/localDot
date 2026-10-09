@@ -37,10 +37,15 @@ import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
 import { StreamTuning } from "./cells/stream-tuning.ts";
 import { monotonicClock } from "./clock.ts";
+import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { EventLog } from "./event-log.ts";
 import { sessionStreamRoute } from "./event-stream.ts";
+import { ChromeRenderer } from "./exports/chrome.ts";
+import { ExportJobs } from "./exports/jobs.ts";
+import { exportsStreamRoute } from "./exports/routes.ts";
+import { ExportStore } from "./exports/store.ts";
 import { FrameStore } from "./gateway/frames.ts";
 import { ActionGateway } from "./gateway/gateway.ts";
 import { KillSwitch } from "./gateway/kill-switch.ts";
@@ -482,6 +487,11 @@ shutdown.push(
 );
 keydMonitor.start();
 keydEvents.start();
+const exportJobs = new ExportJobs({
+  store: new ExportStore(home),
+  renderer: new ChromeRenderer({ origin: `http://127.0.0.1:${port}`, token }),
+});
+shutdown.push(() => exportJobs.close());
 const installCodes = new InstallCodes(token, port);
 const app = createApp({
   token,
@@ -489,6 +499,7 @@ const app = createApp({
   installCodes,
   serviceReadiness,
   eventLog,
+  exports: exportJobs,
   ...(serviceReadiness
     ? { doctorSelfTests: { cells: orchestrator, readiness: serviceReadiness } }
     : {}),
@@ -503,6 +514,13 @@ const app = createApp({
     thumbs: new Thumbnails(home, frames),
     live,
   },
+  deliverables: deliverablesFor(home, eventLog, frames, {
+    computers: () => orchestrator.list(),
+    access: running.computerAccess,
+    start: (cellId, task, signal, opts) => running.runner.start(cellId, task, signal, opts),
+    upload: running.routes.desktop,
+    redactUserText: running.routes.redactUserText,
+  }),
   cells: {
     cells: orchestrator,
     tickets,
@@ -581,6 +599,7 @@ attachUpgradeRouter(server as Server, { port, token }, [
   }),
   cellStatusRoute(orchestrator),
   cellStatusRoute(browserStreams, "browsers"),
+  exportsStreamRoute(exportJobs),
   desktopStreamRoute(desktop),
   desktopStreamRoute(browserViewer, "browser"),
   appEventsRoute(appEvents, notify.presence),

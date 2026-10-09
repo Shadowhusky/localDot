@@ -39,28 +39,125 @@
   gap: calc(var(--spacing) * 4);
 }
 
-/* What is exported: the picture at the playhead and the stretch of the recording. */
+/* What is exported: the picture at a handle, and under it the trim tool. */
 .export-recording {
   display: grid;
-  grid-template-columns: calc(var(--spacing) * 36) minmax(0, 1fr);
-  align-items: center;
-  gap: calc(var(--spacing) * 4);
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
 }
 
+/* The picture, and under it dot's band when dot goes under the picture: it opens as a row of the
+   video's own proportion (112 to 1024), dot at the corner and its line beside it. */
 .export-preview {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 0fr;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background-color: var(--color-void);
+  transition: grid-template-rows var(--dur-default) var(--ease-spring);
+}
+
+.export-preview[data-dot="under"] {
+  grid-template-rows: auto 1fr;
+}
+
+.export-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  pointer-events: none;
+}
+
+.export-preview-picture {
   position: relative;
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  border-radius: var(--radius-sm);
   background-color: var(--color-well);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
-.export-preview > :is(img, .replay-image-empty) {
+.export-preview-picture > :is(img, .replay-image-empty) {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.export-preview-band {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.export-preview-band-inner {
+  position: relative;
+  display: block;
+  aspect-ratio: 1024 / 112;
+  min-height: 14px;
+  background: radial-gradient(ellipse 46% 106% at 50% 0, var(--color-spill), transparent 70%);
+}
+
+.export-preview .dot-glyph {
+  flex: none;
+  color: var(--color-avatar-body);
+}
+
+.export-preview-band-inner > .dot-glyph {
+  position: absolute;
+  top: 10.7%;
+  left: 1.95%;
+  width: 7.03%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.export-preview-said {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--color-fg-1);
+  font:
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.export-preview-band-inner > .export-preview-said {
+  position: absolute;
+  top: 50%;
+  right: 4%;
+  left: 10.94%;
+  translate: 0 -50%;
+}
+
+/* On the picture: dot in the lower left corner with its line in a glass bubble beside it. */
+.export-preview-bubble {
+  position: absolute;
+  bottom: var(--spacing);
+  left: var(--spacing);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 0.75);
+  max-width: calc(100% - var(--spacing) * 3);
+  opacity: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.export-preview[data-dot="over"] .export-preview-bubble {
+  opacity: 1;
+}
+
+.export-preview-bubble > .dot-glyph {
+  width: 13px;
+  height: 13px;
+}
+
+.export-preview-bubble > .export-preview-said {
+  padding: 1px calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: color-mix(in oklab, var(--color-glass-solid) 92%, transparent);
 }
 
 /* Where the burned-in caption sits in the video, on the same material. */
@@ -89,84 +186,9 @@
   opacity: 1;
 }
 
-.export-range {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.export-range-label {
-  color: var(--color-fg-1);
-  font:
-    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-title-3--letter-spacing);
-}
-
-.export-range-meta {
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-/* The chosen range, bracketed on the whole recording the way the scrubber marks a selection. The
-   band and its brackets span the track and move by translate and scale, as the played bar does. */
-.export-range-track {
-  position: relative;
-  height: calc(var(--spacing) * 3);
-  margin-top: calc(var(--spacing) * 2);
-  overflow: clip;
-}
-
-.export-range-track::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  inset-inline: 0;
-  height: var(--spacing);
-  border-radius: var(--radius-full);
-  background-color: var(--color-control);
-  translate: 0 -50%;
-}
-
-.export-range-chosen,
-.export-range-edge {
-  position: absolute;
-  inset: 0;
-  translate: calc(var(--_from) * 100%) 0;
-  transition: translate var(--dur-default) var(--ease-spring);
-}
-
-.export-range-chosen {
-  background-color: var(--color-state-selected);
-  transform-origin: left;
-  scale: calc(var(--_to) - var(--_from)) 1;
-  transition:
-    translate var(--dur-default) var(--ease-spring),
-    scale var(--dur-default) var(--ease-spring);
-}
-
-/* Ends a track's width before its mark, so a range to the end never leaves it wholly outside the
-   track, where browsers skip painting it. */
-.export-range-edge[data-end] {
-  translate: calc((var(--_to) - 1) * 100%) 0;
-}
-
-.export-range-edge::before {
-  content: "";
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: var(--spacing);
-  border-left: 2px solid var(--color-fg-2);
-  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
-}
-
-.export-range-edge[data-end]::before {
-  right: 0;
-  left: auto;
-  border-right: 2px solid var(--color-fg-2);
-  border-left: 0;
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+.export-preview-caption[data-place="head"] {
+  top: var(--spacing);
+  bottom: auto;
 }
 
 /* Each preset's size and wait, in a fixed column so a changing estimate moves nothing. */
@@ -293,16 +315,412 @@
   margin-left: auto;
 }
 
+/* While a handle is held, its moment in a glass chip over the picture's corner. */
+.export-preview-time {
+  position: absolute;
+  top: calc(var(--spacing) * 2);
+  left: calc(var(--spacing) * 2);
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  height: calc(var(--spacing) * 6);
+  padding: 0 calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  pointer-events: none;
+}
+
+.export-preview-time-label {
+  color: var(--color-fg-2);
+}
+
+.export-preview[data-held] .export-preview-time {
+  opacity: 1;
+  transition-duration: var(--dur-fade);
+}
+
+.export-preview[data-held] .export-preview-caption[data-place="head"] {
+  opacity: 0;
+}
+
+/* The trim tool. The strip shows the recording's key frames end to end; a porcelain handle stands
+   at each end of the part that goes in the video, outside it, so the two and the frame's top and
+   bottom edges read as one bracket. What is left out stays visible, dimmed. Every moving part spans
+   the film and moves by translate and scale, as the scrubber's played bar does. */
+.trim {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.trim-strip {
+  --_h: calc(var(--spacing) * 12);
+  --_hw: calc(var(--spacing) * 3.5);
+  --_reach: calc(var(--spacing) * 2.5);
+  --_glide: var(--dur-default) var(--ease-spring);
+  position: relative;
+  height: var(--_h);
+  margin-bottom: calc(var(--spacing) * 2.5);
+  padding-inline: var(--_hw);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.trim-film {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-well);
+}
+
+/* Out of flow, so the last tile running past the end never widens the sheet. */
+.trim-tiles {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.trim-tile {
+  flex: none;
+  height: 100%;
+  aspect-ratio: 16 / 10;
+}
+
+.trim-tile > :is(img, .replay-image-empty) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trim-shade,
+.trim-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition:
+    translate var(--_glide),
+    scale var(--_glide);
+}
+
+.trim-shade {
+  background-color: color-mix(in srgb, var(--color-void) 64%, transparent);
+}
+
+.trim-shade[data-side="from"] {
+  transform-origin: left;
+  scale: var(--_from) 1;
+}
+
+.trim-shade[data-side="to"] {
+  transform-origin: right;
+  scale: calc(1 - var(--_to)) 1;
+}
+
+.trim-frame {
+  transform-origin: left;
+  translate: calc(var(--_from) * 100%) 0;
+  scale: calc(var(--_to) - var(--_from)) 1;
+  box-shadow:
+    inset 0 2px 0 var(--color-fg-1),
+    inset 0 -2px 0 var(--color-fg-1);
+}
+
+/* Each handle rides a rail of no width from the film's left edge, moved by its share of the film's
+   measured width, so nothing reaches past the strip to scroll the sheet sideways. */
+.trim-rail {
+  position: absolute;
+  inset-block: 0;
+  left: var(--_hw);
+  width: 0;
+  pointer-events: none;
+  transition: translate var(--_glide);
+}
+
+.trim-rail[data-rail="from"] {
+  translate: calc(var(--_from) * var(--_film)) 0;
+}
+
+.trim-rail[data-rail="to"] {
+  translate: calc(var(--_to) * var(--_film)) 0;
+}
+
+.trim-handle {
+  position: absolute;
+  inset-block: 0;
+  display: grid;
+  place-items: center;
+  width: var(--_hw);
+  background-image: var(--porcelain);
+  box-shadow: var(--shadow-porcelain-sm);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  outline: none;
+  transition: box-shadow var(--dur-hover) var(--ease-standard);
+}
+
+.trim-handle[data-edge="from"] {
+  right: 100%;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.trim-handle[data-edge="to"] {
+  left: 100%;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* The grip, and a reach wider than the face so the handle is easy to take. The reach grows inward
+   only: outward it would run past the sheet's edge at either end of the strip. */
+.trim-handle::before {
+  content: "";
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background-color: color-mix(in srgb, var(--color-porcelain-ink) 36%, transparent);
+  transition:
+    background-color var(--dur-press) var(--ease-standard),
+    scale var(--dur-snappy) var(--ease-spring);
+}
+
+.trim-handle::after {
+  content: "";
+  position: absolute;
+  inset-block: -6px;
+}
+
+.trim-handle[data-edge="from"]::after {
+  left: 0;
+  right: calc(var(--_reach) * -1);
+}
+
+.trim-handle[data-edge="to"]::after {
+  left: calc(var(--_reach) * -1);
+  right: 0;
+}
+
+.trim-handle:focus-visible {
+  box-shadow:
+    var(--shadow-porcelain-sm),
+    0 0 0 var(--focus-offset) var(--color-void),
+    0 0 0 calc(var(--focus-offset) + var(--focus-width)) var(--color-fg-1);
+}
+
+.trim-strip[data-dragging] :is(.trim-shade, .trim-frame, .trim-rail) {
+  transition: none;
+}
+
+.trim-strip[data-dragging="from"] .trim-handle[data-edge="from"],
+.trim-strip[data-dragging="to"] .trim-handle[data-edge="to"] {
+  background-image: var(--porcelain-pressed);
+}
+
+.trim-strip[data-dragging="from"] .trim-handle[data-edge="from"]::before,
+.trim-strip[data-dragging="to"] .trim-handle[data-edge="to"]::before {
+  background-color: color-mix(in srgb, var(--color-porcelain-ink) 62%, transparent);
+  scale: 1 1.15;
+}
+
+/* dot's steps under the strip, each a bar as long as it took; a step whose start or end a handle
+   snapped to lights up. */
+.trim-steps {
+  position: absolute;
+  top: calc(100% + var(--spacing) * 1.5);
+  inset-inline: var(--_hw);
+  height: 3px;
+  pointer-events: none;
+}
+
+.trim-step {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 4px;
+  padding-inline: 1px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-step-tick);
+  background-clip: content-box;
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+.trim-step[data-snapped] {
+  background-color: var(--color-fg-1);
+}
+
+.trim-times {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.trim-time {
+  width: calc(var(--spacing) * 32);
+}
+
+.trim-time .ui-field-affix {
+  color: var(--color-fg-3);
+}
+
+.trim-length {
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trim-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+}
+
+.trim-shortcuts > .ui-segmented {
+  flex: none;
+}
+
+.trim-snap.ui-choice {
+  flex: none;
+  gap: calc(var(--spacing) * 2);
+  min-height: 0;
+  padding-block: 0;
+}
+
+.trim-snap .ui-choice-text {
+  flex: none;
+}
+
+.trim-snap .ui-choice-label {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* A finger takes a bigger handle: a taller strip, wider faces, and the full 44 px reach. */
+@media (pointer: coarse) {
+  .trim-strip {
+    --_h: calc(var(--spacing) * 14);
+    --_hw: calc(var(--spacing) * 5.5);
+    --_reach: calc(44px - var(--_hw));
+  }
+
+  .trim-handle::before {
+    width: 4px;
+    height: 20px;
+  }
+
+  .trim-time {
+    width: calc(var(--spacing) * 30);
+  }
+
+  .trim-snap.ui-choice {
+    min-height: calc(var(--spacing) * 11);
+  }
+}
+
+/* A phone gives the shortcuts the full width and Snap to steps a row of its own. */
 @media (--phone) {
-  .export-recording {
-    grid-template-columns: calc(var(--spacing) * 28) minmax(0, 1fr);
-    gap: calc(var(--spacing) * 3);
+  .trim-shortcuts {
+    display: grid;
+    justify-content: stretch;
+    gap: var(--spacing);
+  }
+
+  .trim-shortcuts > .ui-segmented {
+    display: grid;
+    width: 100%;
+  }
+
+  .trim-snap.ui-choice {
+    justify-content: space-between;
+  }
+
+  .trim-snap .ui-choice-text {
+    flex: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .export-range-chosen,
-  .export-range-edge {
+  .export-preview,
+  .trim-shade,
+  .trim-frame,
+  .trim-rail {
     transition: none;
   }
+}
+
+/* Exported videos, at the head of Replay's library: the recording's picture with the video's state
+   over it, a ring while it is made and its format once it is ready. */
+.export-row-badge {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.export-row:is([data-phase="queued"], [data-phase="making"]) .export-row-badge {
+  background-color: var(--color-edge);
+}
+
+/* A tag that reads over any picture, light or dark. */
+.export-row-format {
+  place-self: end start;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin: calc(var(--spacing) * 1.25);
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-edge);
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  backdrop-filter: blur(var(--blur-glass));
+  color: var(--color-fg-1);
+  font: var(--text-tag--font-weight) var(--text-tag) / var(--text-tag--line-height) var(--font-ui);
+  letter-spacing: var(--text-tag--letter-spacing);
+  text-transform: uppercase;
+}
+
+.export-row[data-phase="failed"] .ui-list-row-thumbnail {
+  opacity: 0.55;
+}
+
+.export-list-more {
+  margin: var(--spacing) calc(var(--spacing) * 1.5) 0;
+}
+
+/* Under the progress: whether the page has to stay open. */
+.export-progress-note {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* The island's toast while a video is made: a ring and the percentage, in a slot of its own width
+   so the pill keeps its size as the count goes up. */
+.export-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  vertical-align: top;
+}
+
+.export-toast .ui-progress {
+  color: var(--color-fg-2);
+}
+
+.export-toast-percent {
+  min-width: 4ch;
+  color: var(--color-fg-2);
+  font-variant-numeric: tabular-nums;
 }

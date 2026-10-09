@@ -1,13 +1,14 @@
-import type { ScreenName } from "@localdot/protocol";
-import { chapters, observeAt, type SessionModel } from "@localdot/stage";
+import type { DotPlacement } from "@localdot/protocol";
 import {
-  type CSSProperties,
   type ReactNode,
   type RefObject,
+  useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { timeLabel } from "../replay/replay-view.ts";
@@ -26,25 +27,29 @@ import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { ExportContext } from "./export-context.ts";
 import {
+  type Calibration,
   type ExportEstimate,
   estimateExport,
   storedCalibration,
   waitText,
 } from "./export-estimate.ts";
 import {
+  bandLineAt,
   EXPORT_FRAME_RATES,
   EXPORT_QUALITIES,
   type ExportQuality,
+  type ExportRequest,
   fileSize,
   PRIVACY_NOTE,
   planExport,
-  speedText,
   videoLength,
 } from "./export-plan.ts";
 import {
+  choosePreset,
   type ExportChoices,
   type ExportEnvironment,
   type ExportOptions,
+  encodable,
   exportRequest,
   fitOptions,
   frameRateAllowed,
@@ -62,12 +67,13 @@ import {
   storedChoices,
   withOption,
 } from "./export-settings.ts";
+import { type HostExports, useHostExports } from "./host-exports.ts";
 import { busy, type ExportJob, type ExportJobState, useExportJob } from "./job.ts";
 import { DOWNLOAD_LIMIT, exportSupport, LONG_EXPORT } from "./sink.ts";
+import { EDGE_LABEL, Trim, type TrimHold } from "./Trim.tsx";
+import { fitTrim, frameAt, type TrimEdge, type TrimRange, trimTimeLabel } from "./trim.ts";
 import { useExportEnvironment } from "./useExportEnvironment.ts";
 import "./export.css";
-
-type RangeKey = "whole" | "chapter" | "selection";
 
 const TITLE = "Export video";
 const NO_STEP = "The playhead isn't on a step";
@@ -80,42 +86,27 @@ const QUALITY_LABEL: Record<ExportQuality, string> = {
   medium: "Medium",
   high: "High",
 };
-const PRESET_NOTE = { quality: "sharpest", fast: "smallest" } as const;
+const PRESET_NOTE = {
+  quality: "sharpest",
+  fast: "smallest",
+  showcase: "with dot",
+} as const;
+const PLACES = [
+  { value: "under", label: "Under the picture" },
+  { value: "over", label: "On the picture" },
+] as const;
 // The elapsed time and the estimate of what is left move on this beat while a video is saved.
 const TICK_MS = 500;
+const PAGE_NOTE = "This page makes the video, so keep it open until it's saved.";
+const HOST_NOTE = "It keeps going if you close this page or switch apps.";
 const RESULT_TITLE = {
   ready: "Your video is ready",
   downloaded: "Downloaded",
   saved: "Video saved",
 } as const;
 
-// The picture the export opens on: the moment at the playhead when it is in range, else the range's
-// first, else the first after it.
-function previewFrame(
-  model: SessionModel,
-  atMs: number,
-  range: { fromMs: number; toMs: number },
-  screen: ScreenName,
-): string | null {
-  const at = Math.max(range.fromMs, Math.min(range.toMs, atMs));
-  const shown = observeAt(model, at, screen);
-  if (shown) return shown.frameId;
-  return (
-    model.observes.find(
-      (entry) => entry.t >= range.fromMs && (entry.screen ?? "desktop") === screen,
-    )?.frameId ?? null
-  );
-}
-
-function stepLabel(model: SessionModel, atMs: number, endMs: number): string | null {
-  return (
-    chapters(model, endMs).find((chapter) => chapter.startT <= atMs && atMs < chapter.endT)
-      ?.label ?? null
-  );
-}
-
 function optionsText(options: ExportOptions, env: ExportEnvironment): string {
-  const size = sizeOf(options.size, env);
+  const size = sizeOf(options.size, env, options.dot);
   return `${size.w} × ${size.h} · ${options.fps} fps`;
 }
 
@@ -125,9 +116,35 @@ interface Outcome extends ExportEstimate {
   fitted: ExportEstimate;
 }
 
+function outcomeOf(
+  context: ExportContext,
+  env: ExportEnvironment,
+  calibration: Calibration,
+  options: ExportOptions,
+  base: ExportRequest,
+): Outcome | null {
+  try {
+    const request = {
+      ...base,
+      ...options,
+      dot: options.dot === "off" ? undefined : options.dot,
+      size: sizeOf(options.size, env, options.dot),
+    };
+    const plan = planExport(request, context.model, context.activity, context.gaps);
+    return {
+      ...estimateExport(plan, request, calibration),
+      durationS: plan.durationS,
+      fitted: estimateExport(plan, request),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function ExportSheet({
   api,
   job,
+  host,
   context,
   open,
   onClose,
@@ -135,6 +152,7 @@ export function ExportSheet({
 }: {
   api: ApiClient;
   job: ExportJob;
+  host: HostExports;
   context: ExportContext;
   open: boolean;
   onClose(): void;
@@ -146,40 +164,60 @@ export function ExportSheet({
   const shown = useRef(live);
   if (open) shown.current = live;
   const state = shown.current;
-  const env = useExportEnvironment(context);
-  const [range, setRange] = useState<RangeKey>(context.selection ? "selection" : "whole");
+  const hostView = useHostExports(host);
+  useEffect(() => {
+    if (open) host.refresh();
+  }, [open, host]);
+  // The host makes the video when it can; this page makes it only when the host can't.
+  const where =
+    hostView.host?.state === "ready"
+      ? "host"
+      : hostView.host?.state === "checking"
+        ? "checking"
+        : "page";
+  const env = useExportEnvironment(
+    context,
+    where === "host" ? (hostView.host?.maxPixels ?? null) : null,
+  );
+  const [range, setRange] = useState<TrimRange>(() =>
+    fitTrim(context.selection ?? context.whole, context.whole),
+  );
+  // The end of the range the preview shows, once one has moved; the playhead's moment until then.
+  const [shownEdge, setShownEdge] = useState<TrimEdge | null>(null);
+  const [hold, setHold] = useState<TrimHold | null>(null);
   const [choices, setChoices] = useState<ExportChoices>(storedChoices);
   const [calibration] = useState(storedCalibration);
 
   const support = exportSupport();
-  const chosen = context[range] ?? context.whole;
+  // The estimates follow a moving handle as fast as they can be worked out, never holding it back.
+  const chosen = useDeferredValue(range);
   const options = optionsFor(choices, env);
-  const request = exportRequest(context.sessionId, chosen, choices, env);
-
-  const outcome = (rowOptions: ExportOptions): Outcome | null => {
-    try {
-      const rowRequest = { ...request, ...rowOptions, size: sizeOf(rowOptions.size, env) };
-      const plan = planExport(rowRequest, context.model, context.activity, context.gaps);
-      return {
-        ...estimateExport(plan, rowRequest, calibration),
-        durationS: plan.durationS,
-        fitted: estimateExport(plan, rowRequest),
-      };
-    } catch {
-      return null;
-    }
-  };
-  const presets = {
-    quality: presetOptions("quality", env, choices.speed),
-    fast: presetOptions("fast", env, choices.speed),
-    custom: fitOptions(choices.custom, env, choices.speed),
-  } satisfies Record<PresetChoice, ExportOptions>;
-  const outcomes = {
-    quality: outcome(presets.quality),
-    fast: outcome(presets.fast),
-    custom: outcome(presets.custom),
-  };
-  const current = outcome(options);
+  const { presets, outcomes, current } = useMemo(() => {
+    const request = exportRequest(context.sessionId, chosen, choices, env);
+    const outcome = (rowOptions: ExportOptions, base = request) =>
+      outcomeOf(context, env, calibration, rowOptions, base);
+    // Showcase is made at 1× with idle skipped, so its row says what choosing it would make.
+    const showcase = choices.preset === "showcase" ? choices : choosePreset(choices, "showcase");
+    const presets = {
+      quality: presetOptions("quality", env, choices.speed),
+      fast: presetOptions("fast", env, choices.speed),
+      showcase: presetOptions("showcase", env, showcase.speed),
+      custom: fitOptions(choices.custom, env, choices.speed),
+    } satisfies Record<PresetChoice, ExportOptions>;
+    return {
+      presets,
+      outcomes: {
+        quality: outcome(presets.quality),
+        fast: outcome(presets.fast),
+        showcase: outcome(
+          presets.showcase,
+          exportRequest(context.sessionId, chosen, showcase, env),
+        ),
+        custom: outcome(presets.custom),
+      },
+      current: outcome(optionsFor(choices, env)),
+    };
+  }, [context, chosen, choices, env, calibration]);
 
   const update = (next: ExportChoices) => {
     setChoices(next);
@@ -188,19 +226,33 @@ export function ExportSheet({
   };
   const choose = (patch: Partial<ExportChoices>) => update({ ...choices, ...patch });
   const option = (patch: Partial<ExportOptions>) => update(withOption(choices, env, patch));
+  const trim = (next: TrimRange, edge: TrimEdge) => {
+    setRange(next);
+    setShownEdge(edge);
+    if (state.note) job.reset();
+  };
+  const placeDot = (place: DotPlacement) =>
+    update({ ...withOption(choices, env, { dot: place }), place });
 
-  const canMake = env.encodable[options.format][options.size];
-  const blocked = !support.ok
-    ? support.reason
-    : current === null
-      ? "Nothing was recorded in this range"
-      : canMake === undefined
-        ? "Checking what this browser can make"
-        : canMake === false
-          ? `This browser can't make ${sizeLabel(options.size)} video`
-          : support.save === "download" && current.bytes > DOWNLOAD_LIMIT
-            ? LONG_EXPORT
-            : undefined;
+  const canMake = encodable(env, options.format, options.size, options.dot);
+  const maker = where === "page" ? "This browser" : "This computer";
+  const blocked =
+    where === "checking"
+      ? "Checking what this computer can make"
+      : where === "page" && !support.ok
+        ? support.reason
+        : current === null
+          ? "Nothing was recorded in this range"
+          : canMake === undefined
+            ? "Checking what this browser can make"
+            : canMake === false
+              ? `${maker} can't make ${sizeLabel(options.size)} video`
+              : where === "page" &&
+                  support.ok &&
+                  support.save === "download" &&
+                  current.bytes > DOWNLOAD_LIMIT
+                ? LONG_EXPORT
+                : undefined;
   const summary =
     state.phase === "options" && state.note
       ? state.note
@@ -213,19 +265,19 @@ export function ExportSheet({
     const scroller = bodyRef.current?.closest(".ui-sheet-body");
     if (working && scroller) scroller.scrollTop = 0;
   }, [working]);
-  const frame = previewFrame(
-    context.model,
-    context.atMs,
-    chosen,
-    context.source.screen ?? "desktop",
+  const screen = context.source.screen ?? "desktop";
+  const edgeAt = (edge: TrimEdge) => (edge === "from" ? range.fromMs : range.toMs);
+  const shownOf = hold?.edge ?? shownEdge;
+  const shownAt = Math.max(
+    range.fromMs,
+    Math.min(range.toMs, shownOf ? edgeAt(shownOf) : context.atMs),
   );
-  const step = stepLabel(
-    context.model,
-    Math.max(chosen.fromMs, Math.min(chosen.toMs, context.atMs)),
-    context.whole.toMs,
-  );
-  const span = context.whole.toMs - context.whole.fromMs;
-  const share = (time: number) => (span > 0 ? (time - context.whole.fromMs) / span : 0);
+  const frame = frameAt(context.model, shownAt, range, screen);
+  const caption = bandLineAt(context.model, shownAt);
+  const said = options.dot === "off" ? "" : caption;
+  // The handle's time stays in the chip while it fades out.
+  const held = useRef<TrimEdge>("from");
+  if (hold) held.current = hold.edge;
   const cap = maxFrameRate(env, choices.speed);
 
   const presetRow = (preset: PresetChoice, label: string) => {
@@ -236,7 +288,7 @@ export function ExportSheet({
       label,
       description:
         preset === "custom"
-          ? `${optionsText(presets.custom, env)} · ${QUALITY_LABEL[presets.custom.quality].toLowerCase()} quality`
+          ? `${optionsText(presets.custom, env)} · ${QUALITY_LABEL[presets.custom.quality].toLowerCase()} quality${presets.custom.dot === "off" ? "" : " · with dot"}`
           : `${optionsText(presets[preset], env)} · ${PRESET_NOTE[preset]}`,
       disabledReason: unavailable ? NOT_CUSTOM : undefined,
       aside: (
@@ -253,79 +305,95 @@ export function ExportSheet({
       <div className="export-views">
         <div className="export-options" inert={working} data-shown={working ? undefined : ""}>
           <div className="export-recording">
-            <div className="export-preview">
-              <ReplayImage api={api} sessionId={context.sessionId} frameId={frame} full />
-              <span
-                className="export-preview-caption"
-                data-shown={choices.captions && step ? "" : undefined}
-                aria-hidden="true"
-              >
-                {step}
+            <div
+              className="export-preview"
+              data-dot={options.dot}
+              data-held={hold ? "" : undefined}
+            >
+              <div className="export-preview-picture">
+                <ReplayImage
+                  api={api}
+                  sessionId={context.sessionId}
+                  frameId={frame}
+                  full={!hold?.dragging}
+                />
+                <span className="export-preview-time num" aria-hidden="true">
+                  <span className="export-preview-time-label">{EDGE_LABEL[held.current]}</span>
+                  {trimTimeLabel(edgeAt(held.current))}
+                </span>
+                <span
+                  className="export-preview-caption"
+                  data-shown={options.captions && caption ? "" : undefined}
+                  data-place={options.dot === "over" ? "head" : undefined}
+                  aria-hidden="true"
+                >
+                  {caption}
+                </span>
+                <span className="export-preview-bubble" aria-hidden="true">
+                  <Glyph />
+                  {said && <span className="export-preview-said">{said}</span>}
+                </span>
+              </div>
+              <span className="export-preview-band" aria-hidden="true">
+                <span className="export-preview-band-inner">
+                  <Glyph />
+                  <span className="export-preview-said">{said}</span>
+                </span>
               </span>
             </div>
-            <div className="export-range">
-              <span className="export-range-label num">
-                {timeLabel(chosen.fromMs)} – {timeLabel(chosen.toMs)}
-              </span>
-              <span className="export-range-meta num">
-                {current ? `${videoLength(current.durationS)} at ${speedText(choices.speed)}` : "–"}
-              </span>
-              <span
-                className="export-range-track"
-                aria-hidden="true"
-                style={
-                  { "--_from": share(chosen.fromMs), "--_to": share(chosen.toMs) } as CSSProperties
-                }
-              >
-                <span className="export-range-chosen" />
-                <span className="export-range-edge" />
-                <span className="export-range-edge" data-end="" />
-              </span>
-            </div>
+            <Trim
+              api={api}
+              sessionId={context.sessionId}
+              model={context.model}
+              screen={screen}
+              whole={context.whole}
+              shortcuts={{
+                whole: context.whole,
+                chapter: context.chapter,
+                selection: context.selection,
+              }}
+              unavailable={{
+                chapter: NO_STEP,
+                selection: touch ? NO_SELECTION_TOUCH : NO_SELECTION,
+              }}
+              range={range}
+              onRange={trim}
+              snap={choices.snap}
+              onSnap={(snap) => choose({ snap })}
+              onHold={setHold}
+            />
           </div>
           <RadioCards
             aria-label="Preset"
             className="export-presets"
             value={choices.preset}
-            onValueChange={(value) => {
-              const preset = value as PresetChoice;
-              update({ ...choices, preset });
-            }}
+            onValueChange={(value) => update(choosePreset(choices, value as PresetChoice))}
             options={[
               presetRow("quality", "Quality"),
               presetRow("fast", "Fast"),
+              presetRow("showcase", "Showcase"),
               presetRow("custom", "Custom"),
             ]}
           />
           <Group>
-            <Field label="Range" inline className="ui-group-row export-row">
-              <SegmentedControl
-                size={24}
-                items={[
-                  { value: "whole", label: "Whole" },
-                  {
-                    value: "chapter",
-                    label: "This step",
-                    disabledReason: context.chapter ? undefined : NO_STEP,
-                  },
-                  {
-                    value: "selection",
-                    label: "Selection",
-                    disabledReason: context.selection
-                      ? undefined
-                      : touch
-                        ? NO_SELECTION_TOUCH
-                        : NO_SELECTION,
-                  },
-                ]}
-                value={range}
-                onValueChange={(value) => {
-                  setRange(value as RangeKey);
-                  if (state.note) job.reset();
-                }}
-              />
-            </Field>
             <SpeedRow speed={choices.speed} onSpeed={(speed) => choose({ speed })} />
+            <Switch
+              className="ui-group-row"
+              label="Show dot"
+              description="dot and what it's doing, as in the app"
+              checked={options.dot !== "off"}
+              onCheckedChange={(on) => option({ dot: on ? choices.place : "off" })}
+            />
+            <Collapse open={options.dot !== "off"}>
+              <Field label="Position" inline className="ui-group-row export-row">
+                <SegmentedControl
+                  size={24}
+                  items={PLACES}
+                  value={options.dot === "off" ? choices.place : options.dot}
+                  onValueChange={(place) => placeDot(place as DotPlacement)}
+                />
+              </Field>
+            </Collapse>
           </Group>
           <Disclosure
             summary="More options"
@@ -340,8 +408,8 @@ export function ExportSheet({
                     value: size,
                     label: sizeLabel(size),
                     disabledReason:
-                      env.encodable[options.format][size] === false
-                        ? `This browser can't make ${sizeLabel(size)} video`
+                      encodable(env, options.format, size, options.dot) === false
+                        ? `${maker} can't make ${sizeLabel(size)} video`
                         : undefined,
                   }))}
                   value={options.size}
@@ -382,8 +450,8 @@ export function ExportSheet({
                       value: "webm",
                       label: "WebM",
                       disabledReason:
-                        env.encodable.webm[options.size] === false
-                          ? "This browser can't make WebM video"
+                        encodable(env, "webm", options.size, options.dot) === false
+                          ? `${maker} can't make WebM video`
                           : undefined,
                     },
                   ]}
@@ -394,9 +462,9 @@ export function ExportSheet({
               <Switch
                 className="ui-group-row"
                 label="Show the current step"
-                description="A small caption at the foot of the video"
-                checked={choices.captions}
-                onCheckedChange={(captions) => choose({ captions })}
+                description="A small caption on the video"
+                checked={options.captions}
+                onCheckedChange={(captions) => option({ captions })}
               />
               <Switch
                 className="ui-group-row"
@@ -414,7 +482,9 @@ export function ExportSheet({
               />
             </Group>
           </Disclosure>
-          <GroupNote className="export-privacy">{PRIVACY_NOTE}</GroupNote>
+          <GroupNote className="export-privacy">
+            {where === "page" ? `${PAGE_NOTE} ${PRIVACY_NOTE}` : PRIVACY_NOTE}
+          </GroupNote>
         </div>
         <div className="export-status" inert={!working} data-shown={working ? "" : undefined}>
           {working && <ExportStatus state={state} open={open} />}
@@ -434,13 +504,14 @@ export function ExportSheet({
       <ExportActions
         state={state}
         blocked={blocked}
-        picker={support.ok && support.save === "picker"}
+        label={
+          where !== "page" ? "Export" : support.ok && support.save === "picker" ? "Save…" : "Save"
+        }
         onSave={() => {
-          if (current)
-            void job.start(context, request, {
-              durationS: current.durationS,
-              fitted: current.fitted,
-            });
+          const final = exportRequest(context.sessionId, range, choices, env);
+          const made = outcomeOf(context, env, calibration, options, final);
+          if (made)
+            void job.start(context, final, { durationS: made.durationS, fitted: made.fitted });
         }}
         job={job}
         onClose={onClose}
@@ -559,6 +630,11 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
             </p>
           </>
         )}
+        {state.note && (
+          <p className="export-file-meta" role="alert">
+            {state.note}
+          </p>
+        )}
       </div>
     );
   }
@@ -577,23 +653,31 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
       </p>
       <Progress
         label="Export progress"
-        value={picking ? undefined : state.done}
+        value={picking || !state.total ? undefined : state.done}
         max={state.total || 1}
         valueText={`${percent}%`}
       />
       <p className="export-progress-line num">
         {picking
           ? "Waiting for a place to save it"
-          : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
+          : state.waiting
+            ? "Waiting to start"
+            : !state.total
+              ? "Getting the recording ready"
+              : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
       </p>
       {!picking && (
-        <Disclosure summary="Details" className="export-details">
-          <p className="export-details-text num">
-            {state.done.toLocaleString()} of {state.total.toLocaleString()} frames ·{" "}
-            {timeLabel(elapsed)} so far
-          </p>
-          <p className="export-details-text">Keep this tab open until it's saved.</p>
-        </Disclosure>
+        <>
+          <p className="export-progress-note">{state.where === "host" ? HOST_NOTE : PAGE_NOTE}</p>
+          <Disclosure summary="Details" className="export-details">
+            <p className="export-details-text num">
+              {state.total
+                ? `${state.done.toLocaleString()} of ${state.total.toLocaleString()} frames · `
+                : ""}
+              {timeLabel(elapsed)} so far
+            </p>
+          </Disclosure>
+        </>
       )}
     </div>
   );
@@ -602,15 +686,15 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
 function ExportActions({
   state,
   blocked,
-  picker,
+  label,
   onSave,
   job,
   onClose,
 }: {
   state: ExportJobState;
   blocked: string | undefined;
-  // The browser asks where to save before the video is made.
-  picker: boolean;
+  // Export when the host makes it; Save… when this browser asks where to save it first.
+  label: string;
   onSave(): void;
   job: ExportJob;
   onClose(): void;
@@ -657,7 +741,7 @@ function ExportActions({
   return (
     <div className="export-actions">
       <Button variant="primary" disabledReason={blocked} onClick={onSave}>
-        {picker ? "Save…" : "Save"}
+        {label}
       </Button>
     </div>
   );
