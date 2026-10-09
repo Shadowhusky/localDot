@@ -15,24 +15,30 @@ const HOST: AttentionToastHost = {
   hidden: () => document.hidden,
 };
 
+// Where the user is: the task on screen, and whether the island (which toasts hang from) is.
+export interface AttentionPlace {
+  viewing: string | null;
+  island: boolean;
+}
+
 // A task other than the one on screen that needs you, finishes or fails says so from the island,
 // with Open. A hidden tab leaves it to notifications; a task that moves on takes its toast back.
 export function useAttentionToasts(
   latest: AttentionItem | null,
-  viewing: string | null,
+  place: AttentionPlace,
   open: (sessionId: string) => void,
   host: AttentionToastHost = HOST,
 ): void {
-  const now = useRef({ viewing, open, host });
-  now.current = { viewing, open, host };
+  const now = useRef({ place, open, host });
+  now.current = { place, open, host };
   useEffect(() => {
     const sessionId = latest?.sessionId;
     if (!latest || !sessionId) return;
-    const { viewing, host } = now.current;
+    const { place, host } = now.current;
     const id = `attention:${sessionId}`;
     const route = notifyRouteOf(latest.reason);
     if (!route) return host.dismiss(id);
-    if (sessionId === viewing || host.hidden()) return;
+    if (sessionId === place.viewing || !place.island || host.hidden()) return;
     const copy = NOTIFY_COPY[route.kind];
     host.show({
       id,

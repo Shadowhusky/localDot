@@ -845,7 +845,7 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => listenForSessionLinks(openSession), [openSession]);
   const viewing = replayId === LIBRARY ? null : (replayId ?? agent.sessionId ?? null);
   useSeenReporting(api, attention.items, viewing);
-  useAttentionToasts(attention.latest, viewing, openSession);
+  useAttentionToasts(attention.latest, { viewing, island: !replayId }, openSession);
   useTabAttention(appStatus, { count: attention.items.length, top: attention.top });
   const newConversation: NewConversation = {
     run: () => {
@@ -1178,6 +1178,13 @@ function Theatre({ api }: { api: ApiClient }) {
           )
         }
         mode={replayId ? "replay" : "watch"}
+        watchAttention={
+          !!replayId &&
+          (appStatus.attention === "needs_you" ||
+            attention.items.some(
+              (item) => item.level === "needs_you" && item.sessionId === agent.sessionId,
+            ))
+        }
         replayEnabled={!!(replayId || newestReplayId || replayUnlisted)}
         onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
         onModeAgain={() => {
