@@ -1,6 +1,6 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState, PlanItemState } from "@localdot/stage";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
 import { ActivityRow } from "../agent/ActivityRow.tsx";
 import {
@@ -122,7 +122,11 @@ export function ActivityRail({
   const plan = planSnapshot ?? model.plan;
   const handed = useMemo(() => latestFiles(model.results).length, [model.results]);
   const started = !!sessionId || !!plan.length;
-  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
+  // The Files list and usage sit under the steps, so a new step is followed in the frame it lands
+  // in: a glide would first push them down a row and then pull them back.
+  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started, { glide: false });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: new rows and files are the trigger.
+  useLayoutEffect(follow.hold, [page.rows, model.changes, model.results]);
   const timeline = useRef<HTMLElement>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
@@ -134,6 +138,16 @@ export function ActivityRail({
           return last && viewOf(last).state === "doing" ? last.key : undefined;
         })();
   const openKey = opened?.owner === owner ? opened.key : null;
+  // A phone's sheet scrolls Activity whole, out of the rail's own following, so it brings the live
+  // step into view itself once there is one.
+  const placed = useRef(false);
+  useLayoutEffect(() => {
+    const pane = timeline.current?.closest<HTMLElement>(".activity-scroll");
+    if (placed.current || !currentKey || !pane) return;
+    placed.current = true;
+    if (pane.scrollHeight > pane.clientHeight + 1) return;
+    timeline.current?.querySelector("[data-current]")?.scrollIntoView?.({ block: "nearest" });
+  }, [currentKey]);
   useEffect(() => {
     const pane = timeline.current;
     const preserveSelection = () => {

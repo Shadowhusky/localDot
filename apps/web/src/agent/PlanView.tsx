@@ -28,26 +28,34 @@ export function PlanView({
   const [stuck, setStuck] = useState(false);
   const done = plan.filter((item) => item.status === "done").length;
   // Measured on scroll and resize rather than observed: a pane that was hidden when an observer
-  // started never reports a change once it is shown.
+  // started never reports a change once it is shown. In a phone's sheet the sheet's body scrolls
+  // the plan rather than the rail's own scroller.
   useEffect(() => {
-    const mark = sentinel.current,
-      root = mark?.closest(".ui-scroll-area");
-    if (!mark || !root) return;
+    const mark = sentinel.current;
+    const roots = [mark?.closest(".ui-scroll-area"), mark?.closest(".ui-sheet-body")].filter(
+      (root): root is HTMLElement => root instanceof HTMLElement,
+    );
+    if (!mark || !roots.length) return;
+    const scroller = () =>
+      roots.find((root) => root.scrollHeight > root.clientHeight + 1) ?? (roots[0] as HTMLElement);
     let frame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        const root = scroller();
         const top = root.getBoundingClientRect().top + (head.current?.offsetHeight ?? 0);
         setStuck(root.clientHeight > 0 && mark.getBoundingClientRect().top < top);
       });
     };
     measure();
-    root.addEventListener("scroll", measure, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    observer?.observe(root);
+    for (const root of roots) {
+      root.addEventListener("scroll", measure, { passive: true });
+      observer?.observe(root);
+    }
     return () => {
       cancelAnimationFrame(frame);
-      root.removeEventListener("scroll", measure);
+      for (const root of roots) root.removeEventListener("scroll", measure);
       observer?.disconnect();
     };
   }, []);

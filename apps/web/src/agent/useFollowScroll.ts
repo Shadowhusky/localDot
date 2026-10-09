@@ -178,6 +178,9 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     ref,
     pinned,
     onScroll,
+    // Holds the end now, from a layout effect in the commit that adds rows, so they land in the frame
+    // they are drawn in rather than a frame later, when their resize is observed.
+    hold: settle,
     anchorTo(element: HTMLElement) {
       const t = tracking.current;
       if (!t.element) return;
