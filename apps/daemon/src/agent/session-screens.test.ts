@@ -281,30 +281,44 @@ describe("session-owned screen authority", () => {
     retiring.resolve();
     expect(await finished).toBe(true);
     expect(f.physicalStop).not.toHaveBeenCalled();
-    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(f.holder()).toBe("user");
     expect(f.downloadScopes.some((value) => value.binding.holder === "user")).toBe(true);
     for (const { scope } of f.downloadScopes) expect(() => scope.check()).toThrow();
     expect(() => f.session.beginBrain()).toThrow();
   });
 
-  it("retains normal completion until the browser physically retires", async () => {
+  it("retains normal completion until the browser confirms control went back to the user", async () => {
     const f = fixture(),
       generation = await f.browser();
     f.session.retireBrain(generation);
     await f.session.screensSettled();
-    const retirement = Promise.withResolvers<void>();
-    vi.mocked(f.deps.browser.stop).mockImplementationOnce(() => retirement.promise);
+    const released = Promise.withResolvers<void>();
+    const controls = f.grant.mock.calls.length;
+    f.grant.mockImplementationOnce(() => released.promise);
     let settled = false;
     const finished = f.session.finish().then((result) => {
       settled = true;
       return result;
     });
-    await until(() => vi.mocked(f.deps.browser.stop).mock.calls.length === 1);
+    await until(() => f.grant.mock.calls.length === controls + 1);
+    expect(f.grant.mock.calls.at(-1)?.[0].holder).toBe("user");
     expect(settled).toBe(false);
     expect(f.session.stopped).toBe(true);
     expect(f.deps.contain).not.toHaveBeenCalled();
-    retirement.resolve();
+    released.resolve();
     expect(await finished).toBe(true);
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+  });
+
+  it("stops the browser when a finished task cannot confirm handing it back", async () => {
+    const f = fixture(),
+      generation = await f.browser();
+    f.session.retireBrain(generation);
+    await f.session.screensSettled();
+    f.grant.mockRejectedValueOnce(new Error("synthetic control failure"));
+    expect(await f.session.finish()).toBe(true);
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
   });
 
   it("lets Stop contain an in-progress successful cleanup and retains both physical receipts", async () => {
@@ -314,14 +328,15 @@ describe("session-owned screen authority", () => {
     await f.session.screensSettled();
     const retirement = Promise.withResolvers<void>(),
       containment = Promise.withResolvers<void>();
-    vi.mocked(f.deps.browser.stop).mockImplementationOnce(() => retirement.promise);
+    const controls = f.grant.mock.calls.length;
+    f.grant.mockImplementationOnce(() => retirement.promise);
     vi.mocked(f.deps.contain).mockImplementationOnce(() => containment.promise);
     let settled = false;
     const finished = f.session.finish().then((result) => {
       settled = true;
       return result;
     });
-    await until(() => vi.mocked(f.deps.browser.stop).mock.calls.length === 1);
+    await until(() => f.grant.mock.calls.length === controls + 1);
     f.session.stop();
     expect(f.deps.contain).toHaveBeenCalledOnce();
     retirement.resolve();
@@ -340,9 +355,11 @@ describe("session-owned screen authority", () => {
         generation = await f.browser();
       f.session.retireBrain(generation);
       await f.session.screensSettled();
-      vi.mocked(
-        failure === "recording" ? f.deps.fenceRecording : f.deps.browser.stop,
-      ).mockRejectedValueOnce(new Error("synthetic cleanup failure"));
+      vi.mocked(failure === "recording" ? f.deps.fenceRecording : f.grant).mockRejectedValueOnce(
+        new Error("synthetic cleanup failure"),
+      );
+      if (failure === "browser")
+        vi.mocked(f.deps.browser.stop).mockRejectedValueOnce(new Error("synthetic stop failure"));
       await expect(f.session.finish()).rejects.toThrow();
       expect(f.deps.contain).toHaveBeenCalledOnce();
       expect(f.session.stopped).toBe(true);
@@ -887,8 +904,9 @@ describe("session-owned screen authority", () => {
       expect(refused.result.ok).toBe(false);
       expect(refused.result.final).toBeUndefined();
       expect(refused.result.content).toContainEqual(
-        expect.objectContaining({ text: expect.stringContaining("signed-in browser") }),
+        expect.objectContaining({ text: expect.stringContaining("web browser is still starting") }),
       );
+      expect(JSON.stringify(refused.result.content)).not.toContain("signed-in");
       expect(f.session.stopped).toBe(false);
       expect(f.physicalStop).not.toHaveBeenCalled();
       expect(f.holder()).toBe("user");

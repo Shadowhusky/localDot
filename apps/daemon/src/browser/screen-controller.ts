@@ -58,6 +58,8 @@ export interface ScreenControllerDeps {
   readonly desktopGeometry: ScreenGeometry;
   desktopReady(): boolean;
   browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop">;
+  // The browser outlives sessions, so its control revisions are counted across them.
+  revision?(instance: string): number;
   client?(endpoint: ReadyBrowser): Client;
   downloads?(
     endpoint: ReadyBrowser,
@@ -82,7 +84,7 @@ export class ScreenUnavailableError extends Error {
   constructor(screen: ScreenName) {
     super(
       screen === "browser"
-        ? "The signed-in browser isn't available right now. Keep working on the desktop, or try switching to the browser again in a moment."
+        ? "The web browser is still starting. Try switching to it again in a few seconds."
         : "The desktop isn't ready right now. Try switching to it again in a moment.",
     );
     this.name = "ScreenUnavailableError";
@@ -397,10 +399,24 @@ export class ScreenController {
       ...(this.#holding ? [this.#holding] : []),
     ])
       .then(async (results) => {
-        // A late preparation cannot outlive the session's terminal receipt.
-        await this.deps.browser.stop(this.deps.parentCellId).catch(() => {
+        // No grant of this session outlives its terminal receipt. A finished task hands the
+        // browser back to the user and leaves it running for the next one (a browser that has
+        // since restarted holds no grant of this session); containment, including a Stop that
+        // arrives while the task finishes, stops it.
+        const owner = this.#browser;
+        const stop = () => this.deps.browser.stop(this.deps.parentCellId);
+        try {
+          if (
+            !contain &&
+            owner &&
+            this.deps.browser.endpoints(this.deps.parentCellId)?.instance ===
+              owner.endpoint.instance
+          )
+            await this.#revoke().catch(stop);
+          if (contain || this.#failed) await stop();
+        } catch {
           throw new ScreenControlError();
-        });
+        }
         this.#browser?.client.close();
         if (results.some((result) => result.status === "rejected")) throw new ScreenControlError();
       })
@@ -456,7 +472,7 @@ export class ScreenController {
             owner.manualPermit = undefined;
             const request = {
               ...this.#identity(owner),
-              revision: ++owner.revision,
+              revision: this.#nextRevision(owner),
               requestId: ulid(),
               holder: "agent" as const,
               owner: { sessionId: scope.sessionId, generation: scope.generation },
@@ -618,7 +634,7 @@ export class ScreenController {
     owner.manualPermit = undefined;
     const request = {
       ...this.#identity(owner),
-      revision: ++owner.revision,
+      revision: this.#nextRevision(owner),
       requestId: ulid(),
       holder: "user" as const,
     };
@@ -750,6 +766,10 @@ export class ScreenController {
         this.#checkBrowser(owner);
       },
     };
+  }
+  #nextRevision(owner: BrowserOwner): number {
+    owner.revision = this.deps.revision?.(owner.endpoint.instance) ?? owner.revision + 1;
+    return owner.revision;
   }
   #identity(owner: BrowserOwner) {
     const { parentCellId, browserCellId, instance } = owner.endpoint;

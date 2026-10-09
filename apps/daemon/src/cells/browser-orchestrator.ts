@@ -173,6 +173,7 @@ export class BrowserOrchestrator {
       else if (this.deps.store.browserFor(parentCellId))
         throw new BrowserLifecycleError("Browser recovery ownership is missing");
       this.#state.set(parentCellId, "stopped");
+      this.#changed(parentCellId);
     });
   }
 
@@ -659,6 +660,7 @@ export class BrowserOrchestrator {
         } catch {}
       }
       this.#state.set(parent, "failed");
+      this.#changed(parent);
       throw new BrowserLifecycleError(
         `Browser start failed during ${stage}; its profile has been retained`,
       );

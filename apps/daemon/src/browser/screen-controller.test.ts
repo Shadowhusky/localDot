@@ -357,6 +357,28 @@ function fixture(downloads?: ScreenControllerDeps["downloads"]) {
 }
 
 describe("session screen coordinator", () => {
+  it("hands the running browser to the next task with a newer control revision", async () => {
+    const f = fixture();
+    let counted = 0;
+    const revision = vi.fn(() => ++counted);
+    const first = new ScreenController({ ...f.deps, revision });
+    await first.switchTo("browser", f.scope);
+    await first.takeOver();
+    await first.finish();
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(f.holder()).toBe("user");
+    const sessionId = ulid();
+    const next = new ScreenController({ ...f.deps, sessionId, revision });
+    await next.switchTo("browser", { ...f.scope, sessionId });
+    expect(f.holder()).toBe("agent");
+    const sent = f.client.control.mock.calls.map(([request]) => request.revision);
+    expect(sent).toEqual([...sent].sort((a, b) => a - b));
+    expect(new Set(sent).size).toBe(sent.length);
+    expect(revision).toHaveBeenCalledWith(f.endpoint.instance);
+    await next.close();
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+  });
+
   it("selects the unique native foreground instead of registry order", async () => {
     const f = fixture();
     const second = randomUUID();
