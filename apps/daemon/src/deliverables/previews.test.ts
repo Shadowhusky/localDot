@@ -99,6 +99,14 @@ describe("previews", () => {
     expect(preview.kind === "table" && preview.rows[1]?.[1]).toBe("quoted, 0");
     expect(preview.kind === "table" && preview.truncated).toBe(true);
   });
+  it("excerpts source code on its card as plain text, keys masked", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    f.result(id, { "clean.py": `KEY = "sk-proj-${"Q".repeat(40)}"\nprint(KEY)\n` });
+    const card = await json(await f.get(`/api/agent/sessions/${id}/files/clean.py/preview?v=1`));
+    expect(card).toMatchObject({ kind: "text", format: "plain" });
+    expect(card.kind === "text" && card.lines.slice(0, 2)).toEqual(['KEY = "••••"', "print(KEY)"]);
+  });
   it("keeps v1's bytes for v1 after v2 replaced out/<name>", async () => {
     const f = deliverablesFixture();
     const id = f.task();

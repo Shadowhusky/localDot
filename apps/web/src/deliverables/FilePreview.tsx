@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Excerpt rows and cells have no identity but their position.
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: A wide or long excerpt scrolls inside its well, so keyboard users can focus it.
-import type { FileKind, PreviewReason } from "@localdot/protocol";
+import { type FileKind, type PreviewReason, viewerKind } from "@localdot/protocol";
 import { Button } from "../ui/Button.tsx";
 import { Progress } from "../ui/Progress.tsx";
 import type { PreviewState } from "./usePreview.ts";
@@ -36,14 +36,26 @@ export function FilePreview({
   kind,
   name,
   onRetry,
+  opens = false,
 }: {
   state: PreviewState;
   kind: FileKind;
   name: string;
   onRetry(): void;
+  // The row's Open shows the file in full.
+  opens?: boolean;
 }) {
   const picture = kind === "image" || kind === "office" || kind === "pdf";
-  if (kind === "attachment") return <Note text={PREVIEW_REASONS.attachment} />;
+  if (kind === "attachment")
+    return (
+      <Note
+        text={
+          opens && viewerKind(name) !== "details"
+            ? "Press Open to see this file."
+            : PREVIEW_REASONS.attachment
+        }
+      />
+    );
   if (state.state === "waiting" || state.state === "loading")
     return (
       <div

@@ -4,7 +4,10 @@ import {
   JsonPreview,
   OpenOnMacReply,
   PREVIEW_LIMITS,
+  PreviewLinkReply,
   ProofReply,
+  TableFileReply,
+  TextFileReply,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import {
@@ -149,6 +152,90 @@ export async function downloadVersion(
   return new Blob([await bounded(response, FILE_LIMITS.bytes)], {
     type: "application/octet-stream",
   });
+}
+// Each task's preview link, kept so the next preview starts before the daemon answers, until near
+// its idle lapse (the daemon's is 30 minutes). The daemon holds links in memory only, so a kept one
+// is asked for again each time: after a restart the answer is a new link.
+const LINK_REUSE_MS = 20 * 60 * 1000;
+const previewLinks = new WeakMap<ApiClient, Map<string, { base: string; at: number }>>();
+export function keptPreviewBase(api: ApiClient, sessionId: string): string | undefined {
+  const kept = previewLinks.get(api)?.get(sessionId);
+  return kept && Date.now() - kept.at < LINK_REUSE_MS ? kept.base : undefined;
+}
+export async function previewBase(
+  api: ApiClient,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!ULID_PATTERN.test(sessionId)) throw new DeliverableError(400, "invalid task");
+  const response = await request(api, `/api/agent/sessions/${sessionId}/preview-link`, {
+    method: "POST",
+    signal,
+  });
+  const { base } = PreviewLinkReply.parse(await response.json());
+  const known = previewLinks.get(api) ?? new Map<string, { base: string; at: number }>();
+  previewLinks.set(api, known);
+  known.set(sessionId, { base, at: Date.now() });
+  return base;
+}
+// Where the full preview loads a file the browser draws itself: a picture, a page, a PDF or media.
+export function previewUrl(
+  api: ApiClient,
+  base: string,
+  name: string,
+  version: number | null,
+): string {
+  if (!safeTransferName(name)) throw new DeliverableError(400, "invalid file");
+  return `${origin(api)}${base}${encodeURIComponent(name)}${version === null ? "" : `?v=${version}`}`;
+}
+// A PDF's bytes for the renderer, never more than `max`.
+export async function loadPreviewBytes(
+  api: ApiClient,
+  url: string,
+  max: number,
+  signal: AbortSignal,
+): Promise<ArrayBuffer> {
+  const response = await api.fetch(url, {
+    credentials: "omit",
+    redirect: "error",
+    cache: "no-store",
+    signal: AbortSignal.any([AbortSignal.timeout(60_000), signal]),
+  });
+  if (!response.ok) throw new DeliverableError(response.status, "preview unavailable");
+  return bounded(response, max);
+}
+const TEXT_REPLY_BYTES = 8 * 1024 * 1024;
+export async function loadText(
+  api: ApiClient,
+  sessionId: string,
+  name: string,
+  version: number | null,
+  from: "start" | "end",
+  signal: AbortSignal,
+): Promise<TextFileReply> {
+  const query = new URLSearchParams(version === null ? {} : { v: String(version) });
+  if (from === "end") query.set("from", "end");
+  const tail = query.size ? `?${query}` : "";
+  const response = await request(api, `${fileBase(sessionId, name)}/text${tail}`, { signal });
+  const body = await bounded(response, TEXT_REPLY_BYTES);
+  return TextFileReply.parse(JSON.parse(new TextDecoder().decode(body)));
+}
+export async function loadTable(
+  api: ApiClient,
+  sessionId: string,
+  name: string,
+  version: number | null,
+  sheet: number,
+  signal: AbortSignal,
+): Promise<TableFileReply> {
+  const query = new URLSearchParams({ sheet: String(sheet) });
+  if (version !== null) query.set("v", String(version));
+  const response = await request(api, `${fileBase(sessionId, name)}/table?${query}`, {
+    signal,
+    timeoutMs: 45_000,
+  });
+  const body = await bounded(response, TEXT_REPLY_BYTES);
+  return TableFileReply.parse(JSON.parse(new TextDecoder().decode(body)));
 }
 // Open on Mac is offered only where the daemon allows it: the page itself is on loopback.
 export function isLoopbackPage(

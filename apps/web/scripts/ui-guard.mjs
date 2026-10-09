@@ -32,9 +32,10 @@ const TOKENS = "src/ui/tokens.css";
 const TOKEN_LAYER = [TOKENS, "src/ui/motion.css"];
 const DECLARING = [...TOKEN_LAYER, "src/theme.css"];
 // The kit, the galleries, and the stylesheets the UI plan gives the shell (T11-T18), Settings (T19),
-// Keys (T20), first run and sign-in (T21), Replay (T22), Export (T23) and the dot (T24).
+// Keys (T20), first run and sign-in (T21), Replay (T22), Export (T23), the dot (T24) and the full
+// preview of a file.
 const STYLESHEET_HOMES =
-  /^src\/(?:ui\/|gallery\/|dot\/dot\.css$|settings\/settings\.css$|keys\/keys\.css$|onboarding\/onboarding\.css$|replay\/replay\.css$|export\/export\.css$|shell\/(?:stage-frame|hud|layout|bar|rails|phone|conversation|decision|sign-in)\.css$|routines\/routines\.css$)/;
+  /^src\/(?:ui\/|gallery\/|dot\/dot\.css$|settings\/settings\.css$|keys\/keys\.css$|onboarding\/onboarding\.css$|replay\/replay\.css$|export\/export\.css$|shell\/(?:stage-frame|hud|layout|bar|rails|phone|conversation|decision|sign-in)\.css$|routines\/routines\.css$|deliverables\/viewer\/viewer\.css$)/;
 // Dev-only pages, and the list of banned words itself.
 const NOT_COPY = /^src\/(?:ui\/)?gallery\/|^src\/copy\/banned\.ts$/;
 

@@ -42,6 +42,13 @@ export function isAllowedHost(host: string | undefined, port: number): boolean {
   );
 }
 
+// The origin a request reached this daemon at, named by its (already allowed) Host: a loopback
+// address or one of the HTTPS fronts.
+export function requestOrigin(host: string | undefined, port: number): string | undefined {
+  if (host === `127.0.0.1:${port}` || host === `localhost:${port}`) return `http://${host}`;
+  return publicOrigins.find((url) => host === url.host)?.origin;
+}
+
 export function isAllowedOrigin(origin: string | undefined, port: number): boolean {
   return (
     origin === undefined ||
