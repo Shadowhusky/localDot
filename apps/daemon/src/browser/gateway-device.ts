@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import type { HitTestResult, InputRequest, InputResult, Point, Target } from "@localdot/protocol";
 import { BrowserActionPermit } from "../../../../packages/protocol/src/browser-control.ts";
 import { ClockMap } from "../desktopd/clock-map.ts";
@@ -7,6 +8,13 @@ import type { ScreenLease } from "./screen-controller.ts";
 
 type Client = Pick<BrowserClient, "clock" | "settle" | "lookup" | "observe" | "input" | "type">;
 
+// A page refuses reads while it settles (frames come and go, its address changes), and a heavy one
+// answers each in seconds: the element under a point may take as long as browserd gives a read,
+// and no request outlives it to hold browserd's one action slot.
+export const BROWSER_LOOKUP_MS = 16_000;
+const CLOCK_MS = 3000;
+const RETRY_MS = 250;
+
 // One admitted screen action owns this adapter. The action gateway remains responsible for
 // authorization, target revalidation, travel and timing; no browser-native operation bypasses it.
 export function browserGatewayDevice(options: {
@@ -15,6 +23,7 @@ export function browserGatewayDevice(options: {
   tabId: string;
   lease: ScreenLease;
   now(): number;
+  lookupMs?: number;
 }): NativeDevice {
   const { client, tabId, lease, now } = options;
   const permit = BrowserActionPermit.parse(options.permit);
@@ -54,18 +63,36 @@ export function browserGatewayDevice(options: {
           }
         : {}),
     };
-  const hit = async (work: Promise<HitTestResult>, owner: BrowserScope): Promise<HitTestResult> => {
-    const result = await work;
-    owner.check();
+  const lookupMs = options.lookupMs ?? BROWSER_LOOKUP_MS;
+  // A request the page refused while it settled is made again until `ms` has passed; none
+  // outlives that.
+  const settling = async <T>(ms: number, work: (owner: BrowserScope) => Promise<T>): Promise<T> => {
+    const deadline = AbortSignal.timeout(ms);
+    for (;;) {
+      const owner = scope(deadline);
+      try {
+        const result = await work(owner);
+        owner.check();
+        return result;
+      } catch (error) {
+        if (
+          deadline.aborted ||
+          !(error instanceof BrowserClientError) ||
+          error.code !== "unavailable"
+        )
+          throw error;
+      }
+      await sleep(RETRY_MS, undefined, { signal: deadline }).catch(() => {});
+    }
+  };
+  const hit = async (request: Parameters<Client["lookup"]>[2]): Promise<HitTestResult> => {
+    const result = await settling(lookupMs, (owner) =>
+      client.lookup(permit, tabId, request, owner),
+    );
     return { ...result, target: target(result.target), window: null };
   };
   const device: NativeDevice["client"] = {
-    clock: async () => {
-      const owner = scope();
-      const result = await client.clock(permit, tabId, owner);
-      owner.check();
-      return result;
-    },
+    clock: () => settling(CLOCK_MS, (owner) => client.clock(permit, tabId, owner)),
     settle: async (request = {}) => {
       const owner = scope();
       const result = await client.settle(permit, tabId, request, owner);
@@ -78,23 +105,12 @@ export function browserGatewayDevice(options: {
       owner.check();
       return { ...result.frame, pointer: toDevice(result.frame.pointer) };
     },
-    focused: () => {
-      const owner = scope();
-      return hit(client.lookup(permit, tabId, { kind: "focused" }, owner), owner);
-    },
-    hitTest: (point) => {
-      const owner = scope();
-      return hit(
-        client.lookup(permit, tabId, { kind: "hitTest", point: toModel(point) }, owner),
-        owner,
-      );
-    },
+    focused: () => hit({ kind: "focused" }),
+    hitTest: (point) => hit({ kind: "hitTest", point: toModel(point) }),
     find: ({ node, name, role, app }) => {
-      const owner = scope();
-      if (node !== undefined)
-        return hit(client.lookup(permit, tabId, { kind: "node", node, role, name }, owner), owner);
+      if (node !== undefined) return hit({ kind: "node", node, role, name });
       if (name === undefined) return Promise.reject(new BrowserClientError("request"));
-      return hit(client.lookup(permit, tabId, { kind: "find", name, role, app }, owner), owner);
+      return hit({ kind: "find", name, role, app });
     },
     input: async (request, signal, onPress) => {
       const owner = scope(signal);
@@ -145,5 +161,9 @@ export function browserGatewayDevice(options: {
     },
   };
   // No background timer may retain an expired action lease or race input on browserd's native pipe.
-  return { client: device, clocks: new ClockMap(async () => (await device.clock()).mono, now) };
+  return {
+    client: device,
+    clocks: new ClockMap(async () => (await device.clock()).mono, now),
+    lookupMs,
+  };
 }

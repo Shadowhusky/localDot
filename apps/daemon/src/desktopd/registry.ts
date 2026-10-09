@@ -10,6 +10,8 @@ export interface NativeDevice {
   > &
     Partial<Pick<DesktopdClient, "zoom" | "release" | "held">>;
   clocks: ClockMap;
+  // How long this device's element lookups may take, when not desktopd's: it ends them by then.
+  lookupMs?: number;
 }
 
 export interface CellDesktopd extends NativeDevice {

@@ -20,6 +20,8 @@ import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
 export const BROWSER_INPUT_TIMEOUT_MS = 120_000;
 export const BROWSER_INPUT_PRESS_MS = 150;
+const KEYBOARD_ATTEMPTS = 3;
+const KEYBOARD_RETRY_MS = 150;
 // A drag waits this long after its press before it moves, and over the drop point before it lets
 // go: pages start a drag on the motion after a press, and a drop target has to answer the drag.
 const DRAG_PRESS_MS = 50;
@@ -452,7 +454,26 @@ export class BrowserInput {
     return snapshot;
   }
 
+  // A busy page can report its focus or layout mid-change for a moment: both are read again a few
+  // times before the keys count as having nowhere to go.
   async #keyboard(tabId: string, scope: Scope): Promise<BrowserDocument> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.#focusedPage(tabId, scope);
+      } catch (error) {
+        if (
+          !(error instanceof BrowserInputError) ||
+          error.reason !== "focus" ||
+          attempt >= KEYBOARD_ATTEMPTS
+        )
+          throw error;
+      }
+      await sleep(KEYBOARD_RETRY_MS, undefined, { signal: scope.signal }).catch(() => {});
+      scope.check();
+    }
+  }
+
+  async #focusedPage(tabId: string, scope: Scope): Promise<BrowserDocument> {
     const first = await this.#geometry(tabId, scope);
     if (first.focus !== "page") throw new BrowserInputError("focus");
     const secret = await this.#options.secrets.secretFocused(tabId, scope.signal);

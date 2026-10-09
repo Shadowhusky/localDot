@@ -135,17 +135,17 @@ describe("guarded Chromium request broker", () => {
   });
 
   // A slow page answers reads slowly; one given up on changed nothing in Chromium.
-  it.each(["cancelled", "timeout"] as const)(
-    "drops a %s page read and its late reply without fencing the connection",
-    async (outcome) => {
+  it.each([
+    ["cancelled", "DOMSnapshot.captureSnapshot", { computedStyles: [] }],
+    ["timeout", "DOMSnapshot.captureSnapshot", { computedStyles: [] }],
+    ["cancelled", "DOM.getNodeForLocation", { x: 10, y: 20 }],
+  ] as const)(
+    "drops a %s page read (%s) and its late reply without fencing the connection",
+    async (outcome, method, params) => {
       vi.useFakeTimers();
       const { broker, receive, fatal, close } = setup();
       const live = new AbortController();
-      const read = broker.send(
-        "DOMSnapshot.captureSnapshot",
-        { computedStyles: [] },
-        { sessionId: "owned", signal: live.signal },
-      );
+      const read = broker.send(method, params, { sessionId: "owned", signal: live.signal });
       const refused = expect(read).rejects.toThrow(outcome);
       if (outcome === "cancelled") live.abort();
       else await vi.advanceTimersByTimeAsync(CDP_REQUEST_TIMEOUT_MS);

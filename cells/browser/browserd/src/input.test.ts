@@ -586,6 +586,18 @@ describe("guarded browser input", () => {
     },
   );
 
+  // A heavy page reports its layout mid-change for a moment between the two focus reads.
+  it("types into a page whose layout settled between its focus checks", async () => {
+    const peer = await setup();
+    peer.hooks.set("geometry:2", () => {
+      peer.state.contentX += 2;
+    });
+    await expect(
+      peer.input.type(permit, "tab", typing, peer.abort.signal, peer.progress),
+    ).resolves.toMatchObject({ done: true });
+    await peer.control.close();
+  });
+
   it.each(["chrome", "unknown"] as const)("refuses keyboard focus on %s", async (focus) => {
     const peer = await setup();
     peer.state.focus = focus;

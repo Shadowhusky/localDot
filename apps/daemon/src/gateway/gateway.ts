@@ -57,6 +57,8 @@ const KEEP_HELD_MS = 30_000;
 const BUTTON_NUMBER = { left: 1, middle: 2, right: 3 } as const;
 // A backstop for desktopd's own lookup budget; a lookup past it is unknown, not "no element".
 const LOOKUP_TIMEOUT_MS = 1000;
+// A device with its own lookup time ends its lookups by then; this covers the reply's way back.
+const LOOKUP_GRACE_MS = 250;
 // Fitts' W in CSS px, multiplied by the cell's scale: the distance it divides is in device px.
 const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
@@ -144,6 +146,8 @@ export type { NativeActionIdentity } from "./identity.ts";
 
 type Lookup = Omit<NativeActionIdentity, "point">;
 const UNKNOWN: Lookup = { target: null, window: null, unknown: true };
+// An input's result: its frame and whether the screen changed, or that the screen was unreadable.
+type Finished = { frameId?: string; changed: boolean; unread?: true };
 
 export interface NativeActionPermit {
   // `fresh` is the read just before input: it may name an element the approved read did not.
@@ -203,6 +207,8 @@ export interface ActionOutcome {
   notDown?: true;
   // A drag, or a release of a held button, that was cancelled after its press and before its drop.
   dropCancelled?: true;
+  // The input landed, but the screen could not be read after it: there is no frame of its result.
+  unread?: true;
 }
 
 export interface GatewayDeps {
@@ -723,7 +729,7 @@ export class ActionGateway {
       action.verb === "click" ||
       (action.verb === "scroll" && !dragging) ||
       (action.verb === "down" && !placedHere);
-    let result: { frameId: string; changed: boolean };
+    let result: Finished;
     let notDown = false;
     try {
       const pressAtMs = glide
@@ -1191,7 +1197,12 @@ export class ActionGateway {
         ? d.client.hitTest(point, managed ? { managed } : undefined)
         : d.client.focused()
       ).catch(() => UNKNOWN),
-      timeoutAfter(this.deps.hitTestTimeoutMs ?? LOOKUP_TIMEOUT_MS, UNKNOWN),
+      timeoutAfter(
+        d.lookupMs === undefined
+          ? (this.deps.hitTestTimeoutMs ?? LOOKUP_TIMEOUT_MS)
+          : d.lookupMs + LOOKUP_GRACE_MS,
+        UNKNOWN,
+      ),
     ]);
     return {
       target: hit.target,
@@ -1292,15 +1303,27 @@ export class ActionGateway {
     d: NativeDevice,
     verb: keyof typeof SETTLE_FIRST_MS,
     admitted?: { action: GuiAction; identity: NativeActionIdentity },
-  ): Promise<{ frameId: string; changed: boolean }> {
+  ): Promise<Finished> {
     this.#check(ctx);
     const before = this.#lastFrame.get(ctx.cellId)?.digest;
-    const s = await d.client.settle({
-      verb: verb === "move" ? "click" : verb,
-      quietMs: SETTLE_QUIET_MS,
-      firstMs: SETTLE_FIRST_MS[verb],
-      timeoutMs: SETTLE_CAP_MS,
-    });
+    // The input landed; a screen that can't be read after it doesn't undo that. An input whose
+    // settle never reported counts as one without effect.
+    const unread = () => {
+      this.#check(ctx);
+      this.#append(ctx, "action.result", { ok: true });
+      return { changed: false, unread: true as const };
+    };
+    let s: Awaited<ReturnType<NativeDevice["client"]["settle"]>>;
+    try {
+      s = await d.client.settle({
+        verb: verb === "move" ? "click" : verb,
+        quietMs: SETTLE_QUIET_MS,
+        firstMs: SETTLE_FIRST_MS[verb],
+        timeoutMs: SETTLE_CAP_MS,
+      });
+    } catch {
+      return unread();
+    }
     const frameT =
       s.lastChangeMono === null
         ? this.#sessionT(ctx.sessionId, this.deps.now())
@@ -1310,7 +1333,12 @@ export class ActionGateway {
       changed: s.changed.map(roundRect),
       noVisibleChange: s.noVisibleChange,
     });
-    const o = await this.observe(ctx);
+    let o: Awaited<ReturnType<ActionGateway["observe"]>>;
+    try {
+      o = await this.observe(ctx);
+    } catch {
+      return unread();
+    }
     const changed = !s.noVisibleChange && this.#lastFrame.get(ctx.cellId)?.digest !== before;
     if (admitted) ctx.afterEffect?.(admitted.action, admitted.identity, changed);
     this.#append(ctx, "action.result", { ok: true });

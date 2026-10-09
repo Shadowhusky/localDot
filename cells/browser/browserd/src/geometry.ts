@@ -4,6 +4,7 @@ import { z as schema } from "zod";
 import type { BrowserNative } from "./native.ts";
 import {
   type BrowserDocument,
+  BrowserTargetError,
   type BrowserTargets,
   PAGE_READ_ATTEMPTS,
   PAGE_READ_RETRY_MS,
@@ -163,13 +164,12 @@ export class BrowserGeometry {
     const second = await this.native.command("surface", { window: window.id }, signal);
     this.#check(signal, documents);
     const page = second.page;
+    if (!page || !first.page || first.window !== window.id || second.window !== window.id)
+      throw new BrowserGeometryError("unavailable");
+    // The page changed its address under the read, as a click that starts something does.
+    if (page.urlHash !== urlHash || first.page.urlHash !== urlHash)
+      throw new BrowserTargetError("stale");
     if (
-      !page ||
-      !first.page ||
-      first.window !== window.id ||
-      second.window !== window.id ||
-      page.urlHash !== urlHash ||
-      first.page.urlHash !== urlHash ||
       page.focus !== first.page.focus ||
       !sameRect(first.page.frame, page.frame) ||
       !sameRect(first.page.windowFrame, page.windowFrame) ||

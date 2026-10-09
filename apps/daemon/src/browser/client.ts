@@ -124,6 +124,11 @@ const cookieDomains = z.strictObject({
     .max(5000),
 });
 const BODY_LIMIT = 65536;
+// browserd checks the page before an input lands (where the point falls, secret fields, focus),
+// which a heavy page takes seconds to answer.
+const INPUT_CHECK_MS = 20_000;
+// It checks focus and secret fields again before each typed character.
+const KEY_CHECK_MS = 6000;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
 
 export type BrowserLookup =
@@ -713,7 +718,7 @@ export class BrowserClient {
       "/input",
       { ...this.#action(permit, tabId), request },
       scope,
-      10000 + motionMs,
+      INPUT_CHECK_MS + motionMs,
       inputReply,
       65536,
     );
@@ -777,7 +782,7 @@ export class BrowserClient {
       "/type",
       { ...this.#action(permit, tabId), request },
       scope,
-      Math.min(120000, 10000 + count * 1000),
+      Math.min(120000, INPUT_CHECK_MS + count * KEY_CHECK_MS),
       async (response, signal, check) => {
         if (response.headers["content-type"] !== "application/x-ndjson")
           throw new BrowserClientError("reply");
