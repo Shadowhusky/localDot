@@ -1,9 +1,10 @@
 import { providerById } from "@localdot/providers";
 import { type RefObject, useRef, useState } from "react";
 import { AUTONOMY_PRESETS } from "../copy/autonomy.ts";
-import { DoctorCommand } from "../keys/Protection.tsx";
+import { DOCTOR } from "../keys/Protection.tsx";
 import { modelAllowed, type PickerModel, type SubscriptionModel } from "../settings/choices.ts";
 import { modelItems } from "../settings/chooser.ts";
+import { CommandChip } from "../shell/CommandChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
@@ -173,11 +174,7 @@ function SecretField({
           onPaste={onPaste}
         />
       </Field>
-      {unavailable && (
-        <div className="onboarding-fix">
-          <DoctorCommand />
-        </div>
-      )}
+      {unavailable && <CommandChip text={DOCTOR} className="onboarding-fix" />}
     </>
   );
 }
