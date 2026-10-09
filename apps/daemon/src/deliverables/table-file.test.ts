@@ -98,6 +98,17 @@ describe("workbooks", () => {
     expect(reply.rows[0]?.[0]).toBe("a");
   });
 
+  it("never pads a row out to a far column, however many rows reach one", async () => {
+    const rows = Array.from(
+      { length: 50_000 },
+      (_, i) => `<row r="${i + 1}"><c r="XFD${i + 1}"><v>1</v></c></row>`,
+    );
+    const started = performance.now();
+    const reply = await sheetTable("a.xlsx", sheetOf(rows.join("")), 0);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(reply).toMatchObject({ kind: "table", totalRows: 50_000, columns: 16_384 });
+  });
+
   it("counts rows a file skips without walking them", async () => {
     const rows = Array.from(
       { length: 2000 },
