@@ -449,7 +449,9 @@ describe("App token states", () => {
     expect(keys.getAttribute("aria-modal")).toBe("true");
     fireEvent.click(within(keys).getByRole("button", { name: "Settings" }));
     const sheet = screen.getByRole("dialog", { name: "Settings" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Shut down" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: /^Your computer/ }));
+    const computer = screen.getByRole("dialog", { name: "Your computer" });
+    fireEvent.click(within(computer).getByRole("button", { name: "Shut down" }));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
         true,
