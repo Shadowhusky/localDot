@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AskForm, type AskLayout } from "./AskForm.tsx";
 import { AskDraft } from "./ask-draft.ts";
 import type { AgentQuestion } from "./model.ts";
+import { QuestionCard } from "./QuestionCard.tsx";
 
 afterEach(cleanup);
 
@@ -140,31 +141,38 @@ it("puts a chosen file on the computer and answers with its path there", async (
   expect(screen.getByText("On your computer, in Downloads")).toBeTruthy();
 });
 
-it("shows hidden characters in dot's question and a field's label, and names the password's site", () => {
-  const disguised = "Password for ‮moc.knab‬";
-  mount(
-    {
+for (const layout of ["island", "thread"] as const)
+  it(`shows hidden characters in dot's question and a field's label, and names the password's site (${layout})`, () => {
+    const disguised: AgentQuestion = {
       ...login,
       question: "Sign in to ‮kcab‬ your bank",
       fields: [
         {
           id: "password",
           kind: "secret",
-          label: disguised,
+          label: "Password for ‮moc.knab‬",
           target: { screen: "browser", point: { x: 10, y: 10 }, site: "bank.example.test" },
         },
       ],
-    },
-    "island",
-  );
-  const title = screen.getByRole("heading");
-  expect(title.textContent).toBe("Sign in to·U+202EkcabU+202C·your bank");
-  expect(title.textContent).not.toContain("‮");
-  const password = screen.getByLabelText("Password for·[U+202E]moc.knab[U+202C]");
-  expect((password as HTMLInputElement).type).toBe("password");
-  expect(screen.getAllByText(/hidden characters that change text direction/)).toHaveLength(2);
-  expect(screen.getByText("bank.example.test").className).toBe("ask-site");
-});
+    };
+    if (layout === "island") mount(disguised, layout);
+    else {
+      const form = (
+        <AskForm draft={new AskDraft(disguised)} layout="thread" answer={async () => true} />
+      );
+      render(<QuestionCard question={disguised} pending form={form} />);
+    }
+    const title =
+      layout === "island"
+        ? screen.getByRole("heading")
+        : document.querySelector(".thread-question-text");
+    expect(title?.textContent).toBe("Sign in to·U+202EkcabU+202C·your bank");
+    expect(title?.textContent).not.toContain("‮");
+    const password = screen.getByLabelText("Password for·[U+202E]moc.knab[U+202C]");
+    expect((password as HTMLInputElement).type).toBe("password");
+    expect(screen.getAllByText(/hidden characters that change text direction/)).toHaveLength(2);
+    expect(screen.getByText("bank.example.test").className).toBe("ask-site");
+  });
 
 it("offers no way out of a question that only an answer ends", () => {
   mount(

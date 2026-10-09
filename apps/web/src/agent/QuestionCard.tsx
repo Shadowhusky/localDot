@@ -1,5 +1,7 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
+import { RevealedText } from "./ApprovalValue.tsx";
 import type { AgentQuestion } from "./model.ts";
+import { hiddenWarning, revealText } from "./reveal-text.ts";
 
 const UNANSWERED = {
   timeout: "No answer in time, so dot carried on.",
@@ -19,9 +21,13 @@ export function QuestionCard({
   form?: ReactNode;
 }) {
   const answer = question.answer;
+  const asked = useMemo(() => revealText(question.question), [question.question]);
   return (
     <article className="thread-question" aria-label="Question">
-      <p className="thread-question-text">{question.question}</p>
+      <p className="thread-question-text">
+        <RevealedText text={question.question} />
+      </p>
+      {asked.hidden && <p className="decision-warning">{hiddenWarning(asked)}</p>}
       {answer && answer.by !== "user" ? (
         <p className="thread-note">{UNANSWERED[answer.by]}</p>
       ) : !answer && !pending ? (

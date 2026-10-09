@@ -71,7 +71,7 @@ import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
-import { HudIsland } from "./shell/HudIsland.tsx";
+import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
 import {
   islandAttention,
   islandDecision,
@@ -517,6 +517,11 @@ function Theatre({ api }: { api: ApiClient }) {
       ),
     [askDraft],
   );
+  const shownScreen = selectedScreen?.screen ?? "desktop";
+  const askFields = useMemo<StageFields | undefined>(() => {
+    const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
+    return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
+  }, [askMarks, shownScreen, manualGeometry]);
   const replyAsk = async (text: string, attached: boolean): Promise<ReplyOutcome> => {
     if (!askDraft) return "failed";
     const plan = composerReply(askDraft.question, text, attached);
@@ -928,6 +933,9 @@ function Theatre({ api }: { api: ApiClient }) {
         ? appStatus.caption.text
         : "";
   const speaker = phone && approvalView ? "dot" : appStatus.caption.speaker;
+  const asked = agent.model.pendingAsk
+    ? agent.model.questions.get(agent.model.pendingAsk)?.question
+    : undefined;
   const pause = pauseSlot({
     pause: safety.pause,
     canPause: safety.canPause,
@@ -1031,6 +1039,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onTake={take}
                     onComputer={onComputer}
                     decision={grown}
+                    fields={askFields}
                     notices={
                       <>
                         <StopControl controls={controls} inIsland />
@@ -1051,6 +1060,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 <NarratorBand
                   line={narration}
                   speaker={speaker}
+                  reveal={!!asked && narration === asked}
                   showDot={showDot.value}
                   note={focus && stepCount ? `Step ${stepCount}` : undefined}
                 />
