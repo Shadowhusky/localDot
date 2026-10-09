@@ -39,6 +39,9 @@ const SCREENS = [
   { value: "browser", label: "Browser" },
 ] as const;
 const NO_VIDEO = new Set(["none", "failed", "expired"]);
+// WebKit throws on the hundred-and-first address change in ten seconds, which would take the whole
+// page down mid-scrub, so the paused time reaches the address at most this often.
+const ADDRESS_EVERY_MS = 300;
 
 export const RECORDED_TASK = "Recorded task";
 
@@ -116,12 +119,26 @@ export function ReplayView({
     return () => window.removeEventListener("keydown", key);
   }, [visible, exportOpen]);
 
+  const addressWritten = useRef({ sessionId: "", at: Number.NEGATIVE_INFINITY });
   useEffect(() => {
     if (replay.playing || !replay.map) return;
-    const address = new URL(window.location.href);
-    if (address.searchParams.get("replay") !== sessionId) return;
-    address.searchParams.set("t", String(Math.round(replay.tMs)));
-    window.history.replaceState(window.history.state, "", address);
+    const write = () => {
+      const address = new URL(window.location.href);
+      if (address.searchParams.get("replay") !== sessionId) return;
+      address.searchParams.set("t", String(Math.round(replay.tMs)));
+      addressWritten.current = { sessionId, at: performance.now() };
+      try {
+        window.history.replaceState(window.history.state, "", address);
+      } catch {}
+    };
+    const last = addressWritten.current;
+    const wait = last.sessionId === sessionId ? last.at + ADDRESS_EVERY_MS - performance.now() : 0;
+    if (wait <= 0) {
+      write();
+      return;
+    }
+    const timer = setTimeout(write, wait);
+    return () => clearTimeout(timer);
   }, [replay.tMs, replay.playing, replay.map, sessionId]);
 
   const card = replay.card;

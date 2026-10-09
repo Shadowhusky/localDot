@@ -8,10 +8,10 @@ import {
   arrowRect,
   awayFromRectEdge,
   countColour,
-  crosshairMask,
   firstChange,
   locateTemplate,
   outsideRect,
+  pointRingMask,
   type Rgba,
   ringBandMask,
 } from "../src/stage/oracle-check.ts";
@@ -113,9 +113,9 @@ test("pixel oracle: cursor hotspot, ring order, typing pace, clean observations,
 
     if (input.kind === "click" && input.at) {
       // 1. The drawn cursor hotspot within 2 px of where the scene puts it, at zoom 1 and zoom 2,
-      // on the latest capture whose arrow is unsquashed (press 0) and opaque (alpha 1): during the
-      // travel, the dwell or the hold after the release. The template is the unsquashed arrow, so
-      // the squash ticks (pressT − 80 ms … pressT + 150 ms) and an Instant fade-in never qualify.
+      // on the latest capture whose arrow is unpressed (press 0), upright (lean 0) and opaque
+      // (alpha 1): the dwell or the hold after the release. The template is that arrow, so the
+      // press, the lean while travelling and an Instant fade-in never qualify.
       for (const zoom of [1, 2]) {
         const sharpTick = ticks
           .filter(
@@ -123,6 +123,7 @@ test("pixel oracle: cursor hotspot, ring order, typing pace, clean observations,
               t.zoom === zoom &&
               t.cursorShot &&
               t.cursorShot.press === 0 &&
+              t.cursorShot.lean === 0 &&
               t.cursorShot.alpha === 1,
           )
           .sort((a, b) => b.t - a.t)[0];
@@ -192,10 +193,10 @@ test("pixel oracle: cursor hotspot, ring order, typing pace, clean observations,
             w: b.w * t.scale,
             h: b.h * t.scale,
           };
-          parts.push(awayFromRectEdge(box, 8 * dump.dpr));
+          parts.push(awayFromRectEdge(box, 10 * dump.dpr));
         } else {
-          const cross = crosshairMask(t.expected.x, t.expected.y, dump.dpr);
-          parts.push((x, y) => !cross(x, y));
+          const ring = pointRingMask(t.expected.x, t.expected.y, dump.dpr);
+          parts.push((x, y) => !ring(x, y));
         }
         const mask = (x: number, y: number) => parts.every((p) => p(x, y));
         expect(

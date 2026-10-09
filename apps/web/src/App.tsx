@@ -11,10 +11,11 @@ import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
 import { SafetyControls } from "./agent/SafetyControls.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
-import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
+import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
+import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
@@ -54,6 +55,7 @@ import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { Announcer } from "./ui/Announcer.tsx";
 import { PHONE, useMediaQuery } from "./ui/media.ts";
@@ -404,6 +406,8 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
+  const [typing, setTyping] = useState(false);
+  const [pasteRefused, setPasteRefused] = useState<string | null>(null);
   const settingsKnowledge = useKnowledge(api, null, settings.open);
   const { rereadMemory } = settingsKnowledge;
   // A memory change's "Read memory again" opens Settings on what dot knows, read afresh.
@@ -430,6 +434,17 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const manualLive =
+    !!takeover &&
+    controls.canInput &&
+    physicalStageCell?.state === "ready" &&
+    !physicalStageCell.paused;
+  const manual = useManualChannel(
+    api,
+    manualLive ? agent.sessionId : null,
+    manualLive ? (takeover?.requestId ?? null) : null,
+    agent.reconcile,
+  );
   const takeoverShown = useRef<string | null>(null);
   useEffect(() => {
     const requestId = takeover?.requestId;
@@ -744,13 +759,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     <TakeoverPanel
                       key={takeover.requestId}
                       takeover={takeover}
-                      controls={{
-                        ...controls,
-                        canInput:
-                          controls.canInput &&
-                          physicalStageCell?.state === "ready" &&
-                          !physicalStageCell.paused,
-                      }}
+                      controls={{ ...controls, canInput: manualLive }}
                       visible={
                         !replayId && (!narrow || pane === "computer") && !keysOpen && !settings.open
                       }
@@ -759,6 +768,11 @@ function Theatre({ api }: { api: ApiClient }) {
                       screen={manualGeometry}
                       pointerMode={pointerMode}
                       onPointerMode={setPointerMode}
+                      send={manual.send}
+                      drained={manual.drained}
+                      typing={typing}
+                      onKeyboard={(on) => stage.current?.keyboard(on)}
+                      refused={pasteRefused}
                     />
                   ) : undefined
                 }
@@ -790,13 +804,12 @@ function Theatre({ api }: { api: ApiClient }) {
                   manual={
                     takeover && manualGeometry && !agent.model.ended
                       ? {
-                          requestId: takeover.requestId,
-                          enabled:
-                            controls.canInput && stageCell?.state === "ready" && !stageCell.paused,
+                          enabled: manualLive,
                           screen: manualGeometry,
-                          button: pointerMode === "right" ? "right" : "left",
-                          count: pointerMode === "double" ? 2 : 1,
-                          input: controls.input,
+                          pointer: pointerMode,
+                          send: manual.send,
+                          onTyping: setTyping,
+                          onRefused: setPasteRefused,
                         }
                       : undefined
                   }

@@ -182,8 +182,9 @@ it("retires a pending operation on API replacement and ignores its late reply", 
     f = fixture(oldFetch, true);
   let work: Promise<boolean> | undefined;
   act(() => {
-    work = f.result.current.input(ID, { kind: "text", text: "synthetic-owned-secret" });
+    work = f.result.current.handback(ID, "synthetic note");
   });
+  expect(f.result.current.canInput).toBe(false);
   f.update({
     api: createApi("replacement", { origin: "https://owned.invalid", fetchImpl: newFetch }),
   });
@@ -195,11 +196,10 @@ it("retires a pending operation on API replacement and ignores its late reply", 
   expect(f.result.current.canInput).toBe(true);
   await act(async () => {
     late.resolve(new Response(null, { status: 204 }));
-    expect(await f.result.current.input(ID, { kind: "key", combo: ["tab"] })).toBe(true);
+    expect(await f.result.current.handback(ID)).toBe(true);
   });
   expect(oldFetch).toHaveBeenCalledOnce();
   expect(newFetch).toHaveBeenCalledOnce();
-  expect(f.result.current.status).toBeNull();
   expect(f.result.current.stopStatus.phase).toBe("idle");
 });
 it("does not submit a replacement question while the old answer is pending or replay its late acknowledgement", async () => {
@@ -265,63 +265,61 @@ it("does not submit a replacement question while the old answer is pending or re
   });
   expect(fetchImpl).toHaveBeenCalledTimes(2);
 });
-it.each(["blur", "pagehide", "modal", "pane", "feed"])(
-  "cancels owned text on %s and keeps its outcome unknown",
-  async (reason) => {
-    const late = Promise.withResolvers<Response>(),
-      fetchImpl = vi.fn<typeof fetch>(async () => late.promise),
-      f = fixture(fetchImpl, true);
-    let work: Promise<boolean> | undefined;
-    act(() => {
-      work = f.result.current.input(ID, { kind: "text", text: "fake-password-中文" });
+it("keeps direct control open while the user's own input is landing", () => {
+  const f = fixture(vi.fn<typeof fetch>(), true);
+  f.update({
+    agent: {
+      ...f.props.agent,
+      snapshot: { ...snapshotOf(f), pendingTakeover: ID, manualControl: "busy" },
+    },
+  });
+  expect(f.result.current.canInput).toBe(true);
+  expect(f.result.current.canHandback).toBe(true);
+  for (const manualControl of ["waiting", "returning", "unconfirmed"] as const) {
+    f.update({
+      agent: {
+        ...f.props.agent,
+        snapshot: { ...snapshotOf(f), pendingTakeover: ID, manualControl },
+      },
     });
-    if (reason === "modal") f.update({ suspended: true });
-    else if (reason === "pane") f.update({ manualVisible: false });
-    else if (reason === "feed") act(() => f.invalidate({ connection: "lost" }));
-    else act(() => window.dispatchEvent(new Event(reason)));
-    await act(async () => {
-      await work;
-    });
-    expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
-    expect(f.result.current.status?.phase).toBe("uncertain");
-    expect(JSON.stringify(f.result.current.status)).not.toContain("fake-password");
-    await act(async () => {
-      late.resolve(new Response(null, { status: 204 }));
-    });
-    expect(f.result.current.status?.phase).toBe("uncertain");
-    expect(fetchImpl).toHaveBeenCalledOnce();
-  },
-);
-it("handback excludes duplicate input and Stop takes priority across the same shared controller", async () => {
-  const first = Promise.withResolvers<Response>(),
-    handback = Promise.withResolvers<Response>();
+    expect(f.result.current.canInput).toBe(false);
+  }
+});
+it.each(["modal", "pane", "feed"])("closes direct control on %s", (reason) => {
+  const f = fixture(vi.fn<typeof fetch>(), true);
+  expect(f.result.current.canInput).toBe(true);
+  if (reason === "modal") f.update({ suspended: true });
+  else if (reason === "pane") f.update({ manualVisible: false });
+  else {
+    act(() => f.invalidate({ connection: "lost" }));
+    f.update({});
+  }
+  expect(f.result.current.canInput).toBe(false);
+});
+it("handback excludes a duplicate and Stop takes priority across the same shared controller", async () => {
+  const handback = Promise.withResolvers<Response>();
   const fetchImpl = vi.fn<typeof fetch>(async (url) =>
-    String(url).endsWith("/input")
-      ? first.promise
-      : String(url).endsWith("/done")
-        ? handback.promise
-        : Response.json(
-            { revoked: true, paused: true, closed: false, stopped: false, errors: [] },
-            { status: 202 },
-          ),
+    String(url).endsWith("/done")
+      ? handback.promise
+      : Response.json(
+          { revoked: true, paused: true, closed: false, stopped: false, errors: [] },
+          { status: 202 },
+        ),
   );
   const f = fixture(fetchImpl, true);
-  let input: Promise<boolean> | undefined, returned: Promise<boolean> | undefined;
+  let returned: Promise<boolean> | undefined;
   act(() => {
-    input = f.result.current.input(ID, { kind: "key", combo: ["tab"] });
     returned = f.result.current.handback(ID);
     void f.result.current.handback(ID);
-    void f.result.current.input(ID, { kind: "key", combo: ["enter"] });
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await Promise.all([f.result.current.stop(), f.result.current.stop(), returned]);
   });
   expect(fetchImpl).toHaveBeenCalledTimes(2);
-  await act(async () => {
-    await Promise.all([f.result.current.stop(), f.result.current.stop(), input, returned]);
-  });
-  expect(fetchImpl).toHaveBeenCalledTimes(3);
   expect(f.result.current.stopStatus.phase).toBe("paused");
   expect(f.result.current.fenced).toBe(true);
   await act(async () => {
-    first.resolve(new Response(null, { status: 204 }));
     handback.resolve(new Response(null, { status: 204 }));
   });
   expect(f.result.current.stopStatus.phase).toBe("paused");

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { manualKey, manualPoint } from "./manual-point.ts";
+import { manualPoint } from "./manual-point.ts";
 
 it("uses actual letterboxed backing-store coordinates across DPR changes and touch-sized layouts", () => {
   const screen = { w: 2560, h: 1600 },
@@ -16,9 +16,14 @@ it("uses actual letterboxed backing-store coordinates across DPR changes and tou
     manualPoint({ ...rect, width: 0 }, screen, { x: 11, y: 20 }, { w: 390, h: 400 }),
   ).toBeNull();
 });
-it("maps navigation only and lets plain text, composition and Tab stay with native DOM controls", () => {
-  const mods = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
-  expect(manualKey("ArrowLeft", mods)).toEqual(["left"]);
-  expect(manualKey("a", { ...mods, ctrlKey: true })).toEqual(["ctrl", "a"]);
-  for (const key of ["a", "中", "Process", "Tab", "Shift"]) expect(manualKey(key, mods)).toBeNull();
+it("follows a pressed pointer to the desktop's edge instead of dropping it", () => {
+  const screen = { w: 2560, h: 1600 },
+    rect = { left: 0, top: 0, width: 640, height: 400 },
+    backing = { w: 640, h: 400 };
+  expect(manualPoint(rect, screen, { x: -50, y: 200 }, backing)).toBeNull();
+  expect(manualPoint(rect, screen, { x: -50, y: 200 }, backing, true)).toEqual({ x: 0, y: 800 });
+  expect(manualPoint(rect, screen, { x: 900, y: 900 }, backing, true)).toEqual({
+    x: 2559,
+    y: 1599,
+  });
 });

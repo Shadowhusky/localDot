@@ -20,7 +20,6 @@ import type { ReplayState } from "./useReplay.ts";
 // clock, and a report this close to that clock leaves it alone, so the head never steps back.
 const DRIFT_MS = 250;
 const PREVIEW_HALF = 104;
-const SETTLE_MS = 120;
 const KEY_STEPS: Record<string, number> = {
   ArrowLeft: -1000,
   ArrowRight: 1000,
@@ -51,7 +50,6 @@ export function Scrubber({
   const [hover, setHover] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const resume = useRef(false);
-  const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const clock = useRef<Clock>({
     playing: false,
     speed: 1,
@@ -81,10 +79,7 @@ export function Scrubber({
     update();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(node);
-    return () => {
-      observer?.disconnect();
-      clearTimeout(settleTimer.current);
-    };
+    return () => observer?.disconnect();
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the clock re-anchors on each report.
@@ -138,21 +133,12 @@ export function Scrubber({
       ? sessionAt(map, Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width)) * duration)
       : 0;
   };
-  const flush = () => {
-    clearTimeout(settleTimer.current);
-    settleTimer.current = undefined;
-  };
+  // The head follows the finger on every move; the stage shows key frames until the finger lets go.
   const preview = (time: number) => {
-    flush();
     paint(fraction(time));
     latest.current.seek(time, "preview");
-    settleTimer.current = setTimeout(() => {
-      settleTimer.current = undefined;
-      latest.current.seek(time, "exact");
-    }, SETTLE_MS);
   };
   const release = (time: number) => {
-    flush();
     setDragging(false);
     latest.current.seek(time, "exact");
     if (resume.current) latest.current.run({ kind: "toggle-play" });

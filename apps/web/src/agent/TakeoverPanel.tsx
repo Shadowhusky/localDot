@@ -1,12 +1,42 @@
-import { HandbackRequest, ManualInput } from "@localdot/protocol";
+import { HandbackRequest, type ManualStreamInput } from "@localdot/protocol";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
+import type { PointerMode } from "../stage/ManualSurface.tsx";
+import { textInputs } from "../stage/manual-keys.ts";
+import { Button } from "../ui/Button.tsx";
+import { Field } from "../ui/Field.tsx";
+import { Kbd } from "../ui/Kbd.tsx";
+import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { TextArea } from "../ui/TextArea.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import type { AgentTakeover } from "./model.ts";
 import { useKeyGuard } from "./useKeyGuard.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 
-export type PointerMode = "click" | "double" | "right";
+// Input already on its way reaches the computer before dot has it back, unless it takes this long.
+const DRAIN_MS = 5000;
+const PASTE_LIMIT = 4000;
+const POINTER_MODES = [
+  { value: "click", label: "Click" },
+  { value: "double", label: "Double-click" },
+  { value: "right", label: "Right-click" },
+] as const;
+const COMPUTER_KEYS = [
+  ["tab", "Tab"],
+  ["enter", "Return"],
+  ["esc", "Escape"],
+  ["backspace", "Backspace"],
+  ["left", "←"],
+  ["right", "→"],
+  ["up", "↑"],
+  ["down", "↓"],
+] as const;
+const fieldIn = (form: HTMLFormElement | null) => {
+  const field = form?.elements.namedItem("paste");
+  return field instanceof HTMLTextAreaElement ? field : null;
+};
+
 export function TakeoverPanel({
   takeover,
   controls,
@@ -16,6 +46,11 @@ export function TakeoverPanel({
   screen,
   pointerMode,
   onPointerMode,
+  send,
+  drained,
+  typing,
+  onKeyboard,
+  refused,
 }: {
   takeover: AgentTakeover;
   controls: TaskControls;
@@ -25,28 +60,40 @@ export function TakeoverPanel({
   screen: { w: number; h: number } | null;
   pointerMode: PointerMode;
   onPointerMode(mode: PointerMode): void;
+  send(input: ManualStreamInput): void;
+  drained(timeoutMs: number): Promise<boolean>;
+  // Keys typed now go to the computer.
+  typing: boolean;
+  onKeyboard(on: boolean): void;
+  refused: string | null;
 }) {
   const panel = useRef<HTMLElement>(null),
-    text = useRef<HTMLInputElement>(null),
-    note = useRef<HTMLTextAreaElement>(null),
-    composing = useRef(false);
+    pasteForm = useRef<HTMLFormElement>(null),
+    composing = useRef(false),
+    returning = useRef(false),
+    typingAtPress = useRef<boolean | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [pasting, setPasting] = useState(false);
   const guard = useKeyGuard(visible),
     guardOwner = useRef(guard);
-  const keyNotice = useId();
-  const current = useRef({ takeover, controls, visible });
+  const keyNotice = useId(),
+    pasteFormId = useId();
+  const current = useRef({ takeover, controls, visible, send, drained });
+  const live = visible && controls.canInput;
+  const pasteField = () => fieldIn(pasteForm.current);
   const clear = () => {
-    if (text.current) text.current.value = "";
+    const field = pasteField();
+    if (field) field.value = "";
     composing.current = false;
   };
   useLayoutEffect(() => {
-    current.current = { takeover, controls, visible };
+    current.current = { takeover, controls, visible, send, drained };
     guardOwner.current = guard;
     if (!visible || controls.fenced || !controls.canInput) clear();
   });
   useEffect(() => {
-    const field = text.current;
     const clearOwned = () => {
+      const field = fieldIn(pasteForm.current);
       if (field) field.value = "";
       composing.current = false;
     };
@@ -63,24 +110,27 @@ export function TakeoverPanel({
       document.removeEventListener("visibilitychange", hidden);
     };
   }, []);
-  const sendText = () => {
-    const now = current.current,
-      field = text.current;
-    if (!field || !now.visible || !now.controls.canInput || composing.current) return;
-    const parsed = ManualInput.safeParse({ kind: "text", text: field.value });
-    if (!parsed.success) {
-      setProblem("Enter 1–4000 characters of valid text.");
-      clear();
+  const typeText = (value: string) => {
+    const now = current.current;
+    clear(); // Clear the DOM before the input leaves for the computer.
+    if (!now.visible || !now.controls.canInput || !value) return;
+    if ([...value].length > PASTE_LIMIT || !value.isWellFormed() || value.includes("\0")) {
+      setProblem("Paste up to 4,000 characters at a time.");
       return;
     }
-    field.value = ""; // Clear the DOM before the transport closure captures the bounded text.
     setProblem(null);
-    void now.controls.input(now.takeover.requestId, parsed.data);
+    for (const input of textInputs(value)) now.send(input);
+    setPasting(false);
   };
-  const handback = () => {
+  const handback = async () => {
     const now = current.current,
-      field = note.current;
-    if (!now.visible || !now.controls.canHandback || (field && !guardOwner.current.check(field)))
+      field = panel.current?.querySelector<HTMLTextAreaElement>('textarea[name="note"]');
+    if (
+      returning.current ||
+      !now.visible ||
+      !now.controls.canHandback ||
+      (field && !guardOwner.current.check(field))
+    )
       return;
     const parsed = HandbackRequest.safeParse({
       requestId: now.takeover.requestId,
@@ -93,8 +143,16 @@ export function TakeoverPanel({
     clear();
     if (field) field.value = "";
     guardOwner.current.cancel();
-    void now.controls.handback(parsed.data.requestId, parsed.data.note);
+    returning.current = true;
+    try {
+      await now.drained(DRAIN_MS);
+      await current.current.controls.handback(parsed.data.requestId, parsed.data.note);
+    } finally {
+      returning.current = false;
+    }
   };
+  const shown = problem ?? refused;
+  const idle = live ? undefined : "Wait for the computer to be ready";
   return (
     <section
       ref={panel}
@@ -107,115 +165,126 @@ export function TakeoverPanel({
     >
       <h3>Your turn · {takeover.reason === "2fa" ? "verification" : takeover.reason}</h3>
       <p>{takeover.note}</p>
-      <p className="history-note">
-        Click or tap the computer to use it. Text is sent to the computer and cleared after sending.
+      <p className="history-note manual-hint">
+        <span className="manual-hint-pointer">
+          Click the computer, then type: every key goes to it.
+          <br />
+          <Kbd keys={["Escape"]} /> twice stops typing. <Kbd keys={["Mod", "V"]} /> pastes from this
+          device. <Kbd keys={["Mod", "Shift", "."]} /> stops the task.
+        </span>
+        <span className="manual-hint-touch">
+          Tap the computer to click on it. Tap Keyboard to type on it.
+        </span>
       </p>
-      <fieldset disabled={!visible || !controls.canInput} className="pointer-modes">
-        <legend>Pointer</legend>
-        {(
-          [
-            ["click", "Click"],
-            ["double", "Double-click"],
-            ["right", "Right-click"],
-          ] as const
-        ).map(([mode, label]) => (
-          <button
-            type="button"
-            key={mode}
-            aria-pressed={pointerMode === mode}
-            onClick={() => onPointerMode(mode)}
-          >
-            {label}
-          </button>
-        ))}
-      </fieldset>
-      <form
-        aria-label="Type on the computer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          sendText();
-        }}
-      >
-        <label className="control-field">
-          <span>Text for the computer</span>
-          <input
-            ref={text}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={8000}
-            disabled={!visible || !controls.canInput}
-            onCompositionStart={() => {
-              composing.current = true;
-            }}
-            onCompositionEnd={() => {
-              composing.current = false;
-            }}
-            onPaste={(event) => {
-              const field = event.currentTarget,
-                pasted = event.clipboardData.getData("text/plain");
-              event.preventDefault();
-              const next =
-                field.value.slice(0, field.selectionStart ?? field.value.length) +
-                pasted +
-                field.value.slice(field.selectionEnd ?? field.value.length);
-              if (
-                next.length > 8000 ||
-                !ManualInput.safeParse({ kind: "text", text: next }).success
-              ) {
-                clear();
-                setProblem("Enter 1–4000 characters of valid text.");
-              } else field.value = next;
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing && !composing.current) {
+      <div className="manual-entry">
+        <Button
+          size="sm"
+          icon="keyboard"
+          variant={typing ? "secondary" : "quiet"}
+          aria-pressed={typing}
+          disabledReason={idle}
+          // Pressing the button takes focus from the keyboard field before its click arrives.
+          onPointerDown={() => {
+            typingAtPress.current = typing;
+          }}
+          onClick={() => {
+            const was = typingAtPress.current ?? typing;
+            typingAtPress.current = null;
+            onKeyboard(!was);
+          }}
+        >
+          Keyboard
+        </Button>
+        <Button
+          size="sm"
+          icon="clipboard-paste"
+          variant={pasting ? "secondary" : "quiet"}
+          aria-expanded={pasting}
+          aria-controls={pasteFormId}
+          disabledReason={idle}
+          onClick={() => {
+            clear();
+            if (pasting) return setPasting(false);
+            flushSync(() => setPasting(true));
+            pasteField()?.focus();
+          }}
+        >
+          Paste text
+        </Button>
+        <SegmentedControl
+          aria-label="Pointer"
+          className="manual-pointer"
+          items={POINTER_MODES.map((item) => ({ ...item, disabledReason: idle }))}
+          value={pointerMode}
+          onValueChange={(mode) => onPointerMode(mode as PointerMode)}
+        />
+      </div>
+      {pasting && (
+        <form
+          ref={pasteForm}
+          id={pasteFormId}
+          className="manual-paste-form"
+          aria-label="Paste on the computer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!composing.current) typeText(pasteField()?.value ?? "");
+          }}
+        >
+          <Field label="Text to type on the computer" disabledReason={idle}>
+            <TextArea
+              name="paste"
+              className="manual-paste"
+              maxRows={4}
+              autoComplete="off"
+              spellCheck={false}
+              onCompositionStart={() => {
+                composing.current = true;
+              }}
+              onCompositionEnd={() => {
+                composing.current = false;
+              }}
+              onPaste={(event) => {
                 event.preventDefault();
-                sendText();
-              }
-            }}
-          />
-        </label>
-        <button type="submit" disabled={!visible || !controls.canInput}>
-          Type text
-        </button>
-      </form>
-      <fieldset className="manual-keys">
-        <legend>Computer keys</legend>
-        {(
-          [
-            ["tab", "Tab"],
-            ["enter", "Return"],
-            ["esc", "Escape"],
-            ["backspace", "Backspace"],
-            ["left", "←"],
-            ["right", "→"],
-            ["up", "↑"],
-            ["down", "↓"],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            type="button"
+                typeText(event.clipboardData.getData("text/plain"));
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing &&
+                  !composing.current
+                ) {
+                  event.preventDefault();
+                  typeText(event.currentTarget.value);
+                }
+              }}
+            />
+          </Field>
+          <Button type="submit" size="sm" disabledReason={idle}>
+            Type it
+          </Button>
+        </form>
+      )}
+      <fieldset aria-label="Computer keys" className="manual-keys">
+        {COMPUTER_KEYS.map(([key, label]) => (
+          <Button
             key={key}
-            disabled={!visible || !controls.canInput}
+            size="sm"
             aria-label={`Computer ${key}`}
-            onClick={() => {
-              void current.current.controls.input(current.current.takeover.requestId, {
-                kind: "key",
-                combo: [key],
-              });
-            }}
+            disabledReason={idle}
+            onClick={() => current.current.send({ kind: "key", combo: [key] })}
           >
             {label}
-          </button>
+          </Button>
         ))}
         {([-3, 3] as const).map((dy) => (
-          <button
-            type="button"
+          <Button
             key={dy}
-            disabled={!visible || !controls.canInput || !screen}
+            size="sm"
+            disabledReason={idle ?? (screen ? undefined : "Wait for the computer to be ready")}
             onClick={() => {
               if (screen)
-                void current.current.controls.input(current.current.takeover.requestId, {
+                current.current.send({
                   kind: "scroll",
                   at: { x: Math.floor(screen.w / 2), y: Math.floor(screen.h / 2) },
                   dx: 0,
@@ -224,16 +293,20 @@ export function TakeoverPanel({
             }}
           >
             Scroll {dy < 0 ? "up" : "down"}
-          </button>
+          </Button>
         ))}
       </fieldset>
-      <label className="control-field">
-        <span>Optional note for dot</span>
-        <textarea
-          ref={note}
-          rows={2}
+      <Field
+        label="Optional note for dot"
+        className="manual-note"
+        disabledReason={
+          visible && controls.canHandback ? undefined : "Wait for the computer to be ready"
+        }
+      >
+        <TextArea
+          name="note"
+          maxRows={6}
           maxLength={1000}
-          disabled={!visible || !controls.canHandback}
           autoComplete="off"
           onInput={(event) => {
             guardOwner.current.check(event.currentTarget);
@@ -251,16 +324,23 @@ export function TakeoverPanel({
             guardOwner.current.check(field);
           }}
         />
-      </label>
+      </Field>
       <KeyFound guard={guard} receive={receiveKey} noticeId={keyNotice} />
-      <button
-        type="button"
-        disabled={!visible || !controls.canHandback || !!guard.notice}
+      <Button
+        variant="primary"
+        className="manual-return"
+        disabledReason={
+          guard.notice
+            ? "Move the key to Keys or discard it first"
+            : !visible || !controls.canHandback
+              ? "Wait for the computer to be ready"
+              : undefined
+        }
         aria-describedby={guard.notice ? keyNotice : undefined}
-        onClick={handback}
+        onClick={() => void handback()}
       >
         Return control to dot
-      </button>
+      </Button>
       {(manualStatus === "unconfirmed" || manualStatus === "returning") && (
         <p role="status">
           Input or hand-back is still unconfirmed. Agent control remains blocked. Use Stop to
@@ -268,7 +348,7 @@ export function TakeoverPanel({
         </p>
       )}
       {manualStatus === "waiting" && <p role="status">Preparing manual control…</p>}
-      {problem && <p role="alert">{problem}</p>}
+      {shown && <p role="alert">{shown}</p>}
     </section>
   );
 }

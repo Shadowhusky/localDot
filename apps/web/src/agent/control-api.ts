@@ -4,7 +4,6 @@ import {
   keyLikePresent,
   QuestionAnswerRequest,
   StopOutcome,
-  TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
@@ -206,23 +205,6 @@ export function returnControl(
   return controlRequest(
     api,
     `${sessionPath(sessionId)}/takeover/done`,
-    value.data,
-    204,
-    signal,
-    empty,
-  );
-}
-export function manualInput(
-  api: ApiClient,
-  sessionId: string,
-  body: TakeoverInputRequest,
-  signal: AbortSignal,
-): Promise<void> {
-  const value = TakeoverInputRequest.safeParse(body);
-  if (!value.success) throw new ControlFailure(false);
-  return controlRequest(
-    api,
-    `${sessionPath(sessionId)}/takeover/input`,
     value.data,
     204,
     signal,
