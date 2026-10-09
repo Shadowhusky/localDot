@@ -1,7 +1,7 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
-import { EmptyState } from "../ui/EmptyState.tsx";
 import { afterMotion } from "../ui/finished.ts";
+import { Group, GroupRow, IconTile, Monogram } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, REDUCED_MOTION } from "../ui/media.ts";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
@@ -35,22 +35,12 @@ function added(at: string): string | undefined {
   return `Added ${new Date(time).toLocaleDateString([], { day: "numeric", month: "short" })}`;
 }
 
-function Monogram({ record }: { record: KeyRecord }) {
-  if (record.kind === "http")
-    return (
-      <span className="keys-monogram" aria-hidden="true">
-        <Icon name="globe" size={12} />
-      </span>
-    );
+function initial(record: KeyRecord): string {
   const name =
-    record.provider && Object.hasOwn(PROVIDER_NAMES, record.provider)
+    record.kind === "llm" && record.provider && Object.hasOwn(PROVIDER_NAMES, record.provider)
       ? PROVIDER_NAMES[record.provider as Provider]
-      : (record.provider ?? "?");
-  return (
-    <span className="keys-monogram" aria-hidden="true">
-      {name.charAt(0).toUpperCase()}
-    </span>
-  );
+      : record.id;
+  return name.charAt(0).toUpperCase();
 }
 
 // Deleting a key cannot be undone, so the first press arms the button and a second one, within a
@@ -119,98 +109,108 @@ export function KeyList({
 
   if (rows.length === 0)
     return (
-      <EmptyState layout="start" icon="key-round" title="No keys yet">
-        Add one below to use a model or a web API.
-      </EmptyState>
+      <Group>
+        <GroupRow
+          leading={<IconTile icon="key-round" />}
+          label="No keys yet"
+          detail="Add one to use a model or a web API."
+        />
+      </Group>
     );
   return (
     <>
-      <ul
-        ref={list}
-        className="keys-list"
-        aria-label="Saved keys"
-        style={{ "--_armed": `${ARMED_MS}ms` } as CSSProperties}
-      >
-        {rows.map(({ key: k, leaving }) => {
-          const label =
-            pending === k.id ? "Removing…" : armed === k.id ? "Confirm remove" : "Remove";
-          const count = uses?.[k.id] ?? 0;
-          const facts = [
-            ...describeKey(k).split(" · "),
-            added(k.createdAt),
-            count > 0 ? `Used ${count}× this task` : undefined,
-          ].filter((fact): fact is string => Boolean(fact));
-          const lit = fresh?.id === k.id && !leaving;
-          return (
-            <li
-              key={k.id}
-              className="keys-row"
-              data-id={k.id}
-              data-armed={armed === k.id ? "" : undefined}
-              data-leaving={leaving ? "" : undefined}
-              data-fresh={lit ? "" : undefined}
-              inert={leaving}
-            >
-              <div className="keys-row-inner">
-                {lit && <span key={fresh.at} className="keys-row-glow" aria-hidden="true" />}
-                <Monogram record={k} />
-                <div className="keys-row-text">
-                  <span className="keys-row-name">{k.id}</span>
-                  {/* Each fact wraps whole, so no line starts or ends with a separator. */}
-                  <span className="keys-row-meta">
-                    {facts.map((fact, at) => (
-                      <span key={fact}>
-                        {at > 0 && <VisuallyHidden>, </VisuallyHidden>}
-                        {fact}
-                      </span>
-                    ))}
-                  </span>
-                </div>
-                <Button
-                  size="sm"
-                  variant={armed === k.id ? "secondary" : "quiet"}
-                  busy={pending === k.id}
-                  disabledReason={
-                    pending === k.id
-                      ? undefined
-                      : (unavailable ??
-                        (busy ? "Wait for the other key change to finish" : undefined))
+      <Group>
+        <ul
+          ref={list}
+          className="keys-list"
+          aria-label="Saved keys"
+          style={{ "--_armed": `${ARMED_MS}ms` } as CSSProperties}
+        >
+          {rows.map(({ key: k, leaving }) => {
+            const label =
+              pending === k.id ? "Removing…" : armed === k.id ? "Confirm remove" : "Remove";
+            const count = uses?.[k.id] ?? 0;
+            const facts = [
+              ...describeKey(k).split(" · "),
+              added(k.createdAt),
+              count > 0 ? `Used ${count}× this task` : undefined,
+            ].filter((fact): fact is string => Boolean(fact));
+            const lit = fresh?.id === k.id && !leaving;
+            return (
+              <li
+                key={k.id}
+                className="keys-row"
+                data-id={k.id}
+                data-armed={armed === k.id ? "" : undefined}
+                data-leaving={leaving ? "" : undefined}
+                data-fresh={lit ? "" : undefined}
+                inert={leaving}
+              >
+                <GroupRow
+                  className="keys-row-inner"
+                  leading={<Monogram>{initial(k)}</Monogram>}
+                  label={<span className="keys-row-name">{k.id}</span>}
+                  detail={
+                    // Each fact wraps whole, so no line starts or ends with a separator.
+                    <span className="keys-row-meta">
+                      {facts.map((fact, at) => (
+                        <span key={fact}>
+                          {at > 0 && <VisuallyHidden>, </VisuallyHidden>}
+                          {fact}
+                        </span>
+                      ))}
+                    </span>
                   }
-                  aria-label={`${label} ${k.id}`}
-                  onClick={async () => {
-                    if (locked || pendingRef.current) return;
-                    if (armed !== k.id || performance.now() >= expires.current) {
-                      expires.current = performance.now() + ARMED_MS;
-                      setArmed(k.id);
-                      return;
-                    }
-                    setArmed(null);
-                    pendingRef.current = true;
-                    setPending(k.id);
-                    const index = keys.findIndex((key) => key.id === k.id);
-                    try {
-                      await remove(k.id);
-                      setProblem(null);
-                      setGone((now) => [...now, { key: k, index }]);
-                    } catch (err) {
-                      setProblem(problemText(err));
-                    } finally {
-                      pendingRef.current = false;
-                      setPending(null);
-                    }
-                  }}
+                  trailing={
+                    <Button
+                      size="sm"
+                      variant={armed === k.id ? "secondary" : "quiet"}
+                      busy={pending === k.id}
+                      disabledReason={
+                        pending === k.id
+                          ? undefined
+                          : (unavailable ??
+                            (busy ? "Wait for the other key change to finish" : undefined))
+                      }
+                      aria-label={`${label} ${k.id}`}
+                      onClick={async () => {
+                        if (locked || pendingRef.current) return;
+                        if (armed !== k.id || performance.now() >= expires.current) {
+                          expires.current = performance.now() + ARMED_MS;
+                          setArmed(k.id);
+                          return;
+                        }
+                        setArmed(null);
+                        pendingRef.current = true;
+                        setPending(k.id);
+                        const index = keys.findIndex((key) => key.id === k.id);
+                        try {
+                          await remove(k.id);
+                          setProblem(null);
+                          setGone((now) => [...now, { key: k, index }]);
+                        } catch (err) {
+                          setProblem(problemText(err));
+                        } finally {
+                          pendingRef.current = false;
+                          setPending(null);
+                        }
+                      }}
+                    >
+                      {/* As wide as its longest label, so arming it moves nothing in the row. */}
+                      <span className="keys-remove-label" data-longest="Confirm remove">
+                        <span>{label}</span>
+                      </span>
+                    </Button>
+                  }
                 >
-                  {/* As wide as its longest label, so arming it moves nothing in the row. */}
-                  <span className="keys-remove-label" data-longest="Confirm remove">
-                    <span>{label}</span>
-                  </span>
-                </Button>
-                {armed === k.id && <span className="keys-row-drain" aria-hidden="true" />}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                  {lit && <span key={fresh.at} className="keys-row-glow" aria-hidden="true" />}
+                  {armed === k.id && <span className="keys-row-drain" aria-hidden="true" />}
+                </GroupRow>
+              </li>
+            );
+          })}
+        </ul>
+      </Group>
       {problem && (
         <p className="keys-note" data-alert="" role="alert">
           <Icon name="circle-alert" size={12} />

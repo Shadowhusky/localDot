@@ -1,8 +1,11 @@
 import {
   type Attention,
+  microsToMs,
   msToSeconds,
   type PauseSnapshot,
+  type RequestTakeoverInput,
   SESSION_PAUSE_REASONS,
+  STALL,
 } from "@localdot/protocol";
 import {
   type ActionState,
@@ -14,30 +17,41 @@ import {
   startedCount,
   stepAt,
 } from "@localdot/stage";
-import type { AgentModel } from "../agent/model.ts";
+import { type AgentModel, heldByUser } from "../agent/model.ts";
 import type { ComputerPhase, HudActionKind, HudState } from "../cells/hud-state.ts";
 import type { DotState } from "../dot/engine/states.ts";
+
+type TakeoverReason = RequestTakeoverInput["reason"];
 
 // What the live task feed knows beyond the timeline. Replay has only the timeline.
 export interface TaskFacts {
   readonly approval: boolean;
   readonly question: string | null;
   readonly takeover: string | null;
+  // The user has the computer: "user" when they asked for it, or the reason dot handed it over once
+  // they took that.
+  readonly yours: TakeoverReason | "user" | null;
   readonly pause: PauseSnapshot["phase"] | null;
   // The reason on the latest agent.state.
   readonly reason: string | null;
   readonly result: boolean;
+  // A model call waiting to be tried again: when, in session ms, and whether the model could be
+  // reached at all.
+  readonly retry: { readonly atMs: number; readonly unreachable: boolean } | null;
 }
 
 export type TaskRow =
   | "approval"
   | "question"
   | "takeover"
+  | "control"
   | "waiting"
   | "pausing"
   | "paused"
   | "resuming"
   | "recovery"
+  | "retrying"
+  | "limit"
   | "acting"
   | "thinking"
   | "observing"
@@ -55,19 +69,30 @@ export interface TaskHud {
   readonly label: string;
   readonly caption: string;
   readonly elapsedS: number | null;
+  // Seconds until dot tries again, while it waits on a busy model.
+  readonly countdownS: number | null;
   readonly control: boolean;
 }
 
 export function taskFacts(model: AgentModel): TaskFacts {
+  const yours = heldByUser(model);
   return {
     approval: !!model.approval,
     question: model.pendingAsk ? (model.questions.get(model.pendingAsk)?.question ?? "") : null,
     takeover: model.pendingTakeover
       ? (model.takeovers.get(model.pendingTakeover)?.note ?? "")
       : null,
+    yours: !yours ? null : yours.by === "user" ? "user" : yours.reason,
     pause: model.safetyPause?.phase ?? null,
     reason: model.state?.reason ?? null,
     result: model.results.length > 0,
+    retry:
+      model.retrying && model.retry
+        ? {
+            atMs: microsToMs(model.retry.at) + model.retry.data.waitMs,
+            unreachable: model.retry.data.status === undefined,
+          }
+        : null,
   };
 }
 
@@ -75,6 +100,10 @@ const PROGRESSIVE: [RegExp, string][] = [
   [/^Click\b/, "Clicking"],
   [/^Type\b/, "Typing"],
   [/^Press\b/, "Pressing"],
+  [/^Hold\b/, "Holding"],
+  [/^Drag\b/, "Dragging"],
+  [/^Move\b/, "Moving"],
+  [/^Release\b/, "Releasing"],
   [/^Scroll\b/, "Scrolling"],
   [/^Open\b/, "Opening"],
   [/^Wait\b/, "Waiting"],
@@ -83,6 +112,10 @@ const PAST: [RegExp, string][] = [
   [/^Click\b/, "Clicked"],
   [/^Type\b/, "Typed"],
   [/^Press\b/, "Pressed"],
+  [/^Hold\b/, "Held"],
+  [/^Drag\b/, "Dragged"],
+  [/^Move\b/, "Moved"],
+  [/^Release\b/, "Released"],
   [/^Scroll\b/, "Scrolled"],
   [/^Open\b/, "Opened"],
   [/^Wait\b/, "Waited"],
@@ -135,12 +168,73 @@ function pausing(model: SessionModel, step: StepState, at: AgentStateAt, nowMs: 
   }
   return requestT !== undefined && requestT <= at.t;
 }
+// A Pause asked for after a recovery pause publishes no state of its own, and holds the task.
+function replayReason(model: SessionModel, at: AgentStateAt, nowMs: number): string | null {
+  for (let i = model.marks.length - 1; i >= 0; i--) {
+    const mark = model.marks[i];
+    if (!mark || mark.t <= at.t) break;
+    if (mark.t <= nowMs && mark.type === "safety.pause") return null;
+  }
+  return at.reason ?? null;
+}
 function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): string {
   if (at.state !== "waiting_user" && at.state !== "paused") return at.state;
   const step = stepAt(model, nowMs);
   if ((step?.startT ?? Number.NEGATIVE_INFINITY) > at.t) return "acting";
   if (at.state === "waiting_user") return settledSince(model, at, nowMs) ? "acting" : at.state;
   return step && pausing(model, step, at, nowMs) ? "pausing" : at.state;
+}
+
+// What a task paused on, other than its own Pause or a question, says on the HUD.
+const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> = {
+  [STALL.budget]: {
+    row: "limit",
+    label: "Reached your spending limit",
+    caption: "I stopped at the spending limit you set.",
+  },
+  [STALL.modelBusy]: {
+    row: "retrying",
+    label: "Model busy · retrying",
+    caption: "The model is busy. I'll try again in a moment.",
+  },
+  [STALL.modelUnavailable]: {
+    row: "recovery",
+    label: "Model not answering",
+    caption: "The model isn't answering.",
+  },
+  [STALL.modelRefused]: {
+    row: "recovery",
+    label: "Model turned down a request",
+    caption: "The model turned down my request.",
+  },
+  [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
+};
+
+// A wait for the user counts from dot's request, so the island shows how long dot has waited.
+const REQUEST: Partial<Record<TaskRow, string>> = {
+  approval: "approval.request",
+  question: "ask.request",
+  takeover: "takeover.request",
+  control: "takeover.request",
+};
+// What dot says while the user has the computer, by why it is theirs.
+const YOUR_TURN: Record<TakeoverReason | "user", string> = {
+  user: "I'll wait here until you hand back.",
+  login: "Your turn. I'll wait here and pick up after you sign in.",
+  "2fa": "Your turn. I'll wait here and pick up after you enter the code.",
+  captcha: "Your turn. I'll wait here and pick up after you finish the check.",
+  payment: "Your turn. I'll wait here and pick up after you enter the payment details.",
+  other: "Your turn. I'll wait here until you hand back.",
+};
+function waitedS(model: SessionModel, row: TaskRow, nowMs: number): number | null {
+  const type = REQUEST[row];
+  if (!type) return null;
+  for (let i = model.marks.length - 1; i >= 0; i--) {
+    const mark = model.marks[i];
+    if (mark?.type === type && mark.t <= nowMs)
+      return Math.floor(msToSeconds(Math.max(0, nowMs - mark.t)));
+  }
+  return null;
 }
 
 const PAST_HOLD_MS = 1200;
@@ -164,15 +258,17 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     label,
     caption,
     elapsedS: null,
+    countdownS: null,
     control: false,
   });
-  const waiting = (row: TaskRow, label: string, caption: string): TaskHud => ({
+  const waiting = (row: TaskRow, label: string, caption: string, control = false): TaskHud => ({
     row,
     phase: "waiting",
     label,
     caption,
-    elapsedS: null,
-    control: false,
+    elapsedS: waitedS(model, row, nowMs),
+    countdownS: null,
+    control,
   });
   const running = (row: TaskRow, label: string, caption: string, control: boolean): TaskHud => ({
     row,
@@ -180,6 +276,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     label,
     caption,
     elapsedS,
+    countdownS: null,
     control,
   });
 
@@ -190,9 +287,17 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   }
   const at = agentStateAt(model, nowMs);
   const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
-  if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.");
+  const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
+  if (facts?.yours) return waiting("control", "You're in control", YOUR_TURN[facts.yours]);
+  // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
+  if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
   if (facts?.question != null)
-    return waiting("question", "Has a question", facts.question || "Waiting for your answer.");
+    return waiting(
+      "question",
+      "Needs your answer",
+      facts.question || "Waiting for your answer.",
+      true,
+    );
   if (facts?.takeover != null)
     return waiting("takeover", "Your turn", facts.takeover || "Your turn to use the computer.");
   if (facts?.pause === "pausing" || state === "pausing")
@@ -202,13 +307,37 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     return waiting("paused", "Pause unconfirmed", "Pause is unconfirmed.");
   if (facts?.pause) return waiting("paused", "Paused", "Paused.");
 
+  // A busy or unreachable model is tried again by itself, and the wait counts down.
+  if (facts?.retry) {
+    const leftS = Math.ceil((facts.retry.atMs - nowMs) / 1000);
+    const why = facts.retry.unreachable ? "Can't reach the model" : "Model busy";
+    return {
+      ...running(
+        "retrying",
+        leftS > 0 ? `${why} · retrying` : "Retrying…",
+        facts.retry.unreachable
+          ? "I can't reach the model. I'll try again in a moment."
+          : "The model is busy. I'll try again in a moment.",
+        false,
+      ),
+      elapsedS: null,
+      countdownS: leftS > 0 ? leftS : null,
+    };
+  }
   if (state === "waiting_user") return waiting("waiting", "Waiting for you", "Waiting for you.");
-  if (state === "paused")
-    return facts?.reason === "budget"
-      ? waiting("recovery", "Paused · Limit reached", "Paused at the spending limit.")
+  if (state === "paused") {
+    const stall = STALLED[reason ?? ""];
+    return stall
+      ? waiting(stall.row, stall.label, stall.caption)
       : waiting("recovery", "Paused", "Paused.");
-  if (state === "error") return waiting("recovery", "Needs attention", "The task needs attention.");
+  }
+  if (state === "error")
+    return /restarting/.test(reason ?? "")
+      ? running("working", "Starting again…", "Starting again where I left off.", false)
+      : waiting("recovery", "Needs attention", "The task needs attention.");
   if (state === "done") return finished("done", "Done", "Done.");
+  if (state === "idle" && reason === STALL.actionLimit)
+    return waiting("limit", "Reached your action limit", "I stopped at the action limit you set.");
   if (state === "idle")
     return facts?.result
       ? finished("done", "Done", "Done.")
@@ -228,6 +357,11 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
 }
 
+// The thread's foot follows dot's own work. While the user has the computer it says nothing: the
+// turn's line stays in the thread as it was, with the change of hands after it.
+export const footWork = (task: TaskHud | null): TaskHud | null =>
+  task?.row === "control" ? null : task;
+
 export type StatusRow = TaskRow | "computer" | "stopping";
 
 export interface HudAction {
@@ -244,6 +378,7 @@ export interface Status {
   readonly label: string;
   readonly caption: { readonly speaker: "dot" | "system"; readonly text: string };
   readonly elapsedS: number | null;
+  readonly countdownS: number | null;
   // The HUD's controls, in order; never empty.
   readonly actions: readonly HudAction[];
   // dot has control: the xenon rim.
@@ -268,7 +403,7 @@ export interface StatusInput {
 }
 
 const COMPUTER_POSE: Record<ComputerPhase, DotState> = {
-  checking: "idle",
+  checking: "waking",
   none: "sleeping",
   starting: "waking",
   restarting: "waking",
@@ -281,15 +416,18 @@ const COMPUTER_POSE: Record<ComputerPhase, DotState> = {
   failed: "error",
   unavailable: "error",
 };
-const TASK_POSE: Record<TaskRow, DotState> = {
+export const TASK_POSE: Record<TaskRow, DotState> = {
   approval: "waiting",
   question: "waiting",
   waiting: "waiting",
   takeover: "your-turn",
+  control: "your-turn",
   pausing: "thinking",
   paused: "resting",
   resuming: "thinking",
   recovery: "resting",
+  retrying: "thinking",
+  limit: "waiting",
   acting: "acting",
   working: "acting",
   thinking: "thinking",
@@ -304,10 +442,13 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
   question: "needs_you",
   waiting: "needs_you",
   takeover: "needs_you",
+  control: null,
   pausing: "working",
   paused: null,
   resuming: "working",
   recovery: "blocked",
+  retrying: "working",
+  limit: "needs_you",
   acting: "working",
   working: "working",
   thinking: "working",
@@ -321,6 +462,7 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
 const DOT_SPEAKS = new Set<TaskRow>([
   "question",
   "takeover",
+  "control",
   "acting",
   "working",
   "thinking",
@@ -382,6 +524,7 @@ export function statusFor({
       text: own?.caption ?? computer.caption,
     },
     elapsedS: running?.elapsedS ?? null,
+    countdownS: stop ? null : (running?.countdownS ?? null),
     actions,
     control: (running?.control ?? false) && mayControl,
     dotPose:

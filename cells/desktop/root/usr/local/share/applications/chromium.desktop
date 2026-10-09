@@ -1,6 +1,6 @@
 [Desktop Entry]
 Version=1.0
-Name=Chromium Web Browser
+Name=Chromium
 GenericName=Web Browser
 Comment=Access the Internet
 Exec=/usr/local/bin/localdot-chromium %U

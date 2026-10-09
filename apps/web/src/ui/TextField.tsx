@@ -4,12 +4,14 @@ import { useFieldControl } from "./Field.tsx";
 
 export interface TextFieldProps
   extends Omit<ComponentProps<"input">, "size" | "prefix" | "disabled"> {
-  // 32 px, or 36 px inside a sheet; 44 px on a touch screen either way.
-  size?: "md" | "lg";
+  // 36 px; 32 in a popup's search, 40 for a key on its own; 44 px on a touch screen.
+  size?: "sm" | "md" | "lg";
   prefix?: ReactNode;
   suffix?: ReactNode;
   // A code someone reads out or types elsewhere: large monospace, spaced out.
   code?: boolean;
+  // A raised fill with no edge until focused, as a phone's search bar.
+  filled?: boolean;
 }
 
 // A press on the field's padding or an affix lands in the input, as it would on a native field.
@@ -25,6 +27,7 @@ export function TextField({
   prefix,
   suffix,
   code = false,
+  filled = false,
   className,
   type = "text",
   readOnly,
@@ -37,6 +40,7 @@ export function TextField({
       className={clsx("ui-field-box ui-text-field", className)}
       data-size={size}
       data-code={code ? "" : undefined}
+      data-filled={filled ? "" : undefined}
       data-invalid={control.invalid ? "" : undefined}
       data-unavailable={unavailable ? "" : undefined}
       onPointerDown={focusInput}

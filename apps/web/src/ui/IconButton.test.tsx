@@ -34,12 +34,12 @@ describe("IconButton", () => {
       <>
         <IconButton label="Copy" icon="copy" />
         <IconButton label="Send" icon="arrow-up" variant="primary" />
-        <IconButton label="Stop task" icon="square" variant="secondary" />
+        <IconButton label="Stop task" icon="stop" variant="filled" />
       </>,
     );
     expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("data-variant")).toBe(false);
     expect(screen.getByRole("button", { name: "Send" }).dataset.variant).toBe("primary");
-    expect(screen.getByRole("button", { name: "Stop task" }).dataset.variant).toBe("secondary");
+    expect(screen.getByRole("button", { name: "Stop task" }).dataset.variant).toBe("filled");
   });
 
   it("draws the primary action round and filled, at 36 px when asked", () => {
@@ -51,9 +51,27 @@ describe("IconButton", () => {
     expect(screen.getByRole("button", { name: "Next" }).hasAttribute("data-variant")).toBe(false);
   });
 
+  it("draws its icon at the size its button calls for, and a point when it needs you", () => {
+    render(
+      <>
+        <IconButton label="Keyboard" icon="keyboard" variant="filled" round size={44} />
+        <IconButton label="Keys" icon="key-round" size={32} attention />
+      </>,
+    );
+    const keyboard = screen.getByRole("button", { name: "Keyboard" });
+    expect(keyboard.querySelector("svg")?.getAttribute("width")).toBe("22");
+    expect(keyboard.hasAttribute("data-round")).toBe(true);
+    expect(keyboard.querySelector(".ui-icon-button-attention")).toBeNull();
+    const keys = screen.getByRole("button", { name: "Keys" });
+    expect(keys.querySelector("svg")?.getAttribute("width")).toBe("18");
+    expect(keys.querySelector(".ui-icon-button-attention")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
+
   it("shows its label and shortcut on hover without describing itself twice", () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-    render(<IconButton label="Stop" icon="square" kbd={["Mod", "Shift", "."]} />);
+    render(<IconButton label="Stop" icon="stop" kbd={["Mod", "Shift", "."]} />);
     const button = screen.getByRole("button", { name: "Stop" });
     expect(button.getAttribute("aria-keyshortcuts")).toBe("Meta+Shift+.");
     expect(button.hasAttribute("aria-describedby")).toBe(false);
@@ -64,7 +82,7 @@ describe("IconButton", () => {
 
   it("spells the shortcut out with Ctrl away from Apple devices", () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
-    render(<IconButton label="Stop" icon="square" kbd={["Mod", "Shift", "."]} />);
+    render(<IconButton label="Stop" icon="stop" kbd={["Mod", "Shift", "."]} />);
     const button = screen.getByRole("button", { name: "Stop" });
     expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+.");
     expect(hover(button)?.querySelector("kbd [aria-hidden]")?.textContent).toBe("Ctrl+Shift+.");

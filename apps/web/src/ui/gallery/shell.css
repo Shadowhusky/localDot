@@ -17,9 +17,9 @@
 
   .atoms-head h1 {
     font:
-      var(--font-weight-semibold) var(--text-display) / var(--text-display--line-height)
+      var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
       var(--font-ui);
-    letter-spacing: var(--text-display--letter-spacing);
+    letter-spacing: var(--text-title-1--letter-spacing);
   }
 
   .atoms-head p {
@@ -59,7 +59,7 @@
     color: var(--color-fg-1);
   }
 
-  @media (width < 760px) {
+  @media (width < 700px) {
     .atoms-shell {
       gap: calc(var(--spacing) * 10);
       padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4) calc(var(--spacing) * 16);

@@ -135,10 +135,10 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Limits() != DefaultLimits || DefaultLimits != (Limits{PerTaskUSD: 5, PerDayUSD: 20}) {
+	if s.Limits() != DefaultLimits || DefaultLimits != (Limits{}) {
 		t.Fatalf("defaults %+v", s.Limits())
 	}
-	for _, bad := range []Limits{{0, 20}, {5, -1}, {30, 20}} {
+	for _, bad := range []Limits{{-1, 20}, {5, -1}, {30, 20}} {
 		if err := s.SetLimits(bad); err == nil {
 			t.Errorf("SetLimits(%+v) accepted", bad)
 		}

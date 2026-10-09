@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { useContext, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
+import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { threadItems } from "./thread.ts";
@@ -39,7 +40,7 @@ function scrolled(top: number, height = 1000, view = 200, threadEnd = height) {
 }
 
 describe("the conversation thread", () => {
-  it("shows you in a bubble and dot under its name once per run of its messages", () => {
+  it("shows you in a bubble and dot as plain text with no name", () => {
     render(
       <Conversation
         items={items([
@@ -64,7 +65,8 @@ describe("the conversation thread", () => {
       false,
       true,
     ]);
-    expect(document.querySelectorAll(".thread-who")).toHaveLength(1);
+    // dot speaks without a name or a glyph: its words sit unbubbled on the left.
+    expect(document.querySelectorAll(".thread-who")).toHaveLength(0);
     expect(rows[0]?.querySelector(".thread-bubble")?.textContent).toBe("Draw a dog");
     expect(rows[1]?.querySelector(".thread-bubble")).toBeNull();
   });
@@ -186,7 +188,9 @@ describe("the conversation thread", () => {
         truncated={false}
       />,
     );
-    expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe("1 new");
+    expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe(
+      "1 new message",
+    );
     scrolled(800);
     expect(jump().hasAttribute("data-shown")).toBe(false);
   });
@@ -203,7 +207,7 @@ describe("the conversation thread", () => {
     scrolled(100);
     view.rerender(<Conversation items={items([message("one")], [question])} truncated={false} />);
     expect(within(jump()).getByRole("button", { name: "1 new question" }).textContent).toBe(
-      "1 new",
+      "1 new question",
     );
     view.rerender(
       <Conversation
@@ -228,7 +232,7 @@ describe("the conversation thread", () => {
     const scroller = history().closest(".thread-scroll") as HTMLElement;
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo;
-    fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
     expect(screen.getByText("Loading later…")).toBeTruthy();
     const outbox = history().querySelector(".thread-outbox");
     expect(outbox?.closest("[hidden]")).toBeNull();
@@ -275,10 +279,10 @@ describe("the conversation thread", () => {
 it("mounts a bounded window of 10,000 messages and keeps the reader's rows through a live addition", () => {
   const data = Array.from({ length: 10_000 }, (_, n) => message(`message-${n}`, `Content ${n}`));
   const v = render(<Conversation items={items(data)} truncated={false} ownerKey="large-task" />);
-  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
-  fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
-  const kept = screen.getByText("Content 9800").closest("article");
-  expect(screen.getByText("Content 9700")).toBeTruthy();
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
+  fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
+  const kept = screen.getByText("Content 9960").closest("article");
+  expect(screen.getByText("Content 9940")).toBeTruthy();
   v.rerender(
     <Conversation
       items={items([...data, message("new", "Newest content")])}
@@ -286,15 +290,15 @@ it("mounts a bounded window of 10,000 messages and keeps the reader's rows throu
       ownerKey="large-task"
     />,
   );
-  expect(screen.getByText("Content 9800").closest("article")).toBe(kept);
-  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
+  expect(screen.getByText("Content 9960").closest("article")).toBe(kept);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
   expect(screen.queryByText("Newest content")).toBeNull();
   // Each move keeps half the window, so two reach the newest end.
   fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
   expect(screen.queryByText("Newest content")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
   expect(screen.getByText("Newest content")).toBeTruthy();
-  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
 });
 
 it("announces completed replies without reading each streaming delta", () => {
@@ -351,4 +355,88 @@ it("retires the previous task's reply announcement when the conversation owner c
 it("says earlier history lives in the task log when the projection dropped it", () => {
   render(<Conversation items={items([message("one")])} truncated />);
   expect(screen.getByText("Earlier messages are kept in the task log.")).toBeTruthy();
+});
+
+it("says the conversation's older tasks are in Replay", () => {
+  render(<Conversation items={items([message("one")])} truncated earlierInReplay />);
+  expect(screen.getByText("Earlier messages are in Replay.")).toBeTruthy();
+  expect(screen.queryByText("Earlier messages are kept in the task log.")).toBeNull();
+});
+
+describe("opening on a snapshot", () => {
+  const newRows = () => [...history().querySelectorAll(".thread-row[data-new]")];
+  it("shows message-shaped bones while the history arrives, then all of it at once and unanimated", () => {
+    const opened = [message("one", "Draw a dog"), message("two", "Drew it.", "assistant")];
+    const view = render(<Conversation items={[]} truncated={false} ownerKey="task" loading />);
+    expect(history().querySelectorAll(".thread-bone")).toHaveLength(8);
+    expect(screen.getByRole("status").textContent).toBe("Loading the conversation");
+    expect(screen.queryByText("What should we do?")).toBeNull();
+    view.rerender(
+      <Conversation items={items(opened.slice(0, 1))} truncated={false} ownerKey="task" loading />,
+    );
+    expect(screen.queryByText("Draw a dog")).toBeNull();
+    view.rerender(<Conversation items={items(opened)} truncated={false} ownerKey="task" />);
+    expect(history().querySelectorAll(".thread-bone")).toHaveLength(0);
+    expect(screen.getByText("Draw a dog")).toBeTruthy();
+    expect(newRows()).toEqual([]);
+    // Only what arrives after it eases in.
+    view.rerender(
+      <Conversation
+        items={items([...opened, message("three", "Make it blue")])}
+        truncated={false}
+        ownerKey="task"
+      />,
+    );
+    expect(newRows().map((row) => row.textContent)).toEqual(["Make it blue"]);
+  });
+
+  it("asks for the conversation's earlier tasks from the top once the page has no older rows", () => {
+    const older = vi.fn();
+    const view = render(
+      <Conversation
+        items={items([message("one")])}
+        truncated={false}
+        earlier={{ more: true, reading: false, older }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier messages" }));
+    expect(older).toHaveBeenCalledOnce();
+    view.rerender(
+      <Conversation
+        items={items([message("one")])}
+        truncated={false}
+        earlier={{ more: true, reading: true, older }}
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Loading earlier messages" })).toBeTruthy();
+    view.rerender(
+      <Conversation
+        items={items([message("one")])}
+        truncated={false}
+        earlierInReplay
+        earlier={{ more: false, reading: false, older }}
+      />,
+    );
+    expect(document.querySelector(".thread-older")).toBeNull();
+    expect(screen.getByText("Earlier messages are in Replay.")).toBeTruthy();
+  });
+});
+
+it("holds a phone's toolbar at the foot however short the column is, its controls around the field", () => {
+  const { container } = render(
+    <Conversation
+      items={items([message("one")])}
+      truncated={false}
+      composer={<textarea aria-label="Message" />}
+      lead={<button type="button">Activity</button>}
+      trail={<button type="button">More</button>}
+      pinned
+    />,
+  );
+  const dock = container.querySelector(".thread-dock") as HTMLElement;
+  expect(dock.parentElement?.classList.contains("thread-foot")).toBe(true);
+  const controls = dock.querySelectorAll(".thread-toolbar button, .thread-toolbar textarea");
+  expect(
+    [...controls].map((element) => element.getAttribute("aria-label") ?? element.textContent),
+  ).toEqual(["Activity", "Message", "More"]);
 });

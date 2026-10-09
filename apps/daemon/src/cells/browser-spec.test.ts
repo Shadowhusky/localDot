@@ -1,20 +1,16 @@
 import { describe, expect, it } from "vitest";
-import {
-  browserNames,
-  browserNetworkSpec,
-  browserSpec,
-  profileVolumeSpec,
-} from "./browser-spec.ts";
+import { browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
 import { browserImagesFromEnv } from "./images.ts";
-import { gateSpec, ISOLATED_GATEWAY_OPTION, streamOptions } from "./spec.ts";
+import { desktopSpec, gateSpec, ISOLATED_GATEWAY_OPTION, streamOptions } from "./spec.ts";
 import { sampleBrowserRecord } from "./testing/sample-browser-record.ts";
+import { sampleRecord } from "./testing/sample-record.ts";
 
 describe("persistent browser container isolation", () => {
-  it("mounts only the browser-owned profile and keeps credentials and home ephemeral", () => {
+  it("mounts only the shared sign-in profile and keeps credentials and home ephemeral", () => {
     const record = sampleBrowserRecord();
-    const spec = browserSpec(record, "browser-image", streamOptions());
+    const spec = browserSpec(record, "browser-image", streamOptions(), "localdot-accounts");
     expect(spec.HostConfig.Mounts).toEqual([
-      { Type: "volume", Source: record.docker.profileVolume, Target: "/profile" },
+      { Type: "volume", Source: "localdot-accounts", Target: "/profile" },
     ]);
     expect(spec.HostConfig.Tmpfs).not.toHaveProperty("/profile");
     expect(spec.HostConfig.Tmpfs["/downloads"]).toBe(
@@ -53,9 +49,29 @@ describe("persistent browser container isolation", () => {
     });
   });
 
+  it("gives the computer no mount of the sign-ins and no network shared with the browser", () => {
+    const computer = sampleRecord();
+    const record = { ...sampleBrowserRecord(), parentCellId: computer.id };
+    const desktop = desktopSpec(computer, "desktop-image", streamOptions());
+    const browser = browserSpec(record, "browser-image", streamOptions(), "localdot-accounts");
+    expect(desktop.HostConfig.Mounts).toEqual([
+      { Type: "volume", Source: computer.docker.homeVolume, Target: "/config" },
+    ]);
+    expect(JSON.stringify(desktop)).not.toMatch(/accounts|profile-|remote-debugging/u);
+    expect(desktop.HostConfig).not.toHaveProperty("Binds");
+    expect(desktop.HostConfig).not.toHaveProperty("VolumesFrom");
+    expect(Object.keys(desktop.NetworkingConfig.EndpointsConfig)).not.toContain(
+      browser.HostConfig.NetworkMode,
+    );
+    expect(Object.keys(browser.NetworkingConfig.EndpointsConfig)).toEqual([
+      record.docker.internalNetwork,
+    ]);
+    expect(gateSpec(computer, "gate-image").HostConfig).not.toHaveProperty("Mounts");
+  });
+
   it("uses one-shot stdin for bootstrap and exposes neither proxy material nor a debug port", () => {
     const record = sampleBrowserRecord();
-    const spec = browserSpec(record, "browser-image", streamOptions());
+    const spec = browserSpec(record, "browser-image", streamOptions(), "localdot-accounts");
     expect(spec).toMatchObject({ OpenStdin: true, AttachStdin: true, StdinOnce: true, Tty: false });
     expect(spec).not.toHaveProperty("ExposedPorts");
     expect(spec.Env).toContain(`LOCALDOT_BROWSER_CELL_ID=${record.id}`);
@@ -69,12 +85,12 @@ describe("persistent browser container isolation", () => {
 
   it("streams the browser screen 4:2:0 unless the 4:4:4 opt-in is set", () => {
     const record = sampleBrowserRecord();
-    expect(browserSpec(record, "browser-image", streamOptions()).Env).toContain(
-      "LOCALDOT_STREAM_FULLCOLOR=0",
-    );
-    expect(browserSpec(record, "browser-image", { fullcolor: true }).Env).toContain(
-      "LOCALDOT_STREAM_FULLCOLOR=1",
-    );
+    expect(
+      browserSpec(record, "browser-image", streamOptions(), "localdot-accounts").Env,
+    ).toContain("LOCALDOT_STREAM_FULLCOLOR=0");
+    expect(
+      browserSpec(record, "browser-image", { fullcolor: true }, "localdot-accounts").Env,
+    ).toContain("LOCALDOT_STREAM_FULLCOLOR=1");
   });
 
   it("routes the browser's service and stream through its own loopback-published gate", () => {
@@ -112,13 +128,6 @@ describe("persistent browser container isolation", () => {
         "localdot.role": "egress",
       },
     });
-    expect(
-      profileVolumeSpec(record.docker.profileVolume, record.id, record.parentCellId).Labels,
-    ).toEqual({
-      "localdot.cell": record.id,
-      "localdot.parent": record.parentCellId,
-      "localdot.role": "profile",
-    });
   });
 
   it("keeps test resource names separate and rejects path-like resource identities", () => {
@@ -152,6 +161,7 @@ describe("Chromium namespace seccomp allowances without capabilities", () => {
     sampleBrowserRecord(),
     "image",
     streamOptions(),
+    "localdot-accounts",
   ).HostConfig.SecurityOpt.find((value) => value.startsWith("seccomp="));
   const profile = JSON.parse(text?.slice("seccomp=".length) ?? "null") as {
     defaultAction: string;

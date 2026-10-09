@@ -43,7 +43,7 @@ test("the puppet runs a multi-app sequence live in the Theatre with the overlays
     if (message.type() === "error") console.error(`Theatre console: ${message.text()}`);
   });
   await page.goto(`${daemon.origin}/#token=${daemon.token}`);
-  await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 120_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 120_000 });
   await expect
     .poll(
       async () => Number(await page.locator("canvas.stage-canvas").getAttribute("data-frames")),
@@ -96,8 +96,6 @@ test("the puppet runs a multi-app sequence live in the Theatre with the overlays
   await expect(page.getByTestId("hud-status")).toHaveText("Done", { timeout: 15_000 });
   await expect(page.locator(".stage.control")).toHaveCount(0);
   const rail = page.getByRole("complementary", { name: "Plan and steps" });
-  const folded = rail.locator('.activity-group > .ui-disclosure-trigger[aria-expanded="false"]');
-  while ((await folded.count()) > 0) await folded.first().click();
   const rows = rail.getByTestId("step-row");
   await expect(rows).toHaveCount(SCRIPT.steps.length);
   await rows.first().locator(".activity-row-head").click();

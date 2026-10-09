@@ -16,6 +16,8 @@ export type TickKind =
   | "key"
   | "scroll"
   | "drag"
+  | "down"
+  | "up"
   | "wait"
   | "cancel"
   | MarkKind;

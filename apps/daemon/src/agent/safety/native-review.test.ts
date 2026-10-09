@@ -315,6 +315,30 @@ describe("review native repeat answer ownership", () => {
     expect(f.effects()).toHaveLength(2);
   }, 8000);
 
+  it("refuses Not now on the repeat question, which stays answerable with Resume open", async () => {
+    const f = fixture();
+    f.run();
+    const first = await f.active();
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
+    await f.control.settled();
+    const pause = f.session.safetyPause,
+      ask = f.session.pendingAsk;
+    assert.ok(pause && ask);
+    const request = f.h.events().find((row) => row.type === "ask.request");
+    expect(request?.data).toMatchObject({ askId: ask, declinable: false });
+    expect(f.session.decline(ask)).toBe(false);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.session.pendingAsk).toBe(ask);
+    expect(f.h.events().some((row) => row.type === "ask.answer")).toBe(false);
+    expect(f.session.safetyPause).toMatchObject({ phase: "paused", resumeAvailable: true });
+    const correction = "Select the Help menu instead.";
+    expect(f.session.answer(ask, undefined, correction)).toBe(true);
+    await f.control.resume(pause.requestId, pause.revision);
+    const second = await f.active(2);
+    expect(
+      JSON.stringify(second.process.requests.find((row) => row.method === "turn/start")?.params),
+    ).toContain(correction);
+  }, 8000);
   it("a regular durable follow-up while paused is included once in the fresh turn", async () => {
     const f = fixture();
     f.run();

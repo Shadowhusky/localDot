@@ -1,7 +1,15 @@
-import type { ApprovalRequestDraft, PauseSnapshot, RuleChange } from "@localdot/protocol";
+import type {
+  ApprovalRequestDraft,
+  AskFieldRecord,
+  AskFieldValue,
+  AskRequestField,
+  PauseSnapshot,
+  RuleChange,
+} from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
+  askValueProblem,
   type BootConfig,
   type EventDraft,
   freezeAutonomy,
@@ -24,6 +32,7 @@ import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
+import { SecretAnswers } from "./secret-answers.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
@@ -31,7 +40,26 @@ export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" |
 export interface AskAnswer {
   option?: string;
   text?: string;
-  by: "user" | "timeout" | "stop" | "pause";
+  // Per field id, as the journal and the model may see them: a secret only as provided.
+  fields?: Readonly<Record<string, AskFieldRecord>>;
+  declined?: true;
+  // Never journaled: the ask tool types these into their fields and clears them.
+  secrets?: SecretAnswers;
+  by: "user" | "timeout" | "stop" | "pause" | "control";
+}
+export interface AskForm {
+  question: string;
+  fields: readonly AskRequestField[];
+  submit?: string;
+  decline?: string;
+}
+interface Question {
+  question: string;
+  options: string[];
+  allowText: boolean;
+  form?: Omit<AskForm, "question">;
+  // Only an answer ends it: "Not now" is refused.
+  declinable?: boolean;
 }
 export interface TakeoverOutcome {
   note?: string;
@@ -56,6 +84,8 @@ export interface ManualLease {
   readonly requestId: string;
   readonly signal: AbortSignal;
   check(): void;
+  // The user typed under this control. The takeover's end says so, never what was typed.
+  typed(): void;
   // A lost dispatch acknowledgment keeps the control fence until Stop contains the desktop.
   finish(uncertain?: boolean): void;
 }
@@ -70,9 +100,15 @@ interface ControlRecord {
   held: boolean;
   returning: boolean;
   manualUnconfirmed: boolean;
+  typed: boolean;
   released: Promise<TakeoverOutcome>;
   resolve(outcome: TakeoverOutcome): void;
   step?: string;
+  // The user has taken the computer: they asked for it, or took the one dot handed over.
+  taken: boolean;
+  // The user took the computer themselves, at this time, from a task in this state, maybe setting
+  // aside dot's question.
+  user?: { since: number; from: SessionStatus; asked: boolean };
 }
 export class SessionStoppedError extends Error {
   constructor() {
@@ -85,6 +121,13 @@ export class ControlHeldError extends Error {
     super("the user has control of the desktop");
     this.name = "ControlHeldError";
   }
+}
+
+// What dot hears when the user hands back control they took: never what they did or typed.
+function handedBack(ms: number, asked: boolean): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  const took = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+  return `(The user took over the computer for ${took} and has handed it back. The screen may have changed since you last looked: take a screenshot before your next action.${asked ? " They took it instead of answering your question: ask it again if you still need the answer." : ""})`;
 }
 
 export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -116,13 +159,26 @@ export class AgentSession {
   toolToken: string | undefined;
   lastFrameId: string | undefined;
   tainted = false;
+  // What was said earlier in the conversation this task continues.
+  earlier: readonly string[] = [];
   toolCalls = 0;
+  // The user's optional hard stop: the most tool calls between two of their messages.
+  actionLimit: number | undefined;
+  actionsSinceUser = 0;
+  actionLimitReached = false;
   plan: PlanItem[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
+  // Notes to dot that are not the user's words: they never wake a task waiting for them.
+  readonly #notes = new Set<number>();
+  // dot's next input waits for a fresh look at the screen, which the user has had.
+  #lookFirst = false;
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ActiveCall>();
+  // Input the agent keeps down between tool calls (a mouse button): how to let go of it.
+  readonly #held = new Set<() => Promise<void>>();
+  #releasing: Promise<void> | undefined;
   readonly #controlObservers = new Set<{
     generation: BrainGeneration;
     notify(): void;
@@ -133,7 +189,14 @@ export class AgentSession {
   #brain: { generation: BrainGeneration; abort: AbortController } | undefined;
   #delivered = 0;
   #ask:
-    | { askId: string; options: string[]; allowText: boolean; finish(a: AskAnswer): boolean }
+    | {
+        askId: string;
+        options: string[];
+        allowText: boolean;
+        fields?: readonly AskRequestField[];
+        declinable: boolean;
+        finish(a: AskAnswer): boolean;
+      }
     | undefined;
   #control: ControlRecord | undefined;
   #screens: ScreenController | undefined;
@@ -291,6 +354,7 @@ export class AgentSession {
     const prior = this.#steps.pause;
     const pausedBefore = this.status === "paused";
     this.#steps.requestPause(requestId, reason);
+    void this.releaseInput();
     this.#approvals.cancel(this.id);
     this.#ask?.finish({ by: "pause" });
     this.setStatus("paused");
@@ -307,6 +371,30 @@ export class AgentSession {
     if (this.#repeatPauseHandler) throw new Error("task safety controller already installed");
     this.#repeatPauseHandler = handler;
   }
+  // A button the agent left down is let go of (and a cursor it placed is forgotten) before the user
+  // gets the screen, and when the task stops, ends, pauses, switches screens or replaces its brain;
+  // settlement waits for that. One pressed as any of those began is let go of at once.
+  holdInput(release: () => Promise<void>): () => void {
+    this.#held.add(release);
+    if (this.stopped || !this.#brain || this.#control || this.safetyPause) void this.releaseInput();
+    return () => {
+      this.#held.delete(release);
+    };
+  }
+  releaseInput(): Promise<void> | undefined {
+    if (!this.#held.size) return undefined;
+    const releases = [...this.#held];
+    this.#held.clear();
+    const done = Promise.allSettled(releases.map((release) => release())).then(() => {});
+    const releasing = Promise.all([this.#releasing, done]).then(() => {
+      if (this.#releasing === releasing) this.#releasing = undefined;
+    });
+    this.#releasing = releasing;
+    return done;
+  }
+  settleNativeEffect(action: GuiAction, identity: NativeActionIdentity, changed: boolean): void {
+    this.#repeatGuard.settle(action, identity, changed);
+  }
   admitNativeEffect(action: GuiAction, identity: NativeActionIdentity, call: string): boolean {
     if (this.stopped || this.controlHeld || this.safetyPause) return false;
     if (this.#repeatGuard.admit(action, identity, call)) return true;
@@ -319,9 +407,13 @@ export class AgentSession {
       this.uncertainSafetyPause(pause.requestId, pause.revision);
     }
     const question = this.#question(
-      "I repeated the same action twice. What should I change before continuing? Resume is a separate control.",
-      ["I will change the instructions", "I want to take control"],
-      true,
+      {
+        question:
+          "I repeated the same action twice. What should I change before continuing? Resume is a separate control.",
+        options: ["I will change the instructions", "I want to take control"],
+        allowText: true,
+        declinable: false,
+      },
       0,
       undefined,
       this.abort.signal,
@@ -493,6 +585,11 @@ export class AgentSession {
     lease.check();
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
       throw new SessionStoppedError();
+    const releasing = this.releaseInput();
+    if (releasing) {
+      await releasing;
+      lease.check();
+    }
     const result = await this.#screens.switchTo(
       screen,
       this.#screenScope(lease.generation, lease.signal),
@@ -535,6 +632,7 @@ export class AgentSession {
     for (const observer of this.#controlObservers)
       if (observer.generation === generation) this.#controlObservers.delete(observer);
     previous.abort.abort(new SessionStoppedError());
+    void this.releaseInput();
     this.#screenReady = undefined;
     if (this.#screens && !this.stopped) {
       // takeOver fences synchronously, including physical grants that are still being prepared.
@@ -628,6 +726,9 @@ export class AgentSession {
         )
           throw new ControlHeldError();
       },
+      typed: () => {
+        record.typed = true;
+      },
       finish: (uncertain = false) => {
         if (finished) return;
         finished = true;
@@ -641,6 +742,12 @@ export class AgentSession {
   }
   cancelManual(): void {
     for (const call of this.#manual.values()) call.abort.abort(new ControlHeldError());
+  }
+  // Settles once the user's control under this request ends, by hand-back or Stop, or at once
+  // when it is not the current control.
+  controlReleased(requestId: string): Promise<void> {
+    const record = this.#control;
+    return record?.requestId === requestId ? record.released.then(() => {}) : Promise.resolve();
   }
   append(type: string, data: Record<string, unknown>, step?: string): void {
     this.eventLog.append(this.id, {
@@ -658,14 +765,39 @@ export class AgentSession {
     if (kind !== "resume") this.append("message.user", { messageId: item.messageId, text, kind });
     this.#seq = item.seq;
     this.#inbox.push(item);
-    if (kind !== "resume") this.tainted = false;
+    if (kind !== "resume") {
+      this.tainted = false;
+      this.actionsSinceUser = 0;
+      this.actionLimitReached = false;
+    }
     this.#wake();
     return { ...item };
+  }
+  // Reaches the model with the next fetch of the inbox, as a steer it did not hear from the user:
+  // nothing journals it as the user's message.
+  #note(text: string): void {
+    const item = Object.freeze(
+      InboxItem.parse({ seq: this.#seq + 1, messageId: ulid(), kind: "steer", text }),
+    );
+    this.#seq = item.seq;
+    this.#inbox.push(item);
+    this.#notes.add(item.seq);
+    this.#wake();
+  }
+  // After the user hands back control they took, until dot has looked at the screen again.
+  get lookOwed(): boolean {
+    return this.#lookFirst;
+  }
+  freshLook(): void {
+    this.#lookFirst = false;
   }
   async waitForUser(waitMs: number, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
     const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);
-    const unread = () => this.#inbox.some((i) => i.seq > this.#delivered && i.kind !== "resume");
+    const unread = () =>
+      this.#inbox.some(
+        (i) => i.seq > this.#delivered && i.kind !== "resume" && !this.#notes.has(i.seq),
+      );
     const deadline = Date.now() + waitMs;
     while (!unread() && !this.stopped && Date.now() < deadline) {
       await this.#changed(deadline - Date.now(), combined);
@@ -770,6 +902,31 @@ export class AgentSession {
     generation = this.generation,
     signal?: AbortSignal,
   ): Promise<AskAnswer> {
+    return this.#owned({ question, options, allowText }, timeoutMs, step, generation, signal);
+  }
+  // A question answered per field (HITL.md): secret answers come back apart from everything stored.
+  askFields(
+    { question, ...form }: AskForm,
+    timeoutMs: number,
+    step?: string,
+    generation = this.generation,
+    signal?: AbortSignal,
+  ): Promise<AskAnswer> {
+    return this.#owned(
+      { question, options: [], allowText: false, form },
+      timeoutMs,
+      step,
+      generation,
+      signal,
+    );
+  }
+  #owned(
+    prompt: Question,
+    timeoutMs: number,
+    step: string | undefined,
+    generation: BrainGeneration | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<AskAnswer> {
     if (!generation) throw new SessionStoppedError();
     this.check(generation, signal);
     const combined = AbortSignal.any([
@@ -777,14 +934,10 @@ export class AgentSession {
       generation.signal,
       ...(signal ? [signal] : []),
     ]);
-    return this.#question(question, options, allowText, timeoutMs, step, combined, () =>
-      this.isCurrent(generation),
-    );
+    return this.#question(prompt, timeoutMs, step, combined, () => this.isCurrent(generation));
   }
   #question(
-    question: string,
-    options: string[],
-    allowText: boolean,
+    { question, options, allowText, form, declinable = true }: Question,
     timeoutMs: number,
     step: string | undefined,
     combined: AbortSignal,
@@ -804,13 +957,25 @@ export class AgentSession {
         if (settled) return false;
         if (answer.by === "user" && (combined.aborted || this.stopped || !ownerCurrent()))
           return false;
+        if (answer.declined && !declinable) return false;
         settled = true;
         if (timer) clearTimeout(timer);
         combined.removeEventListener("abort", aborted);
         if (this.#ask?.askId === askId) this.#ask = undefined;
         try {
           beforeAnswer?.(answer);
-          this.append("ask.answer", { askId, ...answer }, step);
+          this.append(
+            "ask.answer",
+            {
+              askId,
+              ...(answer.option ? { option: answer.option } : {}),
+              ...(answer.text ? { text: answer.text } : {}),
+              ...(answer.fields ? { fields: answer.fields } : {}),
+              ...(answer.declined ? { declined: true } : {}),
+              by: answer.by,
+            },
+            step,
+          );
         } catch (error) {
           // Abort listeners cannot throw into the event loop or leave a tool waiting forever.
           reject(error);
@@ -829,6 +994,8 @@ export class AgentSession {
             question,
             options: options.map((text, i) => ({ key: keys[i], text })),
             allowText,
+            ...form,
+            ...(declinable ? {} : { declinable: false }),
           },
           step,
         );
@@ -840,7 +1007,14 @@ export class AgentSession {
         reject(error);
         return;
       }
-      this.#ask = { askId, options: keys, allowText, finish };
+      this.#ask = {
+        askId,
+        options: keys,
+        allowText,
+        ...(form ? { fields: form.fields } : {}),
+        declinable,
+        finish,
+      };
       if (!this.safetyPause) this.status = "waiting_user";
       if (timeoutMs > 0) timer = setTimeout(() => finish({ by: "timeout" }), timeoutMs);
       combined.addEventListener("abort", aborted, { once: true });
@@ -849,7 +1023,7 @@ export class AgentSession {
   }
   answer(askId: string, option: string | undefined, text: string | undefined): boolean {
     const ask = this.#ask;
-    if (!ask || ask.askId !== askId || this.stopped) return false;
+    if (!ask || ask.askId !== askId || ask.fields || this.stopped) return false;
     if (
       (option && !ask.options.includes(option)) ||
       (text && (!ask.allowText || text.length > 8000)) ||
@@ -858,12 +1032,45 @@ export class AgentSession {
       return false;
     return ask.finish({ ...(option ? { option } : {}), ...(text ? { text } : {}), by: "user" });
   }
+  // Every field but a QR code needs its answer. `redact` cleans what may be stored or shown to the
+  // model; secret answers are kept apart, unredacted, for typing.
+  answerFields(
+    askId: string,
+    values: Readonly<Record<string, AskFieldValue>>,
+    redact: (text: string) => string,
+  ): boolean {
+    const ask = this.#ask;
+    const fields = ask?.fields;
+    if (!ask || ask.askId !== askId || !fields || this.stopped) return false;
+    if (Object.keys(values).some((id) => !fields.some((field) => field.id === id))) return false;
+    const value = (id: string) => (Object.hasOwn(values, id) ? values[id] : undefined);
+    if (fields.some((field) => askValueProblem(field, value(field.id)) !== undefined)) return false;
+    const record: Record<string, AskFieldRecord> = {};
+    const secrets: [string, string][] = [];
+    for (const field of fields) {
+      const answer = value(field.id);
+      if (answer === undefined) continue;
+      if (field.kind === "secret" && typeof answer === "string") {
+        secrets.push([field.id, answer]);
+        record[field.id] = { provided: true };
+      } else record[field.id] = typeof answer === "string" ? redact(answer.trim()) : answer;
+    }
+    return ask.finish({ fields: record, secrets: new SecretAnswers(secrets), by: "user" });
+  }
+  // "Not now": dot is told the user declined. A question that has no way out keeps waiting.
+  decline(askId: string): boolean {
+    const ask = this.#ask;
+    if (!ask || ask.askId !== askId || !ask.declinable || this.stopped) return false;
+    return ask.finish({ declined: true, by: "user" });
+  }
 
+  // `taken`: the user chose to do this step themselves, so the computer is theirs at once.
   async takeover(
     reason: string,
     note: string,
     step?: string,
     lease?: ToolLease,
+    taken = false,
   ): Promise<TakeoverOutcome> {
     const generation = lease?.generation ?? this.generation;
     if (!generation) throw new SessionStoppedError();
@@ -880,14 +1087,18 @@ export class AgentSession {
       held: false,
       returning: false,
       manualUnconfirmed: false,
+      typed: false,
       released,
       resolve,
       step,
+      taken,
     };
     this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
     this.#screenReady = undefined;
     const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
+    const releasing = this.releaseInput();
+    if (releasing) draining.push(releasing);
     const observers = [...this.#controlObservers].filter(
       (observer) => observer.generation === generation,
     );
@@ -908,10 +1119,17 @@ export class AgentSession {
     void Promise.all(draining)
       .then(() => {
         if (this.#control !== record || this.stopped) return;
-        this.append("takeover.request", { requestId: record.requestId, reason, note }, step);
+        this.append(
+          "takeover.request",
+          { requestId: record.requestId, reason, note, ...(taken ? { by: "user" } : {}) },
+          step,
+        );
         record.held = true;
         this.status = "waiting_user";
         this.append("agent.state", { state: "waiting_user", reason: "takeover" });
+        // The user took it while dot was still handing it over.
+        if (record.taken && !taken)
+          this.append("control.change", { holder: "user", reason: "handoff_request" }, step);
       })
       .catch(() => {
         /* Keep the control fence if publication fails. Stop remains available. */
@@ -922,6 +1140,87 @@ export class AgentSession {
       ...(lease ? [lease.signal] : []),
     ]);
     return abortable(released, signal);
+  }
+  // The user takes the computer at any moment, whatever dot is doing. dot's step in flight is
+  // cancelled and its brain retired, so nothing of dot's reaches the computer until they hand it
+  // back; the task then carries on from its saved history. A held Pause already keeps dot at a step
+  // boundary, so its brain stays. Control the user already holds is theirs to keep.
+  takeControl(): string {
+    if (this.stopped) throw new SessionStoppedError();
+    const held = this.#control;
+    if (held) {
+      // The user takes the computer dot handed over: from now on it is theirs, as they asked. One
+      // still on its way is journaled theirs once it is held.
+      if (!held.taken) {
+        held.taken = true;
+        if (held.held)
+          this.append("control.change", { holder: "user", reason: "handoff_request" }, held.step);
+      }
+      return held.requestId;
+    }
+    const pause = this.#steps.pause;
+    if ((pause && pause.phase !== "paused") || this.#safetyResuming) throw new PausedStepError();
+    const generation = this.generation;
+    let resolve!: (outcome: TakeoverOutcome) => void;
+    const released = new Promise<TakeoverOutcome>((r) => {
+      resolve = r;
+    });
+    const user = { since: Date.now(), from: this.status, asked: false };
+    const record: ControlRecord = {
+      requestId: ulid(),
+      startedByGeneration: generation?.id ?? 0,
+      held: false,
+      returning: false,
+      manualUnconfirmed: false,
+      typed: false,
+      released,
+      resolve,
+      taken: true,
+      user,
+    };
+    this.#approvals.cancel(this.id);
+    this.#control = record; // Synchronous admission fence, before abort/drain or any await.
+    this.#screenReady = undefined;
+    // A held Pause can't be resumed while the user has the computer; viewers read that from it.
+    if (pause) this.#safetyChanged();
+    const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
+    const releasing = this.releaseInput();
+    if (releasing) draining.push(releasing);
+    if (generation && !pause) {
+      // dot's question waits for the hand-back, when dot can ask it again.
+      user.asked = this.#ask?.finish({ by: "control" }) ?? false;
+      for (const observer of [...this.#controlObservers])
+        if (observer.generation === generation)
+          try {
+            observer.notify();
+          } catch {
+            // The generation is retired below whatever an observer does.
+          }
+      if (this.isCurrent(generation)) this.retireBrain(generation);
+    }
+    for (const call of this.#active.values()) {
+      draining.push(call.settled);
+      call.abort.abort(new ControlHeldError());
+    }
+    void Promise.all(draining)
+      .then(() => {
+        if (this.#control !== record || this.stopped) return;
+        this.append("takeover.request", {
+          requestId: record.requestId,
+          reason: "other",
+          note: "",
+          by: "user",
+        });
+        record.held = true;
+        // A task at rest stays at rest; one at work waits for the user, as for dot's own hand-off.
+        if (record.user?.from === "idle" || this.safetyPause) return;
+        this.status = "waiting_user";
+        this.append("agent.state", { state: "waiting_user", reason: "takeover" });
+      })
+      .catch(() => {
+        /* Keep the control fence if publication fails. Stop remains available. */
+      });
+    return record.requestId;
   }
   endTakeover(requestId: string, note: string | undefined): boolean {
     const record = this.#control;
@@ -996,12 +1295,24 @@ export class AgentSession {
     if (note) this.post("steer", note);
     this.append(
       "takeover.end",
-      { requestId: record.requestId, ...(note ? { note } : {}), by: "user" },
+      {
+        requestId: record.requestId,
+        ...(note ? { note } : {}),
+        by: "user",
+        ...(record.typed ? { typed: true } : {}),
+      },
       record.step,
     );
     this.#control = undefined;
-    this.tainted = false;
-    this.status = this.safetyPause ? "paused" : "running";
+    const user = record.user;
+    if (!user) this.tainted = false;
+    this.status = this.safetyPause ? "paused" : user?.from === "idle" ? "idle" : "running";
+    if (user) {
+      this.#lookFirst = true;
+      this.lastFrameId = undefined;
+      this.#note(handedBack(Date.now() - user.since, user.asked));
+      if (this.safetyPause) this.#safetyChanged();
+    }
     record.resolve({ ...(note ? { note } : {}), by: "user" });
     this.#wake();
     return true;
@@ -1013,6 +1324,7 @@ export class AgentSession {
       await Promise.all(
         [...this.#active.values(), ...this.#manual.values()].map((call) => call.settled),
       );
+    if (this.#releasing) await this.#releasing;
   }
   async waitForTools(signal?: AbortSignal): Promise<void> {
     const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);
@@ -1022,6 +1334,7 @@ export class AgentSession {
         combined,
       );
     }
+    if (this.#releasing) await abortable(this.#releasing, combined);
     combined.throwIfAborted();
   }
   async waitForControl(signal?: AbortSignal): Promise<void> {
@@ -1100,7 +1413,11 @@ export class AgentSession {
     if (record) {
       try {
         if (record.held)
-          this.append("takeover.end", { requestId: record.requestId, by: "stop" }, record.step);
+          this.append(
+            "takeover.end",
+            { requestId: record.requestId, by: "stop", ...(record.typed ? { typed: true } : {}) },
+            record.step,
+          );
       } catch {
         // Stop and abort callbacks must still contain the desktop if the journal cannot write.
         console.error("agent takeover end could not be recorded");

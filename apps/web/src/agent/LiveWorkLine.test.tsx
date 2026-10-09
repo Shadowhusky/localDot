@@ -11,9 +11,9 @@ afterEach(() => {
 const step = (key: string, startT: number, state: WorkStep["state"] = "done"): WorkStep => ({
   key,
   testId: "step-row",
-  icon: "mouse-pointer-click",
   title: `Step ${key}`,
-  metric: "0.5 s",
+  meta: "",
+  time: "0:01",
   state,
   stateLabel: state,
   startT,
@@ -34,9 +34,9 @@ it("says what dot is doing while it works, with the turn's steps and time under 
   expect(summary()).toBe("Working · 3 steps · 1 failed · 0:42");
   fireEvent.click(screen.getByRole("button", { expanded: false }));
   expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-    "Step a0.5 s",
-    "Step b0.5 s",
-    "Step c0.5 s",
+    "Step a0:01",
+    "Step b0:01",
+    "Step c0:01",
   ]);
 });
 
@@ -58,7 +58,7 @@ it("names the wait or the end instead of narrating, and stops the clock", () => 
     <LiveWorkLine
       steps={steps}
       startMs={1000}
-      live={live("Has a question", { phase: "waiting", row: "question" })}
+      live={live("Needs your answer", { phase: "waiting", row: "question" })}
     />,
   );
   expect(summary()).toBe("Waiting for you · 3 steps · 1 failed");
@@ -84,12 +84,12 @@ it("opens again on what dot does next, never on the words of the wait", () => {
     <LiveWorkLine
       steps={steps}
       startMs={1000}
-      live={live("Has a question", { phase: "waiting", row: "question" })}
+      live={live("Needs your answer", { phase: "waiting", row: "question" })}
     />,
   );
   act(() => vi.advanceTimersByTime(HOLD_MS * 2));
   view.rerender(<LiveWorkLine steps={steps} startMs={1000} live={live("Typing PDF")} />);
   act(() => vi.advanceTimersByTime(HOLD_MS * 2));
-  expect(screen.queryByText("Has a question")).toBeNull();
+  expect(screen.queryByText("Needs your answer")).toBeNull();
   expect(screen.getByText("Typing PDF")).toBeTruthy();
 });

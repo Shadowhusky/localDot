@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { toComputerAction } from "../../../../../cells/brain/src/computer.ts";
+import { toComputerActions } from "../../../../../cells/brain/src/computer.ts";
 import { type EvalCell, waitForWindow } from "./cell.ts";
 import {
   decodeImage,
@@ -52,7 +52,7 @@ export interface EvalTask {
 // A capability counts as landed once the brain turns its actions into daemon actions.
 export function capabilityLanded(capability: Capability): boolean {
   const accepts = (input: Record<string, unknown>) =>
-    typeof toComputerAction(input, "pixels", "01M4DAHWJZV7VKKJNW9F0A3WXJ") !== "string";
+    typeof toComputerActions(input, "pixels", "01M4DAHWJZV7VKKJNW9F0A3WXJ") !== "string";
   if (capability === "modifier_click")
     return accepts({ action: "left_click", coordinate: [10, 10], text: "ctrl" });
   return (
@@ -154,6 +154,27 @@ function exportGimp(name: string): Step[] {
   ];
 }
 
+// The ellipse's right edge is read on the canvas it was drawn on: the white area found afterwards
+// is cut by the outline itself.
+function drawEllipse(): Step {
+  let drawn: Rect | undefined;
+  return {
+    name: "draw the ellipse",
+    ready: (v) => !!canvas(v),
+    act: (v) => {
+      const c = canvas(v) as Rect;
+      drawn = c;
+      const centre = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+      return stroke(ellipse(centre, c.w * 0.3, c.h * 0.3, 40));
+    },
+    done: (v) => {
+      if (!drawn || !v.frame) return false;
+      const [r, g, b] = pixel(v.frame, drawn.x + drawn.w * 0.8, drawn.y + drawn.h / 2);
+      return r + g + b < 300;
+    },
+  };
+}
+
 const gimpDrawShape: EvalTask = {
   id: "gimp-draw-shape",
   prompt:
@@ -168,21 +189,7 @@ const gimpDrawShape: EvalTask = {
         closeGimpWelcome,
         fitCanvas,
         { name: "pick the paintbrush", act: () => [key("p")] },
-        {
-          name: "draw the ellipse",
-          ready: (v) => !!canvas(v),
-          act: (v) => {
-            const c = canvas(v) as Rect;
-            const centre = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
-            return stroke(ellipse(centre, c.w * 0.3, c.h * 0.3, 40));
-          },
-          done: (v) => {
-            const c = canvas(v);
-            if (!c || !v.frame) return false;
-            const [r, g, b] = pixel(v.frame, c.x + c.w * 0.8, c.y + c.h / 2);
-            return r + g + b < 300;
-          },
-        },
+        drawEllipse(),
         ...exportGimp("shape.png"),
       ],
       "Drew the ellipse and exported ~/eval/shape.png.",
@@ -484,7 +491,7 @@ const NOTES = "The quick brown fox\nA fox jumps over the lazy dog\n";
 const textKeyboard: EvalTask = {
   id: "text-keyboard",
   prompt:
-    "Mousepad is open on ~/eval/notes.txt. Using Find and Replace (Ctrl+R), replace every 'fox' with 'cat', then save the file.",
+    "Mousepad is open on ~/eval/notes.txt. Using Find and Replace (Ctrl+R), replace every 'fox' with 'cat'. Then delete the last word of the second line, 'dog', keeping the space before it, and save the file.",
   requires: [],
   maxHandoffs: 2,
   timeoutMs: 300_000,
@@ -524,16 +531,23 @@ const textKeyboard: EvalTask = {
         { name: "replace the rest", act: (v) => [at(v, 276, 236)] },
         { name: "close the dialog", act: (v) => [at(v, 394, 236)], done: (v) => !dialog(v) },
         {
+          name: "delete the last word of the second line",
+          act: () => [key("ctrl+Home"), key("Down"), key("End"), key("BackSpace", 3)],
+        },
+        {
           name: "save",
           act: () => [key("ctrl+s")],
           done: (v) => windowTitled(v, /notes\.txt - Mousepad$/)?.title.startsWith("*") === false,
         },
       ],
-      "Replaced every fox with cat and saved.",
+      "Replaced every fox with cat, deleted the last word and saved.",
     );
   },
   check: async (cell) =>
-    textVerdict(textOf(cell, "eval/notes.txt"), NOTES.replaceAll("fox", "cat")),
+    textVerdict(
+      textOf(cell, "eval/notes.txt"),
+      NOTES.replaceAll("fox", "cat").replace("lazy dog", "lazy "),
+    ),
 };
 
 export const TASKS: readonly EvalTask[] = [

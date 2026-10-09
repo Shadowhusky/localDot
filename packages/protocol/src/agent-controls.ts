@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AskFieldId, AskFieldValue, MAX_ASK_FIELDS } from "./ask.ts";
 import { ULID_PATTERN } from "./ids.ts";
 
 const Id = z.string().regex(ULID_PATTERN);
@@ -9,6 +10,8 @@ const Text = (limit: number) =>
     .string()
     .max(limit)
     .refine((text) => text.length <= limit && text.isWellFormed() && !text.includes("\0"));
+// A plain question takes an option and/or text; a question with fields takes one value per field
+// (checked against the fields by the daemon); either can be declined ("Not now").
 export const QuestionAnswerRequest = z
   .strictObject({
     askId: Id,
@@ -19,11 +22,29 @@ export const QuestionAnswerRequest = z
     text: Text(2000)
       .refine((text) => text.trim().length > 0)
       .optional(),
+    fields: z
+      .record(AskFieldId, AskFieldValue)
+      .refine((fields) => Object.keys(fields).length <= MAX_ASK_FIELDS)
+      .optional(),
+    declined: z.literal(true).optional(),
   })
-  .refine((answer) => answer.option !== undefined || answer.text !== undefined);
+  .refine(
+    (answer) =>
+      [
+        answer.option !== undefined || answer.text !== undefined,
+        answer.fields !== undefined,
+        answer.declined !== undefined,
+      ].filter(Boolean).length === 1,
+  );
 export type QuestionAnswerRequest = z.infer<typeof QuestionAnswerRequest>;
 export const HandbackRequest = z.strictObject({ requestId: Id, note: Text(1000).optional() });
 export type HandbackRequest = z.infer<typeof HandbackRequest>;
+// The user took the computer themselves: the control their input and hand-back name.
+export const TakeControlReply = z.strictObject({ requestId: Id });
+export type TakeControlReply = z.infer<typeof TakeControlReply>;
+// With no task at work, the session the user's control belongs to.
+export const TakeComputerReply = z.strictObject({ sessionId: Id, requestId: Id });
+export type TakeComputerReply = z.infer<typeof TakeComputerReply>;
 export const BudgetRaiseRequest = z.strictObject({
   budgetUSD: z
     .number()

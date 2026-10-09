@@ -100,7 +100,7 @@ function Toolbar() {
         icon={paused ? "play" : "pause"}
         onClick={() => setPaused((value) => !value)}
       />
-      <IconButton label="Stop" icon="square" kbd={["Mod", "Shift", "."]} />
+      <IconButton label="Stop" icon="stop" kbd={["Mod", "Shift", "."]} />
     </div>
   );
 }
@@ -164,7 +164,7 @@ export function AtomsPage() {
               />
             </Specimen>
             <Specimen caption="Secondary">
-              <IconButton label="Stop task" icon="square" variant="secondary" />
+              <IconButton label="Stop task" icon="stop" variant="filled" round />
             </Specimen>
           </div>
           <div className="atoms-row">
@@ -177,7 +177,7 @@ export function AtomsPage() {
               <Specimen key={size} caption={`${size} px, 4 px apart`}>
                 <div className="atoms-pair" role="toolbar" aria-label={`${size} px, 4 px apart`}>
                   <IconButton label="Pause after this step" icon="pause" size={size} />
-                  <IconButton label="Stop" icon="square" size={size} />
+                  <IconButton label="Stop" icon="stop" size={size} />
                 </div>
               </Specimen>
             ))}

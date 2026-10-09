@@ -26,10 +26,16 @@ describe("bounded explicit Markdown display", () => {
       '<script>alert(1)</script><svg onload="alert(2)"><image href="https://example.test/x"/></svg>\n\n![remote](https://example.test/image.png)';
     const { container } = render(<SafeMarkdown text={text} />);
     expect(
-      container.querySelectorAll("script,svg,img,image,iframe,object,embed,audio,video,style"),
+      container.querySelectorAll(
+        "script,svg:not(.ui-icon),img,image,iframe,object,embed,audio,video,style",
+      ),
     ).toHaveLength(0);
-    expect(container.querySelectorAll("a")).toHaveLength(0);
-    expect(container.textContent).toContain("![remote](https://example.test/image.png)");
+    // A picture is never loaded: it shows as a chip linking to it, named by its host.
+    const links = screen.getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual(["Image · example.test"]);
+    expect(links[0]?.getAttribute("href")).toBe("https://example.test/image.png");
+    expect(links[0]?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(container.textContent).toContain("<script>alert(1)</script>");
   });
   it.each([
     "javascript:alert(1)",
@@ -44,6 +50,13 @@ describe("bounded explicit Markdown display", () => {
     expect(safeMarkdownLink(url)).toBeNull();
     const { container } = render(<SafeMarkdown text={`[label](${url})`} />);
     expect(container.querySelectorAll("a")).toHaveLength(0);
+  });
+  it("names the host a link goes to beside it", () => {
+    const { container } = render(
+      <SafeMarkdown text="Rules from the [finance handbook](https://www.handbook.example.test/finance#4)" />,
+    );
+    expect(screen.getByRole("link", { name: "finance handbook" })).toBeTruthy();
+    expect(container.querySelector(".md-host")?.textContent).toBe("handbook.example.test");
   });
   it("allows only explicit http/https navigation with opener and referrer protections", () => {
     render(
@@ -93,6 +106,90 @@ describe("the Markdown dot writes in a reply", () => {
     expect(container.querySelectorAll("hr")).toHaveLength(1);
   });
 
+  it("nests lists three deep, flattens deeper ones and keeps an ordered list's numbering", () => {
+    const { container } = render(
+      <SafeMarkdown
+        text={
+          "1. Opened the sheet\n2. Checked each row\n   - recomputed Net\n     - in a scratch column\n       - deeper still\n   - compared it\n3. Wrote the summary"
+        }
+      />,
+    );
+    const top = container.querySelector(".safe-markdown > ol") as HTMLElement;
+    expect([...top.children].map((item) => item.querySelector(".md-item")?.textContent)).toEqual([
+      "Opened the sheet",
+      "Checked each row",
+      "Wrote the summary",
+    ]);
+    const second = top.children[1] as HTMLElement;
+    expect(second.querySelectorAll(":scope > ul > li")).toHaveLength(2);
+    const third = second.querySelector(":scope > ul > li > ul") as HTMLElement;
+    expect([...third.children].map((item) => item.textContent)).toEqual([
+      "in a scratch column",
+      "deeper still",
+    ]);
+    expect(container.querySelectorAll("ol, ul")).toHaveLength(3);
+  });
+  it("draws a task list's boxes, done or still to do, without a control to change them", () => {
+    const { container } = render(
+      <SafeMarkdown text={"- [x] Check the totals\n- [ ] Add a chart"} />,
+    );
+    expect(screen.getAllByRole("img").map((box) => box.getAttribute("aria-label"))).toEqual([
+      "Done",
+      "To do",
+    ]);
+    expect(container.querySelector("input")).toBeNull();
+    expect(container.textContent).not.toContain("[x]");
+  });
+  it("right-aligns a column of numbers unless the table aligns it itself", () => {
+    render(
+      <SafeMarkdown
+        text={
+          "| Month | Net | Note |\n| --- | --- | :--- |\n| Jan | 9,000 | 12 |\n| Feb | $9,301 | 4 |"
+        }
+      />,
+    );
+    const cells = screen.getAllByRole("cell");
+    expect(cells.map((cell) => cell.getAttribute("data-align"))).toEqual([
+      null,
+      "right",
+      "left",
+      null,
+      "right",
+      "left",
+    ]);
+  });
+  it("redraws only the block that changes as a message streams in", () => {
+    const first = "## Totals\n\nAll months match.";
+    const { container, rerender } = render(<SafeMarkdown text={`${first}\n\nChecking`} />);
+    const heading = container.querySelector("h3");
+    const paragraph = container.querySelector("p");
+    rerender(<SafeMarkdown text={`${first}\n\nChecking each row`} />);
+    expect(container.querySelector("h3")).toBe(heading);
+    expect(container.querySelector("p")).toBe(paragraph);
+    expect(container.querySelectorAll("p")[1]?.textContent).toBe("Checking each row");
+  });
+  it("reads streaming text again at most every tenth of a second, and finished text at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(<SafeMarkdown text="One" streaming />);
+      rerender(<SafeMarkdown text="One two" streaming />);
+      rerender(<SafeMarkdown text="One two three" streaming />);
+      expect(container.textContent).toBe("One");
+      await act(async () => vi.advanceTimersByTime(100));
+      expect(container.textContent).toBe("One two three");
+      rerender(<SafeMarkdown text="One two three four." />);
+      expect(container.textContent).toBe("One two three four.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("gives a table's first row a row's height until its delimiter arrives", () => {
+    expect(parseMarkdown("Totals:\n\n| Month | Net |").blocks.at(-1)).toMatchObject({
+      kind: "paragraph",
+      pendingRow: true,
+    });
+    expect(parseMarkdown("| Month | Net |\n| --- | --- |").blocks[0]?.kind).toBe("table");
+  });
   it("names a code block by its language and copies only its code", async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

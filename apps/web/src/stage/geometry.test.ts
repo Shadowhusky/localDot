@@ -1,23 +1,27 @@
 import { cameraFor, toCanvas } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
-import { CURSOR_HEIGHT_PX, cursorPolygon, ringRadius, videoPlacement } from "./geometry.ts";
+import { cursorPolygon, cursorSizePx, targetRadius, videoPlacement } from "./geometry.ts";
 
 describe("stage geometry", () => {
-  it("builds the arrow with its tip at the origin, 24 px tall", () => {
-    const pts = cursorPolygon(1);
-    expect(pts[0]).toBe(0);
-    expect(pts[1]).toBe(0);
+  it("builds the macOS arrow with its tip at the origin, 18.1 px tall in its 22 px box", () => {
+    const pts = cursorPolygon();
+    expect(pts.slice(0, 2)).toEqual([0, 0]);
     const ys = pts.filter((_, i) => i % 2 === 1);
-    expect(Math.max(...ys)).toBeCloseTo(CURSOR_HEIGHT_PX, 1);
-    expect(Math.min(...ys)).toBe(0);
-    expect(cursorPolygon(2)[3]).toBeCloseTo((cursorPolygon(1)[3] ?? 0) * 2, 9);
+    expect(Math.max(...ys)).toBeCloseTo(18.1, 6);
+    expect(Math.min(...pts)).toBe(0);
   });
 
-  it("grows the ring from 60 % to 100 % over 225 ms and fades it out over 300 ms", () => {
-    expect(ringRadius(0)).toEqual({ outer: 22 * 0.6, alpha: 0.7 });
-    expect(ringRadius(0.75).outer).toBeCloseTo(22, 6);
-    expect(ringRadius(0.999).alpha).toBeCloseTo(0, 2);
-    expect(ringRadius(0.5).outer).toBeGreaterThan(ringRadius(0.25).outer);
+  it("sizes the cursor by the stage: 22 px from 800, 18 from 600, 16 below", () => {
+    expect(cursorSizePx(1024)).toBe(22);
+    expect(cursorSizePx(800)).toBe(22);
+    expect(cursorSizePx(799)).toBe(18);
+    expect(cursorSizePx(600)).toBe(18);
+    expect(cursorSizePx(374)).toBe(16);
+  });
+
+  it("rounds a focus ring's padded box by 9 px, or half its height when smaller", () => {
+    expect(targetRadius(40)).toBe(9);
+    expect(targetRadius(10)).toBe(8);
   });
 
   it("places a frame of another size into the session screen and flags it", () => {

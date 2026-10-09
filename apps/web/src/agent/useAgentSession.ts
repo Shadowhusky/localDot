@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { LiveSession } from "../session/useLiveSession.ts";
-import { type AgentSnapshot, loadAgentSnapshot } from "./api.ts";
+import { AgentResponseError, type AgentSnapshot, loadAgentSnapshot } from "./api.ts";
 import { type AgentModel, emptyAgentModel } from "./model.ts";
 
 const EMPTY_AGENT_MODEL = emptyAgentModel();
+// A task at rest whose log stops short of its end (the daemon went away under it) is over all the
+// same.
+const CUT_SHORT = { reason: "stopped" } as const;
 
 interface SnapshotView {
   readonly api: ApiClient;
@@ -28,6 +31,8 @@ export interface AgentSessionView {
   // A verified terminal snapshot permits memory history actions, never task or desktop input.
   readonly readFresh?: boolean;
   readonly authorityEpoch?: number | null;
+  // The task's history so far has arrived, so its thread can be drawn whole.
+  readonly history?: boolean;
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
 }
@@ -45,6 +50,8 @@ export function useAgentSession(
   const feed = live.agentFeed;
   const [view, setView] = useState<SnapshotView | null>(null);
   const refresh = useRef<() => void>(() => {});
+  const resting = useRef(false);
+  resting.current = !!live.resting;
   useEffect(() => {
     if (!cellId || !sessionId) {
       setView(null);
@@ -74,7 +81,10 @@ export function useAgentSession(
         else if (matches()) queued = true;
       } catch (error) {
         if (matches() && epoch === feed.read().epoch) {
-          const missing = error instanceof ApiError && error.status === 404;
+          // A task at rest may have run on another computer; it has no status to give here.
+          const missing =
+            (error instanceof ApiError && error.status === 404) ||
+            (resting.current && error instanceof AgentResponseError);
           setView((old) => ({
             api,
             cellId,
@@ -114,7 +124,7 @@ export function useAgentSession(
     refresh.current = invalidate;
     void poll();
     const timer = setInterval(() => {
-      if (!feed.read().model.ended) void poll();
+      if (!feed.read().model.ended && !resting.current) void poll();
     }, 1000);
     return () => {
       disposed = true;
@@ -126,8 +136,21 @@ export function useAgentSession(
   }, [api, cellId, sessionId, feed]);
   const reconcile = useCallback(() => refresh.current(), []);
   const current = feed.read();
+  const atRest = !!live.resting;
+  const model = useMemo(
+    () => (atRest && !current.model.ended ? { ...current.model, ended: CUT_SHORT } : current.model),
+    [atRest, current.model],
+  );
   const owned = view?.api === api && view.cellId === cellId && view.sessionId === sessionId;
-  const snapshot = owned ? view.snapshot : null;
+  // A task at rest has nothing left to do, whether or not the daemon still has its status.
+  const ended = useMemo<AgentSnapshot | null>(
+    () =>
+      atRest && sessionId
+        ? { sessionId, cellId: cellId ?? "", status: "ended", toolCalls: 0 }
+        : null,
+    [atRest, sessionId, cellId],
+  );
+  const snapshot = (owned ? view.snapshot : null) ?? ended;
   const matches = current.cellId === cellId && current.sessionId === sessionId;
   const ownershipAligned =
     (current.model.screen
@@ -158,11 +181,12 @@ export function useAgentSession(
   );
   return {
     sessionId,
-    model: matches ? current.model : EMPTY_AGENT_MODEL,
+    model: matches ? model : EMPTY_AGENT_MODEL,
     snapshot,
     availability: owned ? view.availability : "loading",
     error: current.streamError ?? (owned ? view.error : null),
     authorityEpoch: owned ? view.epoch : null,
+    history: matches && current.history,
     readFresh,
     fresh: Boolean(
       matches &&

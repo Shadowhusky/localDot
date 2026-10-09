@@ -70,7 +70,9 @@ describe("recorded GUI delivery survives the actual row/render chain", () => {
       );
       const row = within(screen.getByTestId("step-row"));
       // Only input that never reached the computer is called out; delivered input says nothing.
-      expect(row.queryAllByText("Not sent", { exact: true })).toHaveLength(delivered ? 0 : 1);
+      expect(row.queryAllByText("The target changed before input.", { exact: true })).toHaveLength(
+        delivered ? 0 : 1,
+      );
       expect(
         row.getByText(delivered ? 'Clicked "Name Box"' : 'Click "Name Box"', { exact: true }),
       ).toBeTruthy();

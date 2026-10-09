@@ -1,0 +1,6 @@
+#!/bin/bash
+# LibreOffice without a session bus keeps its menus in its own window: with the menu bar's
+# registrar in reach it moves them to the top bar but leaves the hidden in-window menus in the
+# accessibility tree, where dot would find and click them. Accessibility reaches it through the
+# AT_SPI_BUS root property instead.
+DBUS_SESSION_BUS_ADDRESS=disabled: exec /usr/bin/libreoffice "$@"

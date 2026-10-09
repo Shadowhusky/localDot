@@ -14,6 +14,7 @@ import {
   turnOutcome,
 } from "@localdot/codex-harness";
 import {
+  earlierRecord,
   type InboxItem,
   type PauseSnapshot,
   type ToolResult,
@@ -533,8 +534,9 @@ export class CodexDriver {
         .filter((m) => m.role === "assistant" && typeof m.content === "string")
         .at(-1)?.content;
     const marks = { done: "x", doing: ">", skipped: "-", todo: " " };
+    const earlier = earlierRecord(session.earlier);
     const text = redact(
-      `localDot restarted you, so the earlier conversation is gone.\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}${this.#resumeNotes.get(session) ? `\n${this.#resumeNotes.get(session)}` : ""}`,
+      `localDot restarted you, so the earlier conversation is gone.${earlier ? `\n${earlier}` : ""}\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}${this.#resumeNotes.get(session) ? `\n${this.#resumeNotes.get(session)}` : ""}`,
     );
     if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new Error("The task recap is too large.");
     return text;
@@ -1034,7 +1036,11 @@ export class CodexDriver {
       const initial = persist(unread.items);
       const text = recap
         ? this.#recap(session, redact, suffix)
-        : redact([session.task, ...initial.map((i) => i.text)].join("\n\n"));
+        : redact(
+            [earlierRecord(session.earlier), session.task, ...initial.map((i) => i.text)]
+              .filter((part) => part !== undefined)
+              .join("\n\n"),
+          );
       if (Buffer.byteLength(text) > MAX_PROMPT_BYTES)
         throw new Error("The task input is too large.");
       check();

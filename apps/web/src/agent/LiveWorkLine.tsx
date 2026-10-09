@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { count } from "../copy/format.ts";
+import { count, spendText } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -56,9 +56,12 @@ export function LiveWorkLine({
   startMs,
   live,
   ended,
+  spend,
 }: {
   steps: readonly WorkStep[];
   startMs: number | null;
+  // What the turn cost, said once its work is over.
+  spend?: { usd: number; estimated: boolean };
   // Given for the latest turn while its task has not ended.
   live: LiveWork | null;
   ended?: "done" | "stopped" | "error";
@@ -97,6 +100,7 @@ export function LiveWorkLine({
     count(steps.length, "step", "steps"),
     failed ? `${failed} failed` : "",
     running && elapsed !== null ? clock(elapsed) : "",
+    !running && spend ? spendText(spend.usd, spend.estimated) : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -123,8 +127,26 @@ export function LiveWorkLine({
         className="thread-work-steps"
         summary={
           <>
-            {summary}
-            {meta && <span className="thread-work-meta num"> · {meta}</span>}
+            <StatusGlyph
+              className="thread-work-glyph"
+              state={
+                running
+                  ? "doing"
+                  : waiting
+                    ? PAUSED.has(live?.row)
+                      ? "skipped"
+                      : "ask"
+                    : ended === "stopped"
+                      ? "skipped"
+                      : ended === "error"
+                        ? "failed"
+                        : "done"
+              }
+            />
+            <span>
+              {summary}
+              {meta && <span className="thread-work-meta num"> · {meta}</span>}
+            </span>
           </>
         }
         open={open}
@@ -136,7 +158,7 @@ export function LiveWorkLine({
               <li key={step.key} className="thread-work-step">
                 <StatusGlyph state={step.state} />
                 <span className="thread-work-title">{step.title}</span>
-                {step.metric && <span className="thread-work-metric num">{step.metric}</span>}
+                {step.time && <span className="thread-work-time num">{step.time}</span>}
               </li>
             ))}
           </ol>

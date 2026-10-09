@@ -1,7 +1,9 @@
-import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
+import { keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
 import {
   type DragEvent,
+  memo,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -15,7 +17,6 @@ import type { CellSummary } from "../cells/types.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
 import { afterMotion } from "../ui/finished.ts";
@@ -25,7 +26,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
-import { TextArea } from "../ui/TextArea.tsx";
+import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
 import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
@@ -35,6 +36,13 @@ import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
 import { DeliveryFailure, deliverText, type MessageMode, type TextDelivery } from "./write-api.ts";
+
+// dot waits on its model for these, and anything the user says sends it back to the model.
+const TRIES_AGAIN = new Set<string | undefined>([
+  STALL.modelBusy,
+  STALL.modelRefused,
+  STALL.modelUnavailable,
+]);
 
 const LIMIT = 8000;
 // A phone: Return starts a new line there, and Send sends.
@@ -54,13 +62,17 @@ export interface ComposerProps {
   keysOpen: boolean;
   receiveKey: KeyIntake["receive"];
   configured?: boolean;
-  // The main model's name, offered on a new task as the way to change it.
-  model?: string;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
-  // The running task's Stop, while there is one.
-  stop?: { run(): void; busy: boolean; enabled: boolean };
+  // While dot waits on a question: a message answers it, or turns it down so dot reads the message
+  // and its files.
+  reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
+  // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
+  layout?: "card" | "pill";
 }
+// What became of a message sent as a reply: it answered the question, it turned the question down
+// and goes on as a message, it did not arrive, or it was held with the reason why.
+export type ReplyOutcome = "answered" | "declined" | "failed" | { readonly hold: string };
 export interface Delivery {
   readonly id: number;
   readonly request: TextDelivery;
@@ -77,15 +89,20 @@ export interface Delivery {
   readonly at: number;
   readonly phase: "sending" | "accepted" | "refused" | "uncertain";
 }
+// The user holds the computer with no task: dot hears from them once they hand it back.
+const holding = (props: ComposerProps) =>
+  !!props.agent.snapshot?.holder && !!props.agent.snapshot.pendingTakeover;
 const readyCell = (props: ComposerProps) =>
   props.known &&
   !props.pending &&
   !props.controlBlocked &&
+  !holding(props) &&
   props.cell?.state === "ready" &&
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
 function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageMode {
-  if (!props.agent.sessionId || props.agent.model.ended) return "new";
+  if (!props.agent.sessionId || props.agent.model.ended || props.agent.snapshot?.holder)
+    return "new";
   return props.agent.snapshot?.status === "idle" ? "followup" : selected;
 }
 // Why nothing can be sent to the computer now, in the order someone would fix it.
@@ -99,6 +116,7 @@ function computerReason(props: ComposerProps): string | undefined {
     return "Turn on your computer first.";
   if (props.cell.paused) return "Resume your computer first.";
   if (props.controlBlocked) return "You can send once the task is ready.";
+  if (holding(props)) return "Hand back the computer, then message dot.";
   return undefined;
 }
 // Why nothing can be sent now, as Send says it.
@@ -119,6 +137,51 @@ const editable = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])");
 const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+// What the composer shows of its text: whether there is any, and its length once that shows.
+interface TextShape {
+  readonly blank: boolean;
+  readonly length: number;
+}
+const shapeOf = (input: HTMLTextAreaElement): TextShape => ({
+  blank: !input.value.trim(),
+  length: input.value.length > NEAR ? input.value.length : 0,
+});
+
+type FieldEvents = Pick<
+  TextAreaProps,
+  "onInput" | "onPaste" | "onKeyDown" | "onCompositionStart" | "onCompositionEnd"
+>;
+// The text lives here and only here. It renders when what it says changes, never per keystroke
+// and never with the task's updates.
+const ComposerField = memo(function ComposerField({
+  label,
+  placeholder,
+  unavailable,
+  describedBy,
+  events,
+}: {
+  label: string;
+  placeholder: string;
+  unavailable: boolean;
+  describedBy?: string;
+  events: FieldEvents;
+}) {
+  return (
+    <TextArea
+      bare
+      className="composer-field"
+      aria-label={label}
+      placeholder={placeholder}
+      maxRows={8}
+      maxLength={LIMIT}
+      autoComplete="off"
+      readOnly={unavailable}
+      aria-disabled={unavailable || undefined}
+      aria-describedby={describedBy}
+      {...events}
+    />
+  );
+});
 
 // A control that comes and goes along the row: it grows in where it sits, and on its way out it
 // shrinks away still showing what it last did, out of reach.
@@ -144,8 +207,9 @@ export function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [length, setLength] = useState(0);
-  const [blank, setBlank] = useState(true);
+  const [text, setText] = useState<TextShape>({ blank: true, length: 0 });
+  const shown = useRef(text);
+  const problemShown = useRef(problem);
   const [menu, setMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -165,6 +229,7 @@ export function Composer(props: ComposerProps) {
     sessionId: props.agent.sessionId,
   });
   const composing = useRef(false);
+  const replying = useRef(false);
   const mounted = useRef(true);
   const wasKeysOpen = useRef(props.keysOpen);
   // Without a thread to wait in, a message waits above the composer.
@@ -175,6 +240,7 @@ export function Composer(props: ComposerProps) {
   useLayoutEffect(() => {
     current.current = props;
     guardOwner.current = guard;
+    problemShown.current = problem;
   });
   useLayoutEffect(() => {
     const previous = identity.current;
@@ -284,10 +350,18 @@ export function Composer(props: ComposerProps) {
     return false;
   }, [delivery, messages]);
 
-  const measure = (input: HTMLTextAreaElement) => {
-    setLength(input.value.length);
-    setBlank(!input.value.trim());
-  };
+  const measure = useCallback((input: HTMLTextAreaElement) => {
+    const next = shapeOf(input);
+    if (next.blank === shown.current.blank && next.length === shown.current.length) return;
+    shown.current = next;
+    setText(next);
+  }, []);
+  // A key taken out, or discarded, changes the text under the composer.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a notice's change is the trigger.
+  useLayoutEffect(() => {
+    const input = form.current?.querySelector("textarea");
+    if (input) measure(input);
+  }, [guard.notice, measure]);
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
     announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
@@ -394,7 +468,7 @@ export function Composer(props: ComposerProps) {
   };
   const submit = (later = false) => {
     const input = field();
-    if (!input || pending.current || composing.current) return;
+    if (!input || pending.current || composing.current || replying.current) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
@@ -425,6 +499,32 @@ export function Composer(props: ComposerProps) {
       setProblem("Write a message of 1–8,000 characters.");
       return;
     }
+    const reply = now.reply;
+    if (reply && chosen !== "new") {
+      replying.current = true;
+      setProblem(null);
+      void reply(text, uploads.rows.length > 0).then((outcome) => {
+        replying.current = false;
+        if (!mounted.current) return;
+        const box = field();
+        if (outcome === "declined") {
+          if (box?.value === text) deliver(text, chosen, later);
+        } else if (outcome === "answered") {
+          if (box?.value === text) {
+            box.value = "";
+            measure(box);
+          }
+        } else
+          setProblem(
+            outcome === "failed" ? "Your reply didn't reach dot. Try again." : outcome.hold,
+          );
+      });
+      return;
+    }
+    deliver(text, chosen, later);
+  };
+  const deliver = (text: string, chosen: MessageMode, later: boolean) => {
+    const now = current.current;
     const attached = uploads.forMessage();
     if (!attached) {
       setProblem("Finish or remove unconfirmed uploads before sending.");
@@ -499,9 +599,65 @@ export function Composer(props: ComposerProps) {
   };
 
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
-  if (!choosing && menu) setMenu(false);
+  // A phone's field has room for its text and Send only; there a message is read after the step.
+  const pill = props.layout === "pill";
+  if ((!choosing || pill) && menu) setMenu(false);
+  const typing = useRef({ submit, touch, choosing });
+  useLayoutEffect(() => {
+    typing.current = { submit, touch, choosing };
+  });
+  const events = useMemo<FieldEvents>(
+    () => ({
+      onCompositionStart: () => {
+        composing.current = true;
+      },
+      onCompositionEnd: () => {
+        composing.current = false;
+      },
+      onInput: (event) => {
+        revision.current += 1;
+        guardOwner.current.input(event.currentTarget, event.nativeEvent);
+        measure(event.currentTarget);
+        if (problemShown.current !== null) setProblem(null);
+      },
+      onPaste: (event) => {
+        const input = event.currentTarget;
+        if (input.readOnly) return;
+        event.preventDefault();
+        const pasted = event.clipboardData.getData("text/plain");
+        if (
+          pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
+          LIMIT
+        )
+          input.value = " ".repeat(LIMIT + 1); // Bounded overflow sentinel, never a truncated key.
+        else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
+        revision.current += 1;
+        guardOwner.current.check(input);
+        measure(input);
+        if (problemShown.current !== null) setProblem(null);
+      },
+      onKeyDown: (event) => {
+        const { submit, touch, choosing } = typing.current;
+        if (
+          touch ||
+          event.key !== "Enter" ||
+          event.shiftKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.nativeEvent.isComposing ||
+          composing.current
+        )
+          return;
+        event.preventDefault();
+        // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
+        if (event.altKey && !choosing) return;
+        if (event.currentTarget.value.trim()) submit(event.altKey);
+      },
+    }),
+    [measure],
+  );
   const connect = mode === "new" && props.configured === false;
-  const near = length > NEAR && length <= LIMIT;
+  const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
   const reason = blockedReason(props, online, mode);
   const sendReason = sending
@@ -510,27 +666,36 @@ export function Composer(props: ComposerProps) {
       ? "Choose what to do with your last message first."
       : guard.notice
         ? "Discard the key or move it to Keys first."
-        : (reason ??
-          (uploads.blocked
-            ? "Wait for your files to finish uploading."
-            : blank
-              ? "Write a message first."
-              : undefined));
+        : connect
+          ? "Choose a model first"
+          : (reason ??
+            (uploads.blocked
+              ? "Wait for your files to finish uploading."
+              : text.blank
+                ? "Write a message first."
+                : undefined));
   const attachReason = guard.notice
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
       ? "Wait until your message is sent."
-      : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
-  const sendLabel =
-    mode === "new" ? "Start task" : mode === "followup" ? "Send follow-up" : "Send now";
+      : (reason ?? (takeover ? "Add files once you hand back." : undefined));
+  // A message to a conversation at rest starts its next task, but reads as any other message.
+  const newConversation = mode === "new" && !props.agent.sessionId;
+  const sendLabel = newConversation
+    ? "Start task"
+    : mode === "new"
+      ? "Send"
+      : mode === "followup"
+        ? "Send follow-up"
+        : "Send now";
   const note =
-    mode === "new"
+    mode === "new" || takeover
       ? undefined
-      : takeover
-        ? "You keep control of the computer"
-        : props.agent.snapshot?.status === "paused"
-          ? "Sending won't resume the task"
-          : undefined;
+      : props.agent.snapshot?.status === "paused"
+        ? TRIES_AGAIN.has(props.agent.model.state?.reason)
+          ? "Sending tries the model again"
+          : "Sending won't resume the task"
+        : undefined;
   const notices = [
     problem && { text: problem, alert: true },
     uploads.problem && { text: uploads.problem, alert: true },
@@ -566,6 +731,7 @@ export function Composer(props: ComposerProps) {
       <form
         ref={form}
         className="composer-card"
+        data-layout={pill ? "pill" : undefined}
         aria-label="Message dot"
         data-dragging={dragging || undefined}
         onSubmit={(event) => {
@@ -613,113 +779,39 @@ export function Composer(props: ComposerProps) {
         <Collapse open={rows.length > 0} className="composer-files">
           <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
         </Collapse>
-        <TextArea
-          bare
-          className="composer-field"
-          aria-label={mode === "new" ? "New task" : "Message"}
-          placeholder={mode === "new" ? "Ask dot to do something…" : "Message dot…"}
-          maxRows={8}
-          maxLength={LIMIT}
-          autoComplete="off"
-          readOnly={unavailable}
-          aria-disabled={unavailable || undefined}
-          aria-describedby={guard.notice ? keyNotice : undefined}
-          onCompositionStart={() => {
-            composing.current = true;
-          }}
-          onCompositionEnd={() => {
-            composing.current = false;
-          }}
-          onInput={(event) => {
-            revision.current += 1;
-            guardOwner.current.check(event.currentTarget);
-            measure(event.currentTarget);
-            setProblem(null);
-          }}
-          onPaste={(event) => {
-            const input = event.currentTarget;
-            if (input.readOnly) return;
-            event.preventDefault();
-            const pasted = event.clipboardData.getData("text/plain");
-            if (
-              pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
-              LIMIT
-            )
-              input.value = " ".repeat(LIMIT + 1); // Bounded overflow sentinel, never a truncated key.
-            else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
-            revision.current += 1;
-            guardOwner.current.check(input);
-            measure(input);
-            setProblem(null);
-          }}
-          onKeyDown={(event) => {
-            if (
-              touch ||
-              event.key !== "Enter" ||
-              event.shiftKey ||
-              event.ctrlKey ||
-              event.metaKey ||
-              event.nativeEvent.isComposing ||
-              composing.current
-            )
-              return;
-            event.preventDefault();
-            // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
-            if (event.altKey && !choosing) return;
-            if (event.currentTarget.value.trim()) submit(event.altKey);
-          }}
+        <ComposerField
+          label={newConversation ? "New task" : "Message"}
+          placeholder={
+            newConversation && !pill
+              ? "Ask dot to do something"
+              : props.reply
+                ? "Answer dot"
+                : "Message dot"
+          }
+          unavailable={!!unavailable}
+          describedBy={guard.notice ? keyNotice : undefined}
+          events={events}
         />
         <div className="composer-bar">
           <FileButton
             label="Attach files"
             icon="paperclip"
+            size={pill ? 36 : 28}
+            round={pill}
             multiple
             onFiles={(files) => uploads.select(files)}
             disabledReason={attachReason}
           />
           <div className="composer-hint">
-            {mode === "new" && props.configured !== false && props.model ? (
-              <Button
-                variant="quiet"
-                size="sm"
-                className="composer-model"
-                aria-label={`Model: ${props.model}. Change in Settings`}
-                onClick={(event) => props.onSettings?.(event.currentTarget)}
-              >
-                <span className="composer-model-name">{props.model}</span>
-                <Icon name="chevron-down" size={12} />
-              </Button>
-            ) : (
-              note && <span className="composer-note">{note}</span>
-            )}
+            {note && <span className="composer-note">{note}</span>}
           </div>
           <Pop shown={near}>
             {near && (
-              <span className="composer-count num">{`${(LIMIT - length).toLocaleString()} left`}</span>
+              <span className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</span>
             )}
           </Pop>
-          <Pop shown={!!props.stop}>
-            {props.stop && (
-              <IconButton
-                className="composer-stop"
-                variant="secondary"
-                size={touch ? 32 : 28}
-                icon="square"
-                label="Stop task"
-                kbd={["Mod", "Shift", "."]}
-                disabledReason={
-                  props.stop.busy
-                    ? "Stopping…"
-                    : props.stop.enabled
-                      ? undefined
-                      : "Reconnecting to the task…"
-                }
-                onClick={props.stop.run}
-              />
-            )}
-          </Pop>
-          <Pop shown={choosing}>
-            {choosing && (
+          <Pop shown={choosing && !pill}>
+            {choosing && !pill && (
               <IconButton
                 ref={more}
                 className="composer-more"
@@ -747,33 +839,17 @@ export function Composer(props: ComposerProps) {
               Send after this task
             </MenuItem>
           </Menu>
-          <Pop shown={connect}>
-            {connect && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  const input = field();
-                  if (input) props.onSettings?.(input);
-                }}
-              >
-                Connect a model
-              </Button>
-            )}
-          </Pop>
-          {!connect && (
-            <IconButton
-              type="submit"
-              className="composer-send"
-              variant="primary"
-              size={touch ? 32 : 28}
-              icon="arrow-up"
-              label={sendLabel}
-              kbd={touch ? undefined : ["Enter"]}
-              disabledReason={sendReason}
-              aria-describedby={guard.notice ? keyNotice : undefined}
-            />
-          )}
+          <IconButton
+            type="submit"
+            className="composer-send"
+            variant="primary"
+            size={32}
+            icon="arrow-up"
+            label={sendLabel}
+            kbd={touch ? undefined : ["Enter"]}
+            disabledReason={sendReason}
+            aria-describedby={guard.notice ? keyNotice : undefined}
+          />
         </div>
         <div className="composer-drop" aria-hidden="true">
           <Icon name="paperclip" />

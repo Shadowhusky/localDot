@@ -1,13 +1,15 @@
-import { providerById } from "@localdot/providers";
-import { useId } from "react";
+import { isOpenRouterRouterId, providerById } from "@localdot/providers";
+import { useId, useRef } from "react";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
+import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import {
+  customModelAllowed,
   type ModelRole,
   matchingKeys,
   type PickerKey,
@@ -16,16 +18,16 @@ import {
   type SubscriptionModel,
 } from "./choices.ts";
 import { CHATGPT } from "./chooser.ts";
-import { ModelChooser } from "./ModelChooser.tsx";
+import { ModelChooser, modelNote, providerNote } from "./ModelChooser.tsx";
 
 const ROLE: Record<ModelRole, { title: string; description: string }> = {
-  main: { title: "Main model", description: "Does the work. It needs a model that can use tools." },
-  fast: { title: "Fast model", description: "Optional. Writes titles and summaries." },
-  local: {
-    title: "Local model",
-    description: "Optional. Runs in LM Studio or Ollama on this Mac.",
-  },
+  main: { title: "Main model", description: "Does the work" },
+  fast: { title: "Fast model", description: "Titles, summaries and quick checks" },
+  local: { title: "Local model", description: "Runs on this Mac with LM Studio or Ollama" },
 };
+
+// Models that work the screen, which the main model's heading tags; their note says no more.
+const SCREEN_TIERS = new Set(["native", "vision-tools"]);
 
 const TIER: Record<string, string> = {
   native: "Computer use",
@@ -33,6 +35,9 @@ const TIER: Record<string, string> = {
   "text-only": "Tools",
   "no-tools": "Text only",
 };
+
+// Picked from the Key row's list, it opens the form that adds one instead of choosing a key.
+const ADD_KEY = "\u0000add-key";
 
 export interface RoleCardProps {
   modelRole: ModelRole;
@@ -49,6 +54,18 @@ export interface RoleCardProps {
   onPrice?(value: { input: string; output: string }): void;
 }
 
+// Notes from the catalog may come without a full stop; joined into one line, each needs one.
+const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+function keyNote(provider: ReturnType<typeof providerById>): string | undefined {
+  if (!provider) return undefined;
+  if (provider.plan) return "Use a key from this plan, not a pay-as-you-go key.";
+  if (provider.client === "azure" || provider.custom)
+    return "The endpoint's address is set with the key.";
+  return undefined;
+}
+
+// One model role as a group of rows: the main model always, the others behind a switch.
 export function RoleCard({
   modelRole: role,
   value,
@@ -69,57 +86,81 @@ export function RoleCard({
     .find((row) => row.id === value?.provider)
     ?.models.find((model) => model.id === value?.model)?.tier;
   const on = role === "main" || !!value;
-  return (
-    <section className="settings-card" aria-labelledby={titleId} data-role={role}>
-      {role === "main" ? (
-        <header className="settings-card-head">
-          <div>
-            <h4 id={titleId} className="settings-card-title">
-              {title}
-            </h4>
-            <p className="settings-card-note">{description}</p>
-          </div>
-          {tier && <Badge>{TIER[tier]}</Badge>}
-        </header>
-      ) : (
-        <Switch
-          className="settings-card-switch"
-          label={
-            <span id={titleId} className="settings-card-title">
-              {title}
-            </span>
-          }
-          description={description}
-          checked={!!value && !inactive}
-          disabledReason={inactive ? "Off while the main model uses the ChatGPT plan." : undefined}
-          onCheckedChange={(checked) => onChange(checked ? { provider: "", model: "" } : undefined)}
+  const typed =
+    !!provider &&
+    customModelAllowed(provider) &&
+    !providers.find((row) => row.id === value?.provider)?.models.length;
+  const notes =
+    on && !inactive && value
+      ? [
+          role === "main" && "Needs a model that can use a computer.",
+          providerNote(value.provider),
+          typed && "Type the model ID as the server names it.",
+          (!SCREEN_TIERS.has(tier ?? "") || isOpenRouterRouterId(value.provider, value.model)) &&
+            modelNote(value, providers),
+          provider && !provider.notOffered && !provider.local && keyNote(provider),
+          manualPrice &&
+            value.provider !== CHATGPT &&
+            "Prices are US dollars per million tokens, from 0 to 10,000; one may be 0. Used to set aside a task's spending. It isn't your bill.",
+        ].filter((note): note is string => Boolean(note))
+      : [];
+  const rows = (value || role === "main") && (
+    <>
+      <ModelChooser
+        modelRole={role}
+        value={value ?? { provider: "", model: "" }}
+        providers={providers}
+        subscriptionModels={subscriptionModels}
+        onChange={onChange}
+      />
+      {value && provider && !provider.notOffered && (
+        <RoleDetails
+          modelRole={role}
+          value={value}
+          keys={keys}
+          keyLayer={keyLayer}
+          manualPrice={manualPrice}
+          onChange={onChange}
+          onKeys={onKeys}
+          onPrice={onPrice}
         />
       )}
-      <Collapse open={on && !inactive}>
-        {value || role === "main" ? (
-          <div className="settings-card-body">
-            <ModelChooser
-              modelRole={role}
-              value={value ?? { provider: "", model: "" }}
-              providers={providers}
-              subscriptionModels={subscriptionModels}
-              onChange={onChange}
-            />
-            {value && provider && !provider.notOffered && (
-              <RoleDetails
-                modelRole={role}
-                value={value}
-                keys={keys}
-                keyLayer={keyLayer}
-                manualPrice={manualPrice}
-                onChange={onChange}
-                onKeys={onKeys}
-                onPrice={onPrice}
-              />
-            )}
-          </div>
-        ) : null}
-      </Collapse>
+    </>
+  );
+  return (
+    <section className="settings-role" aria-labelledby={titleId} data-role={role}>
+      {role === "main" ? (
+        <>
+          <GroupHead
+            id={titleId}
+            title={title}
+            aside={
+              <>
+                {description}
+                {tier && <Badge className="settings-tier">{TIER[tier]}</Badge>}
+              </>
+            }
+          />
+          <Group>{rows}</Group>
+        </>
+      ) : (
+        <Group>
+          <Switch
+            className="ui-group-row"
+            label={<span id={titleId}>{title}</span>}
+            description={inactive ? undefined : description}
+            checked={!!value && !inactive}
+            disabledReason={
+              inactive ? "Off while the main model uses the ChatGPT plan." : undefined
+            }
+            onCheckedChange={(checked) =>
+              onChange(checked ? { provider: "", model: "" } : undefined)
+            }
+          />
+          <Collapse open={on && !inactive}>{rows}</Collapse>
+        </Group>
+      )}
+      {notes.length > 0 && <GroupNote>{notes.map(sentence).join(" ")}</GroupNote>}
     </section>
   );
 }
@@ -137,6 +178,7 @@ function RoleDetails({
   RoleCardProps,
   "modelRole" | "keys" | "keyLayer" | "manualPrice" | "onChange" | "onKeys" | "onPrice"
 > & { value: RoleChoice }) {
+  const row = useRef<HTMLDivElement>(null);
   const provider = providerById(value.provider);
   if (!provider) return null;
   const available = matchingKeys(provider, keys);
@@ -148,46 +190,60 @@ function RoleDetails({
       : !available.length && !missing
         ? `No keys for ${provider.name} yet. Add one.`
         : undefined;
-  const keyNote = provider.plan
-    ? "Use a key from this plan, not a pay-as-you-go key."
-    : provider.client === "azure" || provider.custom
-      ? "The endpoint's address is set with the key."
-      : undefined;
+  const addKey = (trigger: HTMLButtonElement) => onKeys(role, provider.id, trigger);
   return (
     <>
       {keyed && (
-        <div className="settings-key-row">
-          <Field label="Key" description={keyNote} disabledReason={keyReason}>
-            <Select
-              value={value.key ?? ""}
-              placeholder="Choose a key"
-              items={[
-                ...(missing && value.key
-                  ? [
-                      {
-                        value: value.key,
-                        label: value.key,
-                        disabledReason: "Missing, or bound to another provider",
-                      },
-                    ]
-                  : []),
-                ...available.map((key) => ({
-                  value: key.id,
-                  label: key.id,
-                  description: key.baseURL,
-                })),
-              ]}
-              onValueChange={(key) => onChange({ ...value, key: key || undefined })}
+        <div ref={row} className="settings-key-row">
+          {available.length || missing ? (
+            <Field label="Key" inline className="ui-group-row" disabledReason={keyReason}>
+              <Select
+                appearance="inline"
+                value={value.key ?? ""}
+                placeholder="Choose a key"
+                items={[
+                  ...(missing && value.key
+                    ? [
+                        {
+                          value: value.key,
+                          label: value.key,
+                          disabledReason: "Missing, or bound to another provider",
+                        },
+                      ]
+                    : []),
+                  ...available.map((key) => ({
+                    value: key.id,
+                    label: key.id,
+                    description: key.baseURL,
+                  })),
+                  ...(keyLayer === "online" ? [{ value: ADD_KEY, label: "Add a key…" }] : []),
+                ]}
+                onValueChange={(key) => {
+                  const trigger = row.current?.querySelector<HTMLButtonElement>("[role=combobox]");
+                  if (key === ADD_KEY) {
+                    if (trigger) addKey(trigger);
+                  } else onChange({ ...value, key: key || undefined });
+                }}
+              />
+            </Field>
+          ) : (
+            <GroupRow
+              label="Key"
+              detail={keyReason}
+              trailing={
+                <Button
+                  size="sm"
+                  icon="key-round"
+                  disabledReason={
+                    keyLayer !== "online" ? "Keys can't be read right now" : undefined
+                  }
+                  onClick={(event) => addKey(event.currentTarget)}
+                >
+                  Add key
+                </Button>
+              }
             />
-          </Field>
-          <Button
-            className="settings-add-key"
-            icon="key-round"
-            disabledReason={keyLayer !== "online" ? "Keys can't be read right now" : undefined}
-            onClick={(event) => onKeys(role, provider.id, event.currentTarget)}
-          >
-            Add key
-          </Button>
+          )}
         </div>
       )}
       {provider.custom && <CustomEndpoint value={value} onChange={onChange} />}
@@ -208,13 +264,15 @@ function CustomEndpoint({
   return (
     <>
       <Switch
+        className="ui-group-row"
         label="Can see images"
         description="Needed to work the screen."
         checked={value.vision !== false}
         onCheckedChange={(checked) => onChange({ ...value, vision: checked ? undefined : false })}
       />
-      <Field label="Context window" description="Optional. Leave empty for 32,768.">
+      <Field label="Context window" inline className="ui-group-row">
         <TextField
+          size="sm"
           inputMode="numeric"
           maxLength={9}
           placeholder="32768"
@@ -228,6 +286,7 @@ function CustomEndpoint({
         />
       </Field>
       <Switch
+        className="ui-group-row"
         label="Flat-rate plan"
         description={
           value.plan ? "Uses the plan's limits, not a spending limit." : "No per-token price."
@@ -248,30 +307,23 @@ function ManualPrice({
   value: { input: string; output: string };
   onPrice?(value: { input: string; output: string }): void;
 }) {
-  const noteId = useId();
   const field = (side: "input" | "output", label: string) => (
-    <Field label={label}>
+    <Field label={label} inline className="ui-group-row">
       <TextField
+        size="sm"
         inputMode="decimal"
         maxLength={64}
         autoComplete="off"
         prefix="$"
-        aria-describedby={noteId}
         value={value[side]}
         onChange={(event) => onPrice?.({ ...value, [side]: event.target.value })}
       />
     </Field>
   );
   return (
-    <div className="settings-price">
-      <div className="settings-price-fields">
-        {field("input", "Input price")}
-        {field("output", "Output price")}
-      </div>
-      <p id={noteId} className="settings-note">
-        US dollars per million tokens, from 0 to 10,000; one may be 0. Used to set aside a task's
-        spending. It isn't your bill.
-      </p>
-    </div>
+    <>
+      {field("input", "Input price")}
+      {field("output", "Output price")}
+    </>
   );
 }

@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
+
+import type { ManualStreamInput } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
+import { ControlTools } from "../shell/ControlStrip.tsx";
 import { AskForm } from "./AskForm.tsx";
+import { useAskDraft } from "./ask-draft.ts";
 import {
   type AgentFeedState,
   type AgentQuestion,
@@ -10,9 +14,9 @@ import {
   emptyAgentModel,
 } from "./model.ts";
 import { StopControl } from "./StopControl.tsx";
-import { TakeoverPanel } from "./TakeoverPanel.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
-import { useTaskControls } from "./useTaskControls.ts";
+import { useHandBack } from "./useHandBack.ts";
+import { type TaskControls, useTaskControls } from "./useTaskControls.ts";
 
 const CELL = "01JXYZ0000000000000000CELL",
   SESSION = "01JXYZ0000000000000000SESS",
@@ -30,7 +34,12 @@ function mount(takeover: boolean) {
     options: [{ key: "A", text: "Text" }],
     allowText: true,
   };
-  const control: AgentTakeover = { requestId: ID, reason: "login", note: "Sample login" };
+  const control: AgentTakeover = {
+    requestId: ID,
+    reason: "other",
+    note: "",
+    by: "user",
+  };
   const model = {
     ...emptyAgentModel(),
     pendingAsk: takeover ? null : ID,
@@ -44,6 +53,7 @@ function mount(takeover: boolean) {
     epoch: 0,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model,
   };
@@ -65,7 +75,22 @@ function mount(takeover: boolean) {
     reconcile: vi.fn(),
   };
   const receive = vi.fn(() => true);
+  const send = vi.fn<(input: ManualStreamInput) => void>();
+  const drained = vi.fn(async () => true);
+  const keyboard = vi.fn<(on: boolean) => void>();
+  const rightClick = vi.fn<(on: boolean) => void>();
   const feed = { read: () => state, subscribe: () => () => {} };
+  function Ask({ controls }: { controls: TaskControls }) {
+    const draft = useAskDraft(question);
+    return draft ? (
+      <AskForm
+        draft={draft}
+        layout="thread"
+        answer={controls.answer}
+        reason={controls.canAnswer ? undefined : "Check the current task before answering."}
+      />
+    ) : null;
+  }
   function Parts({ visible = true }: { visible?: boolean }) {
     const controls = useTaskControls({
       api,
@@ -83,35 +108,34 @@ function mount(takeover: boolean) {
       manualVisible: visible,
       refreshCell: () => {},
     });
+    const handBack = useHandBack({ takeover: control, controls, drained, unconfirmed: false });
     return (
       <>
         {takeover ? (
-          <TakeoverPanel
-            takeover={control}
-            controls={controls}
-            visible={visible}
-            manualStatus="ready"
-            receiveKey={receive}
-            screen={{ w: 1280, h: 800 }}
-            pointerMode="click"
-            onPointerMode={() => {}}
+          <ControlTools
+            send={send}
+            typing={false}
+            onKeyboard={keyboard}
+            rightClick={false}
+            onRightClick={rightClick}
+            handBack={handBack.slot}
+            onHandBack={() => void handBack.run()}
           />
         ) : (
-          <AskForm question={question} controls={controls} visible={visible} receiveKey={receive} />
+          <Ask controls={controls} />
         )}
         <StopControl controls={controls} />
       </>
     );
   }
   const view = render(<Parts />);
-  return { ...view, fetchImpl, receive, model, Parts };
+  return { ...view, fetchImpl, receive, model, Parts, send, drained, keyboard, rightClick };
 }
 it("respects Chinese composition, exact pending ask ID and shared answer exclusion", async () => {
   const f = mount(false);
-  fireEvent.click(screen.getByRole("radio", { name: "Something else…" }));
-  const field = screen.getByRole("textbox", { name: "Your answer" }) as HTMLTextAreaElement;
+  const field = screen.getByRole("textbox", { name: "Something else" }) as HTMLInputElement;
   fireEvent.compositionStart(field);
-  fireEvent.input(field, { target: { value: "中文" } });
+  fireEvent.change(field, { target: { value: "中文" } });
   fireEvent.keyDown(field, { key: "Enter", isComposing: true });
   expect(f.fetchImpl).not.toHaveBeenCalled();
   fireEvent.compositionEnd(field);
@@ -119,79 +143,88 @@ it("respects Chinese composition, exact pending ask ID and shared answer exclusi
   fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
   expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "中文" }));
-  await waitFor(() => expect(field.value).toBe(""));
   expect(screen.getByRole("button", { name: "Send answer" }).getAttribute("aria-disabled")).toBe(
     "true",
   );
-});
-it("guards question and hand-back notes before a recognized key can enter a request", async () => {
-  const sentinel = `sk-proj-${"z".repeat(80)}`;
-  for (const takeover of [false, true]) {
-    const f = mount(takeover);
-    if (!takeover) fireEvent.click(screen.getByRole("radio", { name: "Something else…" }));
-    const field = screen.getByRole("textbox", {
-      name: takeover ? "Optional note for dot" : "Your answer",
-    }) as HTMLTextAreaElement;
-    fireEvent.input(field, { target: { value: sentinel } });
-    expect(field.value).toBe("");
-    expect(f.container.textContent).not.toContain(sentinel);
-    const send = screen.getByRole("button", {
-      name: takeover ? "Return control to dot" : "Send answer",
-    }) as HTMLButtonElement;
-    expect(send.disabled || send.getAttribute("aria-disabled") === "true").toBe(true);
-    const notice =
-      "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.";
-    const described = () =>
-      (send.getAttribute("aria-describedby") ?? "")
-        .split(" ")
-        .map((id) => document.getElementById(id)?.textContent);
-    expect(described()).toContain(notice);
-    fireEvent.click(send);
-    expect(f.fetchImpl).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
-    expect(f.receive).toHaveBeenCalledOnce();
-    expect(described()).not.toContain(notice);
-    f.unmount();
-    cleanup();
-  }
-});
-it("sends credentials through the manual text route, clears before transport and on hide/blur, and avoids React text state", async () => {
-  const f = mount(true),
-    field = screen.getByLabelText("Text for the computer") as HTMLInputElement,
-    sentinel = `sk-proj-${"p".repeat(80)} 中文🙂`;
-  fireEvent.input(field, { target: { value: sentinel } });
-  fireEvent.compositionStart(field);
-  fireEvent.keyDown(field, { key: "Enter", isComposing: true });
-  expect(f.fetchImpl).not.toHaveBeenCalled();
-  fireEvent.compositionEnd(field);
-  fireEvent.click(screen.getByRole("button", { name: "Type text" }));
-  expect(field.value).toBe("");
-  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
-  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(
-    JSON.stringify({ requestId: ID, input: { kind: "text", text: sentinel } }),
-  );
-  expect(f.container.innerHTML).not.toContain(sentinel);
-  expect(JSON.stringify(f.model)).not.toContain(sentinel);
+  fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
   await act(async () => {
     await Promise.resolve();
   });
-  field.value = "unsent";
+  expect(f.fetchImpl).toHaveBeenCalledOnce();
+});
+it("keeps a recognized key out of an answer and out of the page", async () => {
+  const sentinel = `sk-proj-${"z".repeat(80)}`;
+  const f = mount(false);
+  const field = screen.getByRole("textbox", { name: "Something else" }) as HTMLInputElement;
+  fireEvent.change(field, { target: { value: `use ${sentinel}` } });
+  expect(field.value).toBe("use ");
+  expect(f.container.innerHTML).not.toContain(sentinel);
+  expect(screen.getByText(/That looked like a key/)).toBeTruthy();
+  fireEvent.submit(screen.getByRole("form", { name: "Answer dot" }));
+  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "use" }));
+});
+it("types pasted credentials on the computer through the input stream, clears the field and keeps them out of React state", async () => {
+  const f = mount(true),
+    sentinel = `sk-proj-${"p".repeat(80)} 中文🙂`;
+  fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
+  expect(f.keyboard).toHaveBeenCalledWith(true);
+  fireEvent.click(screen.getByRole("button", { name: "Right-click the next tap" }));
+  expect(f.rightClick).toHaveBeenCalledWith(true);
+  fireEvent.click(screen.getByRole("button", { name: "Type text" }));
+  const field = (await screen.findByLabelText(
+    "Text to type on the computer",
+  )) as HTMLTextAreaElement;
+  fireEvent.paste(field, { clipboardData: { getData: () => sentinel } });
+  expect(f.send).toHaveBeenCalledExactlyOnceWith({ kind: "text", text: sentinel });
+  await waitFor(() => expect(screen.queryByLabelText("Text to type on the computer")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Type text" }));
+  const typed = (await screen.findByLabelText(
+    "Text to type on the computer",
+  )) as HTMLTextAreaElement;
+  typed.value = "line one";
+  fireEvent.compositionStart(typed);
+  fireEvent.keyDown(typed, { key: "Enter", isComposing: true });
+  expect(f.send).toHaveBeenCalledOnce();
+  fireEvent.compositionEnd(typed);
+  fireEvent.keyDown(typed, { key: "Enter" });
+  expect(f.send).toHaveBeenLastCalledWith({ kind: "text", text: "line one" });
+  expect(document.body.innerHTML).not.toContain(sentinel);
+  expect(JSON.stringify(f.model)).not.toContain(sentinel);
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByLabelText("Text to type on the computer")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Type text" }));
+  const unsent = (await screen.findByLabelText(
+    "Text to type on the computer",
+  )) as HTMLTextAreaElement;
+  unsent.value = "unsent";
   fireEvent(window, new Event("blur"));
-  expect(field.value).toBe("");
-  field.value = "unsent";
-  f.rerender(<f.Parts visible={false} />);
-  expect(field.value).toBe("");
+  expect(unsent.value).toBe("");
+});
+it("lets typed input reach the computer before control goes back to dot", async () => {
+  const f = mount(true),
+    drained = Promise.withResolvers<boolean>();
+  f.drained.mockImplementation(() => drained.promise);
+  fireEvent.click(screen.getByRole("button", { name: "Hand back" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(f.drained).toHaveBeenCalledOnce();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  await act(async () => drained.resolve(true));
+  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
+  expect(String(f.fetchImpl.mock.calls[0]?.[0])).toContain("/takeover/done");
 });
 it("picks an answer by its number, writes one under Something else, and sends only the choice", async () => {
   const f = mount(false);
   const send = screen.getByRole("button", { name: "Send answer" });
   expect(send.getAttribute("aria-disabled")).toBe("true");
-  expect(screen.queryByRole("textbox", { name: "Your answer" })).toBeNull();
   const form = screen.getByRole("form", { name: "Answer dot" });
-  fireEvent.keyDown(form, { key: "2" });
-  expect(screen.getByRole("radio", { name: "Something else…" })).toHaveProperty("checked", true);
-  expect(screen.getByRole("textbox", { name: "Your answer" })).toBeTruthy();
-  expect(send.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.change(screen.getByRole("textbox", { name: "Something else" }), {
+    target: { value: "Both" },
+  });
+  expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", false);
+  expect(send.hasAttribute("aria-disabled")).toBe(false);
   fireEvent.keyDown(form, { key: "1" });
   expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", true);
   expect(send.hasAttribute("aria-disabled")).toBe(false);

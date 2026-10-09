@@ -3,27 +3,26 @@ import type { AddressInfo } from "node:net";
 import type { Page } from "@playwright/test";
 import { progressChannel } from "../../../cli/src/install/browser-progress.ts";
 import { TOKEN } from "../fixtures/start-ui-fixture.ts";
-import { expect, keepBaselinesAt, test } from "./harness.ts";
+import { expect, runAt, test } from "./harness.ts";
 
 // Everything before the first task: the installer's page, signing in and first run.
-keepBaselinesAt("c14", "w39");
+runAt("c14", "w39");
 
 const box = (page: Page, selector: string) => page.locator(selector).first().boundingBox();
 
 test("first run", async ({ page, ui }) => {
   await ui.open("first-run");
-  await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("first-run.png");
 });
 
 test("first run, model ready", async ({ page, ui }) => {
   await ui.open("model-ready");
-  await expect(page.getByText("Anthropic · claude-sonnet-5-5", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Finish setting up" })).toHaveCount(0);
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("first-run-model-ready.png");
 });
 
 test("first run shows Turn on without scrolling and keeps the stage where the computer appears", async ({
@@ -31,27 +30,27 @@ test("first run shows Turn on without scrolling and keeps the stage where the co
   ui,
 }) => {
   await ui.open("first-run");
-  const turnOn = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });
+  const turnOn = page.locator(".curtain").getByRole("button", { name: "Turn on" });
   await expect(turnOn).toBeVisible();
   const viewport = page.viewportSize() ?? { width: 0, height: 0 };
   const button = await turnOn.boundingBox();
   expect(button && button.y + button.height <= viewport.height).toBe(true);
   expect(await turnOn.evaluate((element) => element.closest(".ui-scroll-area"))).toBeNull();
   const scrollers = await page
-    .locator(".welcome-setup *")
+    .locator(".curtain *")
     .evaluateAll(
       (all) =>
         all.filter((element) => /auto|scroll/.test(getComputedStyle(element).overflowY)).length,
     );
-  expect(scrollers).toBe(1);
+  expect(scrollers).toBe(0);
   const before = await box(page, ".stage");
   expect((before?.width ?? 0) / (before?.height ?? 1)).toBeCloseTo(1.6, 2);
-  const setup = await box(page, ".welcome-setup");
-  // Inside the stage on a wide screen; over the whole computer pane, and so the stage, on a phone.
-  if (viewport.width >= 760) expect(setup).toEqual(before);
-  else expect(setup).toEqual(await box(page, ".stage-col"));
+  const setup = await box(page, ".curtain");
+  // Over the stage on a wide screen; over the stage and the band under it on a phone.
+  if (viewport.width >= 700) expect(setup).toEqual(before);
+  else expect(setup).toEqual(await box(page, ".stage-frame"));
   await turnOn.click();
-  await expect(page.locator(".welcome-setup")).toHaveCount(0);
+  await expect(turnOn).toHaveAttribute("aria-hidden", "true");
   expect(await box(page, ".stage")).toEqual(before);
 });
 
@@ -61,7 +60,6 @@ test("sign-in, first visit", async ({ page, ui }) => {
   await expect(page.getByRole("alert")).toHaveCount(0);
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("signin-first.png");
 });
 
 test("sign-in, checking", async ({ page, ui }) => {
@@ -70,7 +68,6 @@ test("sign-in, checking", async ({ page, ui }) => {
   await expect(page.getByRole("status")).toHaveText("Signing you in…");
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("signin-checking.png");
 });
 
 test("sign-in, rejected", async ({ page, ui }) => {
@@ -80,7 +77,6 @@ test("sign-in, rejected", async ({ page, ui }) => {
   );
   await ui.settle();
   await ui.still();
-  await expect(page).toHaveScreenshot("signin-rejected.png");
 });
 
 // The CLI serves this page before the app exists, from its own server and under its own policy.
@@ -128,7 +124,6 @@ test("installer progress", async ({ page }) => {
     await expect(page.locator("#images-value")).toHaveText("37%");
     await expect(page.locator("#detail")).toHaveText("Downloading the network gate image…");
     await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "37");
-    await expect(page).toHaveScreenshot("installer-progress.png");
     expect(f.problems).toEqual([]);
   } finally {
     await f.close();
@@ -143,7 +138,6 @@ test("installer failed", async ({ page }) => {
     f.channel.finish("failed");
     await expect(page.getByRole("heading", { name: "Setup stopped" })).toBeVisible();
     await expect(page.locator("#resume")).toBeVisible();
-    await expect(page).toHaveScreenshot("installer-failed.png");
     expect(f.problems).toEqual([]);
   } finally {
     await f.close();

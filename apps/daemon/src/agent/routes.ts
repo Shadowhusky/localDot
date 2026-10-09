@@ -10,12 +10,15 @@ import {
   ApprovalAnswer,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
+  ContinueConversation,
   HandbackRequest,
   type KeydRecord,
   PauseRequest,
   QuestionAnswerRequest,
   ResumeSafetyRequest,
   scanKeyLike,
+  type TakeComputerReply,
+  type TakeControlReply,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -38,14 +41,17 @@ import {
 import type { CatalogStore } from "./catalog-store.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
+import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
 import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
+import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
+import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 
 export interface UploadAccess {
   tools: Pick<DesktopdTools, "putFile">;
@@ -58,12 +64,21 @@ export interface AgentRoutesDeps {
     Partial<
       Pick<
         AgentRunner,
-        "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "budgetHoldOf" | "sessions"
+        | "selectionOf"
+        | "terminalOf"
+        | "pauseTask"
+        | "resumeSafety"
+        | "budgetHoldOf"
+        | "sessions"
+        | "release"
+        | "hold"
+        | "holds"
       >
     >;
+  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
-  keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
+  keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
   memory: Pick<MemoryStore, "readBoth" | "undo">;
   skills(): SkillInfo[];
   canChangeMemory?(): boolean;
@@ -206,6 +221,8 @@ function fail(error: unknown): Response {
     return new Response("the selected models or keys are unavailable", { status: 400 });
   if (error instanceof SessionStoppedError || error instanceof ControlHeldError)
     return new Response("task control changed", { status: 409 });
+  if (error instanceof PausedStepError)
+    return new Response("Pause is changing; try again in a moment", { status: 409 });
   if (error instanceof DesktopdError)
     return new Response("the computer transfer failed", {
       status: error.status === 413 || error.status === 409 ? error.status : 502,
@@ -338,19 +355,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const catalog = deps.catalog.get();
       let keys: KeydRecord[] = [];
-      let defaultTaskBudgetUSD: number | null = null;
       let keyLayer: "online" | "offline" = "online";
       try {
         keys = await deps.keyd.secrets();
-        if (deps.keyd.budget) {
-          try {
-            const budget = await deps.keyd.budget();
-            const checked = AgentSettings.shape.taskBudgetUSD.unwrap().safeParse(budget.perTaskUSD);
-            if (checked.success) defaultTaskBudgetUSD = checked.data;
-          } catch (error) {
-            if (!(error instanceof KeydUnavailableError)) throw error;
-          }
-        }
       } catch (error) {
         if (!(error instanceof KeydUnavailableError)) throw error;
         keyLayer = "offline";
@@ -359,7 +366,6 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
-        defaultTaskBudgetUSD,
         subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
         keys: keys
           .filter((key) => key.kind === "llm")
@@ -435,7 +441,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         if (active.length) pricingOf(active);
       }
       check(c.req.raw.signal);
-      return c.json(deps.settings.put(parsed));
+      const saved = deps.settings.put(parsed);
+      // A task start retries this; until then keyd keeps the daily limit it had.
+      await syncDayLimit(deps.keyd, saved.dayBudgetUSD).catch(() =>
+        console.error("keyd's daily spending limit could not be updated"),
+      );
+      return c.json(saved);
     }),
   );
   app.post(
@@ -454,6 +465,44 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({ sessionId: result.id }, 202);
     }),
   );
+  const conversations = deps.conversations;
+  if (conversations) {
+    // A finished task waiting for a follow-up ends, so the next message starts the chosen one.
+    const release = async (signal: AbortSignal) => {
+      try {
+        await deps.runner.release?.(signal);
+      } catch (error) {
+        if (error instanceof AgentError) throw new RouteError(409, error.message);
+        throw error;
+      }
+      check(signal);
+    };
+    app.get(
+      "/api/conversation",
+      route((c) => c.json(conversations.snapshot())),
+    );
+    app.post(
+      "/api/conversation/new",
+      route(async (c) => {
+        await empty(c.req.raw);
+        await release(c.req.raw.signal);
+        conversations.begin();
+        return c.json(conversations.snapshot());
+      }),
+    );
+    app.post(
+      "/api/conversation/continue",
+      route(async (c) => {
+        const { sessionId } = await json(c.req.raw, ContinueConversation);
+        if (!conversations.has(sessionId)) throw new RouteError(404, "no such task");
+        if (conversations.current() !== sessionId) {
+          await release(c.req.raw.signal);
+          if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
+        }
+        return c.json(conversations.snapshot());
+      }),
+    );
+  }
   app.get(
     "/api/agent/sessions/:id",
     route((c) => {
@@ -479,6 +528,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
         ...(s.pendingTakeover ? { pendingTakeover: s.pendingTakeover } : {}),
         ...(s.manualControl ? { manualControl: s.manualControl } : {}),
+        ...(deps.runner.holds?.(s.id) ? { holder: true } : {}),
       });
     }),
   );
@@ -489,6 +539,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const parsed = await json(c.req.raw, Message);
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (deps.runner.holds?.(s.id))
+        throw new RouteError(409, "hand back the computer, then message dot");
       s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
       return c.body(null, 202);
     }),
@@ -567,12 +619,46 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const parsed = await json(c.req.raw, QuestionAnswerRequest);
       check(c.req.raw.signal);
-      const ok = s.answer(
-        parsed.askId,
-        parsed.option,
-        parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
-      );
+      const ok = parsed.declined
+        ? s.decline(parsed.askId)
+        : parsed.fields
+          ? s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId))
+          : s.answer(
+              parsed.askId,
+              parsed.option,
+              parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
+            );
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // The user takes the computer whatever dot is doing; the reply names the control to hand back.
+  app.post(
+    "/api/agent/sessions/:id/takeover",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      // A hold the user handed back is ending; the computer's own route starts the next one.
+      if (
+        s.stopped ||
+        deps.taskMutationReady?.(s) === false ||
+        (deps.runner.holds?.(s.id) && !s.controlHeld)
+      )
+        throw new RouteError(409, "the computer is not ready to hand over");
+      return c.json({ requestId: s.takeControl() } satisfies TakeControlReply, 202);
+    }),
+  );
+  // The user takes the computer whether or not a task is at work on it.
+  app.post(
+    "/api/cells/:id/takeover",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (!deps.runner.hold) throw new RouteError(503, "taking control is unavailable");
+      const reply = await deps.runner.hold(cellId, c.req.raw.signal);
+      return c.json(reply satisfies TakeComputerReply, 202);
     }),
   );
   app.post(

@@ -31,6 +31,25 @@ describe("normalizeCatalog", () => {
     });
   });
 
+  it("keeps a separate price for reasoning tokens where the catalog states one", () => {
+    const priced = normalizeCatalog(
+      {
+        google: {
+          models: {
+            "gemini-flash": {
+              id: "gemini-flash",
+              cost: { input: 0.3, output: 2.5, reasoning: 3.5 },
+            },
+          },
+        },
+      },
+      "2026-10-09T00:00:00Z",
+    );
+    const model = findModel(priced, "google", "gemini-flash");
+    expect(model?.reasoningUSDPerMTok).toBe(3.5);
+    expect(model && keydRouteModel(model).reasoningUSDPerMTok).toBe(3.5);
+  });
+
   it("skips a malformed provider or model instead of failing the whole catalog", () => {
     expect(catalog.skipped).toBe(3);
     expect(catalog.providers["broken provider!"]).toBeUndefined();
@@ -303,6 +322,7 @@ describe("untrusted catalog names and budget limits", () => {
       "outputUSDPerMTok",
       "cacheReadUSDPerMTok",
       "cacheWriteUSDPerMTok",
+      "reasoningUSDPerMTok",
     ] as const) {
       for (const value of [-1, 10000.01, Number.NaN, Number.POSITIVE_INFINITY])
         expect(() => keydRouteModel({ ...base, [field]: value }), `${field}: ${value}`).toThrow(

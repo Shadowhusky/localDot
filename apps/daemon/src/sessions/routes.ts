@@ -29,8 +29,13 @@ function requestedScreen(request: Request): ScreenName | null {
     ? values[0]
     : null;
 }
-export function eventStreamResponse(file: string, fromSeq: number, signal: AbortSignal): Response {
-  const lines = streamEventLines(file, fromSeq);
+export function eventStreamResponse(
+  file: string,
+  fromSeq: number,
+  signal: AbortSignal,
+  options?: { shown?: boolean },
+): Response {
+  const lines = streamEventLines(file, fromSeq, options);
   const encoder = new TextEncoder();
   let closed = false;
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;

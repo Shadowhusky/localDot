@@ -19,8 +19,8 @@ export interface CollapseProps {
   children?: ReactNode;
 }
 
-// Longer than the fold (--dur-sheet), so the content stays while it folds away.
-const FOLDED = 320;
+// Longer than the fold (--dur-default), so the content stays while it folds away.
+const FOLDED = 520;
 
 // Height comes from the grid track, so nothing is measured. The content mounts when it opens and
 // leaves once it has folded away, so closed panels hold no heavy content (long output, frames).

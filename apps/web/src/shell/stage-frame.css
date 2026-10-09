@@ -1,0 +1,695 @@
+/* The stage frame (design-v2 §10.18, §8): the 16:10 box placed first, its rim, the light it spills
+   on the floor, and the band under it. Its width is set by the layout (app.css). */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
+.stage-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+.stage-box {
+  position: relative;
+  flex: none;
+  aspect-ratio: 16 / 10;
+}
+
+.stage-box > .stage {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-stage);
+}
+
+/* Light on the floor below the stage: neutral, xenon while dot has the computer, porcelain while
+   you do. Gradients cannot fade into each other, so each is its own layer. */
+.stage-spill {
+  position: absolute;
+  top: 100%;
+  left: 4%;
+  right: 4%;
+  height: 170px;
+  pointer-events: none;
+}
+
+.stage-spill > i,
+.stage-rim > i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--dur-light-out) var(--ease-standard);
+}
+
+.stage-spill > [data-light="none"] {
+  background: var(--spill);
+  opacity: 1;
+}
+
+.stage-spill > [data-light="dot"] {
+  background: var(--spill-xenon);
+}
+
+.stage-spill > [data-light="you"] {
+  background: var(--spill-you);
+}
+
+/* The rim is the control indicator: a hairline when nobody acts, xenon for dot, porcelain for you.
+   It is always mounted and only its light fades: 400 ms in, 300 ms out. */
+.stage-rim {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--rim-none);
+  pointer-events: none;
+}
+
+.stage-rim > [data-light="dot"] {
+  box-shadow: var(--rim-xenon), var(--rim-xenon-glow);
+}
+
+.stage-rim > [data-light="you"] {
+  box-shadow: var(--rim-you), var(--rim-you-glow);
+}
+
+.stage-frame[data-light="dot"] :is(.stage-rim, .stage-spill) > [data-light="dot"],
+.stage-frame[data-light="you"] :is(.stage-rim, .stage-spill) > [data-light="you"] {
+  opacity: 1;
+  transition-duration: var(--dur-light-in);
+}
+
+.stage-frame:not([data-light="none"]) .stage-spill > [data-light="none"] {
+  opacity: 0;
+}
+
+.stage-band {
+  position: relative;
+  flex: 1;
+  min-height: var(--band-min);
+}
+
+/* The curtain takes the stage's own box, so turning the computer on never moves it. */
+.stage-curtain {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 5;
+  aspect-ratio: 16 / 10;
+  pointer-events: none;
+}
+
+.stage-curtain > * {
+  pointer-events: auto;
+}
+
+@media (--phone) {
+  /* On a phone the curtain covers the stage and the band, so there is never an empty band. */
+  .stage-curtain {
+    inset: 0;
+    aspect-ratio: auto;
+  }
+}
+
+/* The band (design-v2 §8, §10.17): dot docked under the stage's corner, the ball's left edge on the
+   stage's, and its line beside it, centred on the ball. */
+.narrator {
+  --dock: 96px;
+  --dock-x: -12px;
+  --dock-y: 0px;
+  --line-x: 92px;
+  --line-y: 12px;
+  --line-h: 72px;
+  position: absolute;
+  inset: 0;
+}
+
+.narrator-dock {
+  position: absolute;
+  top: var(--dock-y);
+  left: var(--dock-x);
+  width: var(--dock);
+  height: var(--dock);
+}
+
+.narrator:not([data-dot]) {
+  --line-x: 0px;
+}
+
+.narration {
+  position: absolute;
+  top: var(--line-y);
+  left: var(--line-x);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  width: min(600px, 100% - var(--line-x) - 24px);
+  height: var(--line-h);
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-narration) / var(--text-narration--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-narration--letter-spacing);
+}
+
+.narration[data-speaker="system"] {
+  color: var(--color-fg-2);
+}
+
+.narration-line {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-line[data-leaving] {
+  opacity: 0;
+}
+
+/* Under dot's question when it hides characters, which its line shows as codes. */
+.narration-warning {
+  color: var(--color-danger-fg);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  animation: narration-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+.narration-warning[data-leaving] {
+  opacity: 0;
+}
+
+.narration-speaker {
+  margin-right: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+}
+
+@keyframes narration-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (width < 1100px) {
+  .narrator {
+    --dock: 80px;
+    --dock-x: -10px;
+    --dock-y: 2px;
+    --line-x: 80px;
+    --line-y: 2px;
+    --line-h: 80px;
+  }
+}
+
+@media (--phone) {
+  .narrator {
+    --dock-x: -2px;
+    --dock-y: 4px;
+    --line-x: 84px;
+    --line-y: 4px;
+  }
+
+  .narration {
+    width: calc(100% - var(--line-x) - 8px);
+  }
+
+  .narration-line {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+
+  .narration:has(.narration-warning) .narration-line {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+}
+
+/* Focus mode (design-v2 §8.5): the band moves into the left margin, dot over the step it is on, and
+   the task's controls stand in the right margin, each column 8 px from the picture. */
+.app[data-focus] .stage-spill {
+  display: none;
+}
+
+.app[data-focus] .stage-band,
+.stage-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  min-height: 0;
+}
+
+.app[data-focus] .stage-band {
+  right: calc(100% + 8px);
+}
+
+.stage-side {
+  left: calc(100% + 8px);
+  display: grid;
+  place-items: center;
+}
+
+.app[data-focus] .narrator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.app[data-focus] .narrator-dock {
+  position: relative;
+  top: auto;
+  left: auto;
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+.app[data-focus] .narration {
+  display: none;
+}
+
+.narrator-note {
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+}
+
+.focus-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 4);
+}
+
+.focus-controls {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 2.5);
+}
+
+/* The control tools join the column as its own buttons. */
+.control-tools[data-compact] {
+  display: contents;
+}
+
+.focus-hint {
+  display: none;
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-align: center;
+}
+
+/* Focus mode held upright, after Full screen (design-v2 §8.5 turned on its side): the picture across
+   the screen's width at its middle, dot and its step above it, the controls in a row under it with
+   a word on turning the phone for a bigger picture. */
+@media (orientation: portrait) {
+  .app[data-focus] .stage-band,
+  .app[data-focus] .stage-side {
+    --_margin: calc((100dvh - (100vw - 16px) / 1.6) / 2);
+    right: 0;
+    left: 0;
+    width: auto;
+    height: var(--_margin);
+  }
+
+  .app[data-focus] .stage-band {
+    top: auto;
+    bottom: 100%;
+  }
+
+  .app[data-focus] .stage-side {
+    top: 100%;
+    bottom: auto;
+  }
+
+  .app[data-focus] .focus-controls {
+    flex-direction: row;
+  }
+
+  .app[data-focus] .focus-hint {
+    display: block;
+  }
+}
+
+/* A glass button in the picture's corner while the user watches: full screen, also a double-click
+   or F away. It shows only while the pointer is over the picture. */
+.stage-expand {
+  position: absolute;
+  right: calc(var(--spacing) * 3);
+  bottom: calc(var(--spacing) * 3);
+  z-index: 4;
+  display: flex;
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  opacity: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.stage-expand:has(:focus-visible) {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .stage-box:hover .stage-expand {
+    opacity: 1;
+  }
+}
+
+/* While the user has the computer (design-v2 §11 F): the control strip at the band's right, under
+   the stage's right edge, with what a keyboard and mouse on this side can't do directly. Nothing
+   appears above or below the stage. */
+.control-strip {
+  position: absolute;
+  top: calc(var(--spacing) * 6.5);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  height: 44px;
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-raised);
+  box-shadow:
+    var(--shadow-raised),
+    0 0 0 1px var(--color-hairline);
+  animation: control-strip-in var(--dur-fade) var(--ease-standard) both;
+}
+
+.control-strip > .ui-button {
+  --_quiet-fg: var(--color-fg-1);
+}
+
+.control-strip > .ui-button svg {
+  color: var(--color-fg-2);
+}
+
+.control-strip-chevron {
+  margin-left: calc(var(--spacing) * -0.5);
+}
+
+.control-strip-divider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 calc(var(--spacing) * 0.5);
+  background-color: var(--color-separator);
+}
+
+@keyframes control-strip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The line beside dot leaves the strip its room. */
+.stage-band:has(.control-strip) .narration {
+  width: min(600px, 100% - var(--line-x) - var(--control-strip-w) - calc(var(--spacing) * 6));
+}
+
+/* As wide as the popover's content box: its 320 less its padding. */
+.type-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--spacing) * 3);
+  width: min(288px, 100vw - 48px);
+}
+
+.type-text > .ui-field {
+  align-self: stretch;
+}
+
+.type-text-field {
+  -webkit-text-security: disc;
+}
+
+@media (--phone) {
+  .control-strip {
+    display: none;
+  }
+
+  .type-text {
+    width: auto;
+  }
+}
+
+/* Full screen (design-v2 §11 G): the stage takes the whole screen, 16:10 and square-cornered, its
+   rim inside the screen's edge. The house fades away behind it as it travels; the band folds, dot
+   moves into the island and the control strip floats over the picture's foot. */
+.app[data-full] .stage-col {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-island);
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+}
+
+.app[data-full] .stage-col::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-void);
+  animation: full-house-in var(--dur-default) var(--ease-standard) both;
+}
+
+@keyframes full-house-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.app[data-full] .stage-col > .stage-frame {
+  flex: none;
+  width: min(100vw, 100dvh * 1.6);
+}
+
+.app[data-full] :is(.stage-box > .stage, .stage-rim) {
+  border-radius: 0;
+}
+
+.app[data-full] .stage-spill {
+  display: none;
+}
+
+.app[data-full] .stage-band {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  flex: none;
+  height: 0;
+  min-height: 0;
+}
+
+.app[data-full] .narrator {
+  display: none;
+}
+
+.app[data-full] .control-strip {
+  top: auto;
+  right: auto;
+  bottom: calc(var(--spacing) * 4);
+  left: 50%;
+  translate: -50% 0;
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  transition: opacity var(--dur-default) var(--ease-standard);
+}
+
+/* The house's own regions stay put behind the stage, out of reach, once it has arrived. */
+.app[data-full] > .bar,
+.app[data-full] .rail-panel {
+  visibility: hidden;
+  transition: visibility 0s var(--dur-gentle);
+}
+
+/* The curtain (design-v2 §4, §11 A–B): the stage's own box while there is no picture. dot sleeps in
+   its pool of light over one porcelain action. */
+.curtain {
+  --hero: clamp(128px, 35cqh, 224px);
+  --hero-gap: calc(var(--spacing) * 2);
+  /* The column's height with one line under the title; longer words grow it downward only. */
+  --col-h: calc(var(--hero) + var(--hero-gap) + 113px);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--curtain);
+  box-shadow: var(--shadow-stage);
+  color: var(--color-fg-1);
+  container-type: size;
+  transition: opacity var(--dur-curtain) var(--ease-standard);
+}
+
+@starting-style {
+  .curtain {
+    opacity: 0;
+  }
+}
+
+.stage-curtain .ui-presence[data-leaving] > .curtain {
+  transition-duration: var(--dur-curtain);
+}
+
+.curtain::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 36%;
+  background: var(--curtain-shade);
+  pointer-events: none;
+}
+
+.curtain:not([data-dot]) {
+  --hero: 0px;
+  --hero-gap: 0px;
+}
+
+.curtain-col {
+  position: absolute;
+  top: calc(49% - var(--col-h) / 2);
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* As wide as its words, up to half the curtain, so a phone's line under the title wraps in two. */
+  width: fit-content;
+  max-width: 50%;
+  translate: -50% 0;
+  text-align: center;
+}
+
+.curtain-hero {
+  display: block;
+  flex: none;
+  width: var(--hero);
+  height: var(--hero);
+  margin-bottom: var(--hero-gap);
+}
+
+.curtain-title {
+  font:
+    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-1--letter-spacing);
+}
+
+.curtain-sub {
+  max-width: 420px;
+  margin-top: var(--spacing);
+  color: var(--color-fg-2);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
+  text-wrap: pretty;
+}
+
+.curtain-progress {
+  width: 160px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-progress-track);
+}
+
+/* Eases toward 90 % over about a minute, the first start's length; it never claims to finish. */
+.curtain-progress > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background-color: var(--color-progress-fill);
+  transform-origin: 0 50%;
+  animation: curtain-progress var(--dur-first-start) var(--ease-enter) both;
+}
+
+@keyframes curtain-progress {
+  from {
+    scale: 0.04 1;
+  }
+
+  to {
+    scale: 0.9 1;
+  }
+}
+
+/* The action and the progress that replaces it share one box, so neither moves the column. */
+.curtain-act {
+  display: grid;
+  place-items: center;
+  height: 40px;
+  margin-top: calc(var(--spacing) * 5);
+}
+
+.curtain-act > * {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    visibility 0s;
+}
+
+.curtain-act[data-progress] > .curtain-button,
+.curtain-act:not([data-progress]) > .curtain-progress {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    visibility 0s var(--dur-fade);
+}
+
+@media (--phone) {
+  .curtain {
+    --hero: 128px;
+    --hero-gap: var(--spacing);
+    --col-h: calc(var(--hero) + var(--hero-gap) + 124px);
+  }
+
+  .curtain-col {
+    top: calc(48% - var(--col-h) / 2);
+  }
+
+  .curtain-title {
+    font:
+      var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+  }
+
+  .curtain-sub {
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
+  .curtain-act {
+    height: 44px;
+    margin-top: calc(var(--spacing) * 4.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .curtain-progress > i {
+    animation: none;
+    scale: 0.38 1;
+  }
+}

@@ -139,7 +139,7 @@ describe("hudFor", () => {
 
   it("reflects the stream once the computer is ready", () => {
     expect(hudFor(known(cell("ready", "live")))).toMatchObject({
-      label: "Live",
+      label: "Ready",
       action: { kind: "stop", enabled: true },
       live: true,
     });

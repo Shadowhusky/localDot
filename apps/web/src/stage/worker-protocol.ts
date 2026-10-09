@@ -1,6 +1,8 @@
 import type {
   LocalDotEvent,
+  Point,
   RecordingGap,
+  Rect,
   ScreenName,
   ScreenSelectionSnapshot,
 } from "@localdot/protocol";
@@ -19,6 +21,17 @@ export interface StageViewPatch {
   zoom?: number;
   freeze?: boolean;
   reducedMotion?: boolean;
+  // A decision is open over the picture.
+  dim?: boolean;
+  // The fields dot will type the user's answers into while it waits on them.
+  fields?: readonly FieldMark[];
+}
+
+// A field on one of the screens, in that screen's pixels.
+export interface FieldMark {
+  screen: ScreenName;
+  point: Point;
+  bbox?: Rect;
 }
 
 export interface ReplaySource {

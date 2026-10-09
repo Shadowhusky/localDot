@@ -442,3 +442,34 @@ it("requires a fresh terminal snapshot for memory history, then stops automatic 
   await flush();
   expect(calls.filter((path) => path.startsWith("/api/agent/sessions/"))).toHaveLength(count + 1);
 });
+
+it("reads a task at rest as ended, whatever status the daemon can still give for it", async () => {
+  for (const reply of [
+    () => new Response("no such live task", { status: 404 }),
+    // It ran on a computer that has since been replaced.
+    () => json(snapshot(SESSION, NEXT_CELL, "ended")),
+  ]) {
+    const api = createApi("inert", {
+      origin: "http://fixture",
+      fetchImpl: async (url) => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith("/live")) return new Response(null, { status: 204 });
+        if (path.startsWith("/api/agent/sessions/")) return reply();
+        return json({ originMicros: 0, t: 0 });
+      },
+    });
+    const view = renderHook(() => {
+      const stage = useRef<StageHandle | null>(null);
+      const live = useLiveSession(api, cell(), stage, SESSION);
+      return useAgentSession(api, cell(), live);
+    });
+    await advance(1000);
+    open();
+    await advance(1000);
+    expect(view.result.current.snapshot?.status).toBe("ended");
+    expect(view.result.current.model.ended).toEqual({ reason: "stopped" });
+    expect(view.result.current.error).toBeNull();
+    expect(view.result.current.fresh).toBe(false);
+    view.unmount();
+  }
+});

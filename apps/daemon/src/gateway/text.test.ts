@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { clickLabel, clipTarget, keyLabel, scrollLabel, typeLabel } from "./text.ts";
+import {
+  buttonLabel,
+  clickLabel,
+  clipTarget,
+  dragLabel,
+  keyLabel,
+  moveLabel,
+  scrollLabel,
+  typeLabel,
+} from "./text.ts";
 
 describe("gateway labels", () => {
   it("names clicks by their target, else by coordinates, and clips to 80", () => {
@@ -20,6 +29,30 @@ describe("gateway labels", () => {
     expect(typeLabel("hunter2", true)).toBe("Type 7 characters");
     expect(typeLabel("hello", false)).toBe('Type "hello"');
     expect(typeLabel("a\nb\tc", false)).toBe('Type "a b c"');
+  });
+
+  it("names drags, moves and held buttons by their targets, else by coordinates", () => {
+    const report = { point: { x: 1, y: 2 }, source: "ax" as const, name: "report.txt" };
+    expect(
+      dragLabel(
+        { target: report, point: { x: 1, y: 2 } },
+        { target: null, point: { x: 30, y: 40 } },
+      ),
+    ).toBe('Drag "report.txt" to (30, 40)');
+    expect(moveLabel(undefined, { x: 5, y: 6 })).toBe("Move to (5, 6)");
+    expect(moveLabel(report, { x: 5, y: 6 })).toBe('Move to "report.txt"');
+    expect(buttonLabel("down", "left", null, { x: 7, y: 8 })).toBe(
+      "Hold down the left button at (7, 8)",
+    );
+    expect(buttonLabel("up", "right", report, { x: 7, y: 8 })).toBe(
+      'Release the right button on "report.txt"',
+    );
+    expect(
+      dragLabel(
+        { target: { ...report, name: "x".repeat(200) }, point: report.point },
+        { target: null, point: report.point },
+      ),
+    ).toHaveLength(80);
   });
 
   it("writes key combos and scrolls for people", () => {

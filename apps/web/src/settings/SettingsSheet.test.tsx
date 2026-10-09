@@ -4,11 +4,12 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelRole, RoleChoice } from "./choices.ts";
-import { SettingsSheet, type SettingsSheetProps } from "./SettingsSheet.tsx";
+import { AUTOSAVE_MS, SettingsSheet, type SettingsSheetProps } from "./SettingsSheet.tsx";
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 const MODELS = [
   {
@@ -40,31 +41,45 @@ const props = (): SettingsSheetProps => ({
 const sheet = () => screen.getByRole("dialog", { name: "Settings" });
 const asking = () =>
   screen.getByRole("group", { name: "Discard unsaved changes?" }).hasAttribute("data-shown");
-const status = () =>
-  document.getElementById(
-    screen.getByRole("button", { name: "Save" }).getAttribute("aria-describedby")?.split(" ")[0] ??
-      "",
-  );
+const keysPanel = () => ({
+  keys: {
+    health: {
+      online: true,
+      audit: { ok: true },
+      hairpin: { state: "active" as const, addresses: 1 },
+    },
+    keys: [],
+    loadError: null,
+    busy: false,
+    save: vi.fn(async () => ({ restart: false })),
+    remove: vi.fn(async () => {}),
+  },
+});
+function onPhone() {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(width < 700px)",
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}
 
 describe("settings inspector", () => {
-  it("opens beside the page on the main provider, and on the autonomy choices when asked", () => {
+  it("opens over a dimmed page on the main provider, and on the autonomy choices when asked", () => {
     const view = render(<SettingsSheet {...props()} />);
     const main = screen.getByRole("region", { name: "Main model" });
     expect(document.activeElement).toBe(within(main).getByRole("combobox", { name: "Provider" }));
-    expect(sheet().getAttribute("aria-modal")).toBe("false");
+    expect(sheet().getAttribute("aria-modal")).toBe("true");
     view.unmount();
     const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
-    const later = render(<SettingsSheet {...p} focusSection="autonomy" loading />);
-    later.rerender(<SettingsSheet {...p} focusSection="autonomy" />);
+    const later = render(<SettingsSheet {...p} section="autonomy" sectionRequest={1} loading />);
+    later.rerender(<SettingsSheet {...p} section="autonomy" sectionRequest={1} />);
     const preset = screen.getByRole("radiogroup", { name: "Start from" });
     expect(document.activeElement).toBe(within(preset).getByRole("radio", { name: "Balanced" }));
-    const browsing = within(screen.getByRole("radiogroup", { name: "Browse websites" })).getByRole(
-      "radio",
-      { name: "Just do it" },
-    );
-    browsing.focus();
-    later.rerender(<SettingsSheet {...p} focusSection="autonomy" dirty />);
-    expect(document.activeElement).toBe(browsing);
+    const careful = within(preset).getByRole("radio", { name: "Careful" });
+    careful.focus();
+    later.rerender(<SettingsSheet {...p} section="autonomy" sectionRequest={1} dirty />);
+    expect(document.activeElement).toBe(careful);
     expect(p.onAutonomy).not.toHaveBeenCalled();
   });
   it("opens on what dot knows when asked", () => {
@@ -76,13 +91,28 @@ describe("settings inspector", () => {
       reloadSkills: vi.fn(),
       rereadMemory: vi.fn(),
     };
-    render(<SettingsSheet {...props()} knowledge={knowledge} focusSection="knowledge" />);
+    render(
+      <SettingsSheet {...props()} knowledge={knowledge} section="knowledge" sectionRequest={1} />,
+    );
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "What dot knows" }));
     expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
       "Prefers short replies.",
     );
   });
-  it("chooses a provider, a model and a key from the keyboard alone, then saves", () => {
+  it("lights the section a sidebar row goes to", () => {
+    render(<SettingsSheet {...props()} keysPanel={keysPanel()} />);
+    const index = screen.getByRole("navigation", { name: "Settings sections" });
+    const current = () =>
+      within(index)
+        .getAllByRole("button")
+        .filter((row) => row.getAttribute("aria-current") === "true")
+        .map((row) => row.textContent);
+    expect(current()).toEqual(["Models"]);
+    fireEvent.click(within(index).getByRole("button", { name: "Keys" }));
+    expect(current()).toEqual(["Keys"]);
+  });
+  it("chooses a provider, a model and a key from the keyboard alone, and saves on its own", () => {
+    vi.useFakeTimers();
     const save = vi.fn();
     function Controller() {
       const [choices, setChoices] = useState<Partial<Record<ModelRole, RoleChoice>>>({});
@@ -112,11 +142,52 @@ describe("settings inspector", () => {
     };
     pick("Provider", "openai");
     pick("Model", "large");
+    act(() => {
+      vi.advanceTimersByTime(AUTOSAVE_MS);
+    });
+    expect(save).not.toHaveBeenCalled();
     pick("Key", "");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    act(() => {
+      vi.advanceTimersByTime(AUTOSAVE_MS - 1);
+    });
+    expect(save).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(save).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith({
       main: { provider: "openai", model: "sample-large", key: "openai-key" },
     });
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+  it("never saves on its own while saving failed, until the next edit", () => {
+    vi.useFakeTimers();
+    const p = props();
+    const view = render(<SettingsSheet {...p} dirty error="These settings could not be saved." />);
+    act(() => {
+      vi.advanceTimersByTime(AUTOSAVE_MS * 4);
+    });
+    expect(p.save?.run).not.toHaveBeenCalled();
+    view.rerender(<SettingsSheet {...p} dirty choices={{}} />);
+    act(() => {
+      vi.advanceTimersByTime(AUTOSAVE_MS);
+    });
+    expect(p.save?.run).toHaveBeenCalledOnce();
+  });
+  it("saves edits on their way before closing, and closes once they are saved", async () => {
+    let settle = () => {};
+    const run = vi.fn(() => new Promise<void>((resolve) => (settle = resolve)));
+    const p = { ...props(), save: { enabled: true, run } };
+    const view = render(<SettingsSheet {...p} dirty />);
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(asking()).toBe(false);
+    expect(run).toHaveBeenCalledOnce();
+    view.rerender(<SettingsSheet {...p} dirty busy />);
+    view.rerender(<SettingsSheet {...p} />);
+    expect(p.onClose).not.toHaveBeenCalled();
+    await act(async () => settle());
+    expect(p.onClose).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenCalledOnce();
   });
   it("keeps the sheet and the choice when Escape closes a picker inside it", () => {
     const p = { ...props(), dirty: true };
@@ -134,8 +205,8 @@ describe("settings inspector", () => {
     expect(p.onClose).not.toHaveBeenCalled();
     expect(p.onChange).not.toHaveBeenCalled();
   });
-  it("asks before Escape or the close button discards unsaved changes", () => {
-    const p = { ...props(), dirty: true };
+  it("asks before Escape or the close button discards edits that can't be saved", () => {
+    const p = { ...props(), dirty: true, save: { enabled: false, run: vi.fn() } };
     render(<SettingsSheet {...p} />);
     for (const dismiss of [
       () => fireEvent.keyDown(sheet(), { key: "Escape" }),
@@ -152,7 +223,11 @@ describe("settings inspector", () => {
     expect(p.onClose).toHaveBeenCalledOnce();
   });
   it("asks before Revert drops unsaved changes", () => {
-    const p = props();
+    const p = {
+      ...props(),
+      validation: ["Choose a model for the main role."],
+      save: { enabled: false, run: vi.fn() },
+    };
     const view = render(<SettingsSheet {...p} dirty />);
     const revert = screen.getByRole("button", { name: "Revert" });
     revert.focus();
@@ -186,18 +261,10 @@ describe("settings inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
-  it("says in the footer what saving needs, and ties Save's reason to it", () => {
-    vi.useFakeTimers();
+  it("shows a footer only for what keeps edits from saving, or a save that failed", () => {
     const p = props();
-    const view = render(<SettingsSheet {...p} />);
-    const save = () => screen.getByRole("button", { name: "Save" });
-    expect(status()?.textContent).toBe("All changes saved");
-    expect(save().getAttribute("aria-disabled")).toBe("true");
-    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
-    view.rerender(<SettingsSheet {...p} dirty />);
-    expect(status()?.textContent).toBe("Unsaved changes");
-    expect(save().getAttribute("aria-disabled")).toBeNull();
-    expect(screen.getByRole("button", { name: "Revert" })).toBeTruthy();
+    const view = render(<SettingsSheet {...p} dirty />);
+    expect(document.querySelector(".settings-footer")).toBeNull();
     view.rerender(
       <SettingsSheet
         {...p}
@@ -205,71 +272,96 @@ describe("settings inspector", () => {
         validation={["Local: choose a valid model ID.", "Enter a limit per task in US dollars."]}
       />,
     );
+    const footer = document.querySelector(".settings-footer") as HTMLElement;
     expect(
-      within(status() as HTMLElement)
+      within(footer)
         .getAllByRole("listitem")
         .map((row) => row.textContent),
     ).toEqual(["Local: choose a valid model ID.", "Enter a limit per task in US dollars."]);
-    expect(save().getAttribute("aria-disabled")).toBe("true");
-    view.rerender(<SettingsSheet {...p} dirty />);
-    fireEvent.click(save());
-    expect(p.save?.run).toHaveBeenCalledOnce();
-    view.rerender(<SettingsSheet {...p} dirty busy />);
-    expect(status()?.textContent).toBe("Saving…");
-    expect(save().getAttribute("aria-busy")).toBe("true");
-    view.rerender(<SettingsSheet {...p} />);
-    expect(status()?.textContent).toBe("Saved");
-    act(() => {
-      vi.advanceTimersByTime(1300);
-    });
-    expect(status()?.textContent).toBe("All changes saved");
+    expect(within(footer).getByRole("button", { name: "Revert" })).toBeTruthy();
     view.rerender(<SettingsSheet {...p} dirty error="Settings couldn't be saved. Try again." />);
     expect(screen.getByRole("alert").textContent).toBe("Settings couldn't be saved. Try again.");
-    expect(save().getAttribute("aria-describedby")).toContain(screen.getByRole("alert").id);
+    view.rerender(<SettingsSheet {...p} />);
+    expect(document.querySelector(".settings-footer")).toBeNull();
   });
-  it("slides Keys over itself, keeps the choices, and Back gives focus to the Add key pressed", () => {
+  it("holds Keys as a section: Add key from a role opens its form for that provider", () => {
     const p = props();
-    const onBack = vi.fn();
-    const keysPage = {
-      keys: {
-        health: {
-          online: true,
-          audit: { ok: true },
-          hairpin: { state: "active" as const, addresses: 1 },
-        },
-        keys: [],
-        loadError: null,
-        busy: false,
-        save: vi.fn(async () => ({ restart: false })),
-        remove: vi.fn(async () => {}),
-      },
-      preset: { requestId: 1, provider: "openai" as const },
-      onBack,
-    };
-    const view = render(<SettingsSheet {...p} />);
+    const view = render(
+      <SettingsSheet
+        {...p}
+        choices={{ main: { provider: "openai", model: "sample-large" } }}
+        keys={[]}
+        keysPanel={{
+          ...keysPanel(),
+          keys: {
+            ...keysPanel().keys,
+            keys: [
+              {
+                id: "weather",
+                kind: "http",
+                hosts: ["api.weather.example"],
+                createdAt: "t",
+                updatedAt: "t",
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    const keys = screen.getByRole("region", { name: "Keys" });
+    expect(within(keys).queryByRole("form", { name: "Add a key" })).toBeNull();
     const add = within(screen.getByRole("region", { name: "Main model" })).getByRole("button", {
       name: "Add key",
     });
     fireEvent.click(add);
     expect(p.onKeys).toHaveBeenCalledWith("main", "openai", add);
-    add.focus();
-    view.rerender(<SettingsSheet {...p} keysPage={keysPage} />);
-    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    const keys = document.querySelector<HTMLElement>('[data-page="keys"]') as HTMLElement;
-    expect(within(keys).getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
-    expect(add.closest("[inert]")).not.toBeNull();
-    fireEvent.click(within(keys).getByRole("button", { name: "Settings" }));
-    expect(onBack).toHaveBeenCalledOnce();
-    view.rerender(<SettingsSheet {...p} />);
-    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-    expect(document.activeElement).toBe(
-      within(screen.getByRole("region", { name: "Main model" })).getByRole("button", {
-        name: "Add key",
-      }),
+    view.rerender(
+      <SettingsSheet
+        {...p}
+        choices={{ main: { provider: "openai", model: "sample-large" } }}
+        keys={[]}
+        section="keys"
+        sectionRequest={1}
+        keysPanel={{
+          ...keysPanel(),
+          keys: {
+            ...keysPanel().keys,
+            keys: [
+              {
+                id: "weather",
+                kind: "http",
+                hosts: ["api.weather.example"],
+                createdAt: "t",
+                updatedAt: "t",
+              },
+            ],
+          },
+          preset: { requestId: 1, provider: "openai" as const },
+        }}
+      />,
     );
+    const form = within(screen.getByRole("region", { name: "Keys" })).getByRole("form", {
+      name: "Add a key",
+    });
+    expect(within(form).getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
     expect(p.onChange).not.toHaveBeenCalled();
   });
-  it("leaves on the page it showed, whatever Keys does while it closes", () => {
+  it("on a phone, lists the sections with what each holds and pushes into one", () => {
+    onPhone();
+    const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
+    render(<SettingsSheet {...p} keysPanel={keysPanel()} />);
+    expect(sheet()).toBeTruthy();
+    const row = (name: RegExp) => screen.getByRole("button", { name });
+    expect(row(/^Models/).textContent).toBe("ModelsSample Large");
+    expect(row(/^Autonomy/).textContent).toBe("AutonomyBalanced");
+    fireEvent.click(row(/^Autonomy/));
+    expect(screen.getByRole("dialog", { name: "Autonomy" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Start from" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(sheet()).toBeTruthy();
+  });
+  it("on a phone, goes to the section asked for and leaves on the page it showed", () => {
+    onPhone();
     // Something still moving keeps the closing sheet on the page, as a browser's transitions do.
     Object.defineProperty(HTMLElement.prototype, "getAnimations", {
       configurable: true,
@@ -281,48 +373,24 @@ describe("settings inspector", () => {
       ],
     });
     try {
-      const p = props();
-      const keysPage = {
-        keys: {
-          health: { online: true },
-          keys: [],
-          loadError: null,
-          busy: false,
-          save: vi.fn(async () => ({ restart: false })),
-          remove: vi.fn(async () => {}),
-        },
-        onBack: vi.fn(),
-      };
-      const view = render(<SettingsSheet {...p} />);
-      view.rerender(<SettingsSheet {...p} open={false} keysPage={keysPage} />);
-      expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-      expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull();
-      view.rerender(<SettingsSheet {...p} keysPage={keysPage} />);
-      view.rerender(<SettingsSheet {...p} open={false} />);
+      const p = { ...props(), keysPanel: keysPanel() };
+      const view = render(<SettingsSheet {...p} section="keys" sectionRequest={1} />);
       expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+      view.rerender(<SettingsSheet {...p} open={false} sectionRequest={2} />);
+      expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+      view.rerender(<SettingsSheet {...p} sectionRequest={3} />);
+      expect(sheet()).toBeTruthy();
     } finally {
       Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
     }
   });
-  it("asks before closing over Keys with a key typed, even with no settings changed", () => {
+  it("asks before closing with a key typed, even with no settings changed", () => {
     const p = props();
-    const keysPage = {
-      keys: {
-        health: {
-          online: true,
-          audit: { ok: true },
-          hairpin: { state: "active" as const, addresses: 1 },
-        },
-        keys: [],
-        loadError: null,
-        busy: false,
-        save: vi.fn(async () => ({ restart: false })),
-        remove: vi.fn(async () => {}),
-      },
-      onBack: vi.fn(),
-    };
-    render(<SettingsSheet {...p} keysPage={keysPage} />);
-    fireEvent.change(screen.getByLabelText("Key"), { target: { value: "fake-private-value" } });
+    render(<SettingsSheet {...p} keysPanel={keysPanel()} />);
+    const keys = screen.getByRole("region", { name: "Keys" });
+    fireEvent.change(within(keys).getByLabelText("Key"), {
+      target: { value: "fake-private-value" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
     expect(asking()).toBe(true);
     expect(p.onClose).not.toHaveBeenCalled();
@@ -337,7 +405,7 @@ describe("settings inspector", () => {
         }}
         subscriptionModels={[{ id: "account-model", name: "Reported account model" }]}
         manualPrices={{ fast: { input: "2", output: "3" } }}
-        budget={{ value: "8", useDefault: false, defaultUSD: 2, change: vi.fn() }}
+        spending={{ value: { on: true, task: "8", day: "" }, change: vi.fn() }}
       />,
     );
     const main = screen.getByRole("region", { name: "Main model" });
@@ -353,34 +421,59 @@ describe("settings inspector", () => {
   });
   it("says a plan uses its own limits instead of asking for a price or a limit", () => {
     const p = props();
-    const budget = { value: "8", useDefault: false, defaultUSD: 2, change: vi.fn() };
+    const spending = { value: { on: false, task: "", day: "" }, change: vi.fn() };
     const plan = { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" };
     const view = render(
       <SettingsSheet
         {...p}
         choices={{ main: plan, local: { provider: "ollama", model: "local-model" } }}
-        budget={budget}
+        spending={spending}
       />,
     );
-    const spending = screen.getByRole("region", { name: "Spending" });
-    expect(within(spending).getByText(/Your plan's own limits apply/)).toBeTruthy();
-    expect(within(spending).queryByRole("textbox")).toBeNull();
+    const section = screen.getByRole("region", { name: "Spending" });
+    expect(within(section).getByText(/Your plan's own limits apply/)).toBeTruthy();
+    expect(within(section).queryByRole("textbox")).toBeNull();
     const main = screen.getByRole("region", { name: "Main model" });
-    expect(within(main).getByText("Uses your plan's limits.")).toBeTruthy();
+    expect(within(main).getByText(/Uses your plan's limits\./)).toBeTruthy();
     expect(
-      within(main).getByText("Use a key from this plan, not a pay-as-you-go key."),
+      within(main).getByText(/Use a key from this plan, not a pay-as-you-go key\./),
     ).toBeTruthy();
     view.rerender(
       <SettingsSheet
         {...p}
         choices={{ main: plan, fast: { provider: "zai", model: "glm-5v-turbo", key: "zai" } }}
-        budget={budget}
+        spending={spending}
       />,
     );
     const paid = screen.getByRole("region", { name: "Spending" });
-    expect(within(paid).getByRole("textbox", { name: "Custom limit" })).toBeTruthy();
-    fireEvent.click(within(paid).getByRole("radio", { name: "Default ($2)" }));
-    expect(budget.change).toHaveBeenCalledWith("8", true);
+    const limit = within(paid).getByRole("switch", { name: "Spending limit" });
+    expect((limit as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(limit);
+    expect(spending.change).toHaveBeenCalledWith({ on: true, task: "", day: "" });
+  });
+  it("offers each check-in off, and a number once one is on", () => {
+    const change = vi.fn();
+    const off = { on: false, value: "150" };
+    render(
+      <SettingsSheet
+        {...props()}
+        autonomy={DEFAULT_AUTONOMY}
+        onAutonomy={vi.fn()}
+        checkIns={{
+          value: { steps: off, failures: { on: true, value: "5" }, actions: off },
+          change,
+        }}
+      />,
+    );
+    const steps = screen.getByRole("switch", { name: "After a number of steps" });
+    expect((steps as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole("textbox", { name: "Steps" })).toBeNull();
+    fireEvent.click(steps);
+    expect(change).toHaveBeenCalledWith("steps", { on: true, value: "150" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Failed actions" }), {
+      target: { value: "7x" },
+    });
+    expect(change).toHaveBeenLastCalledWith("failures", { on: true, value: "7" });
   });
   it("marks an autonomy choice that differs from the saved one", () => {
     const onAutonomy = vi.fn();
@@ -388,6 +481,7 @@ describe("settings inspector", () => {
     const view = render(
       <SettingsSheet {...props()} autonomy={saved} savedAutonomy={saved} onAutonomy={onAutonomy} />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Choose for each kind of action" }));
     const send = screen.getByRole("radiogroup", { name: "Send as you" });
     fireEvent.click(within(send).getByRole("radio", { name: "Just do it" }));
     expect(onAutonomy).toHaveBeenCalledWith({ ...DEFAULT_AUTONOMY, send: "act" });
@@ -400,22 +494,27 @@ describe("settings inspector", () => {
         onAutonomy={onAutonomy}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Choose for each kind of action" }));
     expect(screen.getAllByRole("img", { name: "Changed" })).toHaveLength(1);
     expect(screen.getByText("Passwords, codes and card details")).toBeTruthy();
   });
-  it("carries Stop on a phone, where the sheet covers the page, and leaves it to the page elsewhere", () => {
+  it("offers Shut down on every size, and on a phone also the task's Stop and how it went", () => {
+    const shutDown = vi.fn();
+    const view = render(
+      <SettingsSheet
+        {...props()}
+        stop={{ label: "Shut down", enabled: true, run: shutDown }}
+        taskControls={<p>Stopping…</p>}
+      />,
+    );
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Shut down" }));
+    expect(shutDown).toHaveBeenCalledOnce();
+    expect(within(sheet()).queryByText("Stopping…")).toBeNull();
+    view.unmount();
     const run = vi.fn();
     const stop = { label: "Stop", enabled: true, run };
-    const view = render(<SettingsSheet {...props()} stop={stop} />);
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
-    view.unmount();
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(width < 760px)",
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }));
-    try {
+    onPhone();
+    {
       const later = render(
         <SettingsSheet {...props()} stop={stop} taskControls={<p>Stopping…</p>} />,
       );
@@ -426,16 +525,6 @@ describe("settings inspector", () => {
       later.rerender(<SettingsSheet {...props()} taskControls={<p>Stopped.</p>} />);
       expect(within(sheet()).queryByRole("button", { name: "Stop" })).toBeNull();
       expect(within(sheet()).getByText("Stopped.")).toBeTruthy();
-    } finally {
-      vi.unstubAllGlobals();
     }
-  });
-  it("says Saved only after a save, not after an account step that was busy", () => {
-    const p = props();
-    const view = render(<SettingsSheet {...p} />);
-    view.rerender(<SettingsSheet {...p} busy />);
-    expect(status()?.textContent).toBe("All changes saved");
-    view.rerender(<SettingsSheet {...p} />);
-    expect(status()?.textContent).toBe("All changes saved");
   });
 });

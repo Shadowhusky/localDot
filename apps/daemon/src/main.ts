@@ -3,6 +3,7 @@ import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
+import { manualStreamRoute } from "./agent/manual-stream.ts";
 import { ComputerFences } from "./agent/safety/fences.ts";
 import { createReplacementController } from "./agent/safety/replacement-controller.ts";
 import { Transfers } from "./agent/transfers.ts";
@@ -12,6 +13,7 @@ import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
 import { BrowserStreams } from "./browser/streams.ts";
+import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery } from "./cells/browser-recovery.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -167,6 +169,8 @@ try {
 } catch {
   fences.closeAdmission();
 }
+const browserAvailable = (id: string) =>
+  !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id);
 browser = new BrowserOrchestrator({
   home,
   store,
@@ -174,11 +178,15 @@ browser = new BrowserOrchestrator({
   keyd,
   images: browserImagesFromEnv(),
   streamFullcolor: stream.fullcolor,
-  parentAvailable: (id) =>
-    !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id),
+  parentAvailable: browserAvailable,
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const browserRecovery = new BrowserRecovery(browser);
+const browserWarmer = new BrowserWarmer({
+  cells: orchestrator,
+  browser,
+  available: browserAvailable,
+});
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
   parents: orchestrator,
@@ -339,6 +347,7 @@ const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
+  () => browserWarmer.dispose(),
   () => browserRecovery.close(),
   () => agent?.close(),
   () => orchestrator.dispose(),
@@ -373,6 +382,7 @@ const app = createApp({
   cells: { cells: orchestrator, tickets, replacement, reset },
   desktop,
   browser: browserViewer,
+  accounts: { cells: orchestrator, browser },
   ui: { dir: webDir("dist") },
   gateway: {
     registry,
@@ -403,6 +413,10 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
 // serve() is typed as HTTP/1-or-HTTP/2; this daemon only ever creates an HTTP/1 server.
 attachUpgradeRouter(server as Server, { port, token }, [
   sessionStreamRoute(eventLog),
+  manualStreamRoute({
+    session: (id) => agent.routes.runner.get(id),
+    manual: agent.routes.manual,
+  }),
   cellStatusRoute(orchestrator),
   cellStatusRoute(browserStreams, "browsers"),
   desktopStreamRoute(desktop),

@@ -107,7 +107,7 @@ describe("explicit configuration save ownership", () => {
       main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
     });
     const { result } = await opened(f);
-    act(() => result.current.budget("3", false));
+    act(() => result.current.spending({ on: true, task: "3", day: "" }));
     f.state.index.keys = [];
     await act(async () => {
       await result.current.save();
@@ -115,7 +115,7 @@ describe("explicit configuration save ownership", () => {
     expect(f.state.puts).toEqual([]);
     expect(result.current.validation?.join(" ")).toContain("stored key");
     expect(result.current.error).toBeNull();
-    expect(result.current.draft?.budget).toBe("3");
+    expect(result.current.draft?.spending.task).toBe("3");
     expect(result.current.dirty).toBe(true);
   });
   it("does not send the captured configuration when the draft changes during preflight", async () => {
@@ -187,12 +187,12 @@ describe("explicit configuration save ownership", () => {
   it("retains edits after a verified refusal and blocks automatic retry after a lost reply", async () => {
     const f = server(),
       { result } = await opened(f);
-    act(() => result.current.budget("3", false));
+    act(() => result.current.spending({ on: true, task: "3", day: "" }));
     f.state.put = async () => new Response("private-refusal", { status: 400 });
     await act(async () => {
       await result.current.save();
     });
-    expect(result.current.draft?.budget).toBe("3");
+    expect(result.current.draft?.spending.task).toBe("3");
     expect(result.current.uncertain).toBe(false);
     expect(result.current.error).not.toContain("private-refusal");
     f.state.put = async (data) => {
@@ -217,7 +217,7 @@ describe("explicit configuration save ownership", () => {
       { result } = await opened(f),
       held = Promise.withResolvers<Response>();
     f.state.put = () => held.promise;
-    act(() => result.current.budget("3", false));
+    act(() => result.current.spending({ on: true, task: "3", day: "" }));
     let saving!: Promise<void>;
     act(() => {
       saving = result.current.save();
@@ -310,7 +310,7 @@ describe("explicit configuration save ownership", () => {
     await waitFor(() => expect(view.result.current.phase).toBe("ready"));
     act(() => view.result.current.show());
     await waitFor(() => expect(view.result.current.draft).not.toBeNull());
-    act(() => view.result.current.budget("3", false));
+    act(() => view.result.current.spending({ on: true, task: "3", day: "" }));
     const held = Promise.withResolvers<Response>();
     first.state.put = () => held.promise;
     let saving!: Promise<void>;
@@ -380,7 +380,7 @@ describe("explicit configuration save ownership", () => {
     const f = server({ main: { provider: "anthropic", model: "claude-sonnet-5-5" } }),
       { result } = await opened(f);
     const context = result.current.captureKey("main", "anthropic");
-    act(() => result.current.budget("3", false));
+    act(() => result.current.spending({ on: true, task: "3", day: "" }));
     f.state.index.keys.push({ id: "later", provider: "anthropic" });
     await act(async () => {
       await result.current.keySaved(context, { ...storedKey, id: "later" });

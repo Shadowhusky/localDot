@@ -20,8 +20,8 @@ import {
   TypeResult,
   ULID_PATTERN,
 } from "@localdot/protocol";
+import { keyName } from "@localdot/protocol/keys";
 import { z } from "zod";
-import { keyName } from "../../../../cells/desktop/desktopd/src/x/keys.ts";
 import {
   BrowserActionPermit,
   BrowserControlReply,
@@ -113,6 +113,16 @@ const page = BrowserReadResult.extend({
   outline: z.string().max(20000),
 }).strict();
 const stopped = identity.extend({ stopped: z.literal(true) });
+const cookieDomains = z.strictObject({
+  domains: z
+    .array(
+      z.strictObject({
+        domain: z.string().min(1).max(256),
+        count: z.number().int().positive(),
+      }),
+    )
+    .max(5000),
+});
 const BODY_LIMIT = 65536;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
 
@@ -121,9 +131,18 @@ export type BrowserLookup =
   | { kind: "hitTest"; point: Point }
   | { kind: "find"; name: string; role?: string; app?: string };
 
+// Both the model and the task timeline show these messages.
+const REFUSALS = {
+  request: "The request to the web browser was not valid.",
+  stale: "The web browser or the selected screen changed during the request.",
+  aborted: "The web browser did not answer in time, or the request was cancelled.",
+  unavailable: "The web browser is not responding.",
+  reply: "The web browser sent a reply that could not be read.",
+} as const;
+
 export class BrowserClientError extends Error {
-  constructor(readonly code: "request" | "stale" | "aborted" | "unavailable" | "reply") {
-    super(`Browser request refused: ${code}`);
+  constructor(readonly code: keyof typeof REFUSALS) {
+    super(REFUSALS[code]);
     this.name = "BrowserClientError";
   }
 }
@@ -135,7 +154,7 @@ export interface BrowserScope {
 }
 
 // Reject unsupported names/control characters before the session marks an input dispatched.
-export function checkManualBrowserInput(raw: ManualInput): void {
+export function checkManualBrowserInput(raw: unknown): void {
   const input = ManualInput.parse(raw);
   if (input.kind === "key") {
     const keys = input.combo.map(keyName);
@@ -214,6 +233,33 @@ export class BrowserClient {
 
   tabs(scope: BrowserScope): Promise<z.infer<typeof tabs>> {
     return this.#json("GET", "/tabs", undefined, scope, 3000, tabs, 65536);
+  }
+
+  // Cookie domains and how many cookies each holds; browserd never returns cookie values.
+  async cookieDomains(scope: BrowserScope): Promise<{ domain: string; count: number }[]> {
+    const reply = await this.#json(
+      "GET",
+      "/accounts/cookies",
+      undefined,
+      scope,
+      10000,
+      cookieDomains,
+      1024 * 1024,
+    );
+    return reply.domains;
+  }
+
+  async signOut(site: string, scope: BrowserScope): Promise<number> {
+    const reply = await this.#json(
+      "POST",
+      "/accounts/sign-out",
+      { site },
+      scope,
+      30000,
+      z.strictObject({ cookies: z.number().int().nonnegative() }),
+      1024,
+    );
+    return reply.cookies;
   }
 
   async armDownloads(raw: BrowserDownloadBinding, scope: BrowserScope): Promise<void> {
@@ -657,12 +703,16 @@ export class BrowserClient {
     request: InputRequest,
     scope: BrowserScope,
   ): Promise<InputResult> {
+    const motionMs =
+      request.input.kind === "drag" || request.input.kind === "move"
+        ? (request.input.durationMs ?? 0)
+        : 0;
     return this.#json(
       "POST",
       "/input",
       { ...this.#action(permit, tabId), request },
       scope,
-      10000,
+      10000 + motionMs,
       inputReply,
       65536,
     );

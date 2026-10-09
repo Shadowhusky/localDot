@@ -1,6 +1,6 @@
 import type { PointerPlan } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { OVERSHOOT_CAP_PX, pointerAt } from "./pointer-path.ts";
+import { glideAt, OVERSHOOT_CAP_PX, pointerAt } from "./pointer-path.ts";
 
 const plan: PointerPlan = {
   from: { x: 0, y: 0 },
@@ -79,5 +79,41 @@ describe("pointerAt", () => {
     expect(pointerAt(instant, 0)).toEqual(plan.from);
     expect(pointerAt(instant, 999)).toEqual(plan.from);
     expect(pointerAt(instant, 1000)).toEqual(plan.to);
+  });
+});
+
+describe("glideAt", () => {
+  const glide = (p: PointerPlan) =>
+    Array.from({ length: 501 }, (_, i) => glideAt(p, p.startsAt + i));
+
+  it("sits at the start before the move and lands exactly on the target as it ends", () => {
+    expect(glideAt(plan, 999)).toEqual(plan.from);
+    expect(glideAt(plan, 1500)).toEqual(plan.to);
+    expect(glideAt(plan, 1499.99).x).toBeCloseTo(500, 2);
+  });
+
+  it("never overshoots, unlike desktopd's path, and keeps moving forward", () => {
+    const xs = glide(plan).map((p) => p.x);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(500);
+    for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThanOrEqual(xs[i - 1] as number);
+  });
+
+  it("is front-loaded like a critically damped spring: most of the way there by half time", () => {
+    expect(glideAt(plan, 1250).x).toBeGreaterThan(450);
+    expect(glideAt(plan, 1025).x).toBeLessThan(100);
+  });
+
+  it("bows to the same side as the plan's own path, by at most min(5% of distance, 36 px)", () => {
+    const ys = glide(plan).map((p) => p.y);
+    const side = Math.sign(samples(plan).reduce((sum, p) => sum + p.y, 0));
+    expect(Math.sign(ys.reduce((sum, y) => sum + y, 0))).toBe(side);
+    expect(Math.max(...ys.map(Math.abs))).toBeLessThanOrEqual(25 + 1e-9);
+  });
+
+  it("arcs a curve it does not know by 6 % of the distance", () => {
+    const future = { ...plan, curve: "unknown-v9" as unknown as PointerPlan["curve"] };
+    const peak = Math.max(...glide(future).map((p) => Math.abs(p.y)));
+    expect(peak).toBeGreaterThan(14);
+    expect(peak).toBeLessThanOrEqual(15 + 1e-9);
   });
 });

@@ -112,6 +112,25 @@ describe("RadioCards", () => {
     expect(container.querySelectorAll("input")).toHaveLength(3);
   });
 
+  it("lays rows out with a radio at the left and a tag beside the title, outside its name", () => {
+    render(
+      <RadioCards
+        aria-label="Permissions"
+        value="balanced"
+        onValueChange={() => {}}
+        options={[
+          { value: "balanced", label: "Balanced", tag: "Recommended", description: "Asks first" },
+          { value: "careful", label: "Careful" },
+        ]}
+      />,
+    );
+    const balanced = screen.getByRole("radio", { name: "Balanced" });
+    const row = balanced.closest("label");
+    expect(row?.querySelector(".ui-radio-mark")?.getAttribute("aria-hidden")).toBe("true");
+    expect(row?.querySelector(".ui-badge")?.textContent).toBe("Recommended");
+    expect(screen.getByRole("radiogroup").dataset.layout).toBe("rows");
+  });
+
   it("keeps an unavailable choice readable and unchosen", () => {
     const onValueChange = vi.fn();
     render(

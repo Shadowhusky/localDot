@@ -9,6 +9,8 @@ export class BrowserDocker {
   readonly networks = new Map<string, ObjectValue>();
   readonly volumes = new Map<string, ObjectValue>();
   before?: (request: DockerRequest) => void | Promise<void>;
+  // The exit status the sign-in copy container reports; it copies the volume's fields on 0.
+  copyStatus = 0;
   after?: (request: DockerRequest, reply: unknown) => void | Promise<void>;
   next = 1;
 
@@ -28,6 +30,17 @@ export class BrowserDocker {
     const missing = () => {
       throw new DockerError(404, "missing", path);
     };
+    if (kind === "volumes" && key === undefined && method === "GET") {
+      const labels: string[] = JSON.parse(query?.filters ?? "{}").label ?? [];
+      return {
+        Volumes: [...this.volumes.values()].filter((volume) =>
+          labels.every((label) => {
+            const [name, value] = label.split("=");
+            return volume.Labels?.[name ?? ""] === value;
+          }),
+        ),
+      };
+    }
     if (kind === "containers" && key === "json") {
       const volume = JSON.parse(query?.filters ?? "{}").volume?.[0];
       return [...this.containers.values()]
@@ -36,7 +49,11 @@ export class BrowserDocker {
     }
     if (method === "POST" && key === "create") {
       if (kind === "volumes") {
-        if (!this.volumes.has(data.Name)) this.volumes.set(data.Name, { ...data });
+        if (!this.volumes.has(data.Name))
+          this.volumes.set(data.Name, {
+            ...data,
+            CreatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, this.next++)).toISOString(),
+          });
         return this.volumes.get(data.Name);
       }
       if (kind === "networks") {
@@ -59,10 +76,9 @@ export class BrowserDocker {
       }
       if (kind === "containers") {
         const networks: ObjectValue = {};
-        for (const [name, entry] of Object.entries(data.NetworkingConfig.EndpointsConfig) as [
-          string,
-          ObjectValue,
-        ][]) {
+        for (const [name, entry] of Object.entries(
+          data.NetworkingConfig?.EndpointsConfig ?? {},
+        ) as [string, ObjectValue][]) {
           const network = [...this.networks.values()].find((candidate) => candidate.Name === name);
           if (!network) return missing();
           networks[name] = {
@@ -111,6 +127,16 @@ export class BrowserDocker {
           "8082/tcp": [{ HostIp: "127.0.0.1", HostPort: "49102" }],
         };
       return undefined;
+    }
+    if (kind === "containers" && action === "wait") {
+      value.State.Running = false;
+      const mounts = value.Mounts as ObjectValue[];
+      const from = this.volumes.get(mounts.find((mount) => mount.Destination === "/legacy")?.Name);
+      const to = this.volumes.get(mounts.find((mount) => mount.Destination === "/profile")?.Name);
+      if (this.copyStatus === 0 && from && to)
+        for (const [field, data] of Object.entries(from))
+          if (!["Name", "Labels", "CreatedAt"].includes(field)) to[field] = data;
+      return { StatusCode: this.copyStatus };
     }
     if (kind === "networks" && action === "connect") {
       const container = this.containers.get(data.Container);

@@ -36,7 +36,7 @@ afterEach(cleanup);
 const message = (id: string, text: string) =>
   ({ id, role: "user", text, final: true }) as AgentMessage;
 const step = (key: string, state: WorkStep["state"] = "done") =>
-  ({ key, title: `Step ${key}`, metric: "", state, startT: 1, endT: 2 }) as WorkStep;
+  ({ key, title: `Step ${key}`, meta: "", time: "", state, startT: 1, endT: 2 }) as WorkStep;
 // The model keeps its messages and results; the thread's items around them are rebuilt by every
 // event, with new objects for the same steps.
 const first = message("1", "Draw a dog");

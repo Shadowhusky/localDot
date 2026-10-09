@@ -38,6 +38,8 @@ export interface MenuProps {
   label: string;
   side?: Side;
   align?: Align;
+  // Dims the page behind it.
+  dim?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -170,7 +172,7 @@ export function MenuItem({
         onSelect();
       }}
     >
-      {icon && <Icon name={icon} className="ui-menu-icon" />}
+      {icon && <Icon name={icon} size={18} className="ui-menu-icon" />}
       <span className="ui-menu-text">
         <span id={labelId} className="ui-menu-label">
           {children}

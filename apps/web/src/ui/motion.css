@@ -8,8 +8,17 @@
       --dur-hover: 120ms;
       --dur-fade: 150ms;
       --dur-exit: 150ms;
-      --dur-sheet: 150ms;
-      --dur-spring: 150ms;
+      --dur-sheet-exit: 150ms;
+      --dur-snappy: 150ms;
+      --dur-default: 150ms;
+      --dur-gentle: 150ms;
+      --dur-light-in: 150ms;
+      --dur-light-out: 150ms;
+      --dur-text-in: 120ms;
+      --dur-text-out: 120ms;
+      --dur-dim: 150ms;
+      --dur-curtain: 150ms;
+      --dur-first-start: 150ms;
     }
   }
 }

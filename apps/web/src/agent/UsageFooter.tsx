@@ -1,8 +1,8 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import { useRef, useState } from "react";
-import { count } from "../copy/format.ts";
+import { count, dollars, spendText } from "../copy/format.ts";
 import { providerName } from "../settings/choices.ts";
-import { Icon } from "../ui/Icon.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Meter } from "../ui/Meter.tsx";
 import { Popover } from "../ui/Popover.tsx";
 import { pressHandlers } from "../ui/press.ts";
@@ -33,11 +33,26 @@ function windowName(minutes?: number): string {
   return `${count(minutes, "minute", "minutes")} window`;
 }
 
-export function usageSummary(
+// Money is shown only where a task is billed per call: never for a plan.
+export const billedPerCall = (selection?: TaskModelSelection) =>
+  selection?.kind !== "chatgpt" && !(selection?.kind === "api" && selection.plan);
+
+// What one model has cost this task, from the calls the feed has seen.
+function modelSpend(model: AgentModel, route: string, id: string) {
+  const calls = model.spendCalls.filter((call) => call.route === route && call.model === id);
+  if (!calls.length) return null;
+  return {
+    usd: calls.reduce((sum, call) => sum + call.usd, 0),
+    estimated: calls.some((call) => call.estimated),
+  };
+}
+
+// The usage line: the main model, then its figures, which never give way to a long name.
+export function usageParts(
   model: AgentModel,
   selection?: TaskModelSelection,
   modelName?: ModelName,
-): string {
+): { main: string | undefined; figures: string } {
   const role =
     selection?.kind === "chatgpt"
       ? { provider: "chatgpt", model: selection.model }
@@ -46,19 +61,87 @@ export function usageSummary(
         : model.usage[0] && { provider: model.usage[0].route, model: model.usage[0].model };
   const main = role && (modelName?.(role.provider, role.model) ?? role.model);
   const tokens = model.usage.reduce((sum, row) => sum + row.inputTokens + row.outputTokens, 0);
-  return [main, tokens ? `${compact.format(tokens)} tokens` : "No usage yet"]
-    .filter(Boolean)
-    .join(" · ");
+  const spent =
+    model.spend && billedPerCall(selection)
+      ? spendText(model.spend.taskUSD, model.spend.estimated)
+      : null;
+  return {
+    main: main || undefined,
+    figures: [tokens ? `${compact.format(tokens)} tokens` : "No usage yet", spent]
+      .filter(Boolean)
+      .join(" · "),
+  };
+}
+
+export function usageSummary(
+  model: AgentModel,
+  selection?: TaskModelSelection,
+  modelName?: ModelName,
+): string {
+  const { main, figures } = usageParts(model, selection, modelName);
+  return main ? `${main} · ${figures}` : figures;
+}
+
+function limitText(spend: NonNullable<AgentModel["spend"]>): string {
+  const limits = [
+    spend.taskLimitUSD === undefined ? null : `${dollars(spend.taskLimitUSD)} per task`,
+    spend.dayLimitUSD === undefined ? null : `${dollars(spend.dayLimitUSD)} a day`,
+  ].filter(Boolean);
+  return limits.length ? `Limit ${limits.join(" · ")}` : "No spending limit";
+}
+
+function Spending({
+  model,
+  onSpending,
+}: {
+  model: AgentModel;
+  onSpending?(trigger: HTMLElement): void;
+}) {
+  const spend = model.spend;
+  if (!spend) return null;
+  // Today includes other tasks, whose calls this feed never saw: plain only when it is all ours.
+  const todayEstimated = spend.estimated || spend.dayUSD > spend.taskUSD + 1e-9;
+  return (
+    <>
+      <dl className="usage-spend">
+        <div>
+          <dt>This task</dt>
+          <dd className="num">{spendText(spend.taskUSD, spend.estimated)}</dd>
+        </div>
+        <div>
+          <dt>
+            Today<span className="usage-line">All tasks</span>
+          </dt>
+          <dd className="num">{spendText(spend.dayUSD, todayEstimated)}</dd>
+        </div>
+      </dl>
+      {(spend.estimated || todayEstimated) && (
+        <p className="usage-note">≈ is an estimate from token counts and list prices.</p>
+      )}
+      <div className="usage-limit">
+        <span className="usage-line">{limitText(spend)}</span>
+        {onSpending && (
+          <Button variant="quiet" size="sm" onClick={(event) => onSpending(event.currentTarget)}>
+            {spend.taskLimitUSD === undefined && spend.dayLimitUSD === undefined
+              ? "Set a limit…"
+              : "Change…"}
+          </Button>
+        )}
+      </div>
+    </>
+  );
 }
 
 export function UsageDetails({
   model,
   selection,
   modelName,
+  onSpending,
 }: {
   model: AgentModel;
   selection?: TaskModelSelection;
   modelName?: ModelName;
+  onSpending?(trigger: HTMLElement): void;
 }) {
   const named = (provider: string, id: string) => modelName?.(provider, id) ?? id;
   const subscription = model.subscription;
@@ -66,27 +149,33 @@ export function UsageDetails({
   const waiting =
     selection?.kind === "api" ? selection.roles.filter((role) => !reported.has(role.role)) : [];
   const retry = model.retry?.data;
+  const money = billedPerCall(selection);
   return (
     <section className="usage-details" aria-label="Task usage">
       <h3 className="usage-title">Usage</h3>
+      {money && <Spending model={model} onSpending={onSpending} />}
       <dl className="usage-roles">
-        {model.usage.map((row) => (
-          <div key={`${row.role}:${row.route}:${row.model}`} className="usage-role">
-            <dt>{roleName(row.role)}</dt>
-            <dd>
-              <span className="usage-model">{named(row.route, row.model)}</span>
-              <span className="usage-line num">
-                {whole(row.inputTokens)} in · {whole(row.outputTokens)} out
-                {row.reasoningTokens === undefined
-                  ? ""
-                  : ` · ${whole(row.reasoningTokens)} reasoning${row.reasoningPartial ? " (some calls didn't say)" : ""}`}
-              </span>
-              <span className="usage-line">
-                {providerName(row.route)} · {count(row.calls, "call", "calls")}
-              </span>
-            </dd>
-          </div>
-        ))}
+        {model.usage.map((row) => {
+          const spent = money ? modelSpend(model, row.route, row.model) : null;
+          return (
+            <div key={`${row.role}:${row.route}:${row.model}`} className="usage-role">
+              <dt>{roleName(row.role)}</dt>
+              <dd>
+                <span className="usage-model">{named(row.route, row.model)}</span>
+                <span className="usage-line num">
+                  {whole(row.inputTokens)} in · {whole(row.outputTokens)} out
+                  {row.reasoningTokens === undefined
+                    ? ""
+                    : ` · ${whole(row.reasoningTokens)} reasoning${row.reasoningPartial ? " (some calls didn't say)" : ""}`}
+                </span>
+                <span className="usage-line num">
+                  {providerName(row.route)} · {count(row.calls, "call", "calls")}
+                  {spent ? ` · ${spendText(spent.usd, spent.estimated)}` : ""}
+                </span>
+              </dd>
+            </div>
+          );
+        })}
         {waiting.map((role) => (
           <div key={role.role} className="usage-role">
             <dt>{roleName(role.role)}</dt>
@@ -110,7 +199,7 @@ export function UsageDetails({
         <p className="usage-note">No model calls reported yet.</p>
       )}
       {selection?.kind === "api" && selection.plan && (
-        <p className="usage-note">Uses your plan's limits.</p>
+        <p className="usage-note">Included in your plan. Uses your plan's limits.</p>
       )}
       {(selection?.kind === "chatgpt" || subscription) && (
         <div className="usage-plan">
@@ -156,14 +245,17 @@ export function UsageFooter({
   model,
   selection,
   modelName,
+  onSpending,
 }: {
   model: AgentModel;
   selection?: TaskModelSelection;
   modelName?: ModelName;
+  onSpending?(trigger: HTMLElement): void;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  const summary = usageSummary(model, selection, modelName);
+  const { main, figures } = usageParts(model, selection, modelName);
+  const summary = main ? `${main} · ${figures}` : figures;
   return (
     <div className="activity-usage">
       <button
@@ -176,8 +268,8 @@ export function UsageFooter({
         aria-label={`Usage: ${summary}`}
         onClick={() => setOpen((shown) => !shown)}
       >
-        <span className="activity-usage-text num">{summary}</span>
-        <Icon name="chevron-up" size={12} className="activity-usage-chevron" />
+        {main && <span className="activity-usage-text">{main}</span>}
+        <span className="activity-usage-figures num">{figures}</span>
       </button>
       <Popover
         open={open}
@@ -187,7 +279,18 @@ export function UsageFooter({
         side="top"
         className="activity-usage-popover"
       >
-        <UsageDetails model={model} selection={selection} modelName={modelName} />
+        <UsageDetails
+          model={model}
+          selection={selection}
+          modelName={modelName}
+          onSpending={
+            onSpending &&
+            ((trigger) => {
+              setOpen(false);
+              onSpending(trigger);
+            })
+          }
+        />
       </Popover>
     </div>
   );

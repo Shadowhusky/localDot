@@ -18,7 +18,8 @@ const PLANNED: IconName[] = [
   "chevron-down",
   "chevron-up",
   "hand",
-  "square",
+  "hand-back",
+  "stop",
   "pause",
   "play",
   "skip-back",
@@ -34,6 +35,7 @@ const PLANNED: IconName[] = [
   "arrow-left",
   "arrow-right",
   "key-round",
+  "settings",
   "sliders-horizontal",
   "copy",
   "clipboard-paste",
@@ -48,6 +50,34 @@ const PLANNED: IconName[] = [
   "eye-off",
   "globe",
   "monitor",
+  // Added by the master design (design-v2 §6).
+  "power",
+  "compose",
+  "list",
+  "history",
+  "expand",
+  "shrink",
+  "mouse-right",
+  "shield",
+  "book",
+  "contrast",
+  "cpu",
+  "check-circle",
+  "continue",
+  "share",
+  "filter",
+  "back-10",
+  "forward-10",
+  "bell",
+  "trash",
+  "chevrons-up-down",
+  "info",
+  // Settings: Spending and the audit log (design-v2 §11 I, J).
+  "chart",
+  "file-text",
+  // First-run setup: the ChatGPT plan and coding plans (design-v2 §11 A0).
+  "message-circle",
+  "code",
 ];
 
 describe("Icon", () => {
@@ -65,16 +95,12 @@ describe("Icon", () => {
     }
   });
 
-  it("keeps a 1.5 px stroke at every size", () => {
-    for (const [size, stroke] of [
-      [12, "3"],
-      [16, "2.25"],
-      [20, "1.8"],
-    ] as const) {
+  it("draws a 1.6 stroke on the 24 px grid at every size", () => {
+    for (const size of [12, 16, 22] as const) {
       const { container, unmount } = render(<Icon name="check" size={size} />);
       const svg = container.querySelector("svg");
       expect(svg?.getAttribute("width")).toBe(String(size));
-      expect(svg?.getAttribute("stroke-width")).toBe(stroke);
+      expect(svg?.getAttribute("stroke-width")).toBe("1.6");
       unmount();
     }
   });

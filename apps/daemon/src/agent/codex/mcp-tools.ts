@@ -1,5 +1,6 @@
 import {
   ComputerAction,
+  MAX_DRAG_MS,
   MODEL_SCREEN,
   TOOL_INPUTS,
   TOOL_NAMES,
@@ -19,9 +20,18 @@ const H = MODEL_SCREEN.height;
 export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   computer:
     `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: screenshot (returns the screen), ` +
-    `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}; button left/right/middle; count 1-3), ` +
-    "type (text), key (keys, X key names such as Return, ctrl+l; repeat), scroll (point, dx and dy in " +
-    "steps of -30..30), wait (ms), zoom (region {x, y, w, h}, returns that part enlarged), cursor_position. " +
+    `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}, or where the cursor is without one; ` +
+    'button left/right/middle; count 1-3; mods: modifier keys held during the click, such as ["shift"] or ' +
+    '["ctrl"]), drag (path: 2 to 64 points {x, y} to follow, start first, such as a stroke when drawing; ' +
+    `button; mods; ms up to ${MAX_DRAG_MS} for the motion; one approval covers the whole path), move (point: ` +
+    "hovers, or drags while a button is down), mouse_down (point optional, button, mods: the button stays " +
+    "down until mouse_up, at most 60 s; a move, a scroll and the mouse_up while it is down drag from where " +
+    "it went down, and a drop on a send, post or delete control on a web page, or a file carried " +
+    "onto a web page, asks first), " +
+    "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
+    "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
+    "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
+    "(region {x, y, w, h}, returns that part enlarged), cursor_position. " +
     "Each action can return a new screenshot. Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.",
   shell:
     "Run one bash command in the virtual computer's terminal, as its user, in their home. Returns the " +
@@ -29,24 +39,34 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   files:
     "Read, write, edit (old_text must match exactly once) or list files in the virtual computer's home. " +
     "Paths are relative to the home or start with ~/.",
-  browser_read: "Read the text and structure of the page open on the selected screen.",
+  browser_read:
+    "Read the text and structure of the page open on the selected screen: the web browser or the desktop's Chromium.",
   browser_navigate:
-    "Open an http or https URL on the selected desktop or signed-in browser screen.",
+    "Open an http or https page. Public sites open in the web browser, which keeps the user's sign-ins; localhost and local addresses open in the desktop's Chromium. The screen switches to match.",
   browser_upload:
-    "Assign 1–10 desktop-home files (100 MiB total maximum) to the currently open file chooser on the isolated browser screen, after explicit approval of the exact files and receiving page. This does not submit the page's form. Never retry an uncertain upload automatically.",
+    "Assign 1–10 desktop-home files (100 MiB total maximum) to the currently open file chooser in the web browser, after explicit approval of the exact files and receiving page. This does not submit the page's form. Never retry an uncertain upload automatically.",
   switch_screen:
-    "Switch between desktop and the isolated signed-in browser. Use browser for signed-in work and request_takeover for login. Request a fresh screenshot after switching; shell and files remain on the desktop.",
+    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. When a site needs the user to sign in, ask for the details with ask_user fields. Request a fresh screenshot after switching; shell and files remain on the desktop.",
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:
     "Ask the user a question and wait for the answer (up to 30 minutes). Only when you cannot continue " +
     "without the user's information or a choice that would change the result; otherwise pick a sensible " +
     "default and mention it in your summary. Never ask for permission: the safety system asks the user " +
-    "before consequential steps. Give up to six short options, and set allow_text to accept a free answer.",
+    "before consequential steps. For a quick choice, give up to six short options, and set allow_text to " +
+    "accept a free answer. " +
+    "To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short " +
+    "label): text, longtext, secret (a password, PIN or recovery code), code (a one-time code; length if you know " +
+    "it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a " +
+    "file and you get its path) or qr (shows value as a QR code for the user's other device). Name the buttons " +
+    'with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the ' +
+    "password box at target ([x, y] in screen pixels), or into the password box that has keyboard focus when " +
+    "there is no target; you only learn that it was provided. Answers come back by field id. If the user declines, carry on " +
+    "without it.",
   request_takeover:
-    "Hand the screen to the user and wait until they hand it back. Only for a login, 2FA, a CAPTCHA or " +
-    "payment card entry, or after you have tried at least two different approaches and cannot continue; " +
-    "say in the note what you tried. Never type passwords or card numbers yourself.",
+    "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
+    "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +
+    "the note what they need to do. For passwords and codes, ask with ask_user fields instead.",
   remember:
     "Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping).",
   done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",

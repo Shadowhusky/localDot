@@ -1,6 +1,5 @@
 import {
   BudgetRaiseRequest,
-  type ManualInput,
   type QuestionAnswerRequest,
   type StopOutcome,
 } from "@localdot/protocol";
@@ -12,18 +11,19 @@ import { memoryUndoEligible } from "./activity.ts";
 import {
   answerQuestion,
   ControlFailure,
-  manualInput,
   raiseTaskBudget,
   resumeTask,
   returnControl,
   stopTask,
+  takeComputer as takeComputerRequest,
+  takeControl,
   undoMemory,
 } from "./control-api.ts";
-import type { AgentFeed } from "./model.ts";
+import { type AgentFeed, heldByUser } from "./model.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 export interface ControlStatus {
-  readonly kind: "answer" | "input" | "handback" | "budget" | "resume" | "memory";
+  readonly kind: "answer" | "take" | "handback" | "budget" | "resume" | "memory";
   readonly target: string;
   readonly phase: "sending" | "checking" | "refused" | "uncertain";
   readonly message: string;
@@ -42,6 +42,8 @@ interface Props {
   suspended: boolean;
   manualVisible: boolean;
   refreshCell(): void;
+  // Asks the computer which task it runs now.
+  lookLive?(): void;
 }
 interface Operation {
   api: ApiClient;
@@ -54,6 +56,8 @@ interface Operation {
   recheck?: AgentSessionView["snapshot"];
 }
 const idleStop: StopStatus = { phase: "idle", errors: [] };
+// "busy" while the user's own input stream is delivering, which never closes their control.
+const manualReady = (state: string | undefined) => state === "ready" || state === "busy";
 export function useTaskControls(props: Props) {
   const current = useRef(props);
   const operation = useRef<Operation | null>(null);
@@ -94,7 +98,7 @@ export function useTaskControls(props: Props) {
       ? (!current.current.cell || current.current.cell.id === record.cellId) &&
         (!current.current.agent.sessionId || current.current.agent.sessionId === record.sessionId)
       : current.current.cell?.id === record.cellId &&
-        current.current.agent.sessionId === record.sessionId);
+        (current.current.agent.sessionId ?? "") === record.sessionId);
   const authoritative = useCallback((now = current.current, allowEnded = false) => {
     const feed = now.feed.read();
     return (
@@ -121,22 +125,18 @@ export function useTaskControls(props: Props) {
     !now.cell.paused &&
     !now.cell.fenced &&
     !now.cell.replacementPending;
-  const cancelManual = useCallback(() => {
-    if (operation.current?.kind === "input") operation.current.abort.abort();
-  }, []);
   useEffect(() => {
     mounted.current = true;
     const check = () => {
       const record = operation.current;
-      if (!record || !["input", "budget", "resume", "memory"].includes(record.kind)) return;
+      if (!record || !["budget", "resume", "memory"].includes(record.kind)) return;
       const feed = current.current.feed.read();
       if (
         document.hidden ||
         !navigator.onLine ||
         current.current.suspended ||
-        (record.kind === "input" &&
-          (!current.current.manualVisible || feed.model.pendingTakeover !== record.target)) ||
-        (record.kind !== "input" && !!(feed.model.pendingTakeover || feed.model.pendingAsk)) ||
+        feed.model.pendingTakeover ||
+        feed.model.pendingAsk ||
         feed.sessionId !== record.sessionId ||
         feed.cellId !== record.cellId ||
         (feed.connection !== "live" &&
@@ -148,28 +148,15 @@ export function useTaskControls(props: Props) {
     };
     const unsubscribe = props.feed.subscribe(check);
     window.addEventListener("offline", check);
-    window.addEventListener("blur", cancelManual);
-    window.addEventListener("pagehide", cancelManual);
     document.addEventListener("visibilitychange", check);
     return () => {
       mounted.current = false;
       operation.current?.abort.abort();
       unsubscribe();
       window.removeEventListener("offline", check);
-      window.removeEventListener("blur", cancelManual);
-      window.removeEventListener("pagehide", cancelManual);
       document.removeEventListener("visibilitychange", check);
     };
-  }, [props.feed, cancelManual]);
-  useLayoutEffect(() => {
-    if (
-      props.suspended ||
-      !props.manualVisible ||
-      props.cell?.state !== "ready" ||
-      props.cell.paused
-    )
-      cancelManual();
-  }, [props.suspended, props.manualVisible, props.cell?.state, props.cell?.paused, cancelManual]);
+  }, [props.feed]);
   useEffect(() => {
     const record = operation.current;
     if (
@@ -183,16 +170,18 @@ export function useTaskControls(props: Props) {
         !!props.agent.model.ended ||
         (record.kind === "answer"
           ? props.agent.model.pendingAsk !== record.target
-          : record.kind === "handback"
-            ? props.agent.model.pendingTakeover !== record.target
-            : record.kind === "memory"
-              ? props.agent.model.changes.some((change) => change.undoes === record.target)
-              : record.kind === "resume"
-                ? props.agent.snapshot?.status !== "paused"
-                : record.kind === "budget"
-                  ? props.agent.snapshot?.status !== "paused" ||
-                    (!!props.agent.snapshot?.pause && props.agent.snapshot.budgetHold !== "task")
-                  : false);
+          : record.kind === "take"
+            ? !!heldByUser(props.agent.model)
+            : record.kind === "handback"
+              ? props.agent.model.pendingTakeover !== record.target
+              : record.kind === "memory"
+                ? props.agent.model.changes.some((change) => change.undoes === record.target)
+                : record.kind === "resume"
+                  ? props.agent.snapshot?.status !== "paused"
+                  : record.kind === "budget"
+                    ? props.agent.snapshot?.status !== "paused" ||
+                      (!!props.agent.snapshot?.pause && props.agent.snapshot.budgetHold !== "task")
+                    : false);
       const reread = record.recheck !== undefined && record.recheck !== props.agent.snapshot;
       if (
         absent ||
@@ -242,20 +231,20 @@ export function useTaskControls(props: Props) {
     kind: ControlStatus["kind"],
     target: string,
     request: (record: Operation) => Promise<void | string>,
+    record = begin(kind, target),
   ) => {
-    const record = begin(kind, target);
     if (!record) return false;
     setStatus({
       kind,
       target,
       phase: "sending",
-      message: kind === "input" ? "Sending input…" : "Sending request…",
+      message: "Sending request…",
     });
     try {
       const acknowledgement = await request(record);
       if (!owned(record)) return false;
       record.settled = true;
-      if (kind === "input" || (kind === "memory" && typeof acknowledgement === "string")) {
+      if (kind === "memory" && typeof acknowledgement === "string") {
         if (kind === "memory") {
           confirmedUndos.current.add(target);
           setMemoryUndone(new Set(confirmedUndos.current));
@@ -282,12 +271,9 @@ export function useTaskControls(props: Props) {
         ...(error instanceof ControlFailure && error.status !== undefined
           ? { code: error.status }
           : {}),
-        message:
-          kind === "input" && uncertain
-            ? "Input completion not confirmed. Check task state; use Stop if input is still uncertain."
-            : uncertain
-              ? "Delivery not confirmed. Check task state before trying again."
-              : "The request was refused. Check the current task.",
+        message: uncertain
+          ? "Delivery not confirmed. Check task state before trying again."
+          : "The request was refused. Check the current task.",
       });
       current.current.agent.reconcile();
       return false;
@@ -311,30 +297,63 @@ export function useTaskControls(props: Props) {
       answerQuestion(record.api, record.sessionId, body, record.abort.signal),
     );
   };
-  const input = (requestId: string, input: ManualInput): Promise<boolean> => {
+  // Whatever dot is doing, or the computer dot handed over. dot's Pause, mid-change, settles first;
+  // a held one stays held under the user's control.
+  const takeReady = (now = current.current) =>
+    available(now) &&
+    !operation.current &&
+    !heldByUser(now.agent.model) &&
+    (now.agent.snapshot?.pause?.phase ?? "paused") === "paused";
+  const take = (): Promise<boolean> => {
+    if (!takeReady()) return Promise.resolve(false);
+    return perform("take", "", async (record) => {
+      await takeControl(record.api, record.sessionId, record.abort.signal);
+    });
+  };
+  // With no task live on the computer, the user's own hold starts, and the page then finds it there.
+  const computerReady = (now = current.current) =>
+    !fence.current &&
+    !operation.current &&
+    !now.suspended &&
+    !document.hidden &&
+    navigator.onLine &&
+    now.cellPending === null &&
+    now.cell?.state === "ready" &&
+    !now.cell.paused &&
+    !now.cell.fenced &&
+    !now.cell.replacementPending;
+  const takeComputer = (): Promise<boolean> => {
     const now = current.current;
-    if (
-      !available() ||
-      operation.current ||
-      !now.manualVisible ||
-      now.agent.model.pendingTakeover !== requestId ||
-      now.agent.snapshot?.manualControl !== "ready"
-    )
-      return Promise.resolve(false);
-    return perform("input", requestId, (record) =>
-      manualInput(record.api, record.sessionId, { requestId, input }, record.abort.signal),
+    if (!computerReady(now) || !now.cell) return Promise.resolve(false);
+    const record: Operation = {
+      api: now.api,
+      cellId: now.cell.id,
+      sessionId: now.agent.sessionId ?? "",
+      kind: "take",
+      target: "",
+      abort: new AbortController(),
+      settled: false,
+    };
+    operation.current = record;
+    return perform(
+      "take",
+      "",
+      async (record) => {
+        await takeComputerRequest(record.api, record.cellId, record.abort.signal);
+        current.current.lookLive?.();
+      },
+      record,
     );
   };
   const handback = (requestId: string, note?: string): Promise<boolean> => {
     const now = current.current;
     if (
       !available() ||
-      (operation.current && operation.current.kind !== "input") ||
+      operation.current ||
       now.agent.model.pendingTakeover !== requestId ||
-      !["ready", "busy"].includes(now.agent.snapshot?.manualControl ?? "")
+      !manualReady(now.agent.snapshot?.manualControl)
     )
       return Promise.resolve(false);
-    cancelManual();
     return perform("handback", requestId, (record) =>
       returnControl(
         record.api,
@@ -462,13 +481,12 @@ export function useTaskControls(props: Props) {
     status,
     stopStatus,
     answer,
-    input,
+    take,
     handback,
     raiseBudget,
     resume,
     undo,
     stop,
-    cancelManual,
     recheck,
     busy: !!operation.current,
     fenced: fence.current,
@@ -483,15 +501,17 @@ export function useTaskControls(props: Props) {
           Boolean((props.cell && props.agent.sessionId) || stopScope.current)
         : false,
     canAnswer: available(props) && !operation.current && !props.agent.model.pendingTakeover,
+    canTake: takeReady(props),
+    canTakeComputer: computerReady(props),
+    takeComputer,
+    taking: operation.current?.kind === "take",
     canInput:
       available(props) &&
       !operation.current &&
       props.manualVisible &&
-      props.agent.snapshot?.manualControl === "ready",
+      manualReady(props.agent.snapshot?.manualControl),
     canHandback:
-      available(props) &&
-      (!operation.current || operation.current.kind === "input") &&
-      ["ready", "busy"].includes(props.agent.snapshot?.manualControl ?? ""),
+      available(props) && !operation.current && manualReady(props.agent.snapshot?.manualControl),
   };
 }
 export type TaskControls = ReturnType<typeof useTaskControls>;

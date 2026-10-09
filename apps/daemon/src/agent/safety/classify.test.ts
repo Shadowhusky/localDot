@@ -794,6 +794,150 @@ describe("decisions", () => {
   );
 });
 
+describe("drags, and moves, scrolls and releases while a button is down", () => {
+  const file = (name: string): NativeTargetFacts => ({
+    source: "ax",
+    fresh: true,
+    role: "list item",
+    name,
+    app: "Files",
+  });
+  const canvas: NativeTargetFacts = { source: "ax", fresh: true, role: "canvas", app: "Paint" };
+  const drag = (target: NativeTargetFacts | undefined, drop: NativeTargetFacts | null) => ({
+    operation: "pointer" as const,
+    ...(target ? { target } : {}),
+    drop,
+  });
+
+  it.each([
+    ["a stroke on a canvas", drag(canvas, canvas)],
+    ["a stroke where no element is known at either end", drag(undefined, null)],
+    ["a file moved into a folder", drag(file("report.txt"), file("archive"))],
+    ["a file dropped where no element is known", drag(file("report.txt"), null)],
+    ["a file dropped on the desktop's Trash", drag(file("report.txt"), file("Trash"))],
+  ])("%s inside the computer acts under Balanced", (_name, facts) => {
+    expect(classify({ ...desktop, ...facts })).toEqual(["computer"]);
+    expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY).mode).toBe("act");
+  });
+
+  it("asks for a drop where no element is known on a signed-in screen", () => {
+    expect(classify({ ...signedIn, ...drag(dom("Item", "listitem"), null) })).toEqual([
+      "computer",
+      "unknown",
+    ]);
+    expect(decide({ ...signedIn, ...drag(undefined, null) }, BALANCED_AUTONOMY)).toMatchObject({
+      actionClass: "unknown",
+      mode: "ask",
+    });
+  });
+
+  it.each([
+    ["delete", dom("Delete", "button")],
+    ["send", dom("Send", "button")],
+    ["post", dom("Share", "button")],
+  ] as const)("a drop on a web %s button takes its class at either end", (actionClass, end) => {
+    const item = dom("Item", "listitem");
+    expect(decide({ ...signedIn, ...drag(item, end) }, BALANCED_AUTONOMY)).toMatchObject({
+      actionClass,
+      mode: "ask",
+    });
+    expect(decide({ ...signedIn, ...drag(end, item) }, BALANCED_AUTONOMY)).toMatchObject({
+      actionClass,
+      mode: "ask",
+    });
+  });
+
+  it("uploads a file carried from the file manager onto a web page", () => {
+    const zone = dom("Attach files", "button");
+    expect(classify({ ...desktop, ...drag(file("report.txt"), zone) })).toEqual([
+      "computer",
+      "upload",
+    ]);
+    expect(decide({ ...desktop, ...drag(file("report.txt"), zone) }, BALANCED_AUTONOMY)).toEqual({
+      actionClass: "upload",
+      mode: "ask",
+      risk: "high",
+    });
+    // Within one page, or on the browser screen where both ends are on the page, nothing leaves.
+    expect(classify({ ...desktop, ...drag(dom("Card", "listitem"), zone) })).toEqual(["computer"]);
+    expect(classify({ ...signedIn, ...drag(file("report.txt"), zone) })).not.toContain("upload");
+  });
+
+  it.each([
+    ["the downloads page", "chrome://downloads/"],
+    ["a local file tab", "file:///config/Downloads/report.pdf"],
+  ])("uploads what is dragged from %s onto a web page", (_name, url) => {
+    const start: NativeTargetFacts = { ...dom("report.pdf", "link"), url };
+    expect(
+      decide({ ...desktop, ...drag(start, dom("Attach files", "button")) }, BALANCED_AUTONOMY),
+    ).toMatchObject({ actionClass: "upload", mode: "ask" });
+  });
+
+  it("uploads what is carried onto a page no lookup could name, from a start no lookup could name", () => {
+    const zone = dom("Attach files", "button");
+    // desktopd's page lookup ran past its budget: only the browser window is known.
+    const busyPage: NativeTargetFacts = { source: "coords", fresh: true, app: "Chromium" };
+    const upload = { actionClass: "upload", mode: "ask" };
+    for (const facts of [
+      // A press whose lookup failed or ran out of time is off any page.
+      { operation: "pointer", drop: zone },
+      { ...drag(dom("Card", "listitem"), zone), targetUnknown: true },
+      // A drop in a browser window, known or not, or one whose lookup named no window at all.
+      drag(file("report.txt"), busyPage),
+      { ...drag(file("report.txt"), busyPage), dropUnknown: true },
+      { ...drag(file("report.txt"), null), dropUnknown: true },
+    ] as const)
+      expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY)).toMatchObject(upload);
+    // Another app's window is no page, whether or not its lookup ran out of time.
+    const paint: NativeTargetFacts = { source: "coords", fresh: true, app: "Gimp-2.10" };
+    for (const facts of [
+      { ...drag(canvas, paint), dropUnknown: true },
+      { ...drag(undefined, paint), targetUnknown: true, dropUnknown: true },
+    ] as const)
+      expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY).mode).toBe("act");
+  });
+
+  it("hands off a drop on a secret field and keeps the stronger mode of the two ends", () => {
+    const secret = { ...file("Password"), role: "password text" };
+    expect(decide({ ...desktop, ...drag(file("a"), secret) }, BALANCED_AUTONOMY).mode).toBe(
+      "handoff",
+    );
+    expect(
+      decide(
+        { ...signedIn, ...drag(dom("Item", "listitem"), dom("Delete")) },
+        { ...BALANCED_AUTONOMY, delete: "handoff" },
+      ).mode,
+    ).toBe("handoff");
+  });
+
+  it("reads a drag, a held move, scroll or release as a pointer action between two ends", () => {
+    const start = { point: { x: 1, y: 2 }, source: "ax" as const, name: "report.txt" };
+    const end = { point: { x: 9, y: 9 }, source: "ax" as const, name: "Trash" };
+    const facts = (action: GuiAction, drop?: Target | null) =>
+      nativeActionFacts(action, start, drop);
+    const path = [start.point, end.point];
+    const ends = {
+      operation: "pointer",
+      target: { source: "ax", fresh: true, name: "report.txt", secret: false },
+      drop: { source: "ax", fresh: true, name: "Trash", secret: false },
+    };
+    expect(facts({ verb: "drag", path }, end)).toEqual(ends);
+    expect(facts({ verb: "move", point: end.point }, end)).toEqual(ends);
+    expect(facts({ verb: "scroll", point: end.point, dx: 0, dy: 1 }, end)).toEqual(ends);
+    expect(facts({ verb: "up" }, end)).toEqual(ends);
+    expect(facts({ verb: "drag", path }, null)).toEqual({ ...ends, drop: null });
+    expect(
+      nativeActionFacts({ verb: "drag", path }, start, null, { target: true, drop: true }),
+    ).toEqual({ ...ends, drop: null, targetUnknown: true, dropUnknown: true });
+    expect(facts({ verb: "down" })).toEqual({ operation: "pointer", target: ends.target });
+    // With no button down, a hover or a scroll only browses.
+    expect(facts({ verb: "move", point: end.point })).toEqual({ operation: "scroll" });
+    expect(facts({ verb: "scroll", point: end.point, dx: 0, dy: 1 })).toEqual({
+      operation: "scroll",
+    });
+  });
+});
+
 describe("native action facts", () => {
   const target = {
     point: { x: 1, y: 2 },

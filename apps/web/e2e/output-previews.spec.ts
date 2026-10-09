@@ -237,7 +237,7 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 800 });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const proof = await load(page);
-    if (width < 1180) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+    if (width < 1100) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
     const markdown = page.locator(".safe-markdown");
     await expect(markdown.locator("strong")).toHaveText("monthly total");
     await expect(markdown.locator("ul li")).toHaveCount(2);
@@ -257,9 +257,7 @@ for (const width of [1280, 390]) {
         () => (window as unknown as { outputClipboard: { writes: number } }).outputClipboard.writes,
       ),
     ).toBe(0);
-    if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const notes = page.getByRole("button", { name: "Thinking notes", exact: true });
-    await expect(notes).toHaveAttribute("aria-expanded", "false");
+    if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     const trigger = page.getByRole("button", { name: /Check report/ });
     await trigger.click();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");

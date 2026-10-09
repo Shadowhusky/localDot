@@ -292,6 +292,28 @@ describe("Codex conversation and durable input recovery", () => {
       expect(await run).toBe(CODEX_DONE);
     },
   );
+  it("opens a task that continues a conversation with what was said before, after a crash too", async () => {
+    const f = fixture();
+    f.session.earlier = ["The user: Draw a dog", "dot: Drew it"];
+    const run = f.run(),
+      first = await f.fake.nextLaunch(1),
+      opened = await first.waitFor("turn/start");
+    const text = (opened.params as { input: { text?: string }[] }).input[0]?.text ?? "";
+    expect(text).toMatch(
+      /^Earlier in this conversation[^\n]*\n<untrusted source="earlier-conversation">\nThe user: Draw a dog\ndot: Drew it\n<\/untrusted>/,
+    );
+    expect(text.endsWith(`\n\n${f.session.task}`)).toBe(true);
+    first.crash();
+    expect(await run).toBe(CODEX_CRASHED);
+    const resumed = f.run(true),
+      second = await f.fake.nextLaunch(2),
+      turn = await second.waitFor("turn/start");
+    expect((turn.params as { input: { text?: string }[] }).input[0]?.text).toContain(
+      "The user: Draw a dog\ndot: Drew it",
+    );
+    f.done();
+    expect(await resumed).toBe(CODEX_DONE);
+  });
   it("recovers acknowledged input after an actual crash and carries plan and last safe reply", async () => {
     const f = fixture(),
       run = f.run(),

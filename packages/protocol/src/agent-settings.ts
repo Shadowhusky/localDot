@@ -35,6 +35,20 @@ export const AgentDenyFolder = z
       (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\")),
     "deny folders must be absolute literal paths",
   );
+const BudgetUSD = z
+  .number()
+  .positive()
+  .max(10_000)
+  .refine((n) => Math.floor(n * 1e6 + 0.5) >= 1, "budget is below accounting precision");
+// When dot checks in with the user, each off until they turn it on: after this many steps, after
+// this many failed actions in a row, and a hard stop after this many actions, enforced outside dot.
+// The user's next message starts every count again.
+export const CheckIns = z.strictObject({
+  steps: z.number().int().min(5).max(10_000).optional(),
+  failures: z.number().int().min(2).max(100).optional(),
+  actions: z.number().int().min(10).max(100_000).optional(),
+});
+export type CheckIns = z.infer<typeof CheckIns>;
 // The daemon additionally validates the path against its actual host's isAbsolute semantics.
 export const AgentSettingsDocument = z.strictObject({
   autonomy: AutonomyPolicy.optional(),
@@ -42,11 +56,9 @@ export const AgentSettingsDocument = z.strictObject({
   fast: AgentRoleChoice.optional(),
   local: AgentRoleChoice.optional(),
   codexDenyRead: z.array(AgentDenyFolder).max(32).optional(),
-  taskBudgetUSD: z
-    .number()
-    .positive()
-    .max(10_000)
-    .refine((n) => Math.floor(n * 1e6 + 0.5) >= 1, "budget is below accounting precision")
-    .optional(),
+  // Spending limits are the user's to set; without one dot never stops for cost.
+  taskBudgetUSD: BudgetUSD.optional(),
+  dayBudgetUSD: BudgetUSD.optional(),
+  checkIns: CheckIns.optional(),
 });
 export type AgentSettingsDocument = z.infer<typeof AgentSettingsDocument>;

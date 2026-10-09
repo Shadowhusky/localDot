@@ -174,6 +174,27 @@ function fakeX(): XHelper & {
         for (const l of listeners) l({ ev: "press", kind: "key", detail: 30, mono });
         return { keycode: 30, mods: [] } as never;
       }
+      if (cmd === "hold") {
+        for (const l of listeners) l({ ev: "press", kind: "key", detail: 50, mono });
+        return { keycodes: [50] } as never;
+      }
+      if (cmd === "keys") {
+        for (const l of listeners) l({ ev: "press", kind: "key", detail: 35, mono });
+        return { keycodes: [35] } as never;
+      }
+      if (cmd === "down") {
+        for (const l of listeners)
+          l({ ev: "press", kind: "button", detail: Number(sent.button), mono });
+        return { button: sent.button } as never;
+      }
+      if (cmd === "up") {
+        for (const l of listeners)
+          l({ ev: "release", kind: "button", detail: Number(sent.button), mono });
+        return { button: sent.button, released: true } as never;
+      }
+      if (cmd === "release") return { keycodes: [50] } as never;
+      if (cmd === "release_all") return { keys: 2, buttons: 1 } as never;
+      if (cmd === "held") return { buttons: [1] } as never;
       if (cmd === "settle")
         return {
           changed: [[1, 2, 3, 4]],
@@ -265,6 +286,14 @@ describe("desktopd input routes", () => {
     expect((await post({ input: { kind: "teleport" } })).status).toBe(400);
     expect(
       (await post({ input: { kind: "drag", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } })).status,
+    ).toBe(400);
+    expect(
+      (
+        await post({
+          input: { kind: "down", button: "left", at: { x: 0, y: 0 } },
+          injector: "driver",
+        })
+      ).status,
     ).toBe(501);
     expect(
       (await post({ input: { kind: "click", button: "left", count: 1, at: { x: 1, y: 2 } } }))
@@ -343,6 +372,121 @@ describe("desktopd input routes", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  it("streams each press of a repeated key, then the result", async () => {
+    const res = await fullApp(fakeX()).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["bracketright"], repeat: 3 } }),
+    });
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    const lines = (await res.text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.presses)).toEqual([1, 2, 3, [102, 103, 104]]);
+    expect(lines[3]).toMatchObject({ done: true, pressMono: 102, injector: "xtest" });
+  });
+
+  it("streams a drag: a line once its button is down, then the result with its release", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({
+        input: {
+          kind: "drag",
+          from: { x: 10, y: 10 },
+          to: { x: 60, y: 10 },
+          button: "left",
+          durationMs: 50,
+        },
+      }),
+    });
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    const lines = (await res.text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines[0]).toEqual({ presses: 1, pressMono: expect.any(Number) });
+    expect(lines.at(-1)).toMatchObject({ done: true, releaseMono: expect.any(Number) });
+    expect(x.calls.filter((c) => c === "down" || c === "up")).toEqual(["down", "up"]);
+  });
+
+  it("stops pressing a repeated key when its response stream is cancelled", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["bracketright"], repeat: 100 } }),
+    });
+    const reader = res.body?.getReader();
+    await reader?.read();
+    await reader?.cancel();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(x.calls.filter((cmd) => cmd === "keys").length).toBeLessThanOrEqual(2);
+  });
+
+  it("tells a held key's caller once the keys are down", async () => {
+    const stop = new AbortController();
+    const res = await fullApp(fakeX()).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["shift"], holdMs: 10_000 } }),
+      signal: stop.signal,
+    });
+    const reader = res.body?.getReader();
+    const first = await reader?.read();
+    expect(JSON.parse(new TextDecoder().decode(first?.value))).toEqual({
+      presses: 1,
+      pressMono: 102,
+    });
+    stop.abort();
+    await reader?.cancel().catch(() => undefined);
+  });
+
+  it("releases held keys when the request that holds them is stopped", async () => {
+    const x = fakeX();
+    const stop = new AbortController();
+    const holding = fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["shift"], holdMs: 10_000 } }),
+      signal: stop.signal,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(x.calls).toEqual(["arm", "hold"]);
+    stop.abort();
+    await Promise.resolve(holding).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(x.calls).toEqual(["arm", "hold", "release"]);
+  });
+
+  it("releases every key and button that is down", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/release", { method: "POST", headers: bearer });
+    expect(await res.json()).toMatchObject({ keys: 2, buttons: 1 });
+    expect(x.calls).toEqual(["release_all"]);
+  });
+
+  it("keeps a held button down and names the buttons still down", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/held", { method: "POST", headers: bearer });
+    expect(await res.json()).toEqual({ buttons: [1] });
+    expect(x.calls).toEqual(["held"]);
+  });
+
+  it("answers an unknown key name with 400 and its close matches", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["ctrl", "Retrun"] } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/unknown key "Retrun"; did you mean Return/);
+    expect(x.calls).toEqual([]);
   });
 
   it("answers 503 on the input routes when the helper is missing", async () => {

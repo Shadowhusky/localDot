@@ -1,29 +1,44 @@
 import {
   DEFAULT_AUTONOMY,
   LLM_PROVIDERS,
+  type QuestionAnswerRequest,
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { AskForm } from "./agent/AskForm.tsx";
-import { Composer } from "./agent/Composer.tsx";
-import { SafetyControls } from "./agent/SafetyControls.tsx";
+import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
+import { useAskDraft } from "./agent/ask-draft.ts";
+import { composerReply } from "./agent/ask-form.ts";
+import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
+import { uploadFile } from "./agent/file-transfer.ts";
+import { heldByUser } from "./agent/model.ts";
+import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
-import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
+import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
+import { useControlToast } from "./agent/useControlToast.ts";
+import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
+import { useHandBack } from "./agent/useHandBack.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
+import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
-import { hudFor } from "./cells/hud-state.ts";
+import { deliverText } from "./agent/write-api.ts";
+import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { presetOf } from "./copy/autonomy.ts";
+import { decisionWords } from "./copy/decision.ts";
+import { dotFeed } from "./dot/dot-feed.ts";
+import { PresenceLayer } from "./dot/PresenceLayer.tsx";
+import { presencePlace } from "./dot/presence-rules.ts";
+import { useShowDot } from "./dot/show-dot.ts";
 import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
-import { KeysSheet } from "./keys/KeysSheet.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
@@ -35,29 +50,62 @@ import {
 } from "./lib/install-link.ts";
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
-import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
+import { FinishSetup } from "./onboarding/FinishSetup.tsx";
+import { Onboarding } from "./onboarding/Onboarding.tsx";
+import { setupSteps } from "./onboarding/setup.ts";
+import { useOnboarding } from "./onboarding/useOnboarding.ts";
+import { STEP_DOT } from "./onboarding/wizard.ts";
 import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { statusFor, taskFacts, taskHud } from "./session/status.ts";
+import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
+import { useAccounts } from "./settings/useAccounts.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
-import { ConversationRail } from "./shell/ConversationRail.tsx";
-import { Hud } from "./shell/Hud.tsx";
-import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
+import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
+import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
+import { Curtain } from "./shell/Curtain.tsx";
+import { useCurtain } from "./shell/curtain.ts";
+import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
+import { FocusControls } from "./shell/FocusControls.tsx";
+import { useFocusMode, useStill } from "./shell/focus.ts";
+import { useEdgeStill, useFullScreen, useFullScreenKeys } from "./shell/fullscreen.ts";
+import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
+import {
+  islandAttention,
+  islandDecision,
+  islandShape,
+  pauseSlot,
+  takeReason,
+  takeSlot,
+} from "./shell/island.ts";
+import { useCentreRoom, useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { MoreMenu } from "./shell/MoreMenu.tsx";
+import { NarratorBand } from "./shell/NarratorBand.tsx";
+import { narrationLine } from "./shell/narration.ts";
+import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
-import { StageColumn } from "./shell/StageColumn.tsx";
+import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import { useTabAttention } from "./shell/tab-attention.ts";
+import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
-import { PHONE, useMediaQuery } from "./ui/media.ts";
+import { Button } from "./ui/Button.tsx";
+import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
+import { IconButton } from "./ui/IconButton.tsx";
+import { isApple } from "./ui/Kbd.tsx";
 import { Presence } from "./ui/Presence.tsx";
+import type { SegmentItem } from "./ui/SegmentedControl.tsx";
+import { Sheet } from "./ui/Sheet.tsx";
+import { showToast, Toaster } from "./ui/Toast.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -65,9 +113,21 @@ export interface AppProps {
 }
 
 type Rejected = "stored" | "link" | "code" | null;
+// What the rail shows: the chat, or Activity laid over it.
+type RailView = "chat" | "activity";
 
 const RETRY_CHECK_MS = 2000;
+// The island waits at most this long on opening for the task's history.
+const OPENING_MAX_MS = 2000;
 const FROM_WATCH = { fromWatch: true };
+const FROM_LIBRARY = { fromLibrary: true };
+// Replay's address names the recording that plays, or this for the library of recordings.
+const LIBRARY = "library";
+const replayAddress = (selected: string | null) =>
+  selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
+const ACTIVITY_DETENTS = ["medium", "large"] as const;
+const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
+const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -196,10 +256,11 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
-  const [replayId, setReplayId] = useState<string | null>(() => {
-    const selected = new URLSearchParams(window.location.search).get("replay");
-    return selected && ULID_PATTERN.test(selected) ? selected : null;
-  });
+  const showDot = useShowDot();
+  const [replayId, setReplayId] = useState<string | null>(() =>
+    replayAddress(new URLSearchParams(window.location.search).get("replay")),
+  );
+  const playing = replayId === LIBRARY ? null : replayId;
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
@@ -210,25 +271,42 @@ function Theatre({ api }: { api: ApiClient }) {
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
   replayIdRef.current = replayId;
-  // Entering Replay from Watch adds one marked entry and leaving steps back over it, so browser
-  // Back returns to Watch without stacking entries. A deletion only replaces the current entry.
+  // Entering Replay from Watch adds one marked entry, and so does opening a recording from the
+  // library; leaving steps back over the entry it came by, so browser Back goes up one level without
+  // stacking entries. A deletion only replaces the current entry.
   const selectReplay = (id: string | null, entry: "navigate" | "replace" = "navigate") => {
+    const was = replayIdRef.current;
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
     else address.searchParams.delete("replay");
-    if (id !== replayIdRef.current) address.searchParams.delete("t");
-    const leaving = id === null && replayIdRef.current !== null;
-    if (entry === "navigate" && id !== null && replayIdRef.current === null)
+    if (id !== was) address.searchParams.delete("t");
+    const leaving = id === null && was !== null;
+    const up = id === LIBRARY && was !== null && was !== LIBRARY;
+    if (entry === "navigate" && id !== null && was === null)
       window.history.pushState(FROM_WATCH, "", address);
+    else if (entry === "navigate" && id !== null && id !== LIBRARY && was === LIBRARY)
+      window.history.pushState(FROM_LIBRARY, "", address);
+    else if (entry === "navigate" && up && window.history.state?.fromLibrary) window.history.back();
     else if (entry === "navigate" && leaving && window.history.state?.fromWatch)
       window.history.back();
     else window.history.replaceState(leaving ? null : window.history.state, "", address);
     setReplayId(id);
   };
+  // Back and Forward never reopen a recording deleted since the page opened: its entries show the
+  // library instead.
+  const deletedRecordings = useRef(new Set<string>());
   useEffect(() => {
     const restore = () => {
-      const selected = new URLSearchParams(window.location.search).get("replay");
-      setReplayId(selected && ULID_PATTERN.test(selected) ? selected : null);
+      const selected = replayAddress(new URLSearchParams(window.location.search).get("replay"));
+      if (selected && deletedRecordings.current.has(selected)) {
+        const address = new URL(window.location.href);
+        address.searchParams.set("replay", LIBRARY);
+        address.searchParams.delete("t");
+        window.history.replaceState(window.history.state, "", address);
+        setReplayId(LIBRARY);
+        return;
+      }
+      setReplayId(selected);
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
@@ -247,16 +325,7 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
   } = useCell(api);
   const keys = useKeys(api);
-  // Keys shows on its own sheet, or slid over Settings while Settings is open.
-  const [keysIn, setKeysIn] = useState<"sheet" | "settings" | null>(null);
-  const keysOpen = keysIn !== null;
-  const settings = useSettings(api, [], !keysOpen);
-  const settingsOpen = useRef(settings.open);
-  settingsOpen.current = settings.open;
-  const openKeys = useCallback(() => setKeysIn(settingsOpen.current ? "settings" : "sheet"), []);
-  useEffect(() => {
-    if (!settings.open) setKeysIn((now) => (now === "settings" ? null : now));
-  }, [settings.open]);
+  const settings = useSettings(api);
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
@@ -287,55 +356,51 @@ function Theatre({ api }: { api: ApiClient }) {
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
-  const keysOrigin = useRef<HTMLElement | null>(null);
+  const settingsOpen = useRef(settings.open);
+  settingsOpen.current = settings.open;
+  // Where Settings goes, with a count, so a section asked for again is still gone to.
+  const [settingsAt, setSettingsAt] = useState<{ section?: SettingsSection; request: number }>({
+    request: 0,
+  });
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const keyRequest = useRef(0);
   const keyCapture = useRef<{
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
-  const keysDiscard = useRef<((then: () => void) => void) | null>(null);
-  const showSettings = (trigger: HTMLElement, section: SettingsSection = "models") => {
-    const open = () => {
-      settingsOrigin.current = trigger;
-      setSettingsSection(section);
-      if (keysIn === "sheet") {
-        keysOrigin.current = null;
-        setKeysIn(null);
-      }
-      settings.show();
-    };
-    // One sheet at a time: Keys on its own gives way to Settings, after asking if a key is typed.
-    if (keysIn === "sheet" && keysDiscard.current) keysDiscard.current(open);
-    else open();
+  const { show: openSettings } = settings;
+  const goToSettings = useCallback(
+    (trigger: HTMLElement | null, section?: SettingsSection) => {
+      if (!settingsOpen.current) settingsOrigin.current = trigger;
+      setSettingsAt((now) => ({ section, request: now.request + 1 }));
+      openSettings();
+    },
+    [openSettings],
+  );
+  const showSettings = (trigger: HTMLElement, section?: SettingsSection) =>
+    goToSettings(trigger, section);
+  const showKeys = (trigger: HTMLElement | null) => {
+    keyCapture.current = null;
+    setKeyPreset(undefined);
+    goToSettings(trigger, "keys");
   };
   const receiveKey = useCallback<KeyIntake["receive"]>(
     (source, provider) => {
-      keysOrigin.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       keyCapture.current = null;
       flushSync(() => {
         setKeyPreset(undefined);
-        openKeys();
+        goToSettings(
+          document.activeElement instanceof HTMLElement ? document.activeElement : null,
+          "keys",
+        );
       });
       return keysIntake.current?.receive(source, provider) ?? false;
     },
-    [openKeys],
+    [goToSettings],
   );
-  const wasOpen = useRef(false);
-  const closeKeys = useCallback(() => setKeysIn(null), []);
-  useEffect(() => {
-    if (wasOpen.current && !keysOpen) {
-      if (keysOrigin.current?.isConnected && !keysOrigin.current.closest("[inert], [hidden]"))
-        keysOrigin.current.focus();
-      else if (!settings.open) keysButton.current?.focus();
-    }
-    wasOpen.current = keysOpen;
-  }, [keysOpen, settings.open]);
   const wasSettingsOpen = useRef(false);
   useEffect(() => {
-    if (wasSettingsOpen.current && !settings.open && !keysOpen) {
+    if (wasSettingsOpen.current && !settings.open) {
       if (
         settingsOrigin.current?.isConnected &&
         !settingsOrigin.current.closest("[inert], [hidden]")
@@ -344,10 +409,24 @@ function Theatre({ api }: { api: ApiClient }) {
       else settingsButton.current?.focus();
     }
     wasSettingsOpen.current = settings.open;
-  }, [settings.open, keysOpen]);
+  }, [settings.open]);
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
-  const session = useLiveSession(api, cell, stage);
+  const conversation = useConversation(api);
+  const session = useLiveSession(
+    api,
+    cell,
+    stage,
+    status === "known" && conversation.known ? (conversation.sessions.at(-1) ?? null) : undefined,
+    conversation.choice,
+  );
+  const seen = useRef<string | null>(null);
+  const { reload: rereadConversation } = conversation;
+  useEffect(() => {
+    const now = `${session.sessionId}:${session.ended}`;
+    if (seen.current !== null && seen.current !== now) rereadConversation();
+    seen.current = now;
+  }, [session.sessionId, session.ended, rereadConversation]);
   useEffect(() => {
     if (session.sessionId && !session.ended) {
       setNewestReplayId(session.sessionId);
@@ -369,28 +448,24 @@ function Theatre({ api }: { api: ApiClient }) {
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
-  const [pane, setPane] = useState<TheatrePane>("computer");
-  const [narrow, setNarrow] = useState(
-    () => window.matchMedia?.("(width < 1180px)").matches ?? false,
-  );
-  useEffect(() => {
-    if (!window.matchMedia) return;
-    const media = window.matchMedia("(width < 1180px)");
-    const changed = () => setNarrow(media.matches);
-    changed();
-    media.addEventListener("change", changed);
-    return () => media.removeEventListener("change", changed);
-  }, []);
-  const phone = useMediaQuery(PHONE);
+  const layout = useLayout();
+  const phone = layout === "phone";
+  const [railView, setRailView] = useState<RailView>("chat");
+  // A phone shows Activity in a sheet over the thread.
+  const [activityOpen, setActivityOpen] = useState(false);
+  if (activityOpen && !phone) setActivityOpen(false);
+  const island = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
     cell,
     cellPending: pending,
     agent,
     feed: session.agentFeed,
-    suspended: keysOpen || settings.open,
-    manualVisible: !narrow || pane === "computer",
+    suspended: settings.open,
+    manualVisible: true,
     refreshCell: retry,
+    lookLive: session.check,
   });
   const safety = useSafety({
     api,
@@ -399,12 +474,20 @@ function Theatre({ api }: { api: ApiClient }) {
     feed: session.agentFeed,
     blocked: controls.stopping || controls.fenced,
     replaceBlocked: controls.stopping,
-    visible: !keysOpen && !settings.open,
+    visible: !settings.open,
     selectReady,
   });
   useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
+  useControlToast(controls.status, controls.recheck);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
+  const [typing, setTyping] = useState(false);
+  const [pasteRefused, setPasteRefused] = useState<string | null>(null);
   const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const settingsAccounts = useAccounts(
+    api,
+    cell?.state === "ready" && !cell.paused ? cell.id : null,
+    settings.open,
+  );
   const { rereadMemory } = settingsKnowledge;
   // A memory change's "Read memory again" opens Settings on what dot knows, read afresh.
   const [readMemory, setReadMemory] = useState(false);
@@ -430,13 +513,67 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
-  const takeoverShown = useRef<string | null>(null);
+  const yours = !!takeover && takeover === heldByUser(agent.model);
+  const askDraft = useAskDraft(question);
+  const answer = useRef(controls.answer);
+  answer.current = controls.answer;
+  const answerAsk = useCallback((request: QuestionAnswerRequest) => answer.current(request), []);
+  const askCell = cell?.state === "ready" && !cell.paused ? cell.id : null;
+  const uploadAsk = useMemo<AskUpload | undefined>(
+    () => (askCell ? (file, signal) => uploadFile(api, askCell, file, signal) : undefined),
+    [api, askCell],
+  );
+  const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
+  // While dot waits on the answer, the stage keeps its ring on each field a secret goes into.
+  const askMarks = useMemo<readonly FieldMark[] | undefined>(
+    () =>
+      askDraft?.question.fields?.flatMap(({ target }) =>
+        target
+          ? [
+              {
+                screen: target.screen,
+                point: target.point,
+                ...(target.bbox ? { bbox: target.bbox } : {}),
+              },
+            ]
+          : [],
+      ),
+    [askDraft],
+  );
+  const shownScreen = selectedScreen?.screen ?? "desktop";
+  const askFields = useMemo<StageFields | undefined>(() => {
+    const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
+    return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
+  }, [askMarks, shownScreen, manualGeometry]);
+  const replyAsk = async (text: string, attached: boolean): Promise<ReplyOutcome> => {
+    if (!askDraft) return "failed";
+    const plan = composerReply(askDraft.question, text, attached);
+    if (plan.kind === "hold") return { hold: plan.reason };
+    if (!(await answerAsk(plan.request))) return "failed";
+    return plan.kind === "answer" ? "answered" : "declined";
+  };
+  const manualLive =
+    yours && controls.canInput && physicalStageCell?.state === "ready" && !physicalStageCell.paused;
+  const manual = useManualChannel(
+    api,
+    manualLive ? agent.sessionId : null,
+    manualLive ? (takeover?.requestId ?? null) : null,
+    agent.reconcile,
+  );
+  const { send: sendManual } = manual;
+  // A right-click on a phone is for the next tap only.
+  const sendToComputer = useCallback(
+    (input: Parameters<typeof sendManual>[0]) => {
+      sendManual(input);
+      if (input.kind === "click" && input.button === "right") setPointerMode("click");
+    },
+    [sendManual],
+  );
   useEffect(() => {
-    const requestId = takeover?.requestId;
-    if (!requestId || requestId === takeoverShown.current) return;
-    takeoverShown.current = requestId;
-    if (narrow) setPane("computer");
-  }, [takeover?.requestId, narrow]);
+    if (pasteRefused) showToast({ title: pasteRefused, tone: "danger" });
+  }, [pasteRefused]);
+  const shownView: RailView =
+    railView === "activity" && (layout === "wide" || phone) ? "chat" : railView;
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -464,6 +601,21 @@ function Theatre({ api }: { api: ApiClient }) {
   const taskStop = () => {
     void controls.stop();
   };
+  // Carries on a task the user's action limit stopped: their message starts the count again.
+  const continueTask = async () => {
+    if (!cell || !agent.sessionId) return false;
+    try {
+      await deliverText(api, {
+        cellId: cell.id,
+        sessionId: agent.sessionId,
+        mode: "followup",
+        text: "Continue.",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const stageCell =
     physicalStageCell && controls.stopStatus.phase === "paused"
       ? { ...physicalStageCell, paused: true as const }
@@ -477,13 +629,43 @@ function Theatre({ api }: { api: ApiClient }) {
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? hudFor({ cell: stageCell, status, pending })
       : hud;
+  // Which conversation and task the thread shows is not known yet.
+  const threadPending =
+    status === "listing" ||
+    !conversation.known ||
+    (status === "known" && conversation.sessions.length > 0 && !session.sessionId);
+  // On opening, what the task is doing is unknown until its history is in: the island waits rather
+  // than say "Working" for a task that is done. Later tasks start from nothing, so never wait.
+  const [opened, setOpened] = useState(false);
+  const opening = !opened && (threadPending || (!!session.sessionId && agent.history === false));
+  if (!opened && !opening && status !== "listing") setOpened(true);
+  useEffect(() => {
+    if (opened) return;
+    const timer = setTimeout(() => setOpened(true), OPENING_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [opened]);
   const facts = taskFacts(agent.model);
-  const now = useNowMs(
-    session.model,
-    session.version,
-    (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
-  );
-  const task = session.sessionId ? taskHud(session.model, now, facts) : null;
+  // The user's own time on the computer, with no task: the island shows it only while they hold it.
+  const ownHold =
+    agent.snapshot?.holder === true ||
+    (session.ended && agent.history === true && agent.model.messages.size === 0);
+  const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
+  const now = useNowMs(session.model, session.version, (t) => {
+    if (!shownTask) return false;
+    const hud = taskHud(session.model, t, facts);
+    return hud.phase === "running" || hud.elapsedS !== null;
+  });
+  const task = shownTask ? taskHud(session.model, now, facts) : null;
+  const foot = footWork(task);
+  // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
+  // the daemon says which, the choice is offered and the daemon has the last word.
+  const taskStatus = agent.snapshot?.status;
+  const conversationReason =
+    !session.ended && taskStatus && taskStatus !== "idle" && taskStatus !== "ended"
+      ? FINISH_FIRST
+      : conversation.busy
+        ? "Just a moment…"
+        : undefined;
   const computer = error ? { ...containedHud, caption: error } : containedHud;
   const appStatus = statusFor({
     computer: {
@@ -518,13 +700,13 @@ function Theatre({ api }: { api: ApiClient }) {
       !agent.model.pendingTakeover &&
       !agent.snapshot?.pendingTakeover,
   });
-  // The composer offers the task's Stop exactly when the HUD does.
-  const taskStopAction = appStatus.actions.find((action) => action.kind === "stop-task");
+  // The sheets offer Shut down, which the island leaves out; on a phone, where a sheet covers the
+  // island, the task's Stop too.
   const sheetStop = appStatus.actions.find(
-    (action) => action.kind === "stop-task" || action.kind === "stop",
+    (action) => action.kind === "stop" || (phone && action.kind === "stop-task"),
   );
   const sheetStopControl = sheetStop && {
-    label: sheetStop.kind === "stop" ? "Stop computer" : sheetStop.busy ? "Stopping…" : "Stop",
+    label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
@@ -540,7 +722,6 @@ function Theatre({ api }: { api: ApiClient }) {
       if (use.decision === "allow") counts[use.secretId] = (counts[use.secretId] ?? 0) + 1;
     return counts;
   }, [keyUses]);
-  // One panel, on its own sheet or slid over Settings when Settings is open.
   const keysPanel = {
     keys,
     intakeRef: keysIntake,
@@ -550,428 +731,854 @@ function Theatre({ api }: { api: ApiClient }) {
       const context = keyCapture.current;
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
-    stop: sheetStopControl,
-    taskControls: <StopControl controls={controls} />,
   };
-  useEffect(() => {
-    document.title = appStatus.title;
-  }, [appStatus.title]);
-  // On a phone it covers the computer pane, over a stage that stays where the computer appears.
-  const welcome = (
-    <Presence show={!replayId && status === "known" && !cell && listed.length === 0}>
-      <WelcomeSetup
-        modelReady={mainReady}
-        loading={settings.phase === "loading" || !settings.saved}
-        modelLabel={
-          mainChoice
-            ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
-            : undefined
-        }
-        autonomy={settings.saved?.autonomy}
-        appearance={appearance}
-        starting={pending !== null}
-        canStart={appStatus.actions.some((action) => action.kind === "start" && action.enabled)}
-        onSettings={showSettings}
-        onStart={guardStart}
-      />
-    </Presence>
+  useTabAttention(appStatus);
+  const newConversation: NewConversation = {
+    run: () => {
+      void conversation.startNew();
+      setRailView("chat");
+    },
+    reason: conversationReason,
+  };
+  const curtain = useCurtain(appStatus.computer, !!replayId);
+  const stageBox = useRef<HTMLDivElement>(null);
+  const fullScreen = useFullScreen({
+    available: !curtain.up && !replayId,
+    phone,
+    frame: stageBox,
+  });
+  // A phone shows full screen as focus mode; a wider screen gives the stage the whole screen.
+  const full = fullScreen.on && !phone;
+  const computerAction = appStatus.actions.find(
+    (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
   );
-  return (
-    <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
-      <div className="theatre-content">
-        <TopBar
-          title={
-            replayId
-              ? (shownRecording?.title ?? RECORDED_TASK)
-              : (session.model.title ?? "Your computer")
-          }
-          note={shownRecording?.note}
-          live={stageHud.live}
-          mode={replayId ? "replay" : "watch"}
-          replayEnabled={!!(replayId || newestReplayId)}
-          onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
-          keys={keyStatus(keys.health)}
-          keysOpen={keysOpen}
-          onKeys={() => {
-            keysOrigin.current = keysButton.current;
-            keyCapture.current = null;
-            setKeyPreset(undefined);
-            openKeys();
-          }}
-          keysRef={keysButton}
-          settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
+  const onComputer = {
+    start: guardStart,
+    stop: guardComputerStop,
+    resume: guardResume,
+    retry,
+  };
+  const keyboard = useKeyboardUp();
+  const setupKnown = !!settings.saved;
+  const onboarding = useOnboarding({ known: setupKnown, configured: !!settings.saved?.main });
+  const setupStep = onboarding.progress.step;
+  const place = presencePlace({
+    showDot: showDot.value,
+    curtain: curtain.up,
+    replaying: !!replayId,
+    keyboard,
+    setup: onboarding.open,
+    full,
+  });
+  const chosenKey =
+    mainChoice?.provider === "chatgpt"
+      ? settings.chatgpt.canStart
+        ? "Signed in"
+        : null
+      : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
+        ? mainChoice.key
+        : null;
+  const savedAutonomy = settings.saved?.autonomy;
+  const setup = setupSteps({
+    provider: mainChoice?.provider === "chatgpt" ? "chatgpt" : (mainProvider ?? null),
+    key: chosenKey,
+    modelReady: mainReady,
+    model: mainChoice
+      ? `${mainProvider?.name ?? "ChatGPT"} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
+      : null,
+    permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
+    computer: !!cell || listed.length > 0,
+  });
+  const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
+  const wide = layout === "wide";
+  const views: SegmentItem[] = [
+    {
+      value: "chat",
+      label: "Chat",
+      attention: shownView !== "chat" && !!agent.model.pendingAsk,
+    },
+    ...(wide || phone ? [] : [{ value: "activity", label: "Activity" }]),
+  ];
+  const activity = (
+    <ActivityRail
+      cellId={cell?.id}
+      releaseReady={
+        cell?.state === "ready" && !cell.paused && !cell.fenced && !cell.replacementPending
+      }
+      models={agent.snapshot?.models}
+      modelName={modelName}
+      onSpending={(trigger) => showSettings(trigger, "spending")}
+      memoryAction={(change) => {
+        const status =
+          controls.status?.kind === "memory" && controls.status.target === change.changeId
+            ? controls.status
+            : null;
+        return {
+          status:
+            change.changeId && controls.memoryUndone.has(change.changeId)
+              ? "undone"
+              : status?.phase === "sending" || status?.phase === "checking"
+                ? "pending"
+                : status?.phase === "uncertain"
+                  ? "uncertain"
+                  : status?.phase === "refused"
+                    ? status.code === 409
+                      ? "conflict"
+                      : "failed"
+                    : "ready",
+          onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
+          onReread: (trigger) => {
+            controls.recheck();
+            setReadMemory(true);
+            showSettings(trigger, "knowledge");
+          },
+        };
+      }}
+      agent={agent.model}
+      rows={rows}
+      keyUses={session.model.keyUses}
+      sessionId={session.sessionId}
+      scale={cell?.scale ?? 2}
+      api={api}
+      nowMs={now}
+    />
+  );
+  const shape = islandShape(appStatus, curtain.up || opening);
+  // While the user has the computer the island rises into the top bar's centre, where it fits.
+  const [islandWidth, setIslandWidth] = useState(0);
+  const centreRoom = useCentreRoom(bar);
+  const centre =
+    shape === "control" && islandWidth > 0 && islandWidth <= centreRoom ? islandWidth : undefined;
+  const sheetsClosed = !settings.open;
+  const decision = replayId
+    ? null
+    : islandDecision({
+        shape,
+        approval: !!safety.approval && sheetsClosed,
+        question: !!question && !agent.model.ended && sheetsClosed,
+        chatShown: shownView === "chat" || wide || phone,
+      });
+  const approval = safety.approval;
+  const approvalView = approval && decision === "approval" && (
+    <ApprovalDecision
+      key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
+      card={approval}
+      enabled={safety.canApprove}
+      pending={safety.pending === "approval"}
+      onDecision={safety.answerApproval}
+      loadField={safety.readApprovalField}
+      layout={phone ? "sheet" : "island"}
+    />
+  );
+  // One question, answered where you are: in the thread, in the island while you watch the
+  // computer, or in a phone's sheet. Each is the same draft, so answering one answers all.
+  const askIn =
+    !askDraft || replayId || !sheetsClosed
+      ? null
+      : phone
+        ? "sheet"
+        : decision === "question"
+          ? "island"
+          : "thread";
+  const askThread = useMemo(
+    () =>
+      askDraft && askIn === "thread" ? (
+        <AskForm
+          key={askDraft.question.askId}
+          draft={askDraft}
+          layout="thread"
+          answer={answerAsk}
+          reason={askReason}
+          upload={uploadAsk}
+          receiveKey={receiveKey}
         />
-        <div className="task-controls-area">
-          <div className="task-bar" hidden={!!replayId}>
-            <Hud
-              status={appStatus}
-              onStart={guardStart}
-              onStop={guardComputerStop}
-              onResume={guardResume}
-              onStopSession={taskStop}
-              onRetry={retry}
-            />
-            {task && !session.ended && (
-              <span className="task-connection">
-                {agent.error
-                  ? "Activity unavailable"
-                  : agent.connection === "lost"
-                    ? "Connection lost"
-                    : agent.connection === "connecting"
-                      ? "Connecting…"
-                      : task.phase === "finished"
-                        ? "Ready for follow-up"
-                        : task.row === "takeover"
-                          ? "Your turn"
-                          : task.phase === "waiting"
-                            ? "Waiting for you"
-                            : "Task activity"}
-              </span>
-            )}
-          </div>
-          <StopControl controls={controls} />
-          <SafetyControls
-            safety={safety}
-            agent={agent}
-            cell={cell}
-            visible={!keysOpen && !settings.open}
-            replaying={!!replayId}
-          />
-        </div>
-        <div className="watch-content" hidden={!!replayId} inert={!!replayId}>
-          <PaneTabs
-            selected={pane}
-            onSelect={setPane}
-            attention={
-              agent.model.pendingTakeover
-                ? "computer"
-                : agent.model.pendingAsk ||
-                    (agent.snapshot?.pause && agent.snapshot.budgetHold === "task")
-                  ? "conversation"
+      ) : undefined,
+    [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
+  );
+  const askOver = (layout: "island" | "sheet") =>
+    askDraft && (
+      <AskForm
+        key={askDraft.question.askId}
+        draft={askDraft}
+        layout={layout}
+        answer={answerAsk}
+        reason={askReason}
+        upload={uploadAsk}
+        receiveKey={receiveKey}
+      />
+    );
+  const grown =
+    phone || !decision
+      ? undefined
+      : decision === "approval"
+        ? approvalView
+        : askIn === "island"
+          ? askOver("island")
+          : undefined;
+  // A task live on the computer gives the user its own control; with none, the user's own hold
+  // starts.
+  const liveTask = !!agent.sessionId && !session.ended && !ownHold;
+  // Take control works whatever dot is doing: it does an approval's step instead of dot, takes the
+  // computer dot handed over, or takes it from dot at work, at rest or paused.
+  const take = () => {
+    if (decision === "approval" && approval) {
+      if (!safety.canApprove || safety.pending) return;
+      void safety.answerApproval({
+        approvalId: approval.approvalId,
+        generation: approval.generation,
+        revision: approval.revision,
+        decision: "take_control",
+      });
+      return;
+    }
+    if (liveTask) void controls.take();
+    else void controls.takeComputer();
+  };
+  const takeBlocked = takeReason({
+    task: liveTask,
+    ready: liveTask ? controls.canTake : controls.canTakeComputer,
+    pause: safety.pause?.phase,
+  });
+  const takeState = takeSlot(appStatus, {
+    decision,
+    blocked: takeBlocked,
+    taking: controls.taking,
+  });
+  const unconfirmed = agent.snapshot?.manualControl === "unconfirmed";
+  const handBack = useHandBack({ takeover, controls, drained: manual.drained, unconfirmed });
+  const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
+  const replacement = safety.replacement?.phase;
+  // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
+  // is a sheet below, dot asks it aloud.
+  const narration = curtain.up
+    ? ""
+    : phone && approvalView && approval
+      ? decisionWords(approval).line
+      : yours && unconfirmed
+        ? UNCONFIRMED_LINE
+        : yours && phone
+          ? PHONE_CONTROL_LINE
+          : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+            ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
+            : "";
+  const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
+  const asked = agent.model.pendingAsk
+    ? agent.model.questions.get(agent.model.pendingAsk)?.question
+    : undefined;
+  const pause = pauseSlot({
+    pause: safety.pause,
+    canPause: safety.canPause,
+    canResume: safety.canResume,
+    handedOver: !!takeover,
+    budgetHeld: agent.snapshot?.budgetHold === "task",
+  });
+  const { focus, leave: leaveFocus } = useFocusMode(
+    !curtain.up && !replayId,
+    !!question,
+    fullScreen.on && phone,
+  );
+  const touchStill = useStill(focus);
+  const edgeStill = useEdgeStill(full);
+  const still = (touchStill || edgeStill) && !islandAttention(appStatus);
+  useFullScreenKeys({
+    enabled: !phone && !curtain.up && !replayId,
+    apple: isApple(),
+    full,
+    yours,
+    enter: fullScreen.enter,
+    exit: fullScreen.exit,
+  });
+  const working = !!task && !yours;
+  const stepCount = useMemo(
+    () => (focus && working ? workSteps(rows, agent.model).length : 0),
+    [focus, working, rows, agent.model],
+  );
+  const replayContinue = {
+    current: conversation.sessions.at(-1) ?? null,
+    reason: conversationReason,
+    run: (id: string) =>
+      void conversation.continueFrom(id).then((done) => {
+        if (done) selectReplay(null);
+      }),
+  };
+  const page = useRef<HTMLDivElement>(null);
+  useKeyboardFit(page, keyboard);
+  return (
+    <div
+      ref={page}
+      className={appStatus.control && !replayId ? "app control" : "app"}
+      data-layout={layout}
+      data-replaying={replayId ? "" : undefined}
+      data-focus={focus ? "" : undefined}
+      data-full={full ? "" : undefined}
+      data-still={still ? "" : undefined}
+      data-keyboard={keyboard ? "" : undefined}
+      data-setup={onboarding.open ? "" : undefined}
+    >
+      <TopBar
+        title={
+          replayId === LIBRARY
+            ? "Replay"
+            : replayId
+              ? (shownRecording?.title ?? RECORDED_TASK)
+              : (session.model.title ??
+                (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                  ? undefined
+                  : "New conversation"))
+        }
+        note={shownRecording?.note}
+        lead={
+          shownRecording && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon="continue"
+              disabledReason={
+                shownRecording.verdict !== "live" &&
+                shownRecording.sessionId !== conversation.sessions.at(-1)
+                  ? conversationReason
                   : undefined
-            }
-          />
-          <div className="house">
-            <div
-              className="pane pane-conversation"
-              id="pane-conversation"
-              role="tabpanel"
-              aria-label="Conversation"
-              data-selected={pane === "conversation"}
-              inert={narrow && pane !== "conversation"}
-              onFocusCapture={() => {
-                if (!narrow) setPane("conversation");
-              }}
+              }
+              onClick={() =>
+                shownRecording.verdict === "live" ||
+                shownRecording.sessionId === conversation.sessions.at(-1)
+                  ? selectReplay(null)
+                  : replayContinue.run(shownRecording.sessionId)
+              }
             >
-              <ConversationRail
-                visible={!narrow || pane === "conversation"}
-                agent={agent}
-                api={api}
-                rows={rows}
-                computerReady={cell?.state === "ready" && !cell.paused}
-                live={task && !session.ended ? { ...task, nowMs: now } : null}
-                onReplay={
-                  agent.sessionId && (agent.model.ended || task?.phase === "finished")
-                    ? () => selectReplay(agent.sessionId)
-                    : undefined
-                }
-                recovery={
-                  <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
-                }
-                answer={
-                  question && !agent.model.ended ? (
-                    <AskForm
-                      key={question.askId}
-                      question={question}
-                      controls={controls}
-                      visible={(!narrow || pane === "conversation") && !keysOpen && !settings.open}
-                      receiveKey={receiveKey}
-                    />
-                  ) : undefined
-                }
-                composer={
-                  <Composer
-                    api={api}
-                    cell={cell}
-                    known={status === "known"}
-                    pending={pending !== null}
-                    controlBlocked={
-                      controls.fenced ||
-                      controls.stopping ||
-                      !!cell?.fenced ||
-                      !!cell?.replacementPending ||
-                      !!safety.approval
+              Continue
+            </Button>
+          )
+        }
+        mode={replayId ? "replay" : "watch"}
+        replayEnabled={!!(replayId || newestReplayId)}
+        onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
+        onModeAgain={() => {
+          if (playing) selectReplay(LIBRARY);
+        }}
+        keys={keysState}
+        keysOpen={settings.open && settingsAt.section === "keys"}
+        onKeys={() => showKeys(keysButton.current)}
+        keysRef={keysButton}
+        settingsOpen={settings.open}
+        onSettings={showSettings}
+        settingsRef={settingsButton}
+        centre={centre}
+        ref={bar}
+      />
+      <div className="watch" hidden={!!replayId} inert={!!replayId}>
+        <main className="stage-col" aria-label="Computer">
+          <ErrorBoundary>
+            <StageFrame
+              boxRef={stageBox}
+              onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
+              light={appStatus.control ? "dot" : yours ? "you" : "none"}
+              live={stageHud.live}
+              frozen={!!stageHud.paused}
+              curtain={
+                <Presence show={curtain.up}>
+                  <Curtain
+                    phase={curtain.phase}
+                    first={!cell && listed.length === 0}
+                    waking={pending === "start" || pending === "create"}
+                    caption={computer.caption}
+                    notice={error}
+                    action={computerAction}
+                    onAction={() => computerAction && onComputer[computerAction.kind]()}
+                    replace={
+                      cell?.fenced
+                        ? {
+                            enabled: safety.canReplace,
+                            busy: safety.replacing,
+                            note:
+                              replacement === "blocked"
+                                ? "The fresh computer couldn't be checked, so the old one stays off."
+                                : replacement === "ready"
+                                  ? "The fresh computer is ready. Opening it…"
+                                  : replacement
+                                    ? "Setting the old computer aside and starting a fresh one."
+                                    : undefined,
+                            run: () => void safety.replace(),
+                          }
+                        : undefined
                     }
-                    agent={agent}
-                    keysOpen={keysOpen || settings.open}
-                    receiveKey={receiveKey}
-                    configured={mainReady}
-                    onSettings={showSettings}
-                    onTaskStarted={session.check}
-                    model={
-                      mainChoice &&
-                      (modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model)
-                    }
-                    stop={
-                      taskStopAction && {
-                        run: taskStop,
-                        busy: !!taskStopAction.busy,
-                        enabled: taskStopAction.enabled,
-                      }
+                    showDot={showDot.value}
+                  />
+                </Presence>
+              }
+              island={
+                <>
+                  <HudIsland
+                    ref={island}
+                    status={appStatus}
+                    shape={shape}
+                    badge={place === "badge"}
+                    pause={pause}
+                    take={takeState}
+                    handBack={handBack.slot}
+                    onPause={() => void safety.requestPause()}
+                    onContinue={() => void safety.resume()}
+                    onStopTask={taskStop}
+                    onTake={take}
+                    onHandBack={() => void handBack.run()}
+                    onComputer={onComputer}
+                    decision={grown}
+                    rise={centre !== undefined}
+                    full={full}
+                    onExitFull={fullScreen.exit}
+                    onRowWidth={setIslandWidth}
+                    fields={askFields}
+                    notices={
+                      <>
+                        <StopControl controls={controls} inIsland />
+                        <SafetyNotes
+                          safety={safety}
+                          agent={agent}
+                          cell={cell}
+                          visible={sheetsClosed}
+                          replaying={!!replayId}
+                        />
+                      </>
                     }
                   />
-                }
-              />
-            </div>
-            <div
-              className={
-                takeover && !agent.model.ended
-                  ? "pane pane-computer manual-pane"
-                  : "pane pane-computer"
+                  <Toaster anchor={island} />
+                </>
               }
-              id="pane-computer"
-              role="tabpanel"
-              aria-label="Computer"
-              data-selected={pane === "computer"}
-              inert={narrow && pane !== "computer"}
-              onFocusCapture={() => {
-                if (!narrow) setPane("computer");
-              }}
-            >
-              <StageColumn
-                after={
-                  takeover && !agent.model.ended ? (
-                    <TakeoverPanel
-                      key={takeover.requestId}
-                      takeover={takeover}
-                      controls={{
-                        ...controls,
-                        canInput:
-                          controls.canInput &&
-                          physicalStageCell?.state === "ready" &&
-                          !physicalStageCell.paused,
-                      }}
-                      visible={
-                        !replayId && (!narrow || pane === "computer") && !keysOpen && !settings.open
-                      }
-                      manualStatus={agent.snapshot?.manualControl}
-                      receiveKey={receiveKey}
-                      screen={manualGeometry}
-                      pointerMode={pointerMode}
-                      onPointerMode={setPointerMode}
+              band={
+                <>
+                  <NarratorBand
+                    line={narration}
+                    speaker={speaker}
+                    reveal={!!asked && narration === asked}
+                    showDot={showDot.value}
+                    note={focus && stepCount ? `Step ${stepCount}` : undefined}
+                  />
+                  {yours && !phone && (
+                    <ControlStrip
+                      send={sendToComputer}
+                      blocked={inputBlocked}
+                      full={full}
+                      onFullScreen={fullScreen.toggle}
                     />
-                  ) : undefined
-                }
-                live={stageHud.live}
-                frozen={!!stageHud.paused}
-                control={appStatus.control}
-                caption={appStatus.caption.text}
-                cover={phone ? welcome : undefined}
-              >
-                {!phone && welcome}
-                {!replayId && selectedScreen && (
-                  <div className="screen-label" role="status">
-                    {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}
-                    {selectedScreen.screen === "browser" && !browserScreen.cell && (
-                      <span> · {browserScreen.error ?? "Connecting…"}</span>
-                    )}
-                  </div>
-                )}
-                <Stage
-                  ref={stage}
-                  mode={replayId ? "replay" : "live"}
-                  cell={stageCell}
-                  parentId={cell?.id}
-                  selection={selectedScreen}
-                  api={api}
-                  control={appStatus.control}
-                  reconnects={reconnects + browserScreen.reconnects}
-                  listed={listed}
-                  manual={
-                    takeover && manualGeometry && !agent.model.ended
-                      ? {
-                          requestId: takeover.requestId,
-                          enabled:
-                            controls.canInput && stageCell?.state === "ready" && !stageCell.paused,
-                          screen: manualGeometry,
-                          button: pointerMode === "right" ? "right" : "left",
-                          count: pointerMode === "double" ? 2 : 1,
-                          input: controls.input,
-                        }
-                      : undefined
-                  }
-                />
-              </StageColumn>
-            </div>
-            <div
-              className="pane pane-activity"
-              id="pane-activity"
-              role="tabpanel"
-              aria-label="Activity"
-              data-selected={pane === "activity"}
-              inert={narrow && pane !== "activity"}
-              onFocusCapture={() => {
-                if (!narrow) setPane("activity");
-              }}
+                  )}
+                </>
+              }
+              side={
+                focus && (
+                  <FocusControls
+                    take={takeState}
+                    pause={shape === "task" ? pause : null}
+                    stop={appStatus.actions.find((action) => action.kind === "stop-task")}
+                    onTake={take}
+                    onPause={() => void safety.requestPause()}
+                    onContinue={() => void safety.resume()}
+                    onStop={taskStop}
+                    onLeave={() => {
+                      leaveFocus();
+                      fullScreen.exit();
+                    }}
+                    tools={
+                      yours ? (
+                        <ControlTools
+                          compact
+                          send={sendToComputer}
+                          blocked={inputBlocked}
+                          typing={typing}
+                          onKeyboard={(on) => stage.current?.keyboard(on)}
+                          rightClick={pointerMode === "right"}
+                          onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                          handBack={handBack.slot}
+                          onHandBack={() => void handBack.run()}
+                        />
+                      ) : undefined
+                    }
+                  />
+                )
+              }
             >
-              <ActivityRail
-                cellId={cell?.id}
-                releaseReady={
-                  cell?.state === "ready" &&
-                  !cell.paused &&
-                  !cell.fenced &&
-                  !cell.replacementPending
-                }
-                models={agent.snapshot?.models}
-                modelName={modelName}
-                memoryAction={(change) => {
-                  const status =
-                    controls.status?.kind === "memory" && controls.status.target === change.changeId
-                      ? controls.status
-                      : null;
-                  return {
-                    status:
-                      change.changeId && controls.memoryUndone.has(change.changeId)
-                        ? "undone"
-                        : status?.phase === "sending" || status?.phase === "checking"
-                          ? "pending"
-                          : status?.phase === "uncertain"
-                            ? "uncertain"
-                            : status?.phase === "refused"
-                              ? status.code === 409
-                                ? "conflict"
-                                : "failed"
-                              : "ready",
-                    onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
-                    onReread: (trigger) => {
-                      controls.recheck();
-                      setReadMemory(true);
-                      showSettings(trigger, "knowledge");
-                    },
-                  };
-                }}
-                agent={agent.model}
-                rows={rows}
-                keyUses={session.model.keyUses}
-                sessionId={session.sessionId}
-                scale={cell?.scale ?? 2}
+              {!replayId && selectedScreen && (
+                <div className="screen-label" role="status">
+                  {selectedScreen.screen === "browser" ? "Web browser" : "Desktop"}
+                  {selectedScreen.screen === "browser" && !browserScreen.cell && (
+                    <span> · {browserScreen.error ?? "Connecting…"}</span>
+                  )}
+                </div>
+              )}
+              <Stage
+                ref={stage}
+                mode={replayId ? "replay" : "live"}
+                dim={decision !== null}
+                fields={replayId ? undefined : askMarks}
+                cell={stageCell}
+                parentId={cell?.id}
+                selection={selectedScreen}
                 api={api}
+                reconnects={reconnects + browserScreen.reconnects}
+                listed={listed}
+                manual={
+                  yours && manualGeometry && !agent.model.ended
+                    ? {
+                        enabled: manualLive,
+                        screen: manualGeometry,
+                        pointer: pointerMode,
+                        send: sendToComputer,
+                        onTyping: setTyping,
+                        onRefused: setPasteRefused,
+                      }
+                    : undefined
+                }
               />
-            </div>
-          </div>
-        </div>
-        {replayId && (
+              {!phone && !yours && !full && stageHud.live && (
+                <span className="stage-expand">
+                  <IconButton
+                    variant="glass"
+                    round
+                    size={32}
+                    icon="expand"
+                    label="Full screen"
+                    kbd={["F"]}
+                    onClick={fullScreen.enter}
+                  />
+                </span>
+              )}
+            </StageFrame>
+          </ErrorBoundary>
+        </main>
+        {wide && (
+          <RailPanel label="Activity" className="rail-activity">
+            <ErrorBoundary>{activity}</ErrorBoundary>
+          </RailPanel>
+        )}
+        <RailPanel
+          label="Conversation"
+          className="rail-chat"
+          views={views}
+          view={shownView}
+          onView={(view) => setRailView(view as RailView)}
+          end={!phone && agent.sessionId && <NewConversationButton {...newConversation} />}
+        >
+          <ErrorBoundary>
+            <ChatThread
+              visible={shownView === "chat"}
+              agent={agent}
+              api={api}
+              rows={rows}
+              computerReady={cell?.state === "ready" && !cell.paused}
+              live={foot && !session.ended ? { ...foot, nowMs: now } : null}
+              onReplay={
+                agent.sessionId && (agent.model.ended || task?.phase === "finished")
+                  ? () => selectReplay(agent.sessionId)
+                  : undefined
+              }
+              onReplayTask={selectReplay}
+              sessions={conversation.sessions}
+              more={conversation.more}
+              pending={threadPending}
+              pinned={phone}
+              lead={
+                phone && (
+                  <IconButton
+                    className="toolbar-button"
+                    size={44}
+                    round
+                    icon="list"
+                    label="Activity"
+                    onClick={() => setActivityOpen(true)}
+                  />
+                )
+              }
+              trail={
+                phone && (
+                  <MoreMenu
+                    items={[
+                      ...(agent.sessionId
+                        ? [
+                            {
+                              label: "New conversation",
+                              icon: "compose" as const,
+                              disabledReason: newConversation.reason,
+                              run: newConversation.run,
+                            },
+                          ]
+                        : []),
+                      {
+                        label: "Replay",
+                        icon: "history",
+                        startsGroup: true,
+                        disabledReason:
+                          replayId || newestReplayId ? undefined : "No recordings yet",
+                        run: () => selectReplay(LIBRARY),
+                      },
+                      {
+                        label: "Settings",
+                        icon: "settings",
+                        run: (trigger) => showSettings(trigger),
+                      },
+                      { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                      {
+                        label: "Full screen",
+                        icon: "expand",
+                        disabledReason:
+                          curtain.up || replayId ? "Turn on your computer first" : undefined,
+                        run: () => fullScreen.enter(),
+                      },
+                    ]}
+                  />
+                )
+              }
+              start={
+                setupKnown && !mainReady ? (
+                  <FinishSetup
+                    steps={setup.steps}
+                    done={setup.done}
+                    onChooseModel={(event) => showSettings(event.currentTarget, "models")}
+                    onContinue={() => onboarding.reopen()}
+                  />
+                ) : undefined
+              }
+              covered={shownView !== "chat"}
+              cover={
+                !wide &&
+                !phone && (
+                  <div
+                    className="rail-cover-activity"
+                    data-shown={shownView === "activity" || undefined}
+                  >
+                    {activity}
+                  </div>
+                )
+              }
+              tools={
+                phone &&
+                yours && (
+                  <ControlTools
+                    send={sendToComputer}
+                    blocked={inputBlocked}
+                    typing={typing}
+                    onKeyboard={(on) => stage.current?.keyboard(on)}
+                    rightClick={pointerMode === "right"}
+                    onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                    handBack={handBack.slot}
+                    onHandBack={() => void handBack.run()}
+                    onFullScreen={fullScreen.enter}
+                  />
+                )
+              }
+              recovery={
+                <TaskRecovery
+                  agent={agent}
+                  controls={controls}
+                  onSettings={showSettings}
+                  onContinue={continueTask}
+                />
+              }
+              ask={askThread}
+              composer={
+                <Composer
+                  api={api}
+                  cell={cell}
+                  known={status === "known"}
+                  pending={pending !== null}
+                  controlBlocked={
+                    controls.fenced ||
+                    controls.stopping ||
+                    !!cell?.fenced ||
+                    !!cell?.replacementPending ||
+                    !!safety.approval
+                  }
+                  agent={agent}
+                  keysOpen={settings.open}
+                  receiveKey={receiveKey}
+                  configured={mainReady}
+                  onSettings={(trigger) => showSettings(trigger, "models")}
+                  onTaskStarted={session.check}
+                  layout={phone ? "pill" : "card"}
+                  reply={askDraft ? replyAsk : undefined}
+                />
+              }
+            />
+          </ErrorBoundary>
+        </RailPanel>
+      </div>
+      {replayId && (
+        <ErrorBoundary className="replay-failed">
           <ReplayView
             api={api}
-            sessionId={replayId}
+            sessionId={playing}
             onSelect={selectReplay}
+            onLibrary={() => selectReplay(LIBRARY)}
             onGoLive={() => selectReplay(null)}
             onDeleted={(id) => {
+              deletedRecordings.current.add(id);
               if (id === newestReplayId) setNewestReplayId(null);
               historyOwner.current++;
               setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(null, "replace");
+              if (id === replayId) selectReplay(LIBRARY, "replace");
             }}
             onTitle={setRecorded}
+            continueTask={replayContinue}
             exportJob={exportJob}
-            visible={!keysOpen && !settings.open && !safety.approval}
+            visible={!settings.open && !safety.approval}
+            showDot={showDot.value}
           />
-        )}
-      </div>
-      <SettingsSheet
-        focusSection={settingsSection}
-        appearance={appearance}
-        taskControls={<StopControl controls={controls} />}
-        stop={sheetStopControl}
-        open={settings.open}
-        keysPage={keysIn === "settings" ? { ...keysPanel, onBack: closeKeys } : undefined}
-        choices={settings.draft?.choices ?? {}}
-        chatgpt={settings.chatgpt}
-        subscriptionModels={settings.subscriptionModels}
-        providers={settings.index?.providers ?? []}
-        keys={settings.index ? pickerKeys(settings.index) : []}
-        keyLayer={settings.index?.keyLayer ?? "unknown"}
-        catalog={
-          settings.phase === "refreshing"
-            ? "refreshing"
-            : settings.phase === "loading"
-              ? "loading"
-              : settings.phase === "error"
-                ? "offline"
-                : !settings.index?.catalog
-                  ? "empty"
-                  : Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 86_400_000
-                    ? "stale"
-                    : "ready"
-        }
-        catalogAt={settings.index?.catalog?.fetchedAt}
-        dirty={settings.dirty}
-        busy={settings.busy}
-        loading={settings.phase === "loading" || !settings.draft}
-        error={settings.error}
-        validation={settings.validation}
-        onClose={() => {
-          settings.close();
-          setKeysIn(null);
-        }}
-        onChange={settings.change}
-        onKeys={(role, providerId, trigger) => {
-          const provider = providerById(providerId);
-          if (
-            !provider ||
-            provider.local ||
-            provider.availableIn ||
-            provider.notOffered ||
-            !settings.open ||
-            settings.busy ||
-            !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
-          )
-            return;
-          const request = ++keyRequest.current;
-          keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
-          keysOrigin.current = trigger;
-          setKeyPreset({
-            requestId: request,
-            provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
-            ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
-          });
-          setKeysIn("settings");
-        }}
-        onRefresh={() => void settings.refresh()}
-        onReload={settings.reload}
-        save={{ enabled: settings.saveEnabled && settings.dirty, run: () => void settings.save() }}
-        manualPrices={Object.fromEntries(
-          (["main", "fast", "local"] as const)
-            .filter(
-              (role) =>
-                needsPrice(settings.draft?.choices[role], settings.index) &&
-                (role === "main" || settings.draft?.choices.main?.provider !== "chatgpt"),
+        </ErrorBoundary>
+      )}
+      <ErrorBoundary floating>
+        <SettingsSheet
+          section={settingsAt.section}
+          sectionRequest={settingsAt.request}
+          appearance={appearance}
+          showDot={showDot}
+          taskControls={<StopControl controls={controls} />}
+          stop={sheetStopControl}
+          open={settings.open}
+          keysPanel={keysPanel}
+          choices={settings.draft?.choices ?? {}}
+          chatgpt={settings.chatgpt}
+          subscriptionModels={settings.subscriptionModels}
+          providers={settings.index?.providers ?? []}
+          keys={settings.index ? pickerKeys(settings.index) : []}
+          keyLayer={settings.index?.keyLayer ?? "unknown"}
+          catalog={
+            settings.phase === "refreshing"
+              ? "refreshing"
+              : settings.phase === "loading"
+                ? "loading"
+                : settings.phase === "error"
+                  ? "offline"
+                  : !settings.index?.catalog
+                    ? "empty"
+                    : Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 86_400_000
+                      ? "stale"
+                      : "ready"
+          }
+          catalogAt={settings.index?.catalog?.fetchedAt}
+          dirty={settings.dirty}
+          busy={settings.busy}
+          loading={settings.phase === "loading" || !settings.draft}
+          error={settings.error}
+          validation={settings.validation}
+          onClose={settings.close}
+          onChange={settings.change}
+          onKeys={(role, providerId, trigger) => {
+            const provider = providerById(providerId);
+            if (
+              !provider ||
+              provider.local ||
+              provider.availableIn ||
+              provider.notOffered ||
+              !settings.open ||
+              settings.busy ||
+              !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
             )
-            .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
-        )}
-        onPrice={settings.changePrice}
-        autonomy={settings.draft?.autonomy}
-        savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
-        onAutonomy={settings.changeAutonomy}
-        knowledge={settingsKnowledge}
-        rules={rules}
-        budget={
-          settings.draft
-            ? {
-                value: settings.draft.budget,
-                useDefault: settings.draft.defaultBudget,
-                defaultUSD: settings.index?.defaultTaskBudgetUSD ?? null,
-                change: settings.budget,
-              }
-            : undefined
-        }
-      />
-      <KeysSheet
-        {...keysPanel}
-        open={keysIn === "sheet"}
-        onClose={closeKeys}
-        discardRef={keysDiscard}
-      />
+              return;
+            const request = ++keyRequest.current;
+            keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
+            setKeyPreset({
+              requestId: request,
+              provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
+              ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
+            });
+            goToSettings(trigger, "keys");
+          }}
+          onRefresh={() => void settings.refresh()}
+          onReload={settings.reload}
+          save={{
+            enabled: settings.saveEnabled && settings.dirty,
+            run: settings.save,
+          }}
+          manualPrices={Object.fromEntries(
+            (["main", "fast", "local"] as const)
+              .filter(
+                (role) =>
+                  needsPrice(settings.draft?.choices[role], settings.index) &&
+                  (role === "main" || settings.draft?.choices.main?.provider !== "chatgpt"),
+              )
+              .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
+          )}
+          onPrice={settings.changePrice}
+          autonomy={settings.draft?.autonomy}
+          savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
+          onAutonomy={settings.changeAutonomy}
+          knowledge={settingsKnowledge}
+          accounts={settingsAccounts}
+          rules={rules}
+          spending={
+            settings.draft
+              ? { value: settings.draft.spending, change: settings.spending }
+              : undefined
+          }
+          checkIns={
+            settings.draft
+              ? { value: settings.draft.checkIns, change: settings.checkIn }
+              : undefined
+          }
+          spent={agent.model.spend}
+          onSetup={() => {
+            settings.close();
+            onboarding.reopen("thinks");
+          }}
+        />
+      </ErrorBoundary>
+      {phone && (approvalView || askIn === "sheet") && (
+        <ErrorBoundary floating>
+          <DecisionSheet label={appStatus.label} elapsedS={appStatus.elapsedS}>
+            {approvalView || askOver("sheet")}
+          </DecisionSheet>
+        </ErrorBoundary>
+      )}
+      {phone && (
+        <Sheet
+          open={activityOpen}
+          onClose={() => setActivityOpen(false)}
+          title="Activity"
+          doneLabel="Done"
+          detents={ACTIVITY_DETENTS}
+        >
+          <div className="activity-sheet">{activity}</div>
+        </Sheet>
+      )}
+      <Presence show={onboarding.open}>
+        <ErrorBoundary floating>
+          <Onboarding
+            api={api}
+            control={onboarding}
+            phone={phone}
+            keys={keys}
+            index={settings.index}
+            saved={settings.saved}
+            onSaved={settings.reload}
+            turnOn={
+              computerAction && computerAction.kind !== "stop"
+                ? {
+                    run: () => onComputer[computerAction.kind](),
+                    reason: computerAction.enabled ? undefined : "Wait a moment",
+                  }
+                : null
+            }
+            showDot={showDot.value}
+          />
+        </ErrorBoundary>
+      </Presence>
+      {showDot.value && (
+        <PresenceLayer
+          place={place}
+          feed={
+            onboarding.open
+              ? {
+                  state: STEP_DOT[setupStep],
+                  control: false,
+                  attention: false,
+                  focus: null,
+                  dispatched: null,
+                  done: false,
+                  nod: setupStep,
+                }
+              : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+          }
+          line={onboarding.open || speaker !== "dot" ? "" : narration}
+        />
+      )}
       <Announcer />
     </div>
   );

@@ -98,21 +98,24 @@ function fixture(count = 2) {
 }
 async function open(f: ReturnType<typeof fixture>) {
   render(<App fetchImpl={f.fetchImpl} />);
-  const button = screen.getByRole("button", { name: "Replay" });
-  await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+  const button = screen.getByRole("radio", { name: "Replay" });
+  await waitFor(() => expect(button.hasAttribute("aria-disabled")).toBe(false));
   fireEvent.click(button);
-  await screen.findByRole("heading", { name: "Newest notes" });
+  await screen.findByRole("button", { name: "Newest notes" });
   return button;
 }
-async function tasks() {
-  if (!screen.queryByRole("dialog", { name: "Tasks" }))
-    fireEvent.click(await screen.findByRole("button", { name: /^All tasks/ }));
-  return within(await screen.findByRole("dialog", { name: "Tasks" }));
+// Opens a recording from the library, which shows a row's recording at a press without its preview.
+async function play(title: string) {
+  fireEvent.click(await screen.findByRole("button", { name: title }));
+  await screen.findByRole("heading", { name: title });
+}
+async function library() {
+  fireEvent.keyDown(window, { key: "Escape" });
+  await screen.findByRole("textbox", { name: "Search recordings" });
 }
 async function remove(title: string) {
-  fireEvent.click(await (await tasks()).findByRole("button", { name: `More for ${title}` }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: /^Delete recording/ }));
-  const confirm = await screen.findByRole("alertdialog", { name: "Delete this task's recording?" });
+  fireEvent.click(await screen.findByRole("button", { name: `Delete ${title}` }));
+  const confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
   await act(async () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   });
@@ -136,7 +139,7 @@ async function travel(delta: number) {
   return replayParam();
 }
 async function watch() {
-  fireEvent.click(screen.getByRole("button", { name: "Watch" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Watch" }));
   await waitFor(() => expect(window.location.search).toBe(""));
 }
 function enterApp() {
@@ -147,62 +150,61 @@ it("browser Back never reopens a recording deleted after a Watch round-trip", as
   const f = fixture();
   enterApp();
   const button = await open(f);
-  fireEvent.click(await (await tasks()).findByRole("link", { name: /^Older notes/ }));
+  await play("Older notes");
   await waitFor(() => expect(replayParam()).toBe(f.cards[1]?.id));
   await watch();
   fireEvent.click(button);
-  await screen.findByRole("heading", { name: "Newest notes" });
   await remove("Older notes");
   expect(f.deleted).toEqual([f.cards[1]?.id]);
-  expect(await travel(-1)).toBeNull();
-  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
-  expect(await travel(-1)).toBeNull();
+  const visited = [];
+  for (let step = 0; step < 4; step++) visited.push(await travel(-1));
+  expect(visited).not.toContain(f.cards[1]?.id);
+  expect(screen.queryByRole("heading", { name: "Older notes" })).toBeNull();
   expect(window.location.pathname).toBe("/before");
 });
-it("deleting the open recording replaces its entry so Back and Forward never reopen it", async () => {
+it("Back and Forward never reopen a recording deleted after it played", async () => {
   const f = fixture();
   enterApp();
-  const button = await open(f);
-  await watch();
-  fireEvent.click(button);
-  await screen.findByRole("heading", { name: "Newest notes" });
-  const entries = window.history.length;
+  await open(f);
+  await play("Newest notes");
+  await library();
   await remove("Newest notes");
-  expect(window.history.length).toBe(entries);
-  expect(window.location.search).toBe("");
+  expect(f.deleted).toEqual([f.cards[0]?.id]);
   const visited = [];
-  for (const delta of [-1, -1, 1, 1, 1]) visited.push(await travel(delta));
+  for (const delta of [1, -1, -1, 1, 1, 1]) visited.push(await travel(delta));
   expect(visited).not.toContain(f.cards[0]?.id);
-  expect(window.location.pathname).toBe("/");
-  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Newest notes" })).toBeNull();
 });
-it("keeps remaining history reachable after deleting the selected newest session", async () => {
+it("keeps the other recordings in the library after deleting the newest", async () => {
   const f = fixture();
   const button = await open(f);
   await remove("Newest notes");
   expect(f.deleted).toEqual([f.cards[0]?.id]);
-  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Newest notes" })).toBeNull());
+  expect(screen.getByRole("button", { name: "Older notes" })).toBeTruthy();
+  await watch();
   expect(
-    button.hasAttribute("disabled"),
+    button.hasAttribute("aria-disabled"),
     "remaining older recording must still be reachable from Replay",
   ).toBe(false);
   fireEvent.click(button);
-  await waitFor(() =>
-    expect(new URLSearchParams(window.location.search).get("replay")).toBe(f.cards[1]?.id),
-  );
+  expect(await screen.findByRole("button", { name: "Older notes" })).toBeTruthy();
 });
-it("deleting an older unselected session leaves the selected newest replay available", async () => {
+it("deleting an older recording leaves the newest one to play", async () => {
   const f = fixture();
   await open(f);
   await remove("Older notes");
   expect(f.deleted).toEqual([f.cards[1]?.id]);
-  expect(new URLSearchParams(window.location.search).get("replay")).toBe(f.cards[0]?.id);
-  expect(screen.getByRole("button", { name: "Replay" }).hasAttribute("disabled")).toBe(false);
+  await play("Newest notes");
+  expect(replayParam()).toBe(f.cards[0]?.id);
+  expect(screen.getByRole("radio", { name: "Replay" }).hasAttribute("aria-disabled")).toBe(false);
 });
-it("deleting the final recording legitimately disables Replay", async () => {
+it("deleting the final recording legitimately disables Replay once back in Watch", async () => {
   const f = fixture(1);
   const button = await open(f);
   await remove("Newest notes");
   expect(f.deleted).toHaveLength(1);
-  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(await screen.findByText("No recordings yet")).toBeTruthy();
+  await watch();
+  expect(button.hasAttribute("aria-disabled")).toBe(true);
 });

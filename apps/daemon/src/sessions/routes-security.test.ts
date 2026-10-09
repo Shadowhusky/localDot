@@ -57,6 +57,7 @@ describe("replay routes: auth, ids and byte ranges", () => {
       ["GET", "/api/session-index"],
       ["GET", `/api/sessions/${id}/card`],
       ["GET", `/api/sessions/${id}/events`],
+      ["GET", `/api/sessions/${id}/history`],
       ["GET", `/api/sessions/${id}/recording`],
       ["GET", `/api/sessions/${id}/recording/video.mp4`],
       ["HEAD", `/api/sessions/${id}/recording/video.mp4`],
@@ -83,6 +84,7 @@ describe("replay routes: auth, ids and byte ranges", () => {
       for (const path of [
         `/api/sessions/${b}/card`,
         `/api/sessions/${b}/events`,
+        `/api/sessions/${b}/history`,
         `/api/sessions/${b}/recording`,
         `/api/sessions/${b}/recording/video.mp4`,
         `/api/sessions/${id}/thumbs/${b}`,

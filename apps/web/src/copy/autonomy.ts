@@ -27,10 +27,6 @@ const CLASS_WORK: Readonly<Record<ActionClass, string>> = {
   unknown: "unclear steps",
 };
 
-export function allowWithoutAsking(actionClass: ActionClass): string {
-  return `Allow ${CLASS_WORK[actionClass]} without asking:`;
-}
-
 const lower = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 
 export function allowedLine(actionClass: ActionClass, option: AlwaysOption): string {

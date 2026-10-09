@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { msToMicros, type Rect, ulid } from "@localdot/protocol";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeOrchestrator } from "../cells/testing/fake-orchestrator.ts";
 import { NO_STREAM } from "../cells/types.ts";
 import { DesktopdRegistry } from "../desktopd/registry.ts";
@@ -11,7 +11,7 @@ import { FakeDesktopd } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged, regionChanged } from "./freshness.ts";
-import { ActionGateway } from "./gateway.ts";
+import { ActionGateway, type GuiAction } from "./gateway.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
 import { keepPolicy } from "./ring-onset.ts";
 
@@ -163,7 +163,11 @@ async function setup(scale: 1 | 2 = 1) {
   setFrames(await png(base()));
   const basis = await gateway.observe(ctx);
   const clicks = () => fake.calls.filter((call) => call.path === "/input");
+  // The gateway listens to the cells only while it holds an input for the stream.
+  const idle = cells.listeners.size;
+  const holding = () => vi.waitFor(() => expect(cells.listeners.size).toBe(idle + 1));
   return {
+    holding,
     fake,
     log,
     cells,
@@ -285,6 +289,148 @@ describe("gateway freshness", () => {
     expect(s.sleeps).not.toContain(100);
     expect(s.clicks()).toHaveLength(1);
   });
+  it("cancels a drag whose start changed since the model's screenshot, before any press", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
+    const out = await s.gateway.run(s.ctx, {
+      verb: "drag",
+      path: [point, { x: 100, y: 100 }],
+      basedOn: s.basis.frameId,
+    });
+    expect(out).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(s.clicks()).toHaveLength(0);
+  });
+  it("lets an agent's drag start beside a spinner once its element read stays the same", async () => {
+    const s = await setup();
+    s.fake.script.hitTest = (p) => ({
+      target: { point: p, name: "Canvas", role: "drawing area", source: "ax" },
+      window: 42,
+      ms: 1,
+    });
+    s.setFrames(await png(paint(base(), spinner)), await png(base()));
+    const out = await s.gateway.run(
+      {
+        ...s.ctx,
+        source: "agent",
+        authorizeAgent: async () => ({ consume: () => true }),
+        beforeEffect: () => true,
+      },
+      { verb: "drag", path: [point, { x: 100, y: 100 }], basedOn: s.basis.frameId },
+    );
+    expect(out.ok).toBe(true);
+    expect(s.clicks()).toHaveLength(1);
+  });
+  it("checks a button press against the screenshot unless this agent's move on that screenshot just put the cursor there", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
+    const basedOn = s.basis.frameId;
+    const press = () => s.gateway.run(s.ctx, { verb: "down", basedOn });
+    const stale = { ok: false, cancelled: "stale" };
+    expect(await s.gateway.run(s.ctx, { verb: "down", point, basedOn })).toMatchObject(stale);
+    // A move on no screenshot, on a later one, or another agent's move leaves the press checked.
+    await s.gateway.run(s.ctx, { verb: "move", point });
+    expect(await press()).toMatchObject(stale);
+    const later = await s.gateway.observe(s.ctx);
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn: later.frameId });
+    expect(await press()).toMatchObject(stale);
+    await s.gateway.run({ ...s.ctx, agent: "helper" }, { verb: "move", point, basedOn });
+    expect(await press()).toMatchObject(stale);
+    // So does anything else that acted after the move.
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+    await s.gateway.run(s.ctx, { verb: "scroll", point, dx: 0, dy: 1 });
+    expect(await press()).toMatchObject(stale);
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+    expect((await press()).ok).toBe(true);
+    expect(s.clicks().map((c) => (c.body as { input: { kind: string } }).input.kind)).toEqual([
+      "move",
+      "move",
+      "move",
+      "move",
+      "scroll",
+      "move",
+      "down",
+    ]);
+  });
+  it("checks a press after any other action since the move, at a point of its own, or once the pointer moved away", async () => {
+    const s = await setup();
+    const overlay = { x: 620, y: 380, w: 40, h: 40 };
+    s.setFrames(await png(paint(base(), overlay)));
+    const basedOn = s.basis.frameId;
+    const stale = { ok: false, cancelled: "stale" };
+    const actions: GuiAction[] = [
+      { verb: "key", combo: ["Return"] },
+      { verb: "type", text: "a" },
+      { verb: "wait", ms: 10 },
+    ];
+    for (const between of actions) {
+      await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+      await s.gateway.run(s.ctx, between);
+      expect(await s.gateway.run(s.ctx, { verb: "down", basedOn })).toMatchObject(stale);
+    }
+    // The desktop reports the pointer where the move left it, yet a press at a point of its own
+    // is checked there.
+    const covered = await png(paint(base(), overlay));
+    s.fake.script.observe = () => ({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: covered.toString("base64"),
+      pointer: { ...s.fake.pointer },
+      windows: [],
+    });
+    await s.gateway.run(s.ctx, { verb: "move", point: { x: 100, y: 100 }, basedOn });
+    expect(s.gateway.cursorOf(s.ctx.cellId)).toEqual({ x: 100, y: 100 });
+    expect(await s.gateway.run(s.ctx, { verb: "down", point, basedOn })).toMatchObject(stale);
+    const away = { x: 300, y: 300 };
+    const moved = await png(paint(paint(base(), overlay), { x: 280, y: 280, w: 40, h: 40 }));
+    s.fake.script.observe = () => ({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: moved.toString("base64"),
+      pointer: away,
+      windows: [],
+    });
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+    expect(s.gateway.cursorOf(s.ctx.cellId)).toEqual(away);
+    expect(await s.gateway.run(s.ctx, { verb: "down", basedOn })).toMatchObject(stale);
+    expect(
+      s.clicks().filter((c) => (c.body as { input: { kind: string } }).input.kind === "down"),
+    ).toEqual([]);
+  });
+  it("checks a press after the move's owner handed the screen over, or once a held button was let go", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
+    const basedOn = s.basis.frameId;
+    const stale = { ok: false, cancelled: "stale" };
+    let release: (() => Promise<void>) | undefined;
+    const ctx = {
+      ...s.ctx,
+      holdInput: (r: () => Promise<void>) => {
+        release = r;
+        return () => {};
+      },
+    };
+    await s.gateway.run(ctx, { verb: "move", point, basedOn });
+    await release?.();
+    expect(await s.gateway.run(ctx, { verb: "down", basedOn })).toMatchObject(stale);
+    // A held button let go of with Escape (its time ran out, or the task stopped).
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 100 } });
+    await s.gateway.run(ctx, { verb: "move", point, basedOn });
+    await s.gateway.releaseHeld(ctx.cellId);
+    expect(await s.gateway.run(ctx, { verb: "down", basedOn })).toMatchObject(stale);
+  });
+  it("checks a drag's start against the screenshot, not the canvas it is about to change", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 80, y: 80, w: 40, h: 40 })));
+    const out = await s.gateway.run(s.ctx, {
+      verb: "drag",
+      path: [point, { x: 100, y: 100 }],
+      basedOn: s.basis.frameId,
+    });
+    expect(out.ok).toBe(true);
+    expect(s.clicks()).toHaveLength(1);
+  });
   it("preserves optional unknown-basis behavior and avoids checks without a basis", async () => {
     const s = await setup();
     for (const basedOn of [undefined, ulid()])
@@ -322,7 +468,7 @@ describe("freshness after a renewed stream hold", () => {
       };
       const running = s.gateway.run(s.ctx, { verb: "click", point, basedOn: s.basis.frameId });
       try {
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await s.holding();
         expect(s.cells.get(s.ctx.cellId)?.stream.connection).toBe("stalled");
         expect(s.clicks()).toHaveLength(0);
         recovered = true;
@@ -353,7 +499,7 @@ describe("freshness after a renewed stream hold", () => {
     };
     const running = s.gateway.run(s.ctx, { verb: "click", point, basedOn: s.basis.frameId });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await s.holding();
       expect(s.clicks()).toHaveLength(0);
       s.abort.abort();
       expect((await running).cancelled).toBe("user");
@@ -384,7 +530,7 @@ describe("freshness after a renewed stream hold", () => {
     };
     const running = s.gateway.run(s.ctx, { verb: "click", point, basedOn: s.basis.frameId });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await s.holding();
       expect(s.clicks()).toHaveLength(0);
       s.cells.updateStream(s.ctx.cellId, { viewers: 1, connection: "live" });
       expect((await running).ok).toBe(true);

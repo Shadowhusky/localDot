@@ -1,21 +1,3 @@
-.safety-controls {
-  display: grid;
-  gap: 12px;
-  max-width: 1040px;
-  width: calc(100% - 32px);
-  margin: 8px auto 16px;
-  color: var(--text, #e6e9ef);
-}
-.safety-controls:empty {
-  display: none;
-}
-.fenced-recovery {
-  background: var(--surface, #19212b);
-  border: 1px solid #526875;
-  border-radius: 16px;
-  padding: 20px;
-}
-.safety-controls h2,
 .approval-card h2 {
   font-size: 18px;
   font-weight: 600;
@@ -105,127 +87,6 @@
   min-width: 0;
   margin: 0;
 }
-.approval-value {
-  max-height: min(16.5em, 36vh);
-  margin: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  font: 13px / 1.5 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  unicode-bidi: isolate;
-}
-.approval-value[tabindex] {
-  padding: 6px 10px;
-  border: 1px solid #344654;
-  border-radius: 10px;
-  background: rgb(0 0 0 / 18%);
-}
-.approval-value:focus-visible {
-  outline: var(--focus-width) solid var(--color-text-2);
-  outline-offset: 2px;
-}
-.approval-blank {
-  color: #6f8597;
-}
-.approval-mark {
-  display: inline-block;
-  margin: 0 2px;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: #2c3d4c;
-  color: #d4e2ee;
-  font-size: 11.5px;
-  line-height: 1.5;
-  unicode-bidi: isolate;
-}
-.approval-hidden {
-  background: #4a3a17;
-  color: #ffd27a;
-}
-.approval-value-facts,
-.approval-value-warning {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: #b7c8d8;
-}
-.approval-value-warning {
-  color: #ffd27a;
-}
-.approval-card .approval-show-all {
-  margin-top: 8px;
-}
-.safety-task-controls,
-.notification-control {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-}
-.approval-card .notification-control {
-  margin-top: 20px;
-}
-.approval-upload {
-  margin-top: 20px;
-  overflow-wrap: anywhere;
-}
-.approval-upload-destination {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-}
-.approval-upload-destination span,
-.approval-upload-note,
-.approval-upload-path {
-  color: #b7c8d8;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.approval-upload h3 {
-  margin: 20px 0 10px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.approval-upload-files {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 10px;
-}
-.approval-upload-files li {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid #344654;
-  border-radius: 10px;
-}
-.approval-upload-file-heading {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-}
-.approval-upload-file-heading span {
-  flex-shrink: 0;
-  font-size: 13px;
-  color: #b7c8d8;
-}
-.approval-upload-path {
-  margin: 6px 0;
-}
-.approval-upload-files summary {
-  cursor: pointer;
-  font-size: 12px;
-}
-.approval-upload-digest {
-  font: 12px / 1.5 monospace;
-}
-.safety-task-controls p {
-  flex: 1 1 280px;
-  margin: 0;
-}
-.safety-controls button,
 .approval-card button {
   min-height: 44px;
   padding: 10px 16px;
@@ -236,193 +97,22 @@
   font: inherit;
   cursor: pointer;
 }
-.safety-controls button:hover:not(:disabled),
 .approval-card button:hover:not(:disabled) {
   background: #344c61;
 }
-.safety-controls button:active:not(:disabled),
 .approval-card button:active:not(:disabled) {
   transform: scale(0.98);
 }
-.safety-controls button:disabled,
 .approval-card button:disabled {
   opacity: 0.55;
   cursor: default;
 }
-.safety-controls button:focus-visible,
 .approval-card button:focus-visible,
 .approval-card h2:focus-visible {
   outline: var(--focus-width) solid #afdfff;
   outline-offset: 4px;
 }
-.stop-hint {
-  color: #b7c8d8;
-  font-size: 12px;
-}
-@media (hover: none) and (pointer: coarse) {
-  .stop-hint {
-    display: none;
-  }
-}
-.safety-settings select {
-  min-height: 44px;
-  max-width: 100%;
-}
-.safety-settings label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 12px 0;
-}
-.always-allow {
-  display: grid;
-  justify-items: start;
-  gap: calc(var(--spacing) * 2);
-  margin-top: calc(var(--spacing) * 5);
-}
-.approval-card .always-allow-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-button-glyph-gap);
-  margin-left: calc(var(--spacing) * -3);
-  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
-  border-color: transparent;
-  background: transparent;
-  color: var(--color-text);
-}
-.approval-card .always-allow-toggle::after {
-  content: "";
-  width: 12px;
-  height: 12px;
-  background: var(--icon-chevron-down) no-repeat center / 12px 12px;
-  transition: transform var(--duration-veil) var(--ease-veil);
-}
-.approval-card .always-allow-toggle[aria-expanded="true"]::after {
-  transform: rotate(180deg);
-}
-.approval-card .always-allow-toggle:hover:not(:disabled) {
-  background: transparent;
-}
-@media (hover: hover) {
-  .approval-card .always-allow-toggle:hover:not(:disabled) {
-    background: var(--color-hud-button);
-  }
-}
-.always-allow-options {
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: calc(var(--spacing) * 3.5);
-  border: 0;
-  border-radius: var(--radius-stage);
-  background: var(--color-hud-button);
-}
-.always-allow-options:not([hidden]) {
-  animation: always-allow-in var(--duration-veil) var(--ease-veil);
-}
-.always-allow-options legend {
-  float: left;
-  width: 100%;
-  margin: 0 0 calc(var(--spacing) * 3);
-  padding: 0;
-  font-size: var(--text-body);
-  line-height: var(--text-body--line-height);
-  color: var(--color-text-2);
-}
-.always-allow-choices {
-  clear: both;
-  display: flex;
-  flex-wrap: wrap;
-  gap: calc(var(--spacing) * 2);
-}
-.approval-card .always-allow-options button {
-  flex: 1 1 160px;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-.always-notice {
-  position: fixed;
-  z-index: 25;
-  left: 50%;
-  bottom: calc(var(--spacing-edge) + env(safe-area-inset-bottom, 0px));
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 3);
-  width: max-content;
-  max-width: calc(100% - 2 * var(--spacing-edge));
-  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5)
-    calc(var(--spacing) * 4);
-  border-radius: var(--radius-stage);
-  /* Opaque: WebKit shows the page's text through a translucent line, even under a blur. */
-  background: var(--color-surface);
-  box-shadow: var(--shadow-hud);
-  color: var(--color-text);
-  transform: translateX(-50%);
-  animation: always-notice-in var(--duration-veil) var(--ease-veil);
-}
-.always-notice:not(:has(.always-notice-undo)) {
-  padding-block: calc(var(--spacing) * 3);
-  padding-right: calc(var(--spacing) * 4);
-}
-.always-notice.leaving {
-  opacity: 0;
-  transform: translate(-50%, 4px);
-  transition:
-    opacity var(--duration-veil) var(--ease-veil),
-    transform var(--duration-veil) var(--ease-veil);
-}
-.always-notice p {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  line-height: var(--text-body--line-height);
-}
-.always-notice-undo {
-  flex: none;
-  min-height: 36px;
-  padding: 0 calc(var(--spacing) * 3.5);
-  border-radius: var(--radius-md);
-  background: var(--color-hud-button);
-  font-weight: 600;
-}
-.always-notice-undo:hover:not(:disabled) {
-  background: var(--color-hud-line);
-}
-.always-notice-undo:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-@keyframes always-allow-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-}
-@keyframes always-notice-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 8px);
-  }
-}
-@keyframes always-fade-in {
-  from {
-    opacity: 0;
-  }
-}
-@media (pointer: coarse) {
-  .always-notice-undo {
-    min-height: 44px;
-  }
-}
 @media (width < 600px) {
-  .safety-controls {
-    width: calc(100% - 20px);
-  }
-  .fenced-recovery {
-    padding: 16px;
-  }
   .approval-content,
   .approval-footer {
     padding: 16px;
@@ -433,18 +123,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .safety-controls button:active:not(:disabled),
   .approval-card button:active:not(:disabled) {
     transform: none;
-  }
-  .always-allow-options:not([hidden]),
-  .always-notice {
-    animation-name: always-fade-in;
-  }
-  .always-notice.leaving {
-    transform: translateX(-50%);
-  }
-  .approval-card .always-allow-toggle::after {
-    transition: none;
   }
 }

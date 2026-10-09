@@ -8,6 +8,7 @@ const state: DecodeState = {
   shownKeyMs: 0,
   targetKeyMs: 0,
   nextMs: 200,
+  keyOnly: false,
 };
 
 describe("replay decode scheduling", () => {
@@ -27,6 +28,12 @@ describe("replay decode scheduling", () => {
   });
   it("exact seeks from the preceding key when the GOP changed", () => {
     expect(nextDecodeStep({ ...state, mode: "exact", targetKeyMs: 150 })).toBe("seek-exact");
+  });
+  it("exact seeks past a preview's lone key frame, which has nothing decoded after it", () => {
+    const previewed = { ...state, shownMs: 0, nextMs: null, keyOnly: true };
+    expect(nextDecodeStep({ ...previewed, mode: "exact" })).toBe("seek-exact");
+    expect(nextDecodeStep({ ...previewed, mode: "preview" })).toBe("hold");
+    expect(nextDecodeStep({ ...previewed, mode: "play" })).toBe("seek-exact");
   });
   it("exact seek backwards always re-seeks", () => {
     expect(nextDecodeStep({ ...state, mode: "exact", targetMs: 50 })).toBe("seek-exact");

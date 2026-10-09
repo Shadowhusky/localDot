@@ -33,6 +33,18 @@ const shifted = (dx: number) =>
   });
 
 describe("sameNativeIdentity", () => {
+  it("binds a drag's drop point as strictly as its start", () => {
+    const trash = { ...cancel, name: "Trash", point: { x: 100, y: 100 } };
+    const drag = (drop: Partial<NativeActionIdentity> = {}) =>
+      read({ drop: { target: trash, window: 9, point: trash.point, windowFrame: FRAME, ...drop } });
+    expect(sameNativeIdentity(drag(), drag())).toBe(true);
+    expect(sameNativeIdentity(drag(), drag({ target: { ...trash, name: "Shred" } }))).toBe(false);
+    expect(sameNativeIdentity(drag(), drag({ window: 10 }))).toBe(false);
+    expect(sameNativeIdentity(drag(), drag({ target: trash, unknown: true }))).toBe(false);
+    expect(sameNativeIdentity(drag(), read())).toBe(false);
+    expect(sameNativeIdentity(read(), drag())).toBe(false);
+  });
+
   it("accepts the same element read twice, within a toolkit's rounding", () => {
     expect(sameNativeIdentity(read(), read())).toBe(true);
     expect(sameNativeIdentity(read(), shifted(1))).toBe(true);

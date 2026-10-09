@@ -151,19 +151,24 @@ for (const pending of ["wait", "shell"] as const)
       ).toBeChecked();
       await page.getByRole("button", { name: "Send answer", exact: true }).click();
       await showPane("Computer");
-      const manual = page.getByRole("region", { name: "Manual control", exact: true });
-      await expect(manual).toBeVisible({ timeout: 30_000 });
+      // dot hands the computer over from the island; it is the user's once they take it.
+      const take = page.getByRole("button", { name: "Take control", exact: true });
+      await expect(take).toBeEnabled({ timeout: 30_000 });
       checkpoint("manual");
       const beforeManual = (await f.state(owner))[0];
       expect(beforeManual?.provider).toHaveLength(6);
-      await manual
-        .getByLabel("Text for the computer", { exact: true })
-        .fill("task14-private-manual-sentinel");
-      await manual.getByRole("button", { name: "Type text", exact: true }).click();
-      await expect(manual.getByLabel("Text for the computer", { exact: true })).toHaveValue("");
-      await expect(
-        manual.getByRole("button", { name: "Return control to dot", exact: true }),
-      ).toBeEnabled();
+      await take.click();
+      const handBack = page.getByRole("button", { name: "Hand back", exact: true });
+      await expect(handBack).toBeEnabled();
+      await page
+        .getByRole("toolbar", { name: "Computer controls", exact: true })
+        .getByRole("button", { name: /^Type text/ })
+        .click();
+      const paste = page.getByLabel("Text to type on the computer", { exact: true });
+      await paste.fill("task14-private-manual-sentinel");
+      await paste.press("Enter");
+      await expect(paste).toHaveCount(0);
+      await expect(handBack).toBeEnabled();
       const held = (await f.state(owner))[0];
       expect(held?.provider).toHaveLength(6);
       expect(JSON.stringify(held?.events)).not.toContain("task14-private-manual-sentinel");
@@ -171,10 +176,7 @@ for (const pending of ["wait", "shell"] as const)
         path: info.outputPath("assembled-manual-desktop.png"),
         fullPage: true,
       });
-      await manual
-        .getByLabel("Optional note for dot", { exact: true })
-        .fill("The fake local sign-in interaction is complete.");
-      await manual.getByRole("button", { name: "Return control to dot", exact: true }).click();
+      await handBack.click();
       if (pending === "shell") await approveCurrent(page, f);
       await expect
         .poll(
@@ -316,7 +318,7 @@ for (const pending of ["wait", "shell"] as const)
           await route.abort("failed");
         });
         await replace.click();
-        await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled({
+        await expect(page.getByRole("textbox", { name: /^(New task|Message)$/ })).toBeEnabled({
           timeout: 90000,
         });
         await page.unroute(`${origin}/api/cells/${oldId}/replacement`);
@@ -387,16 +389,16 @@ for (const pending of ["wait", "shell"] as const)
       );
       await showPane("Conversation");
       await expect(page.getByRole("region", { name: "Task recovery", exact: true })).toHaveCount(0);
-      await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled();
+      await expect(page.getByRole("textbox", { name: /^(New task|Message)$/ })).toBeEnabled();
       await page
-        .getByRole("textbox", { name: "New task", exact: true })
+        .getByRole("textbox", { name: /^(New task|Message)$/ })
         .fill("task14 explicitly continue after confirmed Stop: export the sample table.");
       const nextReply = page.waitForResponse(
         (r) =>
           r.request().method() === "POST" &&
           /^\/api\/cells\/[^/]+\/agent$/.test(new URL(r.url()).pathname),
       );
-      await page.getByRole("button", { name: "Start task", exact: true }).click();
+      await page.getByRole("button", { name: /^(Start task|Send)$/ }).click();
       const next = await nextReply;
       expect(next.status(), await next.text()).toBe(202);
       const nextOwner = (await next.json()).sessionId;

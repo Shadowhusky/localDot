@@ -18,14 +18,18 @@ describe("theme tokens", () => {
       "--color-xenon-a10": "rgba(63, 181, 222, 0.1)",
       "--color-cursor-fill": "#ffffff",
       "--color-cursor-rim": "#121316",
-      "--color-hud-solid": "rgba(14, 15, 18, 0.92)",
-      "--color-hud-line": "rgba(255, 255, 255, 0.1)",
+      "--color-glass-solid": "rgba(14, 15, 18, 0.92)",
+      "--color-glass-line": "rgba(255, 255, 255, 0.1)",
       "--color-fg-1": "#eeeff1",
       "--color-fg-2": "#a8abb0",
-      "--color-halo-target": "rgba(10, 11, 13, 0.35)",
-      "--color-shade-cursor": "rgba(0, 0, 0, 0.4)",
+      "--color-drag-under": "rgba(10, 11, 13, 0.12)",
+      "--color-shade-cursor": "rgba(0, 0, 0, 0.35)",
       "--color-key-bevel": "rgba(255, 255, 255, 0.06)",
       "--color-void": "#0a0b0d",
+      "--color-stage-glass": "rgba(16, 17, 20, 0.84)",
+      "--color-glyph-light": "#ffffff",
+      "--color-glyph-mid": "#d9dce0",
+      "--color-glyph-shade": "#9fa4ab",
       "--font-ui": ' system-ui, -apple-system, "Segoe UI Variable Text", sans-serif',
     };
     const theme = readTheme({
@@ -34,12 +38,16 @@ describe("theme tokens", () => {
     expect(theme.xenon).toEqual({ color: 0x3fb5de, alpha: 1 });
     expect(theme.text2).toEqual({ color: 0xa8abb0, alpha: 1 });
     expect(theme.font).toBe('system-ui, -apple-system, "Segoe UI Variable Text", sans-serif');
-    expect(theme.haloTarget.alpha).toBeCloseTo(0.35, 6);
+    expect(theme.dragUnder.alpha).toBeCloseTo(0.12, 6);
     expect(Object.keys(theme).sort()).toEqual([
       "cursorFill",
       "cursorRim",
+      "dragUnder",
       "font",
-      "haloTarget",
+      "glass",
+      "glyphLight",
+      "glyphMid",
+      "glyphShade",
       "hudLine",
       "hudSolid",
       "keyBevel",
@@ -48,7 +56,6 @@ describe("theme tokens", () => {
       "text2",
       "void",
       "xenon",
-      "xenonA10",
     ]);
   });
 

@@ -36,7 +36,10 @@ export const modifierClick = (x: number, y: number, keys: string): OracleCall =>
   "computer",
   { action: "left_click", coordinate: [Math.round(x), Math.round(y)], text: keys },
 ];
-export const key = (combo: string): OracleCall => ["computer", { action: "key", text: combo }];
+export const key = (combo: string, repeat?: number): OracleCall => [
+  "computer",
+  { action: "key", text: combo, ...(repeat ? { repeat } : {}) },
+];
 export const type = (text: string): OracleCall => ["computer", { action: "type", text }];
 export const wait = (seconds: number): OracleCall => [
   "computer",

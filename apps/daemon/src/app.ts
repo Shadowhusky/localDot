@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { ServiceReadinessReply } from "../../../packages/protocol/src/install-services.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
+import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
@@ -29,6 +30,7 @@ export interface AppOptions {
   cells?: CellApiDeps;
   desktop?: StreamProxyDeps;
   browser?: BrowserViewerDeps;
+  accounts?: AccountsDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
@@ -47,6 +49,7 @@ export function createApp({
   cells,
   desktop,
   browser,
+  accounts,
   ui,
   gateway,
   keys,
@@ -116,6 +119,7 @@ export function createApp({
     });
   if (installCodes) installCodeRoutes(app, installCodes);
   if (browser) browserViewerApi(app, browser);
+  if (accounts) accountsRoutes(app, accounts);
 
   app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
 
@@ -139,6 +143,21 @@ export function createApp({
         return eventStreamResponse(file, fromSeq, c.req.raw.signal);
       }
       return c.json(eventLog.read(id, fromSeq));
+    } catch (err) {
+      if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
+      throw err;
+    }
+  });
+
+  // What a conversation shows of a task, read whole before its live feed opens: the log without the
+  // events it never shows.
+  app.get("/api/sessions/:id/history", (c) => {
+    const id = c.req.param("id");
+    if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
+    const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
+    if (!Number.isSafeInteger(fromSeq)) return c.text("invalid sequence", 400);
+    try {
+      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, { shown: true });
     } catch (err) {
       if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
       throw err;

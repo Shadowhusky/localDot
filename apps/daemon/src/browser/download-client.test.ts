@@ -139,7 +139,9 @@ describe("browser download client", () => {
         else offer.origin[field] = field === "name" ? "../report.txt" : ulid();
         json(response, { downloads: [offer] });
       });
-      await expect(f.client.downloads(f.binding, f.scope)).rejects.toThrow("stale");
+      await expect(f.client.downloads(f.binding, f.scope)).rejects.toThrow(
+        expect.objectContaining({ code: "stale" }),
+      );
     },
   );
 
@@ -151,7 +153,7 @@ describe("browser download client", () => {
         { ...f.binding, permit: { ...f.binding.permit, instance: randomUUID() } },
         f.scope,
       ),
-    ).rejects.toThrow("stale");
+    ).rejects.toThrow(expect.objectContaining({ code: "stale" }));
     const source = f.client.readDownload(f.binding, f.offer, f.scope);
     const closed = finished(source).catch(() => {});
     source.destroy();
@@ -190,7 +192,7 @@ describe("browser download client", () => {
               : Buffer.alloc(f.value.length),
         ),
       );
-      await expect(f.read()).rejects.toThrow("reply");
+      await expect(f.read()).rejects.toThrow(expect.objectContaining({ code: "reply" }));
     },
   );
 

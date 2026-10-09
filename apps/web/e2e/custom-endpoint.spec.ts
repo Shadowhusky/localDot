@@ -1,5 +1,6 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
 import { nestedKeys, roleCard, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // A custom Anthropic-compatible endpoint, from an empty setup: its key with the vendor's base URL,
@@ -53,12 +54,20 @@ for (const run of runs) {
       );
       const page = await context.newPage();
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
+      await skipSetup(page);
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-      const model = page.locator(".welcome-step").first();
-      const welcome = model.locator(".welcome-step-detail");
-      await expect(welcome).toHaveText("Choose the model dot thinks with.");
+      const setup = page.getByRole("region", { name: "Finish setting up" });
+      const model = setup.locator(".setup-row").filter({ hasText: "Model" });
+      await expect(model.locator(".setup-detail")).toHaveText("Needed to start");
+      // Once the model is ready, setup has nothing left and Settings opens from its own button.
+      const reopen = async () => {
+        const gear = page.getByRole("button", { name: "Settings", exact: true });
+        if (await gear.isVisible()) return press(gear);
+        await press(page.getByRole("button", { name: "More" }));
+        await press(page.getByRole("menuitem", { name: "Settings" }));
+      };
 
-      await press(model.getByRole("button", { name: "Choose" }));
+      await press(model.getByRole("button", { name: "Choose…" }));
       const sheet = settingsSheet(page);
       const main = roleCard(sheet, "main");
       const provider = main.getByRole("combobox", { name: "Provider", exact: true });
@@ -127,10 +136,10 @@ for (const run of runs) {
         price: { inputUSDPerMTok: 0.6, outputUSDPerMTok: 2.2 },
       });
       await press(sheet.getByRole("button", { name: "Close settings" }));
-      await expect(welcome).toHaveText("Other (Anthropic-compatible) · glm-5.3-flash");
+      await expect(setup).toHaveCount(0);
 
       // On a flat-rate plan: no per-token price, no dollar ceiling, and still ready.
-      await press(model.getByRole("button", { name: "Change" }));
+      await reopen();
       await press(main.getByRole("switch", { name: "Flat-rate plan" }));
       await expect(main.getByText("Uses the plan's limits, not a spending limit.")).toBeVisible();
       await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
@@ -148,7 +157,7 @@ for (const run of runs) {
         plan: true,
       });
       await press(sheet.getByRole("button", { name: "Close settings" }));
-      await expect(welcome).toHaveText("Other (Anthropic-compatible) · glm-5.3-flash");
+      await expect(setup).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );

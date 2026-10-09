@@ -57,7 +57,9 @@ export interface ScreenControllerDeps {
   readonly parentCellId: string;
   readonly desktopGeometry: ScreenGeometry;
   desktopReady(): boolean;
-  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop">;
+  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
+  // The browser outlives sessions, so its control revisions are counted across them.
+  revision?(instance: string): number;
   client?(endpoint: ReadyBrowser): Client;
   downloads?(
     endpoint: ReadyBrowser,
@@ -76,6 +78,18 @@ export class ScreenControlError extends Error {
   constructor() {
     super("Screen control is no longer available.");
     this.name = "ScreenControlError";
+  }
+}
+export class ScreenUnavailableError extends Error {
+  constructor(screen: ScreenName, starting = false) {
+    super(
+      screen === "desktop"
+        ? "The desktop isn't ready right now. Try switching to it again in a moment."
+        : starting
+          ? "The web browser is still starting. Try switching to it again in a few seconds."
+          : "The web browser isn't available. Carry on with the desktop, which has none of the user's sign-ins, or tell the user what you couldn't do.",
+    );
+    this.name = "ScreenUnavailableError";
   }
 }
 
@@ -387,10 +401,24 @@ export class ScreenController {
       ...(this.#holding ? [this.#holding] : []),
     ])
       .then(async (results) => {
-        // A late preparation cannot outlive the session's terminal receipt.
-        await this.deps.browser.stop(this.deps.parentCellId).catch(() => {
+        // No grant of this session outlives its terminal receipt. A finished task hands the
+        // browser back to the user and leaves it running for the next one (a browser that has
+        // since restarted holds no grant of this session); containment, including a Stop that
+        // arrives while the task finishes, stops it.
+        const owner = this.#browser;
+        const stop = () => this.deps.browser.stop(this.deps.parentCellId);
+        try {
+          if (
+            !contain &&
+            owner &&
+            this.deps.browser.endpoints(this.deps.parentCellId)?.instance ===
+              owner.endpoint.instance
+          )
+            await this.#revoke().catch(stop);
+          if (contain || this.#failed) await stop();
+        } catch {
           throw new ScreenControlError();
-        });
+        }
         this.#browser?.client.close();
         if (results.some((result) => result.status === "rejected")) throw new ScreenControlError();
       })
@@ -425,13 +453,18 @@ export class ScreenController {
       signal: AbortSignal.any([scope.signal, control]),
       check: guard,
     };
+    let granted = false;
+    let integrity = false;
     const operation = this.#tail
       .then(async () => {
         try {
           guard();
           await Promise.all([...this.#active, downloadsRetired]);
           guard();
-          await this.#revoke();
+          await this.#revoke().catch((error: unknown) => {
+            if (handback) throw error;
+            return this.#retireBrowser();
+          });
           guard();
           let cellId = this.deps.parentCellId;
           let geometry = this.#desktopGeometry;
@@ -441,12 +474,13 @@ export class ScreenController {
             owner.manualPermit = undefined;
             const request = {
               ...this.#identity(owner),
-              revision: ++owner.revision,
+              revision: this.#nextRevision(owner),
               requestId: ulid(),
               holder: "agent" as const,
               owner: { sessionId: scope.sessionId, generation: scope.generation },
             };
             const browserScope = this.#browserScope(owner, operationScope);
+            granted = true;
             await owner.client.control(request, browserScope);
             guard();
             owner.permit = Object.freeze({
@@ -475,7 +509,9 @@ export class ScreenController {
             geometry: Object.freeze({ ...result.geometry }),
             revision: result.revision,
           });
+          integrity = true;
           await this.deps.attachRecording(selection, operationScope);
+          integrity = false;
           guard();
           if (screen === "browser") {
             if (!this.#browser) throw new ScreenControlError();
@@ -501,6 +537,7 @@ export class ScreenController {
             );
             guard();
           } else if (!this.deps.desktopReady()) throw new ScreenControlError();
+          integrity = true;
           this.deps.publish(result);
           guard();
           this.#selection = selection;
@@ -509,7 +546,19 @@ export class ScreenController {
         } catch {
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
             await this.#revoke().catch(() => this.#fail());
-          } else await this.#fail();
+          } else if (handback || integrity) {
+            // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
+            // complete is uncertainty the session cannot continue past.
+            await this.#fail();
+          } else {
+            // The agent asked for a screen that is unavailable. That is an ordinary tool
+            // failure once no grant this call requested can still be live.
+            if (granted) await this.#revoke().catch(() => this.#retireBrowser());
+            throw new ScreenUnavailableError(
+              screen,
+              this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
+            );
+          }
           throw new ScreenControlError();
         }
       })
@@ -590,7 +639,7 @@ export class ScreenController {
     owner.manualPermit = undefined;
     const request = {
       ...this.#identity(owner),
-      revision: ++owner.revision,
+      revision: this.#nextRevision(owner),
       requestId: ulid(),
       holder: "user" as const,
     };
@@ -625,6 +674,19 @@ export class ScreenController {
     });
     owner.revoking = pending;
     return pending;
+  }
+  // An unconfirmed revocation leaves the browser's holder unknown. Only its confirmed
+  // physical stop proves that no agent grant survives; otherwise the session is contained.
+  async #retireBrowser(): Promise<void> {
+    const owner = this.#browser;
+    try {
+      await this.deps.browser.stop(this.deps.parentCellId);
+    } catch {
+      await this.#fail();
+      throw new ScreenControlError();
+    }
+    owner?.client.close();
+    if (this.#browser === owner) this.#browser = undefined;
   }
 
   async #startDownloads(
@@ -709,6 +771,10 @@ export class ScreenController {
         this.#checkBrowser(owner);
       },
     };
+  }
+  #nextRevision(owner: BrowserOwner): number {
+    owner.revision = this.deps.revision?.(owner.endpoint.instance) ?? owner.revision + 1;
+    return owner.revision;
   }
   #identity(owner: BrowserOwner) {
     const { parentCellId, browserCellId, instance } = owner.endpoint;

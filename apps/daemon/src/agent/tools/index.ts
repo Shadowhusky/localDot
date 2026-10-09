@@ -1,21 +1,29 @@
 import {
+  type BrowserNavigateInput,
   clipText,
   isToolName,
   TOOL_INPUTS,
   type ToolName,
   type ToolResult,
   ulid,
+  webUrl,
 } from "@localdot/protocol";
+import { ScreenUnavailableError } from "../../browser/screen-controller.ts";
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
-import { browserNavigateTool, browserReadTool } from "./browser.ts";
+import {
+  browserNavigateTool,
+  browserReadTool,
+  DESKTOP_FALLBACK,
+  opensInWebBrowser,
+} from "./browser.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
-import { append, fail, type ToolCallContext, type ToolDeps } from "./deps.ts";
+import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { updatePlanTool } from "./plan.ts";
@@ -24,13 +32,10 @@ import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
 import { startWorkClock } from "./work-clock.ts";
 
-// Daemon-side cap on one task's tool calls: the brain has its own turn limit, but the brain is in a
-// cell, and enforcement lives outside the cells (trust rule 5); keyd's budget caps the spend.
-export const MAX_TOOL_CALLS = 400;
-
 export interface DispatchDeps {
   tools: ToolDeps;
   policy?: ToolPolicy; // An extra restriction can refuse; it cannot grant execution authority.
+  // A task's own action limit, set by the user, wins over this one.
   maxToolCalls?: number;
 }
 
@@ -69,8 +74,10 @@ function blocked(
   session.append("step.end", { status: "blocked", note: clipText(note, 500) }, step);
 }
 
-// One tool call from the brain: the v1 table, the input's schema, the daemon's call cap and the
+// One tool call from the brain: the v1 table, the input's schema, the user's action limit and the
 // policy seam come first, in that order; only then does anything reach the computer or the user.
+// The limit is enforced here, outside the brain's cell (trust rule 5), and only when the user set
+// one; their next message starts its count again.
 export async function dispatchTool(
   deps: DispatchDeps,
   session: AgentSession,
@@ -177,14 +184,11 @@ async function dispatchAdmitted(
         result: fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
       };
     session.toolCalls += 1;
-    if (session.toolCalls > (deps.maxToolCalls ?? MAX_TOOL_CALLS)) {
-      blocked(
-        session,
-        name,
-        STEP_KIND[name],
-        "Tool call limit",
-        "this task used all its tool calls",
-      );
+    session.actionsSinceUser += 1;
+    const limit = session.actionLimit ?? deps.maxToolCalls;
+    if (limit !== undefined && session.actionsSinceUser > limit) {
+      session.actionLimitReached = true;
+      blocked(session, name, STEP_KIND[name], "Action limit", `reached your limit of ${limit}`);
       return {
         status: 200,
         result: {
@@ -193,7 +197,7 @@ async function dispatchAdmitted(
           content: [
             {
               type: "text",
-              text: "This task has used all its tool calls. Stop and tell the user what is left.",
+              text: `This task reached the user's limit of ${limit} actions. Stop; the user will tell you when to continue.`,
             },
           ],
         },
@@ -221,6 +225,24 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
+    // Public pages open in the web browser, where the user's sign-ins are; local addresses
+    // only resolve on the desktop.
+    let fellBack = false;
+    const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
+    const shown = session.screens?.selection.screen;
+    if (page && opensInWebBrowser(page) && shown === "desktop") {
+      try {
+        await session.switchScreen("browser", lease);
+      } catch (error) {
+        ctx.check();
+        if (!(error instanceof ScreenUnavailableError)) throw error;
+        fellBack = true;
+      }
+      ctx.check();
+    } else if (page && !opensInWebBrowser(page) && shown === "browser") {
+      await session.switchScreen("desktop", lease);
+      ctx.check();
+    }
     if (
       ["computer", "browser_read", "browser_navigate", "browser_upload"].includes(name) &&
       session.screens
@@ -268,7 +290,10 @@ async function dispatchAdmitted(
         append(ctx, "step.start", { kind: "gui" });
         result = await computerTool(t, ctx, input);
         ctx.check();
-        append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });
+        // A step refused for a stale look did nothing: dot looks again, nothing failed.
+        append(ctx, "step.end", {
+          status: result.ok ? "ok" : result.cancelled === "stale" ? "cancelled" : "failed",
+        });
         break;
       case "shell":
         result = await shellTool(t, ctx, input);
@@ -281,6 +306,7 @@ async function dispatchAdmitted(
         break;
       case "browser_navigate":
         result = await browserNavigateTool(t, ctx, input);
+        if (fellBack) result = { ...result, content: [text(DESKTOP_FALLBACK), ...result.content] };
         break;
       case "browser_upload":
         result = await browserUploadTool(t, ctx, input);

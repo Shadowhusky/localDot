@@ -39,6 +39,8 @@
   margin-top: 0;
 }
 
+/* Plan, Steps and Files each open on a 36 px head (design-v2 §10.20): the name, then a quiet count
+   or the filter at the right. */
 .plan-head {
   position: sticky;
   top: 0;
@@ -48,8 +50,8 @@
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 3);
-  min-height: calc(var(--spacing) * 8);
-  background-color: var(--color-void);
+  min-height: 36px;
+  background-color: var(--rail-surface);
 }
 
 .plan-head::after {
@@ -57,7 +59,7 @@
   position: absolute;
   inset: 100% 0 auto;
   height: calc(var(--spacing) * 3);
-  background: linear-gradient(var(--color-void), transparent);
+  background: linear-gradient(var(--rail-surface), transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fade) var(--ease-standard);
@@ -70,9 +72,7 @@
 .plan-title {
   flex-shrink: 0;
   color: var(--color-fg-1);
-  font:
-    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 .plan-progress {
@@ -85,7 +85,7 @@
   translate: 0 2px;
   transition:
     opacity var(--dur-fade) var(--ease-standard),
-    translate var(--dur-spring) var(--ease-spring);
+    translate var(--dur-default) var(--ease-spring);
 }
 
 .plan-head[data-stuck] .plan-progress {
@@ -109,7 +109,7 @@
   background-color: var(--color-fg-1);
 }
 
-.app.control .plan-progress > [data-state="doing"] {
+:root:has(.app.control) .plan-progress > [data-state="doing"] {
   background-color: var(--color-xenon);
 }
 
@@ -121,7 +121,8 @@
 .plan-count {
   flex-shrink: 0;
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .plan-roll {
@@ -132,7 +133,7 @@
 
 .plan-roll > span {
   transition:
-    translate var(--dur-spring) var(--ease-spring),
+    translate var(--dur-default) var(--ease-spring),
     opacity var(--dur-fade) var(--ease-enter);
 }
 
@@ -146,20 +147,21 @@
 .plan-list {
   list-style: none;
   display: grid;
-  margin: var(--spacing) 0 0;
+  margin: 0;
   padding: 0;
 }
 
 .plan-item {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: calc(var(--spacing) * 2);
+  column-gap: calc(var(--spacing) * 2.5);
   align-items: start;
   align-content: center;
-  min-height: calc(var(--spacing) * 7);
-  padding-block: var(--spacing);
-  color: var(--color-fg-2);
+  min-height: 32px;
+  padding-block: calc(var(--spacing) * 2);
+  color: var(--color-fg-1);
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
   transition: color var(--dur-fade) var(--ease-standard);
 }
 
@@ -167,9 +169,8 @@
   margin-top: 1px;
 }
 
-.plan-item[data-state="doing"] {
-  color: var(--color-fg-1);
-  font-weight: var(--font-weight-medium);
+.plan-item[data-state="todo"] {
+  color: var(--color-fg-2);
 }
 
 .plan-text {
@@ -187,43 +188,11 @@
   height: 0;
 }
 
-.activity-extras {
-  display: grid;
-  margin-top: calc(var(--spacing) * 3);
-}
-
-.activity-disclosure,
-.activity-group {
-  margin-inline: calc(var(--spacing) * -2);
-}
-
-.activity-disclosure > .ui-collapse,
-.activity-group > .ui-collapse {
-  margin-inline: calc(var(--spacing) * 2);
-}
-
-/* A run's name over its count in every run, so the headers keep one rhythm. */
-.activity-group .ui-disclosure-label {
+.activity-steps,
+.activity-section {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-}
-
-/* The chevron fills the same 16 px column as a row's icon, so every label starts on one line. */
-.activity-disclosure .ui-disclosure-chevron,
-.activity-group .ui-disclosure-chevron {
-  margin-inline: 2px;
-}
-
-.activity-notes {
-  padding: var(--spacing) 0 calc(var(--spacing) * 3) calc(var(--spacing) * 6);
-  color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.activity-steps {
-  margin-top: calc(var(--spacing) * 6);
+  margin-top: calc(var(--spacing) * 2);
 }
 
 .activity-steps-head,
@@ -232,16 +201,21 @@
   align-items: center;
   justify-content: space-between;
   gap: calc(var(--spacing) * 3);
-  min-height: calc(var(--spacing) * 8);
-  margin-bottom: var(--spacing);
+  min-height: 36px;
 }
 
 .activity-steps-head h3,
-.activity-section-title {
+.activity-section-head h3 {
   color: var(--color-fg-1);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.activity-section-meta {
+  flex-shrink: 0;
+  color: var(--color-fg-3);
   font:
-    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .activity-timeline {
@@ -249,22 +223,14 @@
   flex-direction: column;
 }
 
-.activity-group + .activity-group {
-  margin-top: var(--spacing);
-}
-
-.activity-group-rows {
-  display: flex;
-  flex-direction: column;
-  padding-bottom: var(--spacing);
-}
-
+/* One flat row per step: a status, what dot did over where and how, and its time at the right. The
+   row's face bleeds 8 px past the text so the current step's raised face has room. */
 .activity-row {
   margin-inline: calc(var(--spacing) * -2);
   border-radius: var(--radius-md);
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    translate var(--dur-spring) var(--ease-spring);
+    translate var(--dur-default) var(--ease-spring);
 }
 
 @starting-style {
@@ -276,23 +242,25 @@
 
 .activity-row-head {
   display: grid;
-  /* The metric column keeps its width before a step has a duration, so the title never rewraps. */
-  grid-template-columns: 16px minmax(0, 1fr) minmax(calc(var(--spacing) * 9), auto) 16px;
-  column-gap: calc(var(--spacing) * 2);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: calc(var(--spacing) * 2.5);
   align-items: center;
   width: 100%;
-  min-height: calc(var(--spacing) * 9);
-  padding: calc(var(--spacing) * 2);
+  min-height: 40px;
+  padding: var(--spacing) calc(var(--spacing) * 2);
   border: 0;
   border-radius: inherit;
   background-color: transparent;
   color: var(--color-fg-1);
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
   text-align: start;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transform: none;
-  transition: background-color var(--dur-hover) var(--ease-standard);
+  transition:
+    background-color var(--dur-hover) var(--ease-standard),
+    box-shadow var(--dur-hover) var(--ease-standard);
 }
 
 button.activity-row-head:active {
@@ -315,15 +283,17 @@ button.activity-row-head[data-pressed] {
   outline-offset: calc(var(--focus-width) * -1);
 }
 
-.activity-row-icon {
-  color: var(--color-fg-3);
+.activity-row-glyph {
+  color: var(--color-fg-2);
 }
 
-.activity-row-head > .ui-status-glyph {
-  grid-column: 4;
+.activity-row-text {
+  display: grid;
+  min-width: 0;
 }
 
-.activity-row-title {
+.activity-row-title,
+.activity-row-meta {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
@@ -332,62 +302,59 @@ button.activity-row-head[data-pressed] {
   -webkit-line-clamp: 2;
 }
 
-.activity-row[data-open] .activity-row-title {
+.activity-row[data-open] :is(.activity-row-title, .activity-row-meta) {
   display: block;
 }
 
-.activity-row-metric {
+.activity-row-meta {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  letter-spacing: 0;
+}
+
+.activity-row[data-failed] .activity-row-meta {
+  color: var(--color-fg-2);
+}
+
+.activity-row-time {
   justify-self: end;
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   white-space: nowrap;
 }
 
+.activity-row-time:empty {
+  display: none;
+}
+
+/* The step dot is taking sits raised, on the material of cards. */
 .activity-row[data-current] > .activity-row-head {
-  background-color: var(--color-state-hover);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
 }
 
 @media (hover: hover) {
   .activity-row[data-current] > button.activity-row-head:not([data-pressed]):hover {
-    background-color: var(--color-state-pressed);
+    background-color: var(--color-raised-2);
   }
 }
 
 .activity-row[data-current] > button.activity-row-head[data-pressed] {
-  background-color: var(--color-state-selected);
+  background-color: var(--color-raised-2);
 }
 
 .activity-row[data-future] {
   opacity: var(--opacity-disabled);
 }
 
-.activity-row[data-danger] :is(.activity-row-icon, .activity-row-title) {
-  color: var(--color-danger-fg);
-}
-
-.activity-row-reason {
-  grid-column: 2 / -1;
-  grid-row: 2;
-  min-width: 0;
-  color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-  overflow-wrap: anywhere;
-}
-
-.activity-row-reason > .ui-badge {
-  margin-right: calc(var(--spacing) * 2);
-  vertical-align: 1px;
-}
-
-.activity-row[data-danger] .activity-row-reason {
-  font-family: var(--font-mono);
-}
-
+/* Under the row's text column: 8 padding, the 16 glyph and its 10 gap. */
 .activity-detail {
   display: grid;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
-  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 8);
+  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3)
+    calc(var(--spacing) * 8.5);
 }
 
 .activity-detail-actions {
@@ -399,7 +366,7 @@ button.activity-row-head[data-pressed] {
 
 .activity-detail-note {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
 }
 
@@ -433,7 +400,7 @@ button.activity-row-head[data-pressed] {
     0 0 0 3px var(--color-scrim);
 }
 
-.app.control .activity-row[data-current] .activity-frame-target {
+:root:has(.app.control) .activity-row[data-current] .activity-frame-target {
   box-shadow:
     0 0 0 1.5px var(--color-xenon),
     0 0 0 3px var(--color-scrim);
@@ -446,7 +413,7 @@ button.activity-row-head[data-pressed] {
   margin: 0;
   padding: 0;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .activity-keys li {
@@ -491,23 +458,7 @@ button.activity-row-head[data-pressed] {
 .activity-note {
   margin-top: calc(var(--spacing) * 2);
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-}
-
-.activity-section {
-  display: flex;
-  flex-direction: column;
-  margin-top: calc(var(--spacing) * 6);
-}
-
-.activity-section-title + .activity-row {
-  margin-top: var(--spacing);
-}
-
-.activity-section-meta {
-  flex-shrink: 0;
-  color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .activity-jump {
@@ -526,8 +477,7 @@ button.activity-row-head[data-pressed] {
   box-shadow: var(--shadow-raised);
   color: var(--color-fg-1);
   font:
-    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
-    var(--font-ui);
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   white-space: nowrap;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -550,20 +500,20 @@ button.activity-row-head[data-pressed] {
   pointer-events: auto;
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    translate var(--dur-spring) var(--ease-spring),
-    scale var(--dur-spring) var(--ease-spring),
+    translate var(--dur-default) var(--ease-spring),
+    scale var(--dur-default) var(--ease-spring),
     background-color var(--dur-hover) var(--ease-standard);
 }
 
 @media (hover: hover) {
   .activity-jump:not([data-pressed]):hover {
-    background-color: var(--color-overlay);
+    background-color: var(--color-popover);
   }
 }
 
 .activity-jump[data-pressed] {
   scale: 0.97;
-  background-color: var(--color-overlay);
+  background-color: var(--color-popover);
   transition-duration: var(--dur-press);
 }
 
@@ -572,11 +522,11 @@ button.activity-row-head[data-pressed] {
   outline-offset: var(--focus-offset);
 }
 
+/* The usage line ends the list, quietly, rather than staying pinned under it. */
+/* The usage line ends the list, quietly, rather than staying pinned under it. */
 .activity-usage {
   flex-shrink: 0;
   margin-top: calc(var(--spacing) * 2);
-  padding-top: var(--spacing);
-  border-top: 1px solid var(--color-hairline);
 }
 
 .activity-usage-trigger {
@@ -584,14 +534,15 @@ button.activity-row-head[data-pressed] {
   align-items: center;
   gap: calc(var(--spacing) * 2);
   width: calc(100% + var(--spacing) * 4);
-  min-height: calc(var(--spacing) * 8);
+  min-height: 36px;
   margin-inline: calc(var(--spacing) * -2);
   padding: 0 calc(var(--spacing) * 2);
   border: 0;
   border-radius: var(--radius-md);
   background-color: transparent;
-  color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   text-align: start;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -607,15 +558,15 @@ button.activity-usage-trigger:active {
 
 @media (hover: hover) {
   .activity-usage-trigger:not([data-pressed]):hover {
-    background-color: var(--color-state-hover);
-    color: var(--color-fg-1);
+    background-color: var(--color-control);
+    color: var(--color-fg-2);
   }
 }
 
 .activity-usage-trigger[data-pressed],
 .activity-usage-trigger[aria-expanded="true"] {
-  background-color: var(--color-state-pressed);
-  color: var(--color-fg-1);
+  background-color: var(--color-control-pressed);
+  color: var(--color-fg-2);
 }
 
 .activity-usage-trigger:focus-visible {
@@ -631,18 +582,15 @@ button.activity-usage-trigger:active {
   white-space: nowrap;
 }
 
-.activity-usage-chevron {
-  color: var(--color-fg-3);
-  transition: rotate var(--dur-spring) var(--ease-spring);
-}
-
-.activity-usage-trigger[aria-expanded="true"] .activity-usage-chevron {
-  rotate: 180deg;
+.activity-usage-figures {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 /* The kit's popover is as wide as its content: kept to the rail it opens from (less the popover's
    own padding), so it never reaches over the stage. */
-@media (width >= 1180px) {
+@media (width >= 1100px) {
   .activity-usage-popover > .usage-details {
     width: calc(var(--spacing-rail) - var(--spacing) * 8);
   }
@@ -654,9 +602,7 @@ button.activity-usage-trigger:active {
 }
 
 .usage-title {
-  font:
-    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 .usage-roles {
@@ -673,7 +619,7 @@ button.activity-usage-trigger:active {
 
 .usage-role dt {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-body--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-body--line-height) var(--font-ui);
 }
 
 .usage-role dd {
@@ -691,8 +637,52 @@ button.activity-usage-trigger:active {
 .usage-line,
 .usage-note {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
+}
+
+/* What the task and today cost: quiet labels on the left, the amounts in tabular figures. */
+.usage-spend {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: 0;
+}
+
+.usage-spend > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+}
+
+.usage-spend dt {
+  display: grid;
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.usage-spend dt .usage-line {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.usage-spend dd {
+  margin: 0;
+  color: var(--color-fg-1);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-limit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 8);
+  padding-bottom: calc(var(--spacing) * 3);
+  border-bottom: 1px solid var(--color-hairline);
 }
 
 .usage-plan {
@@ -704,8 +694,7 @@ button.activity-usage-trigger:active {
 
 .usage-plan h4 {
   font:
-    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
-    var(--font-ui);
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .usage-window {
@@ -715,8 +704,7 @@ button.activity-usage-trigger:active {
 
 @media (--coarse) {
   .activity-row-head {
-    min-height: calc(var(--spacing) * 11);
-    padding-block: calc(var(--spacing) * 3);
+    min-height: 44px;
   }
 
   .activity-body:has(> .activity-jump) {
@@ -740,9 +728,5 @@ button.activity-usage-trigger:active {
   .activity-jump[data-shown] {
     translate: -50% 0;
     scale: none;
-  }
-
-  .activity-usage-chevron {
-    transition: none;
   }
 }

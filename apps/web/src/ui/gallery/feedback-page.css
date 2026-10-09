@@ -32,13 +32,13 @@
     top: calc(var(--spacing) * 3.5);
     left: 0;
     right: 0;
-    z-index: var(--layer-hud);
+    z-index: var(--layer-island);
     width: fit-content;
     max-width: calc(100% - var(--spacing) * 8);
     height: calc(var(--spacing) * 10);
     margin-inline: auto;
-    -webkit-backdrop-filter: blur(var(--blur-hud)) saturate(160%);
-    backdrop-filter: blur(var(--blur-hud)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(160%);
+    backdrop-filter: blur(var(--blur-glass)) saturate(160%);
   }
 
   .feedback-controls,
@@ -66,7 +66,7 @@
 
   .feedback-note {
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .feedback-flow > .feedback-note {
@@ -120,7 +120,7 @@
 
   .feedback-figure figcaption {
     color: var(--color-fg-3);
-    font: var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   }
 
   .feedback-files {
@@ -162,11 +162,11 @@
   .feedback-file-detail {
     display: block;
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .feedback-file-text > .ui-skeleton:last-child {
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .feedback-paragraph {

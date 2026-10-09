@@ -18,6 +18,53 @@ describe("desktopd wire schemas", () => {
     expect(req.holdMs).toBe(0);
   });
 
+  it("bounds a key's repeat to 2-100 presses and its hold to 30 s", () => {
+    const key = (more: object) =>
+      InputRequest.safeParse({ input: { kind: "key", combo: ["a"], ...more } }).success;
+    expect([key({ repeat: 2 }), key({ repeat: 100 }), key({ holdMs: 30_000 })]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect([key({ repeat: 1 }), key({ repeat: 101 }), key({ repeat: 2.5 })]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect([key({ holdMs: 0 }), key({ holdMs: 30_001 })]).toEqual([false, false]);
+  });
+
+  it("bounds a drag's path and time, and needs a point for a button press or release", () => {
+    const input = (value: object) => InputRequest.safeParse({ input: value }).success;
+    const at = { x: 1, y: 2 };
+    const path = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i, y: i }));
+    const drag = (more: object) =>
+      input({ kind: "drag", from: at, to: at, button: "left", durationMs: 500, ...more });
+    expect([
+      drag({}),
+      drag({ path: path(62), mods: ["Shift_L"] }),
+      drag({ durationMs: 10_000 }),
+      input({ kind: "move", to: at, durationMs: 300 }),
+      input({ kind: "down", button: "right", at, mods: ["Control_L"] }),
+      input({ kind: "up", button: "left", at }),
+      input({ kind: "scroll", at, dx: 0, dy: 2, mods: ["Control_L"] }),
+    ]).toEqual([true, true, true, true, true, true, true]);
+    expect([
+      drag({ path: path(63) }),
+      drag({ durationMs: 10_001 }),
+      drag({ durationMs: undefined }),
+      drag({ mods: ["a", "b", "c", "d", "e"] }),
+      input({ kind: "down", button: "left" }),
+      input({ kind: "up", button: "left" }),
+    ]).toEqual([false, false, false, false, false, false]);
+    expect(
+      InputRequest.parse({
+        input: { kind: "drag", from: at, to: at, button: "left", durationMs: 500 },
+        dropWindow: 0,
+      }).dropWindow,
+    ).toBe(0);
+  });
+
   it("caps typed text and rejects an unknown app", () => {
     expect(() =>
       TypeRequest.parse({

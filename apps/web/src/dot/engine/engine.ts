@@ -24,7 +24,7 @@ import {
 type Motion = "gx" | "gy" | "mx" | "my" | "squash" | "lift" | "shake" | "eyeSY" | "rim";
 type BlinkTiming = readonly [close: number, hold: number, open: number];
 type LookKind = "saccade" | "drift" | "pursuit";
-interface Point {
+export interface Point {
   x: number;
   y: number;
 }
@@ -142,6 +142,10 @@ export class DotEngine {
   private lastSuccess = Number.NEGATIVE_INFINITY;
   private blinkBlockUntil = Number.NEGATIVE_INFINITY;
   private breath: { phase: number; t0: number; period: number };
+  // The host's action point and resting gaze, in gaze units.
+  private focus: Point | null = null;
+  private bias: Point = BIAS;
+  private places = { composer: COMPOSER, card: CARD };
 
   constructor(o: DotEngineOptions) {
     this.seed = o.seed;
@@ -186,6 +190,42 @@ export class DotEngine {
     this.look(x, y, t, deg > 8 ? "saccade" : "pursuit");
   }
 
+  // Where dot's work is: acting and watching look there, observing scans around it.
+  setFocus(p: Point | null, t: number): void {
+    this.advance(t);
+    this.focus = p;
+    if (p && (this.current === "acting" || this.current === "watching")) {
+      this.blinkBlockUntil = t + 700;
+      this.look(p.x, p.y, t, "saccade");
+    }
+  }
+
+  // Where idle wander leans, and where the composer and the decision are, in gaze units.
+  setBias(b: Point, t: number): void {
+    this.advance(t);
+    this.bias = b;
+  }
+
+  setPlaces(places: Partial<{ composer: Point; card: Point }>, t: number): void {
+    this.advance(t);
+    this.places = { ...this.places, ...places };
+  }
+
+  // A line dot says: a talk-bob in whatever state it is in, so its eyes stay on the work.
+  say(t: number, ms: number): void {
+    this.advance(t);
+    for (let at = t; at < t + ms; at += this.rand(45, 115)) {
+      const a = this.rand(0.35, 1);
+      this.at(at, (td) => this.textDelta(td, a), true);
+    }
+  }
+
+  // A small hop, for taking off from one place to fly to another.
+  hop(t: number): void {
+    this.advance(t);
+    this.hopAt(t);
+  }
+
   setControl(on: boolean, t: number): void {
     this.advance(t);
     this.control = on;
@@ -227,8 +267,7 @@ export class DotEngine {
     const rich = this.rich && !this.reduced;
     const b = rich ? v("breath") * this.breathValue(t) : 0;
     // Like breath, the talk-bob shows only where the body animates.
-    const talk =
-      this.rich && this.current === "speaking" ? this.talk(t) * (this.reduced ? 0.5 : 1) : 0;
+    const talk = this.rich ? this.talk(t) * (this.reduced ? 0.5 : 1) : 0;
     const cap = SQUASH_CAP[this.lod];
     const squash = rich ? clamp(v("squash"), -cap, cap) : 0;
     const size = v("size");
@@ -399,21 +438,23 @@ export class DotEngine {
       case "idle":
         this.enterIdle(t);
         return;
-      case "listening":
-        this.look(COMPOSER.x, COMPOSER.y, t);
+      case "listening": {
+        const composer = this.places.composer;
+        this.look(composer.x, composer.y, t);
         if (this.reduced) return;
         this.loop(
           t,
           () => this.rand(900, 1800),
           (tt) =>
             this.look(
-              COMPOSER.x + this.rand(-1.2, 1.2),
-              COMPOSER.y + this.rand(-0.5, 0.5),
+              this.places.composer.x + this.rand(-1.2, 1.2),
+              this.places.composer.y + this.rand(-0.5, 0.5),
               tt,
               "drift",
             ),
         );
         return;
+      }
       case "thinking":
         this.enterThinking(t);
         return;
@@ -422,6 +463,9 @@ export class DotEngine {
         return;
       case "observing":
         this.enterObserving(t);
+        return;
+      case "watching":
+        this.enterWatching(t);
         return;
       case "speaking":
         this.enterSpeaking(t);
@@ -435,6 +479,9 @@ export class DotEngine {
       case "resting":
         this.look(0, 0.5, t, "drift");
         return;
+      case "dozing":
+        this.look(this.bias.x, this.bias.y + 1.2, t, "drift");
+        return;
       case "error":
         this.reactAt("error", t);
         return;
@@ -445,7 +492,7 @@ export class DotEngine {
   }
 
   private enterIdle(t: number): void {
-    this.look(BIAS.x, BIAS.y, t + 60);
+    this.look(this.bias.x, this.bias.y, t + 60);
     if (this.reduced) return;
     // Mostly small fixations around the resting point, now and then a look at the user.
     let nextUser = t + this.rand(6000, 14000);
@@ -456,7 +503,7 @@ export class DotEngine {
         hold = this.rand(1000, 2000);
         nextUser = tt + this.rand(6000, 14000);
       } else {
-        this.look(BIAS.x + this.rand(-4, 4), BIAS.y + this.rand(-2.5, 2.5), tt);
+        this.look(this.bias.x + this.rand(-4, 4), this.bias.y + this.rand(-2.5, 2.5), tt);
         hold = this.rand(800, 3000);
       }
       this.at(tt + hold, fix);
@@ -490,6 +537,11 @@ export class DotEngine {
   }
 
   private enterActing(t: number): void {
+    if (this.focus) {
+      const f = this.focus;
+      this.at(t + 40, (tt) => this.look(f.x, f.y, tt, "saccade"));
+      return;
+    }
     const act = (tt: number) => {
       const target = { x: this.rand(1.5, 7), y: this.rand(-3, 4) };
       this.blinkBlockUntil = tt + 900;
@@ -506,11 +558,15 @@ export class DotEngine {
 
   private enterObserving(t: number): void {
     const scan = (tt: number) => {
+      const f = this.focus;
       const n = 2 + Math.floor(this.rng() * 3);
       let at = tt;
       this.blinkBlockUntil = tt + 1400;
       for (let i = 0; i < n; i++) {
-        const p = { x: this.rand(1, 6.5), y: this.rand(-3.5, 3.5) };
+        // Fixations around the changed region, or anywhere on the stage when it isn't known.
+        const p = f
+          ? { x: f.x + this.rand(-1.4, 1.4), y: f.y + this.rand(-1, 1) }
+          : { x: this.rand(1, 6.5), y: this.rand(-3.5, 3.5) };
         this.at(at, (ts) => this.look(p.x, p.y, ts, "saccade"));
         at += this.rand(150, 300);
       }
@@ -520,6 +576,22 @@ export class DotEngine {
       this.at(at + this.rand(900, 1600), scan);
     };
     this.at(t + 60, scan);
+  }
+
+  private enterWatching(t: number): void {
+    const at = () => this.focus ?? this.bias;
+    this.look(at().x, at().y, t, "drift");
+    if (this.reduced) return;
+    this.loop(
+      t,
+      () => this.rand(1500, 3000),
+      (tt) => this.look(at().x + this.rand(-0.6, 0.6), at().y + this.rand(-0.4, 0.4), tt, "drift"),
+    );
+    // A look at the user after six seconds, then back to the work.
+    this.at(t + 6000, (tt) => {
+      this.look(0, 0, tt);
+      this.at(tt + 900, (tb) => this.look(at().x, at().y, tb));
+    });
   }
 
   private enterSpeaking(t: number): void {
@@ -545,19 +617,19 @@ export class DotEngine {
   private enterWaiting(t: number): void {
     let atUser = true;
     this.look(0, 0, t);
-    this.hop(t);
+    this.hopAt(t);
     this.loop(
       t,
       () => this.rand(3000, 5000),
       (tt) => {
         atUser = !atUser;
-        const p = atUser ? { x: 0, y: 0 } : CARD;
+        const p = atUser ? { x: 0, y: 0 } : this.places.card;
         this.look(p.x, p.y, tt);
       },
     );
     // Hops every 8 s, then every 20 s after a minute; never a pulse.
     const hop = (tt: number) => {
-      this.hop(tt);
+      this.hopAt(tt);
       this.at(tt + (tt - this.since > 60_000 ? 20_000 : 8000), hop);
     };
     this.at(t + 8000, hop);
@@ -596,7 +668,7 @@ export class DotEngine {
     this.ch.gy.set(gy, t, p);
   }
 
-  private hop(t: number): void {
+  private hopAt(t: number): void {
     if (this.reduced || !this.rich) return;
     this.ch.squash.set(-0.04, t, SPRINGS.snap);
     this.at(
@@ -758,7 +830,7 @@ export class DotEngine {
     this.ch.happy.set(1, t, this.sp(spring(1, 0.16)));
     this.at(t + hold + 80, (tt) => this.ch.happy.set(0, tt, this.sp(spring(1, 0.24))), true);
     this.look(0, 0, t);
-    this.at(t + 820, (tt) => this.look(CARD.x, CARD.y, tt), true);
+    this.at(t + 820, (tt) => this.look(this.places.card.x, this.places.card.y, tt), true);
     this.at(t + 1120, (tt) => this.look(0, 0.3, tt), true);
     if (this.reduced || !this.rich) return;
     this.ch.squash.set(-0.04, t, spring(1, 0.1));

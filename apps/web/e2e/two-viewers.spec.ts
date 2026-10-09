@@ -90,7 +90,7 @@ async function checkViewers(browser: Browser, recordingEnabled: boolean) {
   await expect(a.getByTestId("hud-status")).toHaveText("No computer");
   await a.getByRole("button", { name: "Turn on" }).first().click();
   const cellId = ((await (await created).json()) as { id: string }).id;
-  await expect(a.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
+  await expect(a.getByTestId("hud-status")).toHaveText("Ready", { timeout: 300_000 });
 
   const desktop = desktopContainer(cellId);
   docker(["exec", "-i", "-u", "abc", desktop, "sh", "-c", "cat > /tmp/noise.html"], NOISE);
@@ -110,7 +110,7 @@ async function checkViewers(browser: Browser, recordingEnabled: boolean) {
 
   const b = await (await browser.newContext()).newPage();
   await b.goto(`${daemon.origin}/#token=${daemon.token}`);
-  await expect(b.getByTestId("hud-status")).toHaveText("Live", { timeout: 120_000 });
+  await expect(b.getByTestId("hud-status")).toHaveText("Ready", { timeout: 120_000 });
   await expect
     .poll(
       async () => {
@@ -172,7 +172,7 @@ async function checkViewers(browser: Browser, recordingEnabled: boolean) {
       `viewer B's frames per second in window ${n} of A's freeze (steady ${steady.toFixed(1)})`,
     ).toBeGreaterThan(steady / 2);
     await expect(b.getByTestId("hud-status")).toHaveText(
-      recordingEnabled ? "Recording with two viewers" : "Live",
+      recordingEnabled ? "Recording with two viewers" : "Ready",
     );
     const summary = await (await daemon.request(`/api/cells/${cellId}`)).json();
     expect(summary.stream.viewers).toBe(2);

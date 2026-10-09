@@ -12,7 +12,7 @@ chapters and activity marks show where work happened. Choose a step in the rail 
 shows when the picture is sped up or idle time is skipped. Before/after comparison uses saved
 screenshots for the selected step. A session still running offers **Jump to live**.
 
-For sessions with a separate signed-in browser, use **Desktop** or **Browser** above the stage.
+For sessions that used the web browser, use **Desktop** or **Browser** above the stage.
 Both tracks share the session timeline. Changing tracks pauses playback and keeps the same time,
 speed and idle-skip preference. Pointer overlays, hover screenshots and before/after comparisons
 follow the selected screen. If that screen has no recording, Replay uses only screenshots from

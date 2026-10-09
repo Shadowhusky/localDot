@@ -1,4 +1,11 @@
-import { ApprovalCard, LocalDotEvent as EventSchema, type LocalDotEvent } from "@localdot/protocol";
+import {
+  ApprovalCard,
+  LocalDotEvent as EventSchema,
+  type LocalDotEvent,
+  microsToMs,
+  STALL,
+  ulidTime,
+} from "@localdot/protocol";
 import {
   type AgentConnection,
   type AgentFeed,
@@ -7,6 +14,7 @@ import {
   type AgentStep,
   emptyAgentModel,
   AGENT_LIMITS as L,
+  type Said,
 } from "./model.ts";
 import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.ts";
 
@@ -30,6 +38,7 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "rule.created",
   "rule.removed",
   "budget.exceeded",
+  "model.retry",
   "subscription.usage",
 ]);
 function put<T>(
@@ -46,6 +55,10 @@ function put<T>(
     next.delete(key);
   }
   return next;
+}
+const SAID_TAIL = 600;
+function said(from: Said["from"], text: string, open: boolean, messageId?: string): Said {
+  return { from, text: text.slice(-SAID_TAIL), open, ...(messageId ? { messageId } : {}) };
 }
 // A message keeps its place in the conversation as later deltas and its final text arrive.
 function firstSeen(old: { seq?: number; at?: number } | undefined, e: LocalDotEvent) {
@@ -93,11 +106,17 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = { ...next, screen: { screen, cellId, geometry, revision } };
       break;
     }
-    case "thought.delta":
-      next = { ...next, activity: ((model.activity ?? "") + e.data.text).slice(0, L.messageText) };
+    case "thought.delta": {
+      const going = model.said?.from === "thought" && model.said.open ? model.said.text : "";
+      next = { ...next, said: said("thought", going + e.data.text, true) };
       break;
+    }
     case "agent.state":
-      next = { ...next, state: { ...e.data } };
+      next = {
+        ...next,
+        state: { ...e.data },
+        retrying: model.retrying && e.data.state === "paused" && e.data.reason === STALL.modelBusy,
+      };
       break;
     case "session.end":
       next = { ...next, ended: { ...e.data }, pendingAsk: null, pendingTakeover: null };
@@ -180,7 +199,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       break;
     }
     case "model.retry":
-      next = { ...next, retry: { id: e.id, at: e.t, data: { ...e.data } } };
+      next = {
+        ...next,
+        retry: { id: e.id, at: e.t, data: { ...e.data } },
+        retrying: e.data.waitMs > 0 && !e.data.fallback,
+      };
       break;
     case "subscription.usage":
       next = {
@@ -195,6 +218,28 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "budget.exceeded":
       next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
       break;
+    case "model.spend": {
+      const estimated = e.data.basis === "estimated";
+      const call = {
+        atMs: microsToMs(e.t),
+        route: e.data.route,
+        model: e.data.model,
+        usd: e.data.costUSD,
+        estimated,
+      };
+      next = {
+        ...next,
+        spend: {
+          taskUSD: e.data.taskSpentUSD,
+          dayUSD: e.data.daySpentUSD,
+          estimated: (model.spend?.estimated ?? false) || estimated,
+          ...(e.data.taskLimitUSD === undefined ? {} : { taskLimitUSD: e.data.taskLimitUSD }),
+          ...(e.data.dayLimitUSD === undefined ? {} : { dayLimitUSD: e.data.dayLimitUSD }),
+        },
+        spendCalls: [...model.spendCalls, call].slice(-L.spendCalls),
+      };
+      break;
+    }
     case "message.user": {
       const seen = model.messages.get(e.data.messageId);
       const queued =
@@ -242,6 +287,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           L.messages,
         ),
         historyTruncated: next.historyTruncated || (!old && model.messages.size >= L.messages),
+        said: said("message", text, true, e.data.messageId),
       };
       break;
     }
@@ -263,6 +309,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           L.messages,
         ),
         historyTruncated: next.historyTruncated || (!old && model.messages.size >= L.messages),
+        said: said("message", e.data.text, false, e.data.messageId),
       };
       break;
     }
@@ -311,6 +358,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         steps: put(model.steps, e.step, row, L.steps),
         historyTruncated:
           next.historyTruncated || (!model.steps.has(e.step) && model.steps.size >= L.steps),
+        ...(e.type === "step.end"
+          ? { said: null }
+          : e.type === "step.start" && model.said?.open
+            ? { said: { ...model.said, open: false } }
+            : {}),
       };
       break;
     }
@@ -346,17 +398,45 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = {
         ...next,
         pendingTakeover: e.data.requestId,
-        takeovers: put(model.takeovers, e.data.requestId, { ...e.data }, L.takeovers),
+        takeovers: put(
+          model.takeovers,
+          e.data.requestId,
+          {
+            ...e.data,
+            seq: model.takeovers.get(e.data.requestId)?.seq ?? e.seq,
+            time: ulidTime(e.id),
+          },
+          L.takeovers,
+        ),
         historyTruncated: next.historyTruncated || model.takeovers.size >= L.takeovers,
       };
       break;
+    case "control.change": {
+      const held = model.pendingTakeover ? model.takeovers.get(model.pendingTakeover) : undefined;
+      if (e.data.holder === "user" && held && !held.taken)
+        next = {
+          ...next,
+          takeovers: put(
+            model.takeovers,
+            held.requestId,
+            { ...held, taken: { seq: e.seq, time: ulidTime(e.id) } },
+            L.takeovers,
+          ),
+        };
+      break;
+    }
     case "takeover.end": {
       const old = model.takeovers.get(e.data.requestId);
       next = {
         ...next,
         pendingTakeover: model.pendingTakeover === e.data.requestId ? null : model.pendingTakeover,
         takeovers: old
-          ? put(model.takeovers, e.data.requestId, { ...old, end: { ...e.data } }, L.takeovers)
+          ? put(
+              model.takeovers,
+              e.data.requestId,
+              { ...old, end: { ...e.data }, endSeq: e.seq, endTime: ulidTime(e.id) },
+              L.takeovers,
+            )
           : model.takeovers,
       };
       break;
@@ -418,23 +498,29 @@ export function parseAgentEvent(data: string): LocalDotEvent | null {
       return null;
     const parsed = EventSchema.safeParse(JSON.parse(data));
     if (!parsed.success) return null;
-    const e = parsed.data;
-    const id = (value: string) => value.length > 0 && value.length <= 512;
-    if (e.step !== undefined && !id(e.step)) return null;
-    if (e.type === "plan.set" && e.data.items.some((item) => !id(item.id))) return null;
-    if (e.type === "plan.update" && !id(e.data.id)) return null;
-    if (e.type === "step.start" && e.data.planItem !== undefined && !id(e.data.planItem))
-      return null;
-    if (e.type === "tool.start" && e.data.tool.length > 256) return null;
-    return e;
+    return wellFormed(parsed.data) ? parsed.data : null;
   } catch {
     return null;
   }
+}
+
+function wellFormed(e: LocalDotEvent): boolean {
+  const id = (value: string) => value.length > 0 && value.length <= 512;
+  if (e.step !== undefined && !id(e.step)) return false;
+  if (e.type === "plan.set" && e.data.items.some((item) => !id(item.id))) return false;
+  if (e.type === "plan.update" && !id(e.data.id)) return false;
+  if (e.type === "step.start" && e.data.planItem !== undefined && !id(e.data.planItem))
+    return false;
+  if (e.type === "tool.start" && e.data.tool.length > 256) return false;
+  return true;
 }
 export interface AgentFeedOwner extends AgentFeed {
   reset(cellId: string | null, sessionId: string | null): void;
   connection(value: AgentConnection): void;
   accept(data: string): LocalDotEvent | null;
+  // The task's history, read whole before the live feed opens. The daemon leaves out what the
+  // conversation never shows, so its sequence has gaps; the live feed goes on from its last event.
+  load(events: readonly LocalDotEvent[]): void;
 }
 export function createAgentFeed(now: () => number = () => performance.now()): AgentFeedOwner {
   let value: AgentFeedState = {
@@ -443,6 +529,7 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
     epoch: 0,
     connection: "connecting",
     replayed: false,
+    history: false,
     streamError: null,
     model: emptyAgentModel(),
   };
@@ -470,6 +557,7 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
         epoch: value.epoch,
         connection: "connecting",
         replayed: false,
+        history: false,
         streamError: null,
         model: emptyAgentModel(),
       };
@@ -496,7 +584,7 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
       if (event.seq <= value.model.lastSeq) {
         // Replayed history establishes receipt on this transport without applying it twice.
         if (value.connection === "live" && !value.streamError && !value.replayed) {
-          value = { ...value, replayed: true };
+          value = { ...value, replayed: true, history: true };
           invalidate();
         }
         return null;
@@ -523,9 +611,16 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
         value = { ...value, streamError: null };
       }
       const firstReplay = value.connection === "live" && !value.streamError && !value.replayed;
-      if (firstReplay) value = { ...value, replayed: true };
+      if (firstReplay) value = { ...value, replayed: true, history: true };
       if (RELEVANT.has(event.type) || recovered || firstReplay) invalidate();
       return event;
+    },
+    load(events) {
+      let model = value.model;
+      for (const event of events) if (wellFormed(event)) model = projectAgentEvent(model, event);
+      // A task whose history ends has no live feed to confirm it: the history is the whole of it.
+      value = { ...value, model, history: true, replayed: value.replayed || !!model.ended };
+      invalidate();
     },
   };
 }

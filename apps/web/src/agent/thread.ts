@@ -1,6 +1,15 @@
 import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
-import type { EntryView } from "./activity.ts";
-import type { AgentMessage, AgentQuestion, AgentResult } from "./model.ts";
+import type { TimelineRow } from "../session/key-uses.ts";
+import type { StepRowView } from "../session/session-view.ts";
+import { activityRows, type EntryView, entryView, foldKeyUses } from "./activity.ts";
+import type {
+  AgentMessage,
+  AgentModel,
+  AgentQuestion,
+  AgentResult,
+  AgentTakeover,
+  SpendCall,
+} from "./model.ts";
 
 export type Speaker = "user" | "dot";
 export type WorkStep = EntryView & { key: string };
@@ -17,7 +26,15 @@ export type ThreadItem =
   | (Item<"question"> & { question: AgentQuestion })
   | (Item<"answer"> & { question: AgentQuestion })
   | (Item<"result"> & { result: AgentResult })
-  | (Item<"work"> & { turn: string; steps: readonly WorkStep[]; startMs: number | null });
+  // The computer changing hands: the user took it, or handed it back.
+  | (Item<"control"> & { took: boolean; at?: number })
+  | (Item<"work"> & {
+      turn: string;
+      steps: readonly WorkStep[];
+      startMs: number | null;
+      // What the turn's model calls cost, when any cost something.
+      spend?: { usd: number; estimated: boolean };
+    });
 
 export type ThreadKind = ThreadItem["kind"];
 
@@ -37,11 +54,13 @@ interface Placed {
   index: number;
 }
 
-// Messages, questions and the answers to them, and results, in the order the task produced them.
+// Messages, questions and the answers to them, results, and the computer changing hands, in the
+// order the task produced them.
 export function threadItems(
   messages: Iterable<AgentMessage>,
   questions: Iterable<AgentQuestion> = [],
   results: Iterable<AgentResult> = [],
+  takeovers: Iterable<AgentTakeover> = [],
 ): ThreadItem[] {
   const placed: Placed[] = [];
   const place = (item: ThreadItem, order: number | undefined) =>
@@ -86,11 +105,48 @@ export function threadItems(
       },
       result.seq,
     );
+  for (const takeover of takeovers) {
+    // The user took it when they asked for it, or when they took the computer dot handed over.
+    const took =
+      takeover.by === "user" ? { seq: takeover.seq, time: takeover.time } : takeover.taken;
+    if (took)
+      place(
+        {
+          kind: "control",
+          key: `took-${takeover.requestId}`,
+          speaker: "user",
+          at: took.time,
+          took: true,
+        },
+        took.seq,
+      );
+    if (takeover.end?.by === "user")
+      place(
+        {
+          kind: "control",
+          key: `back-${takeover.requestId}`,
+          speaker: "user",
+          at: takeover.endTime,
+          took: false,
+        },
+        takeover.endSeq,
+      );
+  }
   return placed
     .sort((a, b) =>
       Number.isNaN(a.order) || Number.isNaN(b.order) ? a.index - b.index : a.order - b.order,
     )
     .map((entry) => entry.item);
+}
+
+// A task's steps, as the work lines of its turns show them.
+export function workSteps(
+  rows: readonly TimelineRow<StepRowView>[],
+  model: AgentModel,
+): WorkStep[] {
+  return foldKeyUses(activityRows(rows, model))
+    .filter((entry) => entry.row.kind === "step")
+    .map((entry) => ({ key: entry.key, ...entryView(entry, model.changes, !!model.ended) }));
 }
 
 // A turn starts at each task or follow-up the user sends; steering a running task stays in its turn.
@@ -106,6 +162,7 @@ export function withWork(
   items: readonly ThreadItem[],
   steps: readonly WorkStep[],
   live: boolean,
+  spends: readonly SpendCall[] = [],
 ): ThreadItem[] {
   const turns: { key: string; start: number | null; items: ThreadItem[] }[] = [];
   for (const item of items) {
@@ -119,21 +176,35 @@ export function withWork(
     else turn.items.push(item);
   }
   if (!turns.length) turns.push({ key: "start", start: null, items: [] });
-  const owned = new Map<number, WorkStep[]>();
-  for (const step of steps) {
+  const turnAt = (t: number) => {
     let at = 0;
     for (let i = 1; i < turns.length; i++) {
       const start = turns[i]?.start;
-      if (start !== null && start !== undefined && step.startT >= start) at = i;
+      if (start !== null && start !== undefined && t >= start) at = i;
     }
+    return at;
+  };
+  const owned = new Map<number, WorkStep[]>();
+  for (const step of steps) {
+    const at = turnAt(step.startT);
     owned.set(at, [...(owned.get(at) ?? []), step]);
+  }
+  const spent = new Map<number, { usd: number; estimated: boolean }>();
+  for (const call of spends) {
+    const at = turnAt(call.atMs);
+    const sum = spent.get(at) ?? { usd: 0, estimated: false };
+    spent.set(at, { usd: sum.usd + call.usd, estimated: sum.estimated || call.estimated });
   }
   return turns.flatMap((turn, index) => {
     const own = owned.get(index) ?? [];
     const latest = index === turns.length - 1;
     if (!own.length && !(latest && live)) return turn.items;
+    const spend = spent.get(index);
+    // The line closes dot's own part of the turn: the computer changing hands after it stays after.
+    let end = turn.items.length;
+    while (end > 0 && turn.items[end - 1]?.kind === "control") end--;
     return [
-      ...turn.items,
+      ...turn.items.slice(0, end),
       {
         kind: "work" as const,
         key: `work-${turn.key}`,
@@ -141,7 +212,9 @@ export function withWork(
         turn: turn.key,
         steps: own,
         startMs: turn.start ?? own[0]?.startT ?? null,
+        ...(spend && spend.usd > 0 ? { spend } : {}),
       },
+      ...turn.items.slice(end),
     ];
   });
 }
