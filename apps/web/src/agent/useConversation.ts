@@ -47,8 +47,13 @@ export function useConversation(api: ApiClient): Conversation {
           if (ask === latest.current)
             setState({ snapshot: ConversationSnapshot.parse(data), known: true });
         })
-        .catch(() => {
+        .catch((error) => {
           if (controller.signal.aborted || ask !== latest.current) return;
+          // A daemon without conversations has none to show, which is known, not still loading.
+          if (error instanceof ApiError && error.status === 404) {
+            setState({ snapshot: NONE, known: true });
+            return;
+          }
           retry = setTimeout(
             () => void read(failures + 1),
             Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** failures),

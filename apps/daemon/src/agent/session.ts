@@ -148,6 +148,10 @@ export class AgentSession {
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
   toolCalls = 0;
+  // The user's optional hard stop: the most tool calls between two of their messages.
+  actionLimit: number | undefined;
+  actionsSinceUser = 0;
+  actionLimitReached = false;
   plan: PlanItem[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
@@ -741,7 +745,11 @@ export class AgentSession {
     if (kind !== "resume") this.append("message.user", { messageId: item.messageId, text, kind });
     this.#seq = item.seq;
     this.#inbox.push(item);
-    if (kind !== "resume") this.tainted = false;
+    if (kind !== "resume") {
+      this.tainted = false;
+      this.actionsSinceUser = 0;
+      this.actionLimitReached = false;
+    }
     this.#wake();
     return { ...item };
   }

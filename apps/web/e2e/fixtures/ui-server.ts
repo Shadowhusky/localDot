@@ -991,8 +991,8 @@ const agent: AgentRoutesDeps = {
   keyd: {
     secrets: async () => keys,
     budget: async () => ({
-      perTaskUSD: 2,
-      perDayUSD: 20,
+      perTaskUSD: 0,
+      perDayUSD: 0,
       day: { date: "2026-10-08", spentUSD: 1.2 },
     }),
   } as AgentRoutesDeps["keyd"],
@@ -1931,6 +1931,59 @@ function budget(scope: "task" | "day" = "task"): string | undefined {
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
 }
+// The ways a task stalls that the app must never leave silent.
+function stall(kind: string): string | undefined {
+  if (!session) return "no session";
+  if (kind === "model-busy") {
+    session.append("model.retry", {
+      role: "main",
+      attempt: 3,
+      waitMs: 20_000,
+      status: 529,
+      message: "Overloaded",
+    });
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "model busy" });
+  } else if (kind === "model-refused") {
+    session.setStatus("paused");
+    session.append("agent.state", {
+      state: "paused",
+      reason: "model refused",
+      detail: "400: image input is not supported by this model",
+    });
+  } else if (kind === "action-limit") {
+    endLiveStep();
+    session.setStatus("idle");
+    session.append("agent.state", { state: "idle", reason: "action limit" });
+  } else return "unknown stall";
+}
+// What the task's model calls cost, as keyd reports them: one billed, the rest estimated.
+function spend(): string | undefined {
+  if (!session) return "no session";
+  let task = 0;
+  for (const [costUSD, basis] of [
+    [0.0842, "billed"],
+    [0.0611, "estimated"],
+    [0.0647, "estimated"],
+  ] as const) {
+    task += costUSD;
+    session.append("model.usage", {
+      role: "main",
+      route: "anthropic",
+      model: "claude-sonnet-5-5",
+      inputTokens: 8200,
+      outputTokens: 310,
+    });
+    session.append("model.spend", {
+      route: "anthropic",
+      model: "claude-sonnet-5-5",
+      costUSD,
+      basis,
+      taskSpentUSD: task,
+      daySpentUSD: 1.18 + task,
+    });
+  }
+}
 function endLiveStep() {
   if (!session || !liveStep) return;
   session.append("action.result", { ok: true }, liveStep);
@@ -1995,6 +2048,8 @@ routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),
 );
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
+routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
+routes.post("/__qa/spend", () => reply(spend()));
 routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);

@@ -12,6 +12,7 @@ const status = (row: StatusRow, label: string, elapsedS: number | null = 42): St
   label,
   caption: { speaker: "dot", text: "" },
   elapsedS,
+  countdownS: null,
   actions: [{ kind: "stop-task", enabled: true }],
   control: true,
   dotPose: "acting",
@@ -37,6 +38,17 @@ it("reads a task over an hour as h:mm:ss, never as seconds", () => {
   view.rerender(<HudIsland {...props({ status: status("acting", "Working", 42) })} />);
   expect(screen.getByTestId("hud-elapsed").textContent).toBe("0:42");
   expect(document.body.textContent).not.toMatch(/\d+ s\b/);
+});
+
+it("counts down to a model retry in the elapsed slot", () => {
+  render(
+    <HudIsland
+      {...props({
+        status: { ...status("retrying", "Model busy · retrying", null), countdownS: 20 },
+      })}
+    />,
+  );
+  expect(screen.getByTestId("hud-elapsed").textContent).toBe("in 20 s");
 });
 
 it("keeps Pause, Stop and Take control in place as dot thinks, acts and checks the screen", () => {

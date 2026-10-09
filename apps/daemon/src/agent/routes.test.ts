@@ -171,32 +171,24 @@ describe("agent user routes", () => {
     expect(f.settings.get()).toEqual({});
     expect(f.start).not.toHaveBeenCalled();
   });
-  it("returns the actual configured default ceiling or unknown without mutating budgets or reading an account", async () => {
+  it("gives keyd the user's daily spending limit when settings are saved, and none without one", async () => {
     const f = await setup();
-    const get = async () =>
-      (await (await f.send("GET", "/api/agent/providers")).json()) as {
-        defaultTaskBudgetUSD: number | null;
-        keyLayer: string;
-      };
-    expect((await get()).defaultTaskBudgetUSD).toBeNull();
-    const budget = vi.fn(async () => ({
-      perTaskUSD: 3.25,
-      perDayUSD: 20,
-      day: { date: "2026-10-03", spentUSD: 1 },
-    }));
-    f.deps.keyd.budget = budget;
-    expect((await get()).defaultTaskBudgetUSD).toBe(3.25);
-    expect(budget).toHaveBeenCalledOnce();
-    budget.mockRejectedValueOnce(new KeydUnavailableError("private-sentinel", "/private"));
-    expect(await get()).toMatchObject({ defaultTaskBudgetUSD: null, keyLayer: "online" });
-    budget.mockResolvedValueOnce({
-      perTaskUSD: 10_001,
-      perDayUSD: 20,
-      day: { date: "2026-10-03", spentUSD: 1 },
+    const day = { date: "2026-10-09", spentUSD: 1 };
+    let limits = { perTaskUSD: 5, perDayUSD: 20 };
+    f.deps.keyd.budget = vi.fn(async () => ({ ...limits, day }));
+    const setBudget = vi.fn(async (perTaskUSD: number, perDayUSD: number) => {
+      limits = { perTaskUSD, perDayUSD };
+      return { ...limits, day };
     });
-    expect((await get()).defaultTaskBudgetUSD).toBeNull();
+    f.deps.keyd.setBudget = setBudget;
+    const document = { main: { provider: "ollama", model: "local" } };
+    expect((await f.send("PUT", "/api/agent/settings", document)).status).toBe(200);
+    expect(setBudget).toHaveBeenLastCalledWith(0, 0);
+    const limited = { ...document, taskBudgetUSD: 2, dayBudgetUSD: 12 };
+    expect((await f.send("PUT", "/api/agent/settings", limited)).status).toBe(200);
+    expect(setBudget).toHaveBeenLastCalledWith(0, 12);
+    expect(f.settings.get()).toEqual(limited);
     expect(f.start).not.toHaveBeenCalled();
-    expect(f.raise).not.toHaveBeenCalled();
   });
   it("requires both explicit finite remote prices at the real settings route and preserves accepted settings on every refusal", async () => {
     const f = await setup();

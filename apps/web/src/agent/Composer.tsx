@@ -1,4 +1,4 @@
-import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
+import { keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
 import {
   type DragEvent,
   memo,
@@ -37,6 +37,13 @@ import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
 import { DeliveryFailure, deliverText, type MessageMode, type TextDelivery } from "./write-api.ts";
 
+// dot waits on its model for these, and anything the user says sends it back to the model.
+const TRIES_AGAIN = new Set<string | undefined>([
+  STALL.modelBusy,
+  STALL.modelRefused,
+  STALL.modelUnavailable,
+]);
+
 const LIMIT = 8000;
 // A phone: Return starts a new line there, and Send sends.
 const TOUCH = "(hover: none) and (pointer: coarse)";
@@ -59,6 +66,8 @@ export interface ComposerProps {
   onTaskStarted?(): void;
   // While dot waits on a question: a message answers it, or turns it down so dot reads the message.
   reply?(text: string): Promise<ReplyOutcome>;
+  // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
+  layout?: "card" | "pill";
 }
 // What became of a message sent as a reply: it answered the question, it turned the question down
 // and goes on as a message, it did not arrive, or it was held with the reason why.
@@ -583,7 +592,9 @@ export function Composer(props: ComposerProps) {
   };
 
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
-  if (!choosing && menu) setMenu(false);
+  // A phone's field has room for its text and Send only; there a message is read after the step.
+  const pill = props.layout === "pill";
+  if ((!choosing || pill) && menu) setMenu(false);
   const typing = useRef({ submit, touch, choosing });
   useLayoutEffect(() => {
     typing.current = { submit, touch, choosing };
@@ -676,7 +687,9 @@ export function Composer(props: ComposerProps) {
       : takeover
         ? "You keep control of the computer"
         : props.agent.snapshot?.status === "paused"
-          ? "Sending won't resume the task"
+          ? TRIES_AGAIN.has(props.agent.model.state?.reason)
+            ? "Sending tries the model again"
+            : "Sending won't resume the task"
           : undefined;
   const notices = [
     problem && { text: problem, alert: true },
@@ -713,6 +726,7 @@ export function Composer(props: ComposerProps) {
       <form
         ref={form}
         className="composer-card"
+        data-layout={pill ? "pill" : undefined}
         aria-label="Message dot"
         data-dragging={dragging || undefined}
         onSubmit={(event) => {
@@ -763,7 +777,11 @@ export function Composer(props: ComposerProps) {
         <ComposerField
           label={newConversation ? "New task" : "Message"}
           placeholder={
-            newConversation ? "Ask dot to do something" : props.reply ? "Answer dot" : "Message dot"
+            newConversation && !pill
+              ? "Ask dot to do something"
+              : props.reply
+                ? "Answer dot"
+                : "Message dot"
           }
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
@@ -773,6 +791,8 @@ export function Composer(props: ComposerProps) {
           <FileButton
             label="Attach files"
             icon="paperclip"
+            size={pill ? 36 : 28}
+            round={pill}
             multiple
             onFiles={(files) => uploads.select(files)}
             disabledReason={attachReason}
@@ -785,8 +805,8 @@ export function Composer(props: ComposerProps) {
               <span className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</span>
             )}
           </Pop>
-          <Pop shown={choosing}>
-            {choosing && (
+          <Pop shown={choosing && !pill}>
+            {choosing && !pill && (
               <IconButton
                 ref={more}
                 className="composer-more"

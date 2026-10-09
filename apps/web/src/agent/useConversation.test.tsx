@@ -120,3 +120,10 @@ it("counts each conversation the user chooses", async () => {
   await settle();
   expect(f.view.result.current.choice).toBe(1);
 });
+
+it("knows there is no conversation when the daemon has none to offer", async () => {
+  const f = setup(async () => new Response("not found", { status: 404 }));
+  await settle();
+  expect(f.view.result.current).toMatchObject({ known: true, sessions: [] });
+  expect(f.asked).toEqual(["GET /api/conversation"]);
+});

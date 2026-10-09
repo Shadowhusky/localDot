@@ -625,6 +625,12 @@ button.activity-usage-trigger:active {
   white-space: nowrap;
 }
 
+.activity-usage-figures {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .activity-usage-chevron {
   color: var(--color-fg-3);
   transition: rotate var(--dur-snappy) var(--ease-spring);
@@ -685,6 +691,50 @@ button.activity-usage-trigger:active {
   color: var(--color-fg-2);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
+}
+
+/* What the task and today cost: quiet labels on the left, the amounts in tabular figures. */
+.usage-spend {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: 0;
+}
+
+.usage-spend > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+}
+
+.usage-spend dt {
+  display: grid;
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.usage-spend dt .usage-line {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.usage-spend dd {
+  margin: 0;
+  color: var(--color-fg-1);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-limit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 8);
+  padding-bottom: calc(var(--spacing) * 3);
+  border-bottom: 1px solid var(--color-hairline);
 }
 
 .usage-plan {

@@ -252,6 +252,15 @@
   --_above: calc(24px + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
 }
 
+/* Held sideways a phone has little height: the sheet keeps a readable width, and its body scrolls
+   above the answers. */
+@media (pointer: coarse) and (orientation: landscape) and (height < 500px) {
+  .decision-sheet {
+    width: min(100%, 560px);
+    margin-inline: auto;
+  }
+}
+
 @keyframes decision-sheet-in {
   from {
     translate: 0 100%;

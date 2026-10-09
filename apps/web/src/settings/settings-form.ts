@@ -2,6 +2,7 @@ import {
   AgentModelPrice,
   AgentSettingsDocument,
   AutonomyPolicy,
+  CheckIns,
   DEFAULT_AUTONOMY,
 } from "@localdot/protocol";
 import { isOpenRouterRouterId, providerById, routeFor } from "@localdot/providers";
@@ -23,14 +24,25 @@ export interface PriceDraft {
   input: string;
   output: string;
 }
+// Off by default: dot never stops for cost. On, either limit may be left empty for none.
+export interface SpendingDraft {
+  on: boolean;
+  task: string;
+  day: string;
+}
+export type CheckInKey = keyof CheckIns;
+export type CheckInsDraft = Record<CheckInKey, { on: boolean; value: string }>;
+// What a check-in starts at when the user turns it on.
+export const CHECK_IN_START: Record<CheckInKey, number> = { steps: 150, failures: 5, actions: 400 };
 export interface SettingsDraft {
   choices: Partial<Record<ModelRole, RoleChoice>>;
   prices: Partial<Record<ModelRole, PriceDraft>>;
-  budget: string;
-  defaultBudget: boolean;
+  spending: SpendingDraft;
+  checkIns: CheckInsDraft;
   autonomy?: AutonomyPolicy;
 }
 export const roles = ["main", "fast", "local"] as const;
+const CHECK_INS = ["steps", "failures", "actions"] as const;
 export function formOf(settings: AgentSettingsDocument): SettingsDraft {
   const choices: SettingsDraft["choices"] = {},
     prices: SettingsDraft["prices"] = {};
@@ -44,12 +56,22 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
         output: String(choice.price.outputUSDPerMTok),
       };
   }
+  const amount = (usd: number | undefined) => (usd === undefined ? "" : String(usd));
   return {
     choices,
     prices,
     autonomy: settings.autonomy ?? DEFAULT_AUTONOMY,
-    budget: settings.taskBudgetUSD === undefined ? "" : String(settings.taskBudgetUSD),
-    defaultBudget: settings.taskBudgetUSD === undefined,
+    spending: {
+      on: settings.taskBudgetUSD !== undefined || settings.dayBudgetUSD !== undefined,
+      task: amount(settings.taskBudgetUSD),
+      day: amount(settings.dayBudgetUSD),
+    },
+    checkIns: Object.fromEntries(
+      CHECK_INS.map((key) => {
+        const value = settings.checkIns?.[key];
+        return [key, { on: value !== undefined, value: String(value ?? CHECK_IN_START[key]) }];
+      }),
+    ) as CheckInsDraft,
   };
 }
 export function pickerKeys(index: ProviderIndex): PickerKey[] {
@@ -85,7 +107,12 @@ export type FormResult =
   | { ok: true; document: AgentSettingsDocument }
   | { ok: false; problems: string[] };
 const ROLE_NAMES: Record<ModelRole, string> = { main: "Main", fast: "Fast", local: "Local" };
-// Reports the first problem in each role, and any budget problem, together.
+const CHECK_IN_PROBLEMS: Record<CheckInKey, string> = {
+  steps: "Check in after 5 to 10,000 steps, in whole steps.",
+  failures: "Check in after 2 to 100 failed actions in a row.",
+  actions: "Stop after 10 to 100,000 actions, in whole actions.",
+};
+// Reports the first problem in each role, and any limit or check-in problem, together.
 export function validateForm(
   draft: SettingsDraft,
   saved: AgentSettingsDocument,
@@ -113,17 +140,35 @@ export function validateForm(
     if (typeof checked === "string") problems.push(`${ROLE_NAMES[role]}: ${checked}`);
     else document[role] = checked;
   }
-  // A plan-only task shows no ceiling, so a ceiling it cannot show never blocks a save.
-  const plan = planOnly(draft.choices);
-  if (draft.defaultBudget) {
-    if (!subscription && !plan && index.defaultTaskBudgetUSD === null)
-      problems.push("No default limit is set. Choose Custom and enter a limit per task.");
+  // Settings shows no limits for a plan or the ChatGPT plan, so those keep what was saved.
+  const { spending } = draft;
+  if (!subscription && !planOnly(draft.choices)) {
     delete document.taskBudgetUSD;
-  } else {
-    const budget = decimal(draft.budget);
-    if (budget !== undefined) document.taskBudgetUSD = budget;
-    else if (!plan) problems.push("Enter a limit per task in US dollars.");
+    delete document.dayBudgetUSD;
   }
+  if (spending.on && !subscription && !planOnly(draft.choices)) {
+    for (const [field, raw, name] of [
+      ["taskBudgetUSD", spending.task, "per task"],
+      ["dayBudgetUSD", spending.day, "per day"],
+    ] as const) {
+      if (!raw) continue;
+      const usd = decimal(raw);
+      if (usd !== undefined && usd > 0 && usd <= 10_000) document[field] = usd;
+      else problems.push(`Enter a limit ${name} from $0.01 to $10,000, or leave it empty.`);
+    }
+    if (!spending.task && !spending.day)
+      problems.push("Enter a limit per task, per day or both, or turn the spending limit off.");
+  }
+  const checkIns: CheckIns = {};
+  for (const key of CHECK_INS) {
+    const { on, value } = draft.checkIns[key];
+    if (!on) continue;
+    const parsed = CheckIns.shape[key].safeParse(/^\d+$/.test(value) ? Number(value) : Number.NaN);
+    if (parsed.success && parsed.data !== undefined) checkIns[key] = parsed.data;
+    else problems.push(CHECK_IN_PROBLEMS[key]);
+  }
+  if (Object.keys(checkIns).length) document.checkIns = checkIns;
+  else delete document.checkIns;
   if (problems.length) return { ok: false, problems };
   if (
     draft.autonomy !== undefined &&
@@ -136,9 +181,7 @@ export function validateForm(
     ? { ok: true, document: checked.data }
     : {
         ok: false,
-        problems: [
-          "Check the settings and the limit per task. The limit must be more than $0 and at most $10,000.",
-        ],
+        problems: ["Check the settings and the spending limits: each is $0.01 to $10,000."],
       };
 }
 function checkRole(

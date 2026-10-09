@@ -529,6 +529,35 @@ describe("ChatGPT runner lifecycle", () => {
     expect(f.secrets).not.toHaveBeenCalled();
     expect(f.open).not.toHaveBeenCalled();
   });
+  it("says the user's action limit stopped the task, not that it is done, and waits for them", async () => {
+    const f = setup();
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      checkIns: { actions: 50 },
+    });
+    f.run.mockImplementationOnce(async (session) => {
+      session.actionLimitReached = true;
+      return 0;
+    });
+    const s = await f.runner.start(f.cellId, "Fixture task");
+    expect(s.actionLimit).toBe(50);
+    await until(() => s.status === "idle");
+    const states = f.log
+      .read(s.id)
+      .filter((event) => event.type === "agent.state")
+      .map((event) => event.data);
+    expect(states.at(-1)).toEqual({ state: "idle", reason: "action limit" });
+    expect(states).not.toContainEqual({ state: "done" });
+    s.post("followup", "Continue");
+    expect(s.actionLimitReached).toBe(false);
+    await until(() => f.run.mock.calls.length === 2 && s.status === "idle");
+    expect(
+      f.log
+        .read(s.id)
+        .filter((event) => event.type === "agent.state")
+        .at(-1)?.data,
+    ).toEqual({ state: "done" });
+  });
   it("refuses a USD budget and counts only active subscription tasks", async () => {
     const f = setup(),
       gate = deferred<number>();

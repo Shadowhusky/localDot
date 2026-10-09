@@ -49,6 +49,10 @@ func newGateway(t *testing.T, upstream http.Handler, localUpstream http.Handler)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The user's own limits: keyd sets none.
+	if err := settings.SetLimits(llm.Limits{PerTaskUSD: 5, PerDayUSD: 20}); err != nil {
+		t.Fatal(err)
+	}
 	budget, err := llm.OpenBudget(filepath.Join(dir, "spend.json"), settings.Limits, time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -141,9 +145,41 @@ func TestTheGatewaySwapsTheKeyAndChargesTheTask(t *testing.T) {
 	if info, _ := g.budget.Task("c1"); info.SpentUSD != 0.0045 {
 		t.Fatalf("task spent %v", info.SpentUSD)
 	}
-	e := <-sub
-	if ku := e.Data.(events.KeyUse); ku.SecretID != "anthropic" || ku.Host != "api.anthropic.com" || ku.Decision != "allow" {
-		t.Fatalf("event %+v", e)
+	got := map[string]events.Event{}
+	for len(got) < 2 {
+		e := <-sub
+		got[e.Type] = e
+	}
+	if ku := got[events.TypeKeyUse].Data.(events.KeyUse); ku.SecretID != "anthropic" || ku.Host != "api.anthropic.com" || ku.Decision != "allow" {
+		t.Fatalf("event %+v", got[events.TypeKeyUse])
+	}
+	spend := got[events.TypeSpend].Data.(events.Spend)
+	if spend != (events.Spend{TaskID: spend.TaskID, Route: "anthropic", Model: "claude-sonnet-5-5", CostUSD: 0.0045, TaskSpentUSD: 0.0045, TaskLimitUSD: 5, DaySpentUSD: 0.0045, DayLimitUSD: 20}) || spend.TaskID == "" {
+		t.Fatalf("spend %+v", spend)
+	}
+}
+
+func TestACostTheProviderStatesIsWhatTheTaskIsCharged(t *testing.T) {
+	g := newGateway(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		io.WriteString(rw, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1000,"output_tokens":100,"cost":0.0021}}`)
+	}), nil)
+	sub, cancel := g.events.Subscribe(8)
+	defer cancel()
+	if resp, body := g.post(t, "http://llm.ldot/anthropic/messages", g.key(), sonnet); resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	l := g.waitLine(func(l audit.Line) bool { return l.Mode == "gateway" && l.Decision == audit.Allow })
+	if l.CostMicroUSD != 2100 || l.Usage != "billed" {
+		t.Fatalf("audit %+v", l)
+	}
+	for {
+		if e := <-sub; e.Type == events.TypeSpend {
+			if spend := e.Data.(events.Spend); !spend.Billed || spend.CostUSD != 0.0021 {
+				t.Fatalf("spend %+v", spend)
+			}
+			return
+		}
 	}
 }
 
@@ -213,6 +249,27 @@ func TestTheGatewayRefuses(t *testing.T) {
 	}
 	if n := hits.Load(); n != 0 {
 		t.Fatalf("the provider was reached %d times", n)
+	}
+}
+
+func TestWithoutTheUsersLimitsNoTaskStopsForCost(t *testing.T) {
+	g := newGateway(t, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		io.WriteString(rw, `{"usage":{"input_tokens":1000000,"output_tokens":200000}}`)
+	}), nil)
+	if err := g.settings.SetLimits(llm.Limits{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.budget.Begin("c1", "task-2", 0); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		if resp, body := g.post(t, "http://llm.ldot/anthropic/messages", g.key(), sonnet); resp.StatusCode != 200 {
+			t.Fatalf("%d %s", resp.StatusCode, body)
+		}
+	}
+	if info, _ := g.budget.Task("c1"); info.LimitUSD != 0 || info.SpentUSD != 24 {
+		t.Fatalf("task %+v", info)
 	}
 }
 

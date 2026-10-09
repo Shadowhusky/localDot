@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -208,7 +209,8 @@ export function TaskList({
         }
       />
     );
-  else if (loading && index.cards.length === 0) body = <TaskSkeletons />;
+  else if (loading && index.cards.length === 0)
+    body = <DotLoader className="replay-loading" label="Loading your tasks" />;
   else if (index.cards.length === 0)
     body = (
       <EmptyState title="No tasks yet" icon="monitor">

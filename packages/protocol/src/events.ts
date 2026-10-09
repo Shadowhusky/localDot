@@ -69,8 +69,20 @@ export const AgentState = event(
       "done",
     ]),
     reason: z.string().max(200).optional(),
+    // What the model's provider said, for a reason that has more to tell.
+    detail: z.string().max(200).optional(),
   }),
 );
+// Why a task waits on something other than its own Pause, question or approval. The app gives
+// each one a status, a line from dot and the one action that fixes it.
+export const STALL = {
+  budget: "budget",
+  keyd: "keyd unavailable",
+  modelBusy: "model busy",
+  modelUnavailable: "model unavailable",
+  modelRefused: "model refused",
+  actionLimit: "action limit",
+} as const;
 export const Heartbeat = event(
   "heartbeat",
   z.object({ ongoing: z.boolean(), everyMs: z.number().int().positive() }),
@@ -409,6 +421,21 @@ export const ModelRetry = event(
   }),
 );
 
+// What keyd charged for one model call: billed when the provider's answer said what it cost,
+// otherwise estimated from its token counts and the prices the task started with.
+export const ModelSpendData = z.object({
+  route: z.string().max(64),
+  model: z.string().max(128),
+  costUSD: z.number().nonnegative(),
+  basis: z.enum(["billed", "estimated"]),
+  taskSpentUSD: z.number().nonnegative(),
+  daySpentUSD: z.number().nonnegative(),
+  // Present only when the user set that limit.
+  taskLimitUSD: z.number().positive().optional(),
+  dayLimitUSD: z.number().positive().optional(),
+});
+export const ModelSpend = event("model.spend", ModelSpendData);
+
 export const SubscriptionUsage = event("subscription.usage", SubscriptionUsageData);
 
 export const LocalDotEvent = z.discriminatedUnion("type", [
@@ -456,6 +483,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   TaskResult,
   ModelUsage,
   ModelRetry,
+  ModelSpend,
   SubscriptionUsage,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;

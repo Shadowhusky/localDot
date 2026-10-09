@@ -324,6 +324,10 @@
             "reason": {
               "type": "string",
               "maxLength": 200
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 200
             }
           },
           "required": [
@@ -4404,6 +4408,100 @@
             "attempt",
             "waitMs",
             "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "model.spend"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "model": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "costUSD": {
+              "type": "number",
+              "minimum": 0
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "billed",
+                "estimated"
+              ]
+            },
+            "taskSpentUSD": {
+              "type": "number",
+              "minimum": 0
+            },
+            "daySpentUSD": {
+              "type": "number",
+              "minimum": 0
+            },
+            "taskLimitUSD": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "dayLimitUSD": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "route",
+            "model",
+            "costUSD",
+            "basis",
+            "taskSpentUSD",
+            "daySpentUSD"
           ],
           "additionalProperties": false
         }

@@ -18,7 +18,7 @@ const STATUS: Record<
   approval: { shape: "task", control: /^Pause$/, label: "Needs your OK" },
   ask: { shape: "task", control: /^Pause$/, label: "Needs your answer" },
   takeover: { shape: "task", control: /^Pause$/, label: "Your turn" },
-  budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Paused · Limit reached" },
+  budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Reached your spending limit" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
   continued: { shape: "ready", control: /^Take control$/, label: "Done" },
   reconnecting: {

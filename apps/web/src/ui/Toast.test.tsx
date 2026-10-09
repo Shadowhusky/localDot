@@ -37,6 +37,7 @@ function show(...args: Parameters<Kit["showToast"]>) {
   act(() => {
     id = kit.showToast(...args);
   });
+  wait(SETTLE);
   return id;
 }
 
@@ -52,76 +53,66 @@ function toasts() {
 
 const region = () => screen.getByRole("region", { name: "Notifications" });
 
-// Long enough for the announcer to have read everything already waiting.
-const ANNOUNCED_BY = 5000;
+// A toast shows once it has settled.
+const SETTLE = 400;
 
 describe("Toaster", () => {
-  it("lists toasts newest first in a labelled region", () => {
+  it("shows one toast at a time in a labelled region, the next once the first has gone", () => {
     render(<Stage />);
     show({ title: "Saved to Downloads", tone: "success" });
     show({ title: "Key moved to Keys" });
-    expect(within(region()).getAllByRole("listitem")).toHaveLength(2);
-    expect(toasts()).toEqual(["Key moved to Keys", "Saved to Downloads"]);
+    expect(within(region()).getAllByRole("listitem")).toHaveLength(1);
+    expect(toasts()).toEqual(["Saved to Downloads"]);
+    wait(1600);
+    expect(toasts()).toEqual(["Key moved to Keys"]);
   });
 
-  it("reads each toast out through the one polite region", () => {
+  it("reads each toast out through the one polite region as it shows", () => {
     render(<Stage />);
     show({ title: "Saved to Downloads", description: "summary.txt · 2 KB", tone: "success" });
     expect(screen.getByRole("status").textContent).toBe("Saved to Downloads. summary.txt · 2 KB");
     expect(region().querySelector("[aria-live]")).toBeNull();
   });
 
-  it("lets a result go after four seconds in front, and keeps a failure", () => {
+  it("shows nothing for a state that passes before it settles", () => {
     render(<Stage />);
-    show({ title: "Couldn't confirm the stop", tone: "danger" });
-    show({ title: "Stopped", tone: "success" });
-    wait(3999);
-    expect(toasts()).toEqual(["Stopped", "Couldn't confirm the stop"]);
-    wait(1);
-    expect(toasts()).toEqual(["Couldn't confirm the stop"]);
-    wait(60_000);
-    expect(toasts()).toEqual(["Couldn't confirm the stop"]);
+    act(() => {
+      kit.showToast({ id: "connection", title: "Reconnecting…" });
+    });
+    wait(SETTLE - 1);
+    act(() => kit.dismissToast("connection"));
+    wait(10_000);
+    expect(toasts()).toEqual([]);
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 
-  it("holds the time while focus is in the stack, and opens the stack out", () => {
+  it("holds the time while focus is in the toast", () => {
     render(<Stage />);
     show({ title: "Saved to Downloads" });
-    show({ title: "Key moved to Keys" });
-    const [front, behind] = screen.getAllByRole("listitem");
-    expect(behind?.hasAttribute("inert")).toBe(true);
-    act(() =>
-      within(front as HTMLElement)
-        .getByRole("button", { name: "Dismiss" })
-        .focus(),
-    );
-    expect(region().hasAttribute("data-expanded")).toBe(true);
-    expect(behind?.hasAttribute("inert")).toBe(false);
+    act(() => screen.getByRole("button", { name: "Dismiss" }).focus());
     wait(20_000);
-    expect(toasts()).toEqual(["Key moved to Keys", "Saved to Downloads"]);
+    expect(toasts()).toEqual(["Saved to Downloads"]);
     act(() => screen.getByRole("button", { name: "After the stage" }).focus());
     wait(4000);
-    expect(toasts()).toEqual(["Saved to Downloads"]);
+    expect(toasts()).toEqual([]);
   });
 
-  it("dismisses the focused toast on Escape and keeps the key from reaching the page", () => {
+  it("dismisses the focused toast on Escape, keeps the key from the page and brings the next", () => {
     const onKeyDown = vi.fn();
     document.addEventListener("keydown", onKeyDown);
     render(<Stage />);
-    show({ title: "Saved to Downloads" });
     show({ title: "Couldn't confirm the stop", tone: "danger" });
-    const close = within(screen.getAllByRole("listitem")[0] as HTMLElement).getByRole("button", {
-      name: "Dismiss",
-    });
+    show({ title: "Saved to Downloads" });
+    const close = screen.getByRole("button", { name: "Dismiss" });
     act(() => close.focus());
     fireEvent.keyDown(close, { key: "Escape" });
     expect(toasts()).toEqual(["Saved to Downloads"]);
     expect(onKeyDown).not.toHaveBeenCalled();
-    // Focus moved on to the toast now in front rather than falling to the page.
-    expect(document.activeElement?.closest("li")?.textContent).toContain("Saved to Downloads");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
     document.removeEventListener("keydown", onKeyDown);
   });
 
-  it("gives focus back to where it came from when the last toast goes", () => {
+  it("gives focus back to where it came from when the toast goes", () => {
     render(<Stage />);
     const stop = screen.getByRole("button", { name: "Stop" });
     const after = screen.getByRole("button", { name: "After the stage" });
@@ -137,7 +128,7 @@ describe("Toaster", () => {
     expect(toasts()).toEqual([]);
     expect(document.activeElement).toBe(stop);
 
-    show({ title: "Saved to Downloads" });
+    show({ title: "Key moved to Keys" });
     fireEvent.keyDown(
       from(after, () => screen.getByRole("button", { name: "Dismiss" })),
       { key: "Escape" },
@@ -145,13 +136,13 @@ describe("Toaster", () => {
     expect(document.activeElement).toBe(after);
 
     const onAction = vi.fn();
-    show({ title: "Key moved to Keys", action: { label: "Undo", onAction } });
+    show({ title: "Moved to Downloads", action: { label: "Undo", onAction } });
     fireEvent.click(from(stop, () => screen.getByRole("button", { name: "Undo" })));
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(stop);
   });
 
-  it("gives focus to the anchor when it did not come into the stack from anywhere", () => {
+  it("gives focus to the anchor when it did not come into the toast from anywhere", () => {
     render(<Stage />);
     show({ title: "Saved to Downloads" });
     const close = screen.getByRole("button", { name: "Dismiss" });
@@ -160,33 +151,13 @@ describe("Toaster", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
   });
 
-  it("keeps a toast that comes while the stack is held out of it until it is let go, and reads it out at once", () => {
-    render(<Stage />);
-    show({ title: "Couldn't confirm the stop", tone: "danger" });
-    show({ title: "Key moved to Keys" });
-    act(() =>
-      within(screen.getAllByRole("listitem")[0] as HTMLElement)
-        .getByRole("button", { name: "Dismiss" })
-        .focus(),
-    );
-    show({ title: "Saved to Downloads" });
-    expect(toasts()).toEqual(["Key moved to Keys", "Couldn't confirm the stop"]);
-    wait(ANNOUNCED_BY);
-    expect(screen.getByRole("status").textContent).toBe("Saved to Downloads");
-    act(() => screen.getByRole("button", { name: "After the stage" }).focus());
-    expect(toasts()).toEqual([
-      "Saved to Downloads",
-      "Key moved to Keys",
-      "Couldn't confirm the stop",
-    ]);
-  });
-
-  it("keeps an arrival waiting while a press on the stack lasts, until its click is done", () => {
+  it("keeps the next one waiting while a press on the toast lasts, until its click is done", () => {
     render(<Stage />);
     show({ title: "Key moved to Keys", action: { label: "Undo", onAction() {} } });
     const undo = screen.getByRole("button", { name: "Undo" });
     fireEvent.pointerDown(undo, { pointerType: "touch" });
     show({ title: "Saved to Downloads" });
+    wait(10_000);
     expect(toasts()).toEqual(["Key moved to Keys"]);
     fireEvent.pointerUp(undo, { pointerType: "touch" });
     expect(toasts()).toEqual(["Key moved to Keys"]);
@@ -195,7 +166,7 @@ describe("Toaster", () => {
     expect(toasts()).toEqual(["Saved to Downloads"]);
   });
 
-  it("stands the front toast's time still while the page is hidden", () => {
+  it("stands the toast's time still while the page is hidden", () => {
     let hidden = false;
     vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
     const turn = (to: boolean) => {
@@ -217,15 +188,16 @@ describe("Toaster", () => {
     expect(toasts()).toEqual([]);
   });
 
-  it("drops a toast's reading still waiting when it goes, and reads one out urgently when asked", () => {
+  it("drops a waiting toast's reading when it is withdrawn, and reads one out urgently when asked", () => {
     render(<Stage />);
-    show({ title: "Saved to Downloads", persist: true });
-    const moved = show({ title: "Key moved to Keys", persist: true });
-    show({ title: "Stopped", persist: true });
+    show({ title: "Saved to Downloads", action: { label: "Open", onAction() {} } });
+    const moved = show({ title: "Key moved to Keys" });
     act(() => kit.dismissToast(moved));
-    wait(kit.ANNOUNCE_GAP);
-    expect(screen.getByRole("status").textContent).toBe("Stopped");
+    wait(10_000);
+    expect(toasts()).toEqual(["Saved to Downloads"]);
+    expect(screen.getByRole("status").textContent).toBe("Saved to Downloads");
     show({ title: "Couldn't stop the task", tone: "danger", urgency: "assertive" });
+    wait(6000);
     expect(screen.getByRole("alert").textContent).toBe("Couldn't stop the task");
   });
 
@@ -252,18 +224,6 @@ describe("Toaster", () => {
     expect(toasts()).toEqual(["Stopped"]);
     expect(screen.getByRole("listitem")).toBe(item);
     expect(item.hasAttribute("data-leaving")).toBe(false);
-  });
-
-  it("shows three at most and brings the next forward as the front one goes", () => {
-    render(<Stage />);
-    for (const title of ["One", "Two", "Three", "Four"]) show({ title, persist: true });
-    expect(toasts()).toEqual(["Four", "Three", "Two"]);
-    fireEvent.click(
-      within(screen.getAllByRole("listitem")[0] as HTMLElement).getByRole("button", {
-        name: "Dismiss",
-      }),
-    );
-    expect(toasts()).toEqual(["Three", "Two", "One"]);
   });
 
   it("keeps its region mounted, so a toast adds nothing beside it in the page", () => {

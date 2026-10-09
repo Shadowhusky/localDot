@@ -64,7 +64,7 @@ for (const run of runs) {
           .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
       await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
-      await expect(sheet.getByRole("textbox", { name: "Custom limit" })).toHaveCount(0);
+      await expect(sheet.getByRole("switch", { name: "Spending limit" })).toHaveCount(0);
       await press(sheet.getByRole("button", { name: "Close settings" }));
 
       if (run.phone) await press(page.getByRole("tab", { name: "Conversation", exact: true }));
@@ -74,7 +74,9 @@ for (const run of runs) {
       await press(page.getByRole("button", { name: /^Usage:/ }));
       const usage = page.getByRole("region", { name: "Task usage" });
       await expect(usage).toContainText("MainMiniMax-M3");
-      await expect(usage.getByText("Uses your plan's limits.", { exact: true })).toBeVisible();
+      await expect(
+        usage.getByText("Included in your plan. Uses your plan's limits.", { exact: true }),
+      ).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );

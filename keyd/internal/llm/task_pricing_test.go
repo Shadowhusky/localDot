@@ -218,7 +218,7 @@ func TestPricedTaskLedgerFailsClosedAndLegacyStillOpens(t *testing.T) {
 		strings.Replace(string(good), `"bindings":{`, `"extra":1,"bindings":{`, 1),
 		strings.Replace(string(good), strings.Repeat("a", 64), "invalid-binding", 1),
 		strings.Replace(string(good), `"pricingMode":"snapshot"`, `"pricingMode":"legacy"`, 1),
-		strings.Replace(string(good), `"initialLimitMicroUSD":5000000`, `"initialLimitMicroUSD":0`, 1),
+		strings.Replace(string(good), `"initialLimitMicroUSD":5000000`, `"initialLimitMicroUSD":-1`, 1),
 		strings.Replace(string(good), `"v":2`, `"v":3`, 1),
 		strings.Replace(string(good), `"v":2`, `"v":1`, 1),
 		strings.Replace(string(good), `"pricingMode":"snapshot"`, `"pricingMode":"unknown"`, 1),

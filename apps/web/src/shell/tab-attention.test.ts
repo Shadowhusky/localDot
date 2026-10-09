@@ -11,6 +11,7 @@ const status = (attention: Status["attention"], label = "Needs your answer"): St
   label,
   caption: { speaker: "dot", text: "" },
   elapsedS: 12,
+  countdownS: null,
   actions: [{ kind: "stop-task", enabled: true }],
   control: false,
   dotPose: "waiting",

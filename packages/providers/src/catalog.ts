@@ -18,6 +18,7 @@ const DevModel = z.object({
       output: z.number().nonnegative().optional(),
       cache_read: z.number().nonnegative().optional(),
       cache_write: z.number().nonnegative().optional(),
+      reasoning: z.number().nonnegative().optional(),
     })
     .optional(),
   limit: z
@@ -46,6 +47,7 @@ export const CatalogModel = z.object({
   outputUSDPerMTok: z.number().nonnegative(),
   cacheReadUSDPerMTok: z.number().nonnegative().optional(),
   cacheWriteUSDPerMTok: z.number().nonnegative().optional(),
+  reasoningUSDPerMTok: z.number().nonnegative().optional(),
   releaseDate: z.string().max(32).optional(),
 });
 export type CatalogModel = z.infer<typeof CatalogModel>;
@@ -113,6 +115,7 @@ export function normalizeCatalog(
         outputUSDPerMTok: priced ? (d.cost?.output ?? 0) : 0,
         ...(d.cost?.cache_read !== undefined ? { cacheReadUSDPerMTok: d.cost.cache_read } : {}),
         ...(d.cost?.cache_write !== undefined ? { cacheWriteUSDPerMTok: d.cost.cache_write } : {}),
+        ...(d.cost?.reasoning !== undefined ? { reasoningUSDPerMTok: d.cost.reasoning } : {}),
         ...(d.release_date ? { releaseDate: d.release_date } : {}),
       };
     }
@@ -144,6 +147,7 @@ export interface KeydRouteModel {
   outputUSDPerMTok: number;
   cacheReadUSDPerMTok?: number;
   cacheWriteUSDPerMTok?: number;
+  reasoningUSDPerMTok?: number;
   maxOutputTokens: number;
 }
 
@@ -168,6 +172,9 @@ export function keydRouteModel(m: CatalogModel): KeydRouteModel {
       : {}),
     ...(m.cacheWriteUSDPerMTok !== undefined
       ? { cacheWriteUSDPerMTok: price(m.cacheWriteUSDPerMTok) }
+      : {}),
+    ...(m.reasoningUSDPerMTok !== undefined
+      ? { reasoningUSDPerMTok: price(m.reasoningUSDPerMTok) }
       : {}),
     maxOutputTokens: m.maxOutputTokens,
   };

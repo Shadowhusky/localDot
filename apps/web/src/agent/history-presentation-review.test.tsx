@@ -138,6 +138,7 @@ it("the island's live status holds only the phase, with elapsed time and Stop ou
     label: "Working",
     caption: { speaker: "dot", text: "" },
     elapsedS: 1,
+    countdownS: null,
     actions: [{ kind: "stop-task", enabled: true }],
     control: true,
     dotPose: "acting",

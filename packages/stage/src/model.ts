@@ -51,6 +51,7 @@ export interface ActionState {
 export interface AgentStateAt {
   state: string;
   t: number;
+  reason?: string;
 }
 
 // Audit history for the step rail; never drawn on the stage. Request fields stay plain text.
@@ -255,7 +256,11 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
         model.ended = { t, reason: e.data.reason };
         break;
       case "agent.state":
-        model.agentStates.push({ state: e.data.state, t });
+        model.agentStates.push({
+          state: e.data.state,
+          t,
+          ...(e.data.reason === undefined ? {} : { reason: e.data.reason }),
+        });
         break;
       case "key.use": {
         model.keyUses.push({ id: e.id, t, ...e.data });
