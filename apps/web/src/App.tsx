@@ -1283,7 +1283,9 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const touchStill = useStill(focus);
   const edgeStill = useEdgeStill(full);
-  const still = (touchStill || edgeStill) && !islandAttention(appStatus);
+  // A decision grown out of the island fades with it, so the island stays while one is out: an
+  // app's connection card while the user holds the computer has no attention of its own.
+  const still = (touchStill || edgeStill) && !islandAttention(appStatus) && !grown;
   useFullScreenKeys({
     enabled: !phone && !curtain.up && !replayId,
     apple: isApple(),

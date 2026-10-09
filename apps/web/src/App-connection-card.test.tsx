@@ -7,6 +7,7 @@ import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { STILL_MS } from "./shell/focus.ts";
 import { closeStreams } from "./stage/live-stream.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
@@ -166,6 +167,21 @@ it("shows an app's connection card out of the island while the user holds the co
   expect(island.hasAttribute("data-open")).toBe(true);
   expect(within(island).getByRole("button", { name: /Allow/ })).toBeTruthy();
 });
+
+it("keeps the card in sight in full screen while the user holds the computer", async () => {
+  const d = daemon({ held: true });
+  await open(d);
+  const island = document.querySelector(".island") as HTMLElement;
+  await within(island).findByRole("heading", { name: TITLE });
+  const strip = screen.getByRole("toolbar", { name: "Computer controls" });
+  fireEvent.click(within(strip).getByRole("button", { name: "Full screen" }));
+  const app = document.querySelector(".app") as HTMLElement;
+  await waitFor(() => expect(app.hasAttribute("data-full")).toBe(true));
+  await act(() => new Promise((resolve) => setTimeout(resolve, STILL_MS + 200)));
+  expect(app.hasAttribute("data-still")).toBe(false);
+  expect(island.hasAttribute("data-open")).toBe(true);
+  expect(within(island).getByRole("heading", { name: TITLE })).toBeTruthy();
+}, 10_000);
 
 it("shows the card in the phone's sheet while the user holds the computer", async () => {
   vi.stubGlobal("matchMedia", (query: string) => ({
