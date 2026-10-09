@@ -47,6 +47,7 @@ export function FileRow({
   const tail = Math.min(8, Math.max(0, name.length - 4));
   const body = (
     <>
+      {onToggle && <Icon name="chevron-down" size={12} className="ui-file-chevron" />}
       <span className="ui-file-tile" aria-hidden="true">
         {extension(name)}
       </span>
@@ -57,7 +58,6 @@ export function FileRow({
         </span>
         {meta && <span className="ui-file-meta">{meta}</span>}
       </span>
-      {onToggle && <Icon name="chevron-down" size={14} className="ui-file-chevron" />}
     </>
   );
   return (

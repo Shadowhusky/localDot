@@ -770,6 +770,27 @@
   list-style: none;
 }
 
+/* In Activity, the files dot handed over sit above the files it changed. */
+.activity-deliverables {
+  margin: var(--spacing) 0 calc(var(--spacing) * 2);
+}
+
+/* Over a result's files: how many, and Download all. */
+.deliverables-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  height: calc(var(--spacing) * 9);
+  padding: 0 0 0 calc(var(--spacing) * 2);
+  box-shadow: inset 0 -1px 0 var(--color-separator);
+}
+
+.deliverables-count {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
 /* Rows are separated by a line; an open row keeps its preview with it, above the line. */
 .deliverable {
   min-width: 0;

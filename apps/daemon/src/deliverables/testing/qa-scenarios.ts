@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { ulid } from "@localdot/protocol";
+import { ULID_PATTERN, ulid } from "@localdot/protocol";
 import type { Hono } from "hono";
 import sharp from "sharp";
 import { OutputStore } from "../../agent/output-store.ts";
@@ -82,6 +82,11 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
   app.post("/__qa/files", async (c) => {
     const s = f.session();
     if (!s) return c.text("no session", 409);
+    // ?recording=<a seeded task> lends the live task that task's recording, so it can be exported.
+    const lent = c.req.query("recording") ?? "";
+    const recording = join(f.home, "sessions", lent, "recording");
+    if (ULID_PATTERN.test(lent) && existsSync(recording))
+      cpSync(recording, join(f.home, "sessions", s.id, "recording"), { recursive: true });
     const steps = [ulid(), ulid(), ulid()];
     observe(s, steps[0] as string, 1);
     s.append(

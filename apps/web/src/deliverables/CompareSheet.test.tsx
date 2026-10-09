@@ -3,7 +3,7 @@ import type { FileVersion } from "@localdot/protocol";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { CompareSheet } from "./CompareSheet.tsx";
+import { CompareSheet, changesOnly } from "./CompareSheet.tsx";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 const v = (n: number): FileVersion => ({
@@ -39,6 +39,11 @@ const sheet = (reply: () => Response) => {
   return calls;
 };
 describe("compare sheet", () => {
+  it("shows the changes without the patch's own file lines", () => {
+    expect(changesOnly("--- a/t.csv\n+++ b/t.csv\n@@ -1 +1,2 @@\n a\n+b\n")).toBe(
+      "@@ -1 +1,2 @@\n a\n+b",
+    );
+  });
   it("asks for the diff between the two versions and shows it", async () => {
     const calls = sheet(() =>
       Response.json({

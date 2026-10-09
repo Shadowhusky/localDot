@@ -310,6 +310,12 @@ export function ResultCard({
       <p className="result-summary">{result.summary}</p>
       {files.length > 0 && api && task && (
         <Card variant="file" className="result-files">
+          {downloadAll && (
+            <div className="deliverables-head">
+              <span className="deliverables-count num">{count(files.length, "file", "files")}</span>
+              {downloadAll}
+            </div>
+          )}
           <ul className="deliverables" aria-label={`Files in result ${result.id}`}>
             {files.map((file, index) =>
               valid(file) ? (
@@ -339,21 +345,9 @@ export function ResultCard({
         </Card>
       )}
       {api && task ? (
-        <ResultProof
-          api={api}
-          task={task}
-          resultId={result.id}
-          refresh={refresh}
-          replay={replay}
-          end={downloadAll}
-        />
+        <ResultProof api={api} task={task} resultId={result.id} refresh={refresh} replay={replay} />
       ) : (
-        (replay || downloadAll) && (
-          <div className="proof-actions">
-            {replay}
-            {downloadAll && <span className="proof-end">{downloadAll}</span>}
-          </div>
-        )
+        replay && <div className="proof-actions">{replay}</div>
       )}
     </section>
   );
@@ -365,33 +359,25 @@ function ResultProof({
   resultId,
   refresh,
   replay,
-  end,
 }: {
   api: ApiClient;
   task: string;
   resultId: string;
   refresh: number;
   replay: ReactNode;
-  end: ReactNode;
 }) {
   const proof = useProof(api, task, refresh);
-  if (proof.state === "ready" && !proofOf(proof, resultId) && !replay && !end) return null;
+  // Without its proof, the result still opens its task in Replay.
+  const missing =
+    proof.state === "failed" || (proof.state === "ready" && !proofOf(proof, resultId));
+  if (missing && !replay) return null;
   return (
     <ProofStrip
       api={api}
       sessionId={task}
       resultId={resultId}
       proof={proof}
-      end={
-        proof.state === "failed" || (proof.state === "ready" && !proofOf(proof, resultId)) ? (
-          <>
-            {replay}
-            {end}
-          </>
-        ) : (
-          end
-        )
-      }
+      end={missing ? replay : undefined}
     />
   );
 }

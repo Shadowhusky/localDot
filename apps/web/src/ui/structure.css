@@ -107,15 +107,19 @@
   button.ui-file-main {
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* The whole row lights under the pointer, though only its main part opens it. */
+  .ui-file-row:has(> button.ui-file-main) {
     transition: background-color var(--dur-hover) var(--ease-standard);
   }
 
-  button.ui-file-main:hover {
+  .ui-file-row:has(> button.ui-file-main:hover) {
     background-color: var(--color-row-hover);
   }
 
-  button.ui-file-main[data-pressed] {
-    background-color: var(--color-state-pressed);
+  .ui-file-row:has(> button.ui-file-main[data-pressed]) {
+    background-color: var(--color-state-hover);
     transition-duration: var(--dur-press);
   }
 
@@ -124,9 +128,10 @@
     outline-offset: calc(var(--focus-width) * -1);
   }
 
+  /* The disclosure chevron leads the row, as in a list of files: always in the same place. */
   .ui-file-chevron {
     flex-shrink: 0;
-    margin-left: auto;
+    margin-right: calc(var(--spacing) * -1);
     color: var(--color-fg-4);
     rotate: -90deg;
     transition: rotate var(--dur-snappy) var(--ease-spring);
