@@ -401,6 +401,7 @@ export function Composer(props: ComposerProps) {
     uploads.acknowledge(record.attachmentIDs);
     const input = field();
     if (revision.current === record.revision && input && input.value === record.draftText) {
+      outbox?.keep();
       input.value = "";
       measure(input);
     }
