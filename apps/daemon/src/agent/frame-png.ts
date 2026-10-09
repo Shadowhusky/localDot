@@ -29,15 +29,14 @@ const fit = (image: Buffer) =>
 // capture when it still has that frame, else by enlarging the stored 1280×800 frame.
 export class FramePng {
   constructor(
-    private readonly frames: Pick<FrameStore, "path">,
+    private readonly frames: Pick<FrameStore, "path" | "digest">,
     private readonly detail?: FrameDetail,
   ) {}
 
   // Two stored frames with the same bytes: the screen did not change between them.
   same(sessionId: string, a: string, b: string): boolean {
-    const first = this.frames.path(sessionId, a);
-    const second = this.frames.path(sessionId, b);
-    return !!first && !!second && readFileSync(first).equals(readFileSync(second));
+    const first = this.frames.digest(sessionId, a);
+    return first !== undefined && first === this.frames.digest(sessionId, b);
   }
 
   async png(
