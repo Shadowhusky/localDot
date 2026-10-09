@@ -99,13 +99,11 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   } finally {
     release.resolve();
   }
-  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
-    "Saved weather.",
-  );
-  await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
-  await expect(sheet.locator(".keys-row[data-id='weather']")).toContainText(
-    "api.weather.example, Added",
-  );
+  // The first key folds the form into the list, where its row lights up.
+  const weather = sheet.locator(".keys-row[data-id='weather']");
+  await expect(weather).toContainText("api.weather.example, Added");
+  await expect(weather).toHaveAttribute("data-fresh", "");
+  await expect(sheet.getByRole("form", { name: "Add a key" })).toHaveCount(0);
   await page.unroute("**/api/keys");
   await expect(sheet).toHaveCSS("opacity", "1");
   await page.screenshot({ path: "e2e/out/keys-sheet.png" });
@@ -128,6 +126,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
 
   // A base URL with non-ASCII text goes as the URL parser writes it, so the binding Chrome seals
   // is byte for byte the one keyd rebuilds.
+  await sheet.getByRole("button", { name: /^Add (a )?key$/ }).click();
   await sheet.getByRole("radio", { name: "Model provider" }).click();
   await search(page, sheet.getByRole("combobox", { name: "Provider" }), "openai-compatible");
   await sheet.getByLabel("Label (optional)", { exact: true }).fill("books");
@@ -181,9 +180,7 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   await sheet.getByLabel("Label (optional)", { exact: true }).fill(id);
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
-    `Saved ${id}.`,
-  );
+  await expect(sheet.locator(`.keys-row[data-id='${id}']`)).toHaveAttribute("data-fresh", "");
   const bounds = await sheet.boundingBox();
   expect(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 375).toBe(true);
   expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
