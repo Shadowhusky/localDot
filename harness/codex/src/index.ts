@@ -44,6 +44,8 @@ export {
   type LaunchDeps,
   type LaunchInput,
   launchCodex,
+  NO_CA_BUNDLE,
+  platformUnavailable,
 } from "./launch.ts";
 export { type CodexProcess, CodexProcessError, type CodexProcessFailure } from "./process.ts";
 export {

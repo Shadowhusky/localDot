@@ -14,7 +14,9 @@ import {
   LoginStarted,
   launchCodex,
   ModelList,
+  NO_CA_BUNDLE,
   type OwnedCodexRoots,
+  platformUnavailable,
   RateLimitsRead,
   type RpcRequestOptions,
 } from "@localdot/codex-harness";
@@ -171,10 +173,11 @@ export class CodexAuthOwner {
     if (this.#blocked) return RETIRE_FAILED;
     if (this.#closed) return "The ChatGPT account service is closed.";
     const available = harnessAvailability();
+    // Only reasons the harness owns are shown; anything else reads as this platform's own.
     if (!available.available)
-      return available.reason === "The system certificate bundle is unavailable."
+      return available.reason === NO_CA_BUNDLE
         ? available.reason
-        : CHATGPT_NEEDS_APPLE_SILICON;
+        : (platformUnavailable() ?? CHATGPT_NEEDS_APPLE_SILICON);
     if (this.installer.status().state !== "ready") return CHATGPT_INSTALL_FIRST;
   }
   #usable(): void {
