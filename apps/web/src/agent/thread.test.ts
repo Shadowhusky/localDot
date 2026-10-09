@@ -19,9 +19,9 @@ const message = (
 const step = (key: string, startT: number): WorkStep => ({
   key,
   testId: "step-row",
-  icon: "mouse-pointer-click",
   title: key,
-  metric: "",
+  meta: "",
+  time: "",
   state: "done",
   stateLabel: "Done",
   startT,

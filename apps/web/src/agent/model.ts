@@ -158,7 +158,17 @@ export interface AgentModel {
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
-  readonly activity?: string;
+  readonly said?: Said | null;
+}
+// dot's latest words for the step at hand, said or thought before it acts. A step's end clears
+// them, so the next step starts quiet.
+export interface Said {
+  readonly from: "thought" | "message";
+  readonly messageId?: string;
+  // The tail of the words: only the last sentence is ever shown.
+  readonly text: string;
+  // Still streaming: words without a full stop may yet go on.
+  readonly open: boolean;
 }
 // The hand-over the user holds the computer under: one they asked for, or dot's once they took it.
 export function heldByUser(model: AgentModel): AgentTakeover | undefined {

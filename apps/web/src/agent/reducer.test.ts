@@ -37,6 +37,36 @@ describe("bounded agent projection", () => {
     expect(events.reduce(projectAgentEvent, model)).toBe(model);
     expect(events[0]?.data).toEqual({ messageId: message, text: "pre" });
   });
+  it("keeps dot's latest words for the step at hand, until that step ends", () => {
+    const thinking = reduce([
+      ev(0, "thought.delta", { text: "Opening the " }),
+      ev(1, "thought.delta", { text: "sheet." }),
+    ]);
+    expect(thinking.said).toEqual({ from: "thought", text: "Opening the sheet.", open: true });
+    const said = reduce([
+      ev(0, "thought.delta", { text: "Opening the sheet." }),
+      ev(1, "message.delta", { messageId: message, text: "I'll check " }),
+      ev(2, "message.delta", { messageId: message, text: "the totals." }),
+    ]).said;
+    expect(said).toEqual({
+      from: "message",
+      messageId: message,
+      text: "I'll check the totals.",
+      open: true,
+    });
+    const acting = [
+      ev(0, "thought.delta", { text: "Selecting F3" }),
+      ev(1, "step.start", { kind: "gui" }, "one"),
+    ];
+    expect(reduce(acting).said).toMatchObject({ text: "Selecting F3", open: false });
+    const after = [
+      ...acting,
+      ev(2, "thought.delta", { text: " and more" }),
+      ev(3, "step.end", { status: "ok" }, "one"),
+    ];
+    expect(reduce(after.slice(0, 3)).said).toMatchObject({ text: " and more", open: true });
+    expect(reduce(after).said).toBeNull();
+  });
   it("retains two legitimately identical user messages with their distinct IDs", () => {
     const model = reduce([
       ev(0, "message.user", { messageId: message, text: "again", kind: "task" }),

@@ -2164,6 +2164,14 @@ routes.post("/__qa/stream", (c) => {
   }, 40);
   return c.json({ ok: true });
 });
+// dot thinks aloud: the narrator band speaks its latest sentence (thoughts are not kept in history).
+routes.post("/__qa/think", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("thought.delta", {
+    text: c.req.query("text") ?? "Checking February's net total against revenue minus returns.",
+  });
+  return c.json({ ok: true });
+});
 // dot says something in the thread: n messages at once, or one sent word by word (stream=1).
 routes.post("/__qa/say", (c) => {
   if (!session) return c.text("no session", 409);

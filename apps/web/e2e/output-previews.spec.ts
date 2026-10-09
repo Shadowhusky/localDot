@@ -258,8 +258,6 @@ for (const width of [1280, 390]) {
       ),
     ).toBe(0);
     if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const notes = page.getByRole("button", { name: "Thinking notes", exact: true });
-    await expect(notes).toHaveAttribute("aria-expanded", "false");
     const trigger = page.getByRole("button", { name: /Check report/ });
     await trigger.click();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");

@@ -88,6 +88,7 @@ import {
 import { useCentreRoom, useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
+import { narrationLine } from "./shell/narration.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -839,6 +840,7 @@ function Theatre({ api }: { api: ApiClient }) {
       sessionId={session.sessionId}
       scale={cell?.scale ?? 2}
       api={api}
+      nowMs={now}
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
@@ -957,7 +959,7 @@ function Theatre({ api }: { api: ApiClient }) {
         : yours && phone
           ? PHONE_CONTROL_LINE
           : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-            ? appStatus.caption.text
+            ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
             : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const asked = agent.model.pendingAsk
@@ -1004,7 +1006,7 @@ function Theatre({ api }: { api: ApiClient }) {
   return (
     <div
       ref={page}
-      className="app"
+      className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
       data-replaying={replayId ? "" : undefined}
       data-focus={focus ? "" : undefined}

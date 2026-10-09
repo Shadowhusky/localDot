@@ -164,7 +164,7 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
           step.key === other.key &&
           step.state === other.state &&
           step.title === other.title &&
-          step.metric === other.metric &&
+          step.time === other.time &&
           step.startT === other.startT &&
           step.endT === other.endT
         );
