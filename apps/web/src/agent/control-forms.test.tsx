@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import type { ManualStreamInput } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
@@ -65,6 +67,9 @@ function mount(takeover: boolean) {
     reconcile: vi.fn(),
   };
   const receive = vi.fn(() => true);
+  const send = vi.fn<(input: ManualStreamInput) => void>();
+  const drained = vi.fn(async () => true);
+  const keyboard = vi.fn<(on: boolean) => void>();
   const feed = { read: () => state, subscribe: () => () => {} };
   function Parts({ visible = true }: { visible?: boolean }) {
     const controls = useTaskControls({
@@ -95,6 +100,11 @@ function mount(takeover: boolean) {
             screen={{ w: 1280, h: 800 }}
             pointerMode="click"
             onPointerMode={() => {}}
+            send={send}
+            drained={drained}
+            typing={false}
+            onKeyboard={keyboard}
+            refused={null}
           />
         ) : (
           <AskForm question={question} controls={controls} visible={visible} receiveKey={receive} />
@@ -104,7 +114,7 @@ function mount(takeover: boolean) {
     );
   }
   const view = render(<Parts />);
-  return { ...view, fetchImpl, receive, model, Parts };
+  return { ...view, fetchImpl, receive, model, Parts, send, drained, keyboard };
 }
 it("respects Chinese composition, exact pending ask ID and shared answer exclusion", async () => {
   const f = mount(false);
@@ -155,32 +165,55 @@ it("guards question and hand-back notes before a recognized key can enter a requ
     cleanup();
   }
 });
-it("sends credentials through the manual text route, clears before transport and on hide/blur, and avoids React text state", async () => {
+it("types pasted credentials on the computer through the input stream, clears the field and keeps them out of React state", async () => {
   const f = mount(true),
-    field = screen.getByLabelText("Text for the computer") as HTMLInputElement,
     sentinel = `sk-proj-${"p".repeat(80)} 中文🙂`;
-  fireEvent.input(field, { target: { value: sentinel } });
-  fireEvent.compositionStart(field);
-  fireEvent.keyDown(field, { key: "Enter", isComposing: true });
-  expect(f.fetchImpl).not.toHaveBeenCalled();
-  fireEvent.compositionEnd(field);
-  fireEvent.click(screen.getByRole("button", { name: "Type text" }));
-  expect(field.value).toBe("");
-  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
-  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(
-    JSON.stringify({ requestId: ID, input: { kind: "text", text: sentinel } }),
-  );
+  expect(screen.queryByLabelText("Text for the computer")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Type text" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
+  expect(f.keyboard).toHaveBeenCalledWith(true);
+  fireEvent.click(screen.getByRole("button", { name: "Paste text" }));
+  const field = screen.getByLabelText("Text to type on the computer") as HTMLTextAreaElement;
+  expect(document.activeElement).toBe(field);
+  fireEvent.paste(field, { clipboardData: { getData: () => sentinel } });
+  expect(f.send).toHaveBeenCalledExactlyOnceWith({ kind: "text", text: sentinel });
+  expect(screen.queryByLabelText("Text to type on the computer")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Paste text" }));
+  const typed = screen.getByLabelText("Text to type on the computer") as HTMLTextAreaElement;
+  typed.value = "line one";
+  fireEvent.compositionStart(typed);
+  fireEvent.keyDown(typed, { key: "Enter", isComposing: true });
+  expect(f.send).toHaveBeenCalledOnce();
+  fireEvent.compositionEnd(typed);
+  fireEvent.keyDown(typed, { key: "Enter" });
+  expect(f.send).toHaveBeenLastCalledWith({ kind: "text", text: "line one" });
   expect(f.container.innerHTML).not.toContain(sentinel);
   expect(JSON.stringify(f.model)).not.toContain(sentinel);
+  fireEvent.click(screen.getByRole("button", { name: "Computer tab" }));
+  expect(f.send).toHaveBeenLastCalledWith({ kind: "key", combo: ["tab"] });
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Paste text" }));
+  const unsent = screen.getByLabelText("Text to type on the computer") as HTMLTextAreaElement;
+  unsent.value = "unsent";
+  fireEvent(window, new Event("blur"));
+  expect(unsent.value).toBe("");
+  unsent.value = "unsent";
+  f.rerender(<f.Parts visible={false} />);
+  expect(unsent.value).toBe("");
+});
+it("lets typed input reach the computer before control goes back to dot", async () => {
+  const f = mount(true),
+    drained = Promise.withResolvers<boolean>();
+  f.drained.mockImplementation(() => drained.promise);
+  fireEvent.click(screen.getByRole("button", { name: "Return control to dot" }));
   await act(async () => {
     await Promise.resolve();
   });
-  field.value = "unsent";
-  fireEvent(window, new Event("blur"));
-  expect(field.value).toBe("");
-  field.value = "unsent";
-  f.rerender(<f.Parts visible={false} />);
-  expect(field.value).toBe("");
+  expect(f.drained).toHaveBeenCalledOnce();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  await act(async () => drained.resolve(true));
+  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
+  expect(String(f.fetchImpl.mock.calls[0]?.[0])).toContain("/takeover/done");
 });
 it("picks an answer by its number, writes one under Something else, and sends only the choice", async () => {
   const f = mount(false);

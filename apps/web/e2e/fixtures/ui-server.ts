@@ -34,6 +34,7 @@ import {
   type ChatgptStatus,
   type CodexAccount,
 } from "../../../daemon/src/agent/codex/account.ts";
+import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import {
@@ -927,6 +928,8 @@ const harness = () =>
   chatgptState && chatgptState !== "unavailable"
     ? { available: true as const }
     : { available: false as const, reason: CHATGPT_SWITCHED_OFF };
+// What the user's direct control delivered to the fake computer, in order, with when it arrived.
+const manualInputs: { at: number; input: unknown }[] = [];
 const agent: AgentRoutesDeps = {
   home: HOME,
   settings: settingsStore,
@@ -1037,9 +1040,22 @@ const agent: AgentRoutesDeps = {
     owner === session
       ? {
           screen: { w: 2560, h: 1600 },
-          client,
+          client: {
+            input: (request, signal, onPress) => {
+              manualInputs.push({ at: Date.now(), input: request.input });
+              return client.input(request, signal, onPress);
+            },
+            type: (request, onProgress, signal) => {
+              manualInputs.push({ at: Date.now(), input: { kind: "text", text: request.text } });
+              return client.type(request, onProgress, signal);
+            },
+          },
           prepare: async () => {},
           release: () => {},
+          letGo: async () => {
+            manualInputs.push({ at: Date.now(), input: { kind: "let-go" } });
+            await client.release();
+          },
           check: () => {
             const cell = cells.get(cellId);
             if (
@@ -1094,6 +1110,7 @@ const PORT = (server.address() as AddressInfo).port;
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
+  manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
 ]);
 const routes = createApp({
   token: TOKEN,
@@ -1857,6 +1874,7 @@ routes.post("/__qa/scenario/:name", (c) => {
   if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
   return reply(STEPS[wanted.step]());
 });
+routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
 routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,

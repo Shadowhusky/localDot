@@ -156,11 +156,11 @@ for (const pending of ["wait", "shell"] as const)
       checkpoint("manual");
       const beforeManual = (await f.state(owner))[0];
       expect(beforeManual?.provider).toHaveLength(6);
-      await manual
-        .getByLabel("Text for the computer", { exact: true })
-        .fill("task14-private-manual-sentinel");
-      await manual.getByRole("button", { name: "Type text", exact: true }).click();
-      await expect(manual.getByLabel("Text for the computer", { exact: true })).toHaveValue("");
+      await manual.getByRole("button", { name: "Paste text", exact: true }).click();
+      const paste = manual.getByLabel("Text to type on the computer", { exact: true });
+      await paste.fill("task14-private-manual-sentinel");
+      await paste.press("Enter");
+      await expect(paste).toHaveCount(0);
       await expect(
         manual.getByRole("button", { name: "Return control to dot", exact: true }),
       ).toBeEnabled();

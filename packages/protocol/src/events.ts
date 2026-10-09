@@ -342,6 +342,8 @@ export const TakeoverEnd = event(
     requestId: z.string().regex(ULID_PATTERN),
     note: z.string().max(1000).optional(),
     by: z.enum(["user", "stop"]),
+    // The user typed on the computer while they had it. What they typed is never recorded.
+    typed: z.literal(true).optional(),
   }),
 );
 export const TaskResult = event(

@@ -65,15 +65,11 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
     const manual = page.getByRole("region", { name: "Manual control", exact: true });
     await expect(manual).toBeVisible({ timeout: 30000 });
     const beforeManual = (await f.state(owner))[0];
-    await manual
-      .getByLabel("Text for the computer", { exact: true })
-      .fill("task14-private-manual-sentinel");
-    const typed = page.waitForResponse(
-      (r) => r.request().method() === "POST" && r.url().endsWith("/takeover/input"),
-    );
-    await manual.getByRole("button", { name: "Type text", exact: true }).click();
-    expect((await typed).status()).toBe(204);
-    await expect(manual.getByLabel("Text for the computer", { exact: true })).toHaveValue("");
+    await manual.getByRole("button", { name: "Paste text", exact: true }).click();
+    const paste = manual.getByLabel("Text to type on the computer", { exact: true });
+    await paste.fill("task14-private-manual-sentinel");
+    await paste.press("Enter");
+    await expect(paste).toHaveCount(0);
     const held = (await f.state(owner))[0];
     expect(held?.provider.length).toBe(beforeManual?.provider.length);
     expect(JSON.stringify(held?.events)).not.toContain("task14-private-manual-sentinel");
