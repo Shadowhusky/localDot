@@ -20,7 +20,7 @@ import { MemoryStore } from "../../daemon/src/agent/memory.ts";
 import { type AgentRoutesDeps, agentRoutes } from "../../daemon/src/agent/routes.ts";
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
-import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { closeSettings, nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { skipSetup } from "./skip-setup.ts";
 
 // Production UI/CSP, real settings routes/private store and real browser ECDH/AES-GCM. The
@@ -334,9 +334,7 @@ for (const width of [1280, 390])
         body.scrollTop = 0;
       });
     await page.screenshot({ path: info.outputPath(`settings-${width}-sample.png`) });
-    await sheet
-      .getByRole("button", { name: width < 700 ? "Done" : "Close settings", exact: true })
-      .click();
+    await closeSettings(page);
     await expect(draft).toBeFocused();
     await expect(draft).toHaveValue("Prepare a sample report later.");
     await expect(page.getByRole("button", { name: "Start task", exact: true })).toBeEnabled();

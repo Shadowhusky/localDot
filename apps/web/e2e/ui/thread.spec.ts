@@ -1,14 +1,7 @@
-import type { Page } from "@playwright/test";
-import { expect, runAt, test } from "./harness.ts";
+import { chatRail as conversation, expect, isPhone, runAt, test } from "./harness.ts";
 
 // The conversation thread in each of its states.
 runAt("c14", "w39");
-
-async function conversation(page: Page) {
-  // The rail opens on the chat; on a phone it sits under the stage.
-  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
-  return page.getByRole("complementary", { name: "Conversation" });
-}
 
 test("thread, running", async ({ page, ui }) => {
   await ui.open("running");
@@ -31,7 +24,16 @@ test("thread, done with files", async ({ page, ui }) => {
 test("thread, question", async ({ page, ui }) => {
   await ui.open("ask");
   const rail = await conversation(page);
-  await expect(rail.getByRole("form", { name: "Answer dot" })).toBeVisible();
+  // In the thread beside a wide screen; a phone asks in a sheet, and its message field answers too.
+  if (isPhone(page)) {
+    await expect(
+      page.getByRole("form", { name: "Which report format should I use?" }),
+    ).toBeVisible();
+    await expect(rail.getByRole("textbox", { name: "Message" })).toHaveAttribute(
+      "placeholder",
+      "Answer dot",
+    );
+  } else await expect(rail.getByRole("form", { name: "Answer dot" })).toBeVisible();
   await ui.settle();
   await ui.still();
 });

@@ -1,8 +1,9 @@
 import type { Locator } from "@playwright/test";
-import { expect, test } from "./harness.ts";
+import { expect, isPhone, test } from "./harness.ts";
 
-// The rail is named once on screen, by its segmented header: the view it shows never repeats that
-// name as a title of its own, and screen readers still get it.
+// The rail is named once on screen, by its segmented header, or on a phone by the title of the
+// sheet Activity opens in: the view it shows never repeats that name as a title of its own, and
+// screen readers still get it.
 test.beforeEach(() => {
   test.skip(!["c14", "w39"].includes(test.info().project.name), "One check per engine");
 });
@@ -34,6 +35,14 @@ test("the rail's header names its view, and the view never names itself again", 
   await ui.open("running");
   await expect(page.getByTestId("hud-status")).toHaveText("Select the Net total cell");
   const rail = page.getByRole("complementary", { name: "Conversation" });
+  if (isPhone(page)) {
+    await expect(rail.getByRole("radiogroup", { name: "Show" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "Activity" });
+    await expect(sheet.getByRole("complementary", { name: "Plan and steps" })).toBeVisible();
+    expect(await drawn(sheet, "Activity"), "Activity drawn once, as the sheet's title").toBe(1);
+    return;
+  }
   for (const name of ["Activity", "Chat"]) {
     const view = rail.getByRole("radio", { name, exact: true });
     await view.click();
@@ -50,18 +59,19 @@ test("New conversation sits in the rail's header, or in More on a phone, and ope
   await ui.open("continued");
   await expect(page.getByTestId("hud-status")).toHaveText("Done");
   const rail = page.getByRole("complementary", { name: "Conversation" });
-  await rail.getByRole("radio", { name: "Activity", exact: true }).click();
-  if ((page.viewportSize()?.width ?? 0) < 700) {
+  if (isPhone(page)) {
     await rail.getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "New conversation" }).click();
   } else {
+    // From another view of the rail too, which goes back to the chat.
+    await rail.getByRole("radio", { name: "Activity", exact: true }).click();
     const start = rail.getByRole("button", { name: "New conversation" });
     await expect(start).toHaveCount(1);
     await start.click();
+    await expect(rail.getByRole("radio", { name: "Chat", exact: true })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   }
-  await expect(rail.getByRole("radio", { name: "Chat", exact: true })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
   await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
 });

@@ -36,6 +36,20 @@ export async function openSettings(
   return sheet;
 }
 
+// Closes Settings: its close button beside a wide screen, Done on the phone page in view (the pages
+// under it stay mounted, inert).
+export async function closeSettings(page: Page): Promise<void> {
+  const sheet = settingsSheet(page);
+  const close = sheet.getByRole("button", { name: "Close settings", exact: true });
+  if (await close.isVisible()) await close.click();
+  else
+    await sheet
+      .locator(".ui-sheet-page:not([inert])")
+      .getByRole("button", { name: "Done", exact: true })
+      .click();
+  await expect(sheet).toBeHidden();
+}
+
 export function roleCard(scope: Page | Locator, role: keyof typeof ROLE_TITLES): Locator {
   return scope.getByRole("region", { name: ROLE_TITLES[role], exact: true });
 }
