@@ -1,0 +1,157 @@
+# Installing localDot
+
+localDot runs on macOS, on Linux, and on Windows through WSL 2. Its computers are Linux containers,
+so every platform runs the same ones. The installer builds localDot from source, starts it as your
+own user's services and prints a one-time sign-in link.
+
+## What you need
+
+- **macOS** on Apple silicon or Intel, with Docker Desktop.
+- **Linux** on x86-64 or ARM64 with glibc and systemd (Ubuntu, Debian, Fedora and similar), with
+  Docker Engine 28 or newer.
+- **Windows 10 version 2004 or newer, or Windows 11**, through WSL 2: either Docker Desktop with
+  WSL integration turned on for your distro, or Docker Engine installed inside the distro.
+- git and curl. The installer brings its own Node.js and Go, checked against pinned checksums,
+  and installs nothing system-wide.
+- About 15 GB of free disk space, most of it for the computer images.
+
+Run the installer as your own user, not as root; it never needs sudo. When something is missing,
+it lists everything at once, with the commands to fix it on your system, before downloading
+anything.
+
+## Install
+
+**macOS, Linux and WSL 2**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash
+```
+
+Options go after `bash -s --`, for example `| bash -s -- --tailscale`. Run `install.sh --help` to
+see them all.
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
+```
+
+To pass options, run
+`& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1))) -Tailscale`.
+The Windows installer:
+
+1. Turns on WSL 2 if it is off. Windows asks for permission, then you restart Windows and run
+   the installer again.
+2. Installs Ubuntu if you don't have it (`-Distro` picks another). Create your Linux user when it
+   asks.
+3. Turns on systemd in that distro, then runs `install.sh` inside it.
+4. Adds a hidden task that keeps the distro running after you sign in to Windows, so localDot is
+   there whenever you are.
+
+Open localDot in your Windows browser: `http://127.0.0.1:4750` reaches it inside WSL.
+
+### What the installer does
+
+1. Gets localDot's source into `~/.local/share/localdot/app` (`--ref` picks a branch, tag or
+   commit) and continues with the installer from that version.
+2. Gets Node.js and Go into `~/.local/share/localdot/runtime`, builds the app and the key service.
+3. Builds the computer images. The first build takes 10 to 30 minutes; later ones reuse Docker's
+   cache. `--registry <registry/owner>` pulls images published for the exact version instead, and
+   builds any that are missing.
+4. Starts two services that run whenever you are signed in, or always on Linux:
+   - macOS: LaunchAgents `dev.localdot.keyd` and `dev.localdot.daemon`.
+   - Linux and WSL 2: systemd user units `localdot-keyd.service` and `localdot-daemon.service`.
+     The installer turns on lingering, so they also run without a login session.
+5. Runs `localdot doctor` and prints the sign-in link. On a computer with a screen it opens the
+   link in your browser.
+
+Your data lives in `~/.localdot` (`--home` chooses another folder), with the logs in
+`~/.localdot/logs`. The installer refuses to replace services it did not create, such as an
+existing localDot run by hand, and a port something else uses (`--port` chooses another).
+
+## Saved keys
+
+Your provider keys are kept by the key service:
+
+- **Linux with a desktop keyring** (GNOME Keyring, KWallet): in the keyring.
+- **Linux without one**, such as a server or WSL 2: in an encrypted file. With systemd 256 or
+  newer, systemd-creds protects its key and nothing else is needed. Otherwise you choose a
+  passphrase.
+- **macOS**: in an encrypted file with a passphrase. The Keychain needs the signed release.
+
+When a passphrase protects your keys, run `localdot unlock` after the computer restarts, or after
+an upgrade that changed the key service. The installer asks for it when you run it in a terminal.
+
+## Upgrade, change settings, uninstall
+
+- `localdot update` gets the latest version of the branch you installed and restarts only what
+  changed; an unchanged key service keeps running, so it stays unlocked. Running the installer
+  again does the same. Your settings are kept; options change them, for example
+  `localdot update --ref v0.2.0` or `localdot update --tailscale`.
+- `localdot uninstall` (or `install.sh --uninstall`) removes the services, the `localdot`
+  command and `~/.local/share/localdot`. It keeps your data and Docker's computers and images, and
+  prints the commands that delete them.
+
+## The localdot command
+
+| Command | What it does |
+| --- | --- |
+| `localdot up` | Start localDot and print a sign-in link |
+| `localdot down` | Stop localDot until you start it again or restart the computer |
+| `localdot restart` | Restart localDot |
+| `localdot open [--qr]` | Print a fresh, single-use sign-in link; `--qr` also draws it for your phone |
+| `localdot doctor` | Check Docker, the images, the key service and the app |
+| `localdot unlock` | Enter the passphrase that protects your saved keys |
+| `localdot logs [--follow]` | Show recent logs |
+| `localdot stop [--all]` | Stop dot's actions (`--all`: every task and computer) |
+| `localdot update` | Upgrade and keep your data |
+| `localdot uninstall` | Remove localDot and keep your data |
+
+The command lives in `~/.local/bin`. If your shell doesn't find it, open a new terminal or add
+that folder to your `PATH`.
+
+## Servers without a screen
+
+localDot only listens on `127.0.0.1`; it is never reachable from your network directly. A
+sign-in link works once and expires after a minute. There are two safe ways in.
+
+### SSH tunnel
+
+From your own computer:
+
+```sh
+ssh -N -L 4750:127.0.0.1:4750 you@your-server
+```
+
+Keep the same port on both ends: localDot only answers to its own address. Then run
+`localdot open` on the server and open the link on your computer within a minute.
+
+### Tailscale, for all your devices
+
+Tailscale Serve gives the server an HTTPS address that only devices in your own tailnet can
+reach, phones included.
+
+1. Install Tailscale on the server and your devices, and sign in.
+2. In the Tailscale admin console under DNS, turn on MagicDNS and HTTPS Certificates.
+3. On Linux, let your user change Tailscale's settings once: `sudo tailscale set --operator=$USER`.
+4. Run the installer with `--tailscale`, or `localdot update --tailscale`.
+
+The installer runs `tailscale serve --bg --https=4750 http://127.0.0.1:4750` and tells localDot to
+accept the server's tailnet name. It never uses Funnel, which would publish localDot on the
+internet; don't turn on Funnel for this port. On the server, `localdot open --qr` prints the link
+and draws it as a QR code: scan it with your phone within a minute. `--no-tailscale` stops
+serving.
+
+### Preparing a fresh server
+
+On a new Ubuntu or Debian server, as an administrator:
+
+```sh
+curl -fsSL https://get.docker.com | sudo sh
+sudo adduser dot
+sudo usermod -aG docker dot
+sudo loginctl enable-linger dot
+```
+
+Then sign in as `dot` over SSH (not with `su`, which starts no user session) and run the
+installer.

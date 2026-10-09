@@ -9,6 +9,22 @@ The [browser workspace guide](docs/browser-workspace.md) covers the M7 author dr
 web browser, manual sign-in, reviewed downloads and approved uploads. Final integration
 and independent review are pending.
 
+## Install
+
+localDot runs on macOS, Linux and Windows (through WSL 2). You need Docker and git; the installer
+brings its own Node.js and Go.
+
+- **macOS, Linux, WSL 2:**
+  `curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash`
+- **Windows**, in PowerShell:
+  `irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex`
+
+It builds localDot and its computer images (the first time takes 10 to 30 minutes), starts it as
+your user's services and prints a one-time sign-in link. Run it again, or `localdot update`, to
+upgrade; `localdot uninstall` removes it and keeps your data. localDot only listens on this
+computer: on a server, reach it through an SSH tunnel or Tailscale. See
+[Installing localDot](docs/install.md).
+
 ## Development
 
 The shipping CLI is an author draft pending independent review and installed acceptance.
@@ -46,6 +62,7 @@ subprotocols `localdot.v1, localdot.token.<token>`.
 
 - `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`
   and builds `localdot/desktop:dev`. The first desktop build takes about 10–25 minutes.
+  `cells/browser/build.sh` then builds `localdot/browser:dev` on top of the desktop image.
 - `pnpm --filter @localdot/daemon doctor` checks Docker Desktop (Engine 28+), the images and
   the daemon port.
 - Build the UI with `pnpm --filter @localdot/web build`, start the daemon, then open its
