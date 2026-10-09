@@ -1,4 +1,4 @@
-import type { AutonomyPolicy } from "@localdot/protocol";
+import type { AutonomyPolicy, StartAtLoginState } from "@localdot/protocol";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import { spendText } from "../copy/format.ts";
@@ -108,6 +108,10 @@ export interface SettingsSheetProps {
   stopNote?: StopNote;
   // Opens first-run setup again, from its first choice.
   onSetup?(): void;
+  // Stops every task, pauses every routine and freezes every computer.
+  stopAll?: { run(): void; running: boolean };
+  // Whether localDot starts when the user logs in to the Mac; undefined until known.
+  startAtLogin?: { state: StartAtLoginState | undefined; busy: boolean; set(on: boolean): void };
 }
 
 function ago(at: string | undefined, now: number): string | null {
@@ -400,7 +404,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     knowledge: !!props.knowledge,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
-    computer: !!props.stop || !!props.stream,
+    computer: !!props.stop || !!props.stream || !!props.stopAll || !!props.startAtLogin,
   };
   return SECTIONS.filter((section) => has[section.id]).map((section) => section.id);
 }
@@ -544,7 +548,9 @@ function SectionList({
   };
   return (
     <>
-      {(props.stop || props.stopNote || props.stream) && <ComputerControls props={props} />}
+      {(props.stop || props.stopNote || props.stream || props.stopAll || props.startAtLogin) && (
+        <ComputerControls props={props} />
+      )}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(["spending", "appearance", "knowledge", "accounts", "keys"] as const).map(row)}
@@ -591,7 +597,7 @@ export interface StopNote {
 // The computer's rows: Shut down, or on a phone the task's Stop, with how the last Stop went under
 // its name and any cleanup it couldn't confirm behind Details; then the stream's quality.
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
-  const { stop, stopNote: note, stream } = props;
+  const { stop, stopNote: note, stream, stopAll, startAtLogin: login } = props;
   const phone = useMediaQuery(PHONE);
   return (
     <div>
@@ -629,6 +635,44 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           </GroupRow>
         )}
       </Group>
+      {(login || stopAll) && (
+        <Group>
+          {login && (
+            <Switch
+              className="ui-group-row"
+              label="Start localDot when I log in"
+              description={
+                login.state === "unavailable"
+                  ? undefined
+                  : "So your routines run without you opening anything"
+              }
+              checked={login.state === "on"}
+              disabledReason={
+                login.state === "unavailable"
+                  ? "Works in the installed app on a Mac"
+                  : login.state === undefined
+                    ? "Checking…"
+                    : login.busy
+                      ? "Saving…"
+                      : undefined
+              }
+              onCheckedChange={(on) => login.set(on)}
+            />
+          )}
+          {stopAll && (
+            <GroupRow
+              leading={<IconTile icon="stop" />}
+              label="Stop everything"
+              detail="Stops every task, pauses your routines and freezes your computer"
+              trailing={
+                <Button size="sm" busy={stopAll.running} onClick={() => stopAll.run()}>
+                  Stop everything
+                </Button>
+              }
+            />
+          )}
+        </Group>
+      )}
       {stream && (
         <GroupNote>
           {stream.saved

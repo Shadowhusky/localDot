@@ -12,6 +12,8 @@ import {
 import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { RoutineCard } from "../routines/RoutineCard.tsx";
+import { originLine } from "../routines/routine-copy.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
@@ -69,6 +71,7 @@ const NEW: Partial<Record<ThreadKind, [string, string]>> = {
   answer: MESSAGES,
   question: ["new question", "new questions"],
   result: ["new result", "new results"],
+  routine: ["new routine", "new routines"],
 };
 function unreadLabel(kinds: readonly ThreadKind[]): string {
   const nouns = new Set(kinds.map((kind) => NEW[kind]));
@@ -216,6 +219,18 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       then.downloads === thread.downloads &&
       then.onReplay === thread.onReplay &&
       then.replayTask === thread.replayTask,
+  },
+  routine: {
+    draw: ({ item }) => <RoutineCard proposal={item.proposal} />,
+    same: (was, now) => was.proposal === now.proposal,
+  },
+  origin: {
+    draw: ({ item }) => (
+      <p className="thread-divider">
+        <span>{originLine(item.origin)}</span>
+      </p>
+    ),
+    same: (was, now) => was.origin.runId === now.origin.runId,
   },
   control: {
     draw: ({ item }) => (

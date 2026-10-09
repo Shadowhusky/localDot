@@ -27,6 +27,8 @@ export interface TopBarProps {
   settingsRef?: Ref<HTMLButtonElement>;
   // The risen island's width: the centre is its alone, and the title yields.
   centre?: number;
+  // At the very end: what has no place of its own, such as Stop everything.
+  more?: ReactNode;
   ref?: Ref<HTMLElement>;
 }
 
@@ -48,6 +50,7 @@ export const TopBar = memo(function TopBar({
   onSettings,
   settingsRef,
   centre,
+  more,
   ref,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
@@ -109,6 +112,7 @@ export const TopBar = memo(function TopBar({
           data-state={keys.state}
           onClick={onKeys}
         />
+        {more}
       </div>
     </header>
   );

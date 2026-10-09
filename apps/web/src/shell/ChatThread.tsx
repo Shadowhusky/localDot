@@ -99,6 +99,8 @@ export function ChatThread({
             model.questions.values(),
             model.results,
             model.takeovers.values(),
+            model.routineProposals.values(),
+            model.origin,
           )
         : [],
     [model],

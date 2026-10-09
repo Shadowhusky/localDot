@@ -404,3 +404,36 @@ describe("what a task costs and whether its model is being retried", () => {
     expect(reduce([retry(1, 0, "qwen")]).retrying).toBe(false);
   });
 });
+
+describe("routines in a task", () => {
+  it("keeps the task's origin and each routine dot proposed", () => {
+    const origin = {
+      kind: "routine",
+      routineId: id(30000),
+      runId: id(30001),
+      name: "Morning bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    } as const;
+    const proposal = {
+      routineId: id(30002),
+      revision: 1,
+      name: "Inbox sweep",
+      summary: "Every day at 07:45 · London time",
+      instruction: "Check my inbox",
+      profile: "ask_first",
+      notify: "changes",
+      budgetUSD: null,
+      approvalWindowMinutes: 60,
+      missedPolicy: "run_once",
+    } as const;
+    const model = reduce([
+      ev(0, "session.start", { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", origin }),
+      ev(1, "routine.proposed", proposal),
+    ]);
+    expect(model.origin).toEqual(origin);
+    expect(model.routineProposals.get(proposal.routineId)).toMatchObject({ ...proposal, seq: 1 });
+    expect(
+      reduce([ev(0, "session.start", { screen: { w: 1, h: 1, scale: 1 }, os: "linux" })]),
+    ).not.toHaveProperty("origin");
+  });
+});
