@@ -117,7 +117,7 @@ export function connectorRoutes(app: Hono, { hub, keyd, signIn, port }: Connecto
     }),
   );
 
-  app.patch("/api/connectors/:id", limit, (c) =>
+  app.put("/api/connectors/:id", limit, (c) =>
     guarded(c, async () => {
       const parsed = ConnectorPatch.safeParse(await body(c));
       if (!parsed.success)
@@ -136,11 +136,14 @@ export function connectorRoutes(app: Hono, { hub, keyd, signIn, port }: Connecto
     }),
   );
 
+  // Lists the app's tools again; a program that runs on this Mac may take a while to start, so
+  // the page follows the status rather than waiting here.
   app.post("/api/connectors/:id/refresh", (c) =>
     guarded(c, async () => {
       const id = c.req.param("id");
       if (!hub.config(id)) return refuse(c, 404, "not-found", "no such app");
-      await hub.refresh(id);
+      const done = hub.refresh(id);
+      await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 5_000))]);
       return viewOf(c, id);
     }),
   );

@@ -18,6 +18,20 @@ export const CONNECTOR_TOOL_NAME_PATTERN = /^[a-z][a-z0-9]{1,15}__[A-Za-z0-9_-]{
 // Keys made for a connector: keyd swaps them in for the connector only, never for the computer.
 export const CONNECTOR_SECRET_PREFIX = "connector-";
 
+// A new app's id: its name in lowercase letters and digits, numbered past the ids already taken.
+export function connectorIdFor(name: string, taken: ReadonlySet<string>): string {
+  const cleaned = name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .replace(/^[0-9]+/, "")
+    .slice(0, 12);
+  const base = cleaned.length >= 2 ? cleaned : "app";
+  let id = base;
+  for (let n = 2; taken.has(id); n++) id = `${base.slice(0, 13)}${n}`;
+  return id;
+}
+
 export function isConnectorToolName(name: string): boolean {
   return CONNECTOR_TOOL_NAME_PATTERN.test(name);
 }
@@ -190,6 +204,8 @@ export const ConnectorConfig = z.strictObject({
 export type ConnectorConfig = z.infer<typeof ConnectorConfig>;
 
 export const ConnectorDraft = z.strictObject({
+  // The id the page chose (connectorIdFor), so it could name the app's key before adding it.
+  id: ConnectorId.optional(),
   name: label(40),
   catalog: ConnectorConfig.shape.catalog,
   server: ConnectorServer,
@@ -200,7 +216,7 @@ export const ConnectorPatch = z.strictObject({
   name: label(40).optional(),
   enabled: z.boolean().optional(),
   server: ConnectorServer.optional(),
-  // null returns a tool to its defaults.
+  // A tool's whole choice; null or {} returns it to its defaults.
   tools: z
     .record(ToolKey, ConnectorToolChoice.nullable())
     .refine((tools) => Object.keys(tools).length <= MAX_TOOL_CHOICES)

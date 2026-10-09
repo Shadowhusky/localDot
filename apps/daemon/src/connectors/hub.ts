@@ -6,6 +6,7 @@ import {
   type ConnectorToolSpec,
   type ConnectorView,
   connectorHost,
+  connectorIdFor,
   connectorToolDescription,
   connectorToolName,
   type KeydRecord,
@@ -79,16 +80,6 @@ interface Live {
   link?: Promise<{ client: Client; open: OpenLink }>;
   calls: number;
   idle?: ReturnType<typeof setTimeout>;
-}
-
-function slug(name: string): string {
-  const base = name
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "")
-    .replace(/^[0-9]+/, "")
-    .slice(0, 12);
-  return base.length >= 2 ? base : "app";
 }
 
 function plainProblem(error: unknown, config: ConnectorConfig, stderr?: string): ConnectorProblem {
@@ -251,9 +242,9 @@ export class ConnectorHub {
     if (configs.length >= MAX_CONNECTORS)
       throw new ConnectorProblem("failed", `You can connect up to ${MAX_CONNECTORS} apps.`);
     const taken = new Set(configs.map((c) => c.id));
-    const base = slug(draft.catalog ?? draft.name);
-    let id = base;
-    for (let n = 2; taken.has(id); n++) id = `${base.slice(0, 13)}${n}`;
+    if (draft.id && taken.has(draft.id))
+      throw new ConnectorProblem("failed", "An app with that name is already connected.");
+    const id = draft.id ?? connectorIdFor(draft.catalog ?? draft.name, taken);
     const config: ConnectorConfig = {
       id,
       name: draft.name,
@@ -274,13 +265,12 @@ export class ConnectorHub {
     if (!before) return undefined;
     const tools = { ...before.tools };
     for (const [name, choice] of Object.entries(patch.tools ?? {})) {
-      if (choice === null) delete tools[name];
-      else {
-        const merged = { ...tools[name], ...choice };
-        if (merged.enabled === true) delete merged.enabled;
-        if (Object.keys(merged).length) tools[name] = merged;
-        else delete tools[name];
-      }
+      const kept = {
+        ...(choice?.enabled === false ? { enabled: false } : {}),
+        ...(choice?.access ? { access: choice.access } : {}),
+      };
+      if (Object.keys(kept).length) tools[name] = kept;
+      else delete tools[name];
     }
     const next: ConnectorConfig = {
       ...before,

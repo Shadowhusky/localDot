@@ -428,6 +428,12 @@ export const ICONS = {
     ["path", { d: "m7 22-4-4 4-4" }],
     ["path", { d: "M21 13v1a4 4 0 0 1-4 4H3" }],
   ],
+  plug: [
+    ["path", { d: "M12 22v-5" }],
+    ["path", { d: "M9 8V2" }],
+    ["path", { d: "M15 8V2" }],
+    ["path", { d: "M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" }],
+  ],
 } as const satisfies Record<string, IconNode>;
 
 export type IconName = keyof typeof ICONS;

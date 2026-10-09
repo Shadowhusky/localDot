@@ -6,6 +6,7 @@ import {
   ConnectorConfig,
   ConnectorDraft,
   ConnectorPatch,
+  connectorIdFor,
   connectorToolDescription,
   connectorToolName,
   connectorUrlProblem,
@@ -107,6 +108,16 @@ describe("connector config", () => {
       if (entry.server.kind === "local" || entry.server.auth === "key")
         expect(entry.key).toBeDefined();
     }
+  });
+});
+
+describe("connectorIdFor", () => {
+  it("names a new app after itself, numbered past the ids taken", () => {
+    expect(connectorIdFor("GitHub", new Set())).toBe("github");
+    expect(connectorIdFor("GitHub", new Set(["github", "github2"]))).toBe("github3");
+    expect(connectorIdFor("Ünïcode Notes!", new Set())).toBe("unicodenotes");
+    expect(connectorIdFor("42", new Set())).toBe("app");
+    expect(ConnectorConfig.shape.id.safeParse(connectorIdFor("A very long app name indeed", new Set())).success).toBe(true);
   });
 });
 

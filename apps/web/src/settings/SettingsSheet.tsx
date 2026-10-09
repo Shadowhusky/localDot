@@ -24,6 +24,7 @@ import { AccountsSection } from "./AccountsSection.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import { ClaudeCodePanel } from "./ClaudeCodePanel.tsx";
+import { ConnectorsSection } from "./ConnectorsSection.tsx";
 import {
   type ModelRole,
   type PickerKey,
@@ -54,6 +55,7 @@ import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.t
 import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
+import type { ConnectorsView } from "./useConnectors.ts";
 import type { NotificationsView } from "./useNotifications.ts";
 import type { RulesView } from "./useRules.ts";
 import type { SignInView } from "./useSignIn.ts";
@@ -121,6 +123,8 @@ export interface SettingsSheetProps {
   accounts?: AccountsView;
   // Sign in to a site: the web browser opens it with the user in control.
   signIn?: SignInView;
+  // The user's connected apps and their tools.
+  connectors?: ConnectorsView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
   // Shut down, and on a phone, where the sheet covers the island, the task's Stop.
   stop?: { label: string; enabled: boolean; run(): void; task?: boolean };
@@ -446,6 +450,7 @@ function shownSections(props: SettingsSheetProps, phone = false): SettingsSectio
     notifications: !!props.notifications,
     knowledge: !!props.knowledge && !!props.known,
     accounts: !!props.accounts,
+    connectors: !!props.connectors,
     keys: !!props.keysPanel,
     computer:
       (!!props.stop && !(phone && props.stop.task)) ||
@@ -583,6 +588,8 @@ function SectionList({
     appearance: props.appearance?.value === "midnight" ? "Midnight" : "Graphite",
     notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
+    connectors:
+      props.connectors?.phase === "ready" ? countValue(props.connectors.connectors.length) : "",
     keys: countValue(props.keysPanel?.keys.keys.length),
     computer: props.update?.available ? "Update ready" : "",
   };
@@ -611,7 +618,15 @@ function SectionList({
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(
-          ["spending", "appearance", "notifications", "knowledge", "accounts", "keys"] as const
+          [
+            "spending",
+            "appearance",
+            "notifications",
+            "knowledge",
+            "accounts",
+            "connectors",
+            "keys",
+          ] as const
         ).map(row)}
       </Group>
     </>
@@ -1002,6 +1017,8 @@ function SectionContent({
       return props.accounts ? (
         <AccountsSection accounts={props.accounts} signIn={props.signIn} />
       ) : null;
+    case "connectors":
+      return props.connectors ? <ConnectorsSection connectors={props.connectors} /> : null;
     case "keys":
       return keysPanel;
     case "computer":

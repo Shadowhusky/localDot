@@ -25,7 +25,7 @@ const PENDING_MS = 10 * 60_000;
 const MAX_PENDING = 8;
 
 export interface SignInDeps {
-  hub: Pick<ConnectorHub, "config" | "update" | "setClient" | "afterKeyChange">;
+  hub: Pick<ConnectorHub, "config" | "update" | "setClient" | "afterKeyChange" | "refresh">;
   keyd: Pick<KeydClient, "status" | "putSecret">;
   // keyd's way out for the sign-in's own requests (discovery, registration, the token exchange).
   fetchFor(connectorId: string): Promise<{ fetch: FetchLike; close(): Promise<void> }>;
@@ -162,6 +162,7 @@ export class ConnectorSignIn {
     } finally {
       await link.close();
     }
+    void this.deps.hub.refresh(pending.connectorId);
     return this.deps.hub.config(pending.connectorId)?.name ?? "the app";
   }
 

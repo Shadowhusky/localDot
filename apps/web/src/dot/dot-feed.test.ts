@@ -175,6 +175,15 @@ describe("the tool dot works with", () => {
     expect(toolFor("acting", step(undefined, "", "shell"), undefined)).toBe("terminal");
   });
 
+  it("reads a page for a connected app's reading tool and sends one for a change", () => {
+    const of = (tool: string, title: string) =>
+      toolFor("acting", step(tool, title, "app"), undefined);
+    expect(of("linear__list_issues", "Linear · List issues")).toBe("browsing");
+    expect(of("github__search_code", "GitHub · Search code")).toBe("browsing");
+    expect(of("linear__create_issue", "Linear · Create issue")).toBe("sending");
+    expect(of("slack__send_message", "Slack · Send message")).toBe("sending");
+  });
+
   it("prefers the step's own newer tool over an older action", () => {
     const old = action("click", "Click A", { step: "s0", intentT: 10 });
     expect(toolFor("acting", step("shell", "make", "shell"), old)).toBe("terminal");

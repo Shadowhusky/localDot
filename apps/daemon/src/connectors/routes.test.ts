@@ -115,13 +115,13 @@ describe("connector routes", () => {
   it("saves the user's choices per tool and removes an app with its own keys only", async () => {
     const { send, deleted } = setup([key("connector-github", ["api.githubcopilot.com"])]);
     await send("POST", "/api/connectors", github("connector-github"));
-    const patched = await send("PATCH", "/api/connectors/github", {
+    const patched = await send("PUT", "/api/connectors/github", {
       enabled: false,
       tools: { create_issue: { enabled: false, access: "read" } },
     });
     expect(await patched.json()).toMatchObject({ connector: { enabled: false, status: "off" } });
     expect(
-      (await send("PATCH", "/api/connectors/github", { tools: { x: { mode: 1 } } })).status,
+      (await send("PUT", "/api/connectors/github", { tools: { x: { mode: 1 } } })).status,
     ).toBe(400);
     expect((await send("DELETE", "/api/connectors/nope")).status).toBe(404);
     expect((await send("DELETE", "/api/connectors/github")).status).toBe(204);
