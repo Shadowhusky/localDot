@@ -60,18 +60,24 @@ describe("dot's flight between places", () => {
     expect(flight.at(300).y).toBeGreaterThan(badge.y + 50);
   });
 
-  it("keeps its velocity through a change of place, so the turn has no corner", () => {
-    const flight = new Flight(HERO);
-    flight.fly(DOCK, 0);
-    const T = 180;
+  it("takes off once: sent on mid-flight, it turns at once and keeps its speed", () => {
+    const badge: Box = { x: 300, y: 60, size: 32 };
+    const ELSEWHERE: Box = { x: 900, y: 100, size: 120 };
+    const again = new Flight(badge);
+    const turned = new Flight(badge);
+    again.fly(DOCK, 0, true);
+    turned.fly(DOCK, 0, true);
+    const T = 300;
     const v = (a: Box, b: Box, dt: number) => ({ x: (b.x - a.x) / dt, y: (b.y - a.y) / dt });
     const dt = 0.01;
-    const before = v(flight.at(T - dt), flight.at(T), dt);
-    flight.fly({ x: 900, y: 100, size: 120 }, T);
-    const after = v(flight.at(T), flight.at(T + dt), dt);
+    const before = v(again.at(T - dt), again.at(T), dt);
+    again.fly(ELSEWHERE, T, true);
+    turned.fly(ELSEWHERE, T);
+    const after = v(again.at(T), again.at(T + dt), dt);
     expect(Math.hypot(before.x, before.y)).toBeGreaterThan(0.5);
     expect(Math.abs(after.x - before.x)).toBeLessThan(0.01);
     expect(Math.abs(after.y - before.y)).toBeLessThan(0.01);
+    for (const t of [T + 60, T + 120, T + 300]) expect(again.at(t)).toEqual(turned.at(t));
   });
 
   it("keeps its curve when its seat shifts mid-flight", () => {
@@ -93,8 +99,10 @@ describe("dot's flight between places", () => {
     ahead.fly(DOCK, 0, true);
     fresh.fly(DOCK, 0, true);
     for (let t = 0; t <= 1200; t += FRAME) ahead.at(t);
-    ahead.fly(HERO, 60);
-    fresh.fly(HERO, 60);
+    // Its seat shifts while it is still growing out of the badge.
+    const shifted = { ...DOCK, y: DOCK.y + 2 };
+    ahead.follow(shifted, 60);
+    fresh.follow(shifted, 60);
     for (const t of [60, 200, 400, 900]) expect(ahead.at(t)).toEqual(fresh.at(t));
   });
 
