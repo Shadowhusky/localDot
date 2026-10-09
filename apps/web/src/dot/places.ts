@@ -5,6 +5,18 @@ export type PlaceName = "hero" | "dock" | "badge" | "intro" | "stage";
 // the one under it is dot's again once the latest goes.
 const places = new Map<PlaceName, HTMLElement[]>();
 const listeners = new Set<() => void>();
+let pending = false;
+
+// Places come and go inside React's commit, before the rest of the page has changed around them
+// (Replay's places leave while Watch is still hidden), so listeners hear once the commit is done.
+function changed(): void {
+  if (pending) return;
+  pending = true;
+  queueMicrotask(() => {
+    pending = false;
+    for (const listener of listeners) listener();
+  });
+}
 
 export function placeElement(name: PlaceName): HTMLElement | null {
   return places.get(name)?.at(-1) ?? null;
@@ -13,20 +25,20 @@ export function placeElement(name: PlaceName): HTMLElement | null {
 // A ref callback for a place's element.
 export function registerPlace(name: PlaceName, element: HTMLElement): () => void {
   places.set(name, [...(places.get(name) ?? []).filter((held) => held !== element), element]);
-  for (const listener of listeners) listener();
+  changed();
   return () => {
     const held = places.get(name) ?? [];
     if (!held.includes(element)) return;
     const rest = held.filter((other) => other !== element);
     if (rest.length) places.set(name, rest);
     else places.delete(name);
-    for (const listener of listeners) listener();
+    changed();
   };
 }
 
 // A place moved without a resize or a transition of its own, as when the stage travels to full screen.
 export function placesMoved(): void {
-  for (const listener of listeners) listener();
+  changed();
 }
 
 export function onPlaces(listener: () => void): () => void {
