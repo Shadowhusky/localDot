@@ -101,6 +101,7 @@ describe("App Replay mode", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     window.history.replaceState(null, "", "/");
   });
 
@@ -263,6 +264,27 @@ describe("App Replay mode", () => {
     expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
+  });
+  it("stays up through a long scrub, though WebKit refuses a hundredth address change in ten seconds", async () => {
+    const fixture = historyDaemon();
+    window.history.replaceState(null, "", `/?replay=${fixture.sessionId}`);
+    const replaceState = window.history.replaceState.bind(window.history);
+    let writes = 0;
+    vi.spyOn(window.history, "replaceState").mockImplementation((...args) => {
+      if (++writes > 100)
+        throw new DOMException(
+          "Attempt to use history.replaceState() more than 100 times per 10 seconds",
+          "SecurityError",
+        );
+      replaceState(...args);
+    });
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    for (let index = 0; index <= 300; index++)
+      fireEvent.keyDown(window, { key: index % 2 ? "j" : "l" });
+    expect(screen.getByRole("main", { name: "Replay" })).toBeTruthy();
+    expect(writes).toBeLessThan(10);
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("t")).toBe("10000"));
   });
   it("keeps Watch working when no session exists", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
