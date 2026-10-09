@@ -78,6 +78,16 @@ export class ScreenControlError extends Error {
     this.name = "ScreenControlError";
   }
 }
+export class ScreenUnavailableError extends Error {
+  constructor(screen: ScreenName) {
+    super(
+      screen === "browser"
+        ? "The signed-in browser isn't available right now. Keep working on the desktop, or try switching to the browser again in a moment."
+        : "The desktop isn't ready right now. Try switching to it again in a moment.",
+    );
+    this.name = "ScreenUnavailableError";
+  }
+}
 
 // This object belongs to a session, not a model call. Display selection never grants
 // input: every operation needs a lease bound to this screen, generation and revision.
@@ -425,13 +435,18 @@ export class ScreenController {
       signal: AbortSignal.any([scope.signal, control]),
       check: guard,
     };
+    let granted = false;
+    let integrity = false;
     const operation = this.#tail
       .then(async () => {
         try {
           guard();
           await Promise.all([...this.#active, downloadsRetired]);
           guard();
-          await this.#revoke();
+          await this.#revoke().catch((error: unknown) => {
+            if (handback) throw error;
+            return this.#retireBrowser();
+          });
           guard();
           let cellId = this.deps.parentCellId;
           let geometry = this.#desktopGeometry;
@@ -447,6 +462,7 @@ export class ScreenController {
               owner: { sessionId: scope.sessionId, generation: scope.generation },
             };
             const browserScope = this.#browserScope(owner, operationScope);
+            granted = true;
             await owner.client.control(request, browserScope);
             guard();
             owner.permit = Object.freeze({
@@ -475,7 +491,9 @@ export class ScreenController {
             geometry: Object.freeze({ ...result.geometry }),
             revision: result.revision,
           });
+          integrity = true;
           await this.deps.attachRecording(selection, operationScope);
+          integrity = false;
           guard();
           if (screen === "browser") {
             if (!this.#browser) throw new ScreenControlError();
@@ -501,6 +519,7 @@ export class ScreenController {
             );
             guard();
           } else if (!this.deps.desktopReady()) throw new ScreenControlError();
+          integrity = true;
           this.deps.publish(result);
           guard();
           this.#selection = selection;
@@ -509,7 +528,16 @@ export class ScreenController {
         } catch {
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
             await this.#revoke().catch(() => this.#fail());
-          } else await this.#fail();
+          } else if (handback || integrity) {
+            // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
+            // complete is uncertainty the session cannot continue past.
+            await this.#fail();
+          } else {
+            // The agent asked for a screen that is unavailable. That is an ordinary tool
+            // failure once no grant this call requested can still be live.
+            if (granted) await this.#revoke().catch(() => this.#retireBrowser());
+            throw new ScreenUnavailableError(screen);
+          }
           throw new ScreenControlError();
         }
       })
@@ -625,6 +653,19 @@ export class ScreenController {
     });
     owner.revoking = pending;
     return pending;
+  }
+  // An unconfirmed revocation leaves the browser's holder unknown. Only its confirmed
+  // physical stop proves that no agent grant survives; otherwise the session is contained.
+  async #retireBrowser(): Promise<void> {
+    const owner = this.#browser;
+    try {
+      await this.deps.browser.stop(this.deps.parentCellId);
+    } catch {
+      await this.#fail();
+      throw new ScreenControlError();
+    }
+    owner?.client.close();
+    if (this.#browser === owner) this.#browser = undefined;
   }
 
   async #startDownloads(
