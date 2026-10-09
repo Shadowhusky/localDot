@@ -15,6 +15,7 @@ export const AGENT_LIMITS = Object.freeze({
   questions: 64,
   takeovers: 64,
   results: 64,
+  spendCalls: 2048,
   messageText: 20_000,
   outputText: 65_536,
   patchText: 8192,
@@ -84,6 +85,22 @@ export type UsageRow = EventOf<"model.usage">["data"] & {
   readonly calls: number;
   readonly reasoningPartial: boolean;
 };
+// One model call's cost, at its session time, as keyd charged it.
+export interface SpendCall {
+  readonly atMs: number;
+  readonly route: string;
+  readonly model: string;
+  readonly usd: number;
+  readonly estimated: boolean;
+}
+// What this task and today have cost so far, by keyd's account. Estimated once any call was.
+export interface AgentSpend {
+  readonly taskUSD: number;
+  readonly dayUSD: number;
+  readonly estimated: boolean;
+  readonly taskLimitUSD?: number;
+  readonly dayLimitUSD?: number;
+}
 export interface Reported<T> {
   readonly id: string;
   readonly at: number;
@@ -125,8 +142,12 @@ export interface AgentModel {
   readonly usage: readonly UsageRow[];
   readonly usagePartial: boolean;
   readonly retry: Reported<EventOf<"model.retry">["data"]> | null;
+  // The model call waits out that retry: no later state has said otherwise.
+  readonly retrying: boolean;
   readonly subscription: Reported<EventOf<"subscription.usage">["data"]> | null;
   readonly budget: Reported<EventOf<"budget.exceeded">["data"]> | null;
+  readonly spend: AgentSpend | null;
+  readonly spendCalls: readonly SpendCall[];
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
@@ -150,8 +171,11 @@ export function emptyAgentModel(): AgentModel {
     usage: [],
     usagePartial: false,
     retry: null,
+    retrying: false,
     subscription: null,
     budget: null,
+    spend: null,
+    spendCalls: [],
     historyTruncated: false,
   };
 }
@@ -163,6 +187,8 @@ export interface AgentFeedState {
   readonly connection: AgentConnection;
   // This connection has delivered a valid in-order or duplicate replay packet.
   readonly replayed: boolean;
+  // The task's history so far has arrived, read whole or from the live feed's first packet.
+  readonly history: boolean;
   readonly streamError: string | null;
   readonly model: AgentModel;
 }

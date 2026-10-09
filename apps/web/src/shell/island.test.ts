@@ -21,6 +21,7 @@ const task = (row: TaskHud["row"], phase: TaskHud["phase"] = "running"): TaskHud
   label: "Selecting February's net total",
   caption: "",
   elapsedS: 42,
+  countdownS: null,
   control: phase === "running",
 });
 

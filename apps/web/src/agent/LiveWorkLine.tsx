@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { count } from "../copy/format.ts";
+import { count, spendText } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -56,9 +56,12 @@ export function LiveWorkLine({
   startMs,
   live,
   ended,
+  spend,
 }: {
   steps: readonly WorkStep[];
   startMs: number | null;
+  // What the turn cost, said once its work is over.
+  spend?: { usd: number; estimated: boolean };
   // Given for the latest turn while its task has not ended.
   live: LiveWork | null;
   ended?: "done" | "stopped" | "error";
@@ -97,6 +100,7 @@ export function LiveWorkLine({
     count(steps.length, "step", "steps"),
     failed ? `${failed} failed` : "",
     running && elapsed !== null ? clock(elapsed) : "",
+    !running && spend ? spendText(spend.usd, spend.estimated) : "",
   ]
     .filter(Boolean)
     .join(" · ");

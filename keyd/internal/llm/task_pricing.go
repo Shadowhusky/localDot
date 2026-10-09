@@ -55,7 +55,7 @@ func (p *TaskPricing) UnmarshalJSON(raw []byte) error {
 			return errors.New("llm: invalid snapshot flat mark")
 		}
 		for _, m := range r.Models {
-			for _, k := range []string{"cacheReadUSDPerMTok", "cacheWriteUSDPerMTok"} {
+			for _, k := range []string{"cacheReadUSDPerMTok", "cacheWriteUSDPerMTok", "reasoningUSDPerMTok"} {
 				if v, ok := m[k]; ok && bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
 					return fmt.Errorf("llm: invalid snapshot %s", k)
 				}
@@ -90,7 +90,7 @@ func CanonicalTaskPricing(p TaskPricing) (TaskPricing, error) {
 		}
 		// A flat route is a plan billed outside localDot: every price it states is zero.
 		if r.Flat && slices.ContainsFunc(r.Models, func(m Price) bool {
-			return m.Input != 0 || m.Output != 0 || m.CacheRead != 0 || m.CacheWrite != 0
+			return m.Input != 0 || m.Output != 0 || m.CacheRead != 0 || m.CacheWrite != 0 || m.Reasoning != 0
 		}) {
 			return TaskPricing{}, errors.New("llm: a flat route prices every model at zero")
 		}
@@ -116,6 +116,9 @@ func CanonicalTaskPricing(p TaskPricing) (TaskPricing, error) {
 			}
 			if m.CacheWrite == 0 {
 				m.CacheWrite = 0
+			}
+			if m.Reasoning == 0 {
+				m.Reasoning = 0
 			}
 		}
 		slices.SortFunc(models, func(a, b Price) int { return bytes.Compare([]byte(a.Model), []byte(b.Model)) })

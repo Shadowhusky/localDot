@@ -69,9 +69,9 @@ function ToastStage() {
         <Button onClick={moved}>Show one with Undo</Button>
         <Button
           onClick={() => {
-            stopFailed();
-            moved();
             saved();
+            moved();
+            stopFailed();
           }}
         >
           Show three

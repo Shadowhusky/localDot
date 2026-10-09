@@ -48,7 +48,7 @@
   margin-block: var(--rail-inset);
 }
 
-.app > .replay {
+.app > :is(.replay, .replay-failed) {
   grid-area: 2 / 1 / 3 / -1;
 }
 
@@ -86,7 +86,7 @@
     margin: 0 var(--rail-inset) var(--rail-inset);
   }
 
-  .app > .replay {
+  .app > :is(.replay, .replay-failed) {
     grid-area: 2 / 1 / -1 / -1;
   }
 }

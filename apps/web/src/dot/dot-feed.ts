@@ -17,7 +17,7 @@ export interface DotFeed {
   done: boolean;
 }
 
-const ATTENTION = new Set<StatusRow>(["approval", "question", "waiting", "recovery"]);
+const ATTENTION = new Set<StatusRow>(["approval", "question", "waiting", "recovery", "limit"]);
 
 export function dotFeed(status: Status, model: SessionModel | null, nowMs: number): DotFeed {
   const action = model ? currentAction(model, nowMs) : undefined;

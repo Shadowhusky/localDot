@@ -3,7 +3,7 @@ import { LocalDotEvent, ulid } from "@localdot/protocol";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { EARLIER_SHOWN, leftToReplay, useEarlierThread } from "./earlier.ts";
+import { OPENING_ROWS, useEarlierThread } from "./earlier.ts";
 import type { ThreadItem } from "./thread.ts";
 
 afterEach(cleanup);
@@ -38,9 +38,11 @@ function setup() {
     [SECOND]: log("Make it blue", "Made it blue."),
   };
   const read = vi.fn((id: string) => logs[id]);
+  const paths: string[] = [];
   const api = createApi("fixture", {
     origin: "http://127.0.0.1:4747",
     fetchImpl: async (input) => {
+      paths.push(new URL(String(input)).pathname);
       const id = new URL(String(input)).pathname.split("/")[3] ?? "";
       const text = read(id);
       return text === undefined
@@ -48,7 +50,7 @@ function setup() {
         : new Response(text, { headers: { "content-type": "application/x-ndjson" } });
     },
   });
-  return { api, read };
+  return { api, read, paths: () => paths };
 }
 const said = (items: readonly ThreadItem[]) =>
   items.flatMap((item) =>
@@ -66,7 +68,7 @@ it("shows the conversation's earlier tasks above the latest, oldest first, each 
     initialProps: { shown: { sessionId: THIRD, items: [] as ThreadItem[] } },
   });
   await settle();
-  expect(said(view.result.current)).toEqual([
+  expect(said(view.result.current.items)).toEqual([
     "user: Draw a dog",
     "dot: Drew it.",
     `result of ${FIRST}: dog.png`,
@@ -95,7 +97,7 @@ it("carries the shown task's thread over as it is when the next task takes its p
   await settle();
   // The next task starts before the conversation is read again.
   view.rerender({ sessions: [FIRST, SECOND], shown: { sessionId: THIRD, items: [] } });
-  expect(view.result.current.at(-1)?.key).toBe("message-shown");
+  expect(view.result.current.items.at(-1)?.key).toBe("message-shown");
   await settle();
   expect(f.read.mock.calls.map(([id]) => id)).toEqual([FIRST]);
 });
@@ -106,15 +108,63 @@ it("shows nothing earlier while no task is shown", async () => {
     useEarlierThread(f.api, [FIRST, SECOND], { sessionId: null, items: [] }),
   );
   await settle();
-  expect(view.result.current).toEqual([]);
+  expect(view.result.current.items).toEqual([]);
+  expect(view.result.current.opening).toBe(false);
   expect(f.read).not.toHaveBeenCalled();
 });
 
-it("says when the conversation goes back further than the thread shows", () => {
-  const ids = Array.from({ length: EARLIER_SHOWN + 2 }, () => ulid());
-  const latest = ids.at(-1) ?? null;
-  expect(leftToReplay(ids.slice(-(EARLIER_SHOWN + 1)), latest, false)).toBe(false);
-  expect(leftToReplay(ids, latest, false)).toBe(true);
-  expect(leftToReplay([FIRST, SECOND], SECOND, true)).toBe(true);
-  expect(leftToReplay([], null, true)).toBe(false);
+const rows = (count: number): ThreadItem[] =>
+  Array.from({ length: count }, (_, n) => ({
+    kind: "message",
+    key: `message-${n}`,
+    speaker: "user",
+    message: { id: `${n}`, role: "user", text: `Row ${n}`, final: true },
+  }));
+
+it("opens on enough earlier tasks for its opening rows, then reads one more each time it is asked", async () => {
+  const f = setup();
+  const view = renderHook(() =>
+    useEarlierThread(f.api, [FIRST, SECOND, THIRD], {
+      sessionId: THIRD,
+      items: rows(OPENING_ROWS - 2),
+    }),
+  );
+  expect(view.result.current.opening).toBe(true);
+  await settle();
+  expect(f.read.mock.calls.map(([id]) => id)).toEqual([SECOND]);
+  expect(view.result.current).toMatchObject({ opening: false, more: true, reading: false });
+  expect(said(view.result.current.items)).toEqual([
+    "user: Make it blue",
+    "dot: Made it blue.",
+    `result of ${SECOND}: `,
+  ]);
+  act(() => view.result.current.older());
+  expect(view.result.current.reading).toBe(true);
+  await settle();
+  expect(f.read.mock.calls.map(([id]) => id)).toEqual([SECOND, FIRST]);
+  expect(view.result.current).toMatchObject({ opening: false, more: false, reading: false });
+  expect(said(view.result.current.items)[0]).toBe("user: Draw a dog");
+});
+
+it("waits for the shown task's own history before opening", async () => {
+  const f = setup();
+  const view = renderHook(
+    ({ ready }) =>
+      useEarlierThread(f.api, [FIRST, SECOND], { sessionId: SECOND, items: [] }, ready),
+    { initialProps: { ready: false } },
+  );
+  await settle();
+  expect(f.read).not.toHaveBeenCalled();
+  expect(view.result.current.opening).toBe(true);
+  view.rerender({ ready: true });
+  await settle();
+  expect(view.result.current.opening).toBe(false);
+  expect(f.read.mock.calls.map(([id]) => id)).toEqual([FIRST]);
+});
+
+it("reads each earlier task's history, not its whole log", async () => {
+  const f = setup();
+  renderHook(() => useEarlierThread(f.api, [FIRST, SECOND], { sessionId: SECOND, items: [] }));
+  await settle();
+  expect(f.paths()).toEqual([`/api/sessions/${FIRST}/history`]);
 });

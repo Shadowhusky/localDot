@@ -8,7 +8,6 @@ export function providerFixture(): ProviderIndex {
   return {
     catalog: { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped },
     keyLayer: "online",
-    defaultTaskBudgetUSD: 2,
     subscriptions: [
       { id: "chatgpt", name: "ChatGPT plan", available: false, reason: "fixture not installed" },
     ],

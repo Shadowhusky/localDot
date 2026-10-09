@@ -32,7 +32,9 @@ it("lists what setup has left in the chat without starting tasks or saving polic
                 }
               : path === "/api/session-index"
                 ? { sessions: [], next: null }
-                : [];
+                : path === "/api/conversation"
+                  ? { sessions: [], more: false }
+                  : [];
     return Response.json(data);
   }) as typeof fetch;
   render(<App fetchImpl={fetchImpl} />);

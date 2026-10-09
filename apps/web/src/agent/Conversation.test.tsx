@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { useContext, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
+import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { threadItems } from "./thread.ts";
@@ -275,10 +276,10 @@ describe("the conversation thread", () => {
 it("mounts a bounded window of 10,000 messages and keeps the reader's rows through a live addition", () => {
   const data = Array.from({ length: 10_000 }, (_, n) => message(`message-${n}`, `Content ${n}`));
   const v = render(<Conversation items={items(data)} truncated={false} ownerKey="large-task" />);
-  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
   fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
-  const kept = screen.getByText("Content 9800").closest("article");
-  expect(screen.getByText("Content 9700")).toBeTruthy();
+  const kept = screen.getByText("Content 9960").closest("article");
+  expect(screen.getByText("Content 9940")).toBeTruthy();
   v.rerender(
     <Conversation
       items={items([...data, message("new", "Newest content")])}
@@ -286,15 +287,15 @@ it("mounts a bounded window of 10,000 messages and keeps the reader's rows throu
       ownerKey="large-task"
     />,
   );
-  expect(screen.getByText("Content 9800").closest("article")).toBe(kept);
-  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
+  expect(screen.getByText("Content 9960").closest("article")).toBe(kept);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
   expect(screen.queryByText("Newest content")).toBeNull();
   // Each move keeps half the window, so two reach the newest end.
   fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
   expect(screen.queryByText("Newest content")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
   expect(screen.getByText("Newest content")).toBeTruthy();
-  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(OPENING_ROWS);
 });
 
 it("announces completed replies without reading each streaming delta", () => {
@@ -357,4 +358,63 @@ it("says the conversation's older tasks are in Replay", () => {
   render(<Conversation items={items([message("one")])} truncated earlierInReplay />);
   expect(screen.getByText("Earlier messages are in Replay.")).toBeTruthy();
   expect(screen.queryByText("Earlier messages are kept in the task log.")).toBeNull();
+});
+
+describe("opening on a snapshot", () => {
+  const newRows = () => [...history().querySelectorAll(".thread-row[data-new]")];
+  it("shows message-shaped bones while the history arrives, then all of it at once and unanimated", () => {
+    const opened = [message("one", "Draw a dog"), message("two", "Drew it.", "assistant")];
+    const view = render(<Conversation items={[]} truncated={false} ownerKey="task" loading />);
+    expect(history().querySelectorAll(".thread-bone")).toHaveLength(8);
+    expect(screen.getByRole("status").textContent).toBe("Loading the conversation");
+    expect(screen.queryByText("What should we do?")).toBeNull();
+    view.rerender(
+      <Conversation items={items(opened.slice(0, 1))} truncated={false} ownerKey="task" loading />,
+    );
+    expect(screen.queryByText("Draw a dog")).toBeNull();
+    view.rerender(<Conversation items={items(opened)} truncated={false} ownerKey="task" />);
+    expect(history().querySelectorAll(".thread-bone")).toHaveLength(0);
+    expect(screen.getByText("Draw a dog")).toBeTruthy();
+    expect(newRows()).toEqual([]);
+    // Only what arrives after it eases in.
+    view.rerender(
+      <Conversation
+        items={items([...opened, message("three", "Make it blue")])}
+        truncated={false}
+        ownerKey="task"
+      />,
+    );
+    expect(newRows().map((row) => row.textContent)).toEqual(["Make it blue"]);
+  });
+
+  it("asks for the conversation's earlier tasks from the top once the page has no older rows", () => {
+    const older = vi.fn();
+    const view = render(
+      <Conversation
+        items={items([message("one")])}
+        truncated={false}
+        earlier={{ more: true, reading: false, older }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+    expect(older).toHaveBeenCalledOnce();
+    view.rerender(
+      <Conversation
+        items={items([message("one")])}
+        truncated={false}
+        earlier={{ more: true, reading: true, older }}
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Loading earlier messages" })).toBeTruthy();
+    view.rerender(
+      <Conversation
+        items={items([message("one")])}
+        truncated={false}
+        earlierInReplay
+        earlier={{ more: false, reading: false, older }}
+      />,
+    );
+    expect(document.querySelector(".thread-older")).toBeNull();
+    expect(screen.getByText("Earlier messages are in Replay.")).toBeTruthy();
+  });
 });

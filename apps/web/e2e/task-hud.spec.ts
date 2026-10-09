@@ -160,7 +160,7 @@ test("a question puts the question first", async ({ page }) => {
 test("a budget pause names the limit", async ({ page }) => {
   await open(page);
   await qa(page, "budget");
-  await expectWaiting(page, "Paused · Limit reached");
+  await expectWaiting(page, "Reached your spending limit");
   await expect(page.getByRole("region", { name: "Task recovery" })).toBeVisible();
 });
 

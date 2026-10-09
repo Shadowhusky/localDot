@@ -40,16 +40,6 @@ export function StopControl({
           )}
         </section>
       )}
-      {controls.status && !(inIsland && controls.status.phase === "sending") && (
-        <section className="control-status" aria-label="Task control status">
-          <p role="status">{controls.status.message}</p>
-          {controls.status.phase !== "sending" && (
-            <Button variant="quiet" size="sm" onClick={controls.recheck}>
-              Check task state
-            </Button>
-          )}
-        </section>
-      )}
     </>
   );
 }

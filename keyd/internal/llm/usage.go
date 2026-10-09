@@ -14,12 +14,17 @@ const (
 	maxJSONBody = 16 << 20
 )
 
+// Usage counts each kind of token once: Input is the input read fresh, Output the answer without
+// its reasoning. Billed marks a cost the provider's answer stated itself, in micro-dollars.
 type Usage struct {
 	Input      int64
 	Output     int64
+	Reasoning  int64
 	CacheWrite int64
 	CacheRead  int64
 	Reported   bool
+	Billed     bool
+	BilledCost int64
 }
 
 // Meter watches a response body go by and keeps the last usage the provider reported. It reads
@@ -109,11 +114,11 @@ func (m *Meter) parse(data []byte) {
 		// Groq's streams report usage only here, in the last chunk (P5a-R31).
 		m.take(field(obj, "x_groq", "usage"))
 		if u, ok := obj["usageMetadata"].(map[string]any); ok {
-			m.set(&m.usage.Input, u["promptTokenCount"])
+			m.split(&m.usage.Input, &m.usage.CacheRead, u["promptTokenCount"], u["cachedContentTokenCount"])
 			cand, okC := number(u["candidatesTokenCount"])
 			thoughts, okT := number(u["thoughtsTokenCount"])
 			if okC || okT {
-				m.usage.Output, m.usage.Reported = cand+thoughts, true
+				m.usage.Output, m.usage.Reasoning, m.usage.Reported = cand, thoughts, true
 			}
 		}
 	}
@@ -124,10 +129,43 @@ func (m *Meter) take(v any) {
 	if !ok {
 		return
 	}
-	m.set(&m.usage.Input, first(u["input_tokens"], u["prompt_tokens"]))
-	m.set(&m.usage.Output, first(u["output_tokens"], u["completion_tokens"]))
+	// OpenAI-style input counts include their cache hits, which DeepSeek and Moonshot name their
+	// own way; Anthropic's input excludes its cache, which it counts apart.
+	input := first(u["input_tokens"], u["prompt_tokens"])
+	m.split(&m.usage.Input, &m.usage.CacheRead, input,
+		first(field(u, "prompt_tokens_details", "cached_tokens"), field(u, "input_tokens_details", "cached_tokens"),
+			u["prompt_cache_hit_tokens"], u["cached_tokens"]))
+	// Output counts include their reasoning, unless the total shows it was counted apart (xAI's).
+	output := first(u["output_tokens"], u["completion_tokens"])
+	reasoning := first(field(u, "completion_tokens_details", "reasoning_tokens"), field(u, "output_tokens_details", "reasoning_tokens"))
+	in, _ := number(input)
+	out, okOut := number(output)
+	r, okR := number(reasoning)
+	total, okTotal := number(u["total_tokens"])
+	if okOut && okR && okTotal && r > 0 && total == in+out+r {
+		m.usage.Output, m.usage.Reasoning, m.usage.Reported = out, r, true
+	} else {
+		m.split(&m.usage.Output, &m.usage.Reasoning, output, reasoning)
+	}
 	m.set(&m.usage.CacheWrite, u["cache_creation_input_tokens"])
 	m.set(&m.usage.CacheRead, u["cache_read_input_tokens"])
+	// OpenRouter states each call's cost in US dollars.
+	if cost, ok := u["cost"].(float64); ok && cost >= 0 && cost <= maxPrice {
+		m.usage.BilledCost, m.usage.Billed = int64(math.Ceil(cost*1e6)), true
+	}
+}
+
+// split sets a total and the part of it counted apart: rest is the total less the part.
+func (m *Meter) split(rest, part *int64, totalV, partV any) {
+	total, ok := number(totalV)
+	if !ok {
+		return
+	}
+	n, okPart := number(partV)
+	if !okPart || n > total {
+		n = 0
+	}
+	*rest, *part, m.usage.Reported = total-n, n, true
 }
 
 func (m *Meter) set(dst *int64, v any) {
@@ -173,26 +211,34 @@ type Price struct {
 	Output     float64 `json:"outputUSDPerMTok"`
 	CacheRead  float64 `json:"cacheReadUSDPerMTok,omitempty"`
 	CacheWrite float64 `json:"cacheWriteUSDPerMTok,omitempty"`
+	Reasoning  float64 `json:"reasoningUSDPerMTok,omitempty"`
 	MaxOutput  int64   `json:"maxOutputTokens,omitempty"`
 }
 
-// Cost in micro-dollars, rounded up. Cache tokens without their own price cost the input price.
+// Cost in micro-dollars, rounded up. Cache tokens without their own price cost the input price,
+// and reasoning without its own the output price.
 func (p Price) Cost(u Usage) int64 {
-	orInput := func(v float64) float64 {
+	or := func(v, fallback float64) float64 {
 		if v == 0 {
-			return p.Input
+			return fallback
 		}
 		return v
 	}
 	total := float64(u.Input)*p.Input + float64(u.Output)*p.Output +
-		float64(u.CacheWrite)*orInput(p.CacheWrite) + float64(u.CacheRead)*orInput(p.CacheRead)
+		float64(u.Reasoning)*or(p.Reasoning, p.Output) +
+		float64(u.CacheWrite)*or(p.CacheWrite, p.Input) + float64(u.CacheRead)*or(p.CacheRead, p.Input)
 	return int64(math.Ceil(total))
 }
 
+// PerOutputToken is the most one output token can cost, answer or reasoning.
+func (p Price) PerOutputToken() float64 {
+	return max(p.Output, p.Reasoning)
+}
+
 // Ceiling is the most input and output tokens can cost: the input at the highest of the ordinary, cache-read and
-// cache-write prices, the output at the output price.
+// cache-write prices, the output at the higher of the output and reasoning prices.
 func (p Price) Ceiling(input, output int64) int64 {
-	return int64(math.Ceil(float64(input)*max(p.Input, p.CacheWrite, p.CacheRead) + float64(output)*p.Output))
+	return int64(math.Ceil(float64(input)*max(p.Input, p.CacheWrite, p.CacheRead) + float64(output)*p.PerOutputToken()))
 }
 
 // Estimate stands in when a provider reports no usage: about three bytes a token, rounded up,

@@ -52,6 +52,8 @@ export interface ActivityRailProps {
   agent?: AgentModel;
   models?: TaskModelSelection;
   modelName?(provider: string, model: string): string | undefined;
+  // Opens the spending limits from the usage popover.
+  onSpending?(trigger: HTMLElement): void;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
     onUndo?: (changeId: string) => void;
@@ -91,6 +93,7 @@ export function ActivityRail({
   memoryAction,
   models,
   modelName,
+  onSpending,
   asOfMs,
   onSelect,
   planSnapshot,
@@ -360,7 +363,12 @@ export function ActivityRail({
               <p className="activity-note">Older activity is kept in the task log.</p>
             )}
             {agent && sessionId && (
-              <UsageFooter model={model} selection={models} modelName={modelName} />
+              <UsageFooter
+                model={model}
+                selection={models}
+                modelName={modelName}
+                onSpending={onSpending}
+              />
             )}
           </div>
         </ScrollArea>

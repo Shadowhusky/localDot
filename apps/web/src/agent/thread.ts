@@ -2,7 +2,7 @@ import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { activityRows, type EntryView, entryView, foldKeyUses } from "./activity.ts";
-import type { AgentMessage, AgentModel, AgentQuestion, AgentResult } from "./model.ts";
+import type { AgentMessage, AgentModel, AgentQuestion, AgentResult, SpendCall } from "./model.ts";
 
 export type Speaker = "user" | "dot";
 export type WorkStep = EntryView & { key: string };
@@ -19,7 +19,13 @@ export type ThreadItem =
   | (Item<"question"> & { question: AgentQuestion })
   | (Item<"answer"> & { question: AgentQuestion })
   | (Item<"result"> & { result: AgentResult })
-  | (Item<"work"> & { turn: string; steps: readonly WorkStep[]; startMs: number | null });
+  | (Item<"work"> & {
+      turn: string;
+      steps: readonly WorkStep[];
+      startMs: number | null;
+      // What the turn's model calls cost, when any cost something.
+      spend?: { usd: number; estimated: boolean };
+    });
 
 export type ThreadKind = ThreadItem["kind"];
 
@@ -118,6 +124,7 @@ export function withWork(
   items: readonly ThreadItem[],
   steps: readonly WorkStep[],
   live: boolean,
+  spends: readonly SpendCall[] = [],
 ): ThreadItem[] {
   const turns: { key: string; start: number | null; items: ThreadItem[] }[] = [];
   for (const item of items) {
@@ -131,19 +138,30 @@ export function withWork(
     else turn.items.push(item);
   }
   if (!turns.length) turns.push({ key: "start", start: null, items: [] });
-  const owned = new Map<number, WorkStep[]>();
-  for (const step of steps) {
+  const turnAt = (t: number) => {
     let at = 0;
     for (let i = 1; i < turns.length; i++) {
       const start = turns[i]?.start;
-      if (start !== null && start !== undefined && step.startT >= start) at = i;
+      if (start !== null && start !== undefined && t >= start) at = i;
     }
+    return at;
+  };
+  const owned = new Map<number, WorkStep[]>();
+  for (const step of steps) {
+    const at = turnAt(step.startT);
     owned.set(at, [...(owned.get(at) ?? []), step]);
+  }
+  const spent = new Map<number, { usd: number; estimated: boolean }>();
+  for (const call of spends) {
+    const at = turnAt(call.atMs);
+    const sum = spent.get(at) ?? { usd: 0, estimated: false };
+    spent.set(at, { usd: sum.usd + call.usd, estimated: sum.estimated || call.estimated });
   }
   return turns.flatMap((turn, index) => {
     const own = owned.get(index) ?? [];
     const latest = index === turns.length - 1;
     if (!own.length && !(latest && live)) return turn.items;
+    const spend = spent.get(index);
     return [
       ...turn.items,
       {
@@ -153,6 +171,7 @@ export function withWork(
         turn: turn.key,
         steps: own,
         startMs: turn.start ?? own[0]?.startT ?? null,
+        ...(spend && spend.usd > 0 ? { spend } : {}),
       },
     ];
   });

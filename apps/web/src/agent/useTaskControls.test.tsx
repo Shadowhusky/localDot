@@ -42,6 +42,7 @@ function fixture(fetchImpl: typeof fetch, takeover = false) {
     epoch: 7,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model,
   };

@@ -5,10 +5,8 @@ export type PresencePlace = "hero" | "dock" | "badge";
 export interface PresenceInput {
   // Settings → Appearance → Show dot.
   showDot: boolean;
-  // The curtain covers the stage: the computer is off, starting or failed.
+  // The curtain covers the stage: nothing is known yet, or the computer is off, starting or failed.
   curtain: boolean;
-  // Nothing is known yet, so the curtain has no copy and no dot.
-  checking: boolean;
   // The stage isn't on screen, as in Replay.
   stageHidden: boolean;
   // A phone's keyboard is up and the band has collapsed.
@@ -18,11 +16,10 @@ export interface PresenceInput {
 export function presencePlace({
   showDot,
   curtain,
-  checking,
   stageHidden,
   keyboard,
 }: PresenceInput): PresencePlace | null {
-  if (!showDot || stageHidden || checking) return null;
+  if (!showDot || stageHidden) return null;
   if (curtain) return "hero";
   return keyboard ? "badge" : "dock";
 }
