@@ -32,6 +32,7 @@ import {
   type ApprovalChecks,
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
+import { ConnectionCards } from "./safety/connections.ts";
 import type { Purpose, PurposeGate } from "./safety/purpose.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { RuleError, type RulesStore } from "./safety/rules.ts";
@@ -194,6 +195,7 @@ export class AgentSession {
   // The user's own words for this task: the request and every message since.
   readonly requests: string[];
   readonly #approvals: ApprovalBroker;
+  readonly connections: ConnectionCards;
   readonly #approvalWindowMs: number | undefined;
   readonly #run: SessionRun | undefined;
   readonly #steps = new StepBarrier(() => {
@@ -326,6 +328,25 @@ export class AgentSession {
         if (change) this.append("rule.created", change);
       },
       ttl ?? APPROVAL_TIMEOUT_MS,
+    );
+    this.connections = new ConnectionCards(
+      task,
+      ({ fields, ...card }) => {
+        this.append("approval.request", { ...card, kind: "permission", preview: { fields } });
+      },
+      ({ always, ...resolution }) => {
+        let change: RuleChange | undefined;
+        let note = resolution.note;
+        try {
+          change =
+            always &&
+            this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+        } catch (error) {
+          note = `Allowed once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
+        }
+        this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
+        if (change) this.append("rule.created", change);
+      },
     );
   }
   get unattended(): boolean {
@@ -1580,6 +1601,7 @@ export class AgentSession {
     this.#stopping = true;
     this.status = "ended";
     this.#approvals.cancel(this.id);
+    this.connections.cancel("The task ended, so the connection stays closed.");
     const generation = this.generation;
     if (generation) this.retireBrain(generation);
     this.abort.abort(new SessionStoppedError());

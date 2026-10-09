@@ -36,6 +36,7 @@ import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrato
 import type { PortRange } from "../cells/ports.ts";
 import { type GateRelay, listenOnSocket } from "../cells/relay.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
+import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
 import type { EventLog } from "../event-log.ts";
@@ -77,6 +78,8 @@ import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
+import { ConnectionApprovals } from "./safety/connections.ts";
+import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
@@ -805,6 +808,24 @@ export function createAgent(d: AgentWiringDeps) {
       d.eventLog.append(id, { type, agent: "main", data } as never);
     },
   };
+  const connections = new ConnectionApprovals({
+    keyd: d.keyd,
+    task: (cellId) => {
+      const live = d.live.get(cellId);
+      const session = live ? runner.get(live) : undefined;
+      return session && !session.stopped ? session : undefined;
+    },
+    rules: new RulesStore(d.home),
+    owner: async (cellId, port) => {
+      const endpoint = d.cells.endpoints(cellId)?.desktopd;
+      return endpoint ? new DesktopdClient(endpoint).connectionOwner(port) : undefined;
+    },
+    cells: () =>
+      d.cells
+        .list()
+        .filter((cell) => cell.state === "ready")
+        .map((cell) => cell.id),
+  });
   // A computer for one daemon-initiated job (file previews), admitted like a user upload: refused
   // while the user holds control or Stop is running, and aborted by Stop.
   const computerAccess = (
@@ -832,6 +853,7 @@ export function createAgent(d: AgentWiringDeps) {
   return {
     runner,
     routes,
+    connections,
     computerAccess,
     // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.
     // Unlike agent tasks, they have no AgentSession whose runner can contain a lost reply.

@@ -177,6 +177,8 @@ export function useAgentSession(
     (snapshot?.pendingAsk ?? null) === current.model.pendingAsk &&
     (snapshot?.pendingTakeover ?? null) === current.model.pendingTakeover &&
     JSON.stringify(snapshot?.approval ?? null) === JSON.stringify(current.model.approval ?? null) &&
+    JSON.stringify(snapshot?.connection ?? null) ===
+      JSON.stringify(current.model.connection ?? null) &&
     JSON.stringify(snapshot?.pause ?? null) === JSON.stringify(current.model.safetyPause ?? null);
   const readFresh = Boolean(
     matches &&

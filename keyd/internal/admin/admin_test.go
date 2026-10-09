@@ -4,14 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -119,7 +122,7 @@ func weather() map[string]any {
 func TestStatus(t *testing.T) {
 	f := newFixture(t)
 	code, body := f.call(t, "GET", "/v1/status", nil)
-	if code != 200 || body["bootId"] != "boot-1" || body["sealKey"] != f.s.Opener.PublicKey() || body["version"] != "test" {
+	if code != 200 || body["bootId"] != "boot-1" || body["sealKey"] != f.s.Opener.PublicKey() || body["version"] != "test" || body["capture"] != true {
 		t.Fatalf("%d %v", code, body)
 	}
 	if state, _ := body["audit"].(map[string]any); state["ok"] != true {
@@ -313,5 +316,67 @@ func TestEventsStreamAsJSONLines(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(line), &e); err != nil || e.Type != "key.use" || e.Cell != "c1" || e.Data.SecretID != "anthropic" {
 		t.Fatalf("event line %q: %v", line, err)
+	}
+}
+
+func TestHeldConnectionsAreListedAndAnswered(t *testing.T) {
+	f := newFixture(t)
+	capture := strings.Repeat("c", 43)
+	for _, body := range []map[string]any{
+		{"cellId": "b1", "role": "brain", "port": 0, "captureToken": capture},
+		{"cellId": "d0", "role": "desktop", "port": 0, "captureToken": "short"},
+	} {
+		if code, _ := f.call(t, "POST", "/v1/cells", body); code != 400 {
+			t.Fatalf("capture token %v: %d", body, code)
+		}
+	}
+	code, opened := f.call(t, "POST", "/v1/cells", map[string]any{"cellId": "c1", "role": "desktop", "port": 0, "captureToken": capture})
+	if code != 201 {
+		t.Fatalf("open: %d %v", code, opened)
+	}
+	info, _ := f.s.Manager.Cell("c1")
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(info.Port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	auth := base64.StdEncoding.EncodeToString([]byte("cell:" + capture))
+	io.WriteString(conn, "CONNECT 93.184.216.34:8080 HTTP/1.1\r\nHost: 93.184.216.34:8080\r\nProxy-Authorization: Basic "+auth+"\r\nX-Localdot-Source: 40000\r\n\r\n")
+	var asks []any
+	for deadline := time.Now().Add(3 * time.Second); len(asks) == 0 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		_, listed := f.call(t, "GET", "/v1/cells/c1/asks", nil)
+		asks, _ = listed["asks"].([]any)
+	}
+	if len(asks) != 1 {
+		t.Fatalf("asks %v", asks)
+	}
+	ask := asks[0].(map[string]any)
+	if ask["host"] != "93.184.216.34" || ask["port"] != 8080.0 || ask["source"] != 40000.0 || ask["via"] != "capture" {
+		t.Fatalf("ask %v", ask)
+	}
+	id := ask["id"].(string)
+	for body, want := range map[string]int{`{"decision":"maybe"}`: 400, `{"decision":"allow","app":"a\nb"}`: 400} {
+		req, _ := http.NewRequest("POST", f.srv.URL+"/v1/cells/c1/asks/"+id, strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("%s: %d", body, resp.StatusCode)
+		}
+	}
+	if code, _ := f.call(t, "POST", "/v1/cells/c1/asks/"+id, map[string]any{"decision": "deny", "app": "chat"}); code != 204 {
+		t.Fatalf("answer: %d", code)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil || resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != egress.ReasonAskDenied {
+		t.Fatalf("refusal %v %v", resp, err)
+	}
+	if code, _ := f.call(t, "POST", "/v1/cells/c1/asks/"+id, map[string]any{"decision": "allow"}); code != 404 {
+		t.Fatalf("answered twice: %d", code)
+	}
+	if code, _ := f.call(t, "GET", "/v1/cells/nope/asks", nil); code != 404 {
+		t.Fatalf("unknown cell: %d", code)
 	}
 }

@@ -27,6 +27,8 @@ type TakeoverReason = RequestTakeoverInput["reason"];
 // What the live task feed knows beyond the timeline. Replay has only the timeline.
 export interface TaskFacts {
   readonly approval: boolean;
+  // An app's connection waits on a card; dot itself carries on.
+  readonly connection: boolean;
   readonly question: string | null;
   readonly takeover: string | null;
   // The user has the computer: "user" when they asked for it, or the reason dot handed it over once
@@ -80,6 +82,7 @@ export function taskFacts(model: AgentModel): TaskFacts {
   const yours = heldByUser(model);
   return {
     approval: !!model.approval,
+    connection: !!model.connection,
     question: model.pendingAsk
       ? markdownToPlain(model.questions.get(model.pendingAsk)?.question ?? "")
       : null,
@@ -312,6 +315,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (facts?.yours) return waiting("control", "You're in control", YOUR_TURN[facts.yours]);
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
+  if (facts?.connection)
+    return waiting("approval", "Needs your OK", "Waiting for your OK to connect.", true);
   if (facts?.question != null)
     return waiting(
       "question",

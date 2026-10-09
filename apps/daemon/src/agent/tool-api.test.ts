@@ -1,5 +1,5 @@
 import { ULID_PATTERN, ulid } from "@localdot/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolPolicy } from "./policy.ts";
 import {
   toolHarness as createHarness,
@@ -541,6 +541,26 @@ describe("the tools", () => {
       kind: "files",
       origin: "command output",
     });
+  });
+
+  it("adds what changed for apps' connections to the next tool result, once", async () => {
+    const h = toolHarness();
+    h.desktop.shellDone = { exitCode: 0 };
+    const first = await h.call("shell", { command: "curl -sI https://chat.example.com" });
+    expect(first.body.content.at(-1)?.text).toContain("curl --noproxy '*'");
+    void h.session.connections.request({
+      app: "wechat",
+      host: "long.example.com",
+      port: 8080,
+      why: async () => "wechat hasn't used this destination before.",
+    });
+    await vi.waitFor(() => expect(h.session.connections.pending).toBeDefined());
+    const second = await h.call("shell", { command: "ls" });
+    expect(second.body.content.at(-1)?.text).toContain(
+      'The app "wechat" is waiting for the user\'s OK to connect to long.example.com:8080.',
+    );
+    const third = await h.call("shell", { command: "ls" });
+    expect(third.body.content).toHaveLength(1);
   });
 
   it("starts a call's step with dot's line for it, as one line of plain text", async () => {

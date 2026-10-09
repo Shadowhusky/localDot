@@ -129,6 +129,8 @@ export const KeydStatus = z.object({
   audit: z.object({ ok: z.boolean(), error: z.string().optional() }),
   hairpin: HairpinGuard.nullish(),
   vault: KeydVault.nullish(),
+  // keyd takes a desktop gate's capture token; one from before capture refuses it.
+  capture: z.boolean().optional(),
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
 
@@ -222,6 +224,18 @@ export const BudgetData = z.object({
   needUSD: z.number().optional(),
 });
 
+// A connection keyd holds for the user's answer: where it goes, the local port of the program in
+// the cell (when known) and whether the gate captured it or a program asked the proxy.
+export const KeydAsk = z.object({
+  id: z.string().regex(/^[0-9a-f]{32}$/),
+  host: z.string().min(1).max(253),
+  port: z.number().int().min(1).max(65535),
+  source: z.number().int().min(1).max(65535).optional(),
+  via: z.enum(["proxy", "capture"]),
+});
+export type KeydAsk = z.infer<typeof KeydAsk>;
+export const KeydAsks = z.object({ asks: z.array(KeydAsk).nullish() });
+
 // One settled model call: billed when the provider's answer named its cost. A limit of 0 is none.
 export const SpendData = z.object({
   taskId: z.string(),
@@ -236,6 +250,7 @@ export const SpendData = z.object({
 });
 
 export const KeydEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("egress.ask"), cell: z.string(), time: z.string(), data: KeydAsk }),
   z.object({ type: z.literal("key.use"), cell: z.string(), time: z.string(), data: KeyUseData }),
   z.object({
     type: z.literal("budget.exceeded"),

@@ -302,8 +302,8 @@ func textFields(t *testing.T) []string {
 			t.Fatalf("Line.%s has kind %s, which redact does not cover", f.Name, f.Type.Kind())
 		}
 	}
-	if len(names) != 15 {
-		t.Fatalf("Line has %d text fields, want 15: %v", len(names), names)
+	if len(names) != 17 {
+		t.Fatalf("Line has %d text fields, want 17: %v", len(names), names)
 	}
 	return names
 }

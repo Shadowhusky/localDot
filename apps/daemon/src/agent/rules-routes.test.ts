@@ -198,6 +198,25 @@ describe("Always allow routes", () => {
     );
   });
 
+  it("undoes a connection's task allowance for its own destination only", async () => {
+    const f = setup();
+    const autonomy = f.session.taskAutonomy;
+    for (const destination of ["chat.example.com:5222", "chat.example.com:5223"])
+      autonomy.grant("network", { scope: "task", label: "For this task", destination }, ulid());
+    const path = `/api/agent/sessions/${f.session.id}/allowances/network`;
+    expect((await f.send("DELETE", path)).status).toBe(404);
+    const one = `${path}?destination=${encodeURIComponent("chat.example.com:5222")}`;
+    expect((await f.send("DELETE", one)).status).toBe(204);
+    expect(autonomy.relaxes("network", { destination: "chat.example.com:5222" })).toBe(false);
+    expect(autonomy.relaxes("network", { destination: "chat.example.com:5223" })).toBe(true);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        type: "rule.removed",
+        data: expect.objectContaining({ destination: "chat.example.com:5222" }),
+      }),
+    );
+  });
+
   it("leaves a stopped task's allowances and log alone", async () => {
     const f = setup();
     f.session.taskAutonomy.grant("send", { scope: "task", label: "For this task" }, ulid());
@@ -249,5 +268,55 @@ describe("Always allow routes", () => {
     } finally {
       log.close();
     }
+  });
+});
+
+describe("a connection's card", () => {
+  it("is answered through the task's approval route whatever the brain is doing, and its Always is listed", async () => {
+    const f = setup();
+    const { session, app } = f;
+    const decision = session.connections.request({
+      app: "wechat",
+      host: "chat.example.com",
+      port: 5222,
+      why: async () => "wechat hasn't used this destination before.",
+    });
+    const card = await vi.waitFor(() => {
+      const shown = session.connections.pending;
+      if (!shown) throw new Error("no card yet");
+      return shown;
+    });
+    if (!card) throw new Error("no card");
+    const generation = session.generation;
+    if (generation) session.retireBrain(generation);
+    const post = (body: unknown) =>
+      app.request(`http://127.0.0.1/api/agent/sessions/${session.id}/approvals/answer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const answer = {
+      approvalId: card.approvalId,
+      generation: card.generation,
+      revision: card.revision,
+      decision: "approve",
+      always: "destination",
+    };
+    expect((await post({ ...answer, revision: card.revision + 1 })).status).toBe(409);
+    expect((await post(answer)).status).toBe(204);
+    await expect(decision).resolves.toMatchObject({ allow: true });
+    const listed = (await (await f.send("GET", "/api/agent/rules")).json()) as {
+      rules: AutonomyRule[];
+    };
+    expect(listed.rules).toMatchObject([
+      {
+        actionClass: "network",
+        scope: "destination",
+        destination: "chat.example.com:5222",
+        app: "wechat",
+        label: "Always for apps named wechat on chat.example.com · port 5222",
+      },
+    ]);
+    expect((await post(answer)).status).toBe(409);
   });
 });

@@ -41,11 +41,14 @@ func TestConnectPolicy(t *testing.T) {
 		authority string
 		reason    string
 	}{
-		{"ip literal", desktop, "127.0.0.1:443", policy.ReasonIPLiteral},
-		{"ipv6 literal", desktop, "[::1]:443", policy.ReasonIPLiteral},
-		{"mapped literal", desktop, "[::ffff:127.0.0.1]:443", policy.ReasonIPLiteral},
-		{"metadata literal", desktop, "169.254.169.254:443", policy.ReasonIPLiteral},
-		{"tls on 443 only", desktop, "www.example.test:8443", policy.ReasonPort},
+		{"loopback address", desktop, "127.0.0.1:443", ReasonAddress},
+		{"ipv6 loopback", desktop, "[::1]:443", ReasonAddress},
+		{"mapped loopback", desktop, "[::ffff:127.0.0.1]:443", ReasonAddress},
+		{"metadata address", desktop, "169.254.169.254:80", ReasonAddress},
+		{"private address", desktop, "192.168.1.20:8080", ReasonAddress},
+		{"zoned address", desktop, "[fe80::1%25eth0]:443", policy.ReasonHostInvalid},
+		{"smtp", desktop, "mail.example.test:25", policy.ReasonSMTP},
+		{"another port resolves before asking", desktop, "missing.example.test:8443", ReasonResolve},
 		{"port required", desktop, "www.example.test", policy.ReasonHostInvalid},
 		{"deny list", desktop, "nas.home.arpa:443", policy.ReasonHostDenied},
 		{"the gateway is plain http only", desktop, "llm.ldot:443", policy.ReasonHostDenied},

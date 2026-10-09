@@ -76,6 +76,7 @@ type Cell struct {
 	intercepted    map[string]bool
 	authLog        rateLog
 	connectionLog  rateLog
+	asks           askBook
 	mu             sync.Mutex
 	gen            *generation
 	closed         bool
@@ -189,15 +190,18 @@ func (c *Cell) Revoke() {
 }
 
 func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if reason := c.authorize(r.Header.Values("Proxy-Authorization")); reason != "" {
+	via, reason := c.authorize(r.Header.Values("Proxy-Authorization"))
+	if reason != "" {
 		c.refuseAuth(w, r, reason)
 		return
 	}
 	r.Header.Del("Proxy-Authorization")
 	line := audit.Line{Kind: audit.KindRequest, Method: r.Method, Host: r.URL.Hostname(), Path: r.URL.Path}
 	switch {
+	case via == ViaCapture && r.Method != http.MethodConnect:
+		c.deny(w, line, http.StatusBadRequest, ReasonCaptureUse)
 	case r.Method == http.MethodConnect:
-		c.connect.ServeHTTP(w, r)
+		c.connect.ServeHTTP(w, withVia(r, via))
 	case !r.URL.IsAbs() || r.URL.Scheme != "http":
 		c.deny(w, line, http.StatusBadRequest, ReasonBadRequest)
 	case isInternal(r.URL):
@@ -209,24 +213,30 @@ func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// authorize accepts only Basic credentials whose password is the cell's token.
-func (c *Cell) authorize(values []string) string {
+// authorize accepts only Basic credentials whose password is the cell's token, or the gate's
+// capture token, and says which of the two came.
+func (c *Cell) authorize(values []string) (string, string) {
 	if len(values) == 0 {
-		return ReasonAuthMissing
+		return "", ReasonAuthMissing
 	}
 	scheme, encoded, ok := strings.Cut(values[0], " ")
 	if len(values) > 1 || !ok || !strings.EqualFold(scheme, "Basic") {
-		return ReasonAuthInvalid
+		return "", ReasonAuthInvalid
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil {
-		return ReasonAuthInvalid
+		return "", ReasonAuthInvalid
 	}
 	_, pass, ok := strings.Cut(string(raw), ":")
-	if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(c.cfg.Token)) != 1 {
-		return ReasonAuthInvalid
+	switch {
+	case !ok:
+		return "", ReasonAuthInvalid
+	case subtle.ConstantTimeCompare([]byte(pass), []byte(c.cfg.Token)) == 1:
+		return ViaProxy, ""
+	case c.cfg.CaptureToken != "" && subtle.ConstantTimeCompare([]byte(pass), []byte(c.cfg.CaptureToken)) == 1:
+		return ViaCapture, ""
 	}
-	return ""
+	return "", ReasonAuthInvalid
 }
 
 // refuseAuth answers 407. Any container with egress can reach the listener, so refusals are

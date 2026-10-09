@@ -1149,15 +1149,18 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const shape = islandShape(appStatus, curtain.up || opening);
   const sheetsClosed = !settings.open;
+  const approval = safety.approval;
+  // The card shown is the task's own step, not an app's connection.
+  const stepApproval = !!approval && !!agent.snapshot?.approval;
   const decision = replayId
     ? null
     : islandDecision({
         shape,
-        approval: !!safety.approval && sheetsClosed,
+        approval: !!approval && sheetsClosed,
+        connection: !!approval && !stepApproval,
         question: !!question && !agent.model.ended && sheetsClosed,
         chatShown: shownView === "chat" || wide || phone,
       });
-  const approval = safety.approval;
   const approvalView = approval && decision === "approval" && (
     <ApprovalDecision
       key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
@@ -1267,9 +1270,11 @@ function Theatre({ api }: { api: ApiClient }) {
   // starts.
   const liveTask = !!agent.sessionId && !session.ended && !ownHold;
   // Take control works whatever dot is doing: it does an approval's step instead of dot, takes the
-  // computer dot handed over, or takes it from dot at work, at rest or paused.
+  // computer dot handed over, or takes it from dot at work, at rest or paused. An app's connection
+  // card is no step to do instead of dot: it waits while the user takes the computer.
+  const stepDecision = decision === "approval" && !stepApproval ? null : decision;
   const take = () => {
-    if (decision === "approval" && approval) {
+    if (stepDecision === "approval" && approval) {
       if (!safety.canApprove || safety.pending) return;
       void safety.answerApproval({
         approvalId: approval.approvalId,
@@ -1288,7 +1293,7 @@ function Theatre({ api }: { api: ApiClient }) {
     pause: safety.pause?.phase,
   });
   const takeState = takeSlot(appStatus, {
-    decision,
+    decision: stepDecision,
     blocked: takeBlocked,
     taking: controls.taking,
   });
@@ -1379,7 +1384,9 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const touchStill = useStill(focus);
   const edgeStill = useEdgeStill(full);
-  const still = (touchStill || edgeStill) && !islandAttention(appStatus);
+  // A decision grown out of the island fades with it, so the island stays while one is out: an
+  // app's connection card while the user holds the computer has no attention of its own.
+  const still = (touchStill || edgeStill) && !islandAttention(appStatus) && !grown;
   useFullScreenKeys({
     enabled: !phone && !curtain.up && !replayId,
     apple: isApple(),

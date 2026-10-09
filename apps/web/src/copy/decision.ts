@@ -30,6 +30,7 @@ const QUESTION: Readonly<Record<ActionClass, string>> = {
   upload: "Upload these files?",
   credentials: "Use this password or code?",
   unknown: "Allow this step?",
+  network: "Allow this connection?",
 };
 
 const ASK: Readonly<Record<ActionClass, string>> = {
@@ -46,6 +47,7 @@ const ASK: Readonly<Record<ActionClass, string>> = {
   upload: "Can I upload these files?",
   credentials: "Can I use this password or code?",
   unknown: "Can I take this step?",
+  network: "Can I let this app connect?",
 };
 
 // A question for the user, such as "Send this email?", becomes dot asking to do it.
@@ -91,6 +93,7 @@ const WORK: Readonly<Record<ActionClass, string>> = {
   upload: "uploading files",
   credentials: "using passwords",
   unknown: "unclear steps",
+  network: "connections beyond websites",
 };
 
 const WAITS = "dot waits here; nothing times out.";
@@ -98,25 +101,39 @@ const WAITS = "dot waits here; nothing times out.";
 // The daemon's own words for this action and its reason win; its plain class name becomes a
 // question.
 export function decisionWords(
-  card: Pick<ApprovalCard, "actionClass" | "title" | "why">,
+  card: Pick<ApprovalCard, "actionClass" | "title" | "why"> & Partial<Pick<ApprovalCard, "fields">>,
 ): DecisionWords {
   const { actionClass } = card;
   const verb = VERB[actionClass] ?? "Allow";
   const always = ALWAYS_ASKS[actionClass];
   const title =
     card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title;
+  // A connection is the app's, not dot's: dot keeps working, so its reason stands alone.
+  const network = actionClass === "network";
   return {
     title,
     primary: verb,
     secondary: `Don't ${verb.toLowerCase()}`,
-    why: card.why
-      ? `${card.why} ${WAITS}`
-      : always
-        ? `${always} always needs your OK. ${WAITS}`
-        : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
-    line: askLine(actionClass, title),
+    why: network
+      ? (card.why ?? "Apps reach websites on their own; anything else waits for your OK.")
+      : card.why
+        ? `${card.why} ${WAITS}`
+        : always
+          ? `${always} always needs your OK. ${WAITS}`
+          : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
+    line: (network && connectionLine(card.fields)) || askLine(actionClass, title),
   };
 }
+
+// dot says which app is reaching out, while the card waits.
+function connectionLine(fields: ApprovalCard["fields"] | undefined): string | undefined {
+  const app = fields?.find(([label]) => label === "App")?.[1];
+  if (!fields) return undefined;
+  return `${app && app !== NOT_KNOWN ? app : "An app"} is trying to reach a new server.`;
+}
+
+// The daemon's word for an app it couldn't name.
+export const NOT_KNOWN = "Not known";
 
 export const ONCE = "once";
 export type DecisionScope = AlwaysScope | typeof ONCE;

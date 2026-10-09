@@ -189,6 +189,89 @@ describe("CellOrchestrator.update", () => {
     expect(orchestrator.endpoints(id)?.desktopd.token).toBe(record.tokens.desktopd);
   });
 
+  it("gives a computer made before capture the gate's token, and containers that capture", async () => {
+    const wired: CellRecord[] = [];
+    const { store, boot, id, record } = await setup({
+      keyd: { ...keyd(), wire: async (r) => void wired.push(structuredClone(r)) },
+    });
+    const { capture: _capture, ...tokens } = record.tokens;
+    store.save({ ...record, tokens });
+    for (const o of made.splice(0)) o.dispose();
+    const { updates, orchestrator } = boot();
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    rebuild();
+    await updates.check(store.get(id) as CellRecord);
+    await orchestrator.update(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    const capture = store.get(id)?.tokens.capture;
+    expect(capture).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(store.get(id)?.tokens).toMatchObject(tokens);
+    const gate = fake.state.containers.get(record.docker.gate)?.body as
+      | { Env?: string[]; User?: string }
+      | undefined;
+    expect(gate?.Env).toContain(`LD_CAPTURE_TOKEN=${capture}`);
+    expect(wired.at(-1)?.tokens.capture).toBe(capture);
+    expect(gate?.User).toBe("root");
+    expect(fake.state.containers.get(record.docker.desktop)?.body.HostConfig.Dns).toEqual([
+      record.docker.gateInternalIp,
+    ]);
+  });
+
+  // A rebuilt gate image from before capture: no capture label and no link.sh for the helper.
+  const rebuildOlderGate = () => {
+    rebuild();
+    fake.state.imageLabels.clear();
+    fake.state.failRequests.add("POST /containers/id-localdot-link-");
+  };
+  const capturing = (store: CellStore, record: CellRecord) => {
+    const gate = fake.state.containers.get(record.docker.gate)?.body as
+      | { Env?: string[]; User?: string }
+      | undefined;
+    return {
+      token: store.get(record.id)?.tokens.capture,
+      user: gate?.User,
+      env: gate?.Env?.some((entry) => entry.startsWith("LD_CAPTURE_TOKEN=")),
+      dns: fake.state.containers.get(record.docker.desktop)?.body.HostConfig.Dns,
+    };
+  };
+  const NOT_CAPTURING = { token: undefined, user: "nobody", env: false, dns: undefined };
+
+  it("keeps a computer made before capture without it when the new gate image can't capture", async () => {
+    const wired: CellRecord[] = [];
+    const { store, boot, id, record } = await setup({
+      keyd: { ...keyd(), wire: async (r) => void wired.push(structuredClone(r)) },
+    });
+    const { capture: _capture, ...tokens } = record.tokens;
+    store.save({ ...record, tokens });
+    for (const o of made.splice(0)) o.dispose();
+    const { updates, orchestrator } = boot();
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    rebuildOlderGate();
+    await updates.check(store.get(id) as CellRecord);
+    await orchestrator.update(id);
+    await waitUntil(() => ["ready", "failed"].includes(orchestrator.get(id)?.state ?? ""));
+    expect(orchestrator.get(id)?.state).toBe("ready");
+    expect(fake.state.containers.get(record.docker.gate)?.image).toBe(NEW_GATE);
+    expect(capturing(store, record)).toEqual(NOT_CAPTURING);
+    expect(wired.at(-1)?.tokens).not.toHaveProperty("capture");
+  });
+
+  it("gives up the gate's token when the computer goes onto a gate image that can't capture", async () => {
+    const { updates, orchestrator, store, id, record } = await setup();
+    expect(capturing(store, record).token).toBe(record.tokens.capture);
+    rebuildOlderGate();
+    await updates.check(record);
+    await orchestrator.update(id);
+    await waitUntil(() => ["ready", "failed"].includes(orchestrator.get(id)?.state ?? ""));
+    expect(orchestrator.get(id)?.state).toBe("ready");
+    expect(fake.state.containers.get(record.docker.gate)?.image).toBe(NEW_GATE);
+    expect(store.get(id)?.tokens).toEqual({
+      desktopd: record.tokens.desktopd,
+      stream: record.tokens.stream,
+    });
+    expect(capturing(store, record)).toEqual(NOT_CAPTURING);
+  });
+
   it("gives the new gate keyd's socket on Docker Engine", async () => {
     const relay = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" } as const;
     const { updates, orchestrator, id, record } = await setup({ relay: async () => relay });

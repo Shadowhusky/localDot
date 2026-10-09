@@ -180,6 +180,13 @@ describe("islandDecision", () => {
       expect(islandDecision({ ...base, shape, approval: true, chatShown: false })).toBeNull();
     expect(islandDecision(base)).toBeNull();
   });
+
+  it("grows only an app's connection card while the user holds the computer", () => {
+    const control = { ...base, shape: "control" as const };
+    expect(islandDecision({ ...control, approval: true, connection: true })).toBe("approval");
+    expect(islandDecision({ ...control, approval: true })).toBeNull();
+    expect(islandDecision({ ...control, question: true, chatShown: false })).toBeNull();
+  });
 });
 
 describe("takeReason", () => {

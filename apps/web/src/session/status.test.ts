@@ -179,6 +179,32 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     });
   });
 
+  it("says an app's connection waits for the user's OK, then goes back to dot's work", () => {
+    const begun = start();
+    const card = ev("approval.request", 1500, {
+      approvalId: ID,
+      generation: 1,
+      revision: 1,
+      expiresAt: 9_999_999_999,
+      actionClass: "network",
+      risk: "medium",
+      title: "WeChat wants to connect to long.example.com on port 8080",
+      kind: "permission",
+      preview: { fields: [["App", "WeChat"]] },
+    });
+    expect(view([...begun, card], 9500).task).toMatchObject({
+      row: "approval",
+      label: "Needs your OK",
+      caption: "Waiting for your OK to connect.",
+    });
+    const answered = ev("approval.resolve", 1600, {
+      approvalId: ID,
+      decision: "approve",
+      by: "user",
+    });
+    expect(view([...begun, card, answered], 9500).task.row).not.toBe("approval");
+  });
+
   it("in Replay, ends a wait once the user settles it or a new step starts", () => {
     const approved = [
       ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux" }),

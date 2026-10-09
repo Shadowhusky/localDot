@@ -56,6 +56,7 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { connectionWhy } from "../../../daemon/src/agent/safety/connections.ts";
 import { PurposeGate } from "../../../daemon/src/agent/safety/purpose.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
@@ -1786,6 +1787,18 @@ function requestApproval(
   { always = false, repeat = 1, kind = "" } = {},
 ): string | undefined {
   if (!session?.generation) return "no brain";
+  if (kind === "port") {
+    // An app's connection beyond the web, as the daemon asks about one keyd holds.
+    void session.connections
+      .request({
+        app: "WeChat",
+        host: "long.weixin.qq.com",
+        port: 8080,
+        why: async () => connectionWhy("WeChat", undefined, []),
+      })
+      .then((decision) => effects.push(`connection:${decision.allow ? "allow" : "deny"}`));
+    return;
+  }
   const card = computerCard(kind);
   const facts = card?.facts ?? (call && toolRisk(call.tool, call.input));
   call = card ?? call;
@@ -1886,33 +1899,21 @@ function requestApproval(
             decide(facts, session.autonomy),
             (text) => text,
           )
-        : kind === "port"
-          ? ({
-              actionClass: "browsing",
-              risk: "medium",
-              title: "WeChat wants to connect to host:8080",
-              fields: [
-                ["App", "WeChat, on your computer"],
-                ["Destination", "host:8080 · TCP"],
-                ["For the task", "Send “hi” to Henry on WeChat"],
-              ],
-              always: [{ scope: "task", label: "For this task" }],
-            } as never)
-          : ({
-              actionClass: "send",
-              risk,
-              title: "Send this email?",
-              fields: [
-                ["From", "henry.liao@example.test (you)"],
-                ["To", "team@example.test · 4 people"],
-                ["Subject", "Monthly report (sample)"],
-                ["Attached", "summary.md · 2 KB"],
-              ],
-              always: [
-                { scope: "task", label: "For this task" },
-                { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
-              ],
-            } as never),
+        : ({
+            actionClass: "send",
+            risk,
+            title: "Send this email?",
+            fields: [
+              ["From", "henry.liao@example.test (you)"],
+              ["To", "team@example.test · 4 people"],
+              ["Subject", "Monthly report (sample)"],
+              ["Attached", "summary.md · 2 KB"],
+            ],
+            always: [
+              { scope: "task", label: "For this task" },
+              { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
+            ],
+          } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))

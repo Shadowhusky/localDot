@@ -32,33 +32,10 @@ type Dialer struct {
 }
 
 func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	if err := checkNetwork(network, address); err != nil {
-		return nil, err
-	}
-	host, portText, err := net.SplitHostPort(address)
+	targets, err := d.targets(ctx, network, address)
 	if err != nil {
 		return nil, err
 	}
-	port, err := strconv.ParseUint(portText, 10, 16)
-	if err != nil || port == 0 {
-		return nil, fmt.Errorf("netguard: bad port in %q", address)
-	}
-	ips, err := d.resolve(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	targets := make([]netip.AddrPort, 0, len(ips))
-	for _, ip := range ips {
-		ap := netip.AddrPortFrom(ip.Unmap(), uint16(port))
-		// One denied answer refuses the name: a mix of public and private answers is a rebinding shape.
-		if err := d.Guard.Check(ap); err != nil {
-			return nil, err
-		}
-		targets = append(targets, ap)
-	}
-	slices.SortStableFunc(targets, func(a, b netip.AddrPort) int {
-		return rank(a) - rank(b)
-	})
 	timeout := d.Timeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
@@ -86,6 +63,44 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 		return c, nil
 	}
 	return nil, errors.Join(errs...)
+}
+
+// Check resolves address and checks every answer as DialContext does, without dialling: a refusal
+// that needs nobody's decision is known before anyone is asked. DialContext checks again.
+func (d *Dialer) Check(ctx context.Context, network, address string) error {
+	_, err := d.targets(ctx, network, address)
+	return err
+}
+
+func (d *Dialer) targets(ctx context.Context, network, address string) ([]netip.AddrPort, error) {
+	if err := checkNetwork(network, address); err != nil {
+		return nil, err
+	}
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 {
+		return nil, fmt.Errorf("netguard: bad port in %q", address)
+	}
+	ips, err := d.resolve(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]netip.AddrPort, 0, len(ips))
+	for _, ip := range ips {
+		ap := netip.AddrPortFrom(ip.Unmap(), uint16(port))
+		// One denied answer refuses the name: a mix of public and private answers is a rebinding shape.
+		if err := d.Guard.Check(ap); err != nil {
+			return nil, err
+		}
+		targets = append(targets, ap)
+	}
+	slices.SortStableFunc(targets, func(a, b netip.AddrPort) int {
+		return rank(a) - rank(b)
+	})
+	return targets, nil
 }
 
 func (d *Dialer) resolve(ctx context.Context, host string) ([]netip.Addr, error) {

@@ -43,6 +43,11 @@ func (d *recordingDialer) DialContext(ctx context.Context, network, address stri
 	return d.next.DialContext(ctx, network, address)
 }
 
+// Check is not a dial: it resolves and checks only, so it is not recorded.
+func (d *recordingDialer) Check(ctx context.Context, network, address string) error {
+	return d.next.(checker).Check(ctx, network, address)
+}
+
 func (d *recordingDialer) addresses() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -64,7 +69,7 @@ func (w *world) cellWith(id string, role policy.Role, d Dialer) *Cell {
 	}
 	deps := w.deps()
 	deps.Dialer = d
-	c, err := Open(Config{CellID: id, Policy: p, Token: testToken}, deps)
+	c, err := Open(Config{CellID: id, Policy: p, Token: testToken, AskHold: testAskHold}, deps)
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -325,7 +330,7 @@ func TestOnlyAbsoluteHTTPIsServed(t *testing.T) {
 	w.plainUpstream("ports.example.test", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	c, rd := w.recordingCell("c1", policy.Desktop)
 	for req, want := range map[string]int{
-		"CONNECT ports.example.test:80 HTTP/1.1\r\nHost: ports.example.test:80\r\n":     http.StatusForbidden,
+		"CONNECT ports.example.test:25 HTTP/1.1\r\nHost: ports.example.test:25\r\n":     http.StatusForbidden,
 		"GET https://ports.example.test/ HTTP/1.1\r\nHost: ports.example.test\r\n":      http.StatusBadRequest,
 		"GET ftp://ports.example.test/ HTTP/1.1\r\nHost: ports.example.test\r\n":        http.StatusBadRequest,
 		"GET ws://ports.example.test/ HTTP/1.1\r\nHost: ports.example.test\r\n":         http.StatusBadRequest,

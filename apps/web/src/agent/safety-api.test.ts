@@ -35,6 +35,15 @@ it("removes only a rule or allowance named by a real id and class", () => {
   expect(fetchImpl).not.toHaveBeenCalled();
 });
 
+it("undoes a connection's allowance for its own destination", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const api = createApi("fixture", { origin: "https://owned.invalid", fetchImpl });
+  await removeAllowance(api, SESSION, "network", signal, "[2001:db8::7]:8443");
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+    `https://owned.invalid/api/agent/sessions/${SESSION}/allowances/network?destination=%5B2001%3Adb8%3A%3A7%5D%3A8443`,
+  );
+});
+
 it("reads at most 200 rules and nothing it does not expect", async () => {
   const most = Array.from({ length: 200 }, (_, n) => rule(n));
   expect((await loadRules(setup({ rules: most }).api, signal)).rules).toHaveLength(200);

@@ -291,6 +291,7 @@ describe("CellOrchestrator with keyd", () => {
       role: "desktop",
       port: 4791,
       secrets: ["weather"],
+      captureToken: r.tokens.capture,
     });
     const files = docker.state.containers.get(r.docker.desktop)?.files;
     expect(files?.get(`${CELL_FILES_DIR}/ca.pem`)?.toString()).toBe(FAKE_CA_PEM);

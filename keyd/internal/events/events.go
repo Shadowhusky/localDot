@@ -10,6 +10,7 @@ import (
 const (
 	TypeKeyUse  = "key.use"
 	TypeBudget  = "budget.exceeded"
+	TypeAsk     = "egress.ask"
 	TypeSpend   = "model.spend"
 	TypeDropped = "events.dropped"
 )
@@ -35,6 +36,16 @@ type Budget struct {
 	TaskID   string  `json:"taskId,omitempty"`
 	LimitUSD float64 `json:"limitUSD"`
 	SpentUSD float64 `json:"spentUSD"`
+}
+
+// Ask is a connection held until the daemon answers it: where to, from which local port of the
+// cell's computer (0 when unknown) and whether the gate captured it or a program asked the proxy.
+type Ask struct {
+	ID     string `json:"id"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Source int    `json:"source,omitempty"`
+	Via    string `json:"via"`
 }
 
 // Spend is one settled model call. Billed marks a cost the provider stated; a limit of 0 is none.

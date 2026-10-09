@@ -5,7 +5,7 @@ import { PrivateRecords } from "../agent/safety/private-records.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import { retireExactContainers } from "./exact-retirement.ts";
-import type { Images } from "./images.ts";
+import { gateCaptures, type ImageInspect, type Images } from "./images.ts";
 import {
   CellControlConflict,
   type CellOrchestrator,
@@ -15,6 +15,7 @@ import {
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
 import { type GateRelay, HOST_RELAY } from "./relay.ts";
+import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -205,14 +206,23 @@ export class ComputerUpdates {
   async swap(record: CellRecord, save: Save): Promise<CellRecord> {
     if (this.#store().read(record.id)) throw failure();
     const previous = ownedContainers(record);
-    const images = await this.#targets();
-    if (!images) throw new CellControlConflict(NOT_HERE);
+    const target = await this.#targets();
+    if (!target) throw new CellControlConflict(NOT_HERE);
+    const { images, capture } = target;
     const old = await Promise.all(ROLES.map((role) => this.#container(previous[role])));
     if (old.some((raw) => raw?.State?.Running !== false))
       throw new CellControlConflict("Your computer has to be off to update.");
     if (ROLES.every((role, i) => old[i]?.Image === images[role])) {
       this.#available.set(record.id, false);
       return record;
+    }
+    // The gate's token follows the gate image: a computer made before the gate captured apps that
+    // ignore the proxy gets one, and one going onto a gate image that can't capture gives it up.
+    // It is kept before anything is made, so the new containers match it from their first start.
+    if (capture !== !!record.tokens.capture) {
+      const { capture: _, ...tokens } = record.tokens;
+      record = { ...record, tokens: capture ? { ...tokens, capture: newCellToken() } : tokens };
+      save(record);
     }
     let entry: ComputerUpdateRecord = {
       v: 1,
@@ -401,7 +411,7 @@ export class ComputerUpdates {
 
   async #outdated(record: CellRecord): Promise<boolean> {
     if (!record.ownership || this.pending(record.id)) return false;
-    const images = await this.#targets();
+    const images = (await this.#targets())?.images;
     if (!images) return false;
     for (const role of ROLES) {
       const raw = await this.#container(record.ownership[role]);
@@ -411,17 +421,19 @@ export class ComputerUpdates {
     return false;
   }
 
-  async #targets(): Promise<{ gate: string; desktop: string } | undefined> {
+  async #targets(): Promise<{ images: Record<Role, string>; capture: boolean } | undefined> {
     const ids: Partial<Record<Role, string>> = {};
+    let capture = false;
     for (const role of ROLES) {
-      const raw = await this.#read<{ Id?: unknown }>(
+      const raw = await this.#read<ImageInspect & { Id?: unknown }>(
         `/images/${encodeURIComponent(this.#images[role])}/json`,
       );
       const id = ImageId.safeParse(raw?.Id);
       if (!id.success) return undefined;
       ids[role] = id.data;
+      if (role === "gate") capture = gateCaptures(raw);
     }
-    return ids as { gate: string; desktop: string };
+    return { images: ids as Record<Role, string>, capture };
   }
 
   #container(ref: string): Promise<ContainerInspect | undefined> {

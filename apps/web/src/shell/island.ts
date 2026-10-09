@@ -73,12 +73,15 @@ export function pauseSlot({
 
 // What grows out of the island: an approval always, and a question while the chat that holds it
 // is out of sight. A phone shows the approval in a sheet instead and keeps the question in its
-// thread, which is always in sight there.
+// thread, which is always in sight there. An app's connection card is no step of dot's, so it
+// grows out of the island while the user holds the computer too.
 export type IslandDecision = "approval" | "question" | null;
 
 export interface DecisionInput {
   shape: IslandShape;
   approval: boolean;
+  // The approval is an app's connection card.
+  connection?: boolean;
   question: boolean;
   chatShown: boolean;
 }
@@ -86,9 +89,11 @@ export interface DecisionInput {
 export function islandDecision({
   shape,
   approval,
+  connection = false,
   question,
   chatShown,
 }: DecisionInput): IslandDecision {
+  if (shape === "control") return approval && connection ? "approval" : null;
   if (shape !== "task") return null;
   if (approval) return "approval";
   return question && !chatShown ? "question" : null;

@@ -45,6 +45,12 @@ export class CellKeydWiring implements CellKeyd {
       if (container.State.Running !== false)
         throw new KeyLayerError("stop the computer before replacing its key material");
       const secrets = await this.#webSecrets();
+      // A keyd from before capture refuses the token, so the computer starts without capture
+      // until keyd is updated; its restart opens the cell again, with the token.
+      const capture =
+        record.tokens.capture && (await keyd.status()).capture === true
+          ? record.tokens.capture
+          : undefined;
       await keyd.closeCell(record.id);
       try {
         const opened = await keyd.openCell({
@@ -52,6 +58,7 @@ export class CellKeydWiring implements CellKeyd {
           role: "desktop",
           port: record.keydPort,
           secrets,
+          ...(capture ? { captureToken: capture } : {}),
         });
         if (opened.cellId !== record.id || opened.port !== record.keydPort)
           throw new KeyLayerError("keyd opened a different cell or listener");

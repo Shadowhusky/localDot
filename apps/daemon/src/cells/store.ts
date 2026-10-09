@@ -89,10 +89,14 @@ export function decodeRecord(
     keydPort >= ports.from &&
     keydPort <= ports.to &&
     isObject(tokens) &&
-    exactKeys(tokens, [service, "stream"]) &&
+    exactKeys(tokens, [service, "stream"], browser ? [] : ["capture"]) &&
     matches(TOKEN_PATTERN, tokens[service]) &&
     matches(TOKEN_PATTERN, tokens.stream) &&
     (!browser || tokens[service] !== tokens.stream) &&
+    (tokens.capture === undefined ||
+      (matches(TOKEN_PATTERN, tokens.capture) &&
+        tokens.capture !== tokens[service] &&
+        tokens.capture !== tokens.stream)) &&
     (ownership === undefined ||
       (isObject(ownership) &&
         exactKeys(ownership, [executable, "gate", "internalNetwork", "egressNetwork"]) &&

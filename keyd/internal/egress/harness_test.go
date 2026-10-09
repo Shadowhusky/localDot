@@ -36,7 +36,12 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
 
-const testToken = "test-proxy-token-0123456789abcdefghijklmnopq"
+const (
+	testToken        = "test-proxy-token-0123456789abcdefghijklmnopq"
+	testCaptureToken = "test-capture-token-0123456789abcdefghijklmn"
+	// Long enough for a test to answer, short enough that one that does not still ends.
+	testAskHold = 3 * time.Second
+)
 
 // world is a fake internet: TLS and plain upstreams on loopback, reachable by name through a fake
 // resolver, with exact guard exceptions for their ports and a dialer that maps :443 and :80 to them.
@@ -155,6 +160,16 @@ func (w *world) LookupNetIP(_ context.Context, _ string, host string) ([]netip.A
 type portMap struct{ w *world }
 
 func (p portMap) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	d, address := p.dialer(address)
+	return d.DialContext(ctx, network, address)
+}
+
+func (p portMap) Check(ctx context.Context, network, address string) error {
+	d, address := p.dialer(address)
+	return d.Check(ctx, network, address)
+}
+
+func (p portMap) dialer(address string) (*netguard.Dialer, string) {
 	// keyd dials absolute names; the world knows them without the dot.
 	if host, port, err := net.SplitHostPort(address); err == nil {
 		address = net.JoinHostPort(strings.TrimSuffix(host, "."), port)
@@ -166,8 +181,7 @@ func (p portMap) DialContext(ctx context.Context, network, address string) (net.
 	allow := append([]netip.AddrPort(nil), p.w.allow...)
 	own := append([]netip.Prefix(nil), p.w.own...)
 	p.w.mu.Unlock()
-	d := &netguard.Dialer{Guard: netguard.New(func() ([]netip.Prefix, error) { return own, nil }, allow...), Resolver: p.w}
-	return d.DialContext(ctx, network, address)
+	return &netguard.Dialer{Guard: netguard.New(func() ([]netip.Prefix, error) { return own, nil }, allow...), Resolver: p.w}, address
 }
 
 func (w *world) deps() Deps {
@@ -180,7 +194,7 @@ func (w *world) cell(id string, role policy.Role) *Cell {
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	c, err := Open(Config{CellID: id, Policy: p, Token: testToken}, w.deps())
+	c, err := Open(Config{CellID: id, Policy: p, Token: testToken, CaptureToken: testCaptureToken, AskHold: testAskHold}, w.deps())
 	if err != nil {
 		w.t.Fatal(err)
 	}

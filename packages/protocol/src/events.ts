@@ -253,7 +253,7 @@ export const RuleChange = z
   })
   .refine(
     ({ actionClass, id, ...option }) => AlwaysOption.safeParse(option).success,
-    "a site or app goes only with its own scope",
+    "a site, app or destination goes only with its own scope",
   );
 export type RuleChange = z.infer<typeof RuleChange>;
 export const RuleCreated = event("rule.created", RuleChange);

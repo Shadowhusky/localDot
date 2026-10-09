@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"net"
+	"time"
 
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
 	"github.com/shadowhusky/localdot/keyd/internal/cellca"
@@ -28,8 +29,13 @@ type Config struct {
 	// containers cannot reach the host's 127.0.0.1, so a gate there mounts this folder instead.
 	RelayDir string
 	Token    string
+	// CaptureToken is the gate's own credential: only CONNECTs it captured from programs that ignore
+	// the proxy carry it. Empty for cells without capture.
+	CaptureToken string
 	// CA terminates TLS for its hosts; without one nothing is intercepted.
 	CA *cellca.CA
+	// AskHold bounds how long a connection waits for the user; 0 is DefaultAskHold.
+	AskHold time.Duration
 }
 
 type Deps struct {

@@ -44,11 +44,19 @@ describe("dot's working rules", () => {
       "Prefer a password or code to a QR code",
       "Use request_takeover only for a CAPTCHA, a device approval",
       "then wait for them to hand control back",
-      "it keeps no sign-ins, so nobody signs in there",
+      "keeps no sign-ins",
       "Reopen links that apps open there with browser_navigate",
       "browser_navigate opens sites there; switch_screen moves between it and the desktop",
-      "never get around it with tunnels, proxies or port forwards",
       "never name tools or localDot's internal parts",
+    ])
+      expect(rules, rule).toContain(rule);
+  });
+
+  it("say what the network allows and never work around it", () => {
+    const rules = workingRules("batch");
+    for (const rule of [
+      "Apps reach websites; other ports need the user's OK.",
+      "If something is blocked, tell the user; never bypass it with tunnels, proxies or port forwards.",
     ])
       expect(rules, rule).toContain(rule);
   });

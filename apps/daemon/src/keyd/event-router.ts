@@ -1,5 +1,11 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { clipText, type EventDraft, type KeydEvent, ModelSpendData } from "@localdot/protocol";
+import {
+  clipText,
+  type EventDraft,
+  type KeydAsk,
+  type KeydEvent,
+  ModelSpendData,
+} from "@localdot/protocol";
 import type { EventLog } from "../event-log.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "./client.ts";
@@ -8,6 +14,9 @@ export interface KeydEventRouterDeps {
   keyd: Pick<KeydClient, "events">;
   live: Pick<LiveSessions, "get">;
   eventLog: Pick<EventLog, "append">;
+  ask?(cellId: string, ask: KeydAsk): void;
+  // Some events, held connections among them perhaps, were dropped; their owner lists them again.
+  asksMissed?(): void;
   perCellPerSecond?: number;
   retryMs?: { min: number; max: number };
   now?: () => number;
@@ -93,6 +102,12 @@ export class KeydEventRouter {
     if (event.type === "events.dropped") {
       this.#lost = Math.min(Number.MAX_SAFE_INTEGER, this.#lost + event.data.count);
       this.#reportLost();
+      this.deps.asksMissed?.();
+      return;
+    }
+    // A held connection waits for its answer whether or not a task is live on the cell.
+    if (event.type === "egress.ask") {
+      this.deps.ask?.(event.cell, event.data);
       return;
     }
     const sessionId = this.deps.live.get(event.cell);
@@ -131,7 +146,9 @@ export class KeydEventRouter {
   }
 }
 
-function sessionEvent(event: Exclude<KeydEvent, { type: "events.dropped" }>): EventDraft | null {
+function sessionEvent(
+  event: Exclude<KeydEvent, { type: "events.dropped" | "egress.ask" }>,
+): EventDraft | null {
   switch (event.type) {
     case "key.use":
       return {

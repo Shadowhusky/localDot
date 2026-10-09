@@ -1,8 +1,9 @@
 #!/bin/sh
 # Each relay binds one address: the relays out of a cell exist only on its internal network, the
 # inbound relays only on the egress network, where Docker delivers the ports it publishes.
-# A desktop's gate relays keyd out and desktopd and the stream in; a brain's gate (LD_ROLE=brain,
-# Part 5a) relays keyd and the daemon's tool API out, and nothing in.
+# A desktop's gate relays keyd out and desktopd and the stream in, and with a capture token runs
+# ldgate for the programs that ignore the proxy; a brain's gate (LD_ROLE=brain, Part 5a) relays keyd
+# and the daemon's tool API out, and nothing in.
 # Out means host.docker.internal on Docker Desktop. Docker Engine has no such name and can't reach
 # the host's 127.0.0.1, so there the daemon mounts keyd's and its own sockets (LD_KEYD_SOCKET,
 # LD_TOOL_SOCKET) instead.
@@ -57,6 +58,10 @@ case "$LD_ROLE" in
     stream=$!
     echo "gate: keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to; inbound $LD_EGRESS_ADDR:8081 -> $LD_DESKTOP_ADDR:7700, $LD_EGRESS_ADDR:8082 -> $LD_DESKTOP_ADDR:3000"
     relays="$keyd $desktopd $stream"
+    if [ -n "${LD_CAPTURE_TOKEN:-}" ]; then
+      /usr/local/bin/ldgate &
+      relays="$relays $!"
+    fi
     ;;
   *)
     echo "gate: unknown LD_ROLE $LD_ROLE" >&2

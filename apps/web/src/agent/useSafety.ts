@@ -61,6 +61,15 @@ function sameCard(a: unknown, b: unknown) {
   return x.success && y.success && JSON.stringify(x.data) === JSON.stringify(y.data);
 }
 const storageKey = (cell: string) => `localdot-replacement:${cell}`;
+// The card on screen: the task's own decision first, then a connection's, which waits behind it.
+function shownCard(
+  from: { approval?: ApprovalCard | null; connection?: ApprovalCard | null } | null | undefined,
+) {
+  return from?.approval ?? from?.connection ?? null;
+}
+// A connection is no step of the agent's, so the user can answer it while holding the computer.
+const answerable = (card: ApprovalCard, takeover: string | null) =>
+  card.actionClass === "network" || !takeover;
 export function useSafety(props: SafetyProps) {
   const current = useRef(props);
   const mounted = useRef(true);
@@ -211,10 +220,10 @@ export function useSafety(props: SafetyProps) {
     )
       return;
     const s = props.agent.snapshot;
+    const shown = shownCard(s);
     const reconciled =
       op.kind === "approval"
-        ? !s?.approval ||
-          `${s.approval.approvalId}:${s.approval.generation}:${s.approval.revision}` !== op.target
+        ? !shown || `${shown.approvalId}:${shown.generation}:${shown.revision}` !== op.target
         : op.kind === "pause"
           ? s?.pause?.requestId === op.target
           : !s?.pause || s.pause.phase === "resuming";
@@ -269,12 +278,12 @@ export function useSafety(props: SafetyProps) {
     const input = ApprovalAnswer.safeParse(body);
     if (!input.success || !fresh()) return false;
     const p = current.current,
-      card = ApprovalCard.safeParse(p.agent.snapshot?.approval);
+      card = ApprovalCard.safeParse(shownCard(p.agent.snapshot));
     if (
       !card.success ||
-      !sameCard(card.data, p.feed.read().model.approval) ||
+      !sameCard(card.data, shownCard(p.feed.read().model)) ||
       card.data.expiresAt <= Date.now() ||
-      p.agent.model.pendingTakeover ||
+      !answerable(card.data, p.agent.model.pendingTakeover) ||
       card.data.approvalId !== input.data.approvalId ||
       card.data.generation !== input.data.generation ||
       card.data.revision !== input.data.revision
@@ -331,7 +340,14 @@ export function useSafety(props: SafetyProps) {
     setAllowed({ ...choice, undo: "pending" });
     try {
       if (saved.id) await removeRule(p.api, saved.id, abort.signal);
-      else await removeAllowance(p.api, choice.session, choice.actionClass, abort.signal);
+      else
+        await removeAllowance(
+          p.api,
+          choice.session,
+          choice.actionClass,
+          abort.signal,
+          choice.option.destination,
+        );
       settle("done");
       return true;
     } catch (error) {
@@ -546,7 +562,9 @@ export function useSafety(props: SafetyProps) {
     if (operation.current) operation.current.explicit = true;
     current.current.agent.reconcile();
   };
-  const approval = props.agent.snapshot?.approval ?? null;
+  const approval = shownCard(props.agent.snapshot);
+  // Only the task's own decisions hold Pause and Resume; a connection's card waits beside them.
+  const deciding = !!props.agent.snapshot?.approval;
   const pause = props.agent.snapshot?.pause ?? localPause;
   // A newer decision replaces the last choice's status line.
   const later = !!approval && !!allowed && approval.approvalId !== allowed.approvalId;
@@ -577,13 +595,13 @@ export function useSafety(props: SafetyProps) {
       !operation.current &&
       !!approval &&
       approval.expiresAt > Date.now() &&
-      sameCard(approval, props.feed.read().model.approval) &&
-      !props.agent.model.pendingTakeover,
+      sameCard(approval, shownCard(props.feed.read().model)) &&
+      answerable(approval, props.agent.model.pendingTakeover),
     canPause:
       fresh(props) &&
       !operation.current &&
       !pause &&
-      !approval &&
+      !deciding &&
       !props.agent.model.pendingTakeover &&
       props.agent.snapshot?.status === "running",
     canResume:
@@ -595,7 +613,7 @@ export function useSafety(props: SafetyProps) {
       JSON.stringify(props.feed.read().model.safetyPause) === JSON.stringify(pause) &&
       !props.agent.model.pendingAsk &&
       !props.agent.model.pendingTakeover &&
-      !approval &&
+      !deciding &&
       props.agent.snapshot?.budgetHold !== "task",
     canReplace:
       (!replacement || replacement.phase === "blocked") &&
