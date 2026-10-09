@@ -6,9 +6,34 @@ export function settingsSheet(page: Page): Locator {
   return page.getByRole("dialog", { name: "Settings", exact: true });
 }
 
-// Keys slid over Settings: its own page, apart from the Settings page held under it.
+// Keys: on a phone its own page slid over Settings, at desktop width a section of Settings' one page.
 export function nestedKeys(page: Page): Locator {
-  return page.getByRole("dialog", { name: "Keys", exact: true }).locator("[data-page='keys']");
+  return page
+    .getByRole("dialog", { name: "Keys", exact: true })
+    .locator("[data-page='keys']")
+    .or(settingsSheet(page).getByRole("region", { name: "Keys", exact: true }));
+}
+
+// Settings opens from the top bar's gear, or from More on a phone, which has no top bar and lists
+// the sections, so it goes into `section` there. The sheet is found by its body: on a phone its
+// title is the section shown.
+export async function openSettings(
+  page: Page,
+  press: (target: Locator) => Promise<void> = (target) => target.click(),
+  section?: string,
+): Promise<Locator> {
+  const gear = page.getByRole("button", { name: "Settings", exact: true });
+  const more = page.getByRole("button", { name: "More", exact: true });
+  await expect(gear.or(more).first()).toBeVisible();
+  const sheet = page.getByRole("dialog").filter({ has: page.locator("#settings-sheet-body") });
+  if (await gear.isVisible()) {
+    await press(gear);
+    return sheet;
+  }
+  await press(more);
+  await press(page.getByRole("menuitem", { name: "Settings", exact: true }));
+  if (section) await press(sheet.getByRole("button", { name: new RegExp(`^${section}`) }));
+  return sheet;
 }
 
 export function roleCard(scope: Page | Locator, role: keyof typeof ROLE_TITLES): Locator {

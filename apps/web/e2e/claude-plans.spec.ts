@@ -6,7 +6,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { nestedKeys, openSettings, roleCard, search } from "./settings-ui.ts";
 import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
@@ -70,8 +70,7 @@ for (const run of runs) {
       return { page, press, carried };
     }
     async function settings(page: Page, press: (l: Locator) => Promise<void>) {
-      await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = settingsSheet(page);
+      const sheet = await openSettings(page, press, "Models");
       await expect(
         roleCard(sheet, "main").getByRole("combobox", { name: "Provider", exact: true }),
       ).toBeEnabled();
@@ -163,13 +162,6 @@ for (const run of runs) {
 
     test("removes a plan token from a message, says why and offers no move to Keys", async () => {
       const { page, press, carried } = await open();
-      if (run.phone) {
-        // The tabs move down when the task's pause button arrives; a tap before then misses.
-        await expect(page.getByRole("button", { name: "Pause after this step" })).toBeVisible();
-        const tab = page.getByRole("tab", { name: "Conversation" });
-        await press(tab);
-        await expect(tab).toHaveAttribute("aria-selected", "true");
-      }
       const box = page.getByRole("textbox", { name: "Message" });
       await box.fill(`use ${PLAN_TOKEN} please`);
       await expect(box).toHaveValue("use  please");
