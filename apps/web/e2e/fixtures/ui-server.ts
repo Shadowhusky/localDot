@@ -1,4 +1,4 @@
-import { webcrypto } from "node:crypto";
+import { createECDH, webcrypto } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
@@ -74,6 +74,7 @@ import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
 import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
+import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
 import { nextDue } from "../../../daemon/src/routines/schedule.ts";
@@ -479,7 +480,8 @@ const planItems = (finished: boolean) => [
   { id: "send", text: "Email the report to the team", status: "skipped" },
 ];
 
-function finishTask(s: AgentSession, a: Append) {
+// done: end as the real runner does, with agent.state done, which raises a Done notification.
+function finishTask(s: AgentSession, a: Append, done = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -504,7 +506,7 @@ function finishTask(s: AgentSession, a: Append) {
     ],
   });
   s.setStatus("idle");
-  a("agent.state", { state: "idle" });
+  a("agent.state", { state: done ? "done" : "idle" });
 }
 
 function seedTask(s: AgentSession, finished: boolean) {
@@ -1284,6 +1286,30 @@ const routineChanged = (routineId: string) => {
     });
 };
 
+// Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+const pushKey = createECDH("prime256v1");
+pushKey.generateKeys();
+const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
+const notify = createNotify({
+  home: HOME,
+  eventLog: log,
+  events: appEvents,
+  keyd: {
+    pushKey: async () => ({ publicKey: pushKey.getPublicKey().toString("base64url") }),
+    pushSend: async () => {
+      notified.pushes += 1;
+      return { status: 201, gone: false };
+    },
+  },
+  mac: {
+    available: true,
+    show: async (title, body) => {
+      notified.mac.push([title, body]);
+      return "shown";
+    },
+  },
+});
+
 let app: ReturnType<typeof createApp> | undefined;
 const server: Server = createServer(
   getRequestListener((request) => app?.fetch(request) ?? new Response("starting", { status: 503 })),
@@ -1302,8 +1328,8 @@ attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
+  appEventsRoute(appEvents, notify.presence),
   ...(realDesktop ? [desktopStreamRoute(realDesktop)] : []),
-  appEventsRoute(appEvents),
 ]);
 // Settings > Accounts against the daemon's own routes: the web browser's cookie domains.
 let cookieDomains = [
@@ -1354,6 +1380,7 @@ const routes = createApp({
     live,
   },
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
+  notify: notify.routes,
   routines: {
     store: routineStore,
     scheduler: { replan: planRoutines },
@@ -2159,13 +2186,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(): string | undefined {
+function finish(done = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append);
+  finishTask(owned, append, done);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -2360,7 +2387,7 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", () => reply(finish()));
+routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
   if (!session || session.stopped) return c.text("no live task", 409);
@@ -2525,6 +2552,7 @@ routes.post("/__qa/scenario/:name", async (c) => {
   return reply(await STEPS[wanted.step]());
 });
 routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
+routes.get("/__qa/notify", (c) => c.json(notified));
 routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,
@@ -2574,6 +2602,7 @@ const shutdown = async () => {
       session.stop();
     }
     registry.dispose();
+    notify.close();
     index.close();
     routineStore.close();
     log.close();

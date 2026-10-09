@@ -10,6 +10,14 @@ describe("index.html", () => {
     expect(icon).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
   });
 
+  // The phone's Home Screen app: files from public/ that the build copies to the dist root as is.
+  it("links the Home Screen manifest and icon", () => {
+    expect(page).toContain('<link rel="manifest" href="/manifest.webmanifest" />');
+    expect(page).toContain('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />');
+    expect(page).toContain('<meta name="theme-color" content="#0a0b0d" />');
+    expect(page).toContain('<meta name="apple-mobile-web-app-title" content="localDot" />');
+  });
+
   it("keeps everything the CSP refuses out: no inline script or style", () => {
     expect(page).not.toMatch(/<style/);
     expect(page).not.toMatch(/\sstyle=/);

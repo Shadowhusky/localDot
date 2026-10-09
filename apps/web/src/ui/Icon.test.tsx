@@ -83,6 +83,8 @@ const PLANNED: IconName[] = [
   // Export: stepping a custom speed.
   "minus",
   "plus",
+  // Settings › Notifications: a phone's row.
+  "smartphone",
 ];
 
 describe("Icon", () => {

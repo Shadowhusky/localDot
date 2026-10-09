@@ -34,10 +34,12 @@ import {
 import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, SpendingLimits } from "./Limits.tsx";
+import { NotificationsSection } from "./NotificationsSection.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import {
   autonomyValue,
   countValue,
+  notificationsValue,
   SECTIONS,
   type SettingsSection,
   sectionInView,
@@ -47,6 +49,7 @@ import {
 import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
+import type { NotificationsView } from "./useNotifications.ts";
 import type { RulesView } from "./useRules.ts";
 import "./settings.css";
 
@@ -102,6 +105,7 @@ export interface SettingsSheetProps {
     change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
   knowledge?: Knowledge;
+  notifications?: NotificationsView;
   accounts?: AccountsView;
   keysPanel?: Omit<KeysPanelProps, "active" | "onHolding" | "reveal">;
   // Shut down, and on a phone, where the sheet covers the island, the task's Stop.
@@ -408,6 +412,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     rules: !!props.rules,
     spending: !!props.spending && !chatgptMain,
     appearance: !!props.appearance,
+    notifications: !!props.notifications,
     knowledge: !!props.knowledge,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
@@ -543,6 +548,7 @@ function SectionList({
     rules: countValue(props.rules?.rules.length),
     spending: props.loading ? "" : spendingValue(props.spending?.value, planOnly(props.choices)),
     appearance: props.appearance?.value === "midnight" ? "Midnight" : "Graphite",
+    notifications: notificationsValue(props.notifications?.device),
     accounts: props.accounts?.phase === "ready" ? countValue(props.accounts.sites.length) : "",
     keys: countValue(props.keysPanel?.keys.keys.length),
   };
@@ -570,7 +576,9 @@ function SectionList({
         props.startAtLogin) && <ComputerControls props={props} />}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
-        {(["spending", "appearance", "knowledge", "accounts", "keys"] as const).map(row)}
+        {(
+          ["spending", "appearance", "notifications", "knowledge", "accounts", "keys"] as const
+        ).map(row)}
       </Group>
     </>
   );
@@ -901,6 +909,8 @@ function SectionContent({
       return props.appearance ? (
         <Appearance appearance={props.appearance} showDot={props.showDot} />
       ) : null;
+    case "notifications":
+      return props.notifications ? <NotificationsSection view={props.notifications} /> : null;
     case "knowledge":
       return props.knowledge ? <KnowledgeSection knowledge={props.knowledge} /> : null;
     case "accounts":

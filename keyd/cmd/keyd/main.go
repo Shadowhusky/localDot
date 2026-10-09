@@ -33,6 +33,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
 	"github.com/shadowhusky/localdot/keyd/internal/servicelease"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
+	"github.com/shadowhusky/localdot/keyd/internal/webpush"
 )
 
 const (
@@ -237,6 +238,7 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if cfg.Service != nil {
 		api.Service = &admin.ServiceProcessIdentity{ServiceIdentity: *cfg.Service, PID: os.Getpid()}
 	}
+	api.Push = newPusher(store, v, guard, net.DefaultResolver, d.log)
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.server = &http.Server{
@@ -259,6 +261,14 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	go d.server.Serve(ln)
 	_, err = d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "start", Detail: "boot " + d.BootID + ", version " + version})
 	return err
+}
+
+// newPusher keeps the VAPID key in keyd's own store, gives way to a user secret of the same name and
+// reaches the push services only through the guarded dialer.
+func newPusher(store vault.Store, v *vault.Vault, guard *netguard.Guard, resolver netguard.Resolver, auditLog *audit.Log) *webpush.Sender {
+	dialer := &netguard.Dialer{Guard: guard, Resolver: resolver}
+	taken := func(id string) bool { _, ok := v.Record(id); return ok }
+	return webpush.NewSender(webpush.NewSigner(store, taken, time.Now), webpush.Client(dialer.DialContext), auditLog)
 }
 
 // Close stops serving, closes every cell, records the stop and releases the lock.

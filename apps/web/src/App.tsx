@@ -52,6 +52,10 @@ import {
   takeInstallLink,
 } from "./lib/install-link.ts";
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
+import { listenForSessionLinks } from "./notify/session-link.ts";
+import { useAttention } from "./notify/useAttention.ts";
+import { useAttentionToasts } from "./notify/useAttentionToasts.ts";
+import { useOpenSession } from "./notify/useOpenSession.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
 import { Onboarding } from "./onboarding/Onboarding.tsx";
@@ -74,10 +78,12 @@ import { stepRows } from "./session/session-view.ts";
 import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
+import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
@@ -592,6 +598,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [typing, setTyping] = useState(false);
   const [pasteRefused, setPasteRefused] = useState<string | null>(null);
   const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const settingsNotifications = useNotifications(api, settings.open);
   const settingsAccounts = useAccounts(
     api,
     cell?.state === "ready" && !cell.paused ? cell.id : null,
@@ -894,7 +901,6 @@ function Theatre({ api }: { api: ApiClient }) {
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
   };
-  useTabAttention(appStatus);
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
@@ -1060,6 +1066,23 @@ function Theatre({ api }: { api: ApiClient }) {
       ) : undefined,
     [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
   );
+  const openSession = useOpenSession({
+    known: session.known,
+    sessionId: agent.sessionId,
+    decision:
+      approvalView && approval
+        ? `approval-${approval.approvalId}`
+        : askDraft && askIn
+          ? `ask-${askDraft.question.askId}`
+          : null,
+    select: selectReplay,
+  });
+  const attention = useAttention(api, openSession);
+  useEffect(() => listenForSessionLinks(openSession), [openSession]);
+  const viewing = replayId === LIBRARY ? null : (replayId ?? agent.sessionId ?? null);
+  useSeenReporting(api, attention.items, viewing);
+  useAttentionToasts(attention.latest, { viewing, island: !replayId }, openSession);
+  useTabAttention(appStatus, { count: attention.items.length, top: attention.top });
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
       <AskForm
@@ -1229,6 +1252,13 @@ function Theatre({ api }: { api: ApiClient }) {
           )
         }
         mode={replayId ? "replay" : "watch"}
+        watchAttention={
+          !!replayId &&
+          (appStatus.attention === "needs_you" ||
+            attention.items.some(
+              (item) => item.level === "needs_you" && item.sessionId === agent.sessionId,
+            ))
+        }
         replayEnabled={!!(replayId || newestReplayId || replayUnlisted)}
         onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
         onModeAgain={() => {
@@ -1306,14 +1336,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onExitFull={fullScreen.exit}
                     fields={askFields}
                     noticesRef={toastAnchor}
-                    notices={
-                      <SafetyNotes
-                        safety={safety}
-                        agent={agent}
-                        cell={cell}
-                        visible={sheetsClosed}
-                      />
-                    }
+                    notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
                   />
                   <Toaster anchor={toastAnchor} />
                 </>
@@ -1698,6 +1721,7 @@ function Theatre({ api }: { api: ApiClient }) {
           savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
           onAutonomy={settings.changeAutonomy}
           knowledge={settingsKnowledge}
+          notifications={settingsNotifications}
           accounts={settingsAccounts}
           rules={rules}
           spending={

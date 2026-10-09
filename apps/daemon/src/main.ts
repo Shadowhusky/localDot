@@ -54,6 +54,7 @@ import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
+import { createNotify } from "./notify/wiring.ts";
 import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
@@ -292,6 +293,18 @@ const downloads = new BrowserDownloadCollector({ store: quarantine, transfers })
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const routineStore = new RoutineStore(home, { now: Date.now, zone });
 const appEvents = new AppEvents();
+// Pushes wait on the push service (keyd gives up after 10 s), so they get their own deadline.
+// Test launchers set LOCALDOT_NOTIFY_MAC=off: no suite may post a real Mac banner.
+// Before the routine launcher recovers interrupted runs, so their results are told too.
+const notify = createNotify({
+  home,
+  eventLog,
+  keyd: new KeydClient(keydSocketPath(home), 15_000),
+  events: appEvents,
+  ...(process.env.LOCALDOT_NOTIFY_MAC === "off"
+    ? { mac: { available: false, show: async () => "unavailable" as const } }
+    : {}),
+});
 const expiredRuns = new ExpiredRuns();
 let scheduler: RoutineScheduler | undefined;
 const routineChanged = (routine: StoredRoutine) => {
@@ -452,6 +465,7 @@ shutdown.push(
   () => recorder.stopAll(SHUTDOWN_FINALIZE_MS),
   () => browserStreams.dispose(),
   () => sessionIndex?.close(),
+  () => notify.close(),
   () => eventLog.close(),
 );
 keydMonitor.start();
@@ -499,6 +513,7 @@ const app = createApp({
     prepareDesktopTask: agent.prepareDesktopTask,
   },
   keys: { keyd, monitor: keydMonitor, afterChange: (id) => refreshRunningCells(orchestrator, id) },
+  notify: notify.routes,
   routines: {
     store: routineStore,
     scheduler: routineScheduler,
@@ -555,7 +570,7 @@ attachUpgradeRouter(server as Server, { port, token }, [
   cellStatusRoute(browserStreams, "browsers"),
   desktopStreamRoute(desktop),
   desktopStreamRoute(browserViewer, "browser"),
-  appEventsRoute(appEvents),
+  appEventsRoute(appEvents, notify.presence),
 ]);
 shutdown.unshift(() => {
   server.close();

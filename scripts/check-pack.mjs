@@ -26,6 +26,8 @@ export const PACK_ALLOWLIST = [
   /^dist\/canary-(scan|worker)\.py$/,
   /^skills\/office-files\/SKILL\.md$/,
   /^web\/dist\/index\.html$/,
+  /^web\/dist\/(sw\.js|manifest\.webmanifest)$/,
+  /^web\/dist\/icons\/(apple-touch-icon|icon-192|icon-512|icon-maskable-512)\.png$/,
   /^web\/dist\/assets\/[A-Za-z0-9_.-]+\.(js|css|woff2|svg|png|webp)$/,
   /^web\/dist\/assets\/licenses\/[A-Za-z0-9_.@-]+\.txt$/,
   /^web\/vendor\/selkies\/(index\.html|manifest\.json|icon\.png|icon-512\.png|LICENSE|NOTICE\.md)$/,
@@ -63,7 +65,7 @@ const REQUIRED = [
   "web/vendor/selkies/NOTICE.md",
 ];
 const CANONICAL = /^[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*(\/[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*)*$/;
-const TEXT = /\.(mjs|js|css|html|json|md|txt|py|svg)$/;
+const TEXT = /\.(mjs|js|css|html|json|md|txt|py|svg|webmanifest)$/;
 
 export function packFiles(dir) {
   const out = execFileSync(

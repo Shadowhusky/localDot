@@ -14,6 +14,8 @@ export interface TopBarProps {
   // Before the modes: what the stage's content offers, such as Continue on a recording.
   lead?: ReactNode;
   mode: Mode;
+  // While Replay shows, the live task needs you: Watch carries the amber point.
+  watchAttention?: boolean;
   replayEnabled: boolean;
   onMode(mode: Mode): void;
   // The chosen mode pressed again, such as Replay while a recording plays.
@@ -36,6 +38,7 @@ export const TopBar = memo(function TopBar({
   note,
   lead,
   mode,
+  watchAttention = false,
   replayEnabled,
   onMode,
   onModeAgain,
@@ -49,7 +52,7 @@ export const TopBar = memo(function TopBar({
   more,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
-    { value: "watch", label: "Watch" },
+    { value: "watch", label: "Watch", attention: watchAttention },
     {
       value: "replay",
       label: "Replay",

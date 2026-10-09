@@ -1,17 +1,15 @@
 // @vitest-environment jsdom
 import { type ApprovalCard as Card, DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyProps, useSafety } from "./useSafety.ts";
 
 const CELL = "01J00000000000000000000001",
   SESSION = "01J00000000000000000000002",
-  ID = "01J00000000000000000000003",
-  OTHER = "01J00000000000000000000004";
+  ID = "01J00000000000000000000003";
 const card: Card = {
   approvalId: ID,
   generation: 1,
@@ -265,52 +263,4 @@ it("replacement rechecks actual document focus after its delayed fence read", as
     await work;
   });
   expect(posts).toHaveLength(0);
-});
-it.each([
-  "current blurred",
-  "stale epoch",
-  "expired",
-  "takeover",
-  "hidden",
-  "blocked",
-  "permission denied",
-] as const)("notification eligibility remains owner-bound: %s", (mode) => {
-  const notices: { onclick: (() => void) | null; close: () => void }[] = [];
-  class Notice {
-    static permission = mode === "permission denied" ? "denied" : "granted";
-    onclick: (() => void) | null = null;
-    close = vi.fn();
-    constructor(readonly title: string) {
-      expect(title).toBe("localDot needs your decision");
-      notices.push(this);
-    }
-  }
-  vi.stubGlobal("Notification", Notice);
-  vi.spyOn(window, "focus").mockImplementation(() => {});
-  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
-  const f = fixture(fetchImpl, mode === "expired" ? { ...card, expiresAt: Date.now() - 1 } : card);
-  act(() => window.dispatchEvent(new Event("blur")));
-  if (mode === "stale epoch") {
-    act(() => f.invalidate({ epoch: 8 }));
-    f.update({ agent: { ...f.props.agent } });
-  }
-  if (mode === "takeover")
-    f.update({
-      agent: { ...f.props.agent, model: { ...f.props.agent.model, pendingTakeover: OTHER } },
-    });
-  if (mode === "hidden") vi.spyOn(document, "hidden", "get").mockReturnValue(true);
-  if (mode === "blocked") f.update({ blocked: true });
-  if (mode === "hidden") f.update({ agent: { ...f.props.agent } });
-  const view = render(
-    <SafetyNotes safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />,
-  );
-  expect(notices).toHaveLength(mode === "current blurred" ? 1 : 0);
-  if (mode === "current blurred") {
-    view.rerender(
-      <SafetyNotes safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />,
-    );
-    expect(notices).toHaveLength(1);
-    act(() => notices[0]?.onclick?.());
-  }
-  expect(fetchImpl).toHaveBeenCalledTimes(0);
 });

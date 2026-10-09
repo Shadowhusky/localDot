@@ -32,7 +32,6 @@ const safety = {
   canPause: true,
   canResume: false,
   canReplace: false,
-  canNotify: false,
   error: null,
   replacement: null,
   replacing: false,
@@ -58,7 +57,7 @@ it("drops a decision the computer could not take as a toast with a way to check 
       return (
         <div>
           <div ref={island}>Island</div>
-          <Notes safety={failed} agent={agent} cell={null} />
+          <Notes safety={failed} agent={agent} />
           <Toaster anchor={island} />
         </div>
       );
@@ -114,14 +113,14 @@ it("confirms an Always allow choice under the island and hides it while a sheet 
       },
     },
   };
-  const view = render(<SafetyNotes safety={allowed} agent={confirmed} cell={null} />);
+  const view = render(<SafetyNotes safety={allowed} agent={confirmed} />);
   expect(line()).toBe("Allowed for this task: sending messages.");
   expect(document.querySelector(".always-notice")?.className).toContain("island-note");
   fireEvent.click(
     screen.getByRole("button", { name: "Undo allowing sending messages for this task" }),
   );
   expect(undoAllowed).toHaveBeenCalledOnce();
-  view.rerender(<SafetyNotes safety={allowed} agent={confirmed} cell={null} visible={false} />);
+  view.rerender(<SafetyNotes safety={allowed} agent={confirmed} visible={false} />);
   expect(line()).toBe("");
   expect(document.querySelector(".always-notice")).toBeNull();
 });
@@ -154,12 +153,12 @@ it("keeps the status line's time running while Settings is open", () => {
         },
       },
     };
-    const view = render(<SafetyNotes safety={allowed} agent={confirmed} cell={null} />);
+    const view = render(<SafetyNotes safety={allowed} agent={confirmed} />);
     expect(line()).toBe("Allowed for this task: sending messages.");
     act(() => vi.advanceTimersByTime(5_000));
-    view.rerender(<SafetyNotes safety={allowed} agent={confirmed} cell={null} visible={false} />);
+    view.rerender(<SafetyNotes safety={allowed} agent={confirmed} visible={false} />);
     act(() => vi.advanceTimersByTime(2_000));
-    view.rerender(<SafetyNotes safety={allowed} agent={confirmed} cell={null} />);
+    view.rerender(<SafetyNotes safety={allowed} agent={confirmed} />);
     expect(line()).toBe("Allowed for this task: sending messages.");
     act(() => vi.advanceTimersByTime(1_500));
     expect(dismissAllowed).toHaveBeenCalledOnce();

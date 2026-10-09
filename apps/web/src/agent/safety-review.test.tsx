@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { type ApprovalCard as Card, DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyProps, useSafety } from "./useSafety.ts";
 
@@ -218,27 +217,6 @@ it.each(["current", "stale epoch"] as const)(
     expect(fetchImpl).toHaveBeenCalledTimes(mode === "current" ? 1 : 0);
   },
 );
-
-it("a granted notification still announces a current approval while the visible window is unfocused", () => {
-  const notices: { title: string; onclick: (() => void) | null; close: () => void }[] = [];
-  class Notice {
-    static permission = "granted";
-    onclick: (() => void) | null = null;
-    close = vi.fn();
-    constructor(readonly title: string) {
-      notices.push(this);
-    }
-  }
-  vi.stubGlobal("Notification", Notice);
-  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
-  const f = fixture(fetchImpl);
-  act(() => window.dispatchEvent(new Event("blur")));
-  expect(f.result.current.canApprove).toBe(false);
-  render(<SafetyNotes safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />);
-  expect(notices).toHaveLength(1);
-  expect(notices[0]?.title).toBe("localDot needs your decision");
-  expect(fetchImpl).not.toHaveBeenCalled();
-});
 
 it("synchronous duplicate approval calls produce only one authenticated mutation", async () => {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
