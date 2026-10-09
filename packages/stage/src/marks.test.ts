@@ -92,7 +92,7 @@ const cases: [string, Record<string, unknown>, string, string, string][] = [
     `${label} → api.example.com`,
     tone,
   ]),
-  ["step.verify", { status: "success" }, "verify", "Verified", "neutral"],
+  ["step.verify", { status: "success" }, "verify", "Checked", "neutral"],
   ["step.verify", { status: "unexpected" }, "verify", "Unexpected result", "attention"],
   ["step.verify", { status: "failed" }, "verify", "Check failed", "failure"],
 ];
