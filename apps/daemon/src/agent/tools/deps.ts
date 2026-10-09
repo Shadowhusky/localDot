@@ -138,11 +138,8 @@ export async function contain(
     ],
   };
 }
-// What a screen where the user is signed in shows is private; any other screen's is not.
 export function taintScreen(ctx: ToolCallContext, host?: string, text?: string): void {
-  const screen = screenOf(ctx);
-  if (ctx.session.taskAutonomy.signedIn(screen))
-    ctx.session.taint.add("screen", host ?? `${screen} screen`, text);
+  ctx.session.taintScreen(screenOf(ctx), host, text);
 }
 export async function frame(
   deps: ToolDeps,

@@ -2,11 +2,13 @@ import { ApprovalRequestDraft, type ToolName, UploadApproval } from "@localdot/p
 import { repeatsWhileHeld } from "@localdot/protocol/keys";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
-import { actingFacts, alwaysOptions, decideAutonomy, placeOf, screenOf } from "./autonomy.ts";
+import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
 import { handoffFor } from "./handoff.ts";
 import { outboundOf, type PurposeVerdict } from "./purpose.ts";
 import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } from "./risk.ts";
 import { PausedStepError } from "./step-barrier.ts";
+
+const MAX_DESTINATIONS = 64;
 
 export interface EffectPermit {
   // The user approved a card for this exact effect, rather than the policy letting it act.
@@ -146,10 +148,16 @@ export async function authorizePrepared(
         purpose
           ? {
               ...draft,
-              title: `Send data to ${purpose.destination}?`,
+              title: purpose.title,
               why: purpose.why,
-              fields: [["Destination", purpose.destination], ...draft.fields],
-              // A yes reaches this task or this site; never every site.
+              ...(purpose.destinations.length
+                ? { destinations: purpose.destinations.slice(0, MAX_DESTINATIONS) }
+                : {}),
+              fields: [
+                ["Destination", purpose.destinations.join("\n") || "Not named in this step"],
+                ...draft.fields,
+              ],
+              // A yes reaches these hosts for this task, or this site; never every site.
               always: alwaysOptions(decision.actionClass, acting, ctx.redact).filter(
                 (option) => option.scope !== "always",
               ),
@@ -180,7 +188,6 @@ export async function authorizePrepared(
       return undefined;
     }
     if (outcome !== "approve") return undefined;
-    if (purpose) ctx.session.purpose?.allow(purpose.destination);
   }
   ctx.check();
   return Object.freeze({
@@ -194,7 +201,7 @@ export async function authorizePrepared(
   });
 }
 // A step the policy lets run still asks when it would carry what the task read to a host outside
-// the task's purpose. A choice the user already made for this kind of step covers it.
+// the task's purpose. Only a yes for that host covers it, never one for a kind of step.
 async function purposeCheck(
   ctx: ToolCallContext,
   prepared: PreparedEffect,
@@ -203,8 +210,6 @@ async function purposeCheck(
   const gate = ctx.session.purpose;
   if (!gate) return undefined;
   const acting = actingFacts(ctx, prepared.facts);
-  const { actionClass } = decideAutonomy(ctx, prepared.facts);
-  if (ctx.session.taskAutonomy.relaxes(actionClass, placeOf(acting))) return undefined;
   const verdict = await gate.check(outboundOf(prepared.tool, input, acting), ctx.signal);
   ctx.check();
   return verdict.allow ? undefined : verdict;

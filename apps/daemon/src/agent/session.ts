@@ -154,7 +154,11 @@ export class AgentSession {
   boot: BootConfig | undefined;
   toolToken: string | undefined;
   lastFrameId: string | undefined;
-  tainted = false;
+  // Something other than the user reached the model since the user last spoke.
+  #tainted = false;
+  // Something other than the user has reached the model in this task: what dot plans after that
+  // may follow a page's instructions, so the purpose check keeps the plan from before.
+  #heardOthers = false;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
   toolCalls = 0;
@@ -162,7 +166,8 @@ export class AgentSession {
   actionLimit: number | undefined;
   actionsSinceUser = 0;
   actionLimitReached = false;
-  plan: PlanItem[] = [];
+  #plan: PlanItem[] = [];
+  #trustedPlan: readonly string[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
   readonly #waiters = new Set<() => void>();
@@ -230,15 +235,18 @@ export class AgentSession {
         this.append("approval.request", { ...data, kind, preview: { fields } });
         this.#publishState(this.safetyPause ? "paused" : "waiting_user", "approval");
       },
-      ({ always, ...resolution }) => {
+      ({ always, destinations, ...resolution }) => {
         if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
           this.setStatus("running");
         let change: RuleChange | undefined;
         let note = resolution.note;
         try {
-          change =
-            always &&
-            this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+          // Yes for this task on a purpose ask reaches only the hosts it named.
+          if (destinations && always?.option.scope === "task") this.purpose?.allow(destinations);
+          else
+            change =
+              always &&
+              this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
         } catch (error) {
           note = `Approved once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
         }
@@ -250,8 +258,29 @@ export class AgentSession {
   get autonomy(): Readonly<AutonomyPolicy> {
     return this.#autonomy;
   }
+  get tainted(): boolean {
+    return this.#tainted;
+  }
+  set tainted(value: boolean) {
+    this.#tainted = value;
+    if (value) this.#heardOthers = true;
+  }
+  get plan(): PlanItem[] {
+    return this.#plan;
+  }
+  set plan(items: PlanItem[]) {
+    this.#plan = items;
+    // The earlier conversation holds dot's own replies, which may repeat what a page said.
+    if (!this.#heardOthers && !this.earlier.length)
+      this.#trustedPlan = items.map((item) => item.text);
+  }
   get currentPurpose(): Purpose {
-    return { request: [...this.requests], plan: this.plan.map((item) => item.text) };
+    return { request: [...this.requests], plan: [...this.#trustedPlan] };
+  }
+  // What a screen where the user is signed in shows is private; any other screen's is not.
+  taintScreen(screen: ScreenName, host?: string, text?: string): void {
+    if (this.taskAutonomy.signedIn(screen))
+      this.taint.add("screen", host ?? `${screen} screen`, text);
   }
   get pendingApproval(): ApprovalCard | undefined {
     return this.#approvals.pending(this.id);

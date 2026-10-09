@@ -467,13 +467,13 @@ describe("ChatGPT runner lifecycle", () => {
     expect(f.live.get(f.cellId)).toBeUndefined();
   });
 
-  it("runs the subscription with no paid key lookup, brain cell or USD task account", async () => {
+  it("runs the subscription with no model key, brain cell or USD task account", async () => {
     const f = setup();
-    f.secrets.mockResolvedValueOnce([]);
     const s = await f.runner.start(f.cellId, "Fixture task");
     await until(() => s.status === "idle");
     expect(f.run).toHaveBeenCalledExactlyOnceWith(s, { model: "gpt-6-astra", resume: false });
-    expect(f.secrets).not.toHaveBeenCalled();
+    // Only the purpose check looks, for a Jev key; a failed look leaves the task running.
+    expect(f.secrets).toHaveBeenCalledOnce();
     expect(f.open).not.toHaveBeenCalled();
     expect(f.beginTask).not.toHaveBeenCalled();
     expect(f.runner.isChatgpt(s.id)).toBe(true);
@@ -526,7 +526,7 @@ describe("ChatGPT runner lifecycle", () => {
       { model: "gpt-6-astra", resume: true },
     ]);
     expect(f.runner.codexDenyReadOf(s.id)).toEqual(["/Volumes/Private"]);
-    expect(f.secrets).not.toHaveBeenCalled();
+    expect(f.secrets).toHaveBeenCalledOnce();
     expect(f.open).not.toHaveBeenCalled();
   });
   it("says the user's action limit stopped the task, not that it is done, and waits for them", async () => {
@@ -652,7 +652,41 @@ describe("ChatGPT runner lifecycle", () => {
     session.post("followup", "Continue synthetic work");
     await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
     expect(session.autonomy.send).toBe("ask");
-    expect(f.secrets).not.toHaveBeenCalled();
+    expect(f.secrets).toHaveBeenCalledOnce();
+  });
+
+  it("checks where data goes with a saved Jev key, and not at all when the check is off", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    const signal = new AbortController().signal;
+    const f = setup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.1, unrelated: 0.9 } } },
+    }));
+    f.deps.jev = ask;
+    f.secrets.mockResolvedValueOnce([jev]);
+    const checked = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => checked.status === "idle");
+    checked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await checked.purpose?.check(leak, signal))?.allow).toBe(false);
+    expect(ask).toHaveBeenCalledWith("jev", expect.anything(), expect.any(AbortSignal));
+
+    const off = setup();
+    off.setSettings({ main: { provider: "chatgpt", model: "gpt-6-astra" }, purposeCheck: "off" });
+    const unchecked = await off.runner.start(off.cellId, "Fixture task");
+    await until(() => unchecked.status === "idle");
+    unchecked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await unchecked.purpose?.check(leak, signal))?.allow).toBe(true);
+    expect(off.secrets).not.toHaveBeenCalled();
   });
 
   it("does not start after the request is canceled during account preflight", async () => {

@@ -8,9 +8,11 @@ import type { NativeTargetFacts, RiskFacts } from "./risk.ts";
 
 const desktop = { screen: "desktop", signedIn: false } as const;
 const signedIn = { screen: "browser", signedIn: true } as const;
-// Balanced asks before acting as the user; the purpose check covers everything else.
+// Balanced asks before acting as the user and before a step it can't read.
 const balancedMode = (actionClass: string) =>
-  ["purchase", "send", "post", "delete", "system_settings"].includes(actionClass) ? "ask" : "act";
+  ["purchase", "send", "post", "delete", "system_settings", "unknown"].includes(actionClass)
+    ? "ask"
+    : "act";
 const shell = (command: string): RiskFacts => ({ ...desktop, operation: "shell", command });
 const dom = (name: string, role = "button"): NativeTargetFacts => ({
   source: "dom",
@@ -378,22 +380,14 @@ describe("shell commands inside the computer", () => {
     "cat <<'EOF' | sh\necho 'it\nEOF",
   ])("%j is unclear because it is left open", (command) => {
     expect(classify(shell(command))).toEqual(["computer", "unknown"]);
-    expect(decide(shell(command), BALANCED_AUTONOMY)).toMatchObject({
-      actionClass: "unknown",
-      mode: "act",
-    });
-    expect(decide(shell(command), CAREFUL_AUTONOMY).mode).toBe("ask");
+    expect(decide(shell(command), BALANCED_AUTONOMY).mode).toBe("ask");
   });
 
   it.each(['echo "${x:-\'"\'}"; git push origin main #"\'', 'echo "${ git push origin main; }"'])(
     "%j is unclear because its quoting cannot be read for certain",
     (command) => {
       expect(classify(shell(command))).toEqual(["computer", "unknown"]);
-      expect(decide(shell(command), BALANCED_AUTONOMY)).toMatchObject({
-        actionClass: "unknown",
-        mode: "act",
-      });
-      expect(decide(shell(command), CAREFUL_AUTONOMY).mode).toBe("ask");
+      expect(decide(shell(command), BALANCED_AUTONOMY).mode).toBe("ask");
     },
   );
 
@@ -447,10 +441,9 @@ describe("shell commands inside the computer", () => {
     expect(classify(facts)).toEqual(["computer", "unknown"]);
     expect(decide(facts, BALANCED_AUTONOMY)).toEqual({
       actionClass: "unknown",
-      mode: "act",
+      mode: "ask",
       risk: "medium",
     });
-    expect(decide(facts, CAREFUL_AUTONOMY).mode).toBe("ask");
     expect(decide({ ...shell("git push"), signedIn: true }, BALANCED_AUTONOMY)).toMatchObject({
       actionClass: "post",
     });
@@ -676,13 +669,12 @@ describe("pointer and keyboard input", () => {
         risk: "none",
       });
     });
-    it.each(lines)("%s is unclear once the desktop is signed in", (_name, action) => {
+    it.each(lines)("%s asks once the desktop is signed in", (_name, action) => {
       expect(decide(facts(action, true), BALANCED_AUTONOMY)).toEqual({
         actionClass: "unknown",
-        mode: "act",
+        mode: "ask",
         risk: "medium",
       });
-      expect(decide(facts(action, true), CAREFUL_AUTONOMY).mode).toBe("ask");
       if (action.verb === "key") expect(classify(facts(action, true))).toEqual(["unknown"]);
     });
     it.each([
@@ -692,10 +684,8 @@ describe("pointer and keyboard input", () => {
       ["post", "git push origin main\x0f"],
       ["post", "ls\x0fgit push origin main\n"],
     ])("a typed line names the %s the shell would: %j", (actionClass, text) => {
-      expect(decide(facts({ verb: "type", text }, true), BALANCED_AUTONOMY)).toMatchObject({
-        actionClass,
-        mode: balancedMode(actionClass),
-      });
+      expect(classify(facts({ verb: "type", text }, true))).toContain(actionClass);
+      expect(decide(facts({ verb: "type", text }, true), BALANCED_AUTONOMY).mode).toBe("ask");
     });
     it.each<[string, GuiAction]>([
       ["typing without ending the line", { verb: "type", text: "git push origin main" }],
@@ -769,7 +759,7 @@ describe("decisions", () => {
     });
     expect(decide(facts, CAREFUL_AUTONOMY)).toMatchObject({ actionClass: "computer", mode: "ask" });
   });
-  it("credentials always hand off and unclear steps follow the computer's choice", () => {
+  it("credentials always hand off and unclear actions always ask", () => {
     const allAct = Object.fromEntries(
       Object.keys(BALANCED_AUTONOMY).map((key) => [key, "act"]),
     ) as never;
@@ -778,10 +768,9 @@ describe("decisions", () => {
     ).toEqual({ actionClass: "credentials", mode: "handoff", risk: "high" });
     expect(decide({ ...signedIn, operation: "click" }, allAct)).toEqual({
       actionClass: "unknown",
-      mode: "act",
+      mode: "ask",
       risk: "medium",
     });
-    expect(decide({ ...signedIn, operation: "click" }, CAREFUL_AUTONOMY).mode).toBe("ask");
   });
   it("uploads ask at least, and hand off when sending does", () => {
     const facts = { ...desktop, operation: "files_upload" } as const;
@@ -841,16 +830,15 @@ describe("drags, and moves, scrolls and releases while a button is down", () => 
     expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY).mode).toBe("act");
   });
 
-  it("calls a drop where no element is known on a signed-in screen unclear", () => {
+  it("asks for a drop where no element is known on a signed-in screen", () => {
     expect(classify({ ...signedIn, ...drag(dom("Item", "listitem"), null) })).toEqual([
       "computer",
       "unknown",
     ]);
     expect(decide({ ...signedIn, ...drag(undefined, null) }, BALANCED_AUTONOMY)).toMatchObject({
       actionClass: "unknown",
-      mode: "act",
+      mode: "ask",
     });
-    expect(decide({ ...signedIn, ...drag(undefined, null) }, CAREFUL_AUTONOMY).mode).toBe("ask");
   });
 
   it.each([

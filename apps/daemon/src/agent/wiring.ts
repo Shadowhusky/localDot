@@ -353,11 +353,13 @@ export function createAgent(d: AgentWiringDeps) {
               const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
               check();
               session.tainted = true;
-              const shown = screen?.selection.screen ?? "desktop";
-              if (session.taskAutonomy.signedIn(shown))
-                session.taint.add("screen", `${shown} screen`);
               session.lastFrameId = frame.frameId;
-              return { frameId: frame.frameId, full: true, png: full };
+              return {
+                frameId: frame.frameId,
+                full: true,
+                png: full,
+                ...(screen ? { screen: screen.selection.screen } : {}),
+              };
             } finally {
               screen?.finish();
               lease.finish();

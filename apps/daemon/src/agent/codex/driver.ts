@@ -17,6 +17,7 @@ import {
   earlierRecord,
   type InboxItem,
   type PauseSnapshot,
+  type ScreenName,
   type ToolResult,
   ULID_PATTERN,
   ulid,
@@ -140,7 +141,7 @@ export interface CodexDriverDeps {
     session: AgentSession,
     generation: BrainGeneration,
     signal: AbortSignal,
-  ) => Promise<{ frameId: string; full: true; png: Buffer }>;
+  ) => Promise<{ frameId: string; full: true; png: Buffer; screen?: ScreenName }>;
   readonly transcripts: TranscriptStore;
   readonly instructions: (session: AgentSession) => string;
   readonly redactorFor?: (session: AgentSession) => Redactor;
@@ -1084,6 +1085,7 @@ export class CodexDriver {
       check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       session.tainted = true;
+      session.taintScreen(observation.screen ?? "desktop");
       const started = await request(
         "turn/start",
         {

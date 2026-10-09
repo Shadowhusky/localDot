@@ -185,15 +185,12 @@ describe("consequential steps still stop under Balanced", () => {
       expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 0]);
     });
 
-    it("runs Enter once the desktop is signed in, and asks for it under Careful", async () => {
+    it("asks for Enter once the desktop is signed in", async () => {
       const h = harness(DEFAULT_AUTONOMY);
       h.ctx.session.taskAutonomy.signIn("desktop");
       await native(h.ctx, enter, terminal);
-      expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 0]);
-      const careful = harness(CAREFUL_AUTONOMY);
-      careful.ctx.session.taskAutonomy.signIn("desktop");
-      await native(careful.ctx, enter, terminal);
-      expect(careful.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "unknown" });
+      expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+      expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "unknown" });
     });
 
     it("names a typed push and shows its command once the desktop is signed in", async () => {

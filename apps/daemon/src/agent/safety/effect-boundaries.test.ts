@@ -232,8 +232,8 @@ describe("drawing and dragging by hand under Balanced", () => {
     expect(f.session.safetyPause).toBeUndefined();
   }, 30_000);
 
-  it("asks under Careful for a held move on a signed-in screen where no element is known", async () => {
-    const f = setup(CAREFUL_AUTONOMY);
+  it("asks for a held move on a signed-in screen where no element is known", async () => {
+    const f = setup(BALANCED_AUTONOMY);
     f.fake.script.hitTest = canvas;
     f.session.taskAutonomy.signIn("desktop");
     const cards = answerEveryCard(f, (n) => (n === 0 ? "approve" : "deny"));

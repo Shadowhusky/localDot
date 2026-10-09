@@ -14,13 +14,9 @@ const MODE_RANK = { act: 0, ask: 1, handoff: 2 } as const;
 const DESKTOP_ONLY = new Set<RiskFacts["operation"]>(["shell", "files_write", "files_delete"]);
 const RISK_RANK = { none: 0, medium: 1, high: 2 } as const;
 
-function mode(actionClass: ActionClass, policy: AutonomyPolicy, facts: RiskFacts): AutonomyMode {
+function mode(actionClass: ActionClass, policy: AutonomyPolicy): AutonomyMode {
   if (actionClass === "credentials") return "handoff";
-  // An unclear step goes through the purpose check like any routine step, unless every step in the
-  // computer asks. An address that is not a plain web page (a script, a file, a sign-in in the
-  // address) can act on the open page, so it still asks.
-  if (actionClass === "unknown")
-    return policy.computer === "act" && facts.operation !== "navigate" ? "act" : "ask";
+  if (actionClass === "unknown") return "ask";
   if (actionClass === "upload") return policy.send === "handoff" ? "handoff" : "ask";
   return policy[actionClass];
 }
@@ -39,7 +35,7 @@ export function decide(
   const policy = AutonomyPolicy.parse(rawPolicy);
   return classify(facts)
     .map((actionClass) => {
-      const asked = mode(actionClass, policy, facts);
+      const asked = mode(actionClass, policy);
       return {
         actionClass,
         mode: asked === "ask" && relaxed(actionClass) ? "act" : asked,

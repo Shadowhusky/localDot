@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type TaintKind, TaintSource } from "@localdot/protocol";
 
 const MAX_SOURCES = 64;
+const ORIGIN_MAX = 200;
 const MAX_PRINTS = 200_000;
 const SHINGLE = 3;
 // Of an outbound text's word triples, the share already seen in private text that counts as
@@ -31,6 +32,19 @@ function print(text: string): string {
   return createHash("sha256").update(text).digest("base64url").slice(0, 16);
 }
 
+// An origin as the journal can hold it: one line of whole characters, at most 200 code units.
+function shown(origin: string): string {
+  let kept = "";
+  for (const char of origin
+    .toWellFormed()
+    .replace(/\p{Cc}+/gu, " ")
+    .trim()) {
+    if (kept.length + char.length > ORIGIN_MAX) break;
+    kept += char;
+  }
+  return kept;
+}
+
 // What private data the task has read: where it came from, and hashed fingerprints of its text
 // to tell whether outbound text carries it. The text itself is never kept.
 export class TaskTaint {
@@ -50,7 +64,7 @@ export class TaskTaint {
     return this.sources.filter((source) => source.kind === kind).map((source) => source.origin);
   }
   add(kind: TaintKind, origin: string, text?: string): void {
-    const source = TaintSource.parse({ kind, origin: origin.slice(0, 200) || kind });
+    const source = TaintSource.parse({ kind, origin: shown(origin) || kind });
     const key = `${source.kind}\n${source.origin}`;
     if (!this.#sources.has(key) && this.#sources.size < MAX_SOURCES) {
       this.#sources.set(key, source);

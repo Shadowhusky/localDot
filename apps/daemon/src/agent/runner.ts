@@ -5,6 +5,7 @@ import {
   BootConfig,
   type CheckIns,
   DEFAULT_AGENT_LIMITS,
+  isJevKey,
   type KeydRecord,
   type ModelBinding,
   SESSION_PAUSE_REASONS,
@@ -284,6 +285,10 @@ export class AgentRunner {
           model: settings.main.model,
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
+        // The plan's own models need no key; only a Jev key can check where data goes.
+        if (settings.purposeCheck !== "off")
+          keys = (await this.deps.keyd.secrets().catch(() => [])).filter(isJevKey);
+        signal?.throwIfAborted();
       } else {
         keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
@@ -355,6 +360,7 @@ export class AgentRunner {
           ...(continues ? { continues } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
         this.#safety(rt);
         this.deps.live.start(
           cellId,

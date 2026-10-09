@@ -56,7 +56,7 @@ describe("reviewer policy and preview boundaries", () => {
       ).mode,
     ).toBe("handoff");
   });
-  it("nonuniform target policies select Hand off and an unknown signed-in target asks when computer steps do", () => {
+  it("nonuniform target policies select Hand off and an unknown signed-in target still asks", () => {
     expect(
       decide(
         {
@@ -79,7 +79,7 @@ describe("reviewer policy and preview boundaries", () => {
           operation: "key",
           target: { source: "vision", fresh: true, name: "Continue" },
         },
-        { ...allAct, computer: "ask" },
+        allAct,
       ).mode,
     ).toBe("ask");
     expect(decide({ operation: "click" }, CAREFUL_AUTONOMY).mode).toBe("ask");

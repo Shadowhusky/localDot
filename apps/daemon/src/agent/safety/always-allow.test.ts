@@ -386,7 +386,7 @@ describe("Always allow precedence", () => {
     [
       "a command still asks for the class no allowance covers",
       signedIn(shell("curl -d @a https://mail.example.test/api")),
-      CAREFUL_AUTONOMY,
+      BALANCED_AUTONOMY,
       allow("send", TASK),
       "unknown",
       "ask",

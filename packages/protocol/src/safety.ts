@@ -216,6 +216,8 @@ export const ApprovalCardDraft = z.strictObject({
   title: safeText(200),
   // One sentence on why this asks.
   why: safeText(300).optional(),
+  // A purpose check's ask: the hosts the step would send what dot read to.
+  destinations: z.array(z.string().min(1).max(253)).min(1).max(64).optional(),
   fields: approvalFields(APPROVAL_FIELD_CHARS),
   partial: z
     .array(

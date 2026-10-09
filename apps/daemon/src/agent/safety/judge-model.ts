@@ -95,6 +95,37 @@ export function completionCall(b: ModelBinding, system: string, prompt: string):
   }
 }
 
+interface Reply {
+  readonly headers: { get(name: string): string | null };
+  readonly body: {
+    getReader(): {
+      read(): Promise<{ done: boolean; value?: Uint8Array }>;
+      cancel(): Promise<void>;
+    };
+  } | null;
+}
+
+// A reply's text, refused as soon as it says or turns out to be longer than `max` bytes.
+export async function cappedText(reply: Reply, max: number): Promise<string> {
+  const declared = Number(reply.headers.get("content-length") ?? 0);
+  const reader = reply.body?.getReader();
+  try {
+    if (declared > max) throw new Error("the answer is too large");
+    const parts: Uint8Array[] = [];
+    let bytes = 0;
+    for (;;) {
+      const chunk = await reader?.read();
+      if (!chunk || chunk.done || !chunk.value) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > max) throw new Error("the answer is too large");
+      parts.push(chunk.value);
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(parts, bytes));
+  } finally {
+    void reader?.cancel().catch(() => {});
+  }
+}
+
 // Through the task's own keyd listener, where the model's key is swapped in and its cost counted.
 export function gatewayCompletion(
   binding: () => ModelBinding | undefined,
@@ -124,9 +155,7 @@ export function gatewayCompletion(
         await reply.body?.cancel().catch(() => {});
         throw new Error(`the fast model answered ${reply.status}`);
       }
-      const text = await reply.text();
-      if (Buffer.byteLength(text) > MAX_REPLY_BYTES) throw new Error("the answer is too large");
-      return call.read(JSON.parse(text));
+      return call.read(JSON.parse(await cappedText(reply, MAX_REPLY_BYTES)));
     } finally {
       await agent.close().catch(() => {});
     }

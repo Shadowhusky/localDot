@@ -255,6 +255,7 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
       }
       lease.check();
       session.tainted = true;
+      session.taintScreen(session.screens?.selection.screen ?? "desktop");
       if (!region) session.lastFrameId = frameId;
       return c.body(new Uint8Array(png), 200, {
         "content-type": "image/png",

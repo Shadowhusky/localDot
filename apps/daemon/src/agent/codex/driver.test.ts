@@ -169,6 +169,33 @@ describe("owned Codex task driver", () => {
     expect(f.fake.maxLeases).toBe(1);
     expect(f.fake.activeLeases).toBe(0);
   });
+  it("the turn's screenshot taints the task when the user is signed in on that screen", async () => {
+    const f = fixture();
+    const shot = async () => ({
+      frameId: ulid(),
+      full: true as const,
+      png: Buffer.from(PNG),
+      screen: "browser" as const,
+    });
+    f.observe.mockImplementationOnce(shot as never);
+    const run = f.run(),
+      conn = await f.fake.nextLaunch(1);
+    await conn.waitFor("turn/start");
+    expect(f.session.taint.sources).toEqual([{ kind: "screen", origin: "browser screen" }]);
+    expect(f.events).toContainEqual({
+      type: "safety.taint",
+      data: { kind: "screen", origin: "browser screen" },
+    });
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+    const desktop = fixture(),
+      plain = desktop.run(),
+      next = await desktop.fake.nextLaunch(1);
+    await next.waitFor("turn/start");
+    expect(desktop.session.taint.tainted).toBe(false);
+    desktop.done();
+    await plain;
+  });
   it("does not treat a deliberately retired connection as a crash", async () => {
     const f = fixture(),
       run = f.run(),

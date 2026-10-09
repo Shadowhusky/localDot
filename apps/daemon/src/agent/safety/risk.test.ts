@@ -42,10 +42,7 @@ describe("native and execution risk facts", () => {
         act,
       ).mode,
     ).toBe("act");
-    expect(decide({ ...signedIn, operation: "click" }, BALANCED_AUTONOMY)).toMatchObject({
-      actionClass: "unknown",
-      mode: "act",
-    });
+    expect(decide({ ...signedIn, operation: "click" }, act).mode).toBe("ask");
     expect(decide({ operation: "click" }, CAREFUL_AUTONOMY).mode).toBe("ask");
   });
   it("translated protected names and native secure field roles always hand off", () => {
@@ -95,22 +92,14 @@ describe("native and execution risk facts", () => {
       ).mode,
     ).toBe("handoff");
   });
-  it("stale/vision/OCR coordinates and unknown focused Enter on a signed-in screen are unclear steps", () => {
+  it("stale/vision/OCR coordinates and unknown focused Enter on a signed-in screen need a human decision", () => {
     for (const target of [
       { source: "ax", fresh: false },
       { source: "ocr", fresh: true },
       { source: "vision", fresh: true },
-    ] as const) {
-      expect(decide({ ...signedIn, operation: "key", target }, act)).toMatchObject({
-        actionClass: "unknown",
-        mode: "act",
-      });
-      expect(decide({ ...signedIn, operation: "key", target }, CAREFUL_AUTONOMY).mode).toBe("ask");
-    }
-    expect(decide({ ...signedIn, operation: "key", keys: ["Return"] }, act)).toMatchObject({
-      actionClass: "unknown",
-      mode: "act",
-    });
+    ] as const)
+      expect(decide({ ...signedIn, operation: "key", target }, act).mode).toBe("ask");
+    expect(decide({ ...signedIn, operation: "key", keys: ["Return"] }, act).mode).toBe("ask");
   });
   it("shell work stays inside the computer while effects that leave it ask", () => {
     for (const command of [
@@ -235,11 +224,9 @@ it("strictest matching policy wins across shell effects and native name conflict
     "handoff",
   );
 });
-it("unclear signed-in targets follow the computer's choice, and malformed URLs always ask", () => {
-  expect(decide({ ...signedIn, operation: "click" }, act).mode).toBe("act");
-  expect(decide({ ...signedIn, operation: "pointer" }, { ...act, computer: "ask" }).mode).toBe(
-    "ask",
-  );
+it("unclear signed-in targets and malformed URLs cannot be granted Act through permissive classes", () => {
+  expect(decide({ ...signedIn, operation: "click" }, act).mode).toBe("ask");
+  expect(decide({ ...signedIn, operation: "pointer" }, act).mode).toBe("ask");
   for (const destination of ["javascript:unknown()", "https://u:p@example.test/buy"])
     expect(decide({ operation: "navigate", destination }, act).mode).toBe("ask");
   expect(

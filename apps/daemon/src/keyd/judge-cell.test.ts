@@ -69,4 +69,19 @@ describe("the judge's keyd listener", () => {
     await expect(c.judge.post("jev", {}, new AbortController().signal)).rejects.toThrow();
     expect(c.ports.release).toHaveBeenCalledWith(4789);
   });
+
+  it("stops reading Jev's answer once it is too large", async () => {
+    const c = cell();
+    c.fetch.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull: (controller) => controller.enqueue(new Uint8Array(64 * 1024)),
+        }),
+        { status: 200 },
+      ),
+    );
+    await expect(c.judge.post("jev", {}, new AbortController().signal)).rejects.toThrow(
+      "too large",
+    );
+  });
 });

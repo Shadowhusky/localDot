@@ -63,4 +63,32 @@ describe("the fast model as judge", () => {
     );
     await expect(idle("sys", "prompt", new AbortController().signal)).rejects.toThrow();
   });
+
+  it("stops reading an answer once it is too large", async () => {
+    const endless = () =>
+      new ReadableStream<Uint8Array>({
+        pull: (controller) => controller.enqueue(new Uint8Array(64 * 1024)),
+      });
+    const listener = () => ({ port: 4788, token: "t".repeat(43) });
+    const streamed = gatewayCompletion(
+      () => binding("groq"),
+      listener,
+      (async () => new Response(endless(), { status: 200 })) as never,
+    );
+    await expect(streamed("sys", "prompt", new AbortController().signal)).rejects.toThrow(
+      "too large",
+    );
+    const declared = gatewayCompletion(
+      () => binding("groq"),
+      listener,
+      (async () =>
+        new Response(endless(), {
+          status: 200,
+          headers: { "content-length": String(1 << 30) },
+        })) as never,
+    );
+    await expect(declared("sys", "prompt", new AbortController().signal)).rejects.toThrow(
+      "too large",
+    );
+  });
 });

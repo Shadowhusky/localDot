@@ -137,7 +137,8 @@ const titles: Record<ActionClass, string> = {
   credentials: "Enter a password or code yourself",
   unknown: "Unclear step",
 };
-// Acting as the user always asks; anything else asks only because the user's settings say so.
+// Acting as the user, and a step dot can't read, always ask; anything else asks only because the
+// user's settings say so.
 const HARD_WHY: Partial<Record<ActionClass, string>> = {
   purchase: "Paying always needs your OK.",
   send: "Sending as you always needs your OK.",
@@ -146,6 +147,7 @@ const HARD_WHY: Partial<Record<ActionClass, string>> = {
   system_settings: "Changing your account always needs your OK.",
   upload: "Sharing your files always needs your OK.",
   credentials: "Using a password or code always needs your OK.",
+  unknown: "dot can't tell for sure what this step does, so it checks with you.",
 };
 const WORK: Readonly<Record<ActionClass, string>> = {
   reading: "reading",
@@ -160,7 +162,7 @@ const WORK: Readonly<Record<ActionClass, string>> = {
   memory: "saving to memory",
   upload: "uploading files",
   credentials: "using passwords",
-  unknown: "unclear steps on sites you're signed in to",
+  unknown: "unclear steps",
 };
 export function askWhy(actionClass: ActionClass, facts: Pick<RiskFacts, "operation">): string {
   if (actionClass === "unknown" && facts.operation === "navigate")

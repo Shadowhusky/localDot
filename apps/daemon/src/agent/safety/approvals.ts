@@ -32,6 +32,8 @@ export interface ApprovalResolution {
   note?: string;
   // The card's own option the user chose, never one the answer described.
   always?: { readonly actionClass: ActionClass; readonly option: AlwaysOption };
+  // The hosts an approved purpose card asked about.
+  destinations?: readonly string[];
 }
 interface Pending {
   readonly binding: ActionBinding;
@@ -120,6 +122,9 @@ export class ApprovalBroker {
             ...(result === "stale" ? { note: "Approval cancelled." } : {}),
             ...(always && result === "approve"
               ? { always: { actionClass: card.actionClass, option: always } }
+              : {}),
+            ...(card.destinations && result === "approve"
+              ? { destinations: [...card.destinations] }
               : {}),
           });
         } catch {

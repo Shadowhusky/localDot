@@ -1,5 +1,6 @@
 import { JEV_HOST, JEV_PATH, type KeydOpened } from "@localdot/protocol";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
+import { cappedText } from "../agent/safety/judge-model.ts";
 import type { KeydClient } from "./client.ts";
 
 export const JUDGE_CELL_ID = "purpose-judge";
@@ -52,9 +53,7 @@ export class JudgeCell {
       if ([401, 403, 407].includes(reply.status)) await this.close();
       throw new Error(`Jev answered ${reply.status}`);
     }
-    const text = await reply.text();
-    if (Buffer.byteLength(text) > MAX_REPLY_BYTES) throw new Error("Jev's answer is too large");
-    return JSON.parse(text);
+    return JSON.parse(await cappedText(reply, MAX_REPLY_BYTES));
   }
   #cell(secretId: string): Promise<Open> {
     const current = this.#open;
