@@ -969,3 +969,27 @@ describe("routine start options", () => {
     expect(h.runner.end(session.id)).toBe(false);
   });
 });
+describe("revise link", () => {
+  it("records the revised file on session.start", async () => {
+    const h = setup();
+    const link = { sessionId: ulid(), name: "totals.csv", version: 1 };
+    const session = await h.runner.start(
+      h.cellId,
+      "Revise totals.csv: add a total row",
+      undefined,
+      {
+        revises: link,
+      },
+    );
+    const start = h.log.read(session.id).find((e) => e.type === "session.start");
+    expect(start?.type === "session.start" && start.data.revises).toEqual(link);
+  });
+  it("refuses a malformed link", async () => {
+    const h = setup();
+    await expect(
+      h.runner.start(h.cellId, "Revise", undefined, {
+        revises: { sessionId: ulid(), name: "../x", version: 1 },
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+});
