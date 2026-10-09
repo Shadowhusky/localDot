@@ -53,7 +53,7 @@ describe("the activity timeline", () => {
     expect(keys(entries)).toEqual(["step-a:k1,k3,k5", "key-k4:", "step-b:"]);
   });
 
-  it("says what a web search or page read did, as the browser's steps do", () => {
+  it("says what a web search or page read did, placed on the web rather than the browser", () => {
     const [search, read] = foldKeyUses([
       stepRow("s", 1, undefined, {
         kind: "browser",
@@ -69,7 +69,7 @@ describe("the activity timeline", () => {
     ]) as [ActivityEntry, ActivityEntry];
     expect(entryView(search, [], false)).toMatchObject({
       title: "Looked at images of “Zelda”",
-      meta: "Browser",
+      meta: "Web",
       state: "done",
     });
     expect(entryView(read, [], false)).toMatchObject({

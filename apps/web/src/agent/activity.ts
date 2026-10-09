@@ -145,6 +145,9 @@ const KIND_PLACES: Record<NonNullable<AgentStep["kind"]>, string> = {
   app: "App",
 };
 
+// The web tools run in the browser's step kind but never touch the user's browser.
+const WEB_TOOLS: ReadonlySet<string> = new Set(["web_search", "web_fetch"]);
+
 // One flat row (design-v2 §10.20): what dot did, where and how, and how long it took. A failure's
 // meta line says what went wrong instead.
 export interface EntryView {
@@ -240,7 +243,7 @@ export function entryView(
   const where = computer
     ? joined(computer.app, intent ? what : computer.gesture)
     : joined(
-        kind && KIND_PLACES[kind],
+        WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
         intent ? what : undefined,
         diffStat(own.map((change) => change.patch)),
       );
