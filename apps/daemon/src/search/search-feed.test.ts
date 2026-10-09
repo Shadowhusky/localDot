@@ -153,12 +153,24 @@ describe("search feed", () => {
     const { home, log, index, memory, feed } = setup();
     const id = log.createSession("Insurance call");
     log.append(id, user("call the insurer about the quokka"));
+    log.append(id, {
+      type: "task.result",
+      agent: "main",
+      data: {
+        summary: "Called them.",
+        files: [{ name: "wallaby-claim.pdf", path: "x", bytes: 10 }],
+      },
+    });
     memory.appendNote(id, "Insurer reference is WINDSCREEN-42");
     await feed.backfill();
     expect(index.search({ query: "quokka" })).toHaveLength(1);
+    expect(index.search({ query: "wallaby" })).toHaveLength(1);
     log.forget(id);
-    // Both the sentence and the FTS token are gone at once, with no restart or merge.
-    expect(readFileSync(join(home, "index.sqlite")).includes(Buffer.from("quokka"))).toBe(false);
+    // The sentence, the FTS token and the row keys (which name result files) are gone at once,
+    // with no restart or merge.
+    const file = readFileSync(join(home, "index.sqlite"));
+    expect(file.includes(Buffer.from("quokka"))).toBe(false);
+    expect(file.includes(Buffer.from("wallaby"))).toBe(false);
     expect(index.search({ query: "quokka" })).toEqual([]);
     expect(index.search({ query: "windscreen" })).toEqual([
       expect.objectContaining({ kind: "note", sessionId: null, title: null }),
