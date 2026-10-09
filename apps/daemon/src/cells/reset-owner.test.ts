@@ -243,3 +243,22 @@ it("closes admission on startup when a durable fence names a missing reset recor
   await expect(restarted.reset(old, request)).rejects.toThrow();
   expect(f.host.retireOld).not.toHaveBeenCalled();
 });
+it("keeps only a ready candidate that fails restart verification held and republishes the others", async () => {
+  const otherOld = "01JXYZ00000000000000000005",
+    otherFresh = "01JXYZ00000000000000000006";
+  const second = {
+    ...record("ready"),
+    requestId: other,
+    oldCellId: otherOld,
+    newCellId: otherFresh,
+  };
+  const f = fixture([record("ready"), second]);
+  vi.mocked(f.host.inspectFresh).mockImplementation(async (row) =>
+    row.newCellId === fresh ? "owned" : "ready",
+  );
+  await expect(f.owner.restoreReady()).rejects.toThrow(`could not re-verify ${fresh}`);
+  expect(f.host.publish).toHaveBeenCalledOnce();
+  expect(f.host.publish).toHaveBeenCalledWith(second);
+  expect(f.host.retireFresh).not.toHaveBeenCalled();
+  expect(f.host.createFresh).not.toHaveBeenCalled();
+});

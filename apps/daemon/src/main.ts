@@ -50,6 +50,7 @@ import { KeydClient, keydSocketPath } from "./keyd/client.ts";
 import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
+import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
 import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
@@ -320,31 +321,33 @@ const reset = createComputerResetController({
   available: () => resetAvailable && !shuttingDown,
   stopping: () => shuttingDown,
 });
-const startup = async () => {
-  await runtimeAdmission.restorePrepared({
-    images: runtimeImages,
-    readCell: (id) => store.get(id),
-    verify: async (record) => {
-      if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
-      await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+const startup = () =>
+  runDaemonStartup({
+    stopping: () => shuttingDown,
+    restorePrepared: () =>
+      runtimeAdmission.restorePrepared({
+        images: runtimeImages,
+        readCell: (id) => store.get(id),
+        verify: async (record) => {
+          if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
+          await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+        },
+        canPublish: () => !shuttingDown,
+        retired: (id) =>
+          !!fences.record(id) || resetHolds.records().some((row) => row.oldCellId === id),
+      }),
+    recoverBrowsers: () => browserRecovery.recover(),
+    containFenced: () => orchestrator.containFenced(),
+    startAgent: () => agent.start(),
+    recoverReplacements: () => replacement.owner.start(),
+    reconcile: () => orchestrator.reconcile({ strict: serviceIdentity !== null }),
+    restoreResets: () => reset.restoreReady(),
+    openResets: () => {
+      resetAvailable = true;
     },
-    canPublish: () => !shuttingDown,
-    retired: (id) =>
-      !!fences.record(id) || resetHolds.records().some((row) => row.oldCellId === id),
   });
-  await browserRecovery.recover();
-  await orchestrator.containFenced();
-  await agent.start();
-  try {
-    await replacement.owner.start();
-  } finally {
-    await orchestrator.reconcile({ strict: serviceIdentity !== null });
-  }
-  await reset.restoreReady();
-  resetAvailable = true;
-};
-void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup()).catch(() =>
-  console.error("startup cleanup, replacement recovery or cell reconcile failed"),
+void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup()).catch((error) =>
+  console.error(describeStartupError(error)),
 );
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(

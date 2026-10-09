@@ -82,12 +82,18 @@ export class ComputerResetOwner {
    * republished; incomplete records retain their holds until an explicit same-request retry. */
   async restoreReady(): Promise<void> {
     if (!this.#available) throw fail();
+    const held: string[] = [];
     for (const raw of this.host.store.list()) {
       const record = ComputerResetRecord.parse(raw);
       if (record.phase !== "ready" || this.#old.has(record.newCellId)) continue;
       if (this.#old.get(record.oldCellId) !== record.requestId) throw fail();
-      await this.#run(record);
+      // A candidate that fails fresh verification keeps its hold; the others still publish.
+      await this.#run(record).catch(() => held.push(record.newCellId));
     }
+    if (held.length)
+      throw new Error(
+        `Computer reset could not re-verify ${held.join(", ")}; it stays held until the same request is retried.`,
+      );
   }
   status(oldCellId: string, requestId: string): ComputerResetRecord | undefined {
     if (
