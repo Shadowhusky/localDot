@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   clipText,
   type Input,
+  type InputResult,
   microsToMs,
+  msToMicros,
   type Point,
   type Rect,
   type Target,
@@ -28,13 +31,29 @@ import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.
 import { type NativeActionIdentity, sameNativeIdentity } from "./identity.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
-import { clickLabel, clipTarget, keyLabel, scrollLabel, typeLabel } from "./text.ts";
+import {
+  buttonLabel,
+  clickLabel,
+  clipTarget,
+  dragLabel,
+  keyLabel,
+  moveLabel,
+  scrollLabel,
+  typeLabel,
+} from "./text.ts";
 
 export const DEFAULT_AGENT = "main";
 const MODEL_SCREEN = { width: 1280, height: 800 } as const;
 // How long settle waits for a first screen change before it reports none, by verb: a key shows
-// its effect within a frame or two, a click may first have to open a menu or a dialog.
-const SETTLE_FIRST_MS = { key: 400, type: 400, click: 800, scroll: 800 } as const;
+// its effect within a frame or two, a click may first have to open a menu or a dialog. A hover
+// rarely changes much, and a stroke's every point waits for it.
+const SETTLE_FIRST_MS = { key: 400, type: 400, click: 800, scroll: 800, move: 400 } as const;
+// A button the agent holds down between actions is let go after this long without another
+// pointer action.
+export const HELD_BUTTON_MS = 60_000;
+// While an approval waits with a button held, desktopd's own backstop (90 s) is put off this often.
+const KEEP_HELD_MS = 30_000;
+const BUTTON_NUMBER = { left: 1, middle: 2, right: 3 } as const;
 // A backstop for desktopd's own lookup budget; a lookup past it is unknown, not "no element".
 const LOOKUP_TIMEOUT_MS = 1000;
 // Fitts' W in CSS px, multiplied by the cell's scale: the distance it divides is in device px.
@@ -51,21 +70,70 @@ export type GuiAction =
       find?: { name: string; role?: string; app?: string };
       button?: "left" | "right" | "middle";
       count?: 1 | 2 | 3;
+      // Modifier keys held down through the click.
+      mods?: string[];
       speed?: Speed | "auto";
       basedOn?: string;
     }
   | { verb: "type"; label?: string; text: string; masked?: boolean; speed?: Speed | "auto" }
-  | { verb: "key"; label?: string; combo: string[]; speed?: Speed | "auto" }
+  | {
+      verb: "key";
+      label?: string;
+      combo: string[];
+      // Presses of the combo in one input, or how long it stays down; never both.
+      repeat?: number;
+      holdMs?: number;
+      speed?: Speed | "auto";
+    }
   | {
       verb: "scroll";
       label?: string;
-      point: Point;
+      point?: Point;
       dx: number;
       dy: number;
+      mods?: string[];
       speed?: Speed | "auto";
       basedOn?: string;
     }
+  | {
+      verb: "drag";
+      label?: string;
+      // Model pixels, start first; the approval binds every point.
+      path: Point[];
+      button?: "left" | "right" | "middle";
+      mods?: string[];
+      durationMs?: number;
+      speed?: Speed | "auto";
+      basedOn?: string;
+    }
+  | {
+      verb: "move";
+      label?: string;
+      point: Point;
+      speed?: Speed | "auto";
+      basedOn?: string;
+      drag?: HeldDrag;
+    }
+  // A button that stays down between actions (down) and its release (up); without a point, where
+  // the cursor is.
+  | {
+      verb: "down" | "up";
+      label?: string;
+      point?: Point;
+      button?: "left" | "right" | "middle";
+      mods?: string[];
+      speed?: Speed | "auto";
+      basedOn?: string;
+      drag?: HeldDrag;
+    }
   | { verb: "wait"; label?: string; ms: number };
+
+// Set by the gateway, never by a caller: while a button is down, a move or a release carries on the
+// drag from where it went down to its own point (model pixels), and its approval names both.
+export interface HeldDrag {
+  from: Point;
+  to: Point;
+}
 
 export type { NativeActionIdentity } from "./identity.ts";
 
@@ -99,6 +167,12 @@ export interface ActionContext {
   authorizeAgent?(request: NativeActionRequest): Promise<NativeActionPermit | undefined>;
   // Private daemon callback at the last synchronous boundary before physical input.
   beforeEffect?(action: GuiAction, identity: NativeActionIdentity): boolean;
+  // The outcome of the input beforeEffect admitted, once it settled: whether the screen changed.
+  afterEffect?(action: GuiAction, identity: NativeActionIdentity, changed: boolean): void;
+  // Private daemon callback: input state outlives this action (a button left down, a cursor placed
+  // for the next press). The owner calls `release` before anyone else gets the screen; the
+  // returned function forgets it once it is gone.
+  holdInput?(release: () => Promise<void>): () => void;
   sessionId: string;
   cellId: string;
   agent?: string;
@@ -113,6 +187,17 @@ export interface ActionOutcome {
   target?: Target;
   error?: string;
   cancelled?: "preflight" | "user" | "timeout" | "stale";
+  // Settle saw a change and the result frame differs from the frame before the input.
+  changed?: boolean;
+  // Typing and keys: the element that had keyboard focus just before the input.
+  focus?: { target: Target | null; unknown?: true };
+  // A repeat or a hold that stopped after its first press: the presses made, or how long the
+  // keys were down.
+  partial?: { presses: number; heldMs?: number };
+  // A release of a button that was not down.
+  notDown?: true;
+  // A drag, or a release of a held button, that was cancelled after its press and before its drop.
+  dropCancelled?: true;
 }
 
 export interface GatewayDeps {
@@ -125,6 +210,7 @@ export interface GatewayDeps {
   now(): number;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   hitTestTimeoutMs?: number;
+  heldButtonMs?: number;
 }
 
 class Cancelled extends Error {
@@ -144,13 +230,50 @@ const holding = (s: StreamState) =>
   s.viewers > 0 &&
   (s.connection === "stalled" || s.connection === "disconnected" || s.connection === "connecting");
 
+// A move made on a screenshot: its agent, that screenshot and where it put the cursor.
+interface Placed {
+  sessionId: string;
+  agent: string;
+  basedOn: string;
+  point: Point;
+  forget?: () => void;
+}
+
+interface HeldButton {
+  button: "left" | "right" | "middle";
+  device: NativeDevice;
+  // Where it went down and what was there: a move or a release while it is down drags from it.
+  press: NativeActionIdentity;
+  owner: Pick<ActionContext, "sessionId" | "agent" | "redact">;
+  // None runs while an approval waits; `due` is when it lets go, in daemon time.
+  timer?: NodeJS.Timeout;
+  due: number;
+  forget?: () => void;
+}
+
+// How long a drag's motion takes when the action does not say: longer paths take longer.
+function dragDurationMs(way: readonly Point[], scale: 1 | 2, speed: Speed): number {
+  const length = way
+    .slice(1)
+    .reduce(
+      (sum, p, i) => sum + Math.hypot(p.x - (way[i] as Point).x, p.y - (way[i] as Point).y),
+      0,
+    );
+  const perPx = speed === "watch" ? 1.2 : 0.6;
+  return Math.round(Math.min(3000, Math.max(300, 250 + (length / scale) * perPx)));
+}
+
 export class ActionGateway {
   readonly #cursor = new Map<string, Point>();
   readonly #queues = new Map<string, Promise<unknown>>();
+  // Buttons the agent left down between actions, by screen.
+  readonly #held = new Map<string, HeldButton>();
+  // A move that put the cursor where it is, by screen, until the next action.
+  readonly #placed = new Map<string, Placed>();
   // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
   readonly #lastFrame = new Map<
     string,
-    { frameId: string; sessionId: string; device: NativeDevice }
+    { frameId: string; sessionId: string; device: NativeDevice; digest: string }
   >();
 
   constructor(private readonly deps: GatewayDeps) {}
@@ -159,16 +282,191 @@ export class ActionGateway {
     return this.#cursor.get(cellId);
   }
 
+  // Lets go of a button the agent left down on the screen, without dropping anything: desktopd
+  // cancels a drag the pointer made with it (Escape while it is still down), then every key and
+  // button comes up where the pointer is. The step says so.
+  async releaseHeld(cellId: string): Promise<void> {
+    const held = this.#held.get(cellId);
+    if (!held) return;
+    this.#forget(cellId);
+    this.#unplace(cellId);
+    const at = this.#cursor.get(cellId) ?? (held.press.point as Point);
+    const dragged = at.x !== held.press.point?.x || at.y !== held.press.point?.y;
+    await this.#journalUp(
+      cellId,
+      held,
+      `Release the ${held.button} button${dragged ? ", cancelling the drag" : ""}`,
+      async () => {
+        await held.device.client.release?.();
+      },
+    );
+  }
+
+  // The steps record a held button coming up where the pointer is, once `up` let go of it, or at
+  // once when it is already up.
+  async #journalUp(
+    cellId: string,
+    held: HeldButton,
+    label: string,
+    up?: () => Promise<void>,
+  ): Promise<void> {
+    const ctx: ActionContext = { ...held.owner, cellId };
+    const at = this.#cursor.get(cellId) ?? (held.press.point as Point);
+    const journal = (type: string, data: Record<string, unknown>) => {
+      try {
+        this.#append(ctx, type, data);
+      } catch {
+        // A session that is gone keeps no record; the button still comes up.
+      }
+    };
+    journal("action.intent", { verb: "click", label, point: at, risk: "none" });
+    try {
+      await up?.();
+    } catch (error) {
+      journal("action.result", { ok: false, error: String(error).slice(0, 500) });
+      return;
+    }
+    const pressT = this.#sessionT(held.owner.sessionId, this.deps.now());
+    journal("action.dispatch", {
+      input: { kind: "up", button: held.button, at },
+      pressT,
+      ringAt: pressT,
+      injector: "xtest",
+    });
+    journal("action.result", { ok: true });
+  }
+
+  #unplace(cellId: string): void {
+    const placed = this.#placed.get(cellId);
+    if (!placed) return;
+    this.#placed.delete(cellId);
+    placed.forget?.();
+  }
+
+  // Only the very next action may press where this move put the cursor, and only while nobody
+  // else had the screen: its owner forgets it before anyone else gets the screen.
+  #place(ctx: ActionContext, basedOn: string, point: Point): void {
+    this.#unplace(ctx.cellId);
+    const placed: Placed = {
+      sessionId: ctx.sessionId,
+      agent: ctx.agent ?? DEFAULT_AGENT,
+      basedOn,
+      point,
+    };
+    this.#placed.set(ctx.cellId, placed);
+    const forget = ctx.holdInput?.(async () => {
+      if (this.#placed.get(ctx.cellId) === placed) this.#unplace(ctx.cellId);
+    });
+    if (forget) {
+      if (this.#placed.get(ctx.cellId) === placed) placed.forget = forget;
+      else forget();
+    }
+  }
+
+  #forget(cellId: string): void {
+    const held = this.#held.get(cellId);
+    if (!held) return;
+    this.#held.delete(cellId);
+    clearTimeout(held.timer);
+    held.forget?.();
+  }
+
+  #hold(
+    ctx: ActionContext,
+    device: NativeDevice,
+    button: HeldButton["button"],
+    press: NativeActionIdentity,
+  ): void {
+    this.#forget(ctx.cellId);
+    const owner = {
+      sessionId: ctx.sessionId,
+      ...(ctx.agent ? { agent: ctx.agent } : {}),
+      ...(ctx.redact ? { redact: ctx.redact } : {}),
+    };
+    const held: HeldButton = { button, device, press, owner, due: 0 };
+    this.#held.set(ctx.cellId, held);
+    this.#touch(ctx.cellId);
+    // The owner may let go at once (the task stopped as the button went down): set it first.
+    const forget = ctx.holdInput?.(() => this.releaseHeld(ctx.cellId));
+    if (forget) {
+      if (this.#held.get(ctx.cellId) === held) held.forget = forget;
+      else forget();
+    }
+  }
+
+  // Another pointer action while a button is down restarts its time.
+  #touch(cellId: string): void {
+    this.#letGoIn(cellId, this.deps.heldButtonMs ?? HELD_BUTTON_MS);
+  }
+
+  #letGoIn(cellId: string, ms: number): void {
+    const held = this.#held.get(cellId);
+    if (!held) return;
+    clearTimeout(held.timer);
+    held.due = this.deps.now() + msToMicros(ms);
+    held.timer = setTimeout(() => void this.releaseHeld(cellId), ms);
+    held.timer.unref();
+  }
+
+  // While an approval waits, which can take hours, a held button stays down: its own time stands
+  // still, and desktopd's backstop, which only a pointer input or /held puts off, is put off from
+  // the start and then every 30 s. The returned function starts its time again: afresh for a
+  // pointer action, and with what was left for any other, which is no mouse action.
+  #keepHeld(cellId: string, pointer: boolean): () => void {
+    const held = this.#held.get(cellId);
+    if (!held) return () => {};
+    clearTimeout(held.timer);
+    held.timer = undefined;
+    const left = Math.max(0, microsToMs(held.due - this.deps.now()));
+    const putOff = () => {
+      if (this.#held.get(cellId) === held) void held.device.client.held?.().catch(() => undefined);
+    };
+    putOff();
+    const keep = setInterval(putOff, KEEP_HELD_MS);
+    keep.unref();
+    return () => {
+      clearInterval(keep);
+      if (this.#held.get(cellId) !== held) return;
+      if (pointer) this.#touch(cellId);
+      else this.#letGoIn(cellId, left);
+    };
+  }
+
+  // desktopd lets go of a button on its own when nothing reached it for long, or when its helper
+  // restarted: a move, scroll or release that goes on from the press needs it still down. One that
+  // is up is forgotten, and the steps say it came up.
+  async #confirmHeld(ctx: ActionContext, d: NativeDevice, held: HeldButton): Promise<void> {
+    // A desktopd from before /held cannot say.
+    const reply = await d.client
+      .held?.()
+      .catch((error) =>
+        error instanceof DesktopdError && error.status === 404 ? undefined : Promise.reject(error),
+      );
+    this.#check(ctx);
+    if (!reply || reply.buttons.includes(BUTTON_NUMBER[held.button])) return;
+    if (this.#held.get(ctx.cellId) === held) {
+      this.#forget(ctx.cellId);
+      await this.#journalUp(ctx.cellId, held, `The ${held.button} button came up`);
+    }
+    throw new Cancelled("preflight", `the ${held.button} button is no longer down`);
+  }
+
   // A fresh frame for the brain (M4) and for the step thumbnails; also where the cursor starts.
   async observe(ctx: ActionContext): Promise<{ frameId: string; pointer: Point }> {
     ctx = this.#owner(ctx);
     const d = await this.#ready(ctx);
     const o = await d.client.observe(ctx.signal);
     this.#check(ctx);
-    this.deps.frames.save(ctx.sessionId, o.frameId, Buffer.from(o.image, "base64"));
+    const image = Buffer.from(o.image, "base64");
+    this.deps.frames.save(ctx.sessionId, o.frameId, image);
     this.#append(ctx, "observe", { frameId: o.frameId, width: o.width, height: o.height });
     this.#cursor.set(ctx.cellId, o.pointer);
-    this.#lastFrame.set(ctx.cellId, { frameId: o.frameId, sessionId: ctx.sessionId, device: d });
+    this.#lastFrame.set(ctx.cellId, {
+      frameId: o.frameId,
+      sessionId: ctx.sessionId,
+      device: d,
+      digest: createHash("sha256").update(image).digest("hex"),
+    });
     return { frameId: o.frameId, pointer: o.pointer };
   }
 
@@ -210,6 +508,10 @@ export class ActionGateway {
 
   async #run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
     let dispatched = false;
+    // Only the very next action may use the move that placed the cursor: any other in between,
+    // even a key, may have changed what is under it.
+    const placed = this.#placed.get(ctx.cellId);
+    this.#unplace(ctx.cellId);
     try {
       this.#check(ctx);
       const scale = ctx.screen?.scale ?? this.deps.cells.get(ctx.cellId)?.scale;
@@ -238,7 +540,14 @@ export class ActionGateway {
         }
         case "click":
         case "scroll":
-          return await this.#pointerAction(ctx, action, scale, speed, (v) => {
+        case "move":
+        case "down":
+        case "up":
+          return await this.#pointerAction(ctx, action, scale, speed, placed, (v) => {
+            dispatched = v;
+          });
+        case "drag":
+          return await this.#dragAction(ctx, action, scale, speed, (v) => {
             dispatched = v;
           });
         case "type":
@@ -257,12 +566,21 @@ export class ActionGateway {
 
   async #pointerAction(
     ctx: ActionContext,
-    action: Extract<GuiAction, { verb: "click" | "scroll" }>,
+    action: Extract<GuiAction, { verb: "click" | "scroll" | "move" | "down" | "up" }>,
     scale: 1 | 2,
     speed: Speed,
+    placed: Placed | undefined,
     mark: (v: boolean) => void,
   ): Promise<ActionOutcome> {
     const d = await this.#ready(ctx);
+    const held = this.#held.get(ctx.cellId);
+    if (held && (action.verb === "click" || action.verb === "down"))
+      throw new Cancelled(
+        "preflight",
+        `the ${held.button} button is still down; let go of it with left_mouse_up first`,
+      );
+    const centre = { x: (MODEL_SCREEN.width * scale) / 2, y: (MODEL_SCREEN.height * scale) / 2 };
+    const cursor = this.#cursor.get(ctx.cellId) ?? centre;
     let found: Lookup | undefined;
     let point: Point;
     if (action.verb === "click" && action.find) {
@@ -272,20 +590,40 @@ export class ActionGateway {
       point = found.target.point;
     } else if (action.point) {
       point = toDevice(action.point, { ...MODEL_SCREEN, scale });
-    } else throw new Cancelled("preflight", "click needs a point or a find");
+    } else point = cursor;
 
+    // While a button is down, a move, a scroll or a release carries on a drag from where it went
+    // down: the press is its start and what is under its point its drop, read through the drag's
+    // own icon, so its approval is a drag's, naming both ends.
+    const dragging =
+      held && (action.verb === "move" || action.verb === "scroll" || action.verb === "up")
+        ? held
+        : undefined;
+    const plain = withoutDrag(action);
+    const authorized = dragging
+      ? {
+          ...plain,
+          drag: {
+            from: modelPoint(dragging.press.point ?? cursor, scale),
+            to: modelPoint(point, scale),
+          },
+        }
+      : plain;
     const readIdentity = async (): Promise<NativeActionIdentity> =>
-      frozenSnapshot({ ...(await this.#lookup(ctx, d, point)), point });
+      frozenSnapshot(
+        dragging
+          ? { ...dragging.press, drop: { ...(await this.#lookup(ctx, d, point, true)), point } }
+          : { ...(await this.#lookup(ctx, d, point)), point },
+      );
     const identity = ctx.source === "agent" ? await readIdentity() : undefined;
     const permit = identity
-      ? await this.#authorize(ctx, action, identity, readIdentity)
+      ? await this.#authorize(ctx, authorized, identity, readIdentity)
       : undefined;
-    if (identity) found = identity;
+    this.#stillHeld(ctx, dragging);
+    if (dragging) await this.#confirmHeld(ctx, d, dragging);
+    if (identity) found = identity.drop ?? identity;
     const t0 = this.deps.now();
-    const from = this.#cursor.get(ctx.cellId) ?? {
-      x: (MODEL_SCREEN.width * scale) / 2,
-      y: (MODEL_SCREEN.height * scale) / 2,
-    };
+    const from = cursor;
     const width = found?.target?.bbox
       ? Math.max(MIN_TARGET_PX * scale, Math.min(found.target.bbox.w, found.target.bbox.h))
       : UNKNOWN_TARGET_PX * scale;
@@ -296,14 +634,19 @@ export class ActionGateway {
     );
     const leadMs = speed === "instant" ? 0 : intentLeadMs(speed);
     const startsAt = Math.round(microsToMs(this.#sessionT(ctx.sessionId, t0))) + leadMs;
-    const verb = action.verb === "click" ? "click" : "scroll";
+    const target = found?.target ?? null;
+    const shown = modelPoint(point, scale);
     const label =
       action.label ??
       (action.verb === "click"
-        ? clickLabel(found?.target ?? null, point)
-        : scrollLabel(action.dx, action.dy));
+        ? clickLabel(target, shown)
+        : action.verb === "scroll"
+          ? scrollLabel(action.dx, action.dy)
+          : action.verb === "move"
+            ? moveLabel(target, shown)
+            : buttonLabel(action.verb, action.button ?? "left", target, shown));
     this.#append(ctx, "action.intent", {
-      verb,
+      verb: action.verb === "down" || action.verb === "up" ? "click" : action.verb,
       label: clipText(label, 80),
       point,
       risk: "none",
@@ -327,39 +670,114 @@ export class ActionGateway {
       if (r.target && !ended) this.#append(ctx, "action.target", { target: clipTarget(r.target) });
       return r;
     });
-    let frameId: string;
+    // While a button is down, the cursor glides along with the travel instead of jumping at its
+    // end: the app sees the drag.
+    const glideMs = Math.max(1, Math.round(durationMs));
+    const glide = dragging !== undefined && durationMs > 0;
+    // A release or a hover keeps no basis: the press it ends was checked, and the screen under a
+    // drag changes as it goes. Nor does a press where this agent's own move, made on the same
+    // screenshot, just put the cursor: that move may have drawn a tool's own outline around it (a
+    // paintbrush's footprint). Any other press is checked.
+    const placedHere =
+      action.verb === "down" &&
+      action.point === undefined &&
+      action.basedOn !== undefined &&
+      placed?.basedOn === action.basedOn &&
+      placed.sessionId === ctx.sessionId &&
+      placed.agent === (ctx.agent ?? DEFAULT_AGENT) &&
+      placed.point.x === cursor.x &&
+      placed.point.y === cursor.y;
+    const fresh =
+      action.verb === "click" ||
+      (action.verb === "scroll" && !dragging) ||
+      (action.verb === "down" && !placedHere);
+    let result: { frameId: string; changed: boolean };
+    let notDown = false;
     try {
-      const pressAtMs =
-        speed === "instant" ? startsAt + INSTANT_LEAD_MS : startsAt + durationMs + dwellMs(speed);
+      const pressAtMs = glide
+        ? startsAt
+        : speed === "instant"
+          ? startsAt + INSTANT_LEAD_MS
+          : startsAt + durationMs + dwellMs(speed);
       await this.#sleepUntil(ctx, pressAtMs);
       for (;;) {
         await this.#waitForStream(ctx);
         // A stream can stall during the asynchronous comparison. After recovery, compare again
         // with the same model basis: an earlier allow cannot authorize a delayed press.
-        if (action.basedOn) {
+        if (fresh && action.basedOn) {
           await this.#checkFresh(ctx, action.basedOn, point, scale, d, targetKnown);
         }
         this.#check(ctx);
         const stream = this.#stream(ctx);
         if (!stream || !holding(stream)) break;
       }
+      const mods = "mods" in action && action.mods?.length ? { mods: action.mods } : {};
       const input: Input =
         action.verb === "click"
-          ? { kind: "click", button: action.button ?? "left", count: action.count ?? 1, at: point }
-          : { kind: "scroll", at: point, dx: action.dx, dy: action.dy };
+          ? {
+              kind: "click",
+              button: action.button ?? "left",
+              count: action.count ?? 1,
+              ...mods,
+              at: point,
+            }
+          : action.verb === "scroll"
+            ? { kind: "scroll", at: point, dx: action.dx, dy: action.dy, ...mods }
+            : action.verb === "move"
+              ? { kind: "move", to: point, ...(glide ? { durationMs: glideMs } : {}) }
+              : action.verb === "down"
+                ? { kind: "down", button: action.button ?? "left", at: point, ...mods }
+                : { kind: "up", button: action.button ?? "left", at: point };
       this.#check(ctx);
-      if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
+      if (identity) await this.#consume(ctx, authorized, identity, permit, readIdentity);
       this.#check(ctx);
-      const res = await d.client.input(
-        {
-          input,
-          injector: "xtest",
-          holdMs: 0,
-          ...(known?.window !== undefined && known.window !== null ? { window: known.window } : {}),
-        },
-        ctx.signal,
-      );
+      this.#stillHeld(ctx, dragging);
+      const window =
+        !dragging && action.verb !== "up" && known?.window !== undefined && known.window !== null
+          ? { window: known.window }
+          : {};
+      const drop = dragging && action.verb === "up" ? dropWindowOf(identity) : {};
+      let res: InputResult;
+      try {
+        if (glide && action.verb !== "move" && (point.x !== from.x || point.y !== from.y)) {
+          mark(true);
+          await d.client.input(
+            {
+              input: { kind: "move", to: point, durationMs: glideMs },
+              injector: "xtest",
+              holdMs: 0,
+            },
+            ctx.signal,
+          );
+        }
+        res = await d.client.input(
+          { input, injector: "xtest", holdMs: 0, ...window, ...drop },
+          ctx.signal,
+        );
+      } catch (error) {
+        // A press that failed may have left its button down, and a release that failed may not
+        // have let go: either comes up without dropping. Nothing else may be down.
+        if (action.verb === "down" || (dragging && action.verb === "up")) {
+          this.#forget(ctx.cellId);
+          await d.client.release?.().catch(() => undefined);
+          if (dragging && error instanceof DesktopdError && error.status === 409)
+            return this.#dropCancelled(ctx, error);
+        }
+        throw error;
+      }
       mark(true);
+      if (action.verb === "down")
+        this.#hold(
+          ctx,
+          d,
+          action.button ?? "left",
+          identity ?? frozenSnapshot({ target: null, window: null, point }),
+        );
+      else if (action.verb === "up") {
+        this.#forget(ctx.cellId);
+        notDown = res.releaseMono === undefined;
+      } else this.#touch(ctx.cellId);
+      if (action.verb === "move" && action.basedOn) this.#place(ctx, action.basedOn, point);
       const pressT = this.#pressT(ctx, d, res.pressMono);
       const ringAt = await this.deps.ringOnset.onset({
         pressT,
@@ -369,12 +787,187 @@ export class ActionGateway {
       });
       this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
       this.#cursor.set(ctx.cellId, point);
-      frameId = await this.#finish(ctx, d, verb);
+      result = await this.#finish(
+        ctx,
+        d,
+        action.verb === "move" ? "move" : action.verb === "scroll" ? "scroll" : "click",
+        identity && { action: authorized, identity },
+      );
     } finally {
       ended = true;
     }
     const outcome = await targetKnown;
-    return { ok: true, frameId, ...(outcome.target ? { target: outcome.target } : {}) };
+    return {
+      ok: true,
+      ...result,
+      ...(outcome.target ? { target: outcome.target } : {}),
+      ...(notDown ? { notDown: true as const } : {}),
+    };
+  }
+
+  // A move or a release waited for approval while its button was down: Stop, a pause, a takeover
+  // or its time may have let go meanwhile, and nothing is dragged any more.
+  #stillHeld(ctx: ActionContext, held: HeldButton | undefined): void {
+    if (held && this.#held.get(ctx.cellId) !== held)
+      throw new Cancelled("preflight", `the ${held.button} button is no longer down`);
+  }
+
+  // Pressed, then cancelled before the drop: the step says why, and nothing was dropped.
+  #dropCancelled(ctx: ActionContext, error: unknown): ActionOutcome {
+    const stopped = ctx.signal?.aborted === true;
+    const raw = error instanceof Error ? error.message : String(error);
+    const message = ctx.redact ? ctx.redact(raw) : raw;
+    this.#append(ctx, "action.cancel", {
+      reason: stopped ? "user" : "stale",
+      detail: stopped
+        ? "stopped before the drop; the drag was cancelled"
+        : "another window is at the drop point; the drag was cancelled before its drop",
+    });
+    return {
+      ok: false,
+      error: message,
+      ...(stopped ? { cancelled: "user" as const } : {}),
+      dropCancelled: true,
+    };
+  }
+
+  // Press at the start, follow the path, let go at the end: one approval binds every point. The
+  // start is checked against the model's screenshot; desktopd lets go only over the window the
+  // drop point was in when it was approved, and where the drag started when it stops early.
+  async #dragAction(
+    ctx: ActionContext,
+    action: Extract<GuiAction, { verb: "drag" }>,
+    scale: 1 | 2,
+    speed: Speed,
+    mark: (v: boolean) => void,
+  ): Promise<ActionOutcome> {
+    const d = await this.#ready(ctx);
+    const held = this.#held.get(ctx.cellId);
+    if (held)
+      throw new Cancelled(
+        "preflight",
+        `the ${held.button} button is still down; let go of it with left_mouse_up first`,
+      );
+    if (action.path.length < 2) throw new Cancelled("preflight", "a drag needs two points");
+    const way = action.path.map((p) => toDevice(p, { ...MODEL_SCREEN, scale }));
+    const start = way[0] as Point;
+    const end = way.at(-1) as Point;
+    const readIdentity = async (): Promise<NativeActionIdentity> => {
+      const [at, drop] = await Promise.all([
+        this.#lookup(ctx, d, start),
+        this.#lookup(ctx, d, end),
+      ]);
+      return frozenSnapshot({ ...at, point: start, drop: { ...drop, point: end } });
+    };
+    const identity = ctx.source === "agent" ? await readIdentity() : undefined;
+    const permit = identity
+      ? await this.#authorize(ctx, action, identity, readIdentity)
+      : undefined;
+    const t0 = this.deps.now();
+    const from = this.#cursor.get(ctx.cellId) ?? {
+      x: (MODEL_SCREEN.width * scale) / 2,
+      y: (MODEL_SCREEN.height * scale) / 2,
+    };
+    const width = identity?.target?.bbox
+      ? Math.max(MIN_TARGET_PX * scale, Math.min(identity.target.bbox.w, identity.target.bbox.h))
+      : UNKNOWN_TARGET_PX * scale;
+    const travelMs = travelDurationMs(Math.hypot(start.x - from.x, start.y - from.y), width, speed);
+    const leadMs = speed === "instant" ? 0 : intentLeadMs(speed);
+    const startsAt = Math.round(microsToMs(this.#sessionT(ctx.sessionId, t0))) + leadMs;
+    this.#append(ctx, "action.intent", {
+      verb: "drag",
+      label: clipText(
+        action.label ??
+          dragLabel(
+            { target: identity?.target, point: modelPoint(start, scale) },
+            { target: identity?.drop?.target, point: modelPoint(end, scale) },
+          ),
+        80,
+      ),
+      point: start,
+      risk: "none",
+      pointer: {
+        from,
+        to: start,
+        startsAt,
+        durationMs: travelMs,
+        seed: Math.floor(Math.random() * 2 ** 31),
+        curve: "minjerk-bow-v1",
+      },
+    });
+    if (identity?.target)
+      this.#append(ctx, "action.target", { target: clipTarget(identity.target) });
+    // The animation exception compares the start's element with a fresh read of it alone.
+    const startKnown: Promise<Lookup> = identity
+      ? Promise.resolve({
+          target: identity.target,
+          window: identity.window,
+          ...(identity.windowFrame ? { windowFrame: identity.windowFrame } : {}),
+          ...(identity.unknown ? { unknown: true as const } : {}),
+        })
+      : this.#read(d, start);
+    await this.#sleepUntil(
+      ctx,
+      speed === "instant" ? startsAt + INSTANT_LEAD_MS : startsAt + travelMs + dwellMs(speed),
+    );
+    for (;;) {
+      await this.#waitForStream(ctx);
+      if (action.basedOn) await this.#checkFresh(ctx, action.basedOn, start, scale, d, startKnown);
+      this.#check(ctx);
+      const stream = this.#stream(ctx);
+      if (!stream || !holding(stream)) break;
+    }
+    const input: Input = {
+      kind: "drag",
+      from: start,
+      to: end,
+      ...(way.length > 2 ? { path: way.slice(1, -1) } : {}),
+      button: action.button ?? "left",
+      ...(action.mods?.length ? { mods: action.mods } : {}),
+      durationMs: action.durationMs ?? dragDurationMs(way, scale, speed),
+    };
+    this.#check(ctx);
+    if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
+    this.#check(ctx);
+    let dispatched = false;
+    const dispatch = async (pressMono: number, injector: InputResult["injector"]) => {
+      if (dispatched) return;
+      dispatched = true;
+      mark(true);
+      const pressT = this.#pressT(ctx, d, pressMono);
+      const ringAt = await this.deps.ringOnset.onset({ pressT, injector, kind: "click", scale });
+      this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector });
+    };
+    let res: InputResult;
+    try {
+      res = await d.client.input(
+        {
+          input,
+          injector: "xtest",
+          holdMs: 0,
+          ...(identity?.window !== undefined && identity.window !== null
+            ? { window: identity.window }
+            : {}),
+          ...dropWindowOf(identity),
+        },
+        ctx.signal,
+        (p) => dispatch(p.pressMono, "xtest"),
+      );
+    } catch (error) {
+      // desktopd cancels a drag it stops before the drop; this waits for every button to be up
+      // before Stop or a takeover goes on.
+      await d.client.release?.().catch(() => undefined);
+      if (
+        dispatched &&
+        (ctx.signal?.aborted || (error instanceof DesktopdError && error.status === 409))
+      )
+        return this.#dropCancelled(ctx, error);
+      throw error;
+    }
+    await dispatch(res.pressMono, res.injector);
+    this.#cursor.set(ctx.cellId, end);
+    const settled = await this.#finish(ctx, d, "click", identity && { action, identity });
+    return { ok: true, ...settled, ...(identity?.target ? { target: identity.target } : {}) };
   }
 
   async #typeAction(
@@ -426,7 +1019,7 @@ export class ActionGateway {
       injector: "xtest" as const,
       ...(identity.window ? { window: identity.window } : {}),
     };
-    await this.#consume(ctx, action, identity, permit, readIdentity);
+    const fresh = await this.#consume(ctx, action, identity, permit, readIdentity);
     this.#check(ctx);
     const result = await d.client.type(
       typing,
@@ -457,8 +1050,13 @@ export class ActionGateway {
       ctx.signal,
     );
     if (result.count === 0) throw new Cancelled("timeout", "nothing was typed");
-    const frameId = await this.#finish(ctx, d, "type");
-    return { ok: true, frameId, ...(identity.target ? { target: identity.target } : {}) };
+    const settled = await this.#finish(ctx, d, "type", { action, identity });
+    return {
+      ok: true,
+      ...settled,
+      ...(identity.target ? { target: identity.target } : {}),
+      ...(fresh ? { focus: focusOf(fresh) } : {}),
+    };
   }
 
   async #keyAction(
@@ -479,43 +1077,88 @@ export class ActionGateway {
       : undefined;
     this.#append(ctx, "action.intent", {
       verb: "key",
-      label: clipText(action.label ?? keyLabel(action.combo), 80),
+      label: clipText(action.label ?? keyLabel(action.combo, action), 80),
       risk: "none",
     });
     await this.deps.sleep(dwellMs(speed), ctx.signal);
     await this.#waitForStream(ctx);
-    const input: Input = { kind: "key", combo: action.combo };
-    if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
-    this.#check(ctx);
-    const res = await d.client.input(
-      {
-        input,
-        injector: "xtest",
-        holdMs: 0,
-        ...(identity?.window !== undefined && identity.window !== null
-          ? { window: identity.window }
-          : {}),
-      },
-      ctx.signal,
-    );
-    mark(true);
-    const pressT = this.#pressT(ctx, d, res.pressMono);
-    const ringAt = await this.deps.ringOnset.onset({
-      pressT,
-      injector: res.injector,
+    const input: Input = {
       kind: "key",
-      scale,
-    });
-    this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
-    const frameId = await this.#finish(ctx, d, "key");
-    return { ok: true, frameId };
+      combo: action.combo,
+      ...(action.repeat && action.repeat > 1 ? { repeat: action.repeat } : {}),
+      ...(action.holdMs ? { holdMs: action.holdMs } : {}),
+    };
+    const fresh = identity
+      ? await this.#consume(ctx, action, identity, permit, readIdentity)
+      : undefined;
+    this.#check(ctx);
+    // The input is dispatched once its first press is down: a repeat or a hold that stops later
+    // still pressed keys. `downAt` is when a hold's keys went down, in daemon time.
+    let dispatched = false;
+    let presses = 0;
+    let downAt = 0;
+    const dispatch = async (pressMono: number, injector: InputResult["injector"]) => {
+      if (dispatched) return;
+      dispatched = true;
+      downAt = this.deps.now();
+      mark(true);
+      const pressT = this.#pressT(ctx, d, pressMono);
+      const ringAt = await this.deps.ringOnset.onset({ pressT, injector, kind: "key", scale });
+      this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector });
+    };
+    let res: InputResult;
+    try {
+      res = await d.client.input(
+        {
+          input,
+          injector: "xtest",
+          holdMs: 0,
+          ...(identity?.window !== undefined && identity.window !== null
+            ? { window: identity.window }
+            : {}),
+        },
+        ctx.signal,
+        async (p) => {
+          presses = p.presses;
+          await dispatch(p.pressMono, "xtest");
+        },
+      );
+    } catch (error) {
+      // A hold that was stopped, or keys that failed partway, may still be down. desktopd and its
+      // helper release them too; this waits for it before Stop or a takeover goes on.
+      await d.client.release?.().catch(() => undefined);
+      if (!dispatched) throw error;
+      const heldMs = action.holdMs
+        ? Math.min(action.holdMs, Math.round((this.deps.now() - downAt) / 1000))
+        : undefined;
+      const cause = ctx.signal?.aborted ? ctx.signal.reason : error;
+      const raw = cause instanceof Error ? cause.message : "stopped";
+      const why = ctx.redact ? ctx.redact(raw) : raw;
+      const done =
+        heldMs === undefined
+          ? `${presses} of ${action.repeat ?? 1} presses`
+          : `holding for ${seconds(heldMs)} s of ${seconds(action.holdMs ?? 0)} s`;
+      return {
+        ...this.#fail(ctx, new Error(`Stopped after ${done}: ${why}`), true),
+        error: why,
+        partial: { presses, ...(heldMs === undefined ? {} : { heldMs }) },
+        ...(fresh ? { focus: focusOf(fresh) } : {}),
+      };
+    }
+    await dispatch(res.pressMono, res.injector);
+    const settled = await this.#finish(ctx, d, "key", identity && { action, identity });
+    return { ok: true, ...settled, ...(fresh ? { focus: focusOf(fresh) } : {}) };
   }
 
   // The element under a point, or keyboard focus without one. A lookup that failed or ran out of
-  // time is unknown: it never reads as "no element".
-  async #read(d: NativeDevice, point?: Point): Promise<Lookup> {
+  // time is unknown: it never reads as "no element". `managed` looks through popups over the
+  // point, such as a drag's own icon.
+  async #read(d: NativeDevice, point?: Point, managed = false): Promise<Lookup> {
     const hit = await Promise.race([
-      (point ? d.client.hitTest(point) : d.client.focused()).catch(() => UNKNOWN),
+      (point
+        ? d.client.hitTest(point, managed ? { managed } : undefined)
+        : d.client.focused()
+      ).catch(() => UNKNOWN),
       timeoutAfter(this.deps.hitTestTimeoutMs ?? LOOKUP_TIMEOUT_MS, UNKNOWN),
     ]);
     return {
@@ -526,8 +1169,13 @@ export class ActionGateway {
     };
   }
 
-  async #lookup(ctx: ActionContext, d: NativeDevice, point?: Point): Promise<Lookup> {
-    const hit = await this.#read(d, point);
+  async #lookup(
+    ctx: ActionContext,
+    d: NativeDevice,
+    point?: Point,
+    managed = false,
+  ): Promise<Lookup> {
+    const hit = await this.#read(d, point, managed);
     this.#check(ctx);
     return hit;
   }
@@ -543,16 +1191,25 @@ export class ActionGateway {
     if (ctx.source !== "agent" || !ctx.authorizeAgent)
       throw new Cancelled("preflight", "this native action has no admitted owner");
     let changed = false;
-    const permit = await ctx.authorizeAgent({
-      action,
-      identity,
-      revalidate: async () => {
-        const fresh = await read();
-        this.#check(ctx);
-        changed = !sameNativeIdentity(identity, fresh);
-        return !changed;
-      },
-    });
+    const resume = this.#keepHeld(
+      ctx.cellId,
+      action.verb !== "key" && action.verb !== "type" && action.verb !== "wait",
+    );
+    let permit: NativeActionPermit | undefined;
+    try {
+      permit = await ctx.authorizeAgent({
+        action,
+        identity,
+        revalidate: async () => {
+          const fresh = await read();
+          this.#check(ctx);
+          changed = !sameNativeIdentity(identity, fresh);
+          return !changed;
+        },
+      });
+    } finally {
+      resume();
+    }
     this.#check(ctx);
     if (!permit && changed) {
       // Approved, but the target moved on while the card was open: the model may look and retry.
@@ -569,15 +1226,16 @@ export class ActionGateway {
     return permit;
   }
 
+  // The read just before input, once it confirmed the approved identity; none for manual input.
   async #consume(
     ctx: ActionContext,
     action: GuiAction,
     identity: NativeActionIdentity,
     permit: NativeActionPermit | undefined,
     read: () => Promise<NativeActionIdentity>,
-  ): Promise<void> {
+  ): Promise<NativeActionIdentity | undefined> {
     this.#check(ctx);
-    if (ctx.source === "manual") return;
+    if (ctx.source === "manual") return undefined;
     const fresh = await read();
     this.#check(ctx);
     // The permit and the repeat guard bind the approved identity; the fresh read only confirms it.
@@ -591,17 +1249,22 @@ export class ActionGateway {
         "user",
         "this input was paused before dispatch; wait for explicit Resume",
       );
+    return fresh;
   }
 
-  // settle → observe → result; returns this action's own frame, never a concurrent action's.
+  // settle → observe → result; returns this action's own frame, never a concurrent action's, and
+  // whether the screen changed: settle saw a change and the frame differs from the one before.
+  // `admitted` is the input beforeEffect admitted, which afterEffect hears about.
   async #finish(
     ctx: ActionContext,
     d: NativeDevice,
     verb: keyof typeof SETTLE_FIRST_MS,
-  ): Promise<string> {
+    admitted?: { action: GuiAction; identity: NativeActionIdentity },
+  ): Promise<{ frameId: string; changed: boolean }> {
     this.#check(ctx);
+    const before = this.#lastFrame.get(ctx.cellId)?.digest;
     const s = await d.client.settle({
-      verb,
+      verb: verb === "move" ? "click" : verb,
       quietMs: SETTLE_QUIET_MS,
       firstMs: SETTLE_FIRST_MS[verb],
       timeoutMs: SETTLE_CAP_MS,
@@ -616,8 +1279,10 @@ export class ActionGateway {
       noVisibleChange: s.noVisibleChange,
     });
     const o = await this.observe(ctx);
+    const changed = !s.noVisibleChange && this.#lastFrame.get(ctx.cellId)?.digest !== before;
+    if (admitted) ctx.afterEffect?.(admitted.action, admitted.identity, changed);
     this.#append(ctx, "action.result", { ok: true });
-    return o.frameId;
+    return { frameId: o.frameId, changed };
   }
 
   #fail(ctx: ActionContext, err: unknown, dispatched: boolean): ActionOutcome {
@@ -853,6 +1518,34 @@ export class ActionGateway {
       data: clean(data),
     } as never);
   }
+}
+
+const seconds = (ms: number) => Number((ms / 1000).toFixed(1));
+
+// Labels and approval cards speak the model's pixels, as its screenshot does.
+const modelPoint = (p: Point, scale: 1 | 2): Point => ({
+  x: Math.round(p.x / scale),
+  y: Math.round(p.y / scale),
+});
+
+function withoutDrag<A extends GuiAction>(action: A): A {
+  if (!("drag" in action)) return action;
+  const { drag: _drag, ...rest } = action;
+  return rest as A;
+}
+
+// desktopd lets go only over the window the drop point was in when it was approved, or over none
+// when it was over none. A read that ran out of time, or a screen that names no windows, holds
+// the drop to nothing.
+function dropWindowOf(identity: NativeActionIdentity | undefined): { dropWindow?: number } {
+  const drop = identity?.drop;
+  if (!drop) return {};
+  if (drop.window !== null) return { dropWindow: drop.window };
+  return drop.unknown || identity.window === null ? {} : { dropWindow: 0 };
+}
+
+function focusOf(read: NativeActionIdentity): NonNullable<ActionOutcome["focus"]> {
+  return { target: read.target, ...(read.unknown ? { unknown: true as const } : {}) };
 }
 
 function roundRect(r: Rect): Rect {

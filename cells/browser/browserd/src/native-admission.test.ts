@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { nativeRequest } from "./native-schema.ts";
+import { nativeReply, nativeRequest } from "./native-schema.ts";
 
 describe("native inert argument capture", () => {
   it("captures plain and null-prototype data without keeping caller arrays", () => {
@@ -57,5 +57,25 @@ describe("native inert argument capture", () => {
       ),
     ).toBeUndefined();
     expect(nativeRequest("keys", { combo: ["a", "b", "c", "d"] }, 2)).toBeUndefined();
+  });
+});
+
+describe("native replies for a held button", () => {
+  it("accepts a press, a release or a cancel only for the button asked about", () => {
+    const at = { x: 10, y: 20 };
+    expect(nativeReply("down", { button: 1 }, { ...at, button: 1, mods: [] })).toEqual({
+      button: 1,
+    });
+    expect(nativeReply("down", { button: 3 }, { ...at, button: 1, mods: [] })).toBeUndefined();
+    expect(nativeReply("up", { button: 1, released: true }, { ...at, button: 1 })).toEqual({
+      button: 1,
+      released: true,
+    });
+    expect(nativeReply("up", { button: 2, released: true }, { ...at, button: 1 })).toBeUndefined();
+    expect(nativeReply("cancel", { buttons: 1, escaped: true }, {})).toEqual({
+      buttons: 1,
+      escaped: true,
+    });
+    expect(nativeRequest("cancel", { x: 1 }, 2)).toBeUndefined();
   });
 });

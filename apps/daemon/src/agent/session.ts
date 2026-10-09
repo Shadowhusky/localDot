@@ -123,6 +123,9 @@ export class AgentSession {
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ActiveCall>();
+  // Input the agent keeps down between tool calls (a mouse button): how to let go of it.
+  readonly #held = new Set<() => Promise<void>>();
+  #releasing: Promise<void> | undefined;
   readonly #controlObservers = new Set<{
     generation: BrainGeneration;
     notify(): void;
@@ -291,6 +294,7 @@ export class AgentSession {
     const prior = this.#steps.pause;
     const pausedBefore = this.status === "paused";
     this.#steps.requestPause(requestId, reason);
+    void this.releaseInput();
     this.#approvals.cancel(this.id);
     this.#ask?.finish({ by: "pause" });
     this.setStatus("paused");
@@ -306,6 +310,30 @@ export class AgentSession {
   installRepeatPauseHandler(handler: (requestId: string) => PauseSnapshot): void {
     if (this.#repeatPauseHandler) throw new Error("task safety controller already installed");
     this.#repeatPauseHandler = handler;
+  }
+  // A button the agent left down is let go of (and a cursor it placed is forgotten) before the user
+  // gets the screen, and when the task stops, ends, pauses, switches screens or replaces its brain;
+  // settlement waits for that. One pressed as any of those began is let go of at once.
+  holdInput(release: () => Promise<void>): () => void {
+    this.#held.add(release);
+    if (this.stopped || !this.#brain || this.#control || this.safetyPause) void this.releaseInput();
+    return () => {
+      this.#held.delete(release);
+    };
+  }
+  releaseInput(): Promise<void> | undefined {
+    if (!this.#held.size) return undefined;
+    const releases = [...this.#held];
+    this.#held.clear();
+    const done = Promise.allSettled(releases.map((release) => release())).then(() => {});
+    const releasing = Promise.all([this.#releasing, done]).then(() => {
+      if (this.#releasing === releasing) this.#releasing = undefined;
+    });
+    this.#releasing = releasing;
+    return done;
+  }
+  settleNativeEffect(action: GuiAction, identity: NativeActionIdentity, changed: boolean): void {
+    this.#repeatGuard.settle(action, identity, changed);
   }
   admitNativeEffect(action: GuiAction, identity: NativeActionIdentity, call: string): boolean {
     if (this.stopped || this.controlHeld || this.safetyPause) return false;
@@ -493,6 +521,11 @@ export class AgentSession {
     lease.check();
     if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
       throw new SessionStoppedError();
+    const releasing = this.releaseInput();
+    if (releasing) {
+      await releasing;
+      lease.check();
+    }
     const result = await this.#screens.switchTo(
       screen,
       this.#screenScope(lease.generation, lease.signal),
@@ -535,6 +568,7 @@ export class AgentSession {
     for (const observer of this.#controlObservers)
       if (observer.generation === generation) this.#controlObservers.delete(observer);
     previous.abort.abort(new SessionStoppedError());
+    void this.releaseInput();
     this.#screenReady = undefined;
     if (this.#screens && !this.stopped) {
       // takeOver fences synchronously, including physical grants that are still being prepared.
@@ -888,6 +922,8 @@ export class AgentSession {
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
     this.#screenReady = undefined;
     const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
+    const releasing = this.releaseInput();
+    if (releasing) draining.push(releasing);
     const observers = [...this.#controlObservers].filter(
       (observer) => observer.generation === generation,
     );
@@ -1013,6 +1049,7 @@ export class AgentSession {
       await Promise.all(
         [...this.#active.values(), ...this.#manual.values()].map((call) => call.settled),
       );
+    if (this.#releasing) await this.#releasing;
   }
   async waitForTools(signal?: AbortSignal): Promise<void> {
     const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);
@@ -1022,6 +1059,7 @@ export class AgentSession {
         combined,
       );
     }
+    if (this.#releasing) await abortable(this.#releasing, combined);
     combined.throwIfAborted();
   }
   async waitForControl(signal?: AbortSignal): Promise<void> {

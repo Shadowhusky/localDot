@@ -1,7 +1,8 @@
-import type { InputRequest, TypeProgress, TypeRequest } from "@localdot/protocol";
+import type { InputRequest, KeyProgress, TypeProgress, TypeRequest } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import {
   ActivationError,
+  DropChangedError,
   inject,
   NoPressError,
   typeText,
@@ -163,8 +164,9 @@ describe("inject", () => {
         if (cmd === "windows") return { windows, generation: 1 };
         if (cmd === "activate") return { active: args.window, changed: true, waitedMs: 3 };
         if (cmd === "click") emit(press("button", 1, 500));
-        if (cmd === "keys") emit(press("key", 36, 500));
-        return {};
+        if (cmd !== "keys") return {};
+        emit(press("key", 36, 500));
+        return { keycodes: [36] };
       });
       return { s, done: inject(s.helper, req) };
     };
@@ -251,16 +253,135 @@ describe("inject", () => {
     expect(s.calls.find((c) => c.cmd === "click")?.args).toMatchObject({ button: 3, count: 2 });
   });
 
-  it("presses key combos and takes the last key's press time", async () => {
+  it("presses key combos as keysyms and takes the last key's press time", async () => {
     const s = scripted((_cmd, _args, emit) => {
       emit(press("key", 37, 10));
       emit(press("key", 46, 12));
       return { keycodes: [37, 46] };
     });
     const res = await inject(s.helper, { ...click, input: { kind: "key", combo: ["ctrl", "L"] } });
-    expect(s.calls.find((c) => c.cmd === "keys")?.args).toEqual({ combo: ["Control_L", "l"] });
+    expect(s.calls.find((c) => c.cmd === "keys")?.args).toEqual({ combo: [0xffe3, 0x6c] });
     expect(res.pressMono).toBe(12);
-    expect(res.presses).toEqual([10, 12]);
+    expect(res.presses).toEqual([12]);
+  });
+
+  it("times a shifted symbol from its own key, not from the Shift the helper adds", async () => {
+    const s = scripted((_cmd, _args, emit) => {
+      emit(press("key", 37, 10));
+      emit(press("key", 50, 11));
+      emit(press("key", 61, 12));
+      return { keycodes: [37, 61] };
+    });
+    const res = await inject(s.helper, {
+      ...click,
+      input: { kind: "key", combo: ["ctrl", "Page_Up", "?"] },
+    });
+    expect(s.calls.find((c) => c.cmd === "keys")?.args).toEqual({ combo: [0xffe3, 0xff55, 0x3f] });
+    expect(res.presses).toEqual([12]);
+  });
+
+  describe("repeated keys", () => {
+    const repeating = () => {
+      let mono = 20;
+      return scripted((cmd, _args, emit) => {
+        if (cmd === "keys") emit(press("key", 35, mono++));
+        return { keycodes: [35] };
+      });
+    };
+    const repeat = (n: number): InputRequest => ({
+      ...click,
+      input: { kind: "key", combo: ["bracketright"], repeat: n },
+    });
+
+    it("presses once per helper call and reports each press as it lands", async () => {
+      const s = repeating();
+      const heard: KeyProgress[] = [];
+      const res = await inject(s.helper, repeat(5), { xtest: true }, undefined, (p) => {
+        heard.push(p);
+      });
+      expect(s.calls.filter((c) => c.cmd === "keys").map((c) => c.args)).toEqual(
+        Array(5).fill({ combo: [0x5d] }),
+      );
+      expect(res).toMatchObject({ pressMono: 20, presses: [20, 21, 22, 23, 24] });
+      expect(heard).toEqual([20, 21, 22, 23, 24].map((m, i) => ({ presses: i + 1, pressMono: m })));
+    });
+
+    it("stops pressing once the request is stopped", async () => {
+      const s = repeating();
+      const stop = new AbortController();
+      const heard: number[] = [];
+      await expect(
+        inject(s.helper, repeat(100), { xtest: true }, stop.signal, (p) => {
+          heard.push(p.presses);
+          if (p.presses === 3) stop.abort();
+        }),
+      ).rejects.toThrow(/abort/);
+      expect(s.calls.filter((c) => c.cmd === "keys")).toHaveLength(3);
+      expect(heard).toEqual([1, 2, 3]);
+    });
+  });
+
+  it("refuses an unknown key before arming, naming the close ones", async () => {
+    const s = scripted(() => ({}));
+    await expect(
+      inject(s.helper, { ...click, input: { kind: "key", combo: ["ctrl", "PageUpp"] } }),
+    ).rejects.toThrow(/unknown key "PageUpp"; did you mean/);
+    await expect(
+      inject(s.helper, { ...click, input: { kind: "key", combo: ["a"], repeat: 2, holdMs: 5 } }),
+    ).rejects.toThrow(RangeError);
+    expect(s.calls).toHaveLength(0);
+  });
+
+  describe("held keys", () => {
+    const held = (holdMs: number, opts: { silent?: boolean } = {}) => {
+      const s = scripted((cmd, _args, emit) => {
+        if (cmd === "hold") {
+          if (!opts.silent) emit(press("key", 50, 30));
+          return { keycodes: [50] };
+        }
+        if (cmd === "release") return { keycodes: [50] };
+        return {};
+      });
+      const at: Record<string, number> = {};
+      const call = s.helper.call.bind(s.helper);
+      s.helper.call = (cmd, args, timeoutMs) => {
+        at[cmd] = performance.now();
+        return call(cmd, args, timeoutMs);
+      };
+      const req: InputRequest = {
+        ...click,
+        input: { kind: "key", combo: ["shift"], holdMs },
+      };
+      return { s, at, req };
+    };
+
+    it("keeps the keys down for their time, then releases them", async () => {
+      const { s, at, req } = held(60);
+      const heard: KeyProgress[] = [];
+      const res = await inject(s.helper, req, { xtest: true }, undefined, (p) => {
+        heard.push(p);
+      });
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
+      expect(s.calls[1]?.args).toEqual({ combo: [0xffe1], ms: 60 });
+      expect((at.release as number) - (at.hold as number)).toBeGreaterThanOrEqual(55);
+      expect(res.presses).toEqual([30]);
+      expect(heard).toEqual([{ presses: 1, pressMono: 30 }]);
+    });
+
+    it("releases them at once when the request is stopped", async () => {
+      const { s, at, req } = held(10_000);
+      const stop = new AbortController();
+      setTimeout(() => stop.abort(), 20);
+      await expect(inject(s.helper, req, { xtest: true }, stop.signal)).rejects.toThrow(/abort/);
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
+      expect((at.release as number) - (at.hold as number)).toBeLessThan(1000);
+    });
+
+    it("releases them when their press is never seen", async () => {
+      const { s, req } = held(10_000, { silent: true });
+      await expect(inject(s.helper, req)).rejects.toThrow(NoPressError);
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
+    });
   });
 
   it("scrolls in notches and times the first notch", async () => {
@@ -276,14 +397,249 @@ describe("inject", () => {
     expect(res.presses).toHaveLength(3);
   });
 
-  it("refuses drags, the driver injector until it exists, and anything but clicks through the driver", async () => {
-    const s = scripted(() => ({}));
-    await expect(
-      inject(s.helper, {
+  it("holds a scroll's modifiers through its notches", async () => {
+    const s = scripted((_cmd, args, emit) => {
+      emit(press("button", 4, 30));
+      return { notches: Math.abs(Number(args.dy)) };
+    });
+    await inject(s.helper, {
+      ...click,
+      input: { kind: "scroll", at: { x: 5, y: 5 }, dx: 0, dy: -1, mods: ["ctrl"] },
+    });
+    expect(s.calls.find((c) => c.cmd === "scroll")?.args).toEqual({
+      x: 5,
+      y: 5,
+      dx: 0,
+      dy: -1,
+      mods: [0xffe3],
+    });
+  });
+
+  describe("drags", () => {
+    const from = { x: 100, y: 100 };
+    const to = { x: 400, y: 100 };
+    const path = [
+      { x: 200, y: 200 },
+      { x: 300, y: 200 },
+    ];
+    const dragging = (more: { dropWindow?: number; to?: { x: number; y: number } } = {}) => ({
+      ...click,
+      input: {
+        kind: "drag" as const,
+        from,
+        to: more.to ?? to,
+        path,
+        button: "left" as const,
+        mods: ["shift"],
+        durationMs: 120,
+      },
+      ...(more.dropWindow === undefined ? {} : { dropWindow: more.dropWindow }),
+    });
+    // A desktop whose button 1 goes down on `down` and comes up on `up`, with these windows.
+    const desktop = (windows: HelperWindow[] = [], over: { silent?: boolean } = {}) => {
+      let mono = 500;
+      return scripted((cmd, _args, emit) => {
+        mono += 1;
+        if (cmd === "down" && !over.silent) emit(press("button", 1, mono));
+        if (cmd === "up") emit({ ev: "release", kind: "button", detail: 1, mono });
+        if (cmd === "windows") return { windows, generation: 1 };
+        return cmd === "move" ? { mono } : { button: 1, released: true };
+      });
+    };
+    const moves = (s: Scripted) =>
+      s.calls.filter((c) => c.cmd === "move").map((c) => c.args as { x: number; y: number });
+
+    it("presses with its modifiers at the start, follows every point of the path and lets go at the end", async () => {
+      const s = desktop();
+      const progress: KeyProgress[] = [];
+      const res = await inject(s.helper, dragging(), undefined, undefined, (p) => {
+        progress.push(p);
+      });
+      const cmds = s.calls.map((c) => c.cmd);
+      expect(cmds[0]).toBe("arm");
+      expect(cmds[1]).toBe("down");
+      expect(cmds.at(-1)).toBe("up");
+      expect(s.calls[1]?.args).toEqual({ ...from, button: 1, mods: [0xffe1] });
+      expect(s.calls.at(-1)?.args).toEqual({ ...to, button: 1 });
+      const way = moves(s);
+      expect(way.length).toBeGreaterThanOrEqual(10);
+      for (const p of [...path, to]) expect(way).toContainEqual(p);
+      expect(way.at(-1)).toEqual(to);
+      expect(res.presses).toEqual([res.pressMono]);
+      expect(res.releaseMono).toBeGreaterThan(res.pressMono);
+      expect(progress).toEqual([{ presses: 1, pressMono: res.pressMono }]);
+    });
+
+    it("cancels where it is when it is stopped part-way, never moving back to the start", async () => {
+      const s = desktop();
+      const ac = new AbortController();
+      const helper: XHelper = {
+        ...s.helper,
+        call: async (cmd, args, timeout) => {
+          const reply = await s.helper.call(cmd, args, timeout);
+          if (cmd === "move" && moves(s).length === 3) ac.abort();
+          return reply as never;
+        },
+      };
+      await expect(inject(helper, dragging(), undefined, ac.signal)).rejects.toThrow();
+      expect(moves(s)).toHaveLength(3);
+      expect(s.calls.at(-1)).toEqual({ cmd: "cancel", args: {} });
+      expect(s.calls.filter((c) => c.cmd === "up")).toEqual([]);
+    });
+
+    it("stops a glide that fell behind its schedule at its next motion", async () => {
+      const s = desktop();
+      const ac = new AbortController();
+      const helper: XHelper = {
+        ...s.helper,
+        call: async (cmd, args, timeout) => {
+          // Each motion takes longer than the gap to the next sample: no wait is left to stop in.
+          if (cmd === "move") await new Promise((r) => setTimeout(r, 40));
+          const reply = await s.helper.call(cmd, args, timeout);
+          if (cmd === "move" && moves(s).length === 2) ac.abort();
+          return reply as never;
+        },
+      };
+      await expect(inject(helper, dragging(), undefined, ac.signal)).rejects.toThrow();
+      expect(moves(s)).toHaveLength(2);
+      expect(s.calls.at(-1)?.cmd).toBe("cancel");
+    });
+
+    it("cancels before its drop when another window now covers the drop point", async () => {
+      const s = desktop([
+        xwin(21, { frame: [350, 50, 200, 200] }),
+        xwin(11, { frame: [0, 0, 800, 600] }),
+      ]);
+      await expect(inject(s.helper, dragging({ dropWindow: 11 }))).rejects.toThrow(
+        DropChangedError,
+      );
+      expect(s.calls.at(-1)).toEqual({ cmd: "cancel", args: {} });
+      expect(s.calls.filter((c) => c.cmd === "up")).toEqual([]);
+    });
+
+    it("cancels before its drop when the approved window is no longer at the drop point", async () => {
+      const s = desktop([xwin(11, { frame: [0, 0, 50, 50] })]);
+      await expect(inject(s.helper, dragging({ dropWindow: 11 }))).rejects.toThrow(
+        DropChangedError,
+      );
+      expect(s.calls.at(-1)?.cmd).toBe("cancel");
+    });
+
+    it("drops over the approved window even under its own drag icon", async () => {
+      const s = desktop([
+        xwin(90, { overrideRedirect: true, frame: [390, 90, 32, 32] }),
+        xwin(11, { frame: [0, 0, 800, 600] }),
+      ]);
+      await inject(s.helper, dragging({ dropWindow: 11 }));
+      expect(s.calls.at(-1)).toEqual({ cmd: "up", args: { ...to, button: 1 } });
+    });
+
+    it("drops onto no window only where none is", async () => {
+      await inject(
+        desktop([xwin(11, { frame: [0, 0, 50, 50] })]).helper,
+        dragging({ dropWindow: 0 }),
+      );
+      await expect(
+        inject(desktop([xwin(11)]).helper, dragging({ dropWindow: 0, to: { x: 40, y: 40 } })),
+      ).rejects.toThrow(DropChangedError);
+    });
+
+    it("lets go when its press is never seen", async () => {
+      const s = desktop([], { silent: true });
+      await expect(inject(s.helper, dragging())).rejects.toThrow(NoPressError);
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "down", "cancel"]);
+    });
+  });
+
+  describe("button presses", () => {
+    it("presses a button with its modifiers and leaves it down", async () => {
+      const s = scripted((_cmd, _args, emit) => {
+        emit(press("button", 3, 61));
+        return { button: 3 };
+      });
+      const res = await inject(s.helper, {
         ...click,
-        input: { kind: "drag", from: { x: 0, y: 0 }, to: { x: 9, y: 9 } },
-      }),
-    ).rejects.toThrow(UnsupportedInputError);
+        input: { kind: "down", button: "right", at: { x: 7, y: 8 }, mods: ["ctrl"] },
+      });
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "down"]);
+      expect(s.calls[1]?.args).toEqual({ x: 7, y: 8, button: 3, mods: [0xffe3] });
+      expect(res).toMatchObject({ pressMono: 61, presses: [61] });
+    });
+
+    it("times a release from its raw event, and one of a button that was not down from the reply", async () => {
+      const up = (released: boolean) =>
+        scripted((cmd, _args, emit) => {
+          if (cmd === "ping") return { mono: 70 };
+          if (released) emit({ ev: "release", kind: "button", detail: 1, mono: 66 });
+          return { button: 1, released };
+        });
+      const req = {
+        ...click,
+        input: { kind: "up" as const, button: "left" as const, at: { x: 3, y: 4 } },
+      };
+      const down = up(true);
+      expect(await inject(down.helper, req)).toMatchObject({
+        pressMono: 66,
+        releaseMono: 66,
+        presses: [],
+      });
+      expect(down.calls.find((c) => c.cmd === "up")?.args).toEqual({ x: 3, y: 4, button: 1 });
+      const res = await inject(up(false).helper, req);
+      expect(res.releaseMono).toBeUndefined();
+      expect(res.presses).toEqual([]);
+    });
+
+    it("lets go only over the window approved for the drop, and cancels anywhere else", async () => {
+      const desk = (windows: HelperWindow[]) =>
+        scripted((cmd, _args, emit) => {
+          if (cmd === "windows") return { windows, generation: 1 };
+          if (cmd === "up") emit({ ev: "release", kind: "button", detail: 1, mono: 66 });
+          return { button: 1, released: true };
+        });
+      const req = (dropWindow: number) => ({
+        ...click,
+        input: { kind: "up" as const, button: "left" as const, at: { x: 30, y: 30 } },
+        dropWindow,
+      });
+      const over = desk([
+        xwin(90, { overrideRedirect: true, frame: [20, 20, 32, 32] }),
+        xwin(11, { frame: [0, 0, 100, 100] }),
+      ]);
+      expect(await inject(over.helper, req(11))).toMatchObject({ releaseMono: 66 });
+      expect(over.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "up"]);
+      for (const [windows, expected] of [
+        [[xwin(21, { frame: [0, 0, 100, 100] }), xwin(11, { frame: [0, 0, 100, 100] })], 11],
+        [[], 11],
+        [[xwin(11, { frame: [0, 0, 100, 100] })], 0],
+      ] as const) {
+        const changed = desk([...windows]);
+        await expect(inject(changed.helper, req(expected))).rejects.toThrow(DropChangedError);
+        expect(changed.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "cancel"]);
+      }
+    });
+  });
+
+  it("glides the cursor from where it is when a move has a duration, and jumps otherwise", async () => {
+    let mono = 900;
+    const s = scripted((cmd) => {
+      mono += 1;
+      return cmd === "pointer" ? { x: 0, y: 0 } : { mono };
+    });
+    const res = await inject(s.helper, {
+      ...click,
+      input: { kind: "move", to: { x: 300, y: 0 }, durationMs: 100 },
+    });
+    const way = s.calls.filter((c) => c.cmd === "move").map((c) => c.args);
+    expect(way.length).toBeGreaterThanOrEqual(6);
+    expect(way.at(-1)).toEqual({ x: 300, y: 0 });
+    expect(res.pressMono).toBe(mono);
+    const jump = scripted(() => ({ mono: 5 }));
+    await inject(jump.helper, { ...click, input: { kind: "move", to: { x: 9, y: 9 } } });
+    expect(jump.calls.map((c) => c.cmd)).toEqual(["arm", "move"]);
+  });
+
+  it("refuses the driver injector until it exists, and anything but clicks through the driver", async () => {
+    const s = scripted(() => ({}));
     await expect(inject(s.helper, { ...click, injector: "driver" })).rejects.toThrow(
       UnsupportedInputError,
     );
@@ -306,6 +662,23 @@ describe("inject", () => {
         { xtest: true, driver },
       ),
     ).rejects.toThrow(UnsupportedInputError);
+    await expect(
+      inject(
+        s.helper,
+        {
+          ...click,
+          input: {
+            kind: "drag",
+            from: { x: 0, y: 0 },
+            to: { x: 9, y: 9 },
+            button: "left",
+            durationMs: 100,
+          },
+          injector: "driver",
+        },
+        { xtest: true, driver },
+      ),
+    ).rejects.toThrow(/drag through the driver injector/);
     expect(s.calls.filter((c) => c.cmd === "arm")).toHaveLength(0);
   });
 

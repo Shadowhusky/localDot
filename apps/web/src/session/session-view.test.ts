@@ -109,3 +109,45 @@ it("completes a successful wait without claiming input, while cancelled waits re
     });
   }
 });
+
+it("says what a delivered step tried, not that it finished, when it stopped part-way", () => {
+  const events = [
+    ev("action.intent", 0, { verb: "key", label: "Hold Delete for 10 s", risk: "none" }),
+    ev("action.dispatch", 100, {
+      input: { kind: "key", combo: ["Delete"], holdMs: 10_000 },
+      pressT: 90_000,
+      ringAt: 120_000,
+      injector: "xtest",
+    }),
+    ev("action.result", 3200, { ok: false, error: "Stopped after holding for 3.1 s of 10 s" }),
+  ];
+  expect(stepRows(foldEvents(emptyModel(), events))[0]).toMatchObject({
+    label: "Hold Delete for 10 s",
+    delivery: "delivered",
+    status: "failed",
+  });
+});
+
+it("says plainly that a drag cancelled after its press dropped nothing", () => {
+  for (const [reason, status, text] of [
+    ["user", "cancelled", "Stopped before the drop. The drag was cancelled."],
+    ["stale", "failed", "Another window was at the drop point. The drag was cancelled."],
+  ] as const) {
+    const events = [
+      ev("action.intent", 0, { verb: "drag", label: 'Drag "report.txt" to "Trash"', risk: "none" }),
+      ev("action.dispatch", 100, {
+        input: { kind: "drag", from: { x: 1, y: 1 }, to: { x: 9, y: 9 }, button: "left" },
+        pressT: 90_000,
+        ringAt: 120_000,
+        injector: "xtest",
+      }),
+      ev("action.cancel", 900, { reason }),
+    ];
+    expect(stepRows(foldEvents(emptyModel(), events))[0]).toMatchObject({
+      label: 'Drag "report.txt" to "Trash"',
+      delivery: "delivered",
+      status,
+      reason: text,
+    });
+  }
+});

@@ -190,6 +190,25 @@ describe("hitTest", () => {
     expect(hit.target).toMatchObject({ app: "Other", source: "coords" });
   });
 
+  it("looks through a drag's own icon to the managed window under it when asked", async () => {
+    const icon = win(90, "Thunar", 100, 280, 48, 48, {
+      frame: [100, 280, 48, 48],
+      overrideRedirect: true,
+      title: "",
+    });
+    const native = fakeNative({
+      at: (w) =>
+        w.id === 11
+          ? { element: el("list item", "Trash", { x: 50, y: 140, w: 30, h: 20 }) }
+          : { element: null },
+    });
+    const d = deps([icon, IMAGE], native);
+    expect((await hitTest(d, { x: 115, y: 296 })).window).toBe(90);
+    const under = await hitTest(d, { x: 115, y: 296 }, true);
+    expect(under.window).toBe(11);
+    expect(under.target).toMatchObject({ name: "Trash", role: "list item" });
+  });
+
   it("keeps the window when the lookup runs out of time, and says it is unknown", async () => {
     const native = fakeNative({ at: () => ({ unknown: true }) });
     const hit = await hitTest(deps([IMAGE], native), { x: 40, y: 250 });

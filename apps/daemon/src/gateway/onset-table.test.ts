@@ -47,5 +47,13 @@ describe("onset table", () => {
       "click",
     );
     expect(onsetKind({ kind: "scroll", at: { x: 0, y: 0 }, dx: 0, dy: 1 })).toBe("click");
+    const at = { x: 0, y: 0 };
+    for (const input of [
+      { kind: "drag" as const, from: at, to: at, button: "left" as const, durationMs: 300 },
+      { kind: "down" as const, button: "left" as const, at },
+      { kind: "up" as const, button: "left" as const, at },
+      { kind: "move" as const, to: at, durationMs: 200 },
+    ])
+      expect(onsetKind(input), input.kind).toBe("click");
   });
 });

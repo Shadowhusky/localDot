@@ -14,3 +14,4 @@ test-results/
 apps/daemon/src/cells/testing/out/
 keyd/bin/
 apps/web/dist-gallery/
+__pycache__/

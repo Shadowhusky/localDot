@@ -165,11 +165,16 @@ export async function focusedTarget(deps: PerceptionDeps): Promise<HitTestResult
   return done(answer.element ? elementTarget(win, answer.element, q) : null);
 }
 
-export async function hitTest(deps: PerceptionDeps, point: Point): Promise<HitTestResult> {
+// `managed` looks through override-redirect windows: during a drag, its own icon is at the pointer.
+export async function hitTest(
+  deps: PerceptionDeps,
+  point: Point,
+  managed = false,
+): Promise<HitTestResult> {
   const t0 = performance.now();
   const left = () => LOOKUP_BUDGET_MS - (performance.now() - t0);
   const windows = await listWindows(deps.x);
-  const win = windowUnder(windows, point);
+  const win = windowUnder(managed ? windows.filter((w) => !w.overrideRedirect) : windows, point);
   const done = (target: Target | null, unknown = false): HitTestResult => ({
     target,
     window: win?.id ?? null,

@@ -7,6 +7,8 @@ export interface NativeActionIdentity {
   // With the window id, all a lookup that ran out of time knows.
   readonly windowFrame?: Rect;
   readonly unknown?: true;
+  // A drag's other end: what is under its drop point.
+  readonly drop?: Omit<NativeActionIdentity, "drop">;
 }
 
 // Toolkits round their own layout: two reads of one element can differ by a pixel.
@@ -48,6 +50,10 @@ export function sameNativeIdentity(
   approved: NativeActionIdentity,
   fresh: NativeActionIdentity,
 ): boolean {
+  if (approved.drop || fresh.drop) {
+    if (!approved.drop || !fresh.drop || !sameNativeIdentity(approved.drop, fresh.drop))
+      return false;
+  }
   if (approved.window !== fresh.window || !sameRect(approved.windowFrame, fresh.windowFrame))
     return false;
   if (approved.unknown || approved.target === null) return fresh.target?.secret !== true;

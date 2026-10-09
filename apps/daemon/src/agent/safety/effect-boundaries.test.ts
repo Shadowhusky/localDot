@@ -1,5 +1,6 @@
 import {
   type AutonomyPolicy,
+  BALANCED_AUTONOMY,
   CAREFUL_AUTONOMY,
   type HitTestResult,
   msToMicros,
@@ -28,6 +29,7 @@ import { filesTool } from "../tools/files.ts";
 import { dispatchTool } from "../tools/index.ts";
 import { rememberTool } from "../tools/remember.ts";
 import { shellTool } from "../tools/shell.ts";
+import { authorizePrepared } from "./authorize.ts";
 import { SafetyController } from "./controller.ts";
 
 const UI_TOKEN = "i".repeat(43);
@@ -184,6 +186,175 @@ function setup(autonomy?: AutonomyPolicy) {
     pending,
   };
 }
+
+// Every card a call shows, answered at once (denied unless `answer` says otherwise), so a call
+// that asks never waits.
+function answerEveryCard(
+  f: ReturnType<typeof setup>,
+  answer: (n: number) => "approve" | "deny" = () => "deny",
+) {
+  const cards: { title: string; fields: [string, string][] }[] = [];
+  f.eventLog.subscribe((id, event) => {
+    if (id !== f.session.id || event.type !== "approval.request") return;
+    const card = f.session.pendingApproval;
+    if (!card) return;
+    const decision = answer(cards.length);
+    cards.push({ title: card.title, fields: card.fields as [string, string][] });
+    queueMicrotask(() => void f.post(f.answer(decision)));
+  });
+  return cards;
+}
+const kinds = (f: ReturnType<typeof setup>) =>
+  f.effects().map((c) => (c.body as { input: { kind: string } }).input.kind);
+
+describe("drawing and dragging by hand under Balanced", () => {
+  // The user's paint app had no accessibility tree: every read under the canvas is a bare point.
+  const canvas = (): HitTestResult => ({ target: null, window: 7, ms: 1 });
+  const shape = Array.from({ length: 40 }, (_, i) => {
+    const angle = (2 * Math.PI * (i + 1)) / 40;
+    return {
+      x: Math.round(640 + 200 * Math.cos(angle)),
+      y: Math.round(400 + 150 * Math.sin(angle)),
+    };
+  });
+
+  it("draws a closed shape with a held button and 40 moves on a paint canvas without one card", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    f.fake.script.hitTest = canvas;
+    f.fake.script.focused = canvas;
+    const cards = answerEveryCard(f);
+    const results = [await f.call("computer", { action: "mouse_down", point: { x: 840, y: 400 } })];
+    for (const point of shape) results.push(await f.call("computer", { action: "move", point }));
+    results.push(await f.call("computer", { action: "mouse_up" }));
+    expect(cards).toEqual([]);
+    expect(results.filter((r) => !r.body.ok)).toEqual([]);
+    expect(kinds(f)).toEqual(["down", ...shape.map(() => "move"), "up"]);
+    expect(f.session.safetyPause).toBeUndefined();
+  }, 30_000);
+
+  it("asks for a held move on a signed-in screen where no element is known", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    f.fake.script.hitTest = canvas;
+    f.session.taskAutonomy.signIn("desktop");
+    const cards = answerEveryCard(f, (n) => (n === 0 ? "approve" : "deny"));
+    expect((await f.call("computer", { action: "move", point: { x: 840, y: 400 } })).body.ok).toBe(
+      true,
+    );
+    const pressed = await f.call("computer", { action: "mouse_down" });
+    const moved = await f.call("computer", { action: "move", point: { x: 900, y: 450 } });
+    expect(cards.map((card) => card.title)).toEqual(["Unclear step", "Unclear step"]);
+    expect([pressed.body.ok, moved.body.ok]).toEqual([true, false]);
+    expect(kinds(f)).toEqual(["move", "down"]);
+  });
+
+  it("asks before a held drag drops a file onto a web page, and drops nothing when denied", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    const file: HitTestResult = {
+      target: { point: { x: 20, y: 40 }, source: "ax", role: "list item", name: "report.txt" },
+      window: 7,
+      ms: 1,
+    };
+    const zone: HitTestResult = {
+      target: {
+        point: { x: 1200, y: 600 },
+        source: "dom",
+        role: "button",
+        name: "Attach files",
+        url: "https://mail.example.test/compose",
+      },
+      window: 9,
+      ms: 1,
+    };
+    f.fake.script.hitTest = (point) => (point.x > 1000 ? zone : file);
+    const cards = answerEveryCard(f);
+    expect(
+      (await f.call("computer", { action: "mouse_down", point: { x: 10, y: 20 } })).body.ok,
+    ).toBe(true);
+    expect((await f.call("computer", { action: "move", point: { x: 300, y: 20 } })).body.ok).toBe(
+      true,
+    );
+    for (const action of [
+      { action: "move", point: { x: 600, y: 300 } },
+      { action: "scroll", point: { x: 600, y: 300 }, dy: 1 },
+      { action: "mouse_up", point: { x: 600, y: 300 } },
+    ])
+      expect((await f.call("computer", action)).body.ok).toBe(false);
+    expect(cards.map((card) => card.title)).toEqual([
+      "Upload your files",
+      "Upload your files",
+      "Upload your files",
+    ]);
+    for (const field of [
+      ["Target", "report.txt"],
+      ["Drop target", "Attach files"],
+      ["Drag", "(10, 20) to (600, 300)"],
+    ])
+      expect(cards[0]?.fields).toContainEqual(field);
+    expect(kinds(f)).toEqual(["down", "move"]);
+  });
+
+  it("asks before a file is dropped where a busy page left the lookup unknown", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    f.fake.script.hitTest = (point) =>
+      point.x > 1000
+        ? { target: null, window: null, unknown: true, ms: 1000 }
+        : {
+            target: { point, source: "ax", role: "list item", name: "report.txt" },
+            window: 7,
+            ms: 1,
+          };
+    const cards = answerEveryCard(f);
+    const out = await f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 600, y: 300 },
+      ],
+    });
+    expect(out.body.ok).toBe(false);
+    expect(cards.map((card) => card.title)).toEqual(["Upload your files"]);
+    expect(f.effects()).toHaveLength(0);
+  });
+
+  it("refuses a drag approved over no element once a web page is found at its drop", async () => {
+    const f = setup();
+    let page = false;
+    f.fake.script.hitTest = (point) =>
+      point.x <= 60
+        ? {
+            target: { point, source: "ax", role: "list item", name: "report.txt" },
+            window: 7,
+            ms: 1,
+          }
+        : page
+          ? {
+              target: {
+                point,
+                source: "dom",
+                role: "button",
+                name: "Attach files",
+                url: "https://mail.example.test/compose",
+              },
+              window: 7,
+              ms: 1,
+            }
+          : { target: null, window: 7, ms: 1 };
+    const pending = f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 50, y: 20 },
+      ],
+    });
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval?.title).toBe("Work in its computer");
+    page = true;
+    await f.post(f.answer());
+    const result = await pending;
+    expect(result.body.ok).toBe(false);
+    expect(f.effects()).toHaveLength(0);
+  });
+});
 
 const click = { action: "click", point: { x: 10, y: 20 } };
 describe("mandatory user approval at the real action boundary", () => {
@@ -714,6 +885,178 @@ describe("immediate effect ownership", () => {
     await pending;
     expect(f.effects()).toHaveLength(0);
   });
+  it("a keyboard card says how often the keys are pressed or how long they are held", async () => {
+    const f = setup();
+    const cardFor = async (input: unknown) => {
+      const pending = f.call("computer", input);
+      await until(() => !!f.session.pendingApproval);
+      const fields = f.session.pendingApproval?.fields;
+      await f.post(f.answer("deny"));
+      await pending;
+      return fields;
+    };
+    expect(await cardFor({ action: "key", keys: ["]"], repeat: 5 })).toContainEqual([
+      "Repeat",
+      "× 5",
+    ]);
+    expect(await cardFor({ action: "hold_key", keys: ["shift"], ms: 1500 })).toContainEqual([
+      "Hold",
+      "1.5 s",
+    ]);
+    expect(await cardFor({ action: "hold_key", keys: ["Delete"], ms: 3000 })).toContainEqual([
+      "Hold",
+      "3 s (repeats while held)",
+    ]);
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("a drag card names both ends, the path, the button and the keys held", async () => {
+    const f = setup();
+    const item = (name: string, x: number): HitTestResult => ({
+      target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
+      window: 77,
+      ms: 1,
+    });
+    // The drag starts on a file (device x 20) and drops on Trash (device x 100).
+    f.fake.script.hitTest = (point) =>
+      point.x > 60 ? item("Trash", point.x) : item("report.txt", point.x);
+    const pending = f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 30, y: 40 },
+        { x: 50, y: 60 },
+      ],
+      mods: ["shift"],
+    });
+    await until(() => !!f.session.pendingApproval);
+    const fields = f.session.pendingApproval?.fields;
+    expect(f.session.pendingApproval?.title).toBe("Work in its computer");
+    expect(fields).toContainEqual(["Target", "report.txt"]);
+    expect(fields).toContainEqual(["Drop target", "Trash"]);
+    expect(fields).toContainEqual(["Action", "drag"]);
+    expect(fields).toContainEqual(["Drag", "(10, 20) to (50, 60)"]);
+    expect(fields).toContainEqual(["Path", "3 points"]);
+    expect(fields).toContainEqual(["Button", "left"]);
+    expect(fields).toContainEqual(["Keys held", "shift"]);
+    await f.post(f.answer("deny"));
+    await pending;
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("a button held between actions asks for each move and its release as a drag from where it went down", async () => {
+    const f = setup();
+    const item = (name: string, x: number): HitTestResult => ({
+      target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
+      window: 77,
+      ms: 1,
+    });
+    f.fake.script.hitTest = (point) =>
+      point.x > 60 ? item("Trash", point.x) : item("report.txt", point.x);
+    const ask = async (input: unknown) => {
+      const pending = f.call("computer", input);
+      await until(() => !!f.session.pendingApproval);
+      return { card: f.session.pendingApproval, pending };
+    };
+    const press = await ask({ action: "mouse_down", point: { x: 10, y: 20 } });
+    expect(press.card?.title).toBe("Work in its computer");
+    expect(press.card?.fields).toContainEqual(["Target", "report.txt"]);
+    await f.post(f.answer());
+    expect((await press.pending).body.ok).toBe(true);
+    const move = await ask({ action: "move", point: { x: 50, y: 20 } });
+    expect(move.card?.title).toBe("Work in its computer");
+    for (const field of [
+      ["Target", "report.txt"],
+      ["Drop target", "Trash"],
+      ["Action", "move the pointer"],
+      ["Drag", "(10, 20) to (50, 20)"],
+    ])
+      expect(move.card?.fields).toContainEqual(field);
+    await f.post(f.answer());
+    expect((await move.pending).body.ok).toBe(true);
+    const release = await ask({ action: "mouse_up" });
+    expect(release.card?.title).toBe("Work in its computer");
+    for (const field of [
+      ["Target", "report.txt"],
+      ["Drop target", "Trash"],
+      ["Action", "release a mouse button"],
+      ["Drag", "(10, 20) to (50, 20)"],
+      ["Button", "left"],
+    ])
+      expect(release.card?.fields).toContainEqual(field);
+    await f.post(f.answer("deny"));
+    expect((await release.pending).body.ok).toBe(false);
+    expect(f.effects().map((c) => (c.body as { input: { kind: string } }).input.kind)).toEqual([
+      "down",
+      "move",
+    ]);
+  });
+  it("a drag approved over no element at its drop on a signed-in screen is refused once Trash is found there", async () => {
+    const f = setup();
+    f.session.taskAutonomy.signIn("desktop");
+    const item = (name: string, x: number): HitTestResult => ({
+      target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
+      window: 77,
+      ms: 1,
+    });
+    let trash = false;
+    f.fake.script.hitTest = (point) =>
+      point.x <= 60
+        ? item("report.txt", point.x)
+        : trash
+          ? item("Trash", point.x)
+          : { target: null, window: 77, ms: 1 };
+    const pending = f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 50, y: 20 },
+      ],
+    });
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval?.title).toBe("Unclear step");
+    trash = true;
+    await f.post(f.answer());
+    const result = await pending;
+    expect(result.body.ok).toBe(false);
+    expect(result.body.content[0]?.text).toMatch(/^Not dragged: the screen changed/);
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("a drag's approval binds every point of its path", async () => {
+    const f = setup();
+    const generation = f.session.generation;
+    if (!generation) throw new Error("missing generation");
+    const lease = f.session.admit(generation);
+    const ctx: ToolCallContext = {
+      session: f.session,
+      generation,
+      lease,
+      check: () => lease.check(),
+      callId: "drag",
+      step: ulid(),
+      redact: redactor([PROXY_TOKEN, TOOL_TOKEN]),
+      signal: lease.signal,
+    };
+    const ends = [
+      { x: 10, y: 20 },
+      { x: 50, y: 60 },
+    ];
+    const toolInput = { action: "drag", path: [...ends] };
+    const approved = { verb: "drag", path: [ends[0], { x: 30, y: 40 }, ends[1]] };
+    const swerved = { verb: "drag", path: [ends[0], { x: 30, y: 400 }, ends[1]] };
+    const target = { target: null, window: 7, point: { x: 20, y: 40 } };
+    const authorizing = authorizePrepared(ctx, {
+      tool: "computer",
+      input: { toolInput, action: approved },
+      target,
+      facts: { operation: "click", drop: null },
+      revalidate: async () => true,
+    });
+    await until(() => !!f.session.pendingApproval);
+    await f.post(f.answer());
+    const permit = await authorizing;
+    expect(permit?.consume({ toolInput, action: swerved }, target)).toBe(false);
+    expect(permit?.consume({ toolInput, action: approved }, target)).toBe(true);
+    lease.finish();
+  });
   it("calling an effect handler directly without a consumed dispatcher permit executes nothing", async () => {
     const f = setup();
     const generation = f.session.generation;
@@ -783,8 +1126,28 @@ async function approvedClick(f: ReturnType<typeof setup>, label: string) {
   expect((await f.post(f.answer())).status).toBe(204);
   return pending;
 }
+async function threeKeys(f: ReturnType<typeof setup>) {
+  for (let i = 0; i < 3; i++) await f.call("computer", repeatedKey);
+}
+let frames = 0;
+function screenChanges(f: ReturnType<typeof setup>) {
+  f.fake.script.settle = () => ({
+    changed: [{ x: 10, y: 10, w: 40, h: 20 }],
+    lastChangeMono: 50_100,
+    quiet: true,
+    noVisibleChange: false,
+  });
+  f.fake.script.observe = () => ({
+    frameId: ulid(),
+    width: 1280,
+    height: 800,
+    image: Buffer.from(`frame ${frames++}`).toString("base64"),
+    pointer: { x: 0, y: 0 },
+    windows: [],
+  });
+}
 describe("repeat safety at actual native dispatch", () => {
-  it("one key call with repeat 5 in a native app asks once and presses five times without pausing", async () => {
+  it("one key call with repeat 5 in a native app asks once and presses five times in one input without pausing", async () => {
     const f = setup(CAREFUL_AUTONOMY);
     repeatController(f);
     f.target.value = {
@@ -808,10 +1171,12 @@ describe("repeat safety at actual native dispatch", () => {
     expect(f.session.pendingApproval?.fields).toContainEqual(["Repeat", "× 5"]);
     expect((await f.post(f.answer())).status).toBe(204);
     expect((await out).body.ok).toBe(true);
-    expect(f.effects()).toHaveLength(5);
+    expect(f.effects().map((c) => (c.body as { input: unknown }).input)).toEqual([
+      { kind: "key", combo: ["bracketright"], repeat: 5 },
+    ]);
     expect(f.session.safetyPause).toBeUndefined();
   });
-  it("a third identical call pauses after exactly two physical effects, whatever call id the model sends", async () => {
+  it("a third identical call that changed nothing pauses after exactly two physical effects, whatever call id the model sends", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
@@ -825,6 +1190,49 @@ describe("repeat safety at actual native dispatch", () => {
       phase: "paused",
       resumeAvailable: true,
     });
+  });
+  it("a repeated key is one admission and one physical input", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
+    expect(f.effects().map((c) => (c.body as { input: unknown }).input)).toEqual([
+      { kind: "key", combo: ["ARROWDOWN"], repeat: 5 },
+    ]);
+    expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
+    expect(f.session.safetyPause).toBeUndefined();
+    const third = await f.call("computer", { ...repeatedKey, repeat: 5 });
+    expect({ effects: f.effects().length, pause: third.body.pause }).toEqual({
+      effects: 2,
+      pause: true,
+    });
+    await controller.settled();
+  });
+  it("identical inputs that change the screen each time never pause", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    repeatController(f);
+    screenChanges(f);
+    for (let i = 0; i < 5; i++)
+      expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(5);
+    expect(f.session.safetyPause).toBeUndefined();
+  });
+  it("a frame identical to the one before the input counts as no change", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    screenChanges(f);
+    f.fake.script.observe = () => ({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: Buffer.from("the same pixels").toString("base64"),
+      pointer: { x: 0, y: 0 },
+      windows: [],
+    });
+    await f.call("computer", { action: "screenshot" });
+    await threeKeys(f);
+    expect(f.effects()).toHaveLength(2);
+    await controller.settled();
+    expect(f.session.safetyPause?.reason).toBe("repeated_action");
   });
   it("third click still pauses when model labels, call IDs and frame IDs change", async () => {
     const f = setup();
@@ -840,7 +1248,8 @@ describe("repeat safety at actual native dispatch", () => {
   it("a different actual native window resets the consecutive input identity", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     repeatController(f);
-    expect((await f.call("computer", { ...repeatedKey, repeat: 2 })).body.ok).toBe(true);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     f.target.value = { ...f.target.value, window: 78 };
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     expect(f.effects()).toHaveLength(3);
@@ -864,7 +1273,7 @@ describe("repeat safety at actual native dispatch", () => {
   it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
-    for (let i = 0; i < 3; i++) await f.call("computer", repeatedKey);
+    await threeKeys(f);
     await controller.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;

@@ -115,9 +115,9 @@ describe("frame helpers", () => {
 });
 
 describe("tasks", () => {
-  it("runs the drag and modifier-click tasks as expected failures until the brain accepts them", () => {
-    expect(capabilityLanded("drag")).toBe(false);
-    expect(capabilityLanded("modifier_click")).toBe(false);
+  it("requires the drag and modifier-click tasks to pass now that the brain accepts them", () => {
+    expect(capabilityLanded("drag")).toBe(true);
+    expect(capabilityLanded("modifier_click")).toBe(true);
     expect(TASKS.filter((t) => t.requires.length).map((t) => t.id)).toEqual([
       "gimp-draw-shape",
       "files-drag-drop",

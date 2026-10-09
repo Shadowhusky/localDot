@@ -128,6 +128,75 @@ describe("leased browser gateway device", () => {
       expect(f.device.clocks.toDaemonMicros(50)).toBe(100_000);
     },
   );
+  it("sends a drag's every point in model pixels and keeps no button down past one request", async () => {
+    const f = fixture(2);
+    const drag = {
+      kind: "drag" as const,
+      from: { x: 20, y: 40 },
+      to: { x: 600, y: 800 },
+      path: [{ x: 200, y: 300 }],
+      button: "left" as const,
+      durationMs: 400,
+    };
+    await f.device.client.input({ input: drag, injector: "xtest", holdMs: 0 });
+    expect((f.client.input.mock.calls[0] as unknown[])[2]).toEqual({
+      input: {
+        ...drag,
+        from: { x: 10, y: 20 },
+        to: { x: 300, y: 400 },
+        path: [{ x: 100, y: 150 }],
+      },
+      injector: "xtest",
+      holdMs: 0,
+    });
+    for (const input of [
+      { kind: "down" as const, button: "left" as const, at: { x: 2, y: 2 } },
+      { kind: "up" as const, button: "left" as const, at: { x: 2, y: 2 } },
+    ])
+      await expect(f.device.client.input({ input, injector: "xtest", holdMs: 0 })).rejects.toThrow(
+        /mouse button/,
+      );
+    await expect(
+      f.device.client.input({ input: drag, injector: "xtest", holdMs: 0, dropWindow: 3 }),
+    ).rejects.toThrow();
+    expect(f.client.input).toHaveBeenCalledTimes(1);
+  });
+  it("presses a repeated key once per repeat and refuses to hold keys", async () => {
+    const f = fixture();
+    const key = { kind: "key" as const, combo: ["Down"] };
+    const heard: number[] = [];
+    const result = await f.device.client.input(
+      { input: { ...key, repeat: 3 }, injector: "xtest", holdMs: 0 },
+      undefined,
+      (p) => {
+        heard.push(p.presses);
+      },
+    );
+    expect(f.client.input.mock.calls.map((c) => (c as unknown[])[2])).toEqual(
+      Array(3).fill({ input: key, injector: "xtest", holdMs: 0 }),
+    );
+    expect(result).toMatchObject({ pressMono: 51, presses: [51, 51, 51] });
+    expect(heard).toEqual([1, 2, 3]);
+    await expect(
+      f.device.client.input({ input: { ...key, holdMs: 500 }, injector: "xtest", holdMs: 0 }),
+    ).rejects.toThrow(/hold/i);
+    expect(f.client.input).toHaveBeenCalledTimes(3);
+  });
+  it("stops a repeated key once its screen lease ends between presses", async () => {
+    const f = fixture();
+    let presses = 0;
+    f.onReply(() => {
+      if (++presses === 2) f.lease.finish();
+    });
+    await expect(
+      f.device.client.input({
+        input: { kind: "key", combo: ["Delete"], repeat: 50 },
+        injector: "xtest",
+        holdMs: 0,
+      }),
+    ).rejects.toThrow("expired screen");
+    expect(f.client.input).toHaveBeenCalledTimes(2);
+  });
   it("refuses a finished screen lease before and after asynchronous service replies", async () => {
     const f = fixture();
     f.onReply(() => f.lease.finish());

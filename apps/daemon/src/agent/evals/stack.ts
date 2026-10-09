@@ -5,6 +5,7 @@ import { serve } from "@hono/node-server";
 import {
   type ActionClass,
   type AgentLimits,
+  type ApprovalCard,
   type BootConfig,
   type ComputerAction,
   DEFAULT_AGENT_LIMITS,
@@ -56,6 +57,10 @@ export interface AgentRunOptions {
   timeoutMs: number;
   limits?: AgentLimits;
   approvalDelayMs?: number;
+  // How the simulated user answers a card, after approvalDelayMs; simulatedAnswer by default.
+  answer?: (card: ApprovalCard) => "approve" | "deny";
+  // How long a button held between actions stays down without another pointer action.
+  heldButtonMs?: number;
 }
 
 export interface CallRecord {
@@ -107,7 +112,12 @@ export function manualInputsFor(action: ComputerAction | undefined, scale: 1 | 2
               ? { kind: "key", combo: ["Tab"] }
               : { kind: "text", text: part },
       );
-  if (action?.action === "key" && action.keys) return [{ kind: "key", combo: action.keys }];
+  const keys = action?.action === "key" ? action.keys : undefined;
+  if (keys)
+    return Array.from(
+      { length: action?.repeat ?? 1 },
+      (): ManualInput => ({ kind: "key", combo: keys }),
+    );
   if (action?.action === "click" && action.point)
     return [
       {
@@ -199,6 +209,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
     frames,
     now: () => clock.nowMicros(),
     sleep: (ms, signal) => sleep(ms, undefined, { signal }),
+    ...(o.heldButtonMs ? { heldButtonMs: o.heldButtonMs } : {}),
   });
   const session = new AgentSession(sessionId, cellId, o.task, eventLog, autonomy);
   session.append("session.start", {
@@ -286,7 +297,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
       setTimeout(() => {
         const card = session.pendingApproval;
         if (!card || card.approvalId !== data.approvalId) return;
-        const decision = simulatedAnswer(card.actionClass);
+        const decision = o.answer?.(card) ?? simulatedAnswer(card.actionClass);
         if (
           !session.answerApproval({
             approvalId: card.approvalId,

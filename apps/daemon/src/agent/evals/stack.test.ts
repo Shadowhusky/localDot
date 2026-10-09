@@ -20,6 +20,9 @@ describe("manualInputsFor", () => {
     expect(manualInputsFor({ action: "key", keys: ["ctrl", "s"] }, 2)).toEqual([
       { kind: "key", combo: ["ctrl", "s"] },
     ]);
+    expect(manualInputsFor({ action: "key", keys: ["Down"], repeat: 3 }, 2)).toEqual(
+      Array(3).fill({ kind: "key", combo: ["Down"] }),
+    );
     expect(manualInputsFor({ action: "screenshot" }, 2)).toEqual([]);
     expect(manualInputsFor(undefined, 2)).toEqual([]);
   });

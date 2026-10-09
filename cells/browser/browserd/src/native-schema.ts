@@ -126,6 +126,18 @@ function requests(scale: 1 | 2) {
       dx: schema.number().int().min(-30).max(30),
       dy: schema.number().int().min(-30).max(30),
     }),
+    // An agent drag's press and release, inside one input request.
+    down: schema.strictObject({
+      ...position,
+      button: schema.number().int().min(1).max(3),
+      mods: schema
+        .array(schema.enum(["Control_L", "Shift_L"]))
+        .max(2)
+        .refine((values) => new Set(values).size === values.length),
+    }),
+    up: schema.strictObject({ ...position, button: schema.number().int().min(1).max(3) }),
+    // A stopped drag's button comes up where the pointer is, after Escape cancels the drag.
+    cancel: empty,
     char: schema.strictObject({
       ch: schema.string().refine(safeCharacter),
     }),
@@ -201,6 +213,15 @@ const replies = {
     presses: schema.number().int().min(1).max(3),
   }),
   scroll: schema.strictObject({ notches: schema.number().int().nonnegative().max(60) }),
+  down: schema.strictObject({ button: schema.number().int().min(1).max(3) }),
+  up: schema.strictObject({
+    button: schema.number().int().min(1).max(3),
+    released: schema.boolean(),
+  }),
+  cancel: schema.strictObject({
+    buttons: schema.number().int().min(0).max(3),
+    escaped: schema.boolean(),
+  }),
   char: schema.strictObject({
     keycode,
     mods: schema.array(schema.enum(["Shift_L", "ISO_Level3_Shift"])).max(2),
@@ -300,7 +321,16 @@ export function nativeReply(
     (command === "click" || command === "userClick") &&
     "button" in reply &&
     "button" in args &&
+    "count" in args &&
+    "presses" in reply &&
     (reply.button !== args.button || reply.presses !== args.count)
+  )
+    return undefined;
+  if (
+    (command === "down" || command === "up") &&
+    "button" in reply &&
+    "button" in args &&
+    reply.button !== args.button
   )
     return undefined;
   if (

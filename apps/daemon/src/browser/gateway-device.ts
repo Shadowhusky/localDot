@@ -1,4 +1,4 @@
-import type { HitTestResult, InputRequest, Point, Target } from "@localdot/protocol";
+import type { HitTestResult, InputRequest, InputResult, Point, Target } from "@localdot/protocol";
 import { BrowserActionPermit } from "../../../../packages/protocol/src/browser-control.ts";
 import { ClockMap } from "../desktopd/clock-map.ts";
 import type { NativeDevice } from "../desktopd/registry.ts";
@@ -93,19 +93,41 @@ export function browserGatewayDevice(options: {
       const owner = scope();
       return hit(client.lookup(permit, tabId, { kind: "find", ...request }, owner), owner);
     },
-    input: async (request, signal) => {
+    input: async (request, signal, onPress) => {
       const owner = scope(signal);
-      if (request.window !== undefined) throw new BrowserClientError("request");
+      if (request.window !== undefined || request.dropWindow !== undefined)
+        throw new BrowserClientError("request");
       const input = request.input;
+      // A button never stays down past one browser request: drags press and let go inside one.
+      if (input.kind === "down" || input.kind === "up")
+        throw new Error("Holding a mouse button is not available on the browser screen.");
       const mapped: InputRequest["input"] =
         input.kind === "move"
           ? { ...input, to: toModel(input.to) }
-          : input.kind === "click" || input.kind === "scroll"
-            ? { ...input, at: toModel(input.at) }
-            : input;
-      const result = await client.input(permit, tabId, { ...request, input: mapped }, owner);
-      owner.check();
-      return result;
+          : input.kind === "drag"
+            ? {
+                ...input,
+                from: toModel(input.from),
+                to: toModel(input.to),
+                ...(input.path ? { path: input.path.map(toModel) } : {}),
+              }
+            : input.kind === "click" || input.kind === "scroll"
+              ? { ...input, at: toModel(input.at) }
+              : input;
+      // browserd presses one combo per request: a repeat is that many requests, a hold none.
+      if (mapped.kind === "key" && mapped.holdMs)
+        throw new Error("Holding keys is not available on the browser screen.");
+      const times = mapped.kind === "key" ? (mapped.repeat ?? 1) : 1;
+      const once = mapped.kind === "key" ? { kind: "key" as const, combo: mapped.combo } : mapped;
+      const results: InputResult[] = [];
+      for (let i = 0; i < times; i++) {
+        const result = await client.input(permit, tabId, { ...request, input: once }, owner);
+        results.push(result);
+        owner.check();
+        if (times > 1) await onPress?.({ presses: i + 1, pressMono: result.pressMono });
+      }
+      const [first] = results as [InputResult, ...InputResult[]];
+      return { ...first, presses: results.flatMap((r) => r.presses) };
     },
     type: async (request, onProgress, signal) => {
       const owner = scope(signal);

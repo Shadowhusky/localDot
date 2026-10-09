@@ -125,14 +125,16 @@ export function fakeApi(
   answer: (name: string, input: unknown) => ToolResult | undefined = () => undefined,
 ) {
   const toolCalls: { name: string; input: unknown }[] = [];
+  const callIds: string[] = [];
   const transcript: TranscriptMessage[] = [];
   const inbox: InboxItem[] = [];
   let stopped = false;
   let acknowledged = 0;
   const fetched = new Set<number>();
   const api = {
-    tool: async (name: string, _id: string, input: unknown): Promise<ToolResult> => {
+    tool: async (name: string, id: string, input: unknown): Promise<ToolResult> => {
       toolCalls.push({ name, input });
+      callIds.push(id);
       const custom = answer(name, input);
       if (custom) return custom;
       if (name === "computer") {
@@ -214,6 +216,7 @@ export function fakeApi(
   return {
     api,
     toolCalls,
+    callIds,
     transcript,
     inbox,
     get acknowledged() {

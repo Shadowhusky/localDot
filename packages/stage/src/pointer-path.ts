@@ -29,7 +29,9 @@ function assertFinitePlan(plan: PointerPlan, tMs: number): void {
   if (!values.every(Number.isFinite)) throw new RangeError("pointer plan and time must be finite");
 }
 
-export function pointerAt(plan: PointerPlan, tMs: number): Point {
+// `line`: the straight way a held button glides, which desktopd follows, rather than the plan's
+// curve.
+export function pointerAt(plan: PointerPlan, tMs: number, line = false): Point {
   assertFinitePlan(plan, tMs);
   const { from, to, startsAt, durationMs } = plan;
   if (tMs < startsAt) return { x: from.x, y: from.y };
@@ -38,7 +40,7 @@ export function pointerAt(plan: PointerPlan, tMs: number): Point {
   // A log written by a newer renderer may name a curve this one does not know: draw a straight,
   // minimum-jerk line rather than nothing (the schema's version tag versions the renderer).
   const curve: string = plan.curve;
-  return curve === "minjerk-bow-v1" ? minJerkBow(plan, tau) : straight(plan, tau);
+  return curve === "minjerk-bow-v1" && !line ? minJerkBow(plan, tau) : straight(plan, tau);
 }
 
 function straight(plan: PointerPlan, tau: number): Point {

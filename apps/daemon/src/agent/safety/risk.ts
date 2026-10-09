@@ -36,6 +36,11 @@ export type RiskFacts = {
   screen?: ScreenName;
   signedIn?: boolean;
   target?: NativeTargetFacts;
+  // A drag's drop end: its element, or null when none is known there. Both ends are classified.
+  drop?: NativeTargetFacts | null;
+  // A drag's end whose lookup ran out of time: any element may be there.
+  targetUnknown?: true;
+  dropUnknown?: true;
   keys?: readonly string[];
   newline?: boolean;
   // Typed text goes on past a Tab, which moves focus to the next control.
@@ -142,6 +147,7 @@ export function buildApprovalCard(
     if (value) fields.push([key, redact(value)]);
   };
   add("Target", facts.target?.name);
+  add("Drop target", facts.drop?.name);
   add("App location", safeTargetURL(facts.target?.url));
   add("Web address", facts.destination);
   add("Command", facts.command);

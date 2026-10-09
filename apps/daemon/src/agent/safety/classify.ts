@@ -50,6 +50,8 @@ const PATTERNS = {
   search: /search|搜索|搜尋|\bfind\b|\bquery\b/i,
   enter: /^(?:return|enter|kp_enter)$/i,
   terminal: /terminal/i,
+  // Window classes of the browsers a desktop runs.
+  browserApp: /^(?:chromium|(?:google-)?chrome|firefox|brave|microsoft-edge)\b/i,
   ctrl: /^(?:ctrl|control(?:_l)?)$/i,
   shift: /^shift(?:_l)?$/i,
   tab: /^(?:tab|\t)$/i,
@@ -163,34 +165,73 @@ export function classify(facts: RiskFacts): readonly ActionClass[] {
     case "navigate":
       return navigation(facts);
     default:
-      return input(facts);
+      return facts.drop === undefined ? input(facts) : drag(facts);
   }
 }
 
-export function nativeActionFacts(action: GuiAction, target: Target | null): RiskFacts {
-  if (action.verb === "wait" || action.verb === "scroll") return { operation: action.verb };
+// `drop` is a drag's drop end, null when no element is known there: a drag's own, or that of a
+// move, scroll or release while a button is down. A hover or a scroll with no button down browses.
+// `unknown` names the ends whose lookup ran out of time.
+export function nativeActionFacts(
+  action: GuiAction,
+  target: Target | null,
+  drop?: Target | null,
+  unknown: { target?: boolean; drop?: boolean } = {},
+): RiskFacts {
+  if (action.verb === "wait") return { operation: "wait" };
+  if ((action.verb === "scroll" || action.verb === "move") && drop === undefined)
+    return { operation: "scroll" };
   const terminal = PATTERNS.terminal.test(target?.role ?? "");
   return {
-    operation: action.verb,
+    operation:
+      action.verb === "click" || action.verb === "type" || action.verb === "key"
+        ? action.verb
+        : "pointer",
     ...(action.verb === "key" ? { keys: action.combo } : {}),
     ...(action.verb === "type"
       ? { newline: endsLine(action.text), tabbed: /\t[\s\S]/.test(action.text) }
       : {}),
     ...(action.verb === "type" && terminal ? { command: action.text } : {}),
-    ...(target
-      ? {
-          target: {
-            source: target.source,
-            fresh: true,
-            role: target.role,
-            name: target.name,
-            app: target.app,
-            url: target.url,
-            secret: target.secret === true,
-          },
-        }
-      : {}),
+    ...(target ? { target: targetFacts(target) } : {}),
+    ...(drop !== undefined ? { drop: drop && targetFacts(drop) } : {}),
+    ...(drop !== undefined && unknown.target ? { targetUnknown: true as const } : {}),
+    ...(drop !== undefined && unknown.drop ? { dropUnknown: true as const } : {}),
   };
+}
+
+function targetFacts(target: Target): NativeTargetFacts {
+  return {
+    source: target.source,
+    fresh: true,
+    role: target.role,
+    name: target.name,
+    app: target.app,
+    url: target.url,
+    secret: target.secret === true,
+  };
+}
+
+// A drag acts at both ends: where it picks up and where it lets go. A drop with no element known
+// there is a press on nothing, which runs in the computer and is unclear on a signed-in screen.
+// Something carried onto a web page from outside any page, such as a file from the file manager,
+// is uploaded to it. A start not known to be on a web page, such as chrome://downloads or a file:
+// tab, is off it. A drop in a browser window may
+// be on one, and so may a drop whose lookup ran out of time anywhere but another app's window.
+function drag({ target, drop, targetUnknown, dropUnknown, ...facts }: RiskFacts): ActionClass[] {
+  const classes = new Set([
+    ...input({ ...facts, ...(target ? { target } : {}) }),
+    ...input({ ...facts, ...(drop ? { target: drop } : {}) }),
+  ]);
+  const fromPage = target !== undefined && !targetUnknown && target.fresh && isWebUrl(target.url);
+  const toPage =
+    (drop && (onPage(drop) || PATTERNS.browserApp.test(drop.app ?? ""))) ||
+    (dropUnknown && !drop?.app);
+  if (facts.screen !== "browser" && !fromPage && toPage) classes.add("upload");
+  return [...classes];
+}
+
+function onPage(target: NativeTargetFacts): boolean {
+  return target.fresh && (target.source === "dom" || isWebUrl(target.url));
 }
 
 function named(text: string): ActionClass[] {
