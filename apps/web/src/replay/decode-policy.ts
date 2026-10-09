@@ -10,12 +10,15 @@ export interface DecodeState {
   shownKeyMs: number | null;
   targetKeyMs: number | null;
   nextMs: number | null;
+  // The shown frame is a preview's lone key frame, with nothing decoded after it.
+  keyOnly: boolean;
 }
 
 export function nextDecodeStep(state: DecodeState): DecodeStep {
   const sameKey = state.shownKeyMs === state.targetKeyMs;
   if (state.mode === "preview") return state.shownKeyMs !== null && sameKey ? "hold" : "seek-key";
   if (state.mode === "exact") {
+    if (state.keyOnly) return "seek-exact";
     if (
       sameKey &&
       state.shownMs !== null &&

@@ -144,6 +144,43 @@ describe("a stretch marked for export", () => {
   });
 });
 
+describe("a scrub's seeks", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  it("sends the worker one preview at a time, the newest next, and an exact seek on release", async () => {
+    const f = liveFixture();
+    const hook = renderHook(() => useReplay(f.api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    act(() => {
+      for (let index = 0; index < 200; index++)
+        hook.result.current.seek(1000 + index * 10, "preview");
+    });
+    expect(f.replay.seek.mock.calls).toEqual([[1000, "preview"]]);
+    expect(hook.result.current.tMs).toBe(1000);
+    act(() => f.emit({ type: "replay-time", tMs: 1000, playing: false, idle: false }));
+    expect(f.replay.seek.mock.calls).toEqual([
+      [1000, "preview"],
+      [2990, "preview"],
+    ]);
+    expect(hook.result.current.tMs).toBe(2990);
+    act(() => {
+      hook.result.current.seek(3200, "preview");
+      hook.result.current.seek(3300, "exact");
+    });
+    expect(f.replay.seek.mock.calls.at(-1)).toEqual([3300, "exact"]);
+    act(() => f.emit({ type: "replay-time", tMs: 2990, playing: false, idle: false }));
+    act(() => f.emit({ type: "replay-time", tMs: 3300, playing: false, idle: false }));
+    expect(f.replay.seek).toHaveBeenCalledTimes(3);
+    expect(hook.result.current.tMs).toBe(3300);
+    hook.unmount();
+  });
+});
+
 describe("live replay ownership", () => {
   it("keeps the timestamp across track changes and refuses late messages from retired sources", async () => {
     const f = liveFixture();
