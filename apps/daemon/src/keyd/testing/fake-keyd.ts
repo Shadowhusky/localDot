@@ -52,6 +52,8 @@ export class FakeKeyd {
   bootId = randomBytes(8).toString("hex");
   auditOk = true;
   hairpin: HairpinGuard = { state: "active", source: "nat-pmp", addresses: 1 };
+  // false: a keyd from before capture, which neither says it takes a capture token nor accepts one.
+  capture = true;
   // Answers the next request whose "METHOD /path" starts with the key with this error.
   readonly failures = new Map<string, { status: number; code: string }>();
   // Answers the next request whose "METHOD /path" starts with the key 200 with this body as is.
@@ -219,6 +221,7 @@ export class FakeKeyd {
         day: { date: "2026-10-01", spentUSD: 0 },
         audit: this.auditOk ? { ok: true } : { ok: false, error: "disk full" },
         hairpin: this.hairpin,
+        ...(this.capture ? { capture: true } : {}),
       });
     }
     if (method === "GET" && path === "/v1/push/key")
@@ -255,6 +258,10 @@ export class FakeKeyd {
     }
     if (method === "POST" && path === "/v1/cells") {
       const req = body as { cellId: string; role: string; port: number; secrets: string[] };
+      if (!this.capture && Object.hasOwn(req, "captureToken"))
+        return reply(res, 400, {
+          error: { code: "bad-request", message: 'json: unknown field "captureToken"' },
+        });
       if (this.cells.has(req.cellId))
         return reply(res, 409, { error: { code: "conflict", message: "cell is open" } });
       const unknown = req.secrets.find((id) => !this.records.has(id));

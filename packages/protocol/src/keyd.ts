@@ -129,6 +129,8 @@ export const KeydStatus = z.object({
   audit: z.object({ ok: z.boolean(), error: z.string().optional() }),
   hairpin: HairpinGuard.nullish(),
   vault: KeydVault.nullish(),
+  // keyd takes a desktop gate's capture token; one from before capture refuses it.
+  capture: z.boolean().optional(),
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
 

@@ -190,7 +190,10 @@ describe("CellOrchestrator.update", () => {
   });
 
   it("gives a computer made before capture the gate's token, and containers that capture", async () => {
-    const { store, boot, id, record } = await setup();
+    const wired: CellRecord[] = [];
+    const { store, boot, id, record } = await setup({
+      keyd: { ...keyd(), wire: async (r) => void wired.push(structuredClone(r)) },
+    });
     const { capture: _capture, ...tokens } = record.tokens;
     store.save({ ...record, tokens });
     for (const o of made.splice(0)) o.dispose();
@@ -207,6 +210,7 @@ describe("CellOrchestrator.update", () => {
       | { Env?: string[]; User?: string }
       | undefined;
     expect(gate?.Env).toContain(`LD_CAPTURE_TOKEN=${capture}`);
+    expect(wired.at(-1)?.tokens.capture).toBe(capture);
     expect(gate?.User).toBe("root");
     expect(fake.state.containers.get(record.docker.desktop)?.body.HostConfig.Dns).toEqual([
       record.docker.gateInternalIp,

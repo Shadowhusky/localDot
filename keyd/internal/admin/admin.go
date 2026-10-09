@@ -122,6 +122,8 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"audit":   auditState,
 		"hairpin": s.hairpin(),
 		"vault":   s.vaultState(),
+		// A desktop cell takes its gate's capture token on open; an older keyd refuses that field.
+		"capture": true,
 	})
 }
 

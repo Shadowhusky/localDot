@@ -122,7 +122,7 @@ func weather() map[string]any {
 func TestStatus(t *testing.T) {
 	f := newFixture(t)
 	code, body := f.call(t, "GET", "/v1/status", nil)
-	if code != 200 || body["bootId"] != "boot-1" || body["sealKey"] != f.s.Opener.PublicKey() || body["version"] != "test" {
+	if code != 200 || body["bootId"] != "boot-1" || body["sealKey"] != f.s.Opener.PublicKey() || body["version"] != "test" || body["capture"] != true {
 		t.Fatalf("%d %v", code, body)
 	}
 	if state, _ := body["audit"].(map[string]any); state["ok"] != true {
