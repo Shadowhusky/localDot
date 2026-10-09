@@ -884,16 +884,6 @@
   }
 }
 
-.connectors-chevron {
-  color: var(--color-fg-4);
-  stroke-width: 2;
-  transition: transform var(--dur-default) var(--ease-spring);
-}
-
-.connectors-disclosure[data-open] .connectors-chevron {
-  transform: rotate(180deg);
-}
-
 /* The tools sit in the disclosure's column, one quiet row each. */
 .connectors-tool {
   padding-inline-start: calc(var(--spacing) * 5);
@@ -1027,9 +1017,5 @@
 @media (prefers-reduced-motion: reduce) {
   .connectors-pulse {
     animation: none;
-  }
-
-  .connectors-chevron {
-    transition: none;
   }
 }

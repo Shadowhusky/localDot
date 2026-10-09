@@ -328,22 +328,13 @@ function AppCard({ view, connectors }: { view: ConnectorView; connectors: Connec
         }}
       />
       <NextStep view={view} connectors={connectors} />
-      <button
-        type="button"
-        className="ui-group-row connectors-disclosure"
-        data-open={open || undefined}
-        aria-expanded={open}
-        aria-controls={panel}
-        onClick={() => setOpen((now) => !now)}
-      >
-        <span className="ui-group-row-text">
-          <span className="ui-group-row-label">Tools</span>
-        </span>
-        <span className="ui-group-row-trailing">
-          {view.tools.length ? `${on} of ${view.tools.length} on` : "None listed yet"}
-          <Icon name="chevron-down" size={16} className="connectors-chevron" />
-        </span>
-      </button>
+      <GroupRow
+        label="Tools"
+        trailing={view.tools.length ? `${on} of ${view.tools.length} on` : "None listed yet"}
+        expanded={open}
+        controls={panel}
+        onSelect={() => setOpen((now) => !now)}
+      />
       <Collapse open={open} id={panel}>
         <ToolList view={view} connectors={connectors} />
       </Collapse>
