@@ -605,6 +605,55 @@ describe("leased browser observation", () => {
     await expect(lookup({ node: -1 })).rejects.toThrow();
     await f.observation.close();
   });
+  it("names a field by its author's label, never its value, and finds it again by that name", async () => {
+    const f = await setup();
+    const p = readingPage(f);
+    const attributes = (offset: number, pairs: Record<string, string>) => {
+      p.nodes.attributes[offset] = Object.entries(pairs).flatMap(([k, v]) => [
+        p.value(k),
+        p.value(v),
+      ]);
+    };
+    attributes(4, { id: "email" });
+    attributes(5, { "aria-label": "Message" });
+    const label = p.add("", 2, false, "LABEL");
+    attributes(label, { for: "email" });
+    p.add(" Email\n address ", label, false);
+    const read = await f.observation.read(permit, "tab", {}, signal());
+    expect(read.elements?.map(({ box: _box, ...element }) => element)).toEqual([
+      { ref: "e13", role: "button", name: "Continue" },
+      { ref: "e14", role: "textbox", name: "Email address" },
+      { ref: "e15", role: "textbox", name: "Message" },
+      { ref: "e17", role: "textbox", name: "Protected field", secret: true },
+    ]);
+    expect(JSON.stringify(read)).not.toContain(privateCanary);
+    const lookup = (name: string) =>
+      f.observation.lookup(
+        permit,
+        "tab",
+        { kind: "node", node: 14, role: "textbox", name },
+        f.abort.signal,
+      );
+    expect((await lookup("Email address")).target).toMatchObject({ name: "Email address" });
+    // A label that holds a field of its own never names one.
+    p.add("", label, false, "INPUT");
+    expect((await lookup("Email address")).target).toBeNull();
+    expect((await lookup("Input field")).target).toMatchObject({ name: "Input field" });
+    await f.observation.close();
+  });
+  it("gives a box's tick with the element found by its node", async () => {
+    const f = await setup();
+    const button = required(f.state.accessibility.nodes[0]);
+    Object.assign(button, { properties: [{ name: "checked", value: { value: "true" } }] });
+    const found = await f.observation.lookup(
+      permit,
+      "tab",
+      { kind: "node", node: 13, role: "button", name: "Continue" },
+      f.abort.signal,
+    );
+    expect(found.target).toMatchObject({ checked: "true" });
+    await f.observation.close();
+  });
   it("reads actual accessibility focus and invalidates a focus change during the query", async () => {
     const f = await setup();
     const first = required(f.state.accessibility.nodes[0]);
