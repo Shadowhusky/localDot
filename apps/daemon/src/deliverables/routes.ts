@@ -5,6 +5,7 @@ import {
   FileVersionsReply,
   fileKind,
   PREVIEW_LIMITS,
+  ProofReply,
   ULID_PATTERN,
   unifiedDiff,
 } from "@localdot/protocol";
@@ -12,8 +13,11 @@ import type { Context, Hono } from "hono";
 import { DownloadError, downloadFile } from "../agent/download.ts";
 import { outputNameProblem, outputPath } from "../agent/output-store.ts";
 import type { EventLog } from "../event-log.ts";
+import type { FrameStore } from "../gateway/frames.ts";
+import { recordingCard } from "../sessions/summary.ts";
 import { fileVersions } from "./lineage.ts";
 import type { Previews } from "./previews.ts";
+import { resultProof } from "./proof.ts";
 import { StoredFiles } from "./stored.ts";
 import type { TaskScanner } from "./task-scan.ts";
 
@@ -23,6 +27,7 @@ export interface DeliverablesDeps {
   eventLog: Pick<EventLog, "hasSession" | "logFile">;
   scanner: Pick<TaskScanner, "scan">;
   previews: Pick<Previews, "preview">;
+  frames: Pick<FrameStore, "path">;
 }
 
 const SECURE = {
@@ -133,6 +138,18 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
         to: to.label,
         patch: clipped,
         truncated: clipped !== patch,
+      }),
+    );
+  });
+  app.get("/api/agent/sessions/:id/proof", async (c) => {
+    const id = c.req.param("id");
+    const scan = await deps.scanner.scan(id);
+    if (!scan) return c.text("unknown task", 404);
+    const exists = (frameId: string) => deps.frames.path(id, frameId) !== undefined;
+    return c.json(
+      ProofReply.parse({
+        recording: recordingCard(deps.home, id).state,
+        results: scan.results.slice(-64).map((r) => resultProof(r, exists)),
       }),
     );
   });

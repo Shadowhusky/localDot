@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { vi } from "vitest";
 import { OutputStore } from "../../agent/output-store.ts";
 import { EventLog } from "../../event-log.ts";
+import { FrameStore } from "../../gateway/frames.ts";
 import { type Converter, Previews } from "../previews.ts";
 import { deliverableRoutes } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
@@ -30,6 +31,7 @@ export function deliverablesFixture(opts: { converter?: Converter } = {}) {
     eventLog: log,
     scanner: new TaskScanner(log),
     previews: new Previews(home, opts.converter ?? { convert }),
+    frames: new FrameStore(home),
   });
   const task = (title = "Monthly report") => {
     const id = log.createSession(title);
