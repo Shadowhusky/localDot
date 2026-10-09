@@ -54,6 +54,8 @@ export class FakeKeyd {
   hairpin: HairpinGuard = { state: "active", source: "nat-pmp", addresses: 1 };
   // Answers the next request whose "METHOD /path" starts with the key with this error.
   readonly failures = new Map<string, { status: number; code: string }>();
+  // Answers the next request whose "METHOD /path" starts with the key 200 with this body as is.
+  readonly replies = new Map<string, unknown>();
   // Web Push: the fake's own VAPID key, and where a send goes. Without a target a send is only
   // recorded and answered 201; with one, the fake POSTs to it the way keyd does.
   readonly pushPublicKey: string;
@@ -135,6 +137,13 @@ export class FakeKeyd {
         reply(res, failure.status, {
           error: { code: failure.code, message: `fake ${failure.code}` },
         });
+        return;
+      }
+    }
+    for (const [key, answer] of this.replies) {
+      if (`${method} ${path}`.startsWith(key)) {
+        this.replies.delete(key);
+        reply(res, 200, answer);
         return;
       }
     }

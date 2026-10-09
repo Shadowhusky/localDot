@@ -72,6 +72,28 @@ describe("KeydClient push", () => {
     }
   });
 
+  it("refuses a malformed push reply from keyd", async () => {
+    const request = {
+      endpoint: "https://web.push.apple.com/x",
+      ttl: 60,
+      urgency: "normal",
+      body: message,
+    } as const;
+    const badReply = { code: "bad-reply", status: 200 };
+    for (const answer of [
+      { status: "201", gone: false },
+      { status: 201, gone: "no" },
+      { status: 201 },
+    ]) {
+      keyd.replies.set("POST /v1/push/send", answer);
+      await expect(client.pushSend(request)).rejects.toMatchObject(badReply);
+    }
+    for (const answer of [{ publicKey: "x" }, {}, { publicKey: `${keyd.pushPublicKey}=` }]) {
+      keyd.replies.set("GET /v1/push/key", answer);
+      await expect(client.pushKey()).rejects.toMatchObject(badReply);
+    }
+  });
+
   it("refuses a request it could not have sent before calling keyd", async () => {
     await expect(
       client.pushSend({

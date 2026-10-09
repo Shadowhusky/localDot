@@ -36,7 +36,8 @@ describe("RFC 8291 encryption", () => {
     const payload = Buffer.from('{"kind":"needs_you","sessionId":"01J9ZQ4V5W6X7Y8Z9ABCDEFGHJ"}');
     const a = encryptPush(payload, b64u(browser.p256dh), browser.authSecret);
     const b = encryptPush(payload, b64u(browser.p256dh), browser.authSecret);
-    expect(a.equals(b)).toBe(false);
+    expect(a.subarray(0, 16).equals(b.subarray(0, 16))).toBe(false);
+    expect(a.subarray(21, 86).equals(b.subarray(21, 86))).toBe(false);
     expect(decryptPush(a, browser.privateKey, browser.authSecret).equals(payload)).toBe(true);
     expect(a.includes(Buffer.from("needs_you"))).toBe(false);
   });
