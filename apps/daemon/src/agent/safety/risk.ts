@@ -31,7 +31,9 @@ export type RiskFacts = {
     | "files_write"
     | "files_upload"
     | "files_delete"
-    | "memory_write";
+    | "memory_write"
+    // dot changes when it works: pauses a routine or schedules a follow-up.
+    | "schedule";
   // Filled from the daemon's own session state when the action is decided.
   screen?: ScreenName;
   signedIn?: boolean;
@@ -47,6 +49,7 @@ export type RiskFacts = {
   tabbed?: boolean;
   command?: string;
   destination?: string;
+  schedule?: { title: string; fields: [string, string][] };
 };
 export type RiskDecision = {
   actionClass: ActionClass;
@@ -151,10 +154,11 @@ export function buildApprovalCard(
   add("App location", safeTargetURL(facts.target?.url));
   add("Web address", facts.destination);
   add("Command", facts.command);
+  for (const [key, value] of facts.schedule?.fields ?? []) add(key, value);
   return DraftSchema.parse({
     actionClass: decision.actionClass,
     risk: decision.risk === "high" ? "high" : "medium",
-    title: titles[decision.actionClass],
+    title: facts.schedule?.title ?? titles[decision.actionClass],
     fields,
   });
 }

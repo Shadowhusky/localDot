@@ -470,7 +470,7 @@ export const RoutineProposed = event(
     instruction: z.string().max(8000),
     profile: RoutineProfile,
     notify: RoutineNotify,
-    budgetUSD: z.number().min(0.01).max(100),
+    budgetUSD: z.number().min(0.01).max(100).nullable(),
     approvalWindowMinutes: z.number().int().min(5).max(240),
     missedPolicy: MissedPolicy,
   }),

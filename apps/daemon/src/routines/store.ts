@@ -43,7 +43,7 @@ export interface StoredRoutine {
   profile: RoutineProfile;
   notify: RoutineNotify;
   approvalWindowMinutes: number;
-  budgetUSD: number;
+  budgetUSD: number | null;
   missedPolicy: MissedPolicy;
   state: RoutineState;
   pausedReason: PausedReason | null;
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS routines(
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, instruction TEXT NOT NULL,
   schedule_json TEXT NOT NULL, tz TEXT NOT NULL, end_at TEXT, anchor TEXT NOT NULL,
   profile TEXT NOT NULL, notify TEXT NOT NULL, approval_window_s INTEGER NOT NULL,
-  budget_usd REAL NOT NULL, missed_policy TEXT NOT NULL, state TEXT NOT NULL,
+  budget_usd REAL, missed_policy TEXT NOT NULL, state TEXT NOT NULL,
   paused_reason TEXT, revision INTEGER NOT NULL, next_due_at INTEGER,
   created_from_session TEXT, follow_up_json TEXT, last_seen_at INTEGER,
   absence_asked_at INTEGER, last_result_hash TEXT,
@@ -127,7 +127,7 @@ interface Row {
   profile: string;
   notify: string;
   approval_window_s: number;
-  budget_usd: number;
+  budget_usd: number | null;
   missed_policy: string;
   state: string;
   paused_reason: string | null;
@@ -301,7 +301,7 @@ export class RoutineStore {
         draft.profile ?? ROUTINE_DEFAULTS.profile,
         draft.notify ?? ROUTINE_DEFAULTS.notify,
         (draft.approvalWindowMinutes ?? ROUTINE_DEFAULTS.approvalWindowMinutes) * 60,
-        draft.budgetUSD ?? ROUTINE_DEFAULTS.budgetUSD,
+        draft.budgetUSD === undefined ? ROUTINE_DEFAULTS.budgetUSD : draft.budgetUSD,
         draft.missedPolicy ?? ROUTINE_DEFAULTS.missedPolicy,
         init.state,
         init.createdFromSession ?? null,

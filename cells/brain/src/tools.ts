@@ -8,10 +8,14 @@ import {
   DoneInput,
   FilesInput,
   FindInput,
+  FOLLOW_UP_TOOL_DESCRIPTION,
+  FollowUpAtInput,
   GenericComputerInput,
   type ModelBinding,
   RememberInput,
   RequestTakeoverInput,
+  ROUTINE_TOOL_DESCRIPTION,
+  RoutineToolInput,
   ShellInput,
   SwitchScreenInput,
   UpdatePlanInput,
@@ -117,6 +121,11 @@ export function toolSet(b: ModelBinding): ToolSet {
       description:
         "Finish the task: a summary for the user, and the paths of any files in the computer they should get.",
       inputSchema: DoneInput,
+    }),
+    routine: tool({ description: ROUTINE_TOOL_DESCRIPTION, inputSchema: RoutineToolInput }),
+    follow_up_at: tool({
+      description: FOLLOW_UP_TOOL_DESCRIPTION,
+      inputSchema: FollowUpAtInput,
     }),
   };
 }

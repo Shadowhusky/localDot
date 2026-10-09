@@ -87,11 +87,12 @@ export type RoutineOutcome = z.infer<typeof RoutineOutcome>;
 export const WindowMinutes = z.number().int().min(5).max(240);
 export const BudgetUSD = z.number().min(0.01).max(100);
 
+// No spending limit unless the user sets one: the run then follows their usual spending settings.
 export const ROUTINE_DEFAULTS = Object.freeze({
   profile: "ask_first",
   notify: "changes",
   approvalWindowMinutes: 60,
-  budgetUSD: 0.5,
+  budgetUSD: null,
   missedPolicy: "run_once",
 } as const);
 export const ROUTINE_LIMITS = Object.freeze({
@@ -109,7 +110,7 @@ export const RoutineDraft = z.strictObject({
   profile: RoutineProfile.optional(),
   notify: RoutineNotify.optional(),
   approvalWindowMinutes: WindowMinutes.optional(),
-  budgetUSD: BudgetUSD.optional(),
+  budgetUSD: BudgetUSD.nullable().optional(),
   missedPolicy: MissedPolicy.optional(),
 });
 export type RoutineDraft = z.infer<typeof RoutineDraft>;
@@ -150,7 +151,7 @@ export const Routine = z.strictObject({
   profile: RoutineProfile,
   notify: RoutineNotify,
   approvalWindowMinutes: WindowMinutes,
-  budgetUSD: BudgetUSD,
+  budgetUSD: BudgetUSD.nullable(),
   missedPolicy: MissedPolicy,
   state: RoutineState,
   pausedReason: PausedReason.nullable(),

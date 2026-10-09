@@ -34,7 +34,7 @@ describe("routine store", () => {
       profile: "ask_first",
       notify: "changes",
       approvalWindowMinutes: 60,
-      budgetUSD: 0.5,
+      budgetUSD: null,
       missedPolicy: "run_once",
       state: "active",
       revision: 1,
@@ -43,6 +43,13 @@ describe("routine store", () => {
     });
     expect(statSync(join(home, "routines.sqlite")).mode & 0o777).toBe(0o600);
     expect(toRoutine(routine, undefined).summary).toBe("Weekdays at 08:30 · London time");
+  });
+
+  it("keeps a spending limit only when the user sets one", () => {
+    const { store } = open();
+    const capped = store.create({ ...draft, budgetUSD: 2 }, { state: "active" });
+    expect(capped.budgetUSD).toBe(2);
+    expect(store.update(capped.id, { revision: 1, budgetUSD: null }).budgetUSD).toBeNull();
   });
 
   it("refuses a stale revision and clears the next due time when the schedule changes", () => {

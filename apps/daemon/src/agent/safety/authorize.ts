@@ -238,6 +238,27 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
         operation:
           Array.isArray(input.files) && input.files.length > 0 ? "files_write" : "files_read",
       };
+    case "routine":
+      return input.op === "pause"
+        ? {
+            operation: "schedule",
+            schedule: {
+              title: "Pause a routine",
+              fields: [["Routine", String(input.routine_id ?? "")]],
+            },
+          }
+        : undefined;
+    case "follow_up_at":
+      return {
+        operation: "schedule",
+        schedule: {
+          title: "Follow up later",
+          fields: [
+            ["When", String(input.at).replace("T", " ")],
+            ["Note", String(input.note)],
+          ],
+        },
+      };
     default:
       return undefined; // Metadata and direct user questions grant no native execution.
   }

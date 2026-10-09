@@ -28,4 +28,5 @@ export * from "./target.ts";
 export * from "./text.ts";
 export * from "./time.ts";
 export * from "./tool-api.ts";
+export * from "./tools/routine.ts";
 export * from "./tools.ts";
