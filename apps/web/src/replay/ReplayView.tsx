@@ -805,7 +805,8 @@ function Player({
               api={api}
               replay={replay}
               compact={phone}
-              noVideo={!!whole && noticeOver}
+              noVideo={!!whole}
+              cardShown={!noticeOver}
               screens={
                 twoScreens && (
                   <SegmentedControl

@@ -450,7 +450,16 @@
 }
 
 .replay-no-video {
+  display: flex;
   flex: none;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    visibility 0s;
+}
+
+.replay-no-video[data-held] {
+  visibility: hidden;
+  opacity: 0;
 }
 
 /* Export sits in the transport as its icon; while it runs with its popover put away, its ring
