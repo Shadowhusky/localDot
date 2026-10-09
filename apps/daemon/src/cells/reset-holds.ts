@@ -12,15 +12,18 @@ type Binding = z.infer<typeof Binding>;
 const failure = () => new Error("Computer reset admission is unavailable");
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** Independent deny-only receipt. Old identities never reopen. Candidate releases live only in
- * memory and must be re-earned from verified Ready on every daemon restart. No deletion API. */
+/** Independent deny-only receipt. Old identities never reopen. A candidate is held until its
+ * first publication from verified Ready, which leaves a durable release receipt; from then on it is
+ * an ordinary computer and later restarts never re-confirm it. No deletion API. */
 export class ComputerResetHolds {
   readonly #bindings = new Map<string, Binding>();
   readonly #old = new Map<string, string>();
   readonly #candidate = new Map<string, string>();
   readonly #released = new Set<string>();
+  readonly #finalised = new Set<string>();
   readonly #listeners = new Set<(binding: Binding) => void>();
   #records?: PrivateRecords<Binding>;
+  #receipts?: PrivateRecords<Binding>;
   #resets?: ComputerResetStore;
   #closed = false;
   constructor(home: string) {
@@ -30,8 +33,21 @@ export class ComputerResetHolds {
         if (binding.requestId !== id) throw failure();
         return binding;
       });
+      this.#receipts = new PrivateRecords(home, "computer-reset-releases", (raw, id) => {
+        const binding = Binding.parse(raw);
+        if (binding.requestId !== id) throw failure();
+        return binding;
+      });
       this.#resets = new ComputerResetStore(home);
       for (const binding of this.#records.list()) this.#remember(binding);
+      for (const receipt of this.#receipts.list()) {
+        if (
+          !same(this.#bindings.get(receipt.requestId), receipt) ||
+          this.#resets.read(receipt.requestId)?.phase !== "ready"
+        )
+          throw failure();
+        this.#finalised.add(receipt.newCellId);
+      }
     } catch {
       this.#closed = true;
     }
@@ -44,8 +60,14 @@ export class ComputerResetHolds {
   }
   candidateHeld(id: string): boolean {
     return (
-      this.#closed || this.#old.has(id) || (this.#candidate.has(id) && !this.#released.has(id))
+      this.#closed ||
+      this.#old.has(id) ||
+      (this.#candidate.has(id) && !this.#released.has(id) && !this.#finalised.has(id))
     );
+  }
+  /** Published in an earlier daemon run: an ordinary computer that is never re-confirmed. */
+  finalised(id: string): boolean {
+    return !this.#closed && !this.#old.has(id) && this.#finalised.has(id);
   }
   records(): Binding[] {
     if (this.#closed || !this.#records) throw failure();
@@ -108,8 +130,9 @@ export class ComputerResetHolds {
   /** The production caller must freshly verify physical readiness before this publication gate.
    * A matching durable Ready record is necessary; it never substitutes for that runtime check. */
   publish(input: ComputerResetRecord): void {
-    if (this.#closed || !this.#resets) throw failure();
-    const record = ComputerResetRecord.parse(input),
+    if (this.#closed || !this.#resets || !this.#receipts) throw failure();
+    const receipts = this.#receipts,
+      record = ComputerResetRecord.parse(input),
       binding = this.#bindings.get(record.requestId);
     try {
       if (
@@ -122,6 +145,10 @@ export class ComputerResetHolds {
         !same(this.#resets.read(record.requestId), record)
       )
         throw failure();
+      const prior = receipts.read(record.requestId);
+      if (prior && !same(prior, binding)) throw failure();
+      receipts.write(record.requestId, binding);
+      if (!same(receipts.read(record.requestId), binding)) throw failure();
       this.#released.add(record.newCellId);
     } catch {
       this.#released.delete(record.newCellId);

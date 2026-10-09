@@ -67,15 +67,25 @@ export class RuntimeUpdateAdmission {
         if (!equal(input.readCell(record.id), record)) throw failure();
         return record;
       });
+    // A computer whose runtime fails verification stays held on its own; the others still release.
+    const held = new Map<string, string>();
     for (const record of prepared) {
       if (!input.canPublish()) throw failure();
-      await input.verify(structuredClone(record));
+      try {
+        await input.verify(structuredClone(record));
+      } catch (error) {
+        held.set(record.id, error instanceof Error ? error.message : "verification failed");
+      }
       this.#unchanged();
     }
     if (!input.canPublish()) throw failure();
     if (retired.some((id) => input.retired?.(id) !== true)) throw failure();
     if (prepared.some((record) => !equal(input.readCell(record.id), record))) throw failure();
-    for (const record of prepared) this.#released.add(record.id);
+    for (const record of prepared) if (!held.has(record.id)) this.#released.add(record.id);
     for (const id of retired) this.#retired.add(id);
+    if (held.size)
+      throw new Error(
+        [...held].map(([id, reason]) => `Computer ${id} stays held: ${reason}`).join(" "),
+      );
   }
 }
