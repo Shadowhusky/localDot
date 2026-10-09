@@ -45,6 +45,7 @@ export async function readThread(
     model.questions.values(),
     model.results,
     model.takeovers.values(),
+    model.routineProposals.values(),
   );
   const steps = workSteps(timelineRows(stepRows(stage), stage.keyUses), model);
   return owned(withWork(items, steps, false, model.spendCalls), sessionId);

@@ -206,3 +206,38 @@ describe("rows and quiet times", () => {
     expect(timeLabel(now - 30 * 86_400_000, now)).toMatch(/,/);
   });
 });
+
+describe("routines in the thread", () => {
+  const proposal = {
+    id: ulidAt(5000),
+    seq: 3,
+    routineId: ulidAt(5000, "1111111111111111"),
+    revision: 1,
+    name: "Inbox sweep",
+    summary: "Every day at 07:45 · London time",
+    instruction: "Check my inbox",
+    profile: "ask_first",
+    notify: "changes",
+    budgetUSD: null,
+    approvalWindowMinutes: 60,
+    missedPolicy: "run_once",
+  } as const;
+  it("places a proposal where dot made it and the routine's line first", () => {
+    const origin = {
+      kind: "routine",
+      routineId: proposal.routineId,
+      runId: ulidAt(1000),
+      name: "Morning bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    } as const;
+    const items = threadItems(
+      [message("a", 1), message("b", 5, "assistant")],
+      [],
+      [],
+      [],
+      [proposal],
+      origin,
+    );
+    expect(items.map((item) => item.kind)).toEqual(["origin", "message", "routine", "message"]);
+  });
+});

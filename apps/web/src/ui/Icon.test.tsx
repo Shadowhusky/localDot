@@ -75,6 +75,8 @@ const PLANNED: IconName[] = [
   // Settings: Spending and the audit log (design-v2 §11 I, J).
   "chart",
   "file-text",
+  // Routines: dot's own repeating work.
+  "repeat",
   // First-run setup: the ChatGPT plan and coding plans (design-v2 §11 A0).
   "message-circle",
   "code",

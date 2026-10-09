@@ -3,6 +3,7 @@ import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { SwitchScreenInput } from "./screens.ts";
+import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
 // daemon's tool API runs, including M7's isolated browser screen.
@@ -21,6 +22,8 @@ export const TOOL_NAMES = [
   "request_takeover",
   "remember",
   "done",
+  "routine",
+  "follow_up_at",
 ] as const;
 export const ToolName = z.enum(TOOL_NAMES);
 export type ToolName = z.infer<typeof ToolName>;
@@ -323,6 +326,8 @@ export const TOOL_INPUTS = {
   request_takeover: RequestTakeoverInput,
   remember: RememberInput,
   done: DoneInput,
+  routine: RoutineToolInput,
+  follow_up_at: FollowUpAtInput,
 } as const satisfies Record<ToolName, z.ZodType>;
 
 // A tool's answer to the brain. Images are screenshots the daemon stored (by frameId) and sends

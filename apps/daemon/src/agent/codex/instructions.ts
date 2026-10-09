@@ -1,10 +1,11 @@
-import { TOOL_NAMES } from "@localdot/protocol";
-import { workingRules } from "@localdot/protocol/guidance";
+import { type SessionRun, TOOL_NAMES } from "@localdot/protocol";
+import { thisRunSection, workingRules } from "@localdot/protocol/guidance";
 
 export interface CodexInstructionsInput {
   memory: { user: string; memory: string };
   skills: readonly { name: string; description: string; path: string }[];
   today: Date;
+  run?: SessionRun;
 }
 export function codexInstructions(input: CodexInstructionsInput): string {
   const skills = input.skills.length
@@ -28,5 +29,5 @@ ${input.memory.user.trim()}
 </user_file>
 <user_file name="MEMORY.md">
 ${input.memory.memory.trim()}
-</user_file>${skills}`;
+</user_file>${skills}${thisRunSection(input.run)}`;
 }

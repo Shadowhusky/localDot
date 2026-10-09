@@ -73,3 +73,19 @@ describe("Codex developer instructions", () => {
     );
   });
 });
+
+describe("routine runs", () => {
+  it("tells the ChatGPT plan when a routine started the task", () => {
+    const input = { memory: { user: "", memory: "" }, skills: [], today: new Date() };
+    const run = {
+      kind: "routine" as const,
+      name: "Morning bills",
+      profile: "ask_first" as const,
+      approvalWindowMinutes: 60,
+    };
+    const text = codexInstructions({ ...input, run });
+    expect(text).toContain("# This run");
+    expect(text).toContain("not watching");
+    expect(codexInstructions(input)).not.toContain("# This run");
+  });
+});

@@ -37,6 +37,8 @@ const WAITS_ON_USER = new Set([
   "browser_act",
   "remember",
   "done",
+  "routine",
+  "follow_up_at",
 ]);
 const transcriptReply = z.object({ messages: z.array(TranscriptMessage) });
 const regionSchema = z
@@ -114,6 +116,7 @@ export class ToolClient {
   readonly #baseUrl: string;
   readonly #fetch: typeof fetch;
   #closing?: Promise<void>;
+  #runWindowMs = 0;
 
   constructor(
     baseUrl: string,
@@ -147,7 +150,11 @@ export class ToolClient {
       "GET",
       "/v1/boot",
       undefined,
-      (b) => BootConfig.parse(JSON.parse(b)),
+      (b) => {
+        const boot = BootConfig.parse(JSON.parse(b));
+        this.#runWindowMs = boot.run ? boot.run.approvalWindowMinutes * 60_000 : 0;
+        return boot;
+      },
       BASE_TIMEOUT_MS,
       signal,
       [],
@@ -235,10 +242,12 @@ export class ToolClient {
       const action = ComputerAction.safeParse(input);
       if (action.success) timeoutMs = computerWorkMs(action.data);
     }
-    // The user has thirty minutes; a secret answer is then typed into its field.
-    else if (name === "ask_user") timeoutMs = 31 * 60_000;
+    // The user has thirty minutes, or a routine's own window; a secret answer is then typed into
+    // its field.
+    else if (name === "ask_user") timeoutMs = Math.max(30 * 60_000, this.#runWindowMs) + 60_000;
     else if (name === "request_takeover") timeoutMs = undefined;
-    if (timeoutMs !== undefined && WAITS_ON_USER.has(name)) timeoutMs += APPROVAL_TIMEOUT_MS;
+    if (timeoutMs !== undefined && WAITS_ON_USER.has(name))
+      timeoutMs += Math.max(APPROVAL_TIMEOUT_MS, this.#runWindowMs);
     return this.#json(
       "POST",
       `/v1/tools/${encodeURIComponent(name)}`,

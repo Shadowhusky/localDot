@@ -112,3 +112,53 @@ it("unprotected or symlink token refuses before sending credentials", async () =
   expect(await f.run()).toBe(1);
   expect(f.fetchImpl).not.toHaveBeenCalled();
 });
+
+const everything = {
+  sessions: [
+    {
+      sessionId: SESSION,
+      cellId: CELL,
+      outcome: { revoked: true, paused: true, closed: false, stopped: false, errors: [] },
+    },
+  ],
+  cells: [],
+  routinesPaused: 2,
+  launchesCancelled: 0,
+  confirmed: true,
+};
+it("stops everything with one request and says what stopped", async () => {
+  const f = fixture([ready], everything);
+  expect(
+    await runStop(
+      { home: f.home, all: true, signal: f.abort.signal },
+      { out: f.out, err: f.err, fetch: f.fetchImpl },
+    ),
+  ).toBe(0);
+  expect(f.fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+    "http://127.0.0.1:4750/api/stop-all?by=cli",
+  ]);
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.method).toBe("POST");
+  expect(f.out).toHaveBeenCalledWith(
+    "Everything stopped: 1 task stopped, 0 computers frozen, 2 routines paused.",
+  );
+});
+it("reports an unconfirmed Stop everything and fails", async () => {
+  const f = fixture([ready], { ...everything, confirmed: false });
+  expect(
+    await runStop(
+      { home: f.home, all: true, signal: f.abort.signal },
+      { out: f.out, err: f.err, fetch: f.fetchImpl },
+    ),
+  ).toBe(1);
+  expect(f.err).toHaveBeenCalledWith(expect.stringContaining("Stop everything is unconfirmed"));
+});
+it("does not combine --all with a computer id", async () => {
+  const f = fixture();
+  expect(
+    await runStop(
+      { home: f.home, all: true, cellId: CELL, signal: f.abort.signal },
+      { out: f.out, err: f.err, fetch: f.fetchImpl },
+    ),
+  ).toBe(1);
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+});

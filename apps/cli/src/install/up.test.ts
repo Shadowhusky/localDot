@@ -20,7 +20,16 @@ const mock = vi.hoisted(() => ({
   updateHost: vi.fn(),
   recoverUpdate: vi.fn(),
   runtimes: vi.fn(),
+  sync: vi.fn(),
+  save: vi.fn(),
+  docker: vi.fn(),
 }));
+vi.mock("./login-agent.ts", () => ({
+  syncLoginAgent: mock.sync,
+  startAtLoginStore: () => ({ save: mock.save, read: async () => null }),
+  nodeLoginAgentHost: () => ({ fake: true }),
+}));
+vi.mock("./host-docker-facts.ts", () => ({ readHostDockerFacts: mock.docker }));
 vi.mock("./copy-inventory.ts", () => ({ privateDirectory: mock.directory }));
 vi.mock("./service-journal.ts", () => ({ serviceJournalStore: () => ({ read: mock.read }) }));
 vi.mock("./promote-release.ts", () => ({
@@ -118,6 +127,15 @@ function fixture() {
     events.push("link");
     return 0;
   });
+  mock.sync.mockImplementation(async () => {
+    expect(locked).toBe(true);
+    events.push("sync");
+    return "off";
+  });
+  mock.save.mockImplementation(async (record: { enabled: boolean }) => {
+    expect(locked).toBe(true);
+    events.push(`save:${record.enabled}`);
+  });
   return {
     record,
     release,
@@ -125,12 +143,22 @@ function fixture() {
     controller,
     io,
     run: () => runUp({ home: settings.home, signal: controller.signal }, io),
+    runWith: (options: Parameters<typeof runUp>[2]) =>
+      runUp({ home: settings.home, signal: controller.signal }, io, options),
   };
 }
 it("starts only the recorded selected release after recovery, verification and isolation", async () => {
   const f = fixture();
   expect(await f.run()).toBe(0);
-  expect(f.events).toEqual(["recover-update", "recover", "verify", "isolation", "start", "link"]);
+  expect(f.events).toEqual([
+    "recover-update",
+    "recover",
+    "verify",
+    "isolation",
+    "start",
+    "sync",
+    "link",
+  ]);
   expect(mock.host).toHaveBeenCalledWith(
     expect.objectContaining({ home: f.record.configuration.settings.home }),
     { remove: "actual-adapter", contain: "actual-adapter", isolation: mock.isolation },
@@ -260,4 +288,56 @@ it("does not launch after cancellation during recovery and waits for its cleanup
   expect(await result).toBe(130);
   expect(mock.start).not.toHaveBeenCalled();
   expect(mock.open).not.toHaveBeenCalled();
+});
+it("from login: waits for Docker, starts through the journaled lifecycle, prints no link", async () => {
+  const f = fixture();
+  const dockerReady = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  const sleep = vi.fn(async () => {});
+  expect(await f.runWith({ fromLogin: true, dockerReady, sleep })).toBe(0);
+  expect(dockerReady).toHaveBeenNthCalledWith(1, "/recorded/docker.sock", f.controller.signal);
+  expect(sleep).toHaveBeenCalledWith(10_000, f.controller.signal);
+  expect(f.events).toEqual(["recover-update", "recover", "verify", "isolation", "start", "sync"]);
+  expect(mock.open).not.toHaveBeenCalled();
+});
+it("from login: gives up quietly when Docker never comes, without the lock or a start", async () => {
+  const f = fixture();
+  expect(
+    await f.runWith({
+      fromLogin: true,
+      dockerReady: async () => false,
+      sleep: async () => {},
+      dockerWaitMs: 0,
+    }),
+  ).toBe(0);
+  expect(mock.lock).not.toHaveBeenCalled();
+  expect(f.io.out).toHaveBeenCalledWith(expect.stringContaining("Docker Desktop is not running"));
+});
+it("--at-login records the choice under the lock, syncs the agent, then prints the link", async () => {
+  const f = fixture();
+  expect(await f.runWith({ atLogin: true })).toBe(0);
+  expect(f.events).toEqual([
+    "recover-update",
+    "recover",
+    "verify",
+    "isolation",
+    "start",
+    "save:true",
+    "sync",
+    "link",
+  ]);
+});
+it("--at-login fails loudly when the agent cannot be written", async () => {
+  const f = fixture();
+  mock.sync.mockRejectedValueOnce(new Error("Start at login could not be changed safely."));
+  expect(await f.runWith({ atLogin: true })).toBe(1);
+  expect(mock.open).not.toHaveBeenCalled();
+  expect(f.io.err).toHaveBeenCalledWith(
+    "localDot started, but start at login could not be turned on. Run localdot start-at-login on to try again.",
+  );
+});
+it("plain up still succeeds when the agent sync fails, and says so", async () => {
+  const f = fixture();
+  mock.sync.mockRejectedValueOnce(new Error("Start at login could not be changed safely."));
+  expect(await f.run()).toBe(0);
+  expect(f.io.err).toHaveBeenCalledWith(expect.stringContaining("localdot start-at-login status"));
 });

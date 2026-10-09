@@ -2,9 +2,11 @@ import {
   BrowserAction,
   ComputerAction,
   ComputerStep,
+  FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
+  ROUTINE_TOOL_DESCRIPTION,
   TOOL_INPUTS,
   TOOL_NAMES,
   type ToolName,
@@ -90,6 +92,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   remember:
     "Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping).",
   done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",
+  routine: ROUTINE_TOOL_DESCRIPTION,
+  follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
 };
 
 export interface McpToolDescriptor {

@@ -17,6 +17,7 @@ import { installCodeRoutes } from "./install-code-routes.ts";
 import type { InstallCodes } from "./install-codes.ts";
 import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
+import { type RoutineRoutesDeps, routineRoutes } from "./routines/routes.ts";
 import type { ManagedServiceReadiness } from "./service-readiness.ts";
 import { NDJSON_TYPE } from "./sessions/ndjson.ts";
 import { eventStreamResponse, type ReplayRoutesDeps, replayRoutes } from "./sessions/routes.ts";
@@ -40,6 +41,7 @@ export interface AppOptions {
   installCodes?: InstallCodes;
   serviceReadiness?: Pick<ManagedServiceReadiness, "snapshot">;
   doctorSelfTests?: DoctorSelfTestsDeps;
+  routines?: RoutineRoutesDeps;
 }
 
 export function createApp({
@@ -58,6 +60,7 @@ export function createApp({
   installCodes,
   serviceReadiness,
   doctorSelfTests,
+  routines,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
     throw new Error("install codes belong to another daemon");
@@ -167,6 +170,7 @@ export function createApp({
   if (cells) cellRoutes(app, cells);
   if (keys) keyRoutes(app, keys);
   if (agent) agentRoutes(app, agent);
+  if (routines) routineRoutes(app, routines);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (replay) replayRoutes(app, replay);
   return app;

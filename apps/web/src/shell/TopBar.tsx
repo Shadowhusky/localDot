@@ -25,6 +25,8 @@ export interface TopBarProps {
   settingsOpen: boolean;
   onSettings(trigger: HTMLButtonElement): void;
   settingsRef?: Ref<HTMLButtonElement>;
+  // At the very end: what has no place of its own, such as Stop everything.
+  more?: ReactNode;
 }
 
 // The wordmark and what is on the stage, then the modes, Settings and Keys. It redraws only when one
@@ -44,6 +46,7 @@ export const TopBar = memo(function TopBar({
   settingsOpen,
   onSettings,
   settingsRef,
+  more,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
     { value: "watch", label: "Watch" },
@@ -99,6 +102,7 @@ export const TopBar = memo(function TopBar({
           data-state={keys.state}
           onClick={onKeys}
         />
+        {more}
       </div>
     </header>
   );

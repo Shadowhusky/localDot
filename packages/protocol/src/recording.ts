@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ULID_PATTERN } from "./ids.ts";
+import { SessionOrigin } from "./routines.ts";
 import type { ScreenName } from "./screens.ts";
 
 // One recording lives beneath <home>/sessions/<id>/recording/. Fragment bytes
@@ -147,6 +148,7 @@ export const SessionCard = z.object({
   recording: RecordingSummary,
   // Older sessions and clients expose the desktop-only `recording` field.
   recordings: z.object({ desktop: RecordingSummary, browser: RecordingSummary }).optional(),
+  origin: SessionOrigin.optional(),
 });
 export type SessionCard = z.infer<typeof SessionCard>;
 

@@ -218,3 +218,48 @@ it("a second concurrent request is refused and cannot replace the first owner", 
   h.broker.answer(h.sessionId, reply);
   expect(await first).toBe("approve");
 });
+
+const windowDraft = {
+  actionClass: "send" as const,
+  risk: "high" as const,
+  title: "Send",
+  fields: [["Target", "Synthetic recipient"]] as [string, string][],
+};
+const askOnce = (broker: ApprovalBroker) =>
+  broker.request(
+    {
+      sessionId: ulid(),
+      cellId: ulid(),
+      generation: 1,
+      callId: ulid(),
+      digest: "exact-input",
+      targetDigest: "exact-native-target",
+    },
+    windowDraft,
+    { signal: new AbortController().signal, check: () => {}, revalidate: async () => true },
+  );
+
+it("keeps the default window when none is given", () => {
+  const published = vi.fn();
+  void askOnce(new ApprovalBroker(() => 1_000, published)).catch(() => {});
+  expect(published.mock.calls[0]?.[0].expiresAt).toBe(1_000 + APPROVAL_TIMEOUT_MS);
+});
+
+it("uses a session's own window and refuses when it runs out", async () => {
+  vi.useFakeTimers();
+  try {
+    const published = vi.fn(),
+      resolved = vi.fn();
+    const outcome = askOnce(new ApprovalBroker(() => 1_000, published, resolved, 3_600_000));
+    expect(published.mock.calls[0]?.[0].expiresAt).toBe(1_000 + 3_600_000);
+    await vi.advanceTimersByTimeAsync(3_599_999);
+    expect(resolved).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toBe("deny");
+    expect(resolved).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "deny", by: "timeout" }),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});

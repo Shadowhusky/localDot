@@ -4,6 +4,7 @@ import type {
   EventOf,
   RuleChange,
   ScreenSelectionSnapshot,
+  SessionOrigin,
 } from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
@@ -15,6 +16,7 @@ export const AGENT_LIMITS = Object.freeze({
   questions: 64,
   takeovers: 64,
   results: 64,
+  routineProposals: 16,
   spendCalls: 2048,
   messageText: 20_000,
   outputText: 65_536,
@@ -88,6 +90,11 @@ export interface AgentResult {
   readonly summary: string;
   readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
 }
+// A routine dot drafted in this task; it runs only once the user saves it.
+export type RoutineProposal = EventOf<"routine.proposed">["data"] & {
+  readonly id: string;
+  readonly seq: number;
+};
 export type UsageRow = EventOf<"model.usage">["data"] & {
   readonly calls: number;
   readonly reasoningPartial: boolean;
@@ -146,6 +153,9 @@ export interface AgentModel {
   readonly pendingTakeover: string | null;
   readonly changes: readonly AgentChange[];
   readonly results: readonly AgentResult[];
+  // What started the task when the user did not: a routine or a follow-up.
+  readonly origin?: SessionOrigin;
+  readonly routineProposals: ReadonlyMap<string, RoutineProposal>;
   readonly usage: readonly UsageRow[];
   readonly usagePartial: boolean;
   readonly retry: Reported<EventOf<"model.retry">["data"]> | null;
@@ -191,6 +201,7 @@ export function emptyAgentModel(): AgentModel {
     pendingTakeover: null,
     changes: [],
     results: [],
+    routineProposals: new Map(),
     usage: [],
     usagePartial: false,
     retry: null,

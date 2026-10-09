@@ -7,6 +7,7 @@ import {
   type ScreenName,
   SESSION_SUMMARY,
   SessionCard,
+  type SessionOrigin,
   ULID_PATTERN,
   ulidTime,
 } from "@localdot/protocol";
@@ -58,6 +59,7 @@ export async function summarizeSession(
   let endedAt: number | undefined;
   let coverFrameId: string | null = null;
   let screen: SessionCard["screen"] = null;
+  let origin: SessionOrigin | undefined;
   for await (const line of streamEventLines(file)) {
     const e = parseEvent(JSON.parse(line));
     last = e.t;
@@ -66,6 +68,7 @@ export async function summarizeSession(
         first = e.t;
         screen = e.data.screen;
         title = e.data.title ?? title;
+        origin = e.data.origin ?? origin;
         break;
       case "session.end":
         endedAt = e.t;
@@ -95,6 +98,7 @@ export async function summarizeSession(
       screen,
       recording: recordingCard(home, id),
       recordings: recordingCards(home, id),
+      ...(origin ? { origin } : {}),
     }),
     logBytes,
   };

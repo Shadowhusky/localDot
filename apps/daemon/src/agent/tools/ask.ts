@@ -25,7 +25,12 @@ function siteOf(url: string | undefined): string | undefined {
   }
 }
 
-function unanswered(answer: AskAnswer): ToolResult | undefined {
+// A routine's question waits for its own window, so the run is Needs you until then.
+function askTimeoutMs(deps: ToolDeps, ctx: ToolCallContext): number {
+  return deps.askTimeoutMs ?? ctx.session.approvalWindowMs ?? ASK_TIMEOUT_MS;
+}
+
+function unanswered(answer: AskAnswer, timeoutMs: number): ToolResult | undefined {
   if (answer.by === "pause")
     return {
       ok: false,
@@ -33,7 +38,10 @@ function unanswered(answer: AskAnswer): ToolResult | undefined {
       content: [text("The task was paused while waiting for an answer.")],
     };
   if (answer.by === "timeout")
-    return { ok: false, content: [text("The user did not answer within 30 minutes.")] };
+    return {
+      ok: false,
+      content: [text(`The user did not answer within ${Math.round(timeoutMs / 60_000)} minutes.`)],
+    };
   if (answer.by === "stop") return { ok: false, content: [text("The question was cancelled.")] };
   if (answer.by === "control")
     return { ok: false, content: [text("The user took the computer instead of answering.")] };
@@ -49,17 +57,18 @@ export async function askUserTool(
   ctx.check();
   if (input.fields) return askFields(deps, ctx, input, input.fields);
   const options = (input.options ?? []).map(ctx.redact);
+  const timeoutMs = askTimeoutMs(deps, ctx);
   const answer = await ctx.session.ask(
     ctx.redact(input.question),
     options,
     input.allow_text ?? options.length === 0,
-    deps.askTimeoutMs ?? ASK_TIMEOUT_MS,
+    timeoutMs,
     ctx.step,
     ctx.generation,
     ctx.signal,
   );
   ctx.check();
-  const early = unanswered(answer);
+  const early = unanswered(answer, timeoutMs);
   if (early) return early;
   const picked = answer.option ? options["ABCDEF".indexOf(answer.option)] : undefined;
   return {
@@ -118,6 +127,7 @@ async function askFields(
         : {}),
     };
   };
+  const timeoutMs = askTimeoutMs(deps, ctx);
   const answer = await ctx.session.askFields(
     {
       question: ctx.redact(input.question),
@@ -125,7 +135,7 @@ async function askFields(
       ...(input.submit ? { submit: ctx.redact(input.submit) } : {}),
       ...(input.decline ? { decline: ctx.redact(input.decline) } : {}),
     },
-    deps.askTimeoutMs ?? ASK_TIMEOUT_MS,
+    timeoutMs,
     ctx.step,
     ctx.generation,
     ctx.signal,
@@ -133,7 +143,7 @@ async function askFields(
   const typed = answer.secrets;
   try {
     ctx.check();
-    const early = unanswered(answer);
+    const early = unanswered(answer, timeoutMs);
     if (early) return early;
     const answers: Record<string, unknown> = { ...answer.fields };
     const moved: string[] = [];

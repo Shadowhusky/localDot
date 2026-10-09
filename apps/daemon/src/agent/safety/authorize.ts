@@ -212,7 +212,11 @@ const VERBS: Record<string, string> = {
   up: "release a mouse button",
   move: "move the pointer",
 };
-export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
+export function toolRisk(
+  tool: ToolName,
+  raw: unknown,
+  routineName?: (routineId: string) => string | undefined,
+): RiskFacts | undefined {
   const input = raw as Record<string, unknown>;
   switch (tool) {
     case "computer":
@@ -237,6 +241,25 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
       return {
         operation:
           Array.isArray(input.files) && input.files.length > 0 ? "files_write" : "files_read",
+      };
+    case "routine": {
+      if (input.op !== "pause") return undefined;
+      const id = String(input.routine_id ?? "");
+      return {
+        operation: "schedule",
+        schedule: { title: "Pause a routine", fields: [["Routine", routineName?.(id) ?? id]] },
+      };
+    }
+    case "follow_up_at":
+      return {
+        operation: "schedule",
+        schedule: {
+          title: "Follow up later",
+          fields: [
+            ["When", String(input.at).replace("T", " ")],
+            ["Note", String(input.note)],
+          ],
+        },
       };
     default:
       return undefined; // Metadata and direct user questions grant no native execution.

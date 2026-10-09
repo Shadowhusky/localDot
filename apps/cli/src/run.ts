@@ -60,9 +60,18 @@ export async function runCli(
         { home: localdotHome(options.env), signal: options.signal, version: command.version },
         io,
       );
-    if (command.kind === "down" || command.kind === "up")
-      return await runtime[command.kind](
+    if (command.kind === "down")
+      return await runtime.down({ home: localdotHome(options.env), signal: options.signal }, io);
+    if (command.kind === "up") {
+      const context = { home: localdotHome(options.env), signal: options.signal };
+      if (command.atLogin) return await runtime.up(context, io, { atLogin: true });
+      if (command.fromLogin) return await runtime.up(context, io, { fromLogin: true });
+      return await runtime.up(context, io);
+    }
+    if (command.kind === "start-at-login")
+      return await runtime.startAtLogin(
         { home: localdotHome(options.env), signal: options.signal },
+        command.operation,
         io,
       );
     const context = await runtime.context({
@@ -73,7 +82,10 @@ export async function runCli(
     options.signal.throwIfAborted();
     if (command.kind === "open") return await runtime.open(context, io);
     if (command.kind === "stop")
-      return await runtime.stop({ ...context, cellId: command.cellId }, io);
+      return await runtime.stop(
+        { ...context, cellId: command.cellId, ...(command.all ? { all: true } : {}) },
+        io,
+      );
     if (command.kind === "reset-computer" && command.operation !== "preview")
       return await runtime.resetComputer(
         {
