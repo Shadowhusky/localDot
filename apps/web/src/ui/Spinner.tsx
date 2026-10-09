@@ -4,7 +4,7 @@ const GRID = 16;
 const STROKE = 1.5;
 
 export interface SpinnerProps {
-  size?: 12 | 16;
+  size?: 12 | 14 | 16;
   label?: string;
   className?: string;
 }

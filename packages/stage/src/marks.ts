@@ -47,11 +47,23 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
   });
   switch (e.type) {
     case "takeover.request":
-      return mark("takeover", "Asked you to take control", "user");
+      return e.data.by === "user"
+        ? mark("takeover", "You took control", "user")
+        : mark("takeover", "Asked you to take control", "user");
+    // The recording keeps that the user typed, never what.
     case "takeover.end":
       return e.data.by === "stop"
-        ? mark("pause", "Stopped during your control", "attention")
-        : mark("handback", `Handed back to ${CURSOR_NAME}`);
+        ? mark(
+            "pause",
+            e.data.typed ? "You typed, then it stopped" : "Stopped during your control",
+            "attention",
+          )
+        : mark(
+            "handback",
+            e.data.typed
+              ? `You typed, then handed back to ${CURSOR_NAME}`
+              : `Handed back to ${CURSOR_NAME}`,
+          );
     case "approval.request":
       return mark("approval", `Asked to approve: ${clipText(e.data.title, 60)}`, "attention");
     case "approval.resolve":
@@ -95,7 +107,7 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
     case "step.verify":
       return mark(
         "verify",
-        { success: "Verified", unexpected: "Unexpected result", failed: "Check failed" }[
+        { success: "Checked", unexpected: "Unexpected result", failed: "Check failed" }[
           e.data.status
         ],
         { success: "neutral", unexpected: "attention", failed: "failure" }[

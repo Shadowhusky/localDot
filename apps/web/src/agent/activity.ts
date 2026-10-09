@@ -1,7 +1,9 @@
-import { microsToMs, msToSeconds } from "@localdot/protocol";
-import type { KeyUseState } from "@localdot/stage";
+import { microsToMs } from "@localdot/protocol";
+import { type KeyUseState, plainText } from "@localdot/stage";
+import { clock as runningClock } from "../copy/format.ts";
 import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
+import { past } from "../session/status.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
 import type { AgentChange, AgentModel, AgentStep } from "./model.ts";
@@ -87,61 +89,6 @@ export function matchesFilter(row: TimelineRow<ActivityStep>, filter: ActivityFi
   return filter === "screen" ? isScreenStep(row) : !isScreenStep(row);
 }
 
-export interface ActivityGroup {
-  id: string;
-  planItem: string | null;
-  entries: ActivityEntry[];
-}
-
-const planItemOf = (entry: ActivityEntry) =>
-  entry.row.kind === "step" ? (entry.row.agent?.planItem ?? null) : null;
-
-// Consecutive runs under one plan item. A row without one stays in the run it arrived in, and rows
-// from before the first planned step open that step's run. A return to an earlier item starts a new
-// run, so time order is kept.
-export function groupEntries(entries: readonly ActivityEntry[]): ActivityGroup[] {
-  const groups: ActivityGroup[] = [];
-  const runs = new Map<string, number>();
-  let lead: ActivityEntry[] = [];
-  for (const entry of entries) {
-    const item = planItemOf(entry);
-    const current = groups.at(-1);
-    if (item === null) {
-      if (current) current.entries.push(entry);
-      else lead.push(entry);
-      continue;
-    }
-    if (current?.planItem === item) {
-      current.entries.push(entry);
-      continue;
-    }
-    const run = runs.get(item) ?? 0;
-    runs.set(item, run + 1);
-    groups.push({ id: `${item}#${run}`, planItem: item, entries: [...lead, entry] });
-    lead = [];
-  }
-  if (lead.length) groups.push({ id: "none#0", planItem: null, entries: lead });
-  return groups;
-}
-
-// Runs come from the whole history, so a filter or a page never moves a row into the run that
-// happens to precede it on view.
-export function runsOnView(
-  runs: readonly ActivityGroup[],
-  rows: readonly ActivityEntry[],
-): ActivityGroup[] {
-  const runOf = new Map<string, ActivityGroup>();
-  for (const run of runs) for (const entry of run.entries) runOf.set(entry.key, run);
-  const shown: ActivityGroup[] = [];
-  for (const entry of rows) {
-    const run = runOf.get(entry.key) ?? { id: "none#0", planItem: null };
-    const last = shown.at(-1);
-    if (last?.id === run.id) last.entries.push(entry);
-    else shown.push({ id: run.id, planItem: run.planItem, entries: [entry] });
-  }
-  return shown;
-}
-
 export function stepStatus(step: AgentStep, ended: boolean): string {
   if (step.status)
     return { ok: "Done", failed: "Failed", blocked: "Blocked", cancelled: "Cancelled" }[
@@ -159,13 +106,8 @@ export function memoryUndoEligible(change: AgentChange, changes: readonly AgentC
   );
 }
 
-export function seconds(ms: number): string {
-  return ms < 60_000 ? `${msToSeconds(ms).toFixed(1)} s` : clock(ms);
-}
-
 export function clock(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  return runningClock(Math.round(ms / 1000));
 }
 
 export function diffStat(patches: readonly (string | undefined)[]): string {
@@ -181,15 +123,6 @@ export function diffStat(patches: readonly (string | undefined)[]): string {
 
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1) || path;
 
-const KIND_ICONS: Record<NonNullable<AgentStep["kind"]>, IconName> = {
-  gui: "mouse-pointer-click",
-  shell: "terminal",
-  file: "file-diff",
-  browser: "globe",
-  ask: "circle-alert",
-  think: "more-horizontal",
-};
-
 const KIND_TITLES: Record<NonNullable<AgentStep["kind"]>, string> = {
   gui: "Screen step",
   shell: "Command",
@@ -199,23 +132,28 @@ const KIND_TITLES: Record<NonNullable<AgentStep["kind"]>, string> = {
   think: "Thinking",
 };
 
-const VERB_ICONS: Record<string, IconName> = {
-  type: "type",
-  key: "keyboard",
-  scroll: "arrow-down",
-  wait: "more-horizontal",
+// Where a step that dot took without the screen happened, in the place of a screen step's app.
+const KIND_PLACES: Record<NonNullable<AgentStep["kind"]>, string> = {
+  gui: "Screen",
+  shell: "Terminal",
+  file: "Files",
+  browser: "Browser",
+  ask: "",
+  think: "",
 };
 
+// One flat row (design-v2 §10.20): what dot did, where and how, and how long it took. A failure's
+// meta line says what went wrong instead.
 export interface EntryView {
   testId: "step-row" | "tool-row" | "key-use" | "change-row";
-  icon: IconName;
   title: string;
-  metric: string;
+  meta: string;
+  time: string;
   state: GlyphState;
   stateLabel: string;
-  reason?: string;
-  notSent?: boolean;
-  danger?: boolean;
+  // A file's glyph in place of a status.
+  icon?: IconName;
+  failed?: boolean;
   startT: number;
   endT: number | null;
 }
@@ -242,6 +180,11 @@ const COMPUTER_STATES: Record<StepRowView["status"], [GlyphState, string]> = {
   cancelled: ["skipped", "Cancelled"],
 };
 
+const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" · ");
+// A step's time on the m:ss clock; anything that took time shows at least a second.
+const stepTime = (ms: number) => clock(ms > 0 ? Math.max(ms, 1000) : 0);
+const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
 export function entryView(
   entry: ActivityEntry,
   changes: readonly AgentChange[],
@@ -251,12 +194,12 @@ export function entryView(
   if (row.kind === "key")
     return {
       testId: "key-use",
-      icon: row.blocked ? "lock" : "key-round",
       title: row.label,
-      metric: row.count > 1 ? `×${row.count}` : "",
+      meta: row.blocked ? row.detail : row.count > 1 ? `${row.count} times` : "",
+      time: "",
       state: row.blocked ? "failed" : "done",
       stateLabel: row.blocked ? "Blocked" : "Allowed",
-      ...(row.blocked ? { reason: row.detail, danger: true } : {}),
+      ...(row.blocked ? { failed: true } : {}),
       startT: row.t,
       endT: row.t,
     };
@@ -274,11 +217,15 @@ export function entryView(
     (agent?.startedAt !== undefined && agent.endedAt !== undefined
       ? microsToMs(agent.endedAt - agent.startedAt)
       : null);
-  const title =
+  const what =
     computer?.label ||
     agent?.tool?.title ||
     (kind === "file" ? fileTitle(own) : "") ||
     (kind ? KIND_TITLES[kind] : "Step");
+  // dot's own line for the call leads its first row; what it did moves to the meta line.
+  const given = agent?.intent ?? computer?.intent;
+  const intent = (given && plainText(given)) || undefined;
+  const title = intent ?? what;
   const failed = state === "failed" || state === "skipped";
   const reason = failed
     ? (agent?.note ??
@@ -287,24 +234,50 @@ export function entryView(
     : state === "todo"
       ? "The task ended before this step finished."
       : undefined;
+  const where = computer
+    ? joined(computer.app, intent ? what : computer.gesture)
+    : joined(
+        kind && KIND_PLACES[kind],
+        intent ? what : undefined,
+        diffStat(own.map((change) => change.patch)),
+      );
   return {
     testId: computer ? "step-row" : "tool-row",
-    icon:
-      (computer?.verb && VERB_ICONS[computer.verb]) ||
-      (kind ? KIND_ICONS[kind] : "more-horizontal"),
     title,
-    metric: own.length
-      ? diffStat(own.map((change) => change.patch))
-      : durationMs === null
-        ? ""
-        : seconds(durationMs),
+    meta: reason ? asSentence(reason) : where,
+    time: durationMs === null ? "" : stepTime(durationMs),
     state,
     stateLabel,
-    ...(reason ? { reason } : {}),
-    ...(failed && computer?.delivery === "proposed" ? { notSent: true } : {}),
+    ...(reason ? { failed: true } : {}),
     startT: row.startT,
     endT: durationMs === null ? null : row.startT + durationMs,
   };
+}
+
+const lowerFirst = (text: string) =>
+  /^[A-Z][a-z]/.test(text) ? text[0]?.toLowerCase() + text.slice(1) : text;
+
+// What dot did after a step failed: the same step again, possibly after one or two steps that
+// made room for it, or else the step that came next.
+function nextMove(views: readonly EntryView[], index: number): string {
+  const failed = views[index];
+  if (failed?.state !== "failed" || failed.testId === "key-use") return "";
+  const later = views.slice(index + 1).filter((view) => view.testId !== "key-use");
+  const [next] = later;
+  if (!next) return "";
+  const retry = later.slice(0, 3).findIndex((view) => past(view.title) === past(failed.title));
+  if (retry === 0) return "Tried again.";
+  if (retry > 0) return `${next.title}, then tried again.`;
+  return `Then ${lowerFirst(next.title)}.`;
+}
+
+// A failure's meta line goes on to say what dot did about it.
+export function withNextMoves(views: readonly EntryView[]): EntryView[] {
+  return views.map((view, index) => {
+    const next = nextMove(views, index);
+    if (!next) return view;
+    return { ...view, meta: [view.meta && asSentence(view.meta), next].filter(Boolean).join(" ") };
+  });
 }
 
 export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]): boolean {
@@ -319,29 +292,17 @@ export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]
   );
 }
 
-export interface GroupMeta {
-  steps: number;
-  failed: number;
-  durationMs: number;
-}
-
-export function groupMeta(views: readonly EntryView[]): GroupMeta {
-  const starts = views.map((view) => view.startT).filter(Number.isFinite);
-  const ends = views.map((view) => view.endT ?? view.startT).filter(Number.isFinite);
-  const steps = views.filter((view) => view.testId !== "key-use");
-  return {
-    steps: steps.length,
-    failed: steps.filter((view) => view.state === "failed").length,
-    durationMs: starts.length ? Math.max(...ends) - Math.min(...starts) : 0,
-  };
-}
-
 export function changeView(change: AgentChange): EntryView {
+  const notes = change.type === "memory" && change.path.startsWith("notes/");
   const verb =
     change.type === "memory"
       ? change.undoes
-        ? "Undid a memory change in"
-        : "Updated memory in"
+        ? notes
+          ? "Daily note undone"
+          : "Memory change undone"
+        : notes
+          ? "Added to today's notes"
+          : "Memory updated"
       : change.op === "create"
         ? "Created"
         : change.op === "delete"
@@ -349,9 +310,10 @@ export function changeView(change: AgentChange): EntryView {
           : "Changed";
   return {
     testId: "change-row",
-    icon: change.type === "memory" ? "file" : "file-diff",
-    title: `${verb} ${baseName(change.path)}`,
-    metric: diffStat([change.patch]),
+    icon: "file",
+    title: baseName(change.path),
+    meta: joined(verb, diffStat([change.patch])),
+    time: "",
     state: "done",
     stateLabel: "Done",
     startT: Number.NaN,

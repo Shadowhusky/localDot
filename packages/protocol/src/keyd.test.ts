@@ -3,9 +3,11 @@ import {
   KeydEvent,
   KeydOpened,
   KeydStatus,
+  RESERVED_SECRET_IDS,
   Sealed,
   SealedSecret,
   SecretBinding,
+  SecretId,
   SURROGATE_PATTERN,
   surrogateEnvClash,
   surrogateEnvName,
@@ -229,5 +231,12 @@ describe("KeydStatus", () => {
     ).toBe("unknown");
     expect(KeydStatus.parse(status).hairpin).toBeUndefined();
     expect(KeydStatus.parse({ ...status, hairpin: null }).hairpin).toBeNull();
+  });
+});
+
+describe("push key name", () => {
+  it("reserves keyd's push key name", () => {
+    expect(RESERVED_SECRET_IDS).toContain("webpush-vapid");
+    expect(SecretId.safeParse("webpush-vapid").success).toBe(false);
   });
 });

@@ -19,9 +19,9 @@ const message = (
 const step = (key: string, startT: number): WorkStep => ({
   key,
   testId: "step-row",
-  icon: "mouse-pointer-click",
   title: key,
-  metric: "",
+  meta: "",
+  time: "",
   state: "done",
   stateLabel: "Done",
   startT,
@@ -66,6 +66,51 @@ describe("the conversation's order", () => {
     };
     expect(threadItems([], [question]).map((item) => item.kind)).toEqual(["question"]);
   });
+
+  it("marks where the computer changed hands, and only a hand-back the user made", () => {
+    const took = ulidAt(1_000);
+    const items = threadItems(
+      [message("Download it", 1), message("It needs your password.", 2, "assistant")],
+      [],
+      [],
+      [
+        {
+          requestId: took,
+          reason: "other",
+          note: "",
+          by: "user",
+          seq: 3,
+          time: 1_000,
+          end: { requestId: took, by: "user" },
+          endSeq: 5,
+          endTime: 2_000,
+        },
+        {
+          requestId: ulidAt(3_000),
+          reason: "login",
+          note: "Sign in",
+          seq: 6,
+          time: 3_000,
+          taken: { seq: 7, time: 3_500 },
+          end: { requestId: ulidAt(3_000), by: "stop" },
+          endSeq: 8,
+        },
+        { requestId: ulidAt(4_000), reason: "login", note: "Sign in again", seq: 9, time: 4_000 },
+      ],
+    );
+    expect(
+      items.map((item) => (item.kind === "control" ? `${item.took}@${item.at}` : item.key)),
+    ).toEqual([
+      "message-Download it",
+      "message-It needs your password.",
+      "true@1000",
+      "false@2000",
+      "true@3500",
+    ]);
+    expect(threadRows(items).every((row) => row.item.kind !== "control" || !row.separator)).toBe(
+      true,
+    );
+  });
 });
 
 describe("the work line of each turn", () => {
@@ -86,6 +131,47 @@ describe("the work line of each turn", () => {
     const work = thread.filter((item) => item.kind === "work");
     expect(work.map((item) => item.steps.map((s) => s.key))).toEqual([["a", "b"], ["c"]]);
     expect(work.map((item) => item.startMs)).toEqual([1000, 10_000]);
+  });
+
+  it("says what each turn's model calls cost on its line, an estimate if any call was", () => {
+    const items = threadItems([
+      message("task", 1),
+      message("followup", 10, "user", { kind: "followup" }),
+    ]);
+    const call = (atMs: number, usd: number, estimated = false) => ({
+      atMs,
+      route: "openrouter",
+      model: "glm-5.3",
+      usd,
+      estimated,
+    });
+    const thread = withWork(items, [step("a", 2000), step("c", 11000)], false, [
+      call(2500, 0.1),
+      call(3000, 0.05, true),
+      call(12_000, 0.02),
+      call(13_000, 0),
+    ]);
+    const [first, second] = thread.flatMap((item) => (item.kind === "work" ? [item.spend] : []));
+    expect(first?.usd).toBeCloseTo(0.15);
+    expect(first?.estimated).toBe(true);
+    expect(second).toEqual({ usd: 0.02, estimated: false });
+    const free = withWork(items, [step("a", 2000)], false, [call(2500, 0)]);
+    expect(free.find((item) => item.kind === "work")?.spend).toBeUndefined();
+  });
+
+  it("keeps the line with dot's part of the turn, before the computer changes hands", () => {
+    const taken = ulidAt(5_000);
+    const items = threadItems(
+      [message("Download it", 1)],
+      [],
+      [],
+      [{ requestId: taken, reason: "other", note: "", by: "user", seq: 2, time: 5_000 }],
+    );
+    expect(withWork(items, [step("Open", 1_500)], true).map((item) => item.kind)).toEqual([
+      "message",
+      "work",
+      "control",
+    ]);
   });
 
   it("holds a live line on the latest turn before any step, and none on a turn that only talked", () => {
@@ -118,5 +204,40 @@ describe("rows and quiet times", () => {
     const now = Date.UTC(2026, 9, 8, 12);
     expect(timeLabel(now - 60_000, now)).not.toMatch(/,/);
     expect(timeLabel(now - 30 * 86_400_000, now)).toMatch(/,/);
+  });
+});
+
+describe("routines in the thread", () => {
+  const proposal = {
+    id: ulidAt(5000),
+    seq: 3,
+    routineId: ulidAt(5000, "1111111111111111"),
+    revision: 1,
+    name: "Inbox sweep",
+    summary: "Every day at 07:45 · London time",
+    instruction: "Check my inbox",
+    profile: "ask_first",
+    notify: "changes",
+    budgetUSD: null,
+    approvalWindowMinutes: 60,
+    missedPolicy: "run_once",
+  } as const;
+  it("places a proposal where dot made it and the routine's line first", () => {
+    const origin = {
+      kind: "routine",
+      routineId: proposal.routineId,
+      runId: ulidAt(1000),
+      name: "Morning bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    } as const;
+    const items = threadItems(
+      [message("a", 1), message("b", 5, "assistant")],
+      [],
+      [],
+      [],
+      [proposal],
+      origin,
+    );
+    expect(items.map((item) => item.kind)).toEqual(["origin", "message", "routine", "message"]);
   });
 });

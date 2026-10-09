@@ -127,6 +127,35 @@ async function started() {
 afterEach(() => vi.useRealTimers());
 
 describe("private browser target ownership", () => {
+  it("reads cookie scopes and partitions, never values", async () => {
+    const peer = await started();
+    const partitionKey = { topLevelSite: "https://news.test", hasCrossSiteAncestor: false };
+    peer.intercept((command) => {
+      if (command.method !== "Storage.getCookies") return false;
+      queueMicrotask(() =>
+        peer.reply(command, {
+          cookies: [
+            { name: "SID", value: "secret-canary", domain: ".google.com", path: "/" },
+            {
+              name: "chat",
+              value: "secret-canary",
+              domain: "chat.google.com",
+              path: "/",
+              partitionKey,
+            },
+          ],
+        }),
+      );
+      return true;
+    });
+    const cookies = await peer.targets.cookies();
+    expect(cookies).toEqual([
+      { name: "SID", domain: ".google.com", path: "/" },
+      { name: "chat", domain: "chat.google.com", path: "/", partitionKey },
+    ]);
+    expect(JSON.stringify(cookies)).not.toContain("secret-canary");
+  });
+
   it("reload waits beyond acknowledgement and subframe events for the root load", async () => {
     const peer = await started();
     let completed = false;

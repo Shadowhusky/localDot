@@ -213,15 +213,19 @@ describe("consequential steps still stop under Balanced", () => {
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
   });
 
-  it("saving to its memory asks", async () => {
-    const h = harness(DEFAULT_AUTONOMY);
-    await run(h.ctx, {
+  it("saving to its memory runs, and asks under Careful", async () => {
+    const remember = {
       id: "m",
       kind: "tool",
       tool: "remember",
       input: { file: "MEMORY.md", op: "append", text: "Prefers the soft brush." },
-    });
-    expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+    } as const;
+    const h = harness(DEFAULT_AUTONOMY);
+    await run(h.ctx, remember);
+    expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 0]);
+    const careful = harness(CAREFUL_AUTONOMY);
+    await run(careful.ctx, remember);
+    expect([careful.asks.mock.calls.length, careful.handoffs.mock.calls.length]).toEqual([1, 0]);
   });
 
   it("an upload asks", async () => {

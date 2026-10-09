@@ -1,5 +1,17 @@
 export { CodexInstallFailure, CodexInstallState } from "@localdot/protocol";
-export { CHATGPT_SWITCHED_OFF, CODEX_MANIFEST_SHA256, codexAccepted } from "./acceptance.ts";
+export {
+  type AcceptanceHost,
+  accountStamped,
+  CHATGPT_SWITCHED_OFF,
+  CODEX_MANIFEST_SHA256,
+  codexAccepted,
+  codexReleased,
+  LocalAcceptance,
+  nativeStamped,
+  stampAccount,
+  stampNative,
+} from "./acceptance.ts";
+export { readLocalAcceptance, writeLocalAcceptance } from "./acceptance-store.ts";
 export {
   type ApprovalBrainGeneration,
   type ApprovalContext,
@@ -45,6 +57,7 @@ export {
   type LaunchInput,
   launchCodex,
 } from "./launch.ts";
+export { checkHost, checkNativeSandbox, NativeCheckError } from "./native-check.ts";
 export { type CodexProcess, CodexProcessError, type CodexProcessFailure } from "./process.ts";
 export {
   CODEX_HOME_DENY_WRITE,

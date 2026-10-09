@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApi } from "../lib/api.ts";
-import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { frameCrop } from "./ActivityDetails.tsx";
 import { DIFF_LIMITS, DiffViewer, diffPreview, numberLines } from "./DiffViewer.tsx";
-import { type AgentChange, type AgentStep, emptyAgentModel } from "./model.ts";
+import type { AgentChange, AgentStep } from "./model.ts";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
 
@@ -111,27 +109,5 @@ describe("non-executing output inspection", () => {
       width: "12.500%",
       height: "10.000%",
     });
-  });
-  it("keeps the model's notes folded until asked, and shows them as plain text", () => {
-    const model = {
-      ...emptyAgentModel(),
-      steps: new Map([["step", step()]]),
-      activity: "<b>Notes</b>",
-    };
-    render(
-      <ActivityRail
-        rows={[]}
-        sessionId="one"
-        scale={1}
-        api={createApi("notes", { origin: "http://localhost" })}
-        agent={model}
-      />,
-    );
-    const notes = screen.getByRole("button", { name: "Thinking notes" });
-    expect(notes.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("<b>Notes</b>")).toBeNull();
-    fireEvent.click(notes);
-    expect(screen.getByText("<b>Notes</b>")).toBeTruthy();
-    expect(document.querySelector(".activity-notes b")).toBeNull();
   });
 });

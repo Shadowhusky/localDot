@@ -1,0 +1,52 @@
+/* The top bar over the stage column (design-v2 §8.1): wordmark and title, then Watch | Replay,
+   Settings and Keys. */
+.bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: calc(var(--spacing) * 4);
+  height: var(--bar-h);
+  padding: 0 var(--gutter);
+}
+
+.bar-l {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2.5);
+  min-width: 0;
+}
+
+.bar-wordmark {
+  flex: none;
+  color: var(--color-fg-1);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.bar-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background-color: var(--color-separator);
+}
+
+.bar-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-2);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bar-r {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing);
+}
+
+.bar-modes {
+  margin-right: calc(var(--spacing) * 2);
+}

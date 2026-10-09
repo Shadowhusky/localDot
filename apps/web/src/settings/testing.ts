@@ -1,5 +1,8 @@
+import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "@localdot/protocol";
 import { capabilityOf, normalizeCatalog, PROVIDERS } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
+import { createApi } from "../lib/api.ts";
+import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import type { ProviderIndex } from "./settings-api.ts";
 
 // Test-only metadata. No production module imports this file.
@@ -8,7 +11,6 @@ export function providerFixture(): ProviderIndex {
   return {
     catalog: { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped },
     keyLayer: "online",
-    defaultTaskBudgetUSD: 2,
     subscriptions: [
       { id: "chatgpt", name: "ChatGPT plan", available: false, reason: "fixture not installed" },
     ],
@@ -41,4 +43,55 @@ export function providerFixture(): ProviderIndex {
       })),
     })),
   };
+}
+
+export function knownFixture(over: Partial<WhatDotKnows> = {}): WhatDotKnows {
+  const unused = async (): Promise<never> => {
+    throw new Error("fixture write");
+  };
+  return {
+    phase: "ready",
+    dir: "~/.localdot/memory",
+    files: { "USER.md": [], "MEMORY.md": [] },
+    notes: [],
+    people: [],
+    recent: [],
+    reload: () => {},
+    addFact: unused,
+    editFact: unused,
+    deleteFact: unused,
+    undo: unused,
+    addPerson: unused,
+    editPerson: unused,
+    deletePerson: unused,
+    ...over,
+  };
+}
+
+// The daemon's notification routes, in memory: settings, no phones, a test that reaches this Mac.
+export function notifyDaemonFixture(failSave = false) {
+  let settings: NotifySettings = DEFAULT_NOTIFY_SETTINGS;
+  const calls: string[] = [];
+  const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    const method = init?.method ?? "GET";
+    calls.push(`${method} ${path}`);
+    if (path === "/api/notify/settings" && method === "PUT") {
+      if (failSave)
+        return new Response("Quiet hours need different start and end times.", { status: 400 });
+      settings = JSON.parse(String(init?.body)) as NotifySettings;
+      return Response.json(settings);
+    }
+    if (path === "/api/notify/settings") return Response.json(settings);
+    if (path === "/api/notify/subscriptions") return Response.json({ devices: [] });
+    if (path === "/api/notify/test") return Response.json({ mac: "shown", phones: [] });
+    if (path === "/api/install-code")
+      return Response.json({ code: "C".repeat(43), expiresAt: Date.now() + 60_000 });
+    return new Response("not found", { status: 404 });
+  };
+  const api = createApi("t".repeat(43), {
+    origin: "http://127.0.0.1:4750",
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+  return { api, calls, current: () => settings };
 }

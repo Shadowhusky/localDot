@@ -36,3 +36,13 @@ it("says why copying is unavailable instead of failing quietly", () => {
   render(<SignIn state="first" />);
   expect(screen.getByRole("button", { name: "Copy" }).getAttribute("aria-disabled")).toBe("true");
 });
+
+it("signs the Home Screen app in from a pasted link instead of Terminal", () => {
+  const view = render(<SignIn state="first" homeScreen />);
+  expect(screen.queryByText("localdot open")).toBeNull();
+  expect(screen.getByLabelText("Sign-in link")).toBeTruthy();
+  view.rerender(<SignIn state="expired" homeScreen />);
+  expect(
+    screen.getByText("That link has expired or was already used. Copy a fresh one in Safari."),
+  ).toBeTruthy();
+});

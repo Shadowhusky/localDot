@@ -287,14 +287,14 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const speed = page.getByRole("combobox", { name: "Playback speed" });
       await speed.scrollIntoViewIfNeeded();
       expect((await speed.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-      await page.getByRole("button", { name: "Export MP4" }).tap();
-      const exporter = page.getByRole("dialog", { name: "Export MP4" });
-      for (const name of ["Range", "Speed", "Size"]) {
+      await page.getByRole("button", { name: "Export video" }).tap();
+      const exporter = page.getByRole("dialog", { name: "Export video" });
+      for (const name of ["Range", "Speed"]) {
         const control = exporter.getByRole("radiogroup", { name });
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }
-      for (const name of ["Skip idle", "Captions"]) {
+      for (const name of ["Skip idle", "Show the current step"]) {
         const row = exporter.locator(".ui-choice").filter({ hasText: name });
         expect((await row.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }

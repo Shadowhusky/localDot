@@ -18,6 +18,14 @@ const cases: [string, Record<string, unknown>, string, string, string][] = [
   ["takeover.end", { by: "user" }, "handback", "Handed back to dot", "neutral"],
   ["takeover.end", { by: "stop" }, "pause", "Stopped during your control", "attention"],
   [
+    "takeover.end",
+    { by: "user", typed: true },
+    "handback",
+    "You typed, then handed back to dot",
+    "neutral",
+  ],
+  ["takeover.end", { by: "stop", typed: true }, "pause", "You typed, then it stopped", "attention"],
+  [
     "approval.request",
     { title: "Send a message" },
     "approval",
@@ -31,6 +39,13 @@ const cases: [string, Record<string, unknown>, string, string, string][] = [
     "approval.resolve",
     { by: "user", decision: "take_control" },
     "decision",
+    "You took control",
+    "user",
+  ],
+  [
+    "takeover.request",
+    { requestId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", reason: "other", note: "", by: "user" },
+    "takeover",
     "You took control",
     "user",
   ],
@@ -77,7 +92,7 @@ const cases: [string, Record<string, unknown>, string, string, string][] = [
     `${label} → api.example.com`,
     tone,
   ]),
-  ["step.verify", { status: "success" }, "verify", "Verified", "neutral"],
+  ["step.verify", { status: "success" }, "verify", "Checked", "neutral"],
   ["step.verify", { status: "unexpected" }, "verify", "Unexpected result", "attention"],
   ["step.verify", { status: "failed" }, "verify", "Check failed", "failure"],
 ];

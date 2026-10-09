@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DISMISS_AT, project, releaseTo, rubberband, velocityOf } from "./sheet-drag.ts";
+import {
+  DISMISS_AT,
+  detentStops,
+  project,
+  restingStop,
+  rubberband,
+  velocityOf,
+} from "./sheet-drag.ts";
 
 describe("sheet drag", () => {
   it("projects a release the way a scroll view decelerates", () => {
@@ -21,11 +28,31 @@ describe("sheet drag", () => {
   it("closes on a release projected past 30% of the height and springs back otherwise", () => {
     const height = 600;
     expect(DISMISS_AT).toBe(0.3);
-    expect(releaseTo(100, 0, height)).toBe("rest");
-    expect(releaseTo(181, 0, height)).toBe("dismiss");
+    expect(restingStop(100, 0, [0], height)).toBe(0);
+    expect(restingStop(181, 0, [0], height)).toBe("dismiss");
     // A flick from near the top still closes; a slow push back up does not.
-    expect(releaseTo(40, 900, height)).toBe("dismiss");
-    expect(releaseTo(300, -800, height)).toBe("rest");
+    expect(restingStop(40, 900, [0], height)).toBe("dismiss");
+    expect(restingStop(300, -800, [0], height)).toBe(0);
+  });
+
+  it("rests medium 198 px under large, and a lone detent at the top", () => {
+    expect(detentStops(["medium", "large"])).toEqual([198, 0]);
+    expect(detentStops(["large"])).toEqual([0]);
+    expect(detentStops(["fit"])).toEqual([0]);
+  });
+
+  it("settles a release into the detent nearest where it would land", () => {
+    const stops = detentStops(["medium", "large"]);
+    const height = 804;
+    // Let go still, nearer large: back to large; nearer medium: medium.
+    expect(restingStop(60, 0, stops, height)).toBe(1);
+    expect(restingStop(120, 0, stops, height)).toBe(0);
+    // A flick up from medium throws it to large; a gentle one down from large lands in medium.
+    expect(restingStop(198, -900, stops, height)).toBe(1);
+    expect(restingStop(10, 400, stops, height)).toBe(0);
+    // Past medium by 30 % of what shows there, it closes.
+    expect(restingStop(198 + 180, 0, stops, height)).toBe(0);
+    expect(restingStop(198 + 195, 0, stops, height)).toBe("dismiss");
   });
 
   it("reads velocity over the last 100 ms of movement", () => {

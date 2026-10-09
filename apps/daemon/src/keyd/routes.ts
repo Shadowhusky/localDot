@@ -1,4 +1,9 @@
-import { SealedSecret, SecretId, surrogateEnvClash, surrogateEnvName } from "@localdot/protocol";
+import {
+  SECRET_ID_PATTERN,
+  SealedSecret,
+  surrogateEnvClash,
+  surrogateEnvName,
+} from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type KeydClient, KeydError, KeydUnavailableError } from "./client.ts";
@@ -82,12 +87,14 @@ export function keyRoutes(app: Hono, { keyd, monitor, afterChange }: KeyRoutesDe
   });
 
   app.delete("/api/keys/:id", async (c) => {
-    const id = SecretId.safeParse(c.req.param("id"));
-    if (!id.success) return refuse(c, 400, "bad-request", "not a key name");
+    // The name pattern only: a key whose name was reserved after it was added (webpush-vapid)
+    // must still be removable.
+    const id = c.req.param("id");
+    if (!SECRET_ID_PATTERN.test(id)) return refuse(c, 400, "bad-request", "not a key name");
     return withKeyd(c, () =>
       mutate(async () => {
-        if (!(await keyd.deleteSecret(id.data))) return refuse(c, 404, "not-found", "no such key");
-        await notifyChange(id.data);
+        if (!(await keyd.deleteSecret(id))) return refuse(c, 404, "not-found", "no such key");
+        await notifyChange(id);
         return c.body(null, 204);
       }),
     );
@@ -99,16 +106,22 @@ async function withKeyd(c: Context, fn: () => Promise<Response>): Promise<Respon
     return await fn();
   } catch (err) {
     if (err instanceof KeydUnavailableError) {
-      return refuse(c, 503, "key-layer-offline", "the key layer is offline: start keyd");
+      return refuse(
+        c,
+        503,
+        "key-layer-offline",
+        "key protection is off: turn it back on, then try again",
+      );
     }
     if (err instanceof KeydError) {
       // bad-seal: keyd restarted with a new seal key, or the binding changed after sealing; the UI
       // fetches /api/keyd again and seals once more.
       if (err.code === "bad-seal") return refuse(c, 409, "bad-seal", "seal the key again");
-      if (err.code === "vault") return refuse(c, 502, "vault", "keyd could not store the key");
+      if (err.code === "vault")
+        return refuse(c, 502, "vault", "key protection could not store the key");
       if (err.status === 404) return refuse(c, 404, "not-found", "no such key");
       if (err.status >= 400 && err.status < 500) return refuse(c, 400, err.code, err.detail);
-      return refuse(c, 502, err.code, "keyd failed");
+      return refuse(c, 502, err.code, "key protection failed");
     }
     throw err;
   }

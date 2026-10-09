@@ -15,7 +15,13 @@ import { OracleCapture } from "./oracle.ts";
 import { PixiPresenter } from "./pixi-presenter.ts";
 import { meanLuma, type ProbeRect, wallNow } from "./probe.ts";
 import { type Presenter, type PumpStats, pumpFrames } from "./pump.ts";
-import type { StageClock, StageViewPatch, WorkerIn, WorkerOut } from "./worker-protocol.ts";
+import type {
+  FieldMark,
+  StageClock,
+  StageViewPatch,
+  WorkerIn,
+  WorkerOut,
+} from "./worker-protocol.ts";
 
 const scope = self as unknown as {
   postMessage(message: WorkerOut, transfer?: Transferable[]): void;
@@ -29,11 +35,14 @@ let sourceGeneration = 0;
 let pushed:
   | { sourceId?: number; controller: ReadableStreamDefaultController<VideoFrame> }
   | undefined;
+// The track this worker reads (Safari), ended with its pump.
+let track: MediaStreamTrack | undefined;
 let pendingStats: { generation: number; sourceId?: number; stats: PumpStats } | undefined;
 let probe: { rect: ProbeRect; threshold: number; last: boolean | null } | null = null;
 let model: SessionModel = emptyModel();
 let view: View = { reducedMotion: false };
 let selection: StageViewPatch["selection"] = null;
+let fields: readonly FieldMark[] = [];
 let zoom = 1;
 let freeze = false;
 let frozenT: number | null = null;
@@ -42,6 +51,15 @@ let viewport = { w: 1, h: 1 };
 let lastScene: Scene | null = null;
 const oracle = new OracleCapture();
 let animationFrame: number | null = null;
+
+// The rings on the fields dot will fill, on the screen shown.
+function showFields(): void {
+  const shown = selection?.screen ?? "desktop";
+  presenter?.overlays.setFields(
+    fields.filter((field) => field.screen === shown),
+    view.reducedMotion,
+  );
+}
 
 function scheduleTick(): void {
   if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -139,6 +157,7 @@ let queue = Promise.resolve();
 scope.onmessage = (e) => {
   queue = queue.then(() => handle(e.data));
 };
+scope.postMessage({ type: "caps", tracks: typeof MediaStreamTrackProcessor === "function" });
 async function handle(m: WorkerIn): Promise<void> {
   try {
     switch (m.type) {
@@ -153,6 +172,7 @@ async function handle(m: WorkerIn): Promise<void> {
           warn: (message) => scope.postMessage({ type: "warn", message }),
         });
         oracle.dpr = m.dpr;
+        if (fields.length) showFields();
         scheduleTick();
         return;
       }
@@ -190,6 +210,8 @@ async function handle(m: WorkerIn): Promise<void> {
         if (m.view.freeze !== undefined) freeze = m.view.freeze;
         if (m.view.reducedMotion !== undefined)
           view = { ...view, reducedMotion: m.view.reducedMotion };
+        if (m.view.dim !== undefined) presenter?.setDim(m.view.dim, view.reducedMotion);
+        if (m.view.fields !== undefined) fields = m.view.fields;
         if (m.view.selection !== undefined) {
           selection = m.view.selection;
           view = {
@@ -199,6 +221,7 @@ async function handle(m: WorkerIn): Promise<void> {
           };
           lastScene = null;
         }
+        if (m.view.fields !== undefined || m.view.selection !== undefined) showFields();
         replay?.invalidate();
         scheduleTick();
         return;
@@ -211,6 +234,7 @@ async function handle(m: WorkerIn): Promise<void> {
         pendingStats = undefined;
         await pump?.stop();
         pump = undefined;
+        endTrack();
         oracle.dispose();
         replay?.close();
         if (!presenter) throw new Error("replay before init");
@@ -276,17 +300,22 @@ async function handle(m: WorkerIn): Promise<void> {
         pendingStats = undefined;
         await pump?.stop();
         pump = undefined;
+        endTrack();
         oracle.dispose();
         if (m.type === "frames") {
-          const readable = m.readable ?? (m.pushed ? pushedFrames(m.sourceId) : undefined);
+          const readable =
+            m.readable ??
+            (m.track ? readTrack(m.track) : m.pushed ? pushedFrames(m.sourceId) : undefined);
           if (replay || !readable) {
             m.first?.close();
             void readable?.cancel().catch(() => {});
+            endTrack();
             return;
           }
           if (!presenter) {
             m.first?.close();
             await readable.cancel();
+            endTrack();
             throw new Error("frames before init");
           }
           pump = pumpFrames(
@@ -325,6 +354,17 @@ function pushedFrames(sourceId: number | undefined): ReadableStream<VideoFrame> 
     },
     new CountQueuingStrategy({ highWaterMark: 1 }),
   );
+}
+
+function readTrack(next: MediaStreamTrack): ReadableStream<VideoFrame> {
+  track = next;
+  return new MediaStreamTrackProcessor({ track: next as MediaStreamTrack & MediaStreamVideoTrack })
+    .readable;
+}
+
+function endTrack(): void {
+  track?.stop();
+  track = undefined;
 }
 
 function endPushed(): void {

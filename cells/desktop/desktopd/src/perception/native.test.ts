@@ -131,7 +131,7 @@ describe("AtspiAccessibility", () => {
         : { element: null },
     );
     const native = new AtspiAccessibility(h.start, () => now);
-    const content = native.content(dialog, 1500);
+    const content = native.content(dialog, 1500, 2);
     const at = native.at(dialog, { x: 1, y: 1 }, q, 300);
     await new Promise((resolve) => setTimeout(resolve, 5));
     now = 1_100;
@@ -141,6 +141,15 @@ describe("AtspiAccessibility", () => {
     const sent = h.calls[0]?.[1];
     expect(sent?.args.deadline).toBe(1_300);
     expect(sent?.timeoutMs).toBe(400);
+  });
+
+  it("asks for Chromium's content area in its own frame units, at any scale", async () => {
+    const h = helpers(() => ({ frame: { x: 0, y: 222, w: 2560, h: 1378 } }));
+    const native = new AtspiAccessibility(h.start, () => 0);
+    expect(await native.content(dialog, 1500, 2)).toEqual({ x: 0, y: 222, w: 2560, h: 1378 });
+    // Without its scale factor the helper matches device pixels against frames in DIPs, and
+    // finds no window at scale 2.
+    expect(h.calls[0]?.[0]).toMatchObject({ cmd: "content", args: { kit: "chromium", c: 2 } });
   });
 
   it("answers unknown while its helper is still starting, and uses it once it has", async () => {

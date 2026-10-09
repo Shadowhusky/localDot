@@ -10,6 +10,9 @@ import {
   KeydEvent,
   KeydMinted,
   KeydOpened,
+  KeydPushKey,
+  KeydPushRequest,
+  KeydPushSent,
   KeydRecord,
   KeydRevoked,
   type KeydRouteModel,
@@ -68,7 +71,7 @@ export function privateSocketProblem(socketPath: string): string | undefined {
   }
 }
 
-export type CellRole = "brain" | "desktop" | "browser";
+export type CellRole = "brain" | "desktop" | "browser" | "judge";
 
 export interface OpenCellRequest {
   cellId: string;
@@ -242,19 +245,26 @@ export class KeydClient {
     return result.models ?? [];
   }
 
+  // keyd's Web Push key (the browsers' applicationServerKey). keyd makes it on first use.
+  pushKey(): Promise<KeydPushKey> {
+    return this.#json("GET", "/v1/push/key", undefined, KeydPushKey);
+  }
+
+  // keyd signs the VAPID token itself and sends the ciphertext to the push service named by the
+  // endpoint; the daemon never holds the signing key or the token.
+  async pushSend(request: KeydPushRequest): Promise<KeydPushSent> {
+    return this.#json("POST", "/v1/push/send", KeydPushRequest.parse(request), KeydPushSent);
+  }
+
   budget(): Promise<KeydBudget> {
     return this.#json("GET", "/v1/budget", undefined, KeydBudget);
   }
 
+  // A limit of 0 is none.
   setBudget(perTaskUSD: number, perDayUSD: number): Promise<KeydBudget> {
-    if (
-      !Number.isFinite(perTaskUSD) ||
-      !Number.isFinite(perDayUSD) ||
-      perTaskUSD <= 0 ||
-      perTaskUSD > perDayUSD ||
-      perDayUSD > 10_000
-    )
-      throw new RangeError("budget limits must be positive, ordered and at most10000");
+    const limit = (usd: number) => Number.isFinite(usd) && usd >= 0 && usd <= 10_000;
+    if (!limit(perTaskUSD) || !limit(perDayUSD) || (perDayUSD > 0 && perTaskUSD > perDayUSD))
+      throw new RangeError("budget limits must be 0 (none) to 10000, per task within per day");
     return this.#json("PUT", "/v1/budget", { perTaskUSD, perDayUSD }, KeydBudget);
   }
 

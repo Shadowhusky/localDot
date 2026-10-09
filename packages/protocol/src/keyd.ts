@@ -6,7 +6,8 @@ import { ServiceProcessIdentity } from "./install-services.ts";
 // daemon sends is strict, because keyd refuses unknown fields.
 
 export const SECRET_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-export const RESERVED_SECRET_IDS: readonly string[] = ["lmstudio", "ollama"];
+// "webpush-vapid" is keyd's own phone-notification key (keyd/internal/vault PushKeyID).
+export const RESERVED_SECRET_IDS: readonly string[] = ["lmstudio", "ollama", "webpush-vapid"];
 export const SURROGATE_PATTERN = /^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}$/;
 export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 export const LLM_PROVIDERS = [
@@ -114,6 +115,27 @@ export const KeydStatus = z.object({
 });
 export type KeydStatus = z.infer<typeof KeydStatus>;
 
+// keyd's Web Push egress (POST /v1/push/send): the daemon hands over ciphertext, keyd signs and
+// sends it to the browser vendor's push service and answers with that service's status.
+export const KeydPushKey = z.object({ publicKey: base64url(87, 87) });
+export type KeydPushKey = z.infer<typeof KeydPushKey>;
+export const KeydPushRequest = z.strictObject({
+  endpoint: z.string().max(1024),
+  ttl: z.number().int().min(0).max(2_419_200),
+  urgency: z.enum(["very-low", "low", "normal", "high"]),
+  topic: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,32}$/)
+    .optional(),
+  body: base64url(1, 5462),
+});
+export type KeydPushRequest = z.infer<typeof KeydPushRequest>;
+export const KeydPushSent = z.object({
+  status: z.number().int().min(100).max(599),
+  gone: z.boolean(),
+});
+export type KeydPushSent = z.infer<typeof KeydPushSent>;
+
 export const KeydOpened = z.object({
   cellId: z.string(),
   port: z.number().int(),
@@ -151,6 +173,8 @@ export const KeydRouteModel = z.object({
   outputUSDPerMTok: z.number().nonnegative().max(10_000),
   cacheReadUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
   cacheWriteUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
+  // Thinking tokens, where the provider prices them apart from the answer; else the output price.
+  reasoningUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
   maxOutputTokens: z.number().int().min(1).max(100_000_000).optional(),
 });
 export type KeydRouteModel = z.infer<typeof KeydRouteModel>;
@@ -193,6 +217,19 @@ export const KeydAsk = z.object({
 export type KeydAsk = z.infer<typeof KeydAsk>;
 export const KeydAsks = z.object({ asks: z.array(KeydAsk).nullish() });
 
+// One settled model call: billed when the provider's answer named its cost. A limit of 0 is none.
+export const SpendData = z.object({
+  taskId: z.string(),
+  route: z.string(),
+  model: z.string(),
+  costUSD: z.number().nonnegative(),
+  billed: z.boolean(),
+  taskSpentUSD: z.number().nonnegative(),
+  taskLimitUSD: z.number().nonnegative(),
+  daySpentUSD: z.number().nonnegative(),
+  dayLimitUSD: z.number().nonnegative(),
+});
+
 export const KeydEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("egress.ask"), cell: z.string(), time: z.string(), data: KeydAsk }),
   z.object({ type: z.literal("key.use"), cell: z.string(), time: z.string(), data: KeyUseData }),
@@ -202,6 +239,7 @@ export const KeydEvent = z.discriminatedUnion("type", [
     time: z.string(),
     data: BudgetData,
   }),
+  z.object({ type: z.literal("model.spend"), cell: z.string(), time: z.string(), data: SpendData }),
   z.object({
     type: z.literal("events.dropped"),
     time: z.string(),

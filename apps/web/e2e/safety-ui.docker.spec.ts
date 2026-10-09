@@ -108,9 +108,12 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     await page.getByText("The sample table", { exact: true }).click();
     await page.getByRole("button", { name: "Send answer", exact: true }).click();
     await showPane("Computer");
-    const manual = page.getByRole("region", { name: "Manual control", exact: true });
-    await expect(manual).toBeVisible({ timeout: 30000 });
-    await manual.getByRole("button", { name: "Return control to dot", exact: true }).click();
+    const take = page.getByRole("button", { name: "Take control", exact: true });
+    await expect(take).toBeEnabled({ timeout: 30000 });
+    await take.click();
+    const handBack = page.getByRole("button", { name: "Hand back", exact: true });
+    await expect(handBack).toBeEnabled();
+    await handBack.click();
     const last = page.locator(".approval-card");
     await expect(last).toBeVisible({ timeout: 30000 });
     await last.getByRole("button", { name: "Approve once", exact: true }).click();

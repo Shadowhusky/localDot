@@ -26,6 +26,8 @@ export interface AgentSnapshot {
   // The spending limit that holds the task: its own budget, or the daily limit all tasks share.
   readonly budgetHold?: "task" | "day";
   readonly screen?: ScreenSelectionSnapshot;
+  // No task: the user's own time on the computer, which ends when they hand it back.
+  readonly holder?: true;
 }
 const statuses = new Set<string>([
   "starting",
@@ -50,6 +52,7 @@ const fields = new Set([
   "pause",
   "budgetHold",
   "screen",
+  "holder",
 ]);
 export class AgentResponseError extends Error {
   constructor() {
@@ -108,7 +111,8 @@ export function parseAgentSnapshot(
     (approval && !approval.success) ||
     (connection && (!connection.success || connection.data.actionClass !== "network")) ||
     (pause && !pause.success) ||
-    (Object.hasOwn(v, "budgetHold") && v.budgetHold !== "task" && v.budgetHold !== "day")
+    (Object.hasOwn(v, "budgetHold") && v.budgetHold !== "task" && v.budgetHold !== "day") ||
+    (Object.hasOwn(v, "holder") && v.holder !== true)
   )
     return fail();
   const models = Object.hasOwn(v, "models") ? TaskModelSelection.safeParse(v.models) : null;
@@ -139,6 +143,7 @@ export function parseAgentSnapshot(
     ...(Object.hasOwn(v, "manualControl")
       ? { manualControl: v.manualControl as AgentSnapshot["manualControl"] }
       : {}),
+    ...(v.holder === true ? { holder: true as const } : {}),
   });
 }
 export async function loadAgentSnapshot(

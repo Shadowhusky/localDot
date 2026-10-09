@@ -62,22 +62,25 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
     expect((await f.effects())[0]?.sendCount).toBe(1);
     await approveCurrent(page, f); // launch the synthetic page
     await answerTable(page);
-    const manual = page.getByRole("region", { name: "Manual control", exact: true });
-    await expect(manual).toBeVisible({ timeout: 30000 });
+    // dot hands the computer over from the island; it is the user's once they take it.
+    const take = page.getByRole("button", { name: "Take control", exact: true });
+    await expect(take).toBeEnabled({ timeout: 30000 });
     const beforeManual = (await f.state(owner))[0];
-    await manual
-      .getByLabel("Text for the computer", { exact: true })
-      .fill("task14-private-manual-sentinel");
-    const typed = page.waitForResponse(
-      (r) => r.request().method() === "POST" && r.url().endsWith("/takeover/input"),
-    );
-    await manual.getByRole("button", { name: "Type text", exact: true }).click();
-    expect((await typed).status()).toBe(204);
-    await expect(manual.getByLabel("Text for the computer", { exact: true })).toHaveValue("");
+    await take.click();
+    const handBack = page.getByRole("button", { name: "Hand back", exact: true });
+    await expect(handBack).toBeEnabled();
+    await page
+      .getByRole("toolbar", { name: "Computer controls", exact: true })
+      .getByRole("button", { name: /^Type text/ })
+      .click();
+    const paste = page.getByLabel("Text to type on the computer", { exact: true });
+    await paste.fill("task14-private-manual-sentinel");
+    await paste.press("Enter");
+    await expect(paste).toHaveCount(0);
     const held = (await f.state(owner))[0];
     expect(held?.provider.length).toBe(beforeManual?.provider.length);
     expect(JSON.stringify(held?.events)).not.toContain("task14-private-manual-sentinel");
-    await manual.getByRole("button", { name: "Return control to dot", exact: true }).click();
+    await handBack.click();
     await approveCurrent(page, f); // a finite current atomic command
     await expect
       .poll(

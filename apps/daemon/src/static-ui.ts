@@ -28,14 +28,49 @@ export const UI_CSP = {
 };
 
 export function serveUi(app: Hono, dir: string): void {
-  app.get("/", (c) => {
-    const file = readStatic(dir, "/index.html");
-    if (!file) return c.text(BUILD_HINT, 503, NOSNIFF);
+  // The export page is the daemon's own: its headless browser makes videos there.
+  for (const [path, page] of [
+    ["/", "/index.html"],
+    ["/export.html", "/export.html"],
+  ] as const)
+    app.get(path, (c) => {
+      const file = readStatic(dir, page);
+      if (!file) return c.text(BUILD_HINT, 503, NOSNIFF);
+      return c.body(file.body, 200, {
+        ...NOSNIFF,
+        ...UI_CSP,
+        "content-type": file.type,
+        "cache-control": "no-store",
+      });
+    });
+  // The phone's Home Screen app: its manifest, its service worker (push and notification taps only,
+  // no caching) and its icons. Never immutable: these names carry no content hash. The worker runs
+  // under the policy it is served with, so it gets the page's.
+  for (const path of ["/sw.js", "/manifest.webmanifest"]) {
+    app.get(path, (c) => {
+      const file = readStatic(dir, path);
+      if (!file) return c.text("not found", 404, NOSNIFF);
+      return c.body(file.body, 200, {
+        ...NOSNIFF,
+        ...UI_CSP,
+        "content-type": file.type,
+        "cache-control": "no-cache",
+      });
+    });
+  }
+  app.get("/icons/*", (c) => {
+    let rel: string;
+    try {
+      rel = decodeURIComponent(new URL(c.req.url).pathname).slice("/icons".length);
+    } catch {
+      return c.text("bad path", 400, NOSNIFF);
+    }
+    const file = readStatic(join(dir, "icons"), rel);
+    if (file?.type !== "image/png") return c.text("not found", 404, NOSNIFF);
     return c.body(file.body, 200, {
       ...NOSNIFF,
-      ...UI_CSP,
       "content-type": file.type,
-      "cache-control": "no-store",
+      "cache-control": "public, max-age=86400",
     });
   });
   // Rooted at dist/assets, so an encoded separator ("/assets/..%2findex.html") can't reach the

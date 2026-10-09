@@ -1,6 +1,8 @@
 import type {
   LocalDotEvent,
+  Point,
   RecordingGap,
+  Rect,
   ScreenName,
   ScreenSelectionSnapshot,
 } from "@localdot/protocol";
@@ -19,6 +21,17 @@ export interface StageViewPatch {
   zoom?: number;
   freeze?: boolean;
   reducedMotion?: boolean;
+  // A decision is open over the picture.
+  dim?: boolean;
+  // The fields dot will type the user's answers into while it waits on them.
+  fields?: readonly FieldMark[];
+}
+
+// A field on one of the screens, in that screen's pixels.
+export interface FieldMark {
+  screen: ScreenName;
+  point: Point;
+  bbox?: Rect;
 }
 
 export interface ReplaySource {
@@ -74,7 +87,9 @@ export type WorkerIn =
       type: "frames";
       sourceId?: number;
       readable?: ReadableStream<VideoFrame>;
-      // Safari: the frames follow as "frame" messages for this source.
+      // Safari: a clone of the client's track, which the worker reads.
+      track?: MediaStreamTrack;
+      // The frames follow as "frame" messages for this source.
       pushed?: boolean;
       first?: VideoFrame;
     }
@@ -94,6 +109,8 @@ export type WorkerIn =
   | { type: "oracle"; command: OracleCommand };
 
 export type WorkerOut =
+  // Sent once as the worker starts: whether it can read a track handed to it.
+  | { type: "caps"; tracks: boolean }
   | { type: "stats"; sourceId?: number; stats: PumpStats }
   | { type: "error"; message: string }
   | { type: "warn"; message: string }

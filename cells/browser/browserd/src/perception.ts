@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { BrowserReadResult, Target } from "@localdot/protocol";
+import {
+  type BrowserReadResult,
+  checkedOf,
+  type PageElement,
+  type Target,
+} from "@localdot/protocol";
 import { z as schema } from "zod";
 import type { BrowserCaptureMask, BrowserMaskRect } from "./capture-mask.ts";
 import type { BrowserGeometrySnapshot } from "./geometry.ts";
@@ -81,6 +86,23 @@ const roles = new Set([
   "listitem",
 ]);
 
+// What a person can click, type into or choose: listed with refs when the page is read.
+const interactive = new Set([
+  "button",
+  "link",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "switch",
+  "slider",
+  "tab",
+  "menuitem",
+  "option",
+]);
+const MAX_ELEMENTS = 300;
+
 export class BrowserPerceptionError extends Error {
   constructor(readonly reason: "metadata" | "secret" | "geometry") {
     super(`Browser perception refused: ${reason}`);
@@ -94,6 +116,8 @@ export interface BrowserProjection {
   readonly focused: Target | null;
   readonly page?: BrowserReadResult;
   targetForNode(backendNodeId: number): Target | null;
+  // The target listed for exactly this node.
+  targetOf(backendNodeId: number): Target | null;
 }
 
 function text(value: string): string {
@@ -206,6 +230,12 @@ export function projectBrowser(
     const positions = new Map<number, number>();
     const namedNodes = new Map<string, number[]>();
     const nameReferences = new Map<number, string[]>();
+    // What a field's author named it: its aria-label, or a <label for> its id.
+    const ariaLabels = new Map<number, string>();
+    const fieldIds = new Map<number, string>();
+    const labelsFor = new Map<string, number[]>();
+    // Each node's nearest <label>, itself included.
+    const labelOf = new Map<number, number>();
     let referenceCount = 0;
     for (let offset = 0; offset < length; offset += 1) {
       const parent = nodes.parentIndex[offset];
@@ -246,8 +276,20 @@ export function projectBrowser(
       if (
         ["INPUT", "TEXTAREA", "SELECT"].includes(tag) ||
         (pairs.has("contenteditable") && pairs.get("contenteditable")?.toLowerCase() !== "false")
-      )
+      ) {
         editable.add(offset);
+        const aria = pairs.get("aria-label");
+        if (aria) ariaLabels.set(offset, aria);
+        if (htmlId) fieldIds.set(offset, htmlId);
+      }
+      const labelled = tag === "LABEL" ? offset : labelOf.get(parent);
+      if (labelled !== undefined) labelOf.set(offset, labelled);
+      const labelFor = tag === "LABEL" ? pairs.get("for") : undefined;
+      if (labelFor) {
+        const labels = labelsFor.get(labelFor) ?? [];
+        labels.push(offset);
+        labelsFor.set(labelFor, labels);
+      }
       if (["IFRAME", "FRAME", "OBJECT", "EMBED", "CANVAS"].includes(tag)) embedded.add(offset);
       if (
         editable.has(offset) ||
@@ -291,6 +333,30 @@ export function projectBrowser(
         nameQueue.push(consumer);
       }
     }
+    const labelText = new Map<number, string>();
+    if (nodes.nodeValue?.length === length)
+      for (const [offset, label] of labelOf) {
+        const valueIndex = nodes.nodeValue[offset] ?? -1;
+        if (
+          valueIndex === -1 ||
+          unreadable.has(offset) ||
+          stringAt(nodes.nodeName[offset] as number) !== "#text"
+        )
+          continue;
+        const sofar = labelText.get(label) ?? "";
+        if (sofar.length < 256) labelText.set(label, `${sofar} ${stringAt(valueIndex)}`);
+      }
+    // A field is named by its author's label, never by its value: a <label for> counts only when
+    // it is the field's one label, holds no field or secret, and the id is the field's alone.
+    const fieldName = (offset: number): string => {
+      const aria = ariaLabels.get(offset);
+      if (aria) return aria;
+      const id = fieldIds.get(offset);
+      const labels = id && namedNodes.get(id)?.length === 1 ? labelsFor.get(id) : undefined;
+      const label = labels?.length === 1 ? labels[0] : undefined;
+      if (label === undefined || unsafeNames.has(label) || unreadable.has(label)) return "";
+      return labelText.get(label) ?? "";
+    };
     const boxes = new Map<number, BrowserMaskRect>();
     const redactions: BrowserMaskRect[] = [];
     for (let item = 0; item < root.layout.nodeIndex.length; item += 1) {
@@ -409,6 +475,7 @@ export function projectBrowser(
         : undefined;
     const targets: Target[] = [];
     const projected = new Map<number, Target>();
+    const elements: PageElement[] = [];
     let focused: Target | null = null;
     const seen = new Set<number>();
     for (const node of accessibility.nodes) {
@@ -423,10 +490,13 @@ export function projectBrowser(
       const region = bounds ? pixels(bounds, geometry, content, 0) : undefined;
       if (!region) continue;
       const isSecret = protectedIds.has(nodeId);
+      const property = (key: string) =>
+        node.properties?.find((item) => item.name === key)?.value.value;
+      const checked = checkedOf(property("checked"));
       const name = isSecret
         ? "Protected field"
         : editable.has(offset)
-          ? "Input field"
+          ? text(fieldName(offset).replace(/\s+/gu, " ").trim()).trim() || "Input field"
           : unsafeNames.has(offset)
             ? ""
             : text(node.name?.value ?? "");
@@ -448,12 +518,28 @@ export function projectBrowser(
           app: "Chromium",
           ...(pageURL ? { url: pageURL } : {}),
           secret: isSecret,
+          ...(checked ? { checked } : {}),
         }),
       );
       if (targets.length > 512) throw new BrowserPerceptionError("metadata");
       const target = targets.at(-1);
       if (!target) throw new BrowserPerceptionError("metadata");
       projected.set(nodeId, target);
+      if (page && interactive.has(role) && elements.length < MAX_ELEMENTS && target.bbox) {
+        const expanded = property("expanded");
+        elements.push(
+          Object.freeze({
+            ref: `e${nodeId}`,
+            role: target.role ?? role,
+            name: target.name ?? "",
+            box: target.bbox,
+            ...(checked ? { checked } : {}),
+            ...(property("disabled") === true ? { disabled: true as const } : {}),
+            ...(typeof expanded === "boolean" ? { expanded } : {}),
+            ...(isSecret ? { secret: true as const } : {}),
+          }),
+        );
+      }
       if (
         node.properties?.some(
           (property) => property.name === "focused" && property.value.value === true,
@@ -497,7 +583,8 @@ export function projectBrowser(
       signature,
       focused,
       targetForNode,
-      ...(page ? { page } : {}),
+      targetOf: (nodeId: number) => projected.get(nodeId) ?? null,
+      ...(page ? { page: Object.freeze({ ...page, elements }) } : {}),
     });
   } catch (error) {
     if (error instanceof BrowserPerceptionError) throw error;

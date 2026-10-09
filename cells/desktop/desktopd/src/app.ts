@@ -1,4 +1,6 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import {
+  ElementsRequest,
   FindRequest,
   HeldResult,
   HitTestRequest,
@@ -29,7 +31,14 @@ import {
   typeText,
   UnsupportedInputError,
 } from "./input.ts";
-import { findTarget, focusedTarget, hitTest, type PerceptionDeps } from "./perception/hit-test.ts";
+import {
+  findElements,
+  findTarget,
+  focusedTarget,
+  hitTest,
+  type PerceptionDeps,
+  pageElements,
+} from "./perception/hit-test.ts";
 import { observe } from "./perception/observe.ts";
 import { settle } from "./settle.ts";
 import { addToolRoutes, type ToolRouteDeps } from "./tools/routes.ts";
@@ -75,6 +84,8 @@ export interface DesktopdHealth {
 }
 
 const SCREEN: Record<Scale, Screen> = { 1: { w: 1280, h: 800 }, 2: { w: 2560, h: 1600 } };
+// A release waits this long at most for input still on its way, well inside the daemon's 5 s.
+const LANDING_WAIT_MS = 2000;
 
 // Unknown settings (null) are never ok; an unset property (a null field) is XFCE's default.
 export function hidpiReport(scale: Scale, x: Xsettings | null): HidpiReport {
@@ -218,6 +229,16 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     });
   };
 
+  // Typing and glides send one helper command per step. A release waits for the input requests
+  // still sending, which a stopped request ends at its next step, so its answer covers them.
+  const landing = new Set<Promise<unknown>>();
+  const land = <T>(work: Promise<T>): Promise<T> => {
+    landing.add(work);
+    const done = () => void landing.delete(work);
+    work.then(done, done);
+    return work;
+  };
+
   app.post("/input", async (c) =>
     withX(async (x) => {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
@@ -226,12 +247,14 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
       const long =
         input.kind === "drag" || (input.kind === "key" && (input.repeat || input.holdMs));
       if (!long) {
-        const result: InputResult = await inject(x, parsed.data, deps.injectors, c.req.raw.signal);
+        const result: InputResult = await land(
+          inject(x, parsed.data, deps.injectors, c.req.raw.signal),
+        );
         return c.json(result);
       }
       // Each press is reported as it lands, so a request stopped part-way knows what was pressed.
       return ndjson(c, async (write, signal) => {
-        const result = await inject(x, parsed.data, deps.injectors, signal, write);
+        const result = await land(inject(x, parsed.data, deps.injectors, signal, write));
         await write({ ...result, done: true });
       });
     })(),
@@ -239,7 +262,15 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
 
   // Every key and button the X server has down, whoever pressed them: after a Stop or a failure.
   app.post("/release", async (c) =>
-    withX(async (x) => c.json(await x.call<{ keys: number; buttons: number }>("release_all")))(),
+    withX(async (x) => {
+      const waited = new AbortController();
+      await Promise.race([
+        Promise.allSettled(landing),
+        sleep(LANDING_WAIT_MS, undefined, { signal: waited.signal }).catch(() => undefined),
+      ]);
+      waited.abort();
+      return c.json(await x.call<{ keys: number; buttons: number }>("release_all"));
+    })(),
   );
 
   // Keeps the buttons the agent holds between actions down while the daemon waits on the user.
@@ -252,7 +283,9 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
       const parsed = TypeRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
       return ndjson(c, async (write, signal) => {
-        const result: TypeResult = await typeText(x, parsed.data, write, deps.injectors, signal);
+        const result: TypeResult = await land(
+          typeText(x, parsed.data, write, deps.injectors, signal),
+        );
         await write(result);
       });
     })(),
@@ -318,7 +351,18 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withPerception(async (p) => {
       const parsed = FindRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
+      if (parsed.data.name === undefined && parsed.data.node === undefined)
+        return c.text("find needs a name or a node", 400);
       return c.json(await findTarget(p, parsed.data));
+    })(),
+  );
+  app.post("/elements", (c) =>
+    withPerception(async (p) => {
+      const parsed = ElementsRequest.safeParse(await c.req.json().catch(() => ({})));
+      if (!parsed.success) return c.text(parsed.error.message, 400);
+      if (parsed.data.page) return c.json(await pageElements(p, parsed.data));
+      if (parsed.data.text === undefined) return c.text("elements needs text or page", 400);
+      return c.json(await findElements(p, parsed.data));
     })(),
   );
   return app;

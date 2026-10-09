@@ -6,7 +6,7 @@ computer and shows exactly what it is doing, action by action.
 Status: early development.
 
 The [browser workspace guide](docs/browser-workspace.md) covers the M7 author draft's separate
-signed-in browser, manual sign-in, reviewed downloads and approved uploads. Final integration
+web browser, manual sign-in, reviewed downloads and approved uploads. Final integration
 and independent review are pending.
 
 ## Development

@@ -1,4 +1,4 @@
-import type { LocalDotEvent, ManualInput, ScreenSelectionSnapshot } from "@localdot/protocol";
+import type { LocalDotEvent, ManualStreamInput, ScreenSelectionSnapshot } from "@localdot/protocol";
 import {
   forwardRef,
   useCallback,
@@ -8,17 +8,25 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
-import { forgetOldTickets } from "./client-storage.ts";
-import { DesktopFrame } from "./DesktopFrame.tsx";
 import type { ProbeApi } from "./debug-hooks.ts";
-import { type FrameSource, frameTapSupport } from "./frame-source.ts";
-import { manualKey } from "./manual-point.ts";
+import { frameTapSupport } from "./frame-source.ts";
+import {
+  findStream,
+  holdStream,
+  KEEP_MS,
+  type LiveStream,
+  type StreamPicture,
+} from "./live-stream.ts";
+import { ManualSurface, type ManualSurfaceHandle, type PointerMode } from "./ManualSurface.tsx";
 import type { Flip } from "./probe.ts";
-import { type ReplayHandle, StageCanvas, type StageCanvasHandle } from "./StageCanvas.tsx";
-import type { OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
+import type { PumpStats } from "./pump.ts";
+import { StageCanvas } from "./StageCanvas.tsx";
+import type { ReplayHandle, StageCanvasHandle } from "./stage-engine.ts";
+import type { FieldMark, OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
 
 export interface StageHandle {
   replay: ReplayHandle;
@@ -27,6 +35,8 @@ export interface StageHandle {
   setClock(clock: StageClock): void;
   setView(view: StageViewPatch): void;
   oracle(command: OracleRequest): Promise<unknown>;
+  // Raises or lowers the keyboard that types on the computer while the user has control.
+  keyboard(on: boolean): void;
 }
 
 export interface StageProps {
@@ -35,22 +45,42 @@ export interface StageProps {
   parentId?: string;
   selection?: ScreenSelectionSnapshot;
   api: ApiClient;
-  // The agent has control: the stage wears the xenon rim.
-  control?: boolean;
   reconnects: number;
   listed: readonly string[];
+  // A decision is open: the picture dims under it.
+  dim?: boolean;
+  // The fields dot will type the user's answers into, ringed above the dim.
+  fields?: readonly FieldMark[];
   manual?: {
-    requestId: string;
     enabled: boolean;
     screen: { w: number; h: number };
-    button: "left" | "right";
-    count: 1 | 2;
-    input(requestId: string, input: ManualInput): Promise<boolean>;
+    pointer: PointerMode;
+    send(input: ManualStreamInput): void;
+    onTyping?(typing: boolean): void;
+    onRefused?(message: string | null): void;
   };
+  // What the live stage shows of its computer: nothing yet, its picture, or its last picture while
+  // the stream reconnects.
+  onPicture?(picture: StreamPicture): void;
 }
 
+const quiet = () => () => {};
+const NO_FIELDS: readonly FieldMark[] = [];
+
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
-  { cell, api, control = false, reconnects, listed, manual, mode = "live", parentId, selection },
+  {
+    cell,
+    api,
+    reconnects,
+    listed,
+    manual,
+    mode = "live",
+    parentId,
+    selection,
+    dim = false,
+    fields = NO_FIELDS,
+    onPicture,
+  },
   ref,
 ) {
   const support =
@@ -63,11 +93,11 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
             reason: "This browser lacks WebCodecs. Open localDot in a current Chromium browser.",
           };
   const canvas = useRef<StageCanvasHandle>(null);
-  const presentedAt = useRef(0);
-  const [generation, setGeneration] = useState(0);
+  const keyboard = useRef<ManualSurfaceHandle>(null);
+  // The live stage's engine outlives a remount, so moving the stage keeps its picture.
+  const [keep] = useState(() => (mode === "live" ? api : undefined));
   const cellId = cell?.id ?? null;
   const surface = selection?.screen ?? "desktop";
-  const revision = selection?.revision ?? 0;
   const ready =
     mode === "live" &&
     cell?.state === "ready" &&
@@ -76,20 +106,28 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     !cell.replacementPending &&
     (!selection || selection.cellId === cellId) &&
     (surface !== "browser" || (!!parentId && parentId !== cellId));
+  // What the stage shows. A new revision of the same screen, a status socket that reopens or a
+  // refreshed ticket is not a new owner: each used to reload the client and blank the picture.
   const owner = useMemo(
-    () => ({ api, cellId, ready, generation, reconnects, mode, surface, revision, parentId }),
-    [api, cellId, ready, generation, reconnects, mode, surface, revision, parentId],
+    () => ({ api, cellId, ready, mode, surface, parentId }),
+    [api, cellId, ready, mode, surface, parentId],
   );
   const currentOwner = useRef(owner);
   const sourceOwner = useRef<typeof owner | null>(null);
-  const [ticket, setTicket] = useState<{ owner: typeof owner; src: string } | null>(null);
   const [displayOwner, setDisplayOwner] = useState<typeof owner | null>(null);
-  const src = mode === "live" && ticket?.owner === owner ? ticket.src : null;
+  const [held, setHeld] = useState<{ owner: typeof owner; stream: LiveStream } | null>(null);
+  const stream =
+    held?.owner === owner
+      ? held.stream
+      : ready && cellId && support.ok
+        ? (findStream({ api, cellId, surface, parentId }) ?? null)
+        : null;
+  const streamRef = useRef(stream);
+  streamRef.current = stream;
   useLayoutEffect(() => {
     const leavingReplay = currentOwner.current.mode === "replay" && owner.mode === "live";
     currentOwner.current = owner;
     sourceOwner.current = null;
-    presentedAt.current = 0;
     setDisplayOwner(null);
     if (leavingReplay) canvas.current?.replay.close();
     canvas.current?.detach();
@@ -101,48 +139,68 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     listedRef.current = listed;
   }, [listed]);
 
-  // A self-reloading client reuses its ticket, which dies with the daemon: a new generation mints a
-  // new ticket and remounts the iframe (S8).
   useEffect(() => {
-    if (!cellId || !ready || !support.ok) {
-      setTicket(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .post<{ path: string; cellId?: string }>(
-        `/api/cells/${surface === "browser" ? parentId : cellId}/${surface === "browser" ? "browser-stream-ticket" : "stream-ticket"}?g=${generation}.${reconnects}`,
-      )
-      .then(
-        ({ path, cellId: physicalId }) => {
-          if (
-            !cancelled &&
-            typeof path === "string" &&
-            path.startsWith(`/cells/${cellId}/${surface}/`) &&
-            (surface !== "browser" || physicalId === cellId) &&
-            /^\/cells\/[^/]+\/(?:desktop|browser)\/[A-Za-z0-9_-]{22}\/$/.test(path)
-          ) {
-            forgetOldTickets({ cellId, livePath: path, listed: listedRef.current });
-            setTicket({ owner, src: `${path}#shared` });
-          }
-        },
-        () => {},
-      );
+    if (!cellId || !ready || !support.ok) return;
+    const { stream, release } = holdStream(
+      { api, cellId, surface, parentId },
+      () => listedRef.current,
+    );
+    setHeld({ owner, stream });
+    const disconnect = stream.connect((source) => {
+      if (currentOwner.current !== owner || !canvas.current) {
+        source.stop();
+        return;
+      }
+      sourceOwner.current = owner;
+      canvas.current.attach(source);
+    });
     return () => {
-      cancelled = true;
+      disconnect();
+      const next = currentOwner.current;
+      // A computer that stopped or froze takes its stream with it; any other stage may come back.
+      const stopped =
+        next !== owner &&
+        next.mode === "live" &&
+        next.api === api &&
+        next.cellId === cellId &&
+        next.surface === surface &&
+        !next.ready;
+      release(stopped ? 0 : KEEP_MS);
     };
-  }, [api, cellId, ready, support.ok, generation, reconnects, owner, parentId, surface]);
+  }, [api, cellId, ready, support.ok, owner, parentId, surface]);
+
+  // A status socket that reopened may follow a daemon restart, which ends its tickets.
+  const seenReconnects = useRef(reconnects);
+  useEffect(() => {
+    if (reconnects === seenReconnects.current) return;
+    seenReconnects.current = reconnects;
+    stream?.renew();
+  }, [reconnects, stream]);
+
+  const picture = useSyncExternalStore(stream?.subscribe ?? quiet, () => stream?.picture ?? "none");
+  const shown: StreamPicture = mode === "live" ? picture : "none";
+  useEffect(() => {
+    onPicture?.(shown);
+  }, [shown, onPicture]);
 
   // Overlays freeze while the stream is not live (spec, error handling); zoom comes from ?zoom= for tests.
   const reconnecting =
     mode === "live" &&
     !cell?.paused &&
-    (cell?.stream.connection === "stalled" || cell?.stream.connection === "disconnected");
+    (cell?.stream.connection === "stalled" ||
+      cell?.stream.connection === "disconnected" ||
+      shown === "held");
   const paused = mode === "live" && (!!cell?.paused || reconnecting);
   const manualActive = Boolean(manual);
   useEffect(() => {
     canvas.current?.setView({ selection: mode === "live" ? (selection ?? null) : null });
   }, [mode, selection]);
+  useEffect(() => {
+    canvas.current?.setView({ dim });
+  }, [dim]);
+  useEffect(() => {
+    canvas.current?.setView({ fields: mode === "live" ? fields : NO_FIELDS });
+  }, [mode, fields]);
   useEffect(() => {
     canvas.current?.setView({
       freeze: paused,
@@ -150,38 +208,22 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     });
   }, [paused, params, manualActive]);
 
-  const onSource = useCallback(
-    (source: FrameSource) => {
-      if (currentOwner.current !== owner || ticket?.owner !== owner || !canvas.current) {
-        source.stop();
-        return;
-      }
-      sourceOwner.current = owner;
-      setDisplayOwner(null);
-      presentedAt.current = 0;
-      canvas.current.attach(source);
-    },
-    [owner, ticket],
-  );
-  const onLost = useCallback(() => {
-    if (currentOwner.current === owner) setGeneration((g) => g + 1);
-  }, [owner]);
-  const lastPresentedAt = useCallback(() => presentedAt.current, []);
-  const onStats = useCallback(() => {
+  const onStats = useCallback((stats: PumpStats) => {
     if (sourceOwner.current !== currentOwner.current) return;
-    presentedAt.current = Date.now();
+    streamRef.current?.presented(stats.presented);
     setDisplayOwner(currentOwner.current);
   }, []);
   useEffect(() => {
-    if (!ready) return;
-    // A browser-frozen tab can accumulate obsolete decoder messages. Resume with a fresh
-    // stream instead of making the viewer drain that backlog before seeing the current desktop.
+    if (!stream) return;
+    // A view update also restarts the worker's animation after a suspension.
     const resume = () => {
       canvas.current?.setView({ freeze: paused });
-      onLost();
+      stream.replace();
     };
     const visible = () => {
-      if (document.visibilityState === "visible") resume();
+      if (document.visibilityState !== "visible") return;
+      canvas.current?.setView({ freeze: paused });
+      stream.refresh();
     };
     document.addEventListener("resume", resume);
     document.addEventListener("visibilitychange", visible);
@@ -189,7 +231,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
       document.removeEventListener("resume", resume);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [ready, paused, onLost]);
+  }, [stream, paused]);
   const onFlip = useCallback((flip: Flip) => {
     flips.current.push(flip);
   }, []);
@@ -243,6 +285,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     setClock: (clock) => canvas.current?.setClock(clock),
     setView: (view) => canvas.current?.setView(manual ? { ...view, zoom: 1 } : view),
     oracle: (command) => canvas.current?.oracle(command) ?? Promise.resolve(undefined),
+    keyboard: (on) => keyboard.current?.keyboard(on),
   }));
 
   if (!support.ok) {
@@ -254,64 +297,18 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }
   return (
     <>
-      <StageCanvas ref={canvas} onFlip={onFlip} onStats={onStats} />
-      {src && (
-        <DesktopFrame
-          key={`${src} ${generation}.${reconnects}`}
-          src={src}
-          onSource={onSource}
-          onStale={onLost}
-          lastPresentedAt={lastPresentedAt}
-        />
-      )}
-      <div className={reconnecting ? "stage-veil on" : "stage-veil"} aria-hidden={!reconnecting}>
-        <p>Reconnecting…</p>
-      </div>
-      {mode === "live" && control && <div className="rim" aria-hidden="true" />}
+      <StageCanvas ref={canvas} keep={keep} onFlip={onFlip} onStats={onStats} />
       {mode === "live" && manual && (
-        <button
-          type="button"
-          className="manual-surface"
-          aria-label="Click on the computer"
-          disabled={!manual.enabled || !ready || reconnecting || !src || displayOwner !== owner}
-          onClick={(event) => {
-            if (
-              !manual.enabled ||
-              !ready ||
-              reconnecting ||
-              !src ||
-              displayOwner !== owner ||
-              event.detail === 0
-            )
-              return;
-            const point = canvas.current?.manualPoint(
-              { x: event.clientX, y: event.clientY },
-              manual.screen,
-            );
-            if (point)
-              void manual.input(manual.requestId, {
-                kind: "click",
-                at: point,
-                button: manual.button,
-                count: manual.count,
-              });
-          }}
-          onKeyDown={(event) => {
-            if (
-              !manual.enabled ||
-              !ready ||
-              reconnecting ||
-              !src ||
-              displayOwner !== owner ||
-              event.nativeEvent.isComposing
-            )
-              return;
-            const combo = manualKey(event.key, event);
-            if (combo) {
-              event.preventDefault();
-              void manual.input(manual.requestId, { kind: "key", combo });
-            }
-          }}
+        <ManualSurface
+          ref={keyboard}
+          live={manual.enabled && ready && !reconnecting && !!stream && displayOwner === owner}
+          mode={manual.pointer}
+          locate={(point, follow) =>
+            canvas.current?.manualPoint(point, manual.screen, follow) ?? null
+          }
+          send={manual.send}
+          onTyping={manual.onTyping}
+          onRefused={manual.onRefused}
         />
       )}
     </>

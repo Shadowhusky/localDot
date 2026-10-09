@@ -158,6 +158,29 @@ describe("Review Focus 4: secrets never in a prompt", () => {
 });
 
 describe("Review Focus 3, the daemon's half: a runaway task", () => {
+  it("has no action limit unless the user set one", async () => {
+    const h = toolHarness();
+    h.session.toolCalls = 400;
+    h.session.actionsSinceUser = 400;
+    const call = await h.call("shell", { command: "echo again" });
+    expect(call.body.final).toBeUndefined();
+    expect(h.desktop.shellCalls).toHaveLength(1);
+  });
+  it("stops at the user's action limit, outside the brain, until their next message", async () => {
+    const h = toolHarness();
+    h.session.actionLimit = 2;
+    const plan = (status: string) => h.call("update_plan", { items: [{ text: "a", status }] });
+    expect((await plan("todo")).body.ok).toBe(true);
+    expect((await plan("doing")).body.ok).toBe(true);
+    const third = await h.call("shell", { command: "echo again" });
+    expect(third.body).toMatchObject({ ok: false, final: true });
+    expect(h.session.actionLimitReached).toBe(true);
+    expect(h.desktop.shellCalls).toEqual([]);
+    h.session.post("followup", "Keep going");
+    expect(h.session.actionLimitReached).toBe(false);
+    expect((await h.call("shell", { command: "echo again" })).body.ok).toBe(true);
+    expect(h.session.toolCalls).toBe(4);
+  });
   it("stops a task at its tool-call cap, outside the brain", async () => {
     const h = toolHarness({ maxToolCalls: 2 });
     expect((await h.call("update_plan", { items: [{ text: "a", status: "todo" }] })).body.ok).toBe(
@@ -510,9 +533,36 @@ describe("the tools", () => {
       "tool.start",
       "tool.output",
       "tool.output",
+      "safety.taint",
       "tool.end",
       "step.end",
     ]);
+    expect(h.events().find((e) => e.type === "safety.taint")?.data).toEqual({
+      kind: "files",
+      origin: "command output",
+    });
+  });
+
+  it("starts a call's step with dot's line for it, as one line of plain text", async () => {
+    const h = toolHarness();
+    h.desktop.shellDone = { exitCode: 0 };
+    await h.call("shell", {
+      command: "command -v gimp",
+      intent: `Checking\nfor paint\u0007 apps ${"and more ".repeat(20)}`,
+    });
+    await h.call("computer", { action: "screenshot", intent: "Looking at the screen" });
+    await h.call("computer", { action: "screenshot" });
+    const lines = h
+      .events()
+      .filter((e) => e.type === "step.start")
+      .map((e) => (e.type === "step.start" ? e.data.intent : undefined));
+    expect(lines).toHaveLength(3);
+    const [shell, look, quiet] = lines;
+    expect(shell).toMatch(/^Checking for paint apps and more and more .*…$/);
+    expect(shell).not.toContain("\n");
+    expect([...(shell ?? "")].length).toBeLessThanOrEqual(120);
+    expect(look).toBe("Looking at the screen");
+    expect(quiet).toBeUndefined();
   });
 
   it("writes files with a file.change for the diff panel", async () => {

@@ -17,12 +17,13 @@ import { screenGatewayBinding } from "../browser/gateway-binding.ts";
 import { ScreenController, type ScreenControllerDeps } from "../browser/screen-controller.ts";
 import { SessionScreens } from "../browser/session-screens.ts";
 import { BrowserStreams } from "../browser/streams.ts";
-import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
+import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
+import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
-import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
-import { AgentSession } from "./session.ts";
+import { sendManualInput } from "./manual-input.ts";
+import { AgentSession, ControlHeldError } from "./session.ts";
 import { toolHarness } from "./testing/harness.ts";
 import { dispatchTool } from "./tools/index.ts";
 import { Transfers } from "./transfers.ts";
@@ -166,6 +167,7 @@ function fixture(
     browser: {
       start: vi.fn(async () => endpoint),
       endpoints: () => endpoint,
+      get: vi.fn<BrowserOrchestrator["get"]>(() => undefined),
       stop: vi.fn(async () => {}),
     },
     client: () => client,
@@ -281,30 +283,70 @@ describe("session-owned screen authority", () => {
     retiring.resolve();
     expect(await finished).toBe(true);
     expect(f.physicalStop).not.toHaveBeenCalled();
-    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    expect(f.holder()).toBe("user");
     expect(f.downloadScopes.some((value) => value.binding.holder === "user")).toBe(true);
     for (const { scope } of f.downloadScopes) expect(() => scope.check()).toThrow();
     expect(() => f.session.beginBrain()).toThrow();
   });
 
-  it("retains normal completion until the browser physically retires", async () => {
+  it("retains normal completion until the browser confirms control went back to the user", async () => {
     const f = fixture(),
       generation = await f.browser();
     f.session.retireBrain(generation);
     await f.session.screensSettled();
-    const retirement = Promise.withResolvers<void>();
-    vi.mocked(f.deps.browser.stop).mockImplementationOnce(() => retirement.promise);
+    const released = Promise.withResolvers<void>();
+    const controls = f.grant.mock.calls.length;
+    f.grant.mockImplementationOnce(() => released.promise);
     let settled = false;
     const finished = f.session.finish().then((result) => {
       settled = true;
       return result;
     });
-    await until(() => vi.mocked(f.deps.browser.stop).mock.calls.length === 1);
+    await until(() => f.grant.mock.calls.length === controls + 1);
+    expect(f.grant.mock.calls.at(-1)?.[0].holder).toBe("user");
     expect(settled).toBe(false);
     expect(f.session.stopped).toBe(true);
     expect(f.deps.contain).not.toHaveBeenCalled();
-    retirement.resolve();
+    released.resolve();
     expect(await finished).toBe(true);
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+  });
+
+  it("stops the browser when a finished task cannot confirm handing it back", async () => {
+    const f = fixture(),
+      generation = await f.browser();
+    f.session.retireBrain(generation);
+    await f.session.screensSettled();
+    f.grant.mockRejectedValueOnce(new Error("synthetic control failure"));
+    expect(await f.session.finish()).toBe(true);
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the computer running when the web browser a task used no longer answers as it finishes", async () => {
+    const f = fixture(true),
+      generation = await f.browser();
+    const lease = f.session.admit(generation);
+    await f.session.switchScreen("desktop", lease);
+    lease.finish();
+    f.client.control.mockRejectedValue(new Error("browser stopped answering"));
+    f.session.retireBrain(generation);
+    await f.session.screensSettled();
+    expect(f.session.stopped).toBe(false);
+    expect(await f.session.finish()).toBe(true);
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.physicalStop).not.toHaveBeenCalled();
+  });
+
+  it("still stops the computer when a finished task's web browser can neither hand back nor stop", async () => {
+    const f = fixture(true),
+      generation = await f.browser();
+    f.client.control.mockRejectedValue(new Error("browser stopped answering"));
+    vi.mocked(f.deps.browser.stop).mockRejectedValue(new Error("shutdown unconfirmed"));
+    f.session.retireBrain(generation);
+    await f.session.screensSettled().catch(() => {});
+    expect(f.session.stopped).toBe(true);
+    expect(f.physicalStop).toHaveBeenCalledWith(f.session.cellId);
   });
 
   it("lets Stop contain an in-progress successful cleanup and retains both physical receipts", async () => {
@@ -314,14 +356,15 @@ describe("session-owned screen authority", () => {
     await f.session.screensSettled();
     const retirement = Promise.withResolvers<void>(),
       containment = Promise.withResolvers<void>();
-    vi.mocked(f.deps.browser.stop).mockImplementationOnce(() => retirement.promise);
+    const controls = f.grant.mock.calls.length;
+    f.grant.mockImplementationOnce(() => retirement.promise);
     vi.mocked(f.deps.contain).mockImplementationOnce(() => containment.promise);
     let settled = false;
     const finished = f.session.finish().then((result) => {
       settled = true;
       return result;
     });
-    await until(() => vi.mocked(f.deps.browser.stop).mock.calls.length === 1);
+    await until(() => f.grant.mock.calls.length === controls + 1);
     f.session.stop();
     expect(f.deps.contain).toHaveBeenCalledOnce();
     retirement.resolve();
@@ -340,9 +383,11 @@ describe("session-owned screen authority", () => {
         generation = await f.browser();
       f.session.retireBrain(generation);
       await f.session.screensSettled();
-      vi.mocked(
-        failure === "recording" ? f.deps.fenceRecording : f.deps.browser.stop,
-      ).mockRejectedValueOnce(new Error("synthetic cleanup failure"));
+      vi.mocked(failure === "recording" ? f.deps.fenceRecording : f.grant).mockRejectedValueOnce(
+        new Error("synthetic cleanup failure"),
+      );
+      if (failure === "browser")
+        vi.mocked(f.deps.browser.stop).mockRejectedValueOnce(new Error("synthetic stop failure"));
       await expect(f.session.finish()).rejects.toThrow();
       expect(f.deps.contain).toHaveBeenCalledOnce();
       expect(f.session.stopped).toBe(true);
@@ -510,7 +555,7 @@ describe("session-owned screen authority", () => {
     await taking;
   });
 
-  it("cancels late manual typing and refuses agent handback when completion is uncertain", async () => {
+  it("lets typing already on its way land before the browser goes back to dot", async () => {
     const f = fixture();
     await f.browser();
     const taking = f.session.takeover("login", "fixture login").catch(() => {});
@@ -533,17 +578,17 @@ describe("session-owned screen authority", () => {
       new AbortController().signal,
       f.factory.manual.bind(f.factory),
     );
-    const failed = expect(running).rejects.toBeInstanceOf(ManualInputUncertain);
+    const landed = expect(running).rejects.toBeInstanceOf(ControlHeldError);
     await until(() => !!active);
     const returning = f.session.handback(requestId, undefined);
-    await until(() => active?.aborted === true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(active?.aborted).toBe(false);
     expect(f.holder()).toBe("user");
+    expect(f.session.manualControl).toBe("returning");
     release.resolve();
-    await failed;
-    expect(await returning).toBe(false);
-    expect(f.holder()).toBe("user");
-    expect(f.session.manualControl).toBe("unconfirmed");
-    f.session.stop();
+    await landed;
+    expect(await returning).toBe(true);
+    expect(f.holder()).toBe("agent");
     await taking;
   });
   function tools(f: ReturnType<typeof fixture>) {
@@ -568,6 +613,23 @@ describe("session-owned screen authority", () => {
     const callTool = (name: string, input: unknown) =>
       dispatchTool({ tools: h.tools }, f.session, name, "fixture-call", input, (s) => s);
     return { ...h, call: (input: unknown) => callTool("computer", input), callTool };
+  }
+
+  function bindDesktop(h: ReturnType<typeof tools>) {
+    const browserBinding = h.tools.bindScreen;
+    h.tools.bindScreen = (session, lease) =>
+      lease.selection.screen === "desktop"
+        ? {
+            cellId: session.cellId,
+            parentCellId: session.cellId,
+            scale: lease.selection.geometry.scale,
+            device: {} as NativeScreenBinding["device"],
+            signal: lease.signal,
+            check: () => lease.check(),
+            stream: () => NO_STREAM,
+            subscribe: () => () => {},
+          }
+        : (browserBinding?.(session, lease) as NativeScreenBinding);
   }
 
   function uploads(f: ReturnType<typeof fixture>) {
@@ -834,6 +896,155 @@ describe("session-owned screen authority", () => {
     expect(desktop).not.toHaveBeenCalled();
   });
 
+  it("types a secret answer into the web browser's own field, and nothing once the screen changed", async () => {
+    const secret = "s3cret phrase for the mail";
+    const field = {
+      point: { x: 400, y: 300 },
+      bbox: { x: 320, y: 290, w: 160, h: 20 },
+      source: "dom" as const,
+      role: "textbox",
+      name: "Password",
+      url: "https://mail.example.test/login",
+      secret: true,
+    };
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: field,
+      window: 0,
+      ms: 1,
+    })) as never);
+    f.client.input.mockImplementation((async () => ({
+      pressMono: 1,
+      presses: [1],
+      injector: "xtest",
+      armedMono: 0,
+    })) as never);
+    f.client.type.mockImplementation((async (
+      _p: unknown,
+      _t: unknown,
+      request: { text: string },
+    ) => ({
+      done: true,
+      count: [...request.text].length,
+      firstPressMono: 1,
+      injector: "xtest",
+      armedMono: 0,
+    })) as never);
+    const login = {
+      question: "Sign in to your mail",
+      fields: [{ id: "password", kind: "secret", label: "Password", target: [400, 300] }],
+    };
+    const asking = h.callTool("ask_user", login);
+    await until(() => f.session.pendingAsk !== undefined);
+    const request = f.log.read(f.id).find((e) => e.type === "ask.request");
+    expect(request?.data).toMatchObject({
+      fields: [
+        {
+          target: {
+            screen: "browser",
+            point: { x: 800, y: 600 },
+            bbox: { x: 640, y: 580, w: 320, h: 40 },
+            site: "mail.example.test",
+          },
+        },
+      ],
+    });
+    f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
+    expect((await asking).result.ok).toBe(true);
+    expect(f.client.input.mock.calls.slice(-2).map((call) => call.at(2))).toMatchObject([
+      { input: { kind: "click", at: { x: 400, y: 300 } } },
+      { input: { kind: "key", combo: ["ctrl", "a"] } },
+    ]);
+    expect(f.client.type.mock.calls.at(-1)?.at(2)).toMatchObject({ text: secret, masked: true });
+
+    f.client.type.mockClear();
+    bindDesktop(h);
+    const again = h.callTool("ask_user", login);
+    await until(() => f.session.pendingAsk !== undefined);
+    const generation = f.session.generation;
+    if (!generation) throw new Error("the brain is gone");
+    const lease = f.session.admit(generation);
+    await f.session.switchScreen("desktop", lease);
+    lease.finish();
+    f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
+    const moved = await again;
+    expect(moved.result.content).toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining("The field moved; ask again.") }),
+    );
+    expect(f.client.type).not.toHaveBeenCalled();
+    expect(JSON.stringify(f.log.read(f.id))).not.toContain(secret);
+  });
+
+  it("opens a public page in the web browser from the desktop by switching the screen first", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f),
+      desktop = vi.spyOn(h.tools, "desktop");
+    expect(f.screens.selection.screen).toBe("desktop");
+    const navigated = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
+    expect(navigated.result.ok).toBe(true);
+    expect(f.screens.selection.screen).toBe("browser");
+    expect(f.client.navigate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      "https://mail.example.test/",
+      expect.any(Object),
+    );
+    expect(desktop).not.toHaveBeenCalled();
+    expect(f.log.read(f.session.id).some((event) => event.type === "screen.switch")).toBe(true);
+  });
+
+  it.each([
+    "http://localhost:5173/",
+    "http://127.0.0.1:8000/",
+    "https://example.test:8443/",
+    "http://printer.local/",
+    "http://intranet/",
+  ])("keeps %s on the desktop, where dot's own servers run", async (url) => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    await h.callTool("browser_navigate", { url });
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+  });
+
+  it("opens the page on the desktop with a note when the web browser cannot start", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    vi.mocked(f.deps.browser.start).mockRejectedValueOnce(new Error("browser cell stopped"));
+    bindDesktop(h);
+    const desktop = vi.spyOn(h.tools, "desktop");
+    const navigated = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
+    expect(navigated.result.ok).toBe(true);
+    expect(navigated.result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("web browser couldn't start"),
+    });
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(desktop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.session.stopped).toBe(false);
+  });
+
+  it("goes back to the desktop for a local address while the web browser is shown", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    bindDesktop(h);
+    expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(true);
+    const desktop = vi.spyOn(h.tools, "desktop");
+    const navigated = await h.callTool("browser_navigate", { url: "http://localhost:5173/" });
+    expect(navigated.result.ok).toBe(true);
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(desktop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.client.navigate).not.toHaveBeenCalled();
+  });
+
   it("dispatches switch_screen through the real controller, clears the old frame and keeps shell/files on the desktop", async () => {
     const f = fixture();
     await f.ready();
@@ -887,8 +1098,9 @@ describe("session-owned screen authority", () => {
       expect(refused.result.ok).toBe(false);
       expect(refused.result.final).toBeUndefined();
       expect(refused.result.content).toContainEqual(
-        expect.objectContaining({ text: expect.stringContaining("signed-in browser") }),
+        expect.objectContaining({ text: expect.stringContaining("web browser isn't available") }),
       );
+      expect(JSON.stringify(refused.result.content)).not.toMatch(/signed-in|starting|again/u);
       expect(f.session.stopped).toBe(false);
       expect(f.physicalStop).not.toHaveBeenCalled();
       expect(f.holder()).toBe("user");
@@ -1094,6 +1306,60 @@ describe("session-owned screen authority", () => {
     expect(f.session.lastFrameId).toBeUndefined();
   });
 
+  it("forgets the page's refs on a screen switch and refuses an act by one of them", async () => {
+    const f = fixture();
+    const generation = await f.browser();
+    const h = tools(f);
+    const next = {
+      ref: "e42",
+      role: "button",
+      name: "Next",
+      box: { x: 560, y: 285, w: 80, h: 30 },
+    };
+    f.client.read.mockImplementation((async () => ({
+      url: "https://example.test/",
+      title: "Owned browser page",
+      text: "Public page text",
+      outline: "button Next",
+      truncated: false,
+      elements: [next],
+    })) as never);
+    expect((await h.callTool("browser_read", {})).result.ok).toBe(true);
+    expect(f.session.pageRefs?.elements.has("e42")).toBe(true);
+    const lease = f.session.admit(generation);
+    await f.session.switchScreen("desktop", lease);
+    await f.session.switchScreen("browser", lease);
+    lease.finish();
+    expect(f.session.pageRefs).toBeUndefined();
+    // Back on the same tab, the button is still there to be found and clicked.
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 1200, y: 600 },
+        bbox: { x: 1120, y: 570, w: 160, h: 60 },
+        source: "dom",
+        role: "button",
+        name: "Next",
+        url: "https://example.test/",
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    f.client.input.mockImplementation((async () => ({
+      pressMono: 1,
+      presses: [1],
+      injector: "xtest",
+      armedMono: 0,
+    })) as never);
+    const act = await h.callTool("browser_act", { action: "click", ref: "e42" });
+    expect(act.result.ok).toBe(false);
+    expect(act.result.content).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("e42 is not in this screen's last page read"),
+      }),
+    );
+    expect(f.client.input).not.toHaveBeenCalled();
+  });
+
   it("keeps tool admission closed until the initial recording attachment is confirmed", async () => {
     const f = fixture(),
       barrier = Promise.withResolvers<void>();
@@ -1146,7 +1412,8 @@ describe("session-owned screen authority", () => {
       request.holder === "agent" ? barrier.promise : Promise.resolve(),
     );
     const returning = f.session.handback(requestId, "ready");
-    expect(manual.signal.aborted).toBe(true);
+    expect(manual.returning.aborted).toBe(true);
+    expect(manual.signal.aborted).toBe(false);
     expect(f.holder()).toBe("user");
     manual.finish();
     await until(() => f.grant.mock.calls.at(-1)?.[0].holder === "agent");

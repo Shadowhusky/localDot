@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callsOf, manualInputsFor, simulatedAnswer } from "./stack.ts";
+import { callsOf, manualInputsFor, simulatedAnswer, turnsOf } from "./stack.ts";
 
 describe("manualInputsFor", () => {
   it("types text and presses Return and Tab as keys", () => {
@@ -70,5 +70,18 @@ describe("callsOf", () => {
       { name: "computer", ok: false, skipped: true, refused: false },
       { name: "done", ok: true, skipped: false, refused: false },
     ]);
+  });
+});
+
+describe("turnsOf", () => {
+  it("counts the model's answers, the last one included", () => {
+    expect(
+      turnsOf([
+        { role: "user", content: "task" },
+        { role: "assistant", content: [] },
+        { role: "tool", content: [] },
+        { role: "assistant", content: [] },
+      ]),
+    ).toBe(2);
   });
 });

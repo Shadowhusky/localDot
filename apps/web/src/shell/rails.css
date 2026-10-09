@@ -1,0 +1,81 @@
+/* The rail panel (design-v2 §10.19): console material, a segmented header and one body with the
+   composer at its foot. */
+.rail-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  --rail-surface: var(--color-console);
+  background-color: var(--rail-surface);
+  box-shadow: var(--shadow-console);
+  color: var(--color-fg-1);
+}
+
+.rail-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  height: 56px;
+  padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 4);
+}
+
+/* Without a header the body still starts clear of the console's rounded top. */
+.rail-panel > :first-child:not(.rail-head) {
+  padding-top: calc(var(--spacing) * 3);
+}
+
+.rail-panel .thread-scroll {
+  padding-inline: calc(var(--spacing) * 4) calc(var(--spacing) * 2);
+}
+
+.rail-panel .thread-foot {
+  padding-right: 0;
+}
+
+.rail-panel .thread-dock {
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
+}
+
+.rail-panel .thread-live {
+  padding-inline: calc(var(--spacing) * 2);
+}
+
+/* Activity, laid over the thread or in its own rail on a wide screen. */
+.rail-cover-activity {
+  display: grid;
+  min-height: 0;
+}
+
+.rail-cover-activity > .rail,
+.rail-activity > .rail {
+  min-height: 0;
+  padding-inline: calc(var(--spacing) * 4);
+}
+
+.rail-activity > .rail {
+  flex: 1;
+}
+
+.thread-cover > :not([data-shown]) {
+  visibility: hidden;
+}
+
+.thread-cover > * {
+  grid-area: 1 / 1;
+}
+
+/* A short thread sits on the composer, the way a conversation reads. */
+.rail-panel .thread {
+  justify-content: flex-end;
+}
+
+/* Activity in a phone's sheet: the sheet is its one scroller, and its sticky heads take the sheet's
+   own surface. */
+.activity-sheet {
+  --rail-surface: var(--color-overlay);
+  margin-inline: calc(var(--spacing) * -1.5);
+}

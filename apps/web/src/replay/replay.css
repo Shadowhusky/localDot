@@ -1,316 +1,503 @@
-/* Replay: the task list, the recorded stage with its scrubber and transport, and Activity. Below
-   1680 px the list moves into a sheet; below 760 px Activity drops under the transport. */
+/* Replay (design-v2 §11 H): the library of recordings in the stage's column with the chosen one in
+   the rail, or a recording on the stage with its transport, dot's band and the steps in the rail.
+   Its parts take Watch's own places in the page grid, so nothing moves between the two. */
+@custom-media --wide (width >= 1880px);
+@custom-media --tablet (700px <= width < 1100px);
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
+
 .replay {
-  grid-row: -2;
-  display: grid;
-  grid-template-columns: clamp(240px, 18vw, 300px) minmax(0, 1fr) var(--rail-w);
-  column-gap: calc(var(--spacing) * 6);
-  min-height: 0;
-  padding: 0 calc(var(--spacing) * 4) calc(var(--spacing) * 4);
+  display: contents;
 }
 
-.replay[data-library="sheet"] {
-  grid-template-columns: minmax(0, 1fr) var(--rail-w);
+.replay-rail {
+  grid-area: 1 / 2 / 3 / 3;
+  margin-block: var(--rail-inset);
 }
 
+@media (--wide) {
+  .replay > :is(.replay-library, .replay-main) {
+    grid-column: 1 / 3;
+  }
+
+  .replay-rail {
+    grid-area: 1 / 3 / 3 / 4;
+  }
+}
+
+@media (--tablet) {
+  .replay-library {
+    grid-row: 2 / 4;
+  }
+
+  .replay-rail {
+    grid-area: 3 / 1;
+    margin: 0 var(--rail-inset) var(--rail-inset);
+  }
+}
+
+/* The library: a search, the filters and the count over one list of grid rows. */
 .replay-library {
+  grid-area: 2 / 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  padding: calc(var(--spacing) * 3) var(--gutter) 0;
 }
 
+.replay-library-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  height: 44px;
+}
+
+.replay-library-head > .replay-search {
+  width: 320px;
+}
+
+.replay-library-total {
+  margin-left: auto;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* The scrollbar takes the column's margin, so the rows reach the same edge as the count above. */
 .replay-library-scroll {
   flex: 1;
   min-height: 0;
-  margin-inline: calc(var(--spacing) * -2);
-  padding-inline: calc(var(--spacing) * 2);
+  margin-right: calc(var(--spacing) * -3);
 }
 
 .replay-tasks {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--spacing) * 4);
-  padding-bottom: calc(var(--spacing) * 4);
+  padding-bottom: calc(var(--spacing) * 6);
+}
+
+.replay-loading {
+  min-height: 320px;
 }
 
 .replay-day-title {
-  padding: 0 calc(var(--spacing) * 2) var(--spacing);
+  padding: calc(var(--spacing) * 4.5) calc(var(--spacing) * 2.5) calc(var(--spacing) * 2);
   color: var(--color-fg-3);
   font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
-  letter-spacing: var(--text-micro--letter-spacing);
+    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
 }
 
 .replay-day-list {
   display: grid;
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.replay-task {
-  position: relative;
-  border-radius: var(--radius-md);
-  transition: background-color var(--dur-hover) var(--ease-standard);
-}
-
-.replay-task[data-selected] {
-  background-color: var(--color-state-selected);
-}
-
-.replay-task-open {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 3);
-  height: calc(var(--spacing) * 14);
-  padding: 0 calc(var(--spacing) * 2);
-  border-radius: inherit;
-  color: var(--color-fg-1);
-  text-decoration: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-touch-callout: none;
-  transition: background-color var(--dur-hover) var(--ease-standard);
-}
-
-@media (hover: hover) {
-  .replay-task-open:hover {
-    background-color: var(--color-state-hover);
-  }
-}
-
-.replay-task-open:active {
-  background-color: var(--color-state-pressed);
-  transition-duration: var(--dur-press);
-}
-
-.replay-task-open:focus-visible {
-  outline: var(--focus-width) solid var(--color-fg-1);
-  outline-offset: calc(var(--focus-width) * -1);
-}
-
-.replay-task-cover {
-  flex: none;
-  width: 72px;
-  height: 45px;
+/* What a search found in a task's words, in place of its usual meta line. */
+.replay-match {
+  min-width: 0;
   overflow: hidden;
-  border-radius: var(--radius-xs);
-  background-color: var(--color-well);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  text-overflow: ellipsis;
 }
 
-.replay-task-cover > :is(img, .replay-image-empty) {
+.replay-mark {
+  border-radius: var(--radius-xs);
+  background-color: var(--color-state-selected);
+  color: var(--color-fg-1);
+}
+
+.replay-note {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3) calc(var(--spacing) * 2.5)
+    calc(var(--spacing) * 2.5);
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.replay-note-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.replay-note-day {
+  color: var(--color-fg-3);
+}
+
+/* A deleted row folds its height away as it fades. */
+.replay-task {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--dur-default) var(--ease-spring),
+    opacity var(--dur-exit) var(--ease-exit);
+}
+
+.replay-task[data-folding] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.replay-task-fold {
+  min-height: 0;
+}
+
+.replay-task[data-folding] > .replay-task-fold {
+  overflow: hidden;
+}
+
+.replay-task .ui-list-row-thumbnail > :is(img, .replay-image-empty) {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.replay-task-text {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  gap: 2px;
-}
-
-.replay-task-title {
-  overflow: hidden;
-  color: var(--color-fg-1);
-  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.replay-task-meta {
-  color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-}
-
-.replay-task-verdict {
-  flex: none;
-  color: var(--color-fg-3);
-  transition: opacity var(--dur-hover) var(--ease-standard);
-}
-
-.replay-task-verdict[data-state="failed"] {
-  color: var(--color-fg-1);
-}
-
-/* The verdict and the row's actions share the end slot: pointing at, focusing or choosing the row
-   swaps one for the other in place. A touch screen shows both, side by side. */
-.replay-task-more {
-  position: absolute;
-  top: 50%;
-  right: calc(var(--spacing) * 2);
-  display: flex;
-  opacity: 0;
-  translate: 0 -50%;
-  transition: opacity var(--dur-hover) var(--ease-standard);
-}
-
-.replay-task:is(:hover, :focus-within, [data-selected]) .replay-task-more,
-.replay-task-more[data-open] {
-  opacity: 1;
-}
-
-.replay-task:is(:hover, :focus-within, [data-selected]) .replay-task-verdict,
-.replay-task:has(.replay-task-more[data-open]) .replay-task-verdict {
-  opacity: 0;
-}
-
-@media (pointer: coarse) {
-  .replay-task-open {
-    padding-inline-end: calc(var(--spacing) * 10);
-  }
-
-  .replay-task .replay-task-more,
-  .replay-task .replay-task-verdict {
-    opacity: 1;
-  }
-}
-
 .replay-skeleton-row {
   display: flex;
   align-items: center;
-  gap: calc(var(--spacing) * 3);
-  height: calc(var(--spacing) * 14);
-  padding: 0 calc(var(--spacing) * 2);
+  gap: calc(var(--spacing) * 4);
+  height: 76px;
+  padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 2.5);
+}
+
+.replay-skeleton-text {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
 }
 
 .replay-tasks-note {
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 2);
-  padding: 0 calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 2.5) 0;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-/* The search stays in reach at the top of the list it searches, in the rail and in the sheet. */
-.replay-library-search {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding-bottom: calc(var(--spacing) * 3);
-  background-color: var(--color-void);
+/* The player's rail lists the recordings in a narrower row, each opening at a press. */
+.replay-tasks[data-variant="rail"] {
+  padding-inline: calc(var(--spacing) * 2);
 }
 
-.ui-sheet .replay-library-search {
-  background-color: var(--color-raised);
+.replay-tasks[data-variant="rail"] .replay-day-title {
+  padding-top: calc(var(--spacing) * 2);
 }
 
-/* The stage column: the bar, the picture, the scrubber and the transport keep one width, the
-   picture's, with the bar level with the rails' headings. */
-.replay-main {
-  --_chrome: calc(var(--spacing) * 46);
-  --_w: min(100cqw, (100cqh - var(--_chrome)) * 1.6);
-  container: replay-main / size;
+.replay-rail-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.replay-rail > .activity-rail {
+  flex: 1;
+  min-height: 0;
+  padding-inline: calc(var(--spacing) * 4);
+}
+
+/* With nothing chosen, dot waits above the empty rail's words, so it is never left over the list. */
+.replay-rail-empty {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: calc(var(--spacing) * 3);
-  min-width: 0;
-  min-height: 0;
-  padding-top: var(--spacing);
+  justify-content: center;
 }
 
-.replay-main > * {
-  width: var(--_w);
+.replay-rail-dot {
   flex: none;
+  width: 72px;
+  height: 72px;
+  margin-bottom: calc(var(--spacing) * -4);
 }
 
-/* Too short for a 640 px picture, the transport takes two rows, so the picture leaves room for the
-   second: 584 = 640 / 1.6 + the 184 px of chrome. */
-@container replay-main (height < 584px) {
-  .replay-main > * {
-    width: min(100cqw, (100cqh - var(--_chrome) - var(--spacing) * 6) * 1.6);
-  }
+/* The chosen recording, in the rail: its picture with a play disc, dot with its last line, then its
+   name, what to do with it and the files it made. Delete waits at the foot. */
+.rail-panel > .replay-preview {
+  flex: 1;
+  min-height: 0;
+  padding-top: calc(var(--spacing) * 4);
 }
 
-.replay-bar {
+.replay-preview > .ui-scroll-content,
+.replay-preview {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
-  height: calc(var(--spacing) * 10);
+  flex-direction: column;
 }
 
-.replay-back {
-  margin-inline-start: calc(var(--spacing) * -2);
-}
-
-.replay-bar-end {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: calc(var(--spacing) * 2);
-  min-width: 0;
-}
-
-.replay-library-trigger {
-  max-width: 100%;
-}
-
-.replay-library-trigger > .ui-button-content {
-  min-width: 0;
-}
-
-.replay-library-trigger-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The top bar names the task beside a phone's width; on a phone the trigger names it instead. */
-.replay-library-trigger-text[data-phone=""] {
-  display: none;
-}
-
-.replay-frame {
+.replay-poster {
   position: relative;
+  flex: none;
   aspect-ratio: 16 / 10;
+  margin: 0 calc(var(--spacing) * 4);
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-stage);
 }
 
-.replay-frame > .stage.replay-stage {
+.replay-poster > :is(img, .replay-image-empty) {
+  display: block;
   width: 100%;
   height: 100%;
-  border-radius: var(--radius-lg);
-  background-color: var(--color-well);
-  isolation: isolate;
+  object-fit: cover;
 }
 
-/* Outside the stage, which clips: it rings the picture while dot has control at the playhead. */
-.replay-rim {
+.replay-poster-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  translate: -50% -50%;
+}
+
+.replay-says {
+  position: relative;
+  flex: none;
+  min-height: 84px;
+  padding: calc(var(--spacing) * 4) calc(var(--spacing) * 4) 0 calc(var(--spacing) * 5);
+}
+
+.replay-says[data-dot] {
+  padding-left: calc(var(--spacing) * 21);
+}
+
+.replay-says-dot {
+  position: absolute;
+  top: calc(var(--spacing) * 1.5);
+  left: calc(var(--spacing) * 2);
+  width: 72px;
+  height: 72px;
+}
+
+.replay-says-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-row) / var(--text-row--line-height) var(--font-ui);
+  letter-spacing: var(--text-row--letter-spacing);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  text-wrap: pretty;
+}
+
+.replay-preview-body {
+  flex: 1;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 5) 0;
+}
+
+.replay-preview-title {
+  font:
+    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+  text-wrap: balance;
+}
+
+.replay-preview-meta {
+  margin-top: var(--spacing);
+  color: var(--color-fg-3);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.replay-preview-actions {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin-top: calc(var(--spacing) * 5);
+}
+
+.replay-files {
+  margin-top: calc(var(--spacing) * 5.5);
+}
+
+.replay-files-title {
+  margin-bottom: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-semibold) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+}
+
+.replay-preview-foot {
+  display: grid;
+  flex: none;
+  padding: calc(var(--spacing) * 4) calc(var(--spacing) * 3) calc(var(--spacing) * 3.5);
+}
+
+/* The player: Watch's own stage column, with the transport over the picture's foot. */
+.replay-main .stage {
+  background-color: var(--color-well);
+}
+
+/* Over the stage's well until the recording has opened. */
+.replay-opening {
   position: absolute;
   inset: 0;
-  border-radius: var(--radius-lg);
-  box-shadow:
-    0 0 0 2px var(--color-xenon),
-    0 0 28px 2px var(--color-xenon-a40);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-fade) var(--ease-standard);
-}
-
-.replay-rim[data-on] {
-  opacity: 1;
+  z-index: 3;
+  border-radius: inherit;
+  background-color: var(--color-well);
 }
 
 .replay-image-empty {
   background-color: var(--color-well);
 }
 
+.island[data-shape="replay"] .island-plate {
+  left: 0;
+  width: 100%;
+  translate: none;
+}
+
+.island[data-shape="replay"] .island-row {
+  gap: calc(var(--spacing) * 3);
+  padding-right: calc(var(--spacing) * 3.5);
+}
+
+.island[data-shape="replay"] .island-label {
+  max-width: 260px;
+}
+
+.island[data-shape="replay"] .island-elapsed {
+  width: auto;
+  padding-left: 0;
+}
+
+.island-tag {
+  flex: none;
+}
+
+.replay-transport-slot {
+  position: absolute;
+  right: calc(var(--spacing) * 3);
+  bottom: calc(var(--spacing) * 3);
+  left: calc(var(--spacing) * 3);
+  z-index: 4;
+  opacity: 0;
+  transition: opacity var(--dur-dim) var(--ease-standard);
+}
+
+.replay-transport-slot:is([data-shown], :focus-within) {
+  opacity: 1;
+}
+
+.replay-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  height: 52px;
+  padding: 0 calc(var(--spacing) * 2.5) 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-transport);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-1);
+}
+
+.replay-transport[data-compact] {
+  height: 36px;
+  padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 0.5);
+  border-radius: var(--radius-group);
+}
+
+.replay-time,
+.replay-length {
+  flex: none;
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+}
+
+.replay-time {
+  margin-left: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+}
+
+.replay-transport[data-compact] .replay-time {
+  margin-left: var(--spacing);
+}
+
+.replay-length {
+  color: var(--color-fg-2);
+}
+
+.replay-transport-side {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--spacing);
+  margin-left: calc(var(--spacing) * 2);
+}
+
+.replay-speed {
+  color: var(--color-fg-1);
+}
+
+.replay-toggle[aria-pressed="true"] .replay-toggle-label {
+  color: var(--color-fg-1);
+}
+
+.replay-no-video {
+  flex: none;
+}
+
+/* Export sits in the transport as its icon; while it runs with its popover put away, its ring
+   stands where the icon was. */
+.replay-transport .replay-export-text {
+  display: none;
+}
+
+.replay-export .ui-button-content {
+  position: relative;
+}
+
+.replay-export .ui-icon,
+.replay-export-ring {
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.replay-export-ring {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: flex;
+  opacity: 0;
+  translate: 0 -50%;
+}
+
+.replay-export[data-ring] .ui-icon {
+  opacity: 0;
+}
+
+.replay-export[data-ring] .replay-export-ring {
+  opacity: 1;
+}
+
 /* Docked at the foot of the picture, on solid HUD material, so it reads over any frame. */
 :is(.replay-gap-card, .replay-error) {
   position: absolute;
   z-index: 2;
-  bottom: calc(var(--spacing) * 4);
+  bottom: 76px;
   left: 50%;
   width: max-content;
   max-width: min(360px, calc(100% - var(--spacing) * 8));
   padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
   border-radius: var(--radius-lg);
-  background-color: var(--color-hud-solid);
+  background-color: var(--color-glass-solid);
   box-shadow: var(--shadow-overlay);
-  backdrop-filter: blur(var(--blur-hud));
+  backdrop-filter: blur(var(--blur-glass));
   translate: -50% 0;
 }
 
@@ -330,35 +517,78 @@
   translate: -50% 0;
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    translate var(--dur-spring) var(--ease-spring),
+    translate var(--dur-default) var(--ease-spring),
     visibility 0s;
 }
 
 .replay-gap-title {
   color: var(--color-fg-1);
-  font:
-    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 .replay-gap-body,
 .replay-error {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .replay-gap-body {
   margin-top: 2px;
 }
 
-/* The scrubber: a 40 px reach around a 4 px track that thickens to 8 under the pointer. */
+/* A failed load says what happened and offers to try again beside it. */
+.replay-error {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 2.5) calc(var(--spacing) * 2.5)
+    calc(var(--spacing) * 4);
+}
+
+/* With nothing loaded there is no picture to read over: the words sit in the middle of the empty
+   stage, as its own content, with the way to try again under them. */
+.replay-error[data-place="centre"] {
+  top: 50%;
+  bottom: auto;
+  flex-direction: column;
+  max-width: min(320px, calc(100% - var(--spacing) * 8));
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  text-align: center;
+  translate: -50% -50%;
+}
+
+.replay-error[data-place="centre"] .replay-gap-title {
+  font:
+    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+}
+
+.replay-error[data-place="centre"] .replay-gap-body {
+  margin-top: var(--spacing);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+/* The scrubber: a 4 px track in a 24 px reach, the played part in the text colour, a tick at each
+   step (red where one failed, amber where dot asked) and a porcelain knob. */
 .replay-scrubber {
   position: relative;
+  flex: 1;
+  min-width: 0;
+  margin: 0 calc(var(--spacing) * 2.5);
+}
+
+.replay-transport[data-compact] .replay-scrubber {
+  margin: 0 calc(var(--spacing) * 2.5);
 }
 
 .replay-scrub {
   position: relative;
-  height: calc(var(--spacing) * 10);
+  height: 24px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   touch-action: none;
@@ -388,23 +618,17 @@
   position: absolute;
   top: 50%;
   inset-inline: 0;
-  height: 8px;
-  overflow: hidden;
+  height: 4px;
   border-radius: var(--radius-full);
-  background-color: var(--color-control);
+  background-color: var(--color-scrubber-track);
   translate: 0 -50%;
-  scale: 1 0.5;
-  transition: scale var(--dur-fade) var(--ease-standard);
-}
-
-.replay-scrub:is(:hover, :focus-visible, [data-dragging]) .replay-track {
-  scale: 1 1;
 }
 
 .replay-played {
   position: absolute;
   inset: 0;
-  background-color: var(--color-fg-2);
+  border-radius: inherit;
+  background-color: var(--color-fg-1);
   transform: scaleX(0);
   transform-origin: left;
 }
@@ -426,82 +650,80 @@
   background-image: repeating-linear-gradient(135deg, var(--color-fg-4) 0 2px, transparent 2px 4px);
 }
 
-/* Each chapter after the first opens with a 2 px gap cut out of the track. */
+/* Each step starts at a 2 × 8 tick. */
 .replay-chapter::before {
   content: "";
   position: absolute;
-  inset-block: 0;
+  top: 50%;
   left: -1px;
   width: 2px;
-  background-color: var(--color-void);
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-step-tick);
+  translate: 0 -50%;
+}
+
+.replay-chapter[data-status="failed"]::before {
+  background-color: var(--color-danger-fg);
 }
 
 .replay-landmark {
   position: absolute;
-  top: calc(50% - 12px);
-  display: grid;
-  place-items: center;
-  width: 12px;
-  height: 12px;
-  color: var(--color-danger-fg);
+  top: 50%;
+  width: 2px;
+  height: 8px;
+  border-radius: var(--radius-full);
   translate: -50% -50%;
   pointer-events: none;
 }
 
-.replay-landmark:is([data-tone="attention"], [data-tone="user"])::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-full);
+.replay-landmark[data-tone="failure"] {
+  background-color: var(--color-danger-fg);
 }
 
-.replay-landmark[data-tone="attention"]::before {
+.replay-landmark[data-tone="attention"] {
   background-color: var(--color-attention);
 }
 
-.replay-landmark[data-tone="user"]::before {
-  box-shadow: inset 0 0 0 1px var(--color-fg-2);
+.replay-landmark[data-tone="user"] {
+  background-color: var(--color-fg-1);
 }
 
 .replay-playhead {
   position: absolute;
   top: 50%;
   left: 0;
-  width: 2px;
-  height: 16px;
-  border-radius: var(--radius-full);
-  background-color: var(--color-fg-1);
-  translate: -50% -50%;
+  width: 0;
+  height: 0;
   pointer-events: none;
 }
 
 .replay-knob {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 12px;
-  height: 12px;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
   border-radius: var(--radius-full);
-  background-color: var(--color-fg-1);
-  box-shadow: var(--shadow-thumb);
+  background: var(--porcelain-knob);
+  box-shadow: var(--shadow-knob);
   translate: -50% -50%;
-  scale: 0;
-  transition: scale var(--dur-spring) var(--ease-spring);
+  transition: scale var(--dur-snappy) var(--ease-spring);
 }
 
-.replay-scrub:is(:hover, :focus-visible, [data-dragging]) .replay-knob {
-  scale: 1;
+.replay-scrub[data-dragging] .replay-knob {
+  scale: 1.15;
 }
 
-.replay-preview {
+.replay-preview-pop {
   position: absolute;
   z-index: 3;
-  bottom: calc(100% - var(--spacing));
+  bottom: calc(100% + var(--spacing) * 3);
   left: 0;
   width: 208px;
   padding: var(--spacing);
   border-radius: var(--radius-lg);
-  background-color: var(--color-hud-solid);
+  background-color: var(--color-glass-solid);
   box-shadow: var(--shadow-overlay);
   pointer-events: none;
   translate: -50% 0;
@@ -513,15 +735,15 @@
     scale var(--dur-exit) var(--ease-exit);
 }
 
-.replay-preview[data-shown] {
+.replay-preview-pop[data-shown] {
   opacity: 1;
   scale: 1;
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    scale var(--dur-spring) var(--ease-spring);
+    scale var(--dur-default) var(--ease-spring);
 }
 
-.replay-preview > :is(img, .replay-image-empty) {
+.replay-preview-pop > :is(img, .replay-image-empty) {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 10;
@@ -529,132 +751,22 @@
   border-radius: var(--radius-md);
 }
 
-.replay-preview-meta {
+.replay-preview-pop-meta {
   display: flex;
   gap: calc(var(--spacing) * 2);
   padding: calc(var(--spacing) * 1.5) var(--spacing) 2px;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.replay-preview-meta > .num {
+.replay-preview-pop-meta > .num {
   color: var(--color-fg-1);
 }
 
-.replay-preview-label {
+.replay-preview-pop-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The transport: one 48 px row, playback on the left, how it plays on the right. Where the row is
-   too narrow for both, how it plays takes a second row. */
-.replay-transport {
-  container: replay-transport / inline-size;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--spacing) calc(var(--spacing) * 4);
-  min-height: calc(var(--spacing) * 12);
-}
-
-.replay-transport-main,
-.replay-transport-side {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-}
-
-.replay-transport-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.replay-transport-side {
-  flex: none;
-}
-
-.replay-no-video {
-  flex: none;
-}
-
-@container replay-transport (width < 640px) {
-  .replay-transport-side {
-    flex: 1 1 100%;
-    justify-content: space-between;
-  }
-}
-
-/* While an export runs with its popover put away, its ring stands where the icon was. */
-.replay-export .ui-button-content {
-  position: relative;
-}
-
-.replay-export .ui-icon,
-.replay-export-ring {
-  transition: opacity var(--dur-fade) var(--ease-standard);
-}
-
-.replay-export-ring {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  display: flex;
-  opacity: 0;
-  translate: 0 -50%;
-}
-
-.replay-export[data-ring] .ui-icon {
-  opacity: 0;
-}
-
-.replay-export[data-ring] .replay-export-ring {
-  opacity: 1;
-}
-
-.replay-time {
-  flex: none;
-  color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-}
-
-.replay-now {
-  display: flex;
-  flex: 1;
-  gap: calc(var(--spacing) * 1.5);
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-fg-1);
-  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  white-space: nowrap;
-}
-
-.replay-now-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.replay-now-idle {
-  flex: none;
-  color: var(--color-fg-3);
-}
-
-.replay-speed {
-  width: calc(var(--spacing) * 18);
-}
-
-.replay-skip {
-  white-space: nowrap;
-}
-
-.replay-toggle {
-  display: flex;
-  border-radius: var(--radius-md);
-  transition: background-color var(--dur-hover) var(--ease-standard);
-}
-
-.replay-toggle[data-on] {
-  background-color: var(--color-state-selected);
 }
 
 /* Before and after, over the picture. */
@@ -682,7 +794,7 @@
   gap: calc(var(--spacing) * 2);
   min-width: 0;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   white-space: nowrap;
 }
 
@@ -754,10 +866,11 @@
   top: calc(var(--spacing) * 2);
   padding: 2px calc(var(--spacing) * 2);
   border-radius: var(--radius-sm);
-  background-color: var(--color-hud-solid);
+  background-color: var(--color-glass-solid);
   color: var(--color-fg-1);
   font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
 }
 
 .replay-compare-label.before {
@@ -775,57 +888,164 @@
   color: var(--color-fg-2);
 }
 
-/* The top bar names the recording, and says where it comes from where there is room. */
+/* The top bar names the recording, and says when it ran where there is room. */
 .bar .title-note {
   flex: none;
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
   white-space: nowrap;
 }
 
-@media (width < 1180px) {
+.bar .title-note::before {
+  content: "· ";
+}
+
+@media (width < 1100px) {
   .bar .title-note {
     display: none;
   }
 }
 
-@media (width < 760px) {
-  .replay[data-library] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    row-gap: calc(var(--spacing) * 2);
+/* A phone: Replay is a pushed screen of its own, with a back button and its name at the top. */
+@media (--phone) {
+  .replay {
+    grid-area: 1 / 1 / -1 / -1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .replay-nav {
+    display: grid;
+    flex: none;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    height: 52px;
+    margin-top: env(safe-area-inset-top);
+    padding: 0 calc(var(--spacing) * 2);
+  }
+
+  .replay-nav-back {
+    justify-self: start;
+  }
+
+  .replay-nav-back-label {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-inline-start: calc(var(--spacing) * -2);
+    color: var(--color-fg-1);
+    font:
+      var(--font-weight-normal) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+  }
+
+  .replay-nav-title {
+    min-width: 0;
+    overflow: hidden;
+    font:
+      var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .replay[data-view="player"] .replay-nav {
+    height: 44px;
+  }
+
+  .replay[data-view="player"] :is(.replay-nav-back-label, .replay-nav-title) {
+    font-size: var(--text-title-3);
+  }
+
+  .replay-library {
+    flex: 1;
+    padding: var(--spacing) calc(var(--spacing) * 2) 0;
+  }
+
+  .replay-library-head {
+    height: auto;
+    padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2);
+  }
+
+  .replay-library-head > .replay-search {
+    flex: 1;
+    width: auto;
+  }
+
+  .replay-library-scroll {
+    margin-right: 0;
+  }
+
+  .replay-day-title {
+    padding: calc(var(--spacing) * 3.5) calc(var(--spacing) * 2) calc(var(--spacing) * 1.5);
+  }
+
+  .replay-main.stage-col {
+    flex: none;
+    padding: var(--spacing) calc(var(--spacing) * 2) 0;
+  }
+
+  .replay-main .stage-band {
+    flex: none;
+  }
+
+  .replay-transport-slot {
+    right: calc(var(--spacing) * 1.5);
+    bottom: calc(var(--spacing) * 1.5);
+    left: calc(var(--spacing) * 1.5);
+  }
+
+  :is(.replay-gap-card, .replay-error) {
+    bottom: 48px;
+  }
+
+  .replay-steps {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
     padding-inline: calc(var(--spacing) * 4);
   }
 
-  .replay-main {
-    --_w: 100%;
-    container-type: normal;
-    gap: calc(var(--spacing) * 2);
-    padding-top: 0;
-  }
-
-  .replay-export-text,
-  .replay-library-trigger-text[data-phone="hidden"] {
-    display: none;
-  }
-
-  .replay-library-trigger-text[data-phone=""] {
-    display: inline;
-  }
-
-  .replay > .activity-rail {
+  .replay-steps > .activity-rail {
+    flex: 1;
     min-height: 0;
-    padding-top: calc(var(--spacing) * 2);
+  }
+
+  .replay-toolbar {
+    position: relative;
+    display: grid;
+    flex: none;
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3)
+      calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+    background-color: var(--_toolbar);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
+    --_toolbar: color-mix(in srgb, var(--color-void) 78%, transparent);
+  }
+
+  .replay-toolbar::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    left: 0;
+    height: calc(var(--spacing) * 6);
+    background: linear-gradient(transparent, var(--_toolbar));
+    pointer-events: none;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .replay-track,
-  .replay-knob {
+  .replay-knob,
+  .replay-task {
     transition: none;
   }
 
-  .replay-preview,
+  .replay-preview-pop,
   .replay-gap-card {
     translate: -50% 0;
     scale: 1;
@@ -836,16 +1056,17 @@
   :is(.replay-gap-card, .replay-error) {
     backdrop-filter: none;
   }
+
+  .replay-transport {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 @media (forced-colors: active) {
-  .replay-rim[data-on] {
-    outline: 3px solid Highlight;
-  }
-
   .replay-played,
-  .replay-playhead,
   .replay-knob {
-    background-color: Highlight;
+    background: Highlight;
   }
 }

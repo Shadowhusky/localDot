@@ -1,7 +1,13 @@
 import { vi } from "vitest";
-import themeCss from "../theme.css?raw";
-import tokensCss from "../ui/tokens.css?raw";
+import { readSource } from "./read-source.ts";
 import { readTokens } from "./tokens.ts";
+
+// Under jsdom a literal new URL(…, import.meta.url) becomes a served asset's address.
+const here = import.meta.url;
+const [tokensCss, themeCss] = await Promise.all([
+  readSource(new URL("../ui/tokens.css", here)),
+  readSource(new URL("../theme.css", here)),
+]);
 
 // Keeps every worker the stage starts and what it is sent, so a test can read the protocol.
 export class FakeWorker {

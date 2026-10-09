@@ -101,7 +101,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   );
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
   await expect(sheet.locator(".keys-row[data-id='weather']")).toContainText(
-    "api.weather.example, Authorization",
+    "api.weather.example, Added",
   );
   await page.unroute("**/api/keys");
   await expect(sheet).toHaveCSS("opacity", "1");

@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
-import type { ApprovalCard, PauseSnapshot } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import type { PauseSnapshot } from "@localdot/protocol";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { DesktopFrame } from "../stage/DesktopFrame.tsx";
 import { type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
+import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyView, useSafety } from "./useSafety.ts";
 
@@ -41,6 +40,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
     epoch: 7,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model: { ...emptyAgentModel(), safetyPause: pause },
   };
@@ -79,12 +79,12 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
     });
     return (
       <>
-        <DesktopFrame src="about:blank" onSource={() => {}} onStale={() => {}} />
+        <iframe src="about:blank" title="Desktop stream client" />
         <label>
           Parent task draft
           <input aria-label="Parent task draft" />
         </label>
-        <SafetyControls safety={current} agent={agent} cell={cell} />
+        <SafetyNotes safety={current} agent={agent} />
       </>
     );
   }

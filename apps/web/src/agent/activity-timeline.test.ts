@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { keyUseRow, type TimelineRow } from "../session/key-uses.ts";
+import type { StepRowView } from "../session/session-view.ts";
 import {
   type ActivityEntry,
   type ActivityStep,
+  changeView,
   diffStat,
+  type EntryView,
   entryView,
   foldKeyUses,
-  groupEntries,
-  groupMeta,
-  matchesFilter,
-  runsOnView,
+  withNextMoves,
 } from "./activity.ts";
 import type { AgentStep } from "./model.ts";
 
@@ -57,26 +57,6 @@ describe("the activity timeline", () => {
     expect(keys(foldKeyUses([key(1), key(2)]))).toEqual(["key-k1:", "key-k2:"]);
   });
 
-  it("groups consecutive runs by plan item, keeping unplanned rows in time order", () => {
-    const groups = groupEntries(
-      foldKeyUses([
-        stepRow("lead", 1),
-        stepRow("a", 2, "open"),
-        stepRow("loose", 3),
-        stepRow("b", 4, "draw"),
-        stepRow("c", 5, "open"),
-      ]),
-    );
-    expect(groups.map((group) => [group.id, group.entries.map((entry) => entry.row.id)])).toEqual([
-      ["open#0", ["lead", "a", "loose"]],
-      ["draw#0", ["b"]],
-      ["open#1", ["c"]],
-    ]);
-    expect(groupEntries(foldKeyUses([stepRow("x", 1)])).map((group) => group.id)).toEqual([
-      "none#0",
-    ]);
-  });
-
   it("describes a failed command, an unfinished step after a crash, and a step's file changes", () => {
     const [failed, open, files] = foldKeyUses([
       stepRow("f", 1, undefined, {
@@ -99,84 +79,159 @@ describe("the activity timeline", () => {
     };
     expect(entryView(failed, [], false)).toMatchObject({
       title: "Export",
-      metric: "1.6 s",
+      meta: "Exit code 1.",
+      time: "0:02",
       state: "failed",
-      reason: "Exit code 1",
+      failed: true,
     });
     expect(entryView(open, [], true)).toMatchObject({
       state: "todo",
       stateLabel: "Not confirmed",
-      reason: "The task ended before this step finished.",
+      meta: "The task ended before this step finished.",
     });
     expect(entryView(files, [change], false)).toMatchObject({
       title: "Created dog.md",
-      metric: "+2",
-      icon: "file-diff",
+      meta: "Files · +2",
+    });
+    expect(changeView(change)).toMatchObject({
+      title: "dog.md",
+      meta: "Created · +2",
+      icon: "file",
     });
   });
 
-  it("says when a screen step's input never reached the computer", () => {
-    const row: TimelineRow<ActivityStep> = {
-      kind: "step",
-      id: "s",
-      startT: 0,
-      computer: {
+  it("names a daily note apart from the facts dot always reads", () => {
+    const memory = (path: string, undoes?: string) =>
+      ({
+        id: "m",
+        type: "memory",
+        path,
+        patch: "+- Gate code noted\n",
+        truncated: false,
+        changeId: "01JXYZ0000000000000000CHNG",
+        ...(undoes ? { undoes } : {}),
+      }) as const;
+    expect(changeView(memory("notes/2026-10-08.md")).meta).toMatch(/^Added to today's notes/);
+    expect(changeView(memory("notes/2026-10-08.md", "01JXYZ0000000000000000PREV")).meta).toMatch(
+      /^Daily note undone/,
+    );
+    expect(changeView(memory("MEMORY.md")).meta).toMatch(/^Memory updated/);
+  });
+
+  it("says where a screen step happened and how, or why its input never reached the computer", () => {
+    const row = (extra: Partial<StepRowView>): ActivityEntry => ({
+      key: "s",
+      keys: [],
+      row: {
+        kind: "step",
         id: "s",
-        label: "Click Save",
-        verb: "click",
         startT: 0,
-        status: "failed",
-        durationMs: 200,
-        delivery: "proposed",
-        reason: "The target changed before input.",
+        computer: {
+          id: "s",
+          label: "Selecting February's net total",
+          startT: 0,
+          status: "doing",
+          durationMs: null,
+          ...extra,
+        },
       },
-    };
-    expect(entryView({ key: "s", row, keys: [] }, [], false)).toMatchObject({
-      testId: "step-row",
-      notSent: true,
-      reason: "The target changed before input.",
     });
-  });
-
-  it("counts a run's steps, failures and span, leaving key uses out", () => {
-    const views = foldKeyUses([
-      stepRow("a", 1000, "x", { status: "ok" }),
-      key(1500, "deny"),
-      stepRow("b", 2000, "x", { status: "failed" }),
-    ]).map((entry) => entryView(entry, [], false));
-    expect(groupMeta(views)).toEqual({ steps: 2, failed: 1, durationMs: 1000 });
-  });
-
-  it("keeps a filtered row under the run it happened in, and spans a run by its own rows", () => {
-    const entries = foldKeyUses([
-      stepRow("find", 1000, "open", { status: "ok", startedAt: 1_000_000, endedAt: 1_600_000 }),
-      stepRow("outline", 2000, "sketch", { kind: "gui", status: "ok" }),
-      key(2500, "deny"),
-      stepRow("face", 3000, "sketch", { kind: "gui", status: "ok" }),
-      stepRow("size", 60_000, "colour", { status: "ok" }),
-    ]);
-    const tools = entries.filter((entry) => matchesFilter(entry.row, "tools"));
-    const shown = runsOnView(groupEntries(entries), tools);
-    expect(shown.map((run) => [run.id, run.entries.map((entry) => entry.key)])).toEqual([
-      ["open#0", ["step-find"]],
-      ["sketch#0", ["key-k2500"]],
-      ["colour#0", ["step-size"]],
-    ]);
-    const [open] = shown;
-    expect(groupMeta(open?.entries.map((entry) => entryView(entry, [], false)) ?? [])).toEqual({
-      steps: 1,
-      failed: 0,
-      durationMs: 600,
+    expect(entryView(row({ app: "Calc", gesture: "click F3" }), [], false)).toMatchObject({
+      testId: "step-row",
+      meta: "Calc · click F3",
+      time: "",
+      state: "doing",
     });
     expect(
-      runsOnView(groupEntries(entries), entries.slice(3)).map((run) => [
-        run.id,
-        run.entries.length,
-      ]),
-    ).toEqual([
-      ["sketch#0", 1],
-      ["colour#0", 1],
+      entryView(
+        row({
+          status: "failed",
+          durationMs: 200,
+          delivery: "proposed",
+          reason: "The target changed before input.",
+        }),
+        [],
+        false,
+      ),
+    ).toMatchObject({ meta: "The target changed before input.", time: "0:01", failed: true });
+  });
+
+  it("leads a call's first row with dot's line for it, and keeps what it did in the meta line", () => {
+    const screen: ActivityEntry = {
+      key: "s",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "s",
+        startT: 0,
+        computer: {
+          id: "s",
+          label: "Clicked “Search”",
+          startT: 0,
+          status: "ok",
+          durationMs: 400,
+          app: "Telegram",
+          gesture: "click Search",
+          intent: "Finding your chat with Mum",
+        },
+      },
+    };
+    expect(entryView(screen, [], false)).toMatchObject({
+      title: "Finding your chat with Mum",
+      meta: "Telegram · Clicked “Search”",
+    });
+    const command: ActivityEntry = {
+      key: "c",
+      keys: [],
+      row: stepRow("c", 0, undefined, {
+        intent: "Checking which paint apps are installed",
+        tool: { name: "shell", title: "command -v gimp krita" },
+        status: "ok",
+      }),
+    };
+    expect(entryView(command, [], false)).toMatchObject({
+      title: "Checking which paint apps are installed",
+      meta: "Terminal · command -v gimp krita",
+    });
+  });
+
+  it("shows dot's line for a call as plain words, as the band does", () => {
+    const entry: ActivityEntry = {
+      key: "c",
+      keys: [],
+      row: stepRow("c", 0, undefined, {
+        intent: "Saving **report.ods** to `~/Documents`",
+        tool: { name: "shell", title: "cp report.ods ~/Documents" },
+        status: "ok",
+      }),
+    };
+    expect(entryView(entry, [], false).title).toBe("Saving report.ods to ~/Documents");
+  });
+
+  it("says in a failed row what dot did next: tried again, made room and tried again, or moved on", () => {
+    const view = (title: string, state: EntryView["state"] = "done", meta = ""): EntryView => ({
+      testId: "step-row",
+      title,
+      meta,
+      time: "",
+      state,
+      stateLabel: state,
+      startT: 0,
+      endT: null,
+    });
+    const failed = view("Click Save", "failed", "The target changed before input.");
+    const metas = (views: EntryView[]) => withNextMoves(views).map((row) => row.meta);
+    expect(metas([failed, view("Clicked Save")])).toEqual([
+      "The target changed before input. Tried again.",
+      "",
     ]);
+    expect(metas([failed, view("Scrolled down"), view("Clicked Save")])[0]).toBe(
+      "The target changed before input. Scrolled down, then tried again.",
+    );
+    expect(metas([failed, view("Opened the File menu")])[0]).toBe(
+      "The target changed before input. Then opened the File menu.",
+    );
+    expect(metas([view("Export", "failed", "Exit code 1")])).toEqual(["Exit code 1"]);
   });
 
   it("counts added and removed lines, not file headers", () => {

@@ -1,4 +1,4 @@
-import { type SessionCard, SessionIndexPage } from "@localdot/protocol";
+import { type SearchHit, type SessionCard, SessionIndexPage } from "@localdot/protocol";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -10,19 +10,42 @@ import {
   useRef,
   useState,
 } from "react";
+import { DotLoader } from "../dot/DotLoader.tsx";
 import { type ApiClient, ApiError } from "../lib/api.ts";
+import { dayLabel } from "../settings/memory/memory-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
-import { Menu, MenuItem } from "../ui/Menu.tsx";
-import { triggerProps } from "../ui/Popover.tsx";
+import { ListRow } from "../ui/ListRow.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { Highlight } from "./Highlight.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
-import { byDay, matchesSearch, taskMeta, taskTitle, verdictGlyph } from "./replay-view.ts";
+import {
+  byDay,
+  inFilter,
+  type LibraryFilter,
+  matchesSearch,
+  rowMeta,
+  taskTitle,
+  timeLabel,
+  verdictGlyph,
+} from "./replay-view.ts";
+import type { TaskMatches } from "./search-api.ts";
+
+// A deleted row folds away over this long before the list lets it go.
+const FOLD_MS = 470;
+
+export interface ContinueTask {
+  // The current conversation's latest task: the next message already continues it.
+  current: string | null;
+  // Why no conversation can be continued now.
+  reason?: string;
+  run(sessionId: string): void;
+}
 
 export interface TaskIndex {
   cards: SessionCard[];
@@ -95,13 +118,25 @@ export function useTaskIndex(api: ApiClient): TaskIndex {
   };
 }
 
-export function TasksSearch({ value, onChange }: { value: string; onChange(value: string): void }) {
+export function TasksSearch({
+  value,
+  onChange,
+  size = "md",
+  filled = false,
+}: {
+  value: string;
+  onChange(value: string): void;
+  size?: "sm" | "md";
+  filled?: boolean;
+}) {
   return (
     <TextField
       className="replay-search"
+      size={size}
+      filled={filled}
       prefix={<Icon name="search" />}
-      aria-label="Search tasks"
-      placeholder="Search tasks"
+      aria-label="Search recordings"
+      placeholder="Search recordings"
       enterKeyHint="search"
       autoComplete="off"
       value={value}
@@ -116,34 +151,71 @@ export function TasksSearch({ value, onChange }: { value: string; onChange(value
   );
 }
 
-function rowLinks(list: HTMLElement): HTMLElement[] {
-  return [...list.querySelectorAll<HTMLElement>(".replay-task-open")];
+// The recordings a search and a filter leave, in the index's order: a title that matches, or
+// words said in the task that the search index found.
+export function shownCards(
+  cards: readonly SessionCard[],
+  search: string,
+  filter: LibraryFilter = "all",
+  matches?: TaskMatches,
+): SessionCard[] {
+  return cards.filter(
+    (card) =>
+      inFilter(card, filter) &&
+      (search.trim() === "" || matchesSearch(card, search) || !!matches?.tasks.has(card.id)),
+  );
+}
+
+const MATCH_KIND: Record<SearchHit["kind"], string> = {
+  title: "Title",
+  user: "You wrote",
+  assistant: "dot replied",
+  summary: "Result",
+  step: "Step",
+  file: "File",
+  note: "Daily note",
+};
+
+function rowButtons(list: HTMLElement): HTMLElement[] {
+  return [...list.querySelectorAll<HTMLElement>(".ui-list-row-select")];
 }
 
 export function TaskList({
   api,
   index,
   search,
+  filter = "all",
   selectedId,
   onSelect,
   onDeleted,
+  continueTask,
+  matches,
+  variant = "library",
 }: {
   api: ApiClient;
   index: TaskIndex;
   search: string;
+  filter?: LibraryFilter;
+  matches?: TaskMatches;
   selectedId: string | null;
+  // A row was chosen: the library shows it beside the list, a phone or the rail opens it.
   onSelect(id: string): void;
   onDeleted(id: string): void;
+  continueTask?: ContinueTask;
+  // The library's wide rows; a phone's, with the length in the meta line, Continue always shown and
+  // a swipe to delete; or the player's rail, where a row only opens its recording.
+  variant?: "library" | "phone" | "rail";
 }) {
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLElement | null>(null);
-  const [menuFor, setMenuFor] = useState<SessionCard | null>(null);
   const [deleting, setDeleting] = useState<SessionCard | null>(null);
+  const [folding, setFolding] = useState<ReadonlySet<string>>(new Set());
   const now = useMemo(() => new Date(), []);
-  const searching = search.trim() !== "";
-  const shown = searching ? index.cards.filter((card) => matchesSearch(card, search)) : index.cards;
-  const { more, loading, failed, loadMore } = index;
+  const searching = search.trim() !== "" || filter !== "all";
+  const shown = shownCards(index.cards, search, filter, matches);
+  const notes = search.trim() && filter === "all" ? (matches?.notes ?? []) : [];
+  const { more, loading, failed, loadMore, forget } = index;
 
   // A search looks through every task, so it reads the pages a scroll has not reached yet. A page
   // that failed waits for Try again.
@@ -161,13 +233,22 @@ export function TaskList({
     return () => observer.disconnect();
   }, [more, loadMore]);
 
+  useEffect(() => {
+    if (folding.size === 0) return;
+    const timer = setTimeout(() => {
+      for (const id of folding) forget(id);
+      setFolding(new Set());
+    }, FOLD_MS);
+    return () => clearTimeout(timer);
+  }, [folding, forget]);
+
   const ask = (card: SessionCard, from: HTMLElement | null) => {
     anchor.current = from;
     setDeleting(card);
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLAnchorElement>) => {
-    const rows = list.current ? rowLinks(list.current) : [];
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const rows = list.current ? rowButtons(list.current) : [];
     const at = rows.indexOf(event.target as HTMLElement);
     if (at < 0) return;
     const go = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: rows.length - 1 }[event.key];
@@ -175,13 +256,10 @@ export function TaskList({
       event.preventDefault();
       rows[Math.max(0, Math.min(rows.length - 1, go))]?.focus();
     } else if (event.key === "Backspace" || event.key === "Delete") {
-      const card = shown.find((item) => item.id === rows[at]?.dataset.task);
+      const card = shown.find((item) => item.id === rows[at]?.closest("li")?.dataset.task);
       if (!card) return;
       event.preventDefault();
-      ask(
-        card,
-        rows[at]?.parentElement?.querySelector<HTMLElement>(".replay-task-more button") ?? null,
-      );
+      ask(card, rows[at] ?? null);
     }
   };
 
@@ -189,7 +267,7 @@ export function TaskList({
   if (index.failed && index.cards.length === 0)
     body = (
       <EmptyState
-        title="Tasks couldn't load"
+        title="Recordings couldn't load"
         icon="circle-alert"
         actions={
           <Button size="sm" onClick={index.retry}>
@@ -198,15 +276,22 @@ export function TaskList({
         }
       />
     );
-  else if (loading && index.cards.length === 0) body = <TaskSkeletons />;
+  else if (loading && index.cards.length === 0)
+    body = <DotLoader className="replay-loading" label="Loading your recordings" />;
   else if (index.cards.length === 0)
     body = (
-      <EmptyState title="No tasks yet" icon="monitor">
+      <EmptyState title="No recordings yet" icon="history">
         Each task dot runs is recorded here, to watch again.
       </EmptyState>
     );
-  else if (shown.length === 0 && !(more || loading))
-    body = <EmptyState layout="start" icon="search" title={`No tasks match “${search.trim()}”`} />;
+  else if (shown.length === 0 && notes.length === 0 && !(more || loading || matches?.pending))
+    body = (
+      <EmptyState
+        layout="start"
+        icon="search"
+        title={search.trim() ? `No recordings match “${search.trim()}”` : "No recordings here"}
+      />
+    );
   else
     body = byDay(shown, now).map(({ day, cards }) => (
       <Day key={day} day={day}>
@@ -215,25 +300,26 @@ export function TaskList({
             key={card.id}
             api={api}
             card={card}
-            selected={card.id === selectedId}
-            menuOpen={menuFor?.id === card.id}
-            onOpen={() => onSelect(card.id)}
-            onKeyDown={onKeyDown}
-            onMore={(trigger) => {
-              anchor.current = trigger;
-              setMenuFor(card);
-            }}
+            variant={variant}
+            selected={variant !== "phone" && card.id === selectedId}
+            folding={folding.has(card.id)}
+            continueTask={variant === "rail" ? undefined : continueTask}
+            match={matchesSearch(card, search) ? undefined : matches?.tasks.get(card.id)}
+            onSelect={() => onSelect(card.id)}
+            onDelete={(trigger) => ask(card, trigger)}
           />
         ))}
       </Day>
     ));
 
   return (
-    <div ref={list} className="replay-tasks">
+    // biome-ignore lint/a11y/noStaticElementInteractions: the rows' own buttons take the keys; the list only moves focus between them.
+    <div ref={list} className="replay-tasks" data-variant={variant} onKeyDown={onKeyDown}>
       {body}
+      {notes.length > 0 && <NoteMatches notes={notes} now={now} />}
       {index.failed && index.cards.length > 0 && (
         <p className="replay-tasks-note" role="alert">
-          More tasks couldn't load.{" "}
+          More recordings couldn't load.{" "}
           <Button size="sm" variant="quiet" onClick={index.loadMore}>
             Try again
           </Button>
@@ -244,38 +330,27 @@ export function TaskList({
           <TaskSkeletons count={1} />
         </div>
       )}
-      <Menu
-        open={menuFor !== null}
-        onClose={() => setMenuFor(null)}
-        anchor={anchor}
-        align="end"
-        label={menuFor ? `Actions for ${taskTitle(menuFor)}` : "Task actions"}
-      >
-        <MenuItem
-          kbd={["Backspace"]}
-          onSelect={() => {
-            if (menuFor) ask(menuFor, anchor.current);
-          }}
-        >
-          Delete recording…
-        </MenuItem>
-      </Menu>
       <DeleteTask
         api={api}
         card={deleting}
         anchor={anchor}
         onClose={() => setDeleting(null)}
         onDeleted={(card) => {
-          const rows = list.current ? rowLinks(list.current) : [];
-          const at = rows.findIndex((row) => row.dataset.task === card.id);
+          const rows = list.current ? rowButtons(list.current) : [];
+          const at = rows.findIndex((row) => row.closest("li")?.dataset.task === card.id);
           anchor.current = rows[at + 1] ?? rows[at - 1] ?? null;
           setDeleting(null);
-          index.forget(card.id);
+          setFolding((was) => new Set([...was, card.id]));
           onDeleted(card.id);
         }}
       />
     </div>
   );
+}
+
+// A task that has ended can take its conversation up again, unless it is already where it goes on.
+export function continuable(card: Pick<SessionCard, "id" | "verdict">, task: ContinueTask) {
+  return card.verdict !== "live" && card.id !== task.current;
 }
 
 function Day({ day, children }: { day: string; children: ReactNode }) {
@@ -290,72 +365,119 @@ function Day({ day, children }: { day: string; children: ReactNode }) {
   );
 }
 
+// Daily notes that match: dot's own notes, from tasks that may since have been deleted.
+function NoteMatches({ notes, now }: { notes: readonly SearchHit[]; now: Date }) {
+  return (
+    <Day day="Daily notes">
+      {notes.map((note) => (
+        <li key={`${note.at}:${note.snippet}`} className="replay-note">
+          <span className="replay-note-text">
+            <Highlight text={note.snippet} />
+          </span>
+          <span className="replay-note-day num">{dayLabel(note.at, now)}</span>
+        </li>
+      ))}
+    </Day>
+  );
+}
+
 function TaskRow({
   api,
   card,
+  variant,
   selected,
-  menuOpen,
-  onOpen,
-  onKeyDown,
-  onMore,
+  folding,
+  continueTask,
+  match,
+  onSelect,
+  onDelete,
 }: {
   api: ApiClient;
   card: SessionCard;
+  variant: "library" | "phone" | "rail";
   selected: boolean;
-  menuOpen: boolean;
-  onOpen(): void;
-  onKeyDown(event: KeyboardEvent<HTMLAnchorElement>): void;
-  onMore(trigger: HTMLElement): void;
+  folding: boolean;
+  continueTask?: ContinueTask;
+  // What the task said that a search found, when its title alone did not match.
+  match?: SearchHit;
+  onSelect(): void;
+  onDelete(trigger: HTMLElement): void;
 }) {
   const title = taskTitle(card);
   const verdict = verdictGlyph(card.verdict);
+  const phone = variant === "phone";
+  const wide = variant === "library";
   return (
-    <li className="replay-task" data-selected={selected ? "" : undefined}>
-      <a
-        className="replay-task-open"
-        href={`?replay=${card.id}`}
-        data-task={card.id}
-        aria-current={selected ? "page" : undefined}
-        draggable={false}
-        onKeyDown={onKeyDown}
-        onClick={(event) => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          onOpen();
-        }}
-      >
-        <span className="replay-task-cover" aria-hidden="true">
-          <ReplayImage api={api} sessionId={card.id} frameId={card.coverFrameId} />
-        </span>
-        <span className="replay-task-text">
-          <span className="replay-task-title">{title}</span>
-          <span className="replay-task-meta num">{taskMeta(card)}</span>
-        </span>
-        <StatusGlyph className="replay-task-verdict" state={verdict.state} label={verdict.label} />
-      </a>
-      <span className="replay-task-more" data-open={menuOpen ? "" : undefined}>
-        <IconButton
-          size={24}
-          icon="more-horizontal"
-          label={`More for ${title}`}
-          {...triggerProps("menu", menuOpen)}
-          onClick={(event) => onMore(event.currentTarget)}
+    <li className="replay-task" data-task={card.id} data-folding={folding ? "" : undefined}>
+      <div className="replay-task-fold">
+        <ListRow
+          title={title}
+          compact={variant === "rail"}
+          selected={selected}
+          onSelect={onSelect}
+          thumbnail={<ReplayImage api={api} sessionId={card.id} frameId={card.coverFrameId} />}
+          meta={
+            <>
+              <StatusGlyph state={verdict.state} label={verdict.label} />
+              {match ? (
+                <span className="replay-match">
+                  {/* A narrow row leads with the matched word itself. */}
+                  {!phone && `${MATCH_KIND[match.kind]} · `}
+                  <Highlight text={match.snippet} before={phone ? 0 : 8} />
+                </span>
+              ) : (
+                <span className="num">{rowMeta(card, !wide)}</span>
+              )}
+            </>
+          }
+          trailing={wide && card.durationMs !== null ? timeLabel(card.durationMs) : undefined}
+          actions={
+            variant !== "rail" && (
+              <>
+                {continueTask && (
+                  <Button
+                    size="sm"
+                    icon={phone ? undefined : "continue"}
+                    disabledReason={
+                      continuable(card, continueTask) ? continueTask.reason : undefined
+                    }
+                    onClick={() => continueTask.run(card.id)}
+                  >
+                    Continue
+                  </Button>
+                )}
+                {wide && (
+                  <IconButton
+                    size={28}
+                    icon="trash"
+                    label={`Delete ${title}`}
+                    onClick={(event) => onDelete(event.currentTarget)}
+                  />
+                )}
+              </>
+            )
+          }
+          swipe={
+            phone
+              ? { label: "Delete", accessibleLabel: `Delete ${title}`, onAction: onDelete }
+              : undefined
+          }
         />
-      </span>
+      </div>
     </li>
   );
 }
 
-function TaskSkeletons({ count = 3 }: { count?: number }) {
+export function TaskSkeletons({ count = 3 }: { count?: number }) {
   return (
     <div className="replay-skeletons" aria-hidden="true">
       {Array.from({ length: count }, (_, row) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows have nothing else to key on.
         <div key={row} className="replay-skeleton-row">
-          <Skeleton loading shape="block" width="72px" height="45px" />
-          <span className="replay-task-text">
-            <Skeleton loading width="16ch" />
-            <Skeleton loading width="9ch" />
+          <Skeleton loading shape="block" width="96px" height="60px" />
+          <span className="replay-skeleton-text">
+            <Skeleton loading width="24ch" />
+            <Skeleton loading width="14ch" />
           </span>
         </div>
       ))}
@@ -363,7 +485,7 @@ function TaskSkeletons({ count = 3 }: { count?: number }) {
   );
 }
 
-function DeleteTask({
+export function DeleteTask({
   api,
   card,
   anchor,
@@ -378,9 +500,6 @@ function DeleteTask({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const last = useRef(card);
-  if (card) last.current = card;
-  const shown = last.current;
   const opened = card?.id;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a newly opened card starts clean.
   useEffect(() => {
@@ -411,12 +530,12 @@ function DeleteTask({
         if (!busy) onClose();
       }}
       anchor={anchor}
-      title="Delete this task's recording?"
+      title="Delete this recording?"
       description={
         error ? (
           <span role="alert">{error}</span>
         ) : (
-          `“${shown ? taskTitle(shown) : ""}” and its video, screenshots and steps are removed from this Mac. You can't undo this.`
+          "Its video, screenshots and steps are removed from this Mac. You can't undo this."
         )
       }
     >
@@ -427,7 +546,7 @@ function DeleteTask({
       >
         Cancel
       </Button>
-      <Button busy={busy} onClick={() => void remove()}>
+      <Button variant="destructive" busy={busy} onClick={() => void remove()}>
         Delete
       </Button>
     </Dialog>

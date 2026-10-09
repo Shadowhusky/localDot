@@ -67,7 +67,7 @@ test("a Pause the computer cannot confirm says so", async ({ page }) => {
   await page.getByRole("button", { name: "Pause after this step" }).click();
   await expectWaiting(page, "Paused");
   await qa(page, "pause-uncertain");
-  await expectWaiting(page, "Pause unconfirmed");
+  await expectWaiting(page, "Pause not confirmed");
   await expect(page.getByRole("button", { name: "Resume task" })).toBeDisabled();
 });
 
@@ -79,26 +79,24 @@ test("an approval puts the decision first and takes control from dot", async ({ 
   await expect(page.locator(".task-connection")).toHaveText("Waiting for you");
 });
 
-test("after Approve once, dot has control again and a late heartbeat still warns", async ({
-  page,
-}) => {
+test("after Send, dot has control again and a quiet task still warns", async ({ page }) => {
   await open(page);
   await qa(page, "approval?risk=medium");
   await expectWaiting(page, "Needs your OK");
-  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(status(page)).toHaveText("Select the Net total cell");
   await expect(control(page)).toHaveCount(1);
   await qa(page, "heartbeat");
   await expect(
-    page.getByText("The task heartbeat is late. You can use Stop if you want to contain it."),
+    page.getByText("This is taking longer than usual. Stop me if it looks stuck."),
   ).toBeVisible();
 });
 
-test("Replay after Approve once shows dot back at work, not still waiting", async ({ page }) => {
+test("Replay after Send shows dot back at work, not still waiting", async ({ page }) => {
   await open(page);
   await qa(page, "approval?risk=medium");
   await expectWaiting(page, "Needs your OK");
-  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(status(page)).toHaveText("Select the Net total cell");
   await page
     .getByRole("navigation", { name: "Mode" })
@@ -155,14 +153,14 @@ test("Replay reads a Pause as pausing until the step it waits on ends, as live d
 test("a question puts the question first", async ({ page }) => {
   await open(page);
   await qa(page, "ask");
-  await expectWaiting(page, "Has a question");
-  await expect(page.locator(".caption")).toContainText("Which report format should I use?");
+  await expectWaiting(page, "Needs your answer");
+  await expect(page.locator(".narration")).toContainText("Which report format should I use?");
 });
 
 test("a budget pause names the limit", async ({ page }) => {
   await open(page);
   await qa(page, "budget");
-  await expectWaiting(page, "Paused · Limit reached");
+  await expectWaiting(page, "Spending limit reached");
   await expect(page.getByRole("region", { name: "Task recovery" })).toBeVisible();
 });
 
@@ -174,7 +172,7 @@ test("after Stop and Resume computer, the live computer keeps the stopped verdic
   await page.getByRole("button", { name: "Resume computer" }).click();
   await expect(status(page)).toHaveText("Task stopped");
   await expect(hudButton(page)).toHaveText("Stop computer");
-  await expect(page.locator(".live")).toHaveText("Live");
+  await expect(page.locator(".live")).toHaveText("Ready");
   await expect(control(page)).toHaveCount(0);
   await expect(page.locator(".task-connection")).toHaveCount(0);
 });

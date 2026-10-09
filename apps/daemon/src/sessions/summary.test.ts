@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { EventLog } from "../event-log.ts";
 import { seedSession } from "../recorder/testing/seed-session.ts";
@@ -91,5 +92,35 @@ describe("session summaries", () => {
       verdict: "stopped",
       durationMs: 3000,
     });
+  });
+});
+
+describe("routine runs", () => {
+  it("carries a routine origin onto the card", async () => {
+    const home = setup();
+    const log = new EventLog(home);
+    logs.push(log);
+    const screen = { w: 2560, h: 1600, scale: 2 };
+    const origin = {
+      kind: "routine" as const,
+      routineId: ulid(),
+      runId: ulid(),
+      name: "Morning bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    };
+    const routine = log.createSession("Morning bills");
+    log.append(routine, {
+      type: "session.start",
+      agent: "main",
+      data: { screen, os: "linux", title: "Morning bills", origin },
+    });
+    const typed = log.createSession("Typed task");
+    log.append(typed, {
+      type: "session.start",
+      agent: "main",
+      data: { screen, os: "linux", title: "Typed task" },
+    });
+    expect((await summarizeSession(home, routine, { live: false })).origin).toEqual(origin);
+    expect(await summarizeSession(home, typed, { live: false })).not.toHaveProperty("origin");
   });
 });

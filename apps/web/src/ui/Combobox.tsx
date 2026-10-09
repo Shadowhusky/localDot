@@ -39,6 +39,7 @@ export function Combobox({
   searchPlaceholder = "Search",
   customDescription,
   size = "md",
+  appearance = "field",
   className,
   "aria-label": ariaLabel,
   ...props
@@ -123,6 +124,7 @@ export function Combobox({
         id={control.id}
         className={clsx("ui-field-box ui-select-trigger", className)}
         data-size={size}
+        data-appearance={appearance}
         data-open={open ? "" : undefined}
         data-invalid={control.invalid ? "" : undefined}
         data-unavailable={unavailable ? "" : undefined}
@@ -138,7 +140,7 @@ export function Combobox({
         <span className="ui-select-value" data-placeholder={selected || value ? undefined : ""}>
           {selected?.label ?? (value || placeholder)}
         </span>
-        <Icon name="chevron-down" className="ui-select-chevron" />
+        <Icon name="chevrons-up-down" size={14} className="ui-select-chevron" />
       </button>
       <PickerPopup
         open={open}
@@ -157,7 +159,7 @@ export function Combobox({
               id={`${id}search`}
               type="search"
               role="combobox"
-              size={sheet ? "lg" : "md"}
+              size={sheet ? "md" : "sm"}
               prefix={<Icon name="search" />}
               placeholder={searchPlaceholder}
               value={query}

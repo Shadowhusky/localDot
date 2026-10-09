@@ -17,7 +17,7 @@
   max-width: calc(var(--spacing) * 110);
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    translate var(--dur-spring) var(--ease-spring);
+    translate var(--dur-default) var(--ease-spring);
 }
 
 @starting-style {
@@ -33,9 +33,9 @@
 
 .sign-in-title {
   font:
-    var(--text-display--font-weight) var(--text-display) / var(--text-display--line-height)
+    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-display--letter-spacing);
+  letter-spacing: var(--text-title-1--letter-spacing);
 }
 
 .sign-in-message {
@@ -46,25 +46,59 @@
 }
 
 .sign-in-command {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
   margin-top: calc(var(--spacing) * 5);
-  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1) calc(var(--spacing) * 1)
-    calc(var(--spacing) * 4);
-  border-radius: var(--radius-lg);
-  background: var(--color-raised);
-  box-shadow: var(--shadow-raised);
 }
 
-.sign-in-command code {
-  color: var(--color-fg-1);
-  font: var(--text-reading) / var(--text-reading--line-height) var(--font-mono);
-  user-select: all;
+.sign-in-form {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  width: 100%;
+  margin-top: calc(var(--spacing) * 5);
+}
+
+.sign-in-form > .ui-button {
+  justify-self: start;
 }
 
 .sign-in-foot {
   margin-top: calc(var(--spacing) * 4);
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* A command to run in Terminal with its copy button inside the plate's right edge. In a form or a
+   raised group it sits on the control face; large, alone on the house, it is a raised plate, as on
+   the installer's page (apps/cli install/browser-page.ts). */
+.command-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  width: fit-content;
+  max-width: 100%;
+  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 0.5) calc(var(--spacing) * 0.5)
+    calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background: var(--color-control);
+}
+
+.command-chip[data-size="lg"] {
+  gap: calc(var(--spacing) * 2);
+  padding: var(--spacing) var(--spacing) var(--spacing) calc(var(--spacing) * 4);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.command-chip code {
+  min-width: 0;
+  color: var(--color-fg-1);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  user-select: all;
+}
+
+.command-chip[data-size="lg"] code {
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-mono);
 }

@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
+import { requestRevise } from "../deliverables/revise-draft.ts";
 import { createApi } from "../lib/api.ts";
+import type { TextAreaProps } from "../ui/TextArea.tsx";
 import { withAttachments } from "./attachments.ts";
-import { Composer, type ComposerProps } from "./Composer.tsx";
+import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -17,6 +20,29 @@ vi.mock("../ui/Announcer.tsx", async (importOriginal) => ({
 // What the composer said through the page's one polite region.
 const said = () =>
   spoken.announce.mock.calls.flatMap(([channel, text]) => (channel === "composer" ? [text] : []));
+
+// How often the message field itself renders, and how often a key scan runs.
+const counts = vi.hoisted(() => ({ field: 0, scans: 0 }));
+vi.mock("../ui/TextArea.tsx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../ui/TextArea.tsx")>();
+  return {
+    ...actual,
+    TextArea: (props: TextAreaProps) => {
+      counts.field += 1;
+      return <actual.TextArea {...props} />;
+    },
+  };
+});
+vi.mock("@localdot/protocol", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@localdot/protocol")>();
+  return {
+    ...actual,
+    scanKeyLike: (text: string) => {
+      counts.scans += 1;
+      return actual.scanKeyLike(text);
+    },
+  };
+});
 
 // Lets one test pass a key-shaped name through the upload's own guards to reach Send's check.
 const transfer = vi.hoisted(() => ({ trustNames: false }));
@@ -370,7 +396,8 @@ describe("composer delivery ownership and draft handling", () => {
     f.update({ agent: { ...agent, snapshot: { ...snapshot, status: "paused" } } });
     expect(screen.getByText("Sending won't resume the task")).toBeTruthy();
     f.update({ agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } } });
-    expect(screen.getByText("You keep control of the computer")).toBeTruthy();
+    // While the user has the computer, the composer stays quiet about it: the island says so.
+    expect(screen.queryByText("Sending won't resume the task")).toBeNull();
   });
   it("offers no choice of when to send once the task is idle, so Option-Return does nothing", async () => {
     const f = setup(undefined, { agent: { ...agent, snapshot: { ...snapshot, status: "idle" } } });
@@ -510,12 +537,16 @@ describe("composer delivery ownership and draft handling", () => {
     });
     expect(f.field.disabled).toBe(false);
     f.input("Draft the monthly summary");
-    const connect = screen.getByRole("button", { name: "Connect a model" }) as HTMLButtonElement;
-    expect(connect.disabled).toBe(false);
-    fireEvent.click(connect);
-    expect(onSettings).toHaveBeenCalledExactlyOnceWith(f.field);
+    expect(screen.queryByRole("button", { name: "Connect a model" })).toBeNull();
+    const send = screen.getByRole("button", { name: "Start task" });
+    expect(send.getAttribute("aria-disabled")).toBe("true");
+    const reason = (send.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(reason).toContain("Choose a model first");
     fireEvent.keyDown(f.field, { key: "Enter" });
-    expect(onSettings).toHaveBeenCalledTimes(2);
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(f.field);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(f.field.value).toBe("Draft the monthly summary");
     expect(f.requests).toEqual([]);
@@ -635,20 +666,6 @@ describe("the composer's controls", () => {
       .split(" ")
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-  it("offers the task's Stop beside Send only while there is one, and says when it is stopping", () => {
-    const run = vi.fn();
-    const f = setup(undefined, { stop: { run, busy: false, enabled: true } });
-    fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
-    expect(run).toHaveBeenCalledOnce();
-    f.update({ stop: { run, busy: true, enabled: false } });
-    const stop = screen.getByRole("button", { name: "Stop task" });
-    expect(stop.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(stop);
-    expect(run).toHaveBeenCalledOnce();
-    f.update({ stop: undefined });
-    expect(screen.queryByRole("button", { name: "Stop task" })).toBeNull();
-    expect(f.requests).toEqual([]);
-  });
   it("counts what is left only near the limit, where typing stops", () => {
     const f = setup();
     expect(f.field.maxLength).toBe(8000);
@@ -692,41 +709,12 @@ describe("the composer's controls", () => {
       "Enter",
     );
   });
-  it("lets Stop shrink away before it goes", async () => {
-    const finished = Promise.withResolvers<void>();
-    Object.defineProperty(Element.prototype, "getAnimations", {
-      configurable: true,
-      value(this: Element) {
-        return this.matches("[data-leaving]")
-          ? [
-              {
-                finished: finished.promise,
-                effect: { getComputedTiming: () => ({ endTime: 150 }) },
-              },
-            ]
-          : [];
-      },
-    });
-    try {
-      const run = vi.fn();
-      const f = setup(undefined, { stop: { run, busy: false, enabled: true } });
-      f.update({ stop: undefined });
-      const leaving = f.container.querySelector(".composer-stop")?.closest(".composer-pop");
-      expect(leaving?.hasAttribute("data-leaving")).toBe(true);
-      expect(leaving?.hasAttribute("inert")).toBe(true);
-      await act(async () => finished.resolve());
-      expect(f.container.querySelector(".composer-stop")).toBeNull();
-      expect(run).not.toHaveBeenCalled();
-    } finally {
-      Reflect.deleteProperty(Element.prototype, "getAnimations");
-    }
-  });
   it("sends during a takeover with no files, and says when files can be added", async () => {
     const f = setup(undefined, {
       agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } },
     });
     expect(reasonOf(screen.getByRole("button", { name: "Attach files" }))).toContain(
-      "Add files once you return control to dot.",
+      "Add files once you hand back.",
     );
     f.input("Use the second sheet");
     f.submit();
@@ -737,6 +725,30 @@ describe("the composer's controls", () => {
         path: `/api/agent/sessions/${sessionId}/messages`,
         body: { kind: "steer", text: "Use the second sheet" },
       },
+    ]);
+  });
+  it("waits for the hand-back while the user holds the computer with no task, then starts one", async () => {
+    const f = setup(() => Response.json({ sessionId }, { status: 202 }), {
+      configured: true,
+      agent: {
+        ...agent,
+        snapshot: { ...snapshot, status: "idle", holder: true, pendingTakeover: otherSession },
+      },
+    });
+    f.input("Now fill in the form");
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Hand back the computer, then message dot. Your message stays here.",
+    );
+    expect(f.requests).toEqual([]);
+    f.update({
+      configured: true,
+      agent: { ...agent, snapshot: { ...snapshot, status: "idle", holder: true } },
+    });
+    f.submit();
+    await act(async () => {});
+    expect(f.requests).toEqual([
+      { path: `/api/cells/${cellId}/agent`, body: { task: "Now fill in the form" } },
     ]);
   });
   it("does nothing on Return with nothing written, and says why Send waits", () => {
@@ -753,7 +765,6 @@ describe("the composer's controls", () => {
       cell: null,
       known: true,
       configured: true,
-      model: "Claude Sonnet 5.5",
       agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
     });
     f.input("Summarise the report");
@@ -767,20 +778,37 @@ describe("the composer's controls", () => {
     expect(f.field.value).toBe("Summarise the report");
     expect(f.requests).toEqual([]);
   });
-  it("names the main model on a new task and opens Settings from it", () => {
-    const onSettings = vi.fn();
+  it("asks for a task as a prompt, with no model or Stop of its own", () => {
     setup(undefined, {
       configured: true,
-      model: "Claude Sonnet 5.5",
-      onSettings,
       agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
     });
     expect(screen.getByRole("textbox", { name: "New task" }).getAttribute("placeholder")).toBe(
-      "Ask dot to do something…",
+      "Ask dot to do something",
     );
-    const chip = screen.getByRole("button", { name: /^Model: Claude Sonnet 5\.5/ });
-    fireEvent.click(chip);
-    expect(onSettings).toHaveBeenCalledExactlyOnceWith(chip);
+    expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Stop/ })).toBeNull();
+  });
+  it("invites a message that continues the conversation while an ended task is on show", async () => {
+    const f = setup(
+      () => Response.json({ sessionId: "01JXYZ0000000000000000NEXT" }, { status: 202 }),
+      {
+        agent: {
+          ...agent,
+          model: { ...emptyAgentModel(), ended: { reason: "stopped" } },
+          snapshot: { sessionId, cellId, status: "ended", toolCalls: 0 },
+          fresh: false,
+        },
+      },
+    );
+    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe(
+      "Message dot",
+    );
+    f.input("Now make it blue");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
+    expect(f.requests).toEqual([
+      { path: `/api/cells/${cellId}/agent`, body: { task: "Now make it blue" } },
+    ]);
   });
   it("shows a dragged file over the card and adds what is dropped", async () => {
     transfer.trustNames = true;
@@ -1021,5 +1049,251 @@ describe("a message on its way", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
     expect(end.needs).toHaveBeenLastCalledWith(null);
     outbox.remove();
+  });
+});
+describe("typing", () => {
+  // Characters typed one at a time, as a keyboard sends them.
+  const type = (field: HTMLTextAreaElement, text: string) => {
+    for (const data of text) {
+      field.value += data;
+      fireEvent(field, new InputEvent("input", { bubbles: true, inputType: "insertText", data }));
+    }
+  };
+  it("renders nothing per keystroke, and the task's updates leave the field alone", () => {
+    const commits = vi.fn();
+    const props: ComposerProps = {
+      api: createApi("fixture", { origin: "http://127.0.0.1:4790" }),
+      cell,
+      agent,
+      known: true,
+      pending: false,
+      keysOpen: false,
+      receiveKey: vi.fn(() => false),
+    };
+    const view = render(
+      <Profiler id="composer" onRender={commits}>
+        <Composer {...props} />
+      </Profiler>,
+    );
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    const send = screen.getByRole("button", { name: "Send now" });
+    type(field, "A");
+    expect(send.getAttribute("aria-disabled")).toBeNull();
+    commits.mockClear();
+    type(field, "dd a chart of the monthly totals");
+    expect(commits).not.toHaveBeenCalled();
+    const renders = counts.field;
+    for (let update = 0; update < 5; update++)
+      view.rerender(
+        <Profiler id="composer" onRender={commits}>
+          <Composer {...props} agent={{ ...agent, model: emptyAgentModel() }} />
+        </Profiler>,
+      );
+    expect(commits).toHaveBeenCalled();
+    expect(counts.field).toBe(renders);
+    expect(field.value).toBe("Add a chart of the monthly totals");
+  });
+  it("checks typed text for keys once typing pauses, and at once on Send or leaving", async () => {
+    const f = setup();
+    const key = `sk-ant-api03-${"x".repeat(40)}`;
+    counts.scans = 0;
+    type(f.field, `token ${key}`);
+    expect(counts.scans).toBe(0);
+    expect(screen.queryByRole("region", { name: "Key safeguard" })).toBeNull();
+    await waitFor(() => expect(f.field.value).toBe("token "));
+    expect(counts.scans).toBe(1);
+    expect(screen.getByRole("region", { name: "Key safeguard" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
+
+    type(f.field, key);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(f.field.value).toBe("token ");
+    expect(screen.getByRole("region", { name: "Key safeguard" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
+
+    type(f.field, key);
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(f.field.value).toBe("token ");
+    expect(f.requests).toEqual([]);
+  });
+});
+describe("answering dot from the composer", () => {
+  it("answers dot's question, turns it down before sending the message on, or holds the message", async () => {
+    const reply = vi.fn<(text: string, attached: boolean) => Promise<ReplyOutcome>>();
+    const f = setup(undefined, { reply });
+    expect(f.field.placeholder).toBe("Answer dot");
+    reply.mockResolvedValueOnce("answered");
+    f.input("PDF");
+    f.submit();
+    await waitFor(() => expect(f.field.value).toBe(""));
+    expect(reply).toHaveBeenLastCalledWith("PDF", false);
+    expect(f.requests).toEqual([]);
+    reply.mockResolvedValueOnce("declined");
+    f.input("use my work account");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${sessionId}/messages`,
+      body: { kind: "steer", text: "use my work account" },
+    });
+    reply.mockResolvedValueOnce({ hold: "Type it in dot's question above." });
+    f.input("hunter2");
+    f.submit();
+    await screen.findByText("Type it in dot's question above.");
+    expect(f.field.value).toBe("hunter2");
+    expect(f.requests).toHaveLength(1);
+    f.update({ reply: undefined });
+    expect(f.field.placeholder).toBe("Message dot");
+  });
+
+  it("turns the question down before a message with files goes, rather than leaving it unread", async () => {
+    const calls: { path: string; body: unknown }[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url, init) => {
+        const target = new URL(String(url));
+        calls.push({ path: target.pathname, body: init?.body });
+        return target.pathname.endsWith("/upload")
+          ? Response.json({ path: "~/Downloads/plan.pdf" }, { status: 201 })
+          : new Response(null, { status: 202 });
+      },
+    });
+    const reply = vi.fn(async (_text: string, _attached: boolean): Promise<ReplyOutcome> => {
+      return "declined";
+    });
+    const f = setup(undefined, { api, reply });
+    f.input("Use this plan instead");
+    f.attach(new File(["plan"], "plan.pdf"));
+    await waitFor(() => expect(screen.getByText("Uploaded to Downloads")).toBeTruthy());
+    f.submit();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(reply).toHaveBeenCalledExactlyOnceWith("Use this plan instead", true);
+    expect(JSON.parse(String(calls[1]?.body))).toEqual({
+      kind: "steer",
+      text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
+    });
+  });
+});
+
+describe("revising a result file", () => {
+  const link = { sessionId, name: "totals.csv", version: 1 };
+  it("fills the composer, keeps what was typed and focuses it", () => {
+    const f = setup();
+    f.input("add a total row");
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    expect(f.field.value).toBe("Revise totals.csv: add a total row");
+    expect(document.activeElement).toBe(f.field);
+    expect(screen.getByRole("button", { name: "Stop revising totals.csv" })).toBeTruthy();
+  });
+  it("sends a revision of an ended task to the revise route with the link", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const ended = { ...agent, model: { ...emptyAgentModel(), ended: { reason: "done" as const } } };
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }), {
+      agent: ended,
+      configured: true,
+    });
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    f.input("Revise totals.csv: add a total row");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${sessionId}/files/totals.csv/revise`,
+      body: { cellId, version: 1, text: "Revise totals.csv: add a total row" },
+    });
+  });
+  it("sends a revision of an open task as a plain follow-up, and a removed chip drops the link", async () => {
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(undefined, { agent: idle });
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    f.input("Revise totals.csv: bigger chart");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
+    act(() => {
+      requestRevise({ link, label: 1, newest: false });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Stop revising totals.csv" }));
+    f.input("Revise totals.csv: from the first one");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(2));
+    expect(f.requests[1]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
+  });
+  it("revises an older version of an open task in a new linked task", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }), {
+      agent: idle,
+      configured: true,
+    });
+    act(() => {
+      requestRevise({ link, label: 1, newest: false });
+    });
+    f.input("Revise totals.csv: start again from this one");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/files/totals.csv/revise`);
+  });
+  it("revises an earlier task's newest file in a new task linked to it, not as a follow-up", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }), {
+      agent: idle,
+      configured: true,
+    });
+    act(() => {
+      requestRevise({ link: { ...link, sessionId: otherSession }, label: 1, newest: true });
+    });
+    f.input("Revise totals.csv: add a total row");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]).toEqual({
+      path: `/api/agent/sessions/${otherSession}/files/totals.csv/revise`,
+      body: { cellId, version: 1, text: "Revise totals.csv: add a total row" },
+    });
+  });
+  it("asks to wait before revising an earlier task's file while dot is working", async () => {
+    const f = setup();
+    act(() => {
+      requestRevise({ link: { ...link, sessionId: otherSession }, label: 2, newest: true });
+    });
+    f.input("Revise totals.csv: x");
+    f.submit();
+    expect(await screen.findByText("Wait for dot to finish, then revise v2.")).toBeTruthy();
+    expect(f.requests).toEqual([]);
+  });
+  it("lets the revising chip go once a message that no longer names the file is sent", async () => {
+    const idle = { ...agent, snapshot: { ...snapshot, status: "idle" as const } };
+    const f = setup(undefined, { agent: idle });
+    act(() => {
+      requestRevise({ link, label: 1, newest: true });
+    });
+    f.input("Thanks, that's all");
+    f.submit();
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop revising totals.csv" })).toBeNull(),
+    );
+  });
+  it("asks to wait before revising an older version while dot is working", async () => {
+    const f = setup();
+    act(() => {
+      requestRevise({ link, label: 1, newest: false });
+    });
+    f.input("Revise totals.csv: x");
+    f.submit();
+    expect(await screen.findByText("Wait for dot to finish, then revise v1.")).toBeTruthy();
+    expect(f.requests).toEqual([]);
   });
 });

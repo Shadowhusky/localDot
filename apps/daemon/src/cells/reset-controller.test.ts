@@ -1,13 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { ComputerFences } from "../agent/safety/fences.ts";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { AccountsProfile } from "./accounts-profile.ts";
 import { BrowserLedgerStore } from "./browser-ledger.ts";
 import { BrowserOrchestrator } from "./browser-orchestrator.ts";
 import { browserNames } from "./browser-spec.ts";
+import { ComputerUpdateStore, ComputerUpdates, UPDATE_LABEL } from "./computer-update.ts";
 import { DockerClient, DockerError } from "./docker.ts";
 import { CellOrchestrator } from "./orchestrator.ts";
 import { createComputerResetController } from "./reset-controller.ts";
@@ -25,6 +27,13 @@ const cleanups: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
+interface Container {
+  Id: string;
+  Name: string;
+  State: { Running: boolean; Paused: boolean };
+  Config: { Labels: Record<string, string> };
+  mounts: string[];
+}
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "localdot-reset-controller-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
@@ -49,7 +58,7 @@ function fixture() {
     phase: "retained",
   });
   const profile = browserNames(browserId).profileVolume;
-  const volumes = new Map([
+  const volumes = new Map<string, Record<string, string>>([
     [oldRecord.docker.homeVolume, { "localdot.cell": old, "localdot.role": "home" }],
     [
       profile,
@@ -66,6 +75,9 @@ function fixture() {
     [browserId, { cellId: browserId, role: "browser", port: 4761 }],
   ]);
   const events: string[] = [];
+  const containers = new Map<string, Container>();
+  const container = (ref: string) =>
+    containers.get(ref) ?? [...containers.values()].find((c) => c.Id === ref);
   const cell = vi.fn(async (id: string) => keys.get(id));
   const closeCell = vi.fn(async (id: string) => {
     events.push(`close:${id}`);
@@ -79,8 +91,39 @@ function fixture() {
     }),
   };
   const docker = new DockerClient(join(home, "unused.sock"));
+  const copy = "c".repeat(64);
   const request = vi.spyOn(docker, "request").mockImplementation(async (input) => {
-    if (input.path === "/containers/json") return [];
+    if (input.path === "/containers/json") {
+      const { volume = [] } = JSON.parse(input.query?.filters ?? "{}") as { volume?: string[] };
+      return [...containers.values()]
+        .filter((c) => c.mounts.some((mount) => volume.includes(mount)))
+        .map((c) => ({ Id: c.Id }));
+    }
+    if (input.path === "/volumes" && input.method === "GET")
+      return {
+        Volumes: [...volumes].map(([Name, Labels]) => ({ Name, Labels, CreatedAt: "" })),
+      };
+    if (input.path === "/volumes/create" && input.method === "POST") {
+      const body = input.body as { Name: string; Labels: Record<string, string> };
+      events.push(`make:${body.Name}`);
+      volumes.set(body.Name, body.Labels);
+      return { Name: body.Name };
+    }
+    if (input.path === "/containers/create") {
+      const body = input.body as { HostConfig: { Mounts: { Source: string }[] } };
+      events.push(`copy:${body.HostConfig.Mounts.map((mount) => mount.Source).join(">")}`);
+      return { Id: copy };
+    }
+    if (input.path === `/containers/${copy}/wait`) return { StatusCode: 0 };
+    if (input.path.startsWith(`/containers/${copy}`)) return undefined;
+    const ref = /^\/containers\/([^/]+?)(\/json)?$/.exec(input.path);
+    const found = ref && container(decodeURIComponent(ref[1] as string));
+    if (found && input.method === "GET" && ref[2]) return found;
+    if (found && input.method === "DELETE" && !ref[2]) {
+      events.push(`remove:${found.Name.slice(1)}`);
+      containers.delete(found.Name.slice(1));
+      return undefined;
+    }
     const name = input.path.startsWith("/volumes/")
       ? decodeURIComponent(input.path.slice(9))
       : undefined;
@@ -93,10 +136,13 @@ function fixture() {
     volumes.delete(name);
     return undefined;
   });
+  const images = { desktop: "fixture:dev", gate: "fixture:dev" };
+  const updates = new ComputerUpdates({ home, docker, images, stream: { fullcolor: false } });
   const cells = new CellOrchestrator({
     store,
     docker,
-    images: { desktop: "fixture:dev", gate: "fixture:dev" },
+    images,
+    updates,
     permanentFence: (id) => fences.isFenced(id),
     candidateHold: (id) => holds.candidateHeld(id),
     probeDesktopd: async () => undefined,
@@ -150,12 +196,14 @@ function fixture() {
     },
     create,
     retireReset: cells.retireReset.bind(cells),
+    discardUpdate: cells.discardUpdate.bind(cells),
     inspectReplacement: vi.fn(async (id: string) =>
       store.get(id) ? ("ready" as const) : ("absent" as const),
     ),
     retireReplacement: cells.retireReplacement.bind(cells),
     holdReplacement: cells.holdReplacement.bind(cells),
     publishReplacement: cells.publishReplacement.bind(cells),
+    thawReplacement: vi.fn(async (_id: string) => {}),
   };
   const deps = {
     home,
@@ -171,12 +219,15 @@ function fixture() {
   };
   const controller = createComputerResetController(deps);
   return {
+    accounts: new AccountsProfile({ home, docker, prefix: "localdot-", image: () => "" }).volume,
     home,
     holds,
     fences,
     store,
     ledgers,
     volumes,
+    containers,
+    oldRecord,
     keys,
     events,
     runner,
@@ -200,7 +251,7 @@ it("composes real computer/browser retirement, grant closure and durable publica
   expect(done.phase).toBe("ready");
   expect(f.store.get(old)).toBeUndefined();
   expect(f.ledgers.forParent(old)).toBeUndefined();
-  expect(f.volumes.size).toBe(0);
+  expect([...f.volumes.keys()]).toEqual([f.accounts]);
   expect(f.keys.size).toBe(0);
   expect(f.events[0]).toBe("drain");
   expect(f.events.at(-1)).toBe("create");
@@ -210,10 +261,64 @@ it("composes real computer/browser retirement, grant closure and durable publica
   expect(f.create).toHaveBeenCalledOnce();
   const restartedHolds = new ComputerResetHolds(f.home);
   const restarted = createComputerResetController({ ...f.deps, holds: restartedHolds });
-  expect(restartedHolds.candidateHeld(fresh)).toBe(true);
-  await restarted.restoreReady();
   expect(restartedHolds.candidateHeld(fresh)).toBe(false);
+  vi.mocked(f.deps.cells.inspectReplacement).mockClear();
+  await restarted.restoreReady();
+  expect(f.deps.cells.inspectReplacement).not.toHaveBeenCalled();
+  expect(restartedHolds.candidateHeld(fresh)).toBe(false);
+  expect(f.cells.get(fresh)?.replacementPending).toBeUndefined();
   expect(f.create).toHaveBeenCalledOnce();
+});
+it.each([
+  ["thaws a frozen candidate published before release receipts and confirms it", true],
+  ["keeps a frozen unconfirmable candidate held", false],
+])("on restart %s", async (_, recovers) => {
+  const f = fixture();
+  await f.controller.reset(old, confirmation);
+  const receipt = join(f.home, "safety/computer-reset-releases", `${requestId}.json`);
+  unlinkSync(receipt);
+  let frozen = true;
+  vi.mocked(f.deps.cells.inspectReplacement).mockImplementation(async () =>
+    frozen ? "owned" : "ready",
+  );
+  vi.mocked(f.deps.cells.thawReplacement).mockImplementation(async () => {
+    if (!recovers) throw new Error("not exactly owned");
+    frozen = false;
+  });
+  const restartedHolds = new ComputerResetHolds(f.home);
+  const restarted = createComputerResetController({
+    ...f.deps,
+    holds: restartedHolds,
+    readyTimeoutMs: 1000,
+  });
+  expect(restartedHolds.candidateHeld(fresh)).toBe(true);
+  if (recovers) await restarted.restoreReady();
+  else await expect(restarted.restoreReady()).rejects.toThrow(`could not re-verify ${fresh}`);
+  expect(f.deps.cells.thawReplacement).toHaveBeenCalledWith(fresh);
+  expect(restartedHolds.candidateHeld(fresh)).toBe(!recovers);
+  expect(existsSync(receipt)).toBe(recovers);
+  expect(new ComputerResetHolds(f.home).candidateHeld(fresh)).toBe(!recovers);
+  expect(f.create).toHaveBeenCalledOnce();
+});
+it("copies the computer's own sign-ins into the shared profile before erasing its old profile", async () => {
+  const f = fixture();
+  const profile = browserNames(browserId).profileVolume;
+  await f.controller.reset(old, confirmation);
+  const copied = f.events.indexOf(`copy:${profile}>${f.accounts}`);
+  expect(f.events.indexOf(`make:${f.accounts}`)).toBeLessThan(copied);
+  expect(copied).toBeGreaterThan(-1);
+  expect(copied).toBeLessThan(f.events.indexOf(`erase:${profile}`));
+  expect(f.volumes.get(f.accounts)?.["localdot.role"]).toBe("accounts-profile");
+});
+it("erases an old profile without copying once sign-ins already live in the shared profile", async () => {
+  const f = fixture();
+  writeFileSync(
+    join(f.home, "accounts-profile.json"),
+    JSON.stringify({ v: 1, owner: "00000000-0000-4000-8000-000000000009", migration: "done" }),
+  );
+  await f.controller.reset(old, confirmation);
+  expect(f.events.some((event) => event.startsWith("copy:"))).toBe(false);
+  expect(f.volumes.size).toBe(0);
 });
 it("leaves source records and volumes intact when task drain or key closure is unconfirmed", async () => {
   const f = fixture();
@@ -228,6 +333,37 @@ it("leaves source records and volumes intact when task drain or key closure is u
   expect(g.store.get(old)).toBeDefined();
   expect(g.volumes.size).toBe(2);
   expect(g.create).not.toHaveBeenCalled();
+});
+it("removes what an unfinished update left beside the computer before it checks what it erases", async () => {
+  const f = fixture();
+  const operationId = "01JXYZ00000000000000000005";
+  const leftover = `${f.oldRecord.docker.desktop}-update`;
+  new ComputerUpdateStore(f.home).write({
+    v: 1,
+    operationId,
+    cellId: old,
+    previous: { gate: "a".repeat(64), desktop: "b".repeat(64) },
+    images: { gate: `sha256:${"c".repeat(64)}`, desktop: `sha256:${"d".repeat(64)}` },
+    candidates: { gate: null, desktop: null },
+    phase: "creating",
+  });
+  f.containers.set(leftover, {
+    Id: "e".repeat(64),
+    Name: `/${leftover}`,
+    State: { Running: false, Paused: false },
+    Config: {
+      Labels: { "localdot.cell": old, "localdot.role": "desktop", [UPDATE_LABEL]: operationId },
+    },
+    mounts: [f.oldRecord.docker.homeVolume],
+  });
+
+  expect((await f.controller.reset(old, confirmation)).phase).toBe("ready");
+  expect(f.events).toContain(`remove:${leftover}`);
+  expect(f.events.indexOf(`remove:${leftover}`)).toBeLessThan(f.events.indexOf("drain"));
+  expect(f.containers.size).toBe(0);
+  expect(new ComputerUpdateStore(f.home).read(old)).toBeUndefined();
+  expect(f.store.get(old)).toBeUndefined();
+  expect(f.store.get(fresh)).toBeDefined();
 });
 it("refuses foreign ownership and candidate identities before task drain or volume mutation", async () => {
   const f = fixture();
@@ -267,7 +403,7 @@ it("retries the same transaction after physical cleanup succeeds but computer-re
     remove(id);
   });
   await expect(f.controller.reset(old, confirmation)).rejects.toThrow();
-  expect(f.volumes.size).toBe(0);
+  expect([...f.volumes.keys()]).toEqual([f.accounts]);
   expect(f.store.get(old)).toBeDefined();
   expect(f.controller.status(old, requestId)?.phase).toBe("retiring");
   expect(f.create).not.toHaveBeenCalled();
@@ -286,6 +422,20 @@ it("refuses an unavailable daemon or invalid source without creating orphan hold
   g.store.remove(old);
   await expect(g.controller.reset(old, confirmation)).rejects.toThrow();
   expect(g.holds.records()).toEqual([]);
+});
+it("refuses while the computer is updating, before it captures anything", async () => {
+  const f = fixture();
+  const cells = {
+    ...f.deps.cells,
+    get: (id: string) => {
+      const row = f.cells.get(id);
+      return row && { ...row, updating: true as const };
+    },
+  };
+  const controller = createComputerResetController({ ...f.deps, cells });
+  await expect(controller.reset(old, confirmation)).rejects.toThrow();
+  expect(f.holds.records()).toEqual([]);
+  expect(f.events).toEqual([]);
 });
 it("does not create a replacement if the daemon begins shutdown during old retirement", async () => {
   const f = fixture();

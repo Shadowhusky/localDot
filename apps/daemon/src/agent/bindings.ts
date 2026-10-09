@@ -1,4 +1,5 @@
 import {
+  CLAUDE_CODE_MODEL,
   type ClientKind,
   type KeydRecord,
   type ModelBinding,
@@ -23,6 +24,7 @@ import { immutable } from "./private-files.ts";
 import { RoleChoice } from "./settings.ts";
 export type Role = "main" | "fast" | "local";
 export const CHATGPT = "chatgpt";
+export const CLAUDE_CODE = "claude-code";
 export class BindingError extends Error {
   constructor(
     readonly role: Role,
@@ -39,6 +41,22 @@ export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
   if (choice.price !== undefined) throw new BindingError(role, "the ChatGPT plan needs no price");
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(choice.model))
     throw new BindingError(role, "unknown ChatGPT model");
+}
+export function checkClaudeCodeChoice(role: Role, choice: RoleChoice): void {
+  if (role !== "main")
+    throw new BindingError(role, "Claude Code (your plan) can only be the main model");
+  if (choice.key !== undefined) throw new BindingError(role, "Claude Code needs no key");
+  if (choice.price !== undefined) throw new BindingError(role, "Claude Code needs no price");
+  if (!CLAUDE_CODE_MODEL.test(choice.model))
+    throw new BindingError(role, "unknown Claude Code model");
+}
+// A plan the user signs in to in its own app, which brings its own models and limits.
+export function checkPlanChoices(settings: Partial<Record<Role, RoleChoice>>): void {
+  for (const role of ["main", "fast", "local"] as const) {
+    const choice = settings[role];
+    if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
+    if (choice?.provider === CLAUDE_CODE) checkClaudeCodeChoice(role, choice);
+  }
 }
 export function unpriced(m: CatalogModel): boolean {
   return m.inputUSDPerMTok === 0 && m.outputUSDPerMTok === 0;
@@ -133,11 +151,12 @@ export function resolveRole(
     model.outputUSDPerMTok = 0;
     delete model.cacheReadUSDPerMTok;
     delete model.cacheWriteUSDPerMTok;
+    delete model.reasoningUSDPerMTok;
   } else {
     if (isOpenRouterRouterId(provider.id, model.id))
       throw new BindingError(
         role,
-        `${model.id} picks a model at that model's price, which keyd cannot hold; pick the model itself`,
+        `${model.id} picks a model at that model's price, which localDot cannot track; pick the model itself`,
       );
     if (unpriced(model)) {
       if (!choice.price)
@@ -150,6 +169,7 @@ export function resolveRole(
       // input-price fallback instead of retaining a discount from an incompletely priced record.
       delete model.cacheReadUSDPerMTok;
       delete model.cacheWriteUSDPerMTok;
+      delete model.reasoningUSDPerMTok;
     } else if (choice.price)
       throw new BindingError(
         role,
@@ -191,7 +211,7 @@ export function taskSelection(roles: readonly ResolvedRole[]): TaskModelSelectio
 export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): ModelBinding {
   const surrogate = r.keyId && Object.hasOwn(surrogates, r.keyId) ? surrogates[r.keyId] : undefined;
   if (r.keyId && (typeof surrogate !== "string" || !SURROGATE_PATTERN.test(surrogate)))
-    throw new BindingError(r.role, "the session has no valid surrogate for its selected key");
+    throw new BindingError(r.role, "the task's key is not ready to use; choose the key again");
   return immutable({
     route: r.route,
     client: r.client,

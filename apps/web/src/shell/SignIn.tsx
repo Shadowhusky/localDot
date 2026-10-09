@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { copyBlocked, useCopy } from "../agent/useCopy.ts";
 import { Dot } from "../dot/Dot.tsx";
-import { IconButton } from "../ui/IconButton.tsx";
+import { HomeScreenSignIn } from "../notify/HomeScreenSignIn.tsx";
+import { isHomeScreenApp } from "../notify/this-device.ts";
+import { CommandChip } from "./CommandChip.tsx";
 import "./sign-in.css";
 
 export type SignInState = "first" | "checking" | "expired" | "signed-out";
@@ -17,7 +18,17 @@ const MESSAGES: Record<Exclude<SignInState, "checking">, string> = {
   "signed-out": "This browser was signed out. Run this to sign in again:",
 };
 
-export function SignIn({ state }: { state: SignInState }) {
+const HOME_SCREEN =
+  "In Safari, open localDot, then Settings › Notifications › Copy sign-in link. Paste it here within a minute.";
+
+// homeScreen: opened from the Home Screen, which keeps its own storage and so signs in by itself.
+export function SignIn({
+  state,
+  homeScreen = isHomeScreenApp(),
+}: {
+  state: SignInState;
+  homeScreen?: boolean;
+}) {
   const revealed = useRevealed(state === "checking" ? CHECKING_REVEAL_MS : 0);
   if (state === "checking") {
     return (
@@ -31,6 +42,20 @@ export function SignIn({ state }: { state: SignInState }) {
       </main>
     );
   }
+  if (homeScreen)
+    return (
+      <main className="sign-in" data-state={state}>
+        <div className="sign-in-body">
+          <Dot size={56} state={state === "first" ? "idle" : "waiting"} />
+          <h1 className="sign-in-title">Sign in this app</h1>
+          <p className="sign-in-message">
+            {state === "signed-out" ? `This app was signed out. ${HOME_SCREEN}` : HOME_SCREEN}
+          </p>
+          <HomeScreenSignIn key={state} rejected={state === "expired"} />
+          <p className="sign-in-foot">Each link works once, for one minute.</p>
+        </div>
+      </main>
+    );
   return (
     <main className="sign-in" data-state={state}>
       <div className="sign-in-body">
@@ -39,25 +64,10 @@ export function SignIn({ state }: { state: SignInState }) {
         <p className="sign-in-message" role={state === "first" ? "status" : "alert"}>
           {MESSAGES[state]}
         </p>
-        <Command text={COMMAND} />
+        <CommandChip text={COMMAND} size="lg" className="sign-in-command" />
         <p className="sign-in-foot">Each link works once, for one minute.</p>
       </div>
     </main>
-  );
-}
-
-function Command({ text }: { text: string }) {
-  const { state, copy } = useCopy();
-  return (
-    <div className="sign-in-command">
-      <code>{text}</code>
-      <IconButton
-        icon={state === "copied" ? "check" : "copy"}
-        label={state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : "Copy"}
-        disabledReason={copyBlocked(text)}
-        onClick={() => copy(text)}
-      />
-    </div>
   );
 }
 

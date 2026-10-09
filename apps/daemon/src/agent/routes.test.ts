@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CodexInstallState, InstalledCodex } from "@localdot/codex-harness";
-import { type KeydRecord, ulid } from "@localdot/protocol";
+import { type ChatgptSandbox, type KeydRecord, ulid } from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,8 @@ import { DesktopdTools } from "../desktopd/tools-client.ts";
 import { EventLog } from "../event-log.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import type { ChatgptStatus } from "./codex/account.ts";
+import { SANDBOX_REASONS } from "./codex/setup.ts";
 import { TRANSFER_BYTES } from "./download.ts";
 import { MemoryStore } from "./memory.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
@@ -45,7 +47,7 @@ function deferred<T = void>() {
   });
   return { promise, resolve };
 }
-async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness"> = {}) {
+async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness" | "claudeCode"> = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-agent-routes-"));
   const events: { type: string; data: unknown }[] = [];
   const session = new AgentSession(SESSION, CELL, "task", {
@@ -171,32 +173,24 @@ describe("agent user routes", () => {
     expect(f.settings.get()).toEqual({});
     expect(f.start).not.toHaveBeenCalled();
   });
-  it("returns the actual configured default ceiling or unknown without mutating budgets or reading an account", async () => {
+  it("gives keyd the user's daily spending limit when settings are saved, and none without one", async () => {
     const f = await setup();
-    const get = async () =>
-      (await (await f.send("GET", "/api/agent/providers")).json()) as {
-        defaultTaskBudgetUSD: number | null;
-        keyLayer: string;
-      };
-    expect((await get()).defaultTaskBudgetUSD).toBeNull();
-    const budget = vi.fn(async () => ({
-      perTaskUSD: 3.25,
-      perDayUSD: 20,
-      day: { date: "2026-10-03", spentUSD: 1 },
-    }));
-    f.deps.keyd.budget = budget;
-    expect((await get()).defaultTaskBudgetUSD).toBe(3.25);
-    expect(budget).toHaveBeenCalledOnce();
-    budget.mockRejectedValueOnce(new KeydUnavailableError("private-sentinel", "/private"));
-    expect(await get()).toMatchObject({ defaultTaskBudgetUSD: null, keyLayer: "online" });
-    budget.mockResolvedValueOnce({
-      perTaskUSD: 10_001,
-      perDayUSD: 20,
-      day: { date: "2026-10-03", spentUSD: 1 },
+    const day = { date: "2026-10-09", spentUSD: 1 };
+    let limits = { perTaskUSD: 5, perDayUSD: 20 };
+    f.deps.keyd.budget = vi.fn(async () => ({ ...limits, day }));
+    const setBudget = vi.fn(async (perTaskUSD: number, perDayUSD: number) => {
+      limits = { perTaskUSD, perDayUSD };
+      return { ...limits, day };
     });
-    expect((await get()).defaultTaskBudgetUSD).toBeNull();
+    f.deps.keyd.setBudget = setBudget;
+    const document = { main: { provider: "ollama", model: "local" } };
+    expect((await f.send("PUT", "/api/agent/settings", document)).status).toBe(200);
+    expect(setBudget).toHaveBeenLastCalledWith(0, 0);
+    const limited = { ...document, taskBudgetUSD: 2, dayBudgetUSD: 12 };
+    expect((await f.send("PUT", "/api/agent/settings", limited)).status).toBe(200);
+    expect(setBudget).toHaveBeenLastCalledWith(0, 12);
+    expect(f.settings.get()).toEqual(limited);
     expect(f.start).not.toHaveBeenCalled();
-    expect(f.raise).not.toHaveBeenCalled();
   });
   it("requires both explicit finite remote prices at the real settings route and preserves accepted settings on every refusal", async () => {
     const f = await setup();
@@ -442,6 +436,43 @@ describe("agent user routes", () => {
     expect(await taking).toMatchObject({ note: "[redacted]", by: "user" });
     expect(JSON.stringify(f.events)).not.toContain("credential-fixture");
   });
+  it("takes field answers and declines, keeping secret answers out of every event", async () => {
+    const f = await setup();
+    const secret = "credential-fixture and the rest";
+    const asking = f.session.askFields(
+      {
+        question: "Sign in",
+        fields: [
+          { id: "email", kind: "text", label: "Email" },
+          { id: "password", kind: "secret", label: "Password" },
+        ],
+      },
+      0,
+    );
+    const askId = f.session.pendingAsk;
+    expect((await f.send("POST", endpoint("answer"), { askId, text: "hi" })).status).toBe(409);
+    expect(
+      (await f.send("POST", endpoint("answer"), { askId, fields: { email: "ada" } })).status,
+    ).toBe(409);
+    expect(
+      (
+        await f.send("POST", endpoint("answer"), {
+          askId,
+          fields: { email: "credential-fixture", password: secret },
+        })
+      ).status,
+    ).toBe(204);
+    const answer = await asking;
+    expect(answer.fields).toEqual({ email: "[redacted]", password: { provided: true } });
+    expect(answer.secrets?.take("password")).toBe(secret);
+    expect(JSON.stringify(f.events)).not.toContain("credential-fixture");
+    const plain = f.session.ask("Which?", ["One", "Two"], false, 0);
+    expect(
+      (await f.send("POST", endpoint("answer"), { askId: f.session.pendingAsk, declined: true }))
+        .status,
+    ).toBe(204);
+    expect(await plain).toEqual({ declined: true, by: "user" });
+  });
   it("keeps takeover held across messages/resume/stale handback and accepts only the matching user handback", async () => {
     const f = await setup();
     const taking = f.session.takeover("login", "note");
@@ -587,6 +618,62 @@ describe("agent user routes", () => {
   });
 });
 
+describe("Claude Code (your plan) routes", () => {
+  const signedIn = {
+    state: "signed_in" as const,
+    version: "2.1.290",
+    plan: "max",
+    models: [{ id: "sonnet", name: "Sonnet" }],
+    checkedAt: 1,
+  };
+  function claude() {
+    return { status: vi.fn(async () => signedIn), check: vi.fn(async () => signedIn) };
+  }
+  it("reports the user's Claude Code and checks it again on request", async () => {
+    const claudeCode = claude();
+    const f = await setup({ claudeCode });
+    const status = await f.send("GET", "/api/agent/claude-code");
+    expect(status.status).toBe(200);
+    expect(await status.json()).toEqual(signedIn);
+    const checked = await f.app.request("http://fixture/api/agent/claude-code/check", {
+      method: "POST",
+    });
+    expect(checked.status).toBe(200);
+    expect(claudeCode.check).toHaveBeenCalledTimes(1);
+    const reply = (await (await f.send("GET", "/api/agent/providers")).json()) as {
+      subscriptions: { id: string; available: boolean }[];
+    };
+    expect(reply.subscriptions.find((row) => row.id === "claude-code")).toEqual({
+      id: "claude-code",
+      name: "Claude Code (your plan)",
+      available: true,
+    });
+  });
+  it("has no Claude Code routes where it isn't offered", async () => {
+    const f = await setup();
+    expect((await f.send("GET", "/api/agent/claude-code")).status).toBe(404);
+  });
+  it("saves Claude Code as the main model with no key lookup, and nowhere else", async () => {
+    const f = await setup({ claudeCode: claude() });
+    const settings = {
+      main: { provider: "claude-code", model: "sonnet" },
+      fast: { provider: "anthropic", model: "stored-unavailable", key: "missing-key" },
+    };
+    expect((await f.send("PUT", "/api/agent/settings", settings)).status).toBe(200);
+    expect(f.settings.get()).toEqual(settings);
+    expect(f.deps.keyd.secrets).not.toHaveBeenCalled();
+    for (const bad of [
+      { main: { provider: "claude-code", model: "sonnet", key: "anthropic" } },
+      {
+        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+        fast: { provider: "claude-code", model: "sonnet" },
+      },
+    ])
+      expect((await f.send("PUT", "/api/agent/settings", bad)).status).toBe(400);
+    expect(f.settings.get()).toEqual(settings);
+  });
+});
+
 describe("ChatGPT settings and installation integration", () => {
   it("saves a subscription with inactive paid choices intact and no paid key lookup", async () => {
     const f = await setup();
@@ -666,6 +753,12 @@ describe("ChatGPT settings and installation integration", () => {
         available: false,
         reason: "Pinned privacy acceptance is pending.",
       },
+      {
+        id: "claude-code",
+        name: "Claude Code (your plan)",
+        available: false,
+        reason: "Claude Code isn't available on this computer.",
+      },
     ]);
     expect(reply.providers.some((p: { id: string }) => p.id === "chatgpt")).toBe(false);
     expect(reply.providers.some((p: { id: string }) => p.id === "anthropic")).toBe(true);
@@ -690,21 +783,44 @@ describe("ChatGPT settings and installation integration", () => {
       verifiedInstallation: vi.fn(async () => undefined),
       cancel: vi.fn(() => {}),
     };
-    let available = true;
+    let available = true,
+      released = true,
+      sandbox: ChatgptSandbox = "unchecked";
+    const plan = {
+      sandbox: () => sandbox,
+      check: vi.fn(async () => {
+        if (install.state === "ready" && sandbox !== "passed") sandbox = "checking";
+        return sandbox;
+      }),
+      confirm: vi.fn(async (status: ChatgptStatus) => status),
+    };
     const f = await setup({
-      chatgpt: { account, installer, availability: () => ({ available }) },
-      harness: () => ({ available }),
+      chatgpt: { account, installer, availability: () => ({ available }), setup: plan },
+      harness: () =>
+        available && !released
+          ? {
+              available: false,
+              reason: "ChatGPT plan support isn't switched on in this version yet.",
+            }
+          : { available },
     });
     return {
       ...f,
       account,
       installer,
+      plan,
       gate,
       setInstall(value: CodexInstallState) {
         install = value;
       },
       setAvailable(value: boolean) {
         available = value;
+      },
+      setReleased(value: boolean) {
+        released = value;
+      },
+      setSandbox(value: ChatgptSandbox) {
+        sandbox = value;
       },
     };
   }
@@ -772,21 +888,105 @@ describe("ChatGPT settings and installation integration", () => {
     expect(install.status).toBe(503);
     expect(await install.text()).toBe("ChatGPT support can't be installed on this computer.");
   });
-  it.each(["/install", "/install/cancel"])("requires the install token for %s", async (path) => {
-    const f = await installedFixture(),
-      log = new EventLog(f.home);
-    const app = createApp({ token: "i".repeat(43), port: 4750, eventLog: log, agent: f.deps });
-    try {
-      expect(
-        (await app.request(`http://127.0.0.1:4750/api/agent/chatgpt${path}`, { method: "POST" }))
-          .status,
-      ).toBe(401);
-      expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
-      expect(f.installer.cancel).not.toHaveBeenCalled();
-    } finally {
-      log.close();
-    }
+  it("checks this Mac's sandbox after installation, before any sign-in", async () => {
+    const f = await installedFixture();
+    expect((await f.send("POST", "/api/agent/chatgpt/install")).status).toBe(202);
+    expect(f.plan.check).not.toHaveBeenCalled();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    f.gate.resolve({
+      version: "0.154.0",
+      platform: "darwin-arm64",
+      binDir: "/fixture",
+      codexBin: "/fixture/codex",
+      codeModeHostBin: "/fixture/host",
+    });
+    await vi.waitFor(() => expect(f.plan.check).toHaveBeenCalledTimes(1));
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "unavailable",
+      reason: SANDBOX_REASONS.checking,
+      install: { state: "ready" },
+      sandbox: "checking",
+    });
+    const login = await f.send("POST", "/api/agent/chatgpt/login", {});
+    expect(login.status).toBe(409);
+    expect(await login.text()).toBe(SANDBOX_REASONS.checking);
+    expect((await f.send("POST", "/api/agent/chatgpt/refresh")).status).toBe(409);
+    expect(f.account.status).not.toHaveBeenCalled();
+    expect(f.account.login).not.toHaveBeenCalled();
+    f.setSandbox("passed");
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "signed_out",
+      sandbox: "passed",
+    });
+    expect(f.plan.confirm).toHaveBeenCalledTimes(1);
+    expect((await f.send("POST", "/api/agent/chatgpt/login", {})).status).toBe(202);
   });
+  it("starts a check for an installation that has none and keeps a failed check closed", async () => {
+    const f = await installedFixture();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      state: "unavailable",
+      sandbox: "checking",
+    });
+    expect(f.plan.check).toHaveBeenCalledTimes(1);
+    f.setSandbox("failed");
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "unavailable",
+      reason: SANDBOX_REASONS.failed,
+      sandbox: "failed",
+    });
+    expect(f.plan.check).toHaveBeenCalledTimes(1);
+    expect((await f.send("POST", "/api/agent/chatgpt/login", {})).status).toBe(409);
+    const again = await f.send("POST", "/api/agent/chatgpt/check");
+    expect(again.status).toBe(202);
+    expect(await again.json()).toEqual({ sandbox: "checking" });
+    expect(f.plan.check).toHaveBeenCalledTimes(2);
+    expect(f.account.status).not.toHaveBeenCalled();
+  });
+  it("refuses a check before installation or with a body", async () => {
+    const f = await installedFixture();
+    const early = await f.send("POST", "/api/agent/chatgpt/check");
+    expect(early.status).toBe(409);
+    expect(await early.text()).toBe("Install ChatGPT support first.");
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    expect((await f.send("POST", "/api/agent/chatgpt/check", {})).status).toBe(400);
+    f.setAvailable(false);
+    expect((await f.send("POST", "/api/agent/chatgpt/check")).status).toBe(503);
+    expect(f.plan.check).not.toHaveBeenCalled();
+  });
+  it("runs no check without release evidence for this version", async () => {
+    const f = await installedFixture();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    f.setReleased(false);
+    const refused = await f.send("POST", "/api/agent/chatgpt/check");
+    expect(refused.status).toBe(503);
+    expect(await refused.text()).toBe(
+      "ChatGPT plan support isn't switched on in this version yet.",
+    );
+    expect(f.plan.check).not.toHaveBeenCalled();
+  });
+  it.each(["/install", "/install/cancel", "/check"])(
+    "requires the install token for %s",
+    async (path) => {
+      const f = await installedFixture(),
+        log = new EventLog(f.home);
+      const app = createApp({ token: "i".repeat(43), port: 4750, eventLog: log, agent: f.deps });
+      try {
+        expect(
+          (await app.request(`http://127.0.0.1:4750/api/agent/chatgpt${path}`, { method: "POST" }))
+            .status,
+        ).toBe(401);
+        expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+        expect(f.installer.cancel).not.toHaveBeenCalled();
+        expect(f.plan.check).not.toHaveBeenCalled();
+      } finally {
+        log.close();
+      }
+    },
+  );
 });
 
 describe("bounded user file transfers", () => {
@@ -1041,7 +1241,7 @@ it("requires an empty resume/undo body and rechecks paused ownership and memory 
   const change = f.memory.apply(SESSION, "MEMORY.md", "append", "First remembered fact");
   const undoPath = `/api/agent/memory/${change.changeId}/undo`;
   f.deps.canChangeMemory = () => false;
-  expect((await f.send("POST", undoPath)).status).toBe(409);
+  expect((await f.send("POST", undoPath)).status).toBe(503);
   expect(f.memory.readBoth().memory).toContain("First remembered fact");
   f.deps.canChangeMemory = () => true;
   expect((await f.send("POST", undoPath, { changeId: SESSION })).status).toBe(400);

@@ -1,0 +1,244 @@
+/* Routines (the rail's Routines view, its phone sheet, the routine sheet and the thread's routine
+   card): kit parts laid out on the 4 px scale, never restyled; the kit's layer comes after this. */
+.routines-panel {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+}
+
+.routines-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.routines-content {
+  display: grid;
+  align-content: start;
+  gap: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 4) calc(var(--spacing) * 4);
+}
+
+.routines-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 8);
+}
+
+.routines-count {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.routines-problem,
+.routine-sheet-problem {
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.routines-list {
+  display: grid;
+  gap: 2px;
+}
+
+.routines-list > .ui-skeleton {
+  display: block;
+}
+
+@media (pointer: coarse) {
+  .routine-row > .ui-list-row-actions {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+.routine-detail,
+.routine-form {
+  display: grid;
+  gap: calc(var(--spacing) * 6);
+  padding-block: 2px calc(var(--spacing) * 2);
+}
+
+.routine-instruction {
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+  color: var(--color-fg-1);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.routine-days {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.routine-sheet-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 1.5);
+  width: 100%;
+}
+
+.routine-sheet-footer > .routine-sheet-problem {
+  flex: 1 1 100%;
+}
+
+.routine-sheet-gap {
+  flex: 1;
+}
+
+.routine-history {
+  display: grid;
+  margin: 0;
+  padding: calc(var(--spacing) * 1) 0;
+  border-radius: var(--radius-group);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+  list-style: none;
+}
+
+.routine-run {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 11);
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2) calc(var(--spacing) * 1.5)
+    calc(var(--spacing) * 3.5);
+  color: var(--color-fg-2);
+}
+
+.routine-run + .routine-run {
+  border-top: 1px solid var(--color-separator);
+}
+
+.routine-run > .ui-status-glyph {
+  color: var(--color-fg-2);
+}
+
+.routine-run-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.routine-run-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.routine-run-time,
+.routine-history-empty {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* The thread's card for a routine dot drafted: raised, its facts as a short definition list. */
+.routine-card {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.routine-card-head {
+  display: grid;
+  gap: 2px;
+}
+
+.routine-card-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.routine-card-name {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+  overflow-wrap: anywhere;
+}
+
+.routine-card-when {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.routine-card-what {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
+.routine-card-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: calc(var(--spacing) * 1) calc(var(--spacing) * 4);
+  margin: 0;
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.routine-card-facts dt {
+  color: var(--color-fg-3);
+}
+
+.routine-card-facts dd {
+  margin: 0;
+  color: var(--color-fg-1);
+}
+
+.routine-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+/* Reserves the buttons' row: the outcome line takes their place without moving the card. */
+.routine-card-outcome {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  min-height: calc(var(--spacing) * 8);
+  color: var(--color-fg-2);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+/* In a phone's sheet the sheet's own margins frame the list. */
+.ui-sheet .routines-content {
+  padding-inline: 0;
+}

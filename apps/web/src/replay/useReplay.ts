@@ -26,6 +26,7 @@ import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
 import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
 import { compareFrames, followRule, type ReplayCommand } from "./replay-view.ts";
+import { SeekGate } from "./seek-gate.ts";
 
 export interface ReplayState {
   sessionId: string | null;
@@ -50,10 +51,12 @@ export interface ReplayState {
   setSpeed(speed: ReplaySpeed): void;
   setSkipIdle(on: boolean): void;
   selectStep(stepId: string): void;
+  // Loads the recording again from the start, after it failed to load.
+  retry(): void;
 }
 type ReplayValues = Omit<
   ReplayState,
-  "run" | "seek" | "setSpeed" | "setSkipIdle" | "selectStep" | "setScreen"
+  "run" | "seek" | "setSpeed" | "setSkipIdle" | "selectStep" | "setScreen" | "retry"
 >;
 
 function initialState(sessionId: string | null): ReplayValues {
@@ -80,22 +83,41 @@ export function replayOrigin(api: ApiClient): string {
   address.protocol = address.protocol === "wss:" ? "https:" : "http:";
   return address.origin;
 }
-export async function readReplayEvents(
+export function readReplayEvents(
   api: ApiClient,
   sessionId: string,
   fromSeq: number,
   signal: AbortSignal,
   onBatch: (events: LocalDotEvent[]) => void,
 ): Promise<void> {
-  const response = await api.fetch(
-    `${replayOrigin(api)}/api/sessions/${sessionId}/events?fromSeq=${fromSeq}`,
-    {
-      headers: { authorization: api.authorization(), accept: "application/x-ndjson" },
-      credentials: "omit",
-      redirect: "error",
-      signal,
-    },
+  return readEventLines(
+    api,
+    `/api/sessions/${sessionId}/events?fromSeq=${fromSeq}`,
+    signal,
+    onBatch,
   );
+}
+// What a conversation shows of a task: its log without the model's thinking or the heartbeats.
+export function readTaskHistory(
+  api: ApiClient,
+  sessionId: string,
+  signal: AbortSignal,
+  onBatch: (events: LocalDotEvent[]) => void,
+): Promise<void> {
+  return readEventLines(api, `/api/sessions/${sessionId}/history`, signal, onBatch);
+}
+async function readEventLines(
+  api: ApiClient,
+  path: string,
+  signal: AbortSignal,
+  onBatch: (events: LocalDotEvent[]) => void,
+): Promise<void> {
+  const response = await api.fetch(`${replayOrigin(api)}${path}`, {
+    headers: { authorization: api.authorization(), accept: "application/x-ndjson" },
+    credentials: "omit",
+    redirect: "error",
+    signal,
+  });
   if (response.status === 401) api.rejectUnauthorized?.();
   if (!response.ok) throw new ApiError(response.status, "Session history could not be loaded.");
   if (!response.body) throw new Error("Session history has no response body.");
@@ -144,7 +166,8 @@ export function useReplay(
   api: ApiClient,
   sessionId: string | null,
   stage: RefObject<StageHandle | null>,
-  opts: { onGoLive(): void },
+  // onExit leaves the recording, as Escape does; onGoLive follows a live task back to Watch.
+  opts: { onGoLive(): void; onExit?(): void },
 ): ReplayState {
   const [values, setValues] = useState<ReplayValues>(() => initialState(sessionId));
   const [choice, setChoice] = useState<{ sessionId: string | null; screen: ScreenName }>({
@@ -152,6 +175,7 @@ export function useReplay(
     screen: "desktop",
   });
   const screen = choice.sessionId === sessionId ? choice.screen : "desktop";
+  const [attempt, setAttempt] = useState(0);
   const screenSeek = useRef<{
     sessionId: string | null;
     tMs: number;
@@ -175,6 +199,18 @@ export function useReplay(
     current.current = { ...current.current, ...patch };
     setValues(current.current);
   };
+  // The page shows a seek as it goes to the worker, so a drag renders Replay once per frame the
+  // worker draws, not once per pointer event; the scrubber's head follows the finger on its own.
+  const sendSeek = (tMs: number, mode: "exact" | "preview") => {
+    const map = current.current.map;
+    if (!map) return;
+    pendingSeekTime.current = tMs;
+    update({ tMs, playing: false, compare: null, idleNow: idleAt(map, tMs) });
+    stage.current?.replay.seek(tMs, mode);
+  };
+  const sending = useRef(sendSeek);
+  sending.current = sendSeek;
+  const [seeks] = useState(() => new SeekGate((tMs, mode) => sending.current(tMs, mode)));
   const setScreen = (next: ScreenName) => {
     if (!ScreenName.safeParse(next).success || next === screen) return;
     screenSeek.current = {
@@ -185,6 +221,7 @@ export function useReplay(
     };
     mediaOwner.current++;
     pendingSeekTime.current = null;
+    seeks.reset();
     stage.current?.replay.close();
     update({
       screen: next,
@@ -200,6 +237,7 @@ export function useReplay(
     const state = current.current;
     if (state.map) {
       pendingSeekTime.current = null;
+      seeks.reset();
       stage.current?.replay.transport({
         playing: state.playing,
         speed: state.speed,
@@ -211,10 +249,7 @@ export function useReplay(
   const seek = (time: number, mode: "exact" | "preview") => {
     const state = current.current;
     if (!state.map || !Number.isFinite(time)) return;
-    const tMs = Math.min(state.map.endMs, Math.max(state.map.startMs, time));
-    pendingSeekTime.current = tMs;
-    update({ tMs, playing: false, compare: null, idleNow: idleAt(state.map, tMs) });
-    stage.current?.replay.seek(tMs, mode);
+    seeks.seek(Math.min(state.map.endMs, Math.max(state.map.startMs, time)), mode);
   };
   const setSpeed = (speed: ReplaySpeed) => {
     if (!REPLAY_SPEEDS.includes(speed)) return;
@@ -303,13 +338,14 @@ export function useReplay(
       case "exit":
         if (state.compare) update({ compare: null });
         else if (state.selection) update({ selection: null });
-        else options.current.onGoLive();
+        else (options.current.onExit ?? options.current.onGoLive)();
         break;
     }
   };
   const controls = useRef({ seek, setSpeed, setSkipIdle, run });
   controls.current = { seek, setSpeed, setSkipIdle, run };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new attempt loads the recording again
   useEffect(() => {
     const controller = new AbortController();
     const handle = stage.current;
@@ -339,6 +375,7 @@ export function useReplay(
     });
     lastEventMs.current = 0;
     pendingSeekTime.current = null;
+    seeks.reset();
     handle?.resetSession();
     function notifyModel() {
       if (versionTimer !== undefined) return;
@@ -465,6 +502,7 @@ export function useReplay(
         message.owner !== mediaOwner.current
       )
         return;
+      if (message.type === "replay-status" || message.type === "replay-time") seeks.settled();
       if (message.type === "replay-status") change({ status: message.status.state });
       if (message.type === "replay-time") {
         if (
@@ -536,7 +574,7 @@ export function useReplay(
       seekWaiters.current.clear();
       if (window.__localdot) delete window.__localdot.replay;
     };
-  }, [api, sessionId, stage, screen]);
+  }, [api, sessionId, stage, screen, seeks, attempt]);
   return {
     // Until the effect resets for a newly picked session, the held values describe the previous one.
     ...(values.sessionId === sessionId ? values : initialState(sessionId)),
@@ -545,6 +583,7 @@ export function useReplay(
     seek,
     setSpeed,
     setSkipIdle,
+    retry: () => setAttempt((count) => count + 1),
     selectStep: (stepId) => {
       const index = current.current.model.stepIndex.get(stepId);
       const step = index === undefined ? undefined : current.current.model.steps[index];

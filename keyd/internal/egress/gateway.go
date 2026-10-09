@@ -216,7 +216,7 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 		c.refuseModelAdmission(w, line)
 		return
 	}
-	meter := &gatewayMeter{c: c, price: price, hold: hold}
+	meter := &gatewayMeter{c: c, price: price, hold: hold, route: name, model: model}
 	c.relay(w, r.WithContext(meter.watch(r.Context())), route{dest: dest, target: &target, line: line, gen: g, local: b.Local, meter: meter}, scrubber, line)
 }
 
@@ -236,7 +236,7 @@ func (c *Cell) reserve(w http.ResponseWriter, r *http.Request, g *generation, li
 		return nil, nil, false
 	}
 	capped := op.Cap != "" && (price.Output > 0 || lease.Snapshot())
-	ask := llm.Ask{Fixed: price.Ceiling(req.Input, 0), PerToken: price.Output}
+	ask := llm.Ask{Fixed: price.Ceiling(req.Input, 0), PerToken: price.PerOutputToken()}
 	if capped {
 		ask.Tokens = price.MaxOutput
 		if req.HasCap {
@@ -337,6 +337,8 @@ type gatewayMeter struct {
 	c     *Cell
 	price llm.Price
 	hold  *llm.Hold
+	route string
+	model string
 	m     *llm.Meter
 	ok    bool
 	sent  atomic.Bool
@@ -360,8 +362,10 @@ func (g *gatewayMeter) settle(l *audit.Line, out int64, clean bool) {
 	}
 	u := g.m.Usage()
 	switch {
-	case !g.ok && !u.Reported:
+	case !g.ok && !u.Reported && !u.Billed:
 		return
+	case clean && u.Billed:
+		l.CostMicroUSD, l.Usage = u.BilledCost, "billed"
 	case !g.ok, clean && u.Reported:
 		l.CostMicroUSD, l.Usage = g.price.Cost(u), "reported"
 	case clean:
@@ -396,6 +400,11 @@ func (g *gatewayMeter) charge(l *audit.Line) {
 	if err != nil {
 		log.Printf("keyd: saving request spend failed: %v", err)
 	}
+	task, day := g.hold.Account()
+	g.c.deps.Events.Publish(events.Event{Type: events.TypeSpend, Cell: g.c.cfg.CellID, Data: events.Spend{
+		TaskID: task.ID, Route: g.route, Model: g.model, CostUSD: float64(l.CostMicroUSD) / 1e6, Billed: l.Usage == "billed",
+		TaskSpentUSD: task.SpentUSD, TaskLimitUSD: task.LimitUSD, DaySpentUSD: day.SpentUSD, DayLimitUSD: day.LimitUSD,
+	}})
 	for _, e := range crossed {
 		g.c.announce(e)
 	}

@@ -6,11 +6,12 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { nestedKeys, openSettings, roleCard, search } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 const SENTENCE =
-  "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+  "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";
 const PLAN_TOKEN = `sk-ant-oat01-${"Qz7_".repeat(24)}`;
 const REFRESH_TOKEN = `sk-ant-ort01-${"Pv5_".repeat(24)}`;
 const API_KEY = `sk-ant-api03-${"Rw8-".repeat(24)}`;
@@ -63,20 +64,20 @@ for (const run of runs) {
         const sent = `${r.url()} ${r.postData() ?? ""}`;
         if (/sk-ant-o[ar]t/.test(sent)) carried.push(`${r.method()} ${new URL(r.url()).pathname}`);
       });
+      await skipSetup(page);
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
       return { page, press, carried };
     }
     async function settings(page: Page, press: (l: Locator) => Promise<void>) {
-      await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = settingsSheet(page);
+      const sheet = await openSettings(page, press, "Models");
       await expect(
         roleCard(sheet, "main").getByRole("combobox", { name: "Provider", exact: true }),
       ).toBeEnabled();
       return sheet;
     }
 
-    test("says Claude plans can't be used, under Anthropic, on a search and in Subscription", async () => {
+    test("offers Claude Code (your plan) in Subscription, and Anthropic for API keys", async () => {
       const { page, press } = await open();
       const sheet = await settings(page, press);
       const main = roleCard(sheet, "main");
@@ -85,10 +86,9 @@ for (const run of runs) {
       const list = page.getByRole("listbox", { name: "Provider" });
       const plan = list
         .getByRole("group", { name: "Subscription" })
-        .getByRole("option", { name: /^Claude Pro or Max/ });
-      await expect(plan).toHaveAttribute("aria-disabled", "true");
-      await expect(plan).toContainText("Not allowed in other apps. Use an Anthropic key.");
-      await expect(sheet.getByText(SENTENCE)).toHaveCount(0);
+        .getByRole("option", { name: /^Claude Code \(your plan\)/ });
+      await expect(plan).not.toHaveAttribute("aria-disabled", "true");
+      await expect(plan).toContainText("Uses your own Claude Code");
 
       const search = page.getByRole("combobox", { name: "Search: Provider" });
       await search.fill("claude code");
@@ -97,12 +97,11 @@ for (const run of runs) {
       await expect(anthropic).not.toHaveAttribute("aria-disabled", "true");
       await press(anthropic);
       await expect(provider).toHaveText("Anthropic");
-      const note = sheet.getByText(SENTENCE, { exact: true });
-      await expect(note).toBeVisible();
-      await expect(provider).toHaveAttribute(
-        "aria-describedby",
-        (await note.getAttribute("id")) as string,
+      const note = sheet.getByText(
+        "Uses API keys. To use your Claude plan, choose Claude Code (your plan).",
+        { exact: false },
       );
+      await expect(note).toBeVisible();
       await expect(main.getByRole("button", { name: "Add key", exact: true })).toBeVisible();
     });
 
@@ -163,13 +162,6 @@ for (const run of runs) {
 
     test("removes a plan token from a message, says why and offers no move to Keys", async () => {
       const { page, press, carried } = await open();
-      if (run.phone) {
-        // The tabs move down when the task's pause button arrives; a tap before then misses.
-        await expect(page.getByRole("button", { name: "Pause after this step" })).toBeVisible();
-        const tab = page.getByRole("tab", { name: "Conversation" });
-        await press(tab);
-        await expect(tab).toHaveAttribute("aria-selected", "true");
-      }
       const box = page.getByRole("textbox", { name: "Message" });
       await box.fill(`use ${PLAN_TOKEN} please`);
       await expect(box).toHaveValue("use  please");

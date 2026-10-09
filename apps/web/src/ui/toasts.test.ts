@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createToasts, SHOWN_FOR } from "./toasts.ts";
+import {
+  createToasts,
+  REPEAT_MS,
+  SETTLE_MS,
+  SHOWN_AT_LEAST,
+  SHOWN_AT_MOST,
+  SHOWN_FOR,
+} from "./toasts.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -15,103 +22,163 @@ function shown(queue: ReturnType<typeof createToasts>): string[] {
     .filter((toast) => !toast.leaving)
     .map((toast) => toast.title);
 }
+const wait = (ms: number) => vi.advanceTimersByTime(ms);
 
 describe("toast queue", () => {
-  it("puts the newest in front", () => {
+  it("shows one at a time, in the order they came, each once it has settled", () => {
     const queue = createToasts();
     queue.show({ title: "Saved to Downloads" });
     queue.show({ title: "Key moved to Keys" });
-    expect(shown(queue)).toEqual(["Key moved to Keys", "Saved to Downloads"]);
-  });
-
-  it("gives the front toast its time, then the one behind it its own", () => {
-    const queue = createToasts();
-    queue.show({ title: "Saved to Downloads" });
-    vi.advanceTimersByTime(1000);
-    queue.show({ title: "Key moved to Keys" });
-    vi.advanceTimersByTime(SHOWN_FOR - 1);
-    expect(shown(queue)).toEqual(["Key moved to Keys", "Saved to Downloads"]);
-    vi.advanceTimersByTime(1);
+    wait(SETTLE_MS - 1);
+    expect(shown(queue)).toEqual([]);
+    wait(1);
     expect(shown(queue)).toEqual(["Saved to Downloads"]);
-    // It had been in front for 1 s before the newer one came, so 3 s are left.
-    vi.advanceTimersByTime(SHOWN_FOR - 1001);
+    // With another waiting, the one on screen goes once it has had its least time.
+    wait(SHOWN_AT_LEAST - 1);
     expect(shown(queue)).toEqual(["Saved to Downloads"]);
-    vi.advanceTimersByTime(1);
+    wait(1);
+    expect(shown(queue)).toEqual(["Key moved to Keys"]);
+    wait(SHOWN_FOR - 1);
+    expect(shown(queue)).toEqual(["Key moved to Keys"]);
+    wait(1);
     expect(shown(queue)).toEqual([]);
   });
 
-  it("keeps a failure until it is dismissed", () => {
+  it("shows nothing for a state that flips back before it settles", () => {
     const queue = createToasts();
-    const id = queue.show({ title: "Couldn't confirm the stop", tone: "danger" });
-    vi.advanceTimersByTime(SHOWN_FOR * 10);
+    queue.show({ id: "connection", title: "Reconnecting…" });
+    wait(SETTLE_MS - 100);
+    queue.withdraw("connection");
+    wait(SHOWN_AT_MOST);
+    expect(queue.list()).toEqual([]);
+  });
+
+  it("keeps a toast whose state passed on screen for its least time", () => {
+    const queue = createToasts();
+    queue.show({ id: "connection", title: "Reconnecting…" });
+    wait(SETTLE_MS + 200);
+    queue.withdraw("connection");
+    wait(SHOWN_AT_LEAST - 201);
+    expect(shown(queue)).toEqual(["Reconnecting…"]);
+    wait(1);
+    expect(shown(queue)).toEqual([]);
+  });
+
+  it("never shows the same message again within five seconds of it leaving", () => {
+    const queue = createToasts();
+    queue.show({ title: "Saved to Downloads" });
+    queue.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS);
+    expect(shown(queue)).toEqual(["Saved to Downloads"]);
+    queue.show({ title: "Saved to Downloads" });
+    wait(SHOWN_FOR);
+    expect(shown(queue)).toEqual([]);
+    queue.show({ title: "Saved to Downloads" });
+    wait(REPEAT_MS - 1);
+    queue.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS);
+    expect(shown(queue)).toEqual([]);
+    // Five seconds on, it may come back.
+    queue.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS);
+    expect(shown(queue)).toEqual(["Saved to Downloads"]);
+  });
+
+  it("lets a result go after four seconds and a failure after six", () => {
+    const queue = createToasts();
+    queue.show({ title: "Couldn't confirm the stop", tone: "danger" });
+    wait(SETTLE_MS + SHOWN_AT_MOST - 1);
     expect(shown(queue)).toEqual(["Couldn't confirm the stop"]);
-    queue.dismiss(id);
+    wait(1);
     expect(shown(queue)).toEqual([]);
   });
 
-  it("stands the front toast's time still while held, and goes on from there", () => {
+  it("keeps one with an action until it is dismissed, unless another waits for six seconds", () => {
     const queue = createToasts();
+    const undo = { label: "Undo", onAction() {} };
+    queue.show({ title: "Key moved to Keys", action: undo });
+    wait(SETTLE_MS + 60_000);
+    expect(shown(queue)).toEqual(["Key moved to Keys"]);
     queue.show({ title: "Saved to Downloads" });
-    vi.advanceTimersByTime(3000);
-    queue.hold("hover", true);
-    vi.advanceTimersByTime(SHOWN_FOR * 5);
+    wait(SETTLE_MS);
     expect(shown(queue)).toEqual(["Saved to Downloads"]);
-    queue.hold("hover", false);
-    vi.advanceTimersByTime(999);
-    expect(shown(queue)).toEqual(["Saved to Downloads"]);
-    vi.advanceTimersByTime(1);
-    expect(shown(queue)).toEqual([]);
+
+    const other = createToasts();
+    other.show({ title: "Key moved to Keys", action: undo });
+    wait(SETTLE_MS + 1000);
+    other.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS);
+    expect(shown(other)).toEqual(["Key moved to Keys"]);
+    wait(SHOWN_AT_MOST - 1000 - SETTLE_MS);
+    expect(shown(other)).toEqual(["Saved to Downloads"]);
   });
 
-  it("holds while any reason holds", () => {
+  it("keeps one with details until it is dismissed, and shows changed details in place", () => {
+    const queue = createToasts();
+    queue.show({ id: "stop", title: "Stopped", details: ["One note"] });
+    wait(SETTLE_MS + 60_000);
+    expect(shown(queue)).toEqual(["Stopped"]);
+    queue.show({ id: "stop", title: "Stopped", details: ["One note", "Another"] });
+    expect(queue.list()[0]?.details).toEqual(["One note", "Another"]);
+  });
+
+  it("keeps one with a live part until it is dismissed, and announces only its title", () => {
+    const queue = createToasts();
+    queue.show({ id: "export", title: "Exporting…", live: "42%" });
+    wait(SETTLE_MS + 60_000);
+    expect(shown(queue)).toEqual(["Exporting…"]);
+    expect(queue.list()[0]?.live).toBe("42%");
+    queue.show({ id: "export", title: "Exporting…", live: "43%" });
+    expect(queue.list()[0]?.live).toBe("42%");
+  });
+
+  it("stands the time still while held, and goes on from there", () => {
     const queue = createToasts();
     queue.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS + 3000);
     queue.hold("hover", true);
     queue.hold("hidden", true);
     queue.hold("hover", false);
-    vi.advanceTimersByTime(SHOWN_FOR * 2);
+    wait(SHOWN_FOR * 5);
     expect(shown(queue)).toEqual(["Saved to Downloads"]);
+    queue.hold("hidden", false);
+    wait(999);
+    expect(shown(queue)).toEqual(["Saved to Downloads"]);
+    wait(1);
+    expect(shown(queue)).toEqual([]);
   });
 
-  it("replaces a toast shown again under its id, brings it forward and restarts its time", () => {
+  it("changes the toast on screen in place under its id and gives it its time again", () => {
     const queue = createToasts();
     queue.show({ id: "stop", title: "Couldn't confirm the stop", tone: "danger" });
-    queue.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS + 5000);
+    const key = queue.list()[0]?.key;
     queue.show({ id: "stop", title: "Stopped", tone: "success" });
-    expect(shown(queue)).toEqual(["Stopped", "Saved to Downloads"]);
-    expect(queue.list().filter((toast) => toast.id === "stop")).toHaveLength(1);
-    vi.advanceTimersByTime(SHOWN_FOR);
-    expect(shown(queue)).toEqual(["Saved to Downloads"]);
+    expect(queue.list()).toEqual([expect.objectContaining({ key, title: "Stopped" })]);
+    wait(SHOWN_FOR - 1);
+    expect(shown(queue)).toEqual(["Stopped"]);
+    wait(1);
+    expect(shown(queue)).toEqual([]);
   });
 
-  it("keeps a toast's key when it is shown again in place, and gives it a new one after a swipe", () => {
-    const queue = createToasts();
-    queue.show({ id: "stop", title: "Couldn't confirm the stop", tone: "danger" });
-    const first = queue.list()[0]?.key;
-    queue.show({ id: "stop", title: "Still checking", tone: "danger" });
-    queue.dismiss("stop");
-    queue.show({ id: "stop", title: "Stopped", tone: "success" });
-    expect(queue.list().map((toast) => toast.key)).toEqual([first]);
-    // Its element is still flying off with the swipe, so the toast comes back as a new one.
-    queue.dismiss("stop", "swipe");
-    queue.show({ id: "stop", title: "Couldn't confirm the stop", tone: "danger" });
-    expect(queue.list()).toHaveLength(1);
-    expect(shown(queue)).toEqual(["Couldn't confirm the stop"]);
-    expect(queue.list()[0]?.key).not.toBe(first);
-  });
-
-  it("keeps a dismissed toast listed as leaving until it is forgotten", () => {
+  it("lets the user send the toast away at once and brings the next forward", () => {
     const queue = createToasts();
     const id = queue.show({ title: "Saved to Downloads" });
+    queue.show({ title: "Key moved to Keys" });
+    wait(SETTLE_MS);
     queue.dismiss(id, "swipe");
-    expect(queue.list()).toEqual([expect.objectContaining({ id, leaving: "swipe" })]);
+    expect(queue.list()).toEqual([
+      expect.objectContaining({ title: "Key moved to Keys" }),
+      expect.objectContaining({ id, leaving: "swipe" }),
+    ]);
     queue.forget(id);
-    expect(queue.list()).toEqual([]);
+    expect(queue.list()).toEqual([expect.objectContaining({ title: "Key moved to Keys" })]);
   });
 
   it("does not forget a toast that is still on show", () => {
     const queue = createToasts();
     const id = queue.show({ title: "Saved to Downloads" });
+    wait(SETTLE_MS);
     queue.forget(id);
     expect(shown(queue)).toEqual(["Saved to Downloads"]);
   });

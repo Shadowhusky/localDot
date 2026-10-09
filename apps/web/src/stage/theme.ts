@@ -6,34 +6,46 @@ export interface ThemeColor {
 export interface StageTheme {
   font: string;
   xenon: ThemeColor;
-  xenonA10: ThemeColor;
+  attention: ThemeColor;
   cursorFill: ThemeColor;
   cursorRim: ThemeColor;
   hudSolid: ThemeColor;
   hudLine: ThemeColor;
   text: ThemeColor;
   text2: ThemeColor;
-  haloTarget: ThemeColor;
+  dragUnder: ThemeColor;
   shadeCursor: ThemeColor;
   keyBevel: ThemeColor;
   void: ThemeColor;
+  glass: ThemeColor;
+  glyphLight: ThemeColor;
+  glyphMid: ThemeColor;
+  glyphShade: ThemeColor;
+  spill: ThemeColor;
+  spillXenon: ThemeColor;
 }
 
 type ColorKey = Exclude<keyof StageTheme, "font">;
 
 const TOKENS: Record<ColorKey, string> = {
   xenon: "--color-xenon",
-  xenonA10: "--color-xenon-a10",
+  attention: "--color-attention",
   cursorFill: "--color-cursor-fill",
   cursorRim: "--color-cursor-rim",
-  hudSolid: "--color-hud-solid",
-  hudLine: "--color-hud-line",
+  hudSolid: "--color-glass-solid",
+  hudLine: "--color-glass-line",
   text: "--color-fg-1",
   text2: "--color-fg-2",
-  haloTarget: "--color-halo-target",
+  dragUnder: "--color-drag-under",
   shadeCursor: "--color-shade-cursor",
   keyBevel: "--color-key-bevel",
   void: "--color-void",
+  glass: "--color-stage-glass",
+  glyphLight: "--color-glyph-light",
+  glyphMid: "--color-glyph-mid",
+  glyphShade: "--color-glyph-shade",
+  spill: "--color-spill",
+  spillXenon: "--color-spill-xenon",
 };
 
 export function parseCssColor(value: string): ThemeColor {

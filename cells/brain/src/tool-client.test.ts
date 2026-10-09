@@ -82,6 +82,8 @@ describe("tool deadlines own the whole response lifetime", () => {
     "browser_upload",
     "remember",
     "done",
+    "routine",
+    "follow_up_at",
   ])("keeps %s pending while the user decides for fifteen minutes", async (name) => {
     vi.useFakeTimers();
     const c = client(delayed(16 * 60_000));
@@ -117,17 +119,44 @@ describe("tool deadlines own the whole response lifetime", () => {
       expect(String(call.state.error)).toContain("cancelled");
     },
   );
-  it("keeps ask_user pending for six minutes but expires at thirty minutes plus ten seconds", async () => {
+  it("keeps ask_user pending for six minutes but expires at thirty-one minutes", async () => {
     vi.useFakeTimers();
     const call = observe(client(delayed(2_000_000)).tool("ask_user", "c", {}));
     await vi.advanceTimersByTimeAsync(360_000);
     expect(call.state.done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1_449_999);
+    await vi.advanceTimersByTimeAsync(1_499_999);
     expect(call.state.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(call.state.done).toBe(true);
     await call.settled;
     expect(String(call.state.error)).toContain("cancelled");
+  });
+  it("keeps a routine's question open for its whole window, and attended questions at thirty-one minutes", async () => {
+    vi.useFakeTimers();
+    const run = {
+      kind: "routine" as const,
+      name: "Morning bills",
+      profile: "ask_first" as const,
+      approvalWindowMinutes: 240,
+    };
+    const never = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/v1/boot")
+        ? Response.json(bootConfig({ run }))
+        : new Promise<Response>(() => {}),
+    ) as unknown as typeof fetch;
+    const routine = client(never);
+    await routine.boot();
+    const question = observe(routine.tool("ask_user", "c", {}));
+    const card = observe(routine.tool("routine", "c", { op: "pause" }));
+    const attended = observe(client(delayed(APPROVAL_TIMEOUT_MS)).tool("ask_user", "c", {}));
+    await vi.advanceTimersByTimeAsync(240 * 60_000);
+    expect(question.state.done).toBe(false);
+    expect(card.state.done).toBe(false);
+    expect(String(attended.state.error)).toContain("cancelled");
+    await vi.advanceTimersByTimeAsync(60_000);
+    await question.settled;
+    expect(String(question.state.error)).toContain("cancelled");
+    expect(card.state.done).toBe(false);
   });
   it("does not expire takeover after sixty-one minutes, then cancels on generation loss", async () => {
     vi.useFakeTimers();

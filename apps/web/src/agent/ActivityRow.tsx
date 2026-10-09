@@ -1,5 +1,4 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { Badge } from "../ui/Badge.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { pressHandlers } from "../ui/press.ts";
@@ -16,6 +15,7 @@ export interface ActivityRowProps {
   children?: ReactNode;
 }
 
+// One flat row: a status (or a file's glyph), what happened over where and how, and its time.
 export function ActivityRow({
   id,
   view,
@@ -27,19 +27,16 @@ export function ActivityRow({
 }: ActivityRowProps) {
   const face = (
     <>
-      <Icon name={view.icon} className="activity-row-icon" />
-      <span className="activity-row-title">{view.title}</span>{" "}
-      {view.metric && <span className="activity-row-metric num">{view.metric}</span>}{" "}
-      <StatusGlyph state={view.state} label={view.stateLabel} />
-      {view.reason && (
-        <>
-          {" "}
-          <span className="activity-row-reason">
-            {view.notSent && <Badge tone="danger">Not sent</Badge>}
-            <span>{view.reason}</span>
-          </span>
-        </>
+      {view.icon ? (
+        <Icon name={view.icon} className="activity-row-glyph" />
+      ) : (
+        <StatusGlyph state={view.state} label={view.stateLabel} />
       )}
+      <span className="activity-row-text">
+        <span className="activity-row-title">{view.title}</span>{" "}
+        {view.meta && <span className="activity-row-meta">{view.meta}</span>}
+      </span>{" "}
+      <span className="activity-row-time num">{view.time}</span>
     </>
   );
   return (
@@ -51,7 +48,7 @@ export function ActivityRow({
       data-current={current || undefined}
       data-future={future || undefined}
       data-open={open || undefined}
-      data-danger={view.danger || undefined}
+      data-failed={view.failed || undefined}
       data-anchor=""
       onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== "Escape" || !open || !onToggle) return;

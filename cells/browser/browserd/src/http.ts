@@ -22,6 +22,7 @@ import {
   BrowserUploadRequest,
 } from "../../../../packages/protocol/src/browser-uploads.ts";
 import { DOWNLOAD_BYTES } from "../../../../packages/protocol/src/quarantine.ts";
+import { type BrowserAccounts, isSiteName } from "./accounts.ts";
 import type { BrowserControl } from "./control.ts";
 import type { BrowserDownloadService } from "./download-service.ts";
 import type { BrowserInput } from "./input.ts";
@@ -75,7 +76,10 @@ const routes = new Set([
   "POST /downloads/ack",
   "POST /uploads/chooser",
   "POST /uploads/send",
+  "GET /accounts/cookies",
+  "POST /accounts/sign-out",
 ]);
+const signOutSchema = schema.strictObject({ site: schema.string().max(253) });
 
 export interface BrowserHttpOptions {
   readonly config: BrowserRuntimeConfig;
@@ -89,6 +93,7 @@ export interface BrowserHttpOptions {
   readonly navigation?: Pick<BrowserNavigation, "navigate">;
   readonly downloads?: Pick<BrowserDownloadService, "arm" | "list" | "read" | "acknowledge">;
   readonly uploads?: Pick<BrowserUploadService, "chooser" | "upload">;
+  readonly accounts?: Pick<BrowserAccounts, "domains" | "signOut">;
   ready(): boolean;
   fence(): void;
   stop(): Promise<void>;
@@ -345,6 +350,13 @@ export class BrowserHttp {
           return;
         }
         this.#available(signal);
+        if (route === "GET /accounts/cookies") {
+          if (!this.#options.accounts) throw new HttpRefusal(503, "unavailable");
+          const domains = await this.#options.accounts.domains();
+          this.#available(signal);
+          send(response, 200, { domains });
+          return;
+        }
         send(response, 200, {
           tabs: this.#options.targets.tabs().map(({ id, ready }) => ({ id, ready })),
         });
@@ -395,6 +407,15 @@ export class BrowserHttp {
         return;
       }
       this.#available(signal);
+      if (route === "POST /accounts/sign-out") {
+        const parsed = signOutSchema.safeParse(body);
+        if (!parsed.success || !isSiteName(parsed.data.site)) throw new HttpRefusal(400, "request");
+        if (!this.#options.accounts) throw new HttpRefusal(503, "unavailable");
+        const result = await this.#options.accounts.signOut(parsed.data.site);
+        this.#available(signal);
+        send(response, 200, result);
+        return;
+      }
       if (route === "POST /uploads/chooser") {
         if (!this.#options.uploads) throw new HttpRefusal(503, "unavailable");
         const access = BrowserUploadAccess.safeParse(body);

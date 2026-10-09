@@ -1,21 +1,32 @@
-import type { ToolResult } from "@localdot/protocol";
+import { clipText, INTENT_CHARS, type ToolResult } from "@localdot/protocol";
 import type { ScreenLease } from "../../browser/screen-controller.ts";
 import type { DesktopdClient } from "../../desktopd/client.ts";
+import type { NativeDevice } from "../../desktopd/registry.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
 import type { ActionContext, ActionGateway, NativeScreenBinding } from "../../gateway/gateway.ts";
 import type { FramePng } from "../frame-png.ts";
 import type { MemoryStore } from "../memory.ts";
+import type { PeopleStore } from "../people.ts";
 import type { Redactor } from "../redact.ts";
 import type { EffectPermit } from "../safety/authorize.ts";
+import { screenOf } from "../safety/autonomy.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import type { Transfers } from "../transfers.ts";
+
+export interface RecallHit {
+  title: string;
+  day: string;
+  kind: "title" | "user" | "assistant" | "summary" | "step" | "file" | "note";
+  snippet: string;
+}
 
 export interface ToolDeps {
   uploads?: {
     desktop(cellId: string): Pick<DesktopdTools, "inspectUpload" | "readUpload"> | undefined;
     transfers: Pick<Transfers, "acquire">;
   };
-  gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf">;
+  gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf"> &
+    Partial<Pick<ActionGateway, "find">>;
   // Installed with the session's screen controller; one private binding per admitted tool.
   bindScreen?(session: AgentSession, lease: ScreenLease): NativeScreenBinding;
   // The cell's scale, to bring the gateway's device-pixel cursor back to model pixels.
@@ -23,7 +34,7 @@ export interface ToolDeps {
   desktop(
     cellId: string,
   ):
-    | Pick<
+    | (Pick<
         DesktopdTools,
         | "shell"
         | "readFile"
@@ -33,18 +44,25 @@ export interface ToolDeps {
         | "fetchFile"
         | "browserRead"
         | "browserNavigate"
-      >
+      > &
+        Partial<Pick<DesktopdTools, "elements">>)
     | undefined;
   launcher(cellId: string): Pick<DesktopdClient, "launch"> | undefined;
-  png: Pick<FramePng, "png">;
-  memory: Pick<MemoryStore, "apply">;
+  // The desktop's input device while its computer takes input: where a secret answer is typed
+  // when the session has no screen controller.
+  device?(cellId: string): NativeDevice | undefined;
+  png: Pick<FramePng, "png"> & Partial<Pick<FramePng, "same">>;
+  memory: Pick<MemoryStore, "apply" | "appendNote">;
+  // Earlier tasks matching a query, never the asking task itself.
+  recall?(query: string, limit: number, excludeSessionId: string): RecallHit[];
+  people?: Pick<PeopleStore, "find" | "record" | "redirects">;
   // Where a done task's files are kept for the result card: <home>/sessions/<id>/out/<name>.
   saveOutput(
     sessionId: string,
     name: string,
     source: ReadableStream<Uint8Array>,
     scope: { signal: AbortSignal; check(): void },
-  ): Promise<{ path: string; bytes: number }>;
+  ): Promise<{ path: string; bytes: number; version?: number }>;
   // Called after synchronous session.stop(); must still revoke/freeze already-fenced sessions.
   stopForUncertainty(
     session: AgentSession,
@@ -52,6 +70,7 @@ export interface ToolDeps {
   ): Promise<void>;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
+  routines?: import("./routine.ts").RoutineToolPort;
 }
 
 export interface ToolCallContext {
@@ -66,6 +85,8 @@ export interface ToolCallContext {
   permit?: EffectPermit;
   screen?: ScreenLease;
   nativeScreen?: NativeScreenBinding;
+  // The call's last Activity step was stopped before it did anything.
+  stepCancelled?: boolean;
 }
 
 export function text(t: string): ToolResult["content"][number] {
@@ -98,6 +119,13 @@ export function tail(s: string, max: number): string {
 export function cut(s: string, max: number): string {
   const chars = [...s];
   return chars.length <= max ? s : `${chars.slice(0, max - 1).join("")}…`;
+}
+
+// The call's line for the user, as plain text: secrets masked first, since a mask can be longer
+// than what it hides, then cut to the event's limit.
+export function intentOf(ctx: ToolCallContext, input: { intent?: string }): { intent?: string } {
+  const line = input.intent ? clipText(ctx.redact(input.intent), INTENT_CHARS) : "";
+  return line ? { intent: line } : {};
 }
 
 export function append(ctx: ToolCallContext, kind: string, data: Record<string, unknown>): void {
@@ -133,6 +161,9 @@ export async function contain(
     ],
   };
 }
+export function taintScreen(ctx: ToolCallContext, host?: string, text?: string): void {
+  ctx.session.taintScreen(screenOf(ctx), host, text);
+}
 export async function frame(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -143,6 +174,7 @@ export async function frame(
   const png = await deps.png.png(ctx.session.id, frameId, region, ctx.signal);
   ctx.check();
   ctx.session.tainted = true;
+  taintScreen(ctx);
   if (!region) ctx.session.lastFrameId = frameId;
   return {
     type: "image",

@@ -1,13 +1,11 @@
-import { useEffect, useState } from "react";
+import { CommandChip } from "../shell/CommandChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
-import { Icon } from "../ui/Icon.tsx";
-import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
+import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
+import type { IconName } from "../ui/icons.ts";
 import type { KeydHealth } from "./keys-api.ts";
 
-const DOCTOR = "localdot doctor";
-const COPIED_MS = 1500;
+export const DOCTOR = "localdot doctor";
 
 type Tone = "ok" | "wait" | "bad";
 
@@ -75,72 +73,52 @@ export function protectionOf(health: KeydHealth | null): Status[] {
   return [isolation, audit, network];
 }
 
-function Glyph({ tone }: { tone: Tone }) {
+function Glyph({ tone }: { tone: Exclude<Tone, "ok"> }) {
   if (tone === "bad") return <Badge kind="dot" tone="attention" label="Needs attention" />;
-  if (tone === "ok") return <Icon name="check" size={12} />;
   return <span className="keys-status-ring" aria-hidden="true" />;
 }
 
-// A command to run in Terminal, copied with one press where the browser allows it.
-function Command() {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), COPIED_MS);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  if (typeof navigator === "undefined" || typeof navigator.clipboard?.writeText !== "function")
-    return <code className="keys-code">{DOCTOR}</code>;
-  return (
-    <>
-      <Button
-        size="sm"
-        icon={copied ? "check" : "copy"}
-        aria-label={`Copy the command ${DOCTOR}`}
-        onClick={() => {
-          void navigator.clipboard.writeText(DOCTOR).then(
-            () => setCopied(true),
-            () => {},
-          );
-        }}
-      >
-        <code className="keys-code">{DOCTOR}</code>
-      </Button>
-      <VisuallyHidden role="status">{copied ? "Copied" : ""}</VisuallyHidden>
-    </>
-  );
-}
+const TILE: Record<string, IconName> = {
+  "Key isolation": "lock",
+  "Audit log": "file-text",
+  "Network protection": "shield",
+};
 
 // What keeps keys safe, one row each, so a problem says what it means and how to fix it.
 export function Protection({ health }: { health: KeydHealth | null }) {
   return (
-    <ul className="keys-protection">
-      {protectionOf(health).map((status) => (
-        <li key={status.name} className="keys-status" data-tone={status.tone}>
-          <div className="keys-status-line">
-            <span className="keys-status-name">{status.name}</span>
-            <span className="keys-status-state">
-              <Glyph tone={status.tone} />
-              <span>{status.state}</span>
-            </span>
-          </div>
-          {status.problem && (
-            <div className="keys-status-help">
-              <p>{status.problem}</p>
-              <div className="keys-status-fix">
-                <span>To fix it, run</span>
-                <Command />
-                <span>in Terminal.</span>
-              </div>
-              {status.details && (
-                <Disclosure summary="Details" className="keys-status-details">
-                  <p className="keys-raw">{status.details}</p>
-                </Disclosure>
+    <Group>
+      <ul className="keys-protection">
+        {protectionOf(health).map((status) => (
+          <li key={status.name} className="keys-status" data-tone={status.tone}>
+            <GroupRow
+              leading={<IconTile icon={TILE[status.name] ?? "shield"} />}
+              label={status.name}
+              trailing={
+                <span className="keys-status-state">
+                  {status.tone === "ok" ? null : <Glyph tone={status.tone} />}
+                  <span>{status.state}</span>
+                </span>
+              }
+            >
+              {status.problem && (
+                <div className="keys-status-help">
+                  <p>{status.problem}</p>
+                  <div className="keys-status-fix">
+                    <span>To fix it, run this in Terminal:</span>
+                    <CommandChip text={DOCTOR} />
+                  </div>
+                  {status.details && (
+                    <Disclosure summary="Details" className="keys-status-details">
+                      <p className="keys-raw">{status.details}</p>
+                    </Disclosure>
+                  )}
+                </div>
               )}
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
+            </GroupRow>
+          </li>
+        ))}
+      </ul>
+    </Group>
   );
 }

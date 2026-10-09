@@ -106,9 +106,8 @@ export function outsideRect(
     x < rect.x - pad || x > rect.x + rect.w + pad || y < rect.y - pad || y > rect.y + rect.h + pad;
 }
 
-// The arrow's footprint around its tip at `dpr`: x −2…20, y −2…25 CSS px (geometry.ts, the 12°
-// tilt, the rim and the halo), grown by 2 px for the xenon stroke. Its own accent stroke must
-// never count as ring pixels.
+// The arrow's footprint around its tip at `dpr`: x −2…20, y −2…25 CSS px (geometry.ts, with its
+// edge, shadow and lean), grown by 2 px. Its own accent edge must never count as ring pixels.
 export function arrowRect(
   tip: { x: number; y: number },
   dpr: number,
@@ -116,21 +115,16 @@ export function arrowRect(
   return { x: tip.x - 2 * dpr - 2, y: tip.y - 2 * dpr - 2, w: 22 * dpr + 4, h: 27 * dpr + 4 };
 }
 
-// The coordinates-only marker (18 px ring with 1.5 px stroke, four arms from 14 to 24 px) in
-// crop pixels at `dpr`; true where its pixels can lie.
-export function crosshairMask(
+// The coordinates-only focus ring (a 24 px circle, 2 px stroke over its halo, scaling in from
+// 1.06) in crop pixels at `dpr`; true where its pixels can lie.
+export function pointRingMask(
   cx: number,
   cy: number,
   dpr: number,
 ): (x: number, y: number) => boolean {
   return (x, y) => {
     const r = Math.hypot(x - cx, y - cy);
-    if (r >= 16.5 * dpr && r <= 19.5 * dpr) return true;
-    const onArm =
-      (Math.abs(x - cx) <= 1.5 * dpr || Math.abs(y - cy) <= 1.5 * dpr) &&
-      r >= 13 * dpr &&
-      r <= 25 * dpr;
-    return onArm || r <= 3 * dpr;
+    return r >= 10 * dpr && r <= 18.5 * dpr;
   };
 }
 

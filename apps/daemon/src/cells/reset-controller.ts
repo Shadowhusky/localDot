@@ -35,7 +35,9 @@ export interface ComputerResetControllerDeps {
     | "get"
     | "create"
     | "retireReset"
+    | "discardUpdate"
     | "inspectReplacement"
+    | "thawReplacement"
     | "retireReplacement"
     | "holdReplacement"
     | "publishReplacement"
@@ -103,7 +105,7 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     capture,
     hold: (old, fresh, request) => {
       d.holds.hold(old, fresh, request);
-      d.cells.holdReplacement(fresh);
+      if (d.holds.candidateHeld(fresh)) d.cells.holdReplacement(fresh);
     },
     expectedRequests: () => d.holds.records(),
     closeAdmission: () => {
@@ -112,7 +114,19 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     },
     inspectFresh,
     oldAbsent,
+    finalised: (record) => d.holds.finalised(record.newCellId),
+    thawFresh: async (record) => {
+      if (d.stopping?.()) throw failure();
+      await d.cells.thawReplacement(record.newCellId);
+      const deadline = Date.now() + (d.readyTimeoutMs ?? 60000);
+      while (!d.stopping?.() && Date.now() < deadline) {
+        if ((await inspectFresh(record)) === "ready") return;
+        await sleep(250);
+      }
+    },
     retireOld: async (record) => {
+      // An unfinished update's new containers mount the home beside the captured graph.
+      await d.cells.discardUpdate(record.oldCellId);
       // Do not start even the ordinary Stop/browser cleanup path until the captured graph is owned.
       await verifyComputerResetResources(d.docker, record);
       if (!(await d.runner.retireForReset(record.oldCellId))) throw failure();
@@ -159,7 +173,8 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     restoreReady: () => owner.restoreReady(),
     status: (old: string, request: string) => owner.status(old, request),
     reset: (old: string, input: ComputerResetRequest) => {
-      if (!d.available()) return Promise.reject(failure());
+      // An update moves the computer onto new containers after the source below is captured.
+      if (!d.available() || d.cells.get(old)?.updating) return Promise.reject(failure());
       try {
         const request = ComputerResetRequest.parse(input);
         // Invalid/missing source records must not leave new durable holds with no transaction.

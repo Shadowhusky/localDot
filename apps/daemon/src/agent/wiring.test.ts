@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CODEX_MANIFEST_SHA256,
@@ -7,16 +7,24 @@ import {
   CodexInstallError,
   type CodexInstaller,
   type HarnessAvailability,
+  NativeCheckError,
+  stampAccount,
+  stampNative,
 } from "@localdot/codex-harness";
-import { ulid } from "@localdot/protocol";
+import { type ScreenName, ulid } from "@localdot/protocol";
+import { CHECK_MEMORY_FIRST } from "@localdot/protocol/guidance";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ScreenController, ScreenScope } from "../browser/screen-controller.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
 import { LiveSessions } from "../gateway/live.ts";
+import type { ClaudeCodeDriverDeps } from "./claude-code/driver.ts";
 import type { CodexAuthOwnerDeps } from "./codex/auth-owner.ts";
 import type { CodexDriverDeps } from "./codex/driver.ts";
 import type { McpEndpointInput } from "./codex/mcp-endpoint.ts";
+import { SANDBOX_REASONS } from "./codex/setup.ts";
+import { MemoryStore } from "./memory.ts";
 import { AgentSession } from "./session.ts";
 import type { ToolApiDeps } from "./tool-api.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
@@ -24,11 +32,14 @@ import { type AgentWiringDeps, createAgent } from "./wiring.ts";
 const m = vi.hoisted(() => ({
   owner: undefined as CodexAuthOwnerDeps | undefined,
   driver: undefined as CodexDriverDeps | undefined,
+  claude: undefined as ClaudeCodeDriverDeps | undefined,
   tool: undefined as ToolApiDeps | undefined,
   toolApp: undefined as ReturnType<typeof import("./tool-api.ts")["createToolApi"]> | undefined,
   endpoints: [] as McpEndpointInput[],
   available: { available: true } as HarnessAvailability,
   record: {} as Record<string, unknown>,
+  host: { system: "25G83", runtime: "0.0.78" },
+  check: vi.fn(),
   installed: false,
   ensure: vi.fn(),
   verify: vi.fn(),
@@ -44,6 +55,8 @@ const m = vi.hoisted(() => ({
 vi.mock("@localdot/codex-harness", async (original) => ({
   ...(await original<typeof import("@localdot/codex-harness")>()),
   harnessAvailability: () => m.available,
+  checkHost: () => m.host,
+  checkNativeSandbox: (...args: unknown[]) => m.check(...args),
 }));
 vi.mock("../../../../harness/codex/acceptance/record.json", () => ({ default: m.record }));
 vi.mock("@hono/node-server", () => ({ serve: (...args: unknown[]) => m.serve(...args) }));
@@ -84,6 +97,17 @@ vi.mock("./codex/driver.ts", async (original) => ({
   CodexDriver: class {
     constructor(d: CodexDriverDeps) {
       m.driver = d;
+    }
+    run(...args: unknown[]) {
+      return m.run(...args);
+    }
+  },
+}));
+vi.mock("./claude-code/driver.ts", async (original) => ({
+  ...(await original<typeof import("./claude-code/driver.ts")>()),
+  ClaudeCodeDriver: class {
+    constructor(d: ClaudeCodeDriverDeps) {
+      m.claude = d;
     }
     run(...args: unknown[]) {
       return m.run(...args);
@@ -147,6 +171,7 @@ function gate<T>() {
 const fixtures: { agent: ReturnType<typeof createAgent>; log: EventLog; base: string }[] = [];
 beforeEach(() => {
   for (const fn of [
+    m.check,
     m.ensure,
     m.verify,
     m.cancel,
@@ -161,13 +186,25 @@ beforeEach(() => {
     fn.mockReset();
   m.owner = undefined;
   m.driver = undefined;
+  m.claude = undefined;
   m.tool = undefined;
   m.toolApp = undefined;
   m.endpoints.length = 0;
   m.available = { available: true };
   for (const key of Object.keys(m.record)) delete m.record[key];
   m.installed = false;
-  m.verify.mockResolvedValue(undefined);
+  m.verify.mockImplementation(async () =>
+    m.installed
+      ? {
+          version: "0.154.0",
+          platform: "darwin-arm64",
+          binDir: "/owned/bin/x",
+          codexBin: "/owned/bin/x/codex",
+          codeModeHostBin: "/owned/bin/x/codex-code-mode-host",
+        }
+      : undefined,
+  );
+  m.check.mockImplementation(async () => ({ host: m.host, reportSha256: "c".repeat(64) }));
   m.ensure.mockResolvedValue({ version: "0.154.0" });
   m.authClose.mockResolvedValue(undefined);
   m.sweep.mockResolvedValue(0);
@@ -195,7 +232,9 @@ afterEach(async () => {
   }
   vi.restoreAllMocks();
 });
-function setup(options: { codex?: boolean; unsafe?: boolean } = {}) {
+function setup(
+  options: { codex?: boolean; claude?: boolean; unsafe?: boolean; record?: unknown } = {},
+) {
   const base = mkdtempSync("/tmp/ld12-wire-"),
     home = join(base, "daemon"),
     realHome = join(base, "real-home");
@@ -207,6 +246,12 @@ function setup(options: { codex?: boolean; unsafe?: boolean } = {}) {
     cellId = ulid(),
     frameId = ulid();
   if (options.unsafe) symlinkSync(realHome, join(home, "codex"));
+  if (options.record) {
+    mkdirSync(join(home, "codex"), { mode: 0o700 });
+    writeFileSync(join(home, "codex", "acceptance.json"), JSON.stringify(options.record), {
+      mode: 0o600,
+    });
+  }
   let endpoint = { baseUrl: "http://127.0.0.1:1", token: "d".repeat(43) };
   let cell: CellSummary = {
     id: cellId,
@@ -259,6 +304,7 @@ function setup(options: { codex?: boolean; unsafe?: boolean } = {}) {
     keydPorts: { from: 4791, to: 4796 },
     toolPort: 0,
     ...(options.codex === false ? {} : { codex: { realHome, user: "fixture" } }),
+    ...(options.claude ? { claudeCode: { realHome } } : {}),
   };
   const agent = createAgent(deps);
   fixtures.push({ agent, log, base });
@@ -301,48 +347,153 @@ describe("ChatGPT production integration", () => {
     expect(m.verify).toHaveBeenCalledTimes(1);
     expect(m.ensure).not.toHaveBeenCalled();
     expect(m.status).not.toHaveBeenCalled();
+    expect(m.check).not.toHaveBeenCalled();
   });
-  const accepted = () => ({
+  const released = () => ({
     format: 1,
     codexVersion: CODEX_VERSION,
     platform: `${process.platform}-${process.arch}`,
     manifestSha256: CODEX_MANIFEST_SHA256,
     nativeSandbox: { passed: true, inputSha256: "a".repeat(64), reportSha256: "b".repeat(64) },
-    realAccount: { passed: true, reportSha256: "c".repeat(64) },
+    realAccount: { passed: false },
   });
   const pending = {
     available: false,
     reason: "ChatGPT plan support isn't switched on in this version yet.",
   };
+  const signedIn = {
+    available: true,
+    state: "signed_in",
+    codexVersion: "0.154.0",
+    account: { email: "person@example.test", plan: "plus" },
+  };
+  const choose = (f: ReturnType<typeof setup>) =>
+    f.agent.routes.settings.put({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
+  const recordOf = (f: ReturnType<typeof setup>) =>
+    JSON.parse(readFileSync(join(f.home, "codex", "acceptance.json"), "utf8"));
   it.each([
     ["no record", {}],
     ["no native sandbox stamp", { nativeSandbox: { passed: false } }],
-    ["no real-account stamp", { realAccount: { passed: false } }],
     ["another Codex version", { codexVersion: "0.155.0" }],
     ["another release manifest", { manifestSha256: "0".repeat(64) }],
-  ])("keeps the plan switched off after installation with %s", async (name, patch) => {
-    if (name !== "no record") Object.assign(m.record, accepted(), patch);
+  ])("keeps the plan switched off without release evidence: %s", async (name, patch) => {
+    if (name !== "no record") Object.assign(m.record, released(), patch);
     m.installed = true;
     const f = setup();
     await f.agent.start();
     expect(f.agent.routes.harness?.()).toEqual(pending);
-    f.agent.routes.settings.put({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
+    choose(f);
     await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
       status: 400,
     });
+    expect(m.check).not.toHaveBeenCalled();
     expect(m.status).not.toHaveBeenCalled();
     expect(m.run).not.toHaveBeenCalled();
     expect(m.ensure).not.toHaveBeenCalled();
   });
-  it("opens the plan only with the complete committed acceptance record", async () => {
-    Object.assign(m.record, accepted());
-    m.installed = true;
+  it("lets the plan be chosen and set up with the release evidence, before this Mac's stamps", async () => {
+    Object.assign(m.record, released());
     const f = setup();
     await f.agent.start();
     expect(f.agent.routes.harness?.()).toEqual({ available: true });
     expect(f.agent.routes.chatgpt?.availability()).toEqual({ available: true });
+    expect(f.agent.routes.chatgpt?.setup.sandbox()).toBe("unchecked");
+    choose(f);
+    await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "Install ChatGPT support first.",
+    });
     m.available = { available: false, reason: "fixture unsupported platform" };
     expect(f.agent.routes.harness?.()).toEqual(m.available);
+  });
+  it("checks this Mac's sandbox at startup, then opens tasks after the first verified sign-in", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    const f = setup();
+    // Every Codex launch, for the account or a task, stays closed until this Mac's check passes.
+    expect(m.owner?.sandboxReason?.()).toBe(SANDBOX_REASONS.unchecked);
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.owner?.sandboxReason?.()).toBeUndefined();
+    expect(m.check).toHaveBeenCalledTimes(1);
+    expect(recordOf(f)).toMatchObject({
+      nativeSandbox: {
+        passed: true,
+        inputSha256: "a".repeat(64),
+        system: "25G83",
+        runtime: "0.0.78",
+      },
+      realAccount: { passed: false },
+    });
+    choose(f);
+    m.status.mockResolvedValueOnce({
+      available: true,
+      state: "signed_out",
+      codexVersion: "0.154.0",
+    });
+    await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "ChatGPT plan: sign in under Settings first.",
+    });
+    expect(recordOf(f).realAccount).toEqual({ passed: false });
+    m.status.mockResolvedValue(signedIn);
+    expect((await f.agent.runner.start(f.cellId, "Fixture task")).task).toBe("Fixture task");
+    expect(recordOf(f).realAccount).toMatchObject({ passed: true });
+  });
+  it("keeps tasks closed when this Mac's sandbox check fails", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    m.check.mockRejectedValue(new NativeCheckError("task nested"));
+    const f = setup();
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("failed"));
+    expect(m.owner?.sandboxReason?.()).toBe(SANDBOX_REASONS.failed);
+    choose(f);
+    m.status.mockResolvedValue(signedIn);
+    await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "ChatGPT support didn't pass its safety check on this Mac, so it stays off.",
+    });
+    expect(m.status).not.toHaveBeenCalled();
+    expect(m.run).not.toHaveBeenCalled();
+    expect(() => readFileSync(join(f.home, "codex", "acceptance.json"))).toThrow();
+  });
+  it("checks again after a macOS update and keeps the user's account stamp", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    const old = { system: "25F70", runtime: m.host.runtime };
+    const f = setup({
+      record: stampAccount(stampNative(undefined, old, "d".repeat(64), 1), old, 2),
+    });
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.check).toHaveBeenCalledTimes(1);
+    expect(recordOf(f)).toMatchObject({
+      nativeSandbox: { passed: true, system: "25G83" },
+      realAccount: { passed: true, checkedAt: 2 },
+    });
+  });
+  it("checks again after a release changes localDot's sandbox sources and keeps the account stamp", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    const record = stampAccount(stampNative(undefined, m.host, "d".repeat(64), 1), m.host, 2);
+    Object.assign(m.record, {
+      nativeSandbox: { ...released().nativeSandbox, inputSha256: "e".repeat(64) },
+    });
+    const f = setup({ record });
+    expect(m.owner?.sandboxReason?.()).toBe(SANDBOX_REASONS.unchecked);
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.check).toHaveBeenCalledTimes(1);
+    expect(recordOf(f)).toMatchObject({
+      nativeSandbox: { passed: true, inputSha256: "e".repeat(64) },
+      realAccount: { passed: true, checkedAt: 2 },
+    });
   });
   it.each([false, true])(
     "does not construct a launcher for absent or unsafe roots: unsafe=%s",
@@ -431,6 +582,26 @@ describe("ChatGPT production integration", () => {
     expect(first?.[0].policy).toBe(f.policy);
     expect(second?.[0].policy).toBe(f.policy);
   });
+  it.each([
+    ["paused", { paused: true }],
+    ["fenced", { fenced: { revision: 1 } }],
+    ["waiting on its replacement", { replacementPending: true }],
+    ["not ready", { state: "stopping" }],
+    ["held by the kill switch", {}],
+  ] as const)("gives secret typing no device while the computer is %s", async (name, patch) => {
+    const f = setup();
+    const device = { client: {} } as unknown as NonNullable<
+      ReturnType<AgentWiringDeps["registry"]["for"]>
+    >;
+    f.deps.registry.for = () => device;
+    const tools = required(m.tool).tools;
+    expect(tools.device?.(f.cellId)).toBeUndefined();
+    await f.agent.start();
+    expect(tools.device?.(f.cellId)).toBe(device);
+    if (name === "held by the kill switch") f.state.busy = true;
+    else f.change(patch);
+    expect(tools.device?.(f.cellId)).toBeUndefined();
+  });
   it("supplies a full-frame PNG and records provenance only after all checks", async () => {
     const f = setup();
     await f.agent.start();
@@ -455,6 +626,41 @@ describe("ChatGPT production integration", () => {
       cellId: s.cellId,
       signal: expect.any(AbortSignal),
     });
+  });
+  it("taints the task with the screen a ChatGPT turn starts on, when the user is signed in there", async () => {
+    const f = setup();
+    f.deps.sessionScreens = {
+      install: vi.fn(),
+      manual: vi.fn(),
+      bind: vi.fn(() => ({ cellId: f.cellId })),
+    } as unknown as AgentWiringDeps["sessionScreens"];
+    await f.agent.start();
+    const observeOn = async (screen: ScreenName) => {
+      const s = f.session();
+      s.attachScreens({
+        activate: async () => ({}),
+        lease: (scope: ScreenScope) => ({
+          selection: { screen, cellId: f.cellId, geometry: null, revision: 1 },
+          signal: scope.signal,
+          check: () => scope.check(),
+          finish() {},
+        }),
+        takeOver: async () => {},
+        close: async () => {},
+      } as unknown as ScreenController);
+      const g = s.beginBrain();
+      await s.prepareScreens(g);
+      await required(m.driver).observe(s, g, g.signal);
+      return s;
+    };
+    const browser = await observeOn("browser");
+    expect(
+      f.log
+        .read(browser.id)
+        .filter((event) => event.type === "safety.taint")
+        .map((event) => event.data),
+    ).toEqual([{ kind: "screen", origin: "browser screen" }]);
+    expect((await observeOn("desktop")).taint.tainted).toBe(false);
   });
   it.each(["endpoint", "generation", "control", "keyd", "busy", "pause"])(
     "rejects a capture when %s changes while the gateway is pending",
@@ -514,6 +720,66 @@ describe("ChatGPT production integration", () => {
     const wait = vi.spyOn(f.agent.runner, "waitForAuthResume").mockResolvedValue();
     await required(m.driver).waitForAuthResume?.(s);
     expect(wait).toHaveBeenCalledExactlyOnceWith(s);
+  });
+});
+
+describe("Claude Code production integration", () => {
+  it("taints a Claude Code task as a ChatGPT one: its memory, its first screen and every call", async () => {
+    const f = setup({ claude: true });
+    f.deps.sessionScreens = {
+      install: vi.fn(),
+      manual: vi.fn(),
+      bind: vi.fn(() => ({ cellId: f.cellId })),
+    } as unknown as AgentWiringDeps["sessionScreens"];
+    await f.agent.start();
+    const claude = required(m.claude);
+    expect(claude.observe).toBe(required(m.driver).observe);
+    new MemoryStore(f.home).apply(ulid(), "MEMORY.md", "append", "Account 4417-1234-5678");
+    const s = f.session();
+    s.recent = [{ title: "Pay the <gas> bill", outcome: "done", day: "2026-10-08" }];
+    const prompt = claude.instructions(s);
+    expect(prompt).toContain(CHECK_MEMORY_FIRST);
+    expect(prompt).toContain("Account 4417-1234-5678");
+    expect(prompt).toContain("Pay the &lt;gas&gt; bill");
+    expect(s.taint.overlap("my account 4417-1234-5678").overlaps).toBe(true);
+
+    s.attachScreens({
+      activate: async () => ({}),
+      lease: (scope: ScreenScope) => ({
+        selection: { screen: "browser", cellId: f.cellId, geometry: null, revision: 1 },
+        signal: scope.signal,
+        check: () => scope.check(),
+        finish() {},
+      }),
+      takeOver: async () => {},
+      close: async () => {},
+    } as unknown as ScreenController);
+    const g = s.beginBrain();
+    await s.prepareScreens(g);
+    await claude.observe(s, g, g.signal);
+    expect(
+      f.log
+        .read(s.id)
+        .filter((event) => event.type === "safety.taint")
+        .map((event) => event.data),
+    ).toEqual([
+      { kind: "memory", origin: "MEMORY.md" },
+      { kind: "screen", origin: "browser screen" },
+    ]);
+
+    const remembered = await claude.dispatch(
+      s,
+      g,
+      "remember",
+      ulid(),
+      { file: "MEMORY.md", op: "append", text: "Account 4417-1234-5678" },
+      g.signal,
+    );
+    expect(remembered.ok).toBe(false);
+    expect(m.dispatch).toHaveBeenCalledOnce();
+    expect(f.policy.decide).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: s.id, tool: "remember", tainted: true }),
+    );
   });
 });
 

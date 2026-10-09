@@ -4,6 +4,7 @@ import type {
   EventOf,
   RuleChange,
   ScreenSelectionSnapshot,
+  SessionOrigin,
 } from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
@@ -15,6 +16,8 @@ export const AGENT_LIMITS = Object.freeze({
   questions: 64,
   takeovers: 64,
   results: 64,
+  routineProposals: 16,
+  spendCalls: 2048,
   messageText: 20_000,
   outputText: 65_536,
   patchText: 8192,
@@ -38,6 +41,8 @@ export interface AgentStep {
   readonly firstSeenAt?: number;
   readonly kind?: EventOf<"step.start">["data"]["kind"];
   readonly planItem?: string;
+  // dot's line for the user about the call this step starts.
+  readonly intent?: string;
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly status?: EventOf<"step.end">["data"]["status"];
@@ -58,7 +63,14 @@ export type AgentQuestion = EventOf<"ask.request">["data"] & {
   readonly answer?: EventOf<"ask.answer">["data"];
 };
 export type AgentTakeover = EventOf<"takeover.request">["data"] & {
+  readonly seq?: number;
+  // Wall-clock ms of the hand-over and of its end.
+  readonly time?: number;
+  // When the user took the computer dot handed over.
+  readonly taken?: { readonly seq: number; readonly time: number };
   readonly end?: EventOf<"takeover.end">["data"];
+  readonly endSeq?: number;
+  readonly endTime?: number;
 };
 export interface AgentChange {
   readonly id: string;
@@ -73,15 +85,38 @@ export interface AgentChange {
 }
 export interface AgentResult {
   readonly id: string;
+  // An earlier task's result in the conversation: its files are that task's.
+  readonly sessionId?: string;
   readonly seq?: number;
   readonly at?: number;
   readonly summary: string;
   readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
 }
+// A routine dot drafted in this task; it runs only once the user saves it.
+export type RoutineProposal = EventOf<"routine.proposed">["data"] & {
+  readonly id: string;
+  readonly seq: number;
+};
 export type UsageRow = EventOf<"model.usage">["data"] & {
   readonly calls: number;
   readonly reasoningPartial: boolean;
 };
+// One model call's cost, at its session time, as keyd charged it.
+export interface SpendCall {
+  readonly atMs: number;
+  readonly route: string;
+  readonly model: string;
+  readonly usd: number;
+  readonly estimated: boolean;
+}
+// What this task and today have cost so far, by keyd's account. Estimated once any call was.
+export interface AgentSpend {
+  readonly taskUSD: number;
+  readonly dayUSD: number;
+  readonly estimated: boolean;
+  readonly taskLimitUSD?: number;
+  readonly dayLimitUSD?: number;
+}
 export interface Reported<T> {
   readonly id: string;
   readonly at: number;
@@ -122,16 +157,28 @@ export interface AgentModel {
   readonly pendingTakeover: string | null;
   readonly changes: readonly AgentChange[];
   readonly results: readonly AgentResult[];
+  // What started the task when the user did not: a routine or a follow-up.
+  readonly origin?: SessionOrigin;
+  readonly routineProposals: ReadonlyMap<string, RoutineProposal>;
   readonly usage: readonly UsageRow[];
   readonly usagePartial: boolean;
   readonly retry: Reported<EventOf<"model.retry">["data"]> | null;
+  // The model call waits out that retry: no later state has said otherwise.
+  readonly retrying: boolean;
   readonly subscription: Reported<EventOf<"subscription.usage">["data"]> | null;
   readonly budget: Reported<EventOf<"budget.exceeded">["data"]> | null;
+  readonly spend: AgentSpend | null;
+  readonly spendCalls: readonly SpendCall[];
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
-  readonly activity?: string;
 }
+// The hand-over the user holds the computer under: one they asked for, or dot's once they took it.
+export function heldByUser(model: AgentModel): AgentTakeover | undefined {
+  const held = model.pendingTakeover ? model.takeovers.get(model.pendingTakeover) : undefined;
+  return held && (held.by === "user" || held.taken) ? held : undefined;
+}
+
 export function emptyAgentModel(): AgentModel {
   return {
     lastSeq: -1,
@@ -147,11 +194,15 @@ export function emptyAgentModel(): AgentModel {
     pendingTakeover: null,
     changes: [],
     results: [],
+    routineProposals: new Map(),
     usage: [],
     usagePartial: false,
     retry: null,
+    retrying: false,
     subscription: null,
     budget: null,
+    spend: null,
+    spendCalls: [],
     historyTruncated: false,
   };
 }
@@ -163,6 +214,8 @@ export interface AgentFeedState {
   readonly connection: AgentConnection;
   // This connection has delivered a valid in-order or duplicate replay packet.
   readonly replayed: boolean;
+  // The task's history so far has arrived, read whole or from the live feed's first packet.
+  readonly history: boolean;
   readonly streamError: string | null;
   readonly model: AgentModel;
 }

@@ -1,6 +1,17 @@
-import { ComputerAction, type CoordSpaceName, MAX_DRAG_MS, type Point } from "@localdot/protocol";
-import { checkCombo, checkModifiers } from "@localdot/protocol/keys";
-import { modelPoint } from "@localdot/providers";
+import {
+  type AskUserInput,
+  type BrowserActInput,
+  type BrowserAction,
+  ComputerAction,
+  type ComputerStep,
+  type CoordSpaceName,
+  MAX_BATCH_ACTIONS,
+  MAX_BATCH_STEPS,
+  MAX_DRAG_MS,
+  type Point,
+} from "@localdot/protocol";
+import { checkCombo, checkModifiers, keyCombo } from "@localdot/protocol/keys";
+import { modelPoint, toModelSpace } from "@localdot/providers";
 
 // What Anthropic's computer tools and localDot's generic tool send: the same Anthropic-style shape.
 export interface ProviderComputerInput {
@@ -17,6 +28,8 @@ export interface ProviderComputerInput {
   submit?: boolean;
   path?: number[][];
   button?: "left" | "right" | "middle";
+  steps?: ProviderComputerInput[];
+  intent?: string;
 }
 
 const CLICKS: Record<string, { button: "left" | "right" | "middle"; count: 1 | 2 | 3 }> = {
@@ -29,18 +42,6 @@ const CLICKS: Record<string, { button: "left" | "right" | "middle"; count: 1 | 2
 
 const MAX_HOLD_S = 30;
 const BUTTONS = new Set(["left", "right", "middle"]);
-
-// xdotool-style combos ("ctrl+shift+t", "Return"): the gateway's key names (protocol keys.ts maps
-// them onto X keysyms). A trailing "+" is the plus key: "ctrl++", or "+" alone.
-export function keyCombo(text: string): string[] | undefined {
-  const trimmed = text.trim();
-  const plus = trimmed === "+" || /\+\s*\+$/.test(trimmed);
-  const rest = plus ? trimmed.replace(/\+?\s*\+$/, "") : trimmed;
-  const keys = [...(rest ? rest.split("+").map((k) => k.trim()) : []), ...(plus ? ["+"] : [])];
-  return keys.length >= 1 && keys.length <= 8 && keys.every((k) => k.length > 0 && k.length <= 32)
-    ? keys
-    : undefined;
-}
 
 // A combo the model wrote, or the message it gets instead: unreadable, or a key with no X name.
 function comboOf(action: string, text: string | undefined): string[] | string {
@@ -131,7 +132,7 @@ function normalizeComputerAction(
   }
   switch (action) {
     case "screenshot":
-      return { action: "screenshot" };
+      return { action: "screenshot", ...frame };
     case "cursor_position":
       return { action: "cursor_position" };
     case "key": {
@@ -142,6 +143,7 @@ function normalizeComputerAction(
         action: "key",
         keys,
         ...(input.repeat && input.repeat > 1 ? { repeat: input.repeat } : {}),
+        ...frame,
       };
     }
     case "hold_key": {
@@ -150,7 +152,7 @@ function normalizeComputerAction(
       const seconds = input.duration ?? 0;
       if (seconds <= 0 || seconds > MAX_HOLD_S)
         return `hold_key needs a duration of more than 0 and at most ${MAX_HOLD_S} seconds`;
-      return { action: "hold_key", keys, ms: Math.round(seconds * 1000) };
+      return { action: "hold_key", keys, ms: Math.round(seconds * 1000), ...frame };
     }
     case "scroll": {
       const mods = modsOf(action, input.text);
@@ -196,6 +198,7 @@ function normalizeComputerAction(
       return {
         action: "wait",
         ms: Math.round(Math.max(0, Math.min(30, input.duration ?? 1)) * 1000),
+        ...frame,
       };
     case "zoom": {
       const r = input.region;
@@ -227,6 +230,7 @@ function typeSteps(
   coords: CoordSpaceName,
   basedOn: string | undefined,
 ): ComputerAction[] | string {
+  const frame = basedOn ? { basedOn } : {};
   const steps: ComputerAction[] = [];
   if (input.coordinate !== undefined) {
     const click = normalizeComputerAction(
@@ -238,16 +242,63 @@ function typeSteps(
     steps.push(click);
   }
   if (input.clear)
-    steps.push({ action: "key", keys: ["ctrl", "a"] }, { action: "key", keys: ["BackSpace"] });
-  if (input.text) steps.push({ action: "type", text: input.text });
+    steps.push(
+      { action: "key", keys: ["ctrl", "a"], ...frame },
+      { action: "key", keys: ["BackSpace"], ...frame },
+    );
+  if (input.text) steps.push({ action: "type", text: input.text, ...frame });
   else if (!input.clear) return "type needs text";
-  if (input.submit) steps.push({ action: "key", keys: ["Return"] });
+  if (input.submit) steps.push({ action: "key", keys: ["Return"], ...frame });
   return steps;
 }
 
 // Provider output is untrusted even when an SDK validates its advertised tool schema. Refuse
 // malformed fields before coercion, and validate the normalized daemon wire shape as a final fence.
 // One provider action is one daemon action, except `type` with its options (typeSteps).
+// ask_user's secret targets, from the model's coordinate space to model pixels; the message for
+// the model when one is off the screen.
+export function askInModelSpace(
+  input: AskUserInput,
+  coords: CoordSpaceName,
+): AskUserInput | string {
+  if (!input.fields?.some((field) => field.target)) return input;
+  const fields: NonNullable<AskUserInput["fields"]> = [];
+  for (const field of input.fields) {
+    if (!field.target) {
+      fields.push(field);
+      continue;
+    }
+    const p = modelPoint(field.target, coords);
+    if (!p.ok) return `ask_user: the target of ${field.id}: ${p.error}`;
+    fields.push({ ...field, target: [p.point.x, p.point.y] });
+  }
+  return { ...input, fields };
+}
+
+const NOT_STEPS = new Set(["batch", "screenshot", "zoom", "cursor_position"]);
+
+// A batch as one daemon action: its steps in daemon form, sharing the batch's screenshot.
+function batchOf(
+  input: ProviderComputerInput,
+  coords: CoordSpaceName,
+  basedOn: string | undefined,
+): ComputerAction | string {
+  const steps = input.steps;
+  if (!Array.isArray(steps) || steps.length === 0)
+    return `batch needs steps: 1 to ${MAX_BATCH_STEPS} actions`;
+  if (steps.length > MAX_BATCH_STEPS) return `batch takes at most ${MAX_BATCH_STEPS} steps`;
+  const inputs: ComputerStep[] = [];
+  for (const [i, step] of steps.entries()) {
+    if (step && typeof step === "object" && NOT_STEPS.has(String(step.action)))
+      return `batch step ${i + 1}: ${String(step.action).slice(0, 40)} cannot be a step; the batch returns a screenshot at its end`;
+    const actions = toComputerActions(step, coords, undefined);
+    if (typeof actions === "string") return `batch step ${i + 1}: ${actions}`;
+    for (const { basedOn: _basis, ...action } of actions) inputs.push(action as ComputerStep);
+  }
+  if (inputs.length > MAX_BATCH_ACTIONS) return "batch: too many inputs; split it in two";
+  return { action: "batch", steps: inputs, ...(basedOn ? { basedOn } : {}) };
+}
+
 export function toComputerActions(
   input: ProviderComputerInput,
   coords: CoordSpaceName,
@@ -279,16 +330,74 @@ export function toComputerActions(
   )
     return "Invalid path";
   if (input.button !== undefined && !BUTTONS.has(input.button)) return "Invalid button";
+  if (input.steps !== undefined && input.action !== "batch") return "steps are only for a batch";
   const result =
-    input.action === "type"
-      ? typeSteps(input, coords, basedOn)
-      : normalizeComputerAction(input, coords, basedOn);
+    input.action === "batch"
+      ? batchOf(input, coords, basedOn)
+      : input.action === "type"
+        ? typeSteps(input, coords, basedOn)
+        : normalizeComputerAction(input, coords, basedOn);
   if (typeof result === "string") return result;
+  // The call's line for the user goes with its first daemon action, which starts its first step.
+  const intent = typeof input.intent === "string" ? input.intent.trim().slice(0, 500) : "";
   const actions: ComputerAction[] = [];
   for (const action of Array.isArray(result) ? result : [result]) {
-    const parsed = ComputerAction.safeParse(action);
+    const parsed = ComputerAction.safeParse(
+      intent && !actions.length ? { ...action, intent } : action,
+    );
     if (!parsed.success) return "Invalid computer action fields";
     actions.push(parsed.data);
   }
   return actions;
+}
+
+// Whether an action chooses a point on the screen, which needs a screenshot to choose it on.
+export function pointsAtScreen(action: ComputerAction): boolean {
+  const at = (a: { action: string }) => a.action === "click" || a.action === "scroll";
+  return at(action) || (action.steps?.some(at) ?? false);
+}
+
+// browser_act's fallback coordinate, from the model's space to model pixels, with the screenshot it
+// was chosen on; a coordinate needs one, and is left out beside a ref when there is none.
+export function actInModelSpace(
+  input: BrowserActInput,
+  coords: CoordSpaceName,
+  basedOn: string | undefined,
+): BrowserAction | string {
+  if (!input || typeof input !== "object") return "Invalid browser_act input";
+  const { coordinate, ...rest } = input;
+  if (coordinate === undefined) return input;
+  if (!basedOn) {
+    if (input.ref !== undefined) return rest;
+    return "Take a full screenshot before choosing a point on the screen.";
+  }
+  const p = modelPoint(coordinate, coords);
+  if (!p.ok) return `browser_act: ${p.error}`;
+  return { ...rest, coordinate: [p.point.x, p.point.y], basedOn };
+}
+
+const ELEMENT_BOX = /\[(\d+), (\d+), (\d+), (\d+)\]$/;
+const CONTROL_AT = / at \((\d+), (\d+)\) \[(\d+), (\d+), (\d+), (\d+)\]$/;
+
+// The element lines browser_read and find answer in model pixels, on the 0-1000 grid.
+export function elementsOnGrid(text: string): string {
+  const grid = (x: string, y: string) => toModelSpace({ x: Number(x), y: Number(y) }, "per1000");
+  const box = (a: string, b: string, c: string, d: string) => {
+    const [x0, y0] = grid(a, b);
+    const [x1, y1] = grid(c, d);
+    return `[${x0}, ${y0}, ${x1}, ${y1}]`;
+  };
+  return text
+    .split("\n")
+    .map((line) => {
+      if (/^e\d+ /.test(line))
+        return line.replace(ELEMENT_BOX, (_m, a, b, c, d) => box(a, b, c, d));
+      if (line.startsWith("- "))
+        return line.replace(CONTROL_AT, (_m, x, y, a, b, c, d) => {
+          const [gx, gy] = grid(x, y);
+          return ` at (${gx}, ${gy}) ${box(a, b, c, d)}`;
+        });
+      return line;
+    })
+    .join("\n");
 }

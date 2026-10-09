@@ -1,12 +1,23 @@
 import { z } from "zod";
+import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.ts";
+import { MAX_OUTPUT_VERSION, ReviseLink } from "./deliverables.ts";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import { TaintSource } from "./purpose.ts";
+import {
+  MissedPolicy,
+  RoutineName,
+  RoutineNotify,
+  RoutineProfile,
+  SessionOrigin,
+} from "./routines.ts";
 import { ActionClass, AlwaysOption, ApprovalCard, PauseSnapshot } from "./safety.ts";
-import { ScreenSwitchData } from "./screens.ts";
+import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
+import { INTENT_CHARS } from "./tools.ts";
 
 const envelope = {
   v: z.literal(1),
@@ -45,6 +56,12 @@ export const SessionStart = event(
     }),
     os: z.enum(["linux", "macos"]),
     title: z.string().max(200).optional(),
+    // The earlier task this one continues, in the same conversation.
+    continues: z.string().regex(ULID_PATTERN).optional(),
+    // What started this task when the user did not: a routine or a follow-up.
+    origin: SessionOrigin.optional(),
+    // The handed-over file this task revises, from a task that has ended.
+    revises: ReviseLink.optional(),
   }),
 );
 export const SessionEnd = event(
@@ -66,8 +83,20 @@ export const AgentState = event(
       "done",
     ]),
     reason: z.string().max(200).optional(),
+    // What the model's provider said, for a reason that has more to tell.
+    detail: z.string().max(200).optional(),
   }),
 );
+// Why a task waits on something other than its own Pause, question or approval. The app gives
+// each one a status, a line from dot and the one action that fixes it.
+export const STALL = {
+  budget: "budget",
+  keyd: "keyd unavailable",
+  modelBusy: "model busy",
+  modelUnavailable: "model unavailable",
+  modelRefused: "model refused",
+  actionLimit: "action limit",
+} as const;
 export const Heartbeat = event(
   "heartbeat",
   z.object({ ongoing: z.boolean(), everyMs: z.number().int().positive() }),
@@ -85,6 +114,8 @@ export const StepStart = event(
   z.object({
     kind: z.enum(["gui", "shell", "file", "browser", "ask", "think"]),
     planItem: z.string().optional(),
+    // The model's own line for the user about the call this step starts, as plain text.
+    intent: boundedText(INTENT_CHARS).optional(),
   }),
 );
 export const StepEnd = event(
@@ -239,10 +270,11 @@ export const PauseChange = event(
   z.object({ paused: z.boolean(), atStepBoundary: z.boolean() }),
 );
 // changeId names the change so the UI can undo it; undoes names the change an undo reverted.
+export const NOTES_FILE = /^notes\/\d{4}-\d{2}-\d{2}\.md$/;
 export const MemoryChange = event(
   "memory.change",
   z.object({
-    file: z.enum(["USER.md", "MEMORY.md"]),
+    file: z.union([z.enum(["USER.md", "MEMORY.md"]), z.string().regex(NOTES_FILE)]),
     patch: z.string(),
     changeId: z.string().regex(ULID_PATTERN).optional(),
     undoes: z.string().regex(ULID_PATTERN).optional(),
@@ -299,6 +331,28 @@ export const MessageAssistant = event(
   "message.assistant",
   z.object({ messageId: MessageId, text: z.string().max(20_000) }),
 );
+export const AskRequestField = z.object({
+  id: AskFieldId,
+  kind: AskFieldKind,
+  label: z.string().min(1).max(200),
+  hint: z.string().min(1).max(300).optional(),
+  options: z.array(z.string().min(1).max(200)).min(1).max(6).optional(),
+  length: z.number().int().min(4).max(12).optional(),
+  value: z.string().min(1).max(2000).optional(),
+  // secret: where the field the answer is typed into was when dot asked, in the screen's pixels,
+  // and the site whose page holds it.
+  target: z
+    .object({
+      screen: ScreenName,
+      point: Point,
+      bbox: Rect.optional(),
+      site: z.string().min(1).max(255).optional(),
+    })
+    .optional(),
+});
+export type AskRequestField = z.infer<typeof AskRequestField>;
+// A request with `fields` answers per field (options is empty and allowText false); one without
+// is a plain question with lettered options.
 export const AskRequest = event(
   "ask.request",
   z.object({
@@ -308,8 +362,15 @@ export const AskRequest = event(
       .array(z.object({ key: z.string().regex(/^[A-F]$/), text: z.string().min(1).max(200) }))
       .max(6),
     allowText: z.boolean(),
+    fields: z.array(AskRequestField).min(1).max(MAX_ASK_FIELDS).optional(),
+    submit: z.string().min(1).max(40).optional(),
+    decline: z.string().min(1).max(40).optional(),
+    // Only an answer ends it: there is no way out ("Not now").
+    declinable: z.literal(false).optional(),
   }),
 );
+// The task read private data from here; what it read is never recorded.
+export const SafetyTaint = event("safety.taint", TaintSource);
 export const SafetyPause = event(
   "safety.pause",
   z.object({ revision: z.number().int().nonnegative(), pause: PauseSnapshot.optional() }).strict(),
@@ -324,7 +385,11 @@ export const AskAnswer = event(
       .regex(/^[A-F]$/)
       .optional(),
     text: z.string().max(2000).optional(),
-    by: z.enum(["user", "timeout", "stop", "pause"]),
+    // Per field id; a secret only as { provided: true }.
+    fields: z.record(AskFieldId, AskFieldRecord).optional(),
+    // The user chose the way out ("Not now").
+    declined: z.literal(true).optional(),
+    by: z.enum(["user", "timeout", "stop", "pause", "control"]),
   }),
 );
 export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);
@@ -334,6 +399,8 @@ export const TakeoverRequest = event(
     requestId: z.string().regex(ULID_PATTERN),
     reason: TakeoverReason,
     note: z.string().max(500),
+    // The user took the computer themselves; absent when dot handed it over.
+    by: z.literal("user").optional(),
   }),
 );
 export const TakeoverEnd = event(
@@ -342,6 +409,8 @@ export const TakeoverEnd = event(
     requestId: z.string().regex(ULID_PATTERN),
     note: z.string().max(1000).optional(),
     by: z.enum(["user", "stop"]),
+    // The user typed on the computer while they had it. What they typed is never recorded.
+    typed: z.literal(true).optional(),
   }),
 );
 export const TaskResult = event(
@@ -354,6 +423,7 @@ export const TaskResult = event(
           name: z.string().min(1).max(255),
           path: z.string().max(1024),
           bytes: z.number().int().nonnegative(),
+          version: z.number().int().min(1).max(MAX_OUTPUT_VERSION).optional(),
         }),
       )
       .max(32),
@@ -383,7 +453,39 @@ export const ModelRetry = event(
   }),
 );
 
+// What keyd charged for one model call: billed when the provider's answer said what it cost,
+// otherwise estimated from its token counts and the prices the task started with.
+export const ModelSpendData = z.object({
+  route: z.string().max(64),
+  model: z.string().max(128),
+  costUSD: z.number().nonnegative(),
+  basis: z.enum(["billed", "estimated"]),
+  taskSpentUSD: z.number().nonnegative(),
+  daySpentUSD: z.number().nonnegative(),
+  // Present only when the user set that limit.
+  taskLimitUSD: z.number().positive().optional(),
+  dayLimitUSD: z.number().positive().optional(),
+});
+export const ModelSpend = event("model.spend", ModelSpendData);
+
 export const SubscriptionUsage = event("subscription.usage", SubscriptionUsageData);
+
+// dot drafted a routine in this task; it runs only after the user saves it.
+export const RoutineProposed = event(
+  "routine.proposed",
+  z.strictObject({
+    routineId: z.string().regex(ULID_PATTERN),
+    revision: z.number().int().positive(),
+    name: RoutineName,
+    summary: z.string().max(200),
+    instruction: z.string().max(8000),
+    profile: RoutineProfile,
+    notify: RoutineNotify,
+    budgetUSD: z.number().min(0.01).max(100).nullable(),
+    approvalWindowMinutes: z.number().int().min(5).max(240),
+    missedPolicy: MissedPolicy,
+  }),
+);
 
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
@@ -425,12 +527,15 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   AskRequest,
   AskAnswer,
   SafetyPause,
+  SafetyTaint,
   TakeoverRequest,
   TakeoverEnd,
   TaskResult,
   ModelUsage,
   ModelRetry,
+  ModelSpend,
   SubscriptionUsage,
+  RoutineProposed,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
 export type EventType = LocalDotEvent["type"];

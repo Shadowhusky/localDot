@@ -3,6 +3,7 @@ import { emptyManifest } from "@localdot/protocol";
 import { buildPlaybackMap, emptyModel } from "@localdot/stage";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { createApi } from "../lib/api.ts";
 import { ReplayControls } from "./ReplayControls.tsx";
 import type { ReplayState } from "./useReplay.ts";
 
@@ -34,31 +35,43 @@ function replay(): ReplayState {
     setSpeed: vi.fn(),
     setSkipIdle: vi.fn(),
     selectStep: vi.fn(),
+    retry: vi.fn(),
   };
 }
 
-it("plays, steps, changes speed and skips idle through the kit's controls", async () => {
+const api = createApi("a".repeat(43), { origin: "http://127.0.0.1" });
+
+it("plays, skips ten seconds, changes speed and skips idle through the kit's controls", async () => {
   const state = replay();
-  render(<ReplayControls replay={state} label="Typing a sample" />);
+  render(<ReplayControls api={api} replay={state} />);
   const group = screen.getByRole("group", { name: "Playback controls" });
   expect(group.querySelector("select, input[type=checkbox]:not([role=switch])")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Play replay" }));
   expect(state.run).toHaveBeenCalledWith({ kind: "toggle-play" });
-  fireEvent.click(screen.getByRole("button", { name: "Next step" }));
-  expect(state.run).toHaveBeenCalledWith({ kind: "step", dir: 1 });
-  fireEvent.click(screen.getByRole("switch", { name: "Skip idle" }));
+  fireEvent.click(screen.getByRole("button", { name: "Forward 10 seconds" }));
+  expect(state.run).toHaveBeenCalledWith({ kind: "jump", ms: 10_000 });
+  const skip = screen.getByRole("button", { name: "Skip idle" });
+  expect(skip.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(skip);
   expect(state.setSkipIdle).toHaveBeenCalledWith(false);
   const speed = screen.getByRole("combobox", { name: "Playback speed" });
   expect(speed.textContent).toContain("1×");
   fireEvent.click(speed);
   fireEvent.click(await screen.findByRole("option", { name: "4×" }));
   expect(state.setSpeed).toHaveBeenCalledWith(4);
-  expect(screen.getByText("Typing a sample")).toBeTruthy();
+});
+
+it("keeps only play and the scrubber on a phone", () => {
+  render(<ReplayControls api={api} replay={replay()} compact />);
+  expect(screen.getByRole("button", { name: "Play replay" })).toBeTruthy();
+  expect(screen.getByRole("slider", { name: "Replay timeline" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Forward 10 seconds" })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "Playback speed" })).toBeNull();
 });
 
 it("names a recording with no video once its card has gone", () => {
-  const { rerender } = render(<ReplayControls replay={replay()} label="Working" />);
+  const { rerender } = render(<ReplayControls api={api} replay={replay()} />);
   expect(screen.queryByText("No video")).toBeNull();
-  rerender(<ReplayControls replay={replay()} label="Working" noVideo />);
+  rerender(<ReplayControls api={api} replay={replay()} noVideo />);
   expect(screen.getByText("No video")).toBeTruthy();
 });

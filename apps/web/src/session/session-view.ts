@@ -13,6 +13,24 @@ export interface StepRowView {
   durationMs: number | null;
   delivery?: "proposed" | "delivered";
   reason?: string;
+  // Where it happened and the gesture with what it touched: "Calc", "click F3".
+  app?: string;
+  gesture?: string;
+  // dot's line for the user about the call this step starts.
+  intent?: string;
+}
+
+const COUNTS = ["", "", "double-", "triple-"];
+
+function gesture(a: ActionState): string {
+  const input = a.dispatch?.input;
+  const word =
+    input?.kind === "click"
+      ? `${input.button === "right" ? "right-" : input.button === "middle" ? "middle-" : COUNTS[input.count]}click`
+      : a.verb === "key"
+        ? "keys"
+        : a.verb;
+  return a.target?.name ? `${word} ${a.target.name}` : word;
 }
 
 const CANCEL_REASONS: Record<string, string> = {
@@ -60,6 +78,8 @@ export function stepRows(model: SessionModel): StepRowView[] {
       ...(a.target?.bbox ? { target: a.target.bbox } : {}),
       durationMs: done === undefined ? null : Math.round(done - a.intentT),
       delivery: a.dispatch ? "delivered" : "proposed",
+      gesture: gesture(a),
+      ...(a.target?.app ? { app: a.target.app } : {}),
       ...(a.cancel
         ? {
             reason:
@@ -72,10 +92,15 @@ export function stepRows(model: SessionModel): StepRowView[] {
   }
   // The frame a step ends with is the observe appended inside it; the model keeps observes by
   // step through the actions' order: the latest observe at or before the result belongs to it.
-  return [...rows.values()].map((row) => ({
-    ...row,
-    ...(frameFor(model, row.id) ? { frameId: frameFor(model, row.id) } : {}),
-  }));
+  return [...rows.values()].map((row) => {
+    const index = model.stepIndex.get(row.id);
+    const intent = index === undefined ? undefined : model.steps[index]?.intent;
+    return {
+      ...row,
+      ...(frameFor(model, row.id) ? { frameId: frameFor(model, row.id) } : {}),
+      ...(intent ? { intent } : {}),
+    };
+  });
 }
 
 function frameFor(model: SessionModel, step: string): string | undefined {

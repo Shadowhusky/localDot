@@ -78,6 +78,8 @@ export class EventLog {
     this.#clock = clock;
     const index = join(home, "index.sqlite");
     this.#db = new DatabaseSync(index, { timeout: BUSY_TIMEOUT_MS });
+    // A deleted task's rows are zeroed on disk, not just unlinked.
+    this.#db.exec("PRAGMA secure_delete = ON");
     // SQLite gives new journal files the database file's mode, so tightening these once suffices.
     for (const suffix of ["", "-journal", "-wal", "-shm"]) {
       if (existsSync(`${index}${suffix}`)) chmodSync(`${index}${suffix}`, 0o600);
@@ -184,6 +186,23 @@ export class EventLog {
           .get()
       )
         this.#db.prepare("DELETE FROM session_cards WHERE id = ?").run(sessionId);
+      // The search index's rows go with the task; its daily notes stay, as notes outlive tasks.
+      for (const [table, notes] of [
+        ["docs", true],
+        ["docs_plain", true],
+        ["doc_keys", true],
+        ["doc_progress", false],
+      ] as const)
+        if (
+          this.#db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .get(table)
+        )
+          this.#db
+            .prepare(
+              `DELETE FROM ${table} WHERE session_id = ?${notes ? " AND kind <> 'note'" : ""}`,
+            )
+            .run(sessionId);
       this.#db.exec("COMMIT");
     } catch (error) {
       if (this.#db.isTransaction) this.#db.exec("ROLLBACK");
@@ -220,6 +239,17 @@ export class EventLog {
       `)
       .all() as unknown as SessionSummary[];
     return sessions.filter((session) => !this.hasPendingDeletion(session.id));
+  }
+
+  sessionInfo(ids: readonly string[]): Map<string, { title: string | null; startedAt: string }> {
+    const out = new Map<string, { title: string | null; startedAt: string }>();
+    const get = this.#db.prepare("SELECT title, started_at FROM sessions WHERE id = ?");
+    for (const id of ids) {
+      if (!ULID_PATTERN.test(id) || this.hasPendingDeletion(id)) continue;
+      const row = get.get(id) as { title: string | null; started_at: string } | undefined;
+      if (row) out.set(id, { title: row.title, startedAt: row.started_at });
+    }
+    return out;
   }
 
   subscribe(listener: EventListener): () => void {

@@ -28,13 +28,18 @@ const (
 	Brain   Role = "brain"
 	Desktop Role = "desktop"
 	Browser Role = "browser"
+	// Judge is the daemon's own listener for the purpose check: it reaches only the hosts its web
+	// API keys are bound to.
+	Judge Role = "judge"
 )
 
-// Policy is a cell's egress: Web is the general web, Gateway the LLM gateway.
+// Policy is a cell's egress: Web is the general web, Gateway the LLM gateway, Bound only the hosts
+// the cell's own web API keys are bound to.
 type Policy struct {
 	Role    Role
 	Web     bool
 	Gateway bool
+	Bound   bool
 }
 
 func ForRole(r Role) (Policy, error) {
@@ -43,6 +48,8 @@ func ForRole(r Role) (Policy, error) {
 		return Policy{Role: r, Gateway: true}, nil
 	case Desktop, Browser:
 		return Policy{Role: r, Web: true}, nil
+	case Judge:
+		return Policy{Role: r, Bound: true}, nil
 	}
 	return Policy{}, fmt.Errorf("policy: unknown role %q", r)
 }

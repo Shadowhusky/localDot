@@ -6,17 +6,14 @@ import { ActivityRow } from "../agent/ActivityRow.tsx";
 import {
   type ActivityEntry,
   type ActivityFilter,
-  type ActivityGroup,
   activityRows,
   clock,
   type EntryView,
   entryView,
   foldKeyUses,
-  groupEntries,
-  groupMeta,
   hasDetails,
   matchesFilter,
-  runsOnView,
+  withNextMoves,
 } from "../agent/activity.ts";
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
@@ -26,12 +23,13 @@ import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { usePagedRows } from "../agent/usePagedRows.ts";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
 import { count } from "../copy/format.ts";
+import { isLoopbackPage } from "../deliverables/api.ts";
+import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { timeLabel } from "../replay/replay-view.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { Button } from "../ui/Button.tsx";
-import { Disclosure } from "../ui/Disclosure.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
@@ -42,16 +40,22 @@ export interface ActivityRailProps {
   rows: TimelineRow<StepRowView>[];
   keyUses?: readonly KeyUseState[];
   sessionId: string | null;
+  // What the steps say while there are none, in place of their own words.
+  empty?: string;
   cellId?: string;
   releaseReady?: boolean;
   scale: number;
   api: ApiClient;
   asOfMs?: number;
+  // The session's now, for the clock on the step dot is taking.
+  nowMs?: number;
   onSelect?(stepId: string): void;
   planSnapshot?: PlanItemState[];
   agent?: AgentModel;
   models?: TaskModelSelection;
   modelName?(provider: string, model: string): string | undefined;
+  // Opens the spending limits from the usage popover.
+  onSpending?(trigger: HTMLElement): void;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
     onUndo?: (changeId: string) => void;
@@ -69,12 +73,6 @@ const entryKey = (entry: ActivityEntry) => entry.key;
 const REVEAL_AFTER = 300;
 const EMPTY = emptyAgentModel();
 
-interface FollowedRun {
-  owner: string;
-  run: string | null;
-  watched: string | null;
-}
-
 function reveal(element: Element | null) {
   element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
 }
@@ -83,6 +81,7 @@ export function ActivityRail({
   rows,
   keyUses,
   sessionId,
+  empty,
   cellId,
   releaseReady = false,
   scale,
@@ -91,7 +90,9 @@ export function ActivityRail({
   memoryAction,
   models,
   modelName,
+  onSpending,
   asOfMs,
+  nowMs,
   onSelect,
   planSnapshot,
 }: ActivityRailProps) {
@@ -102,10 +103,6 @@ export function ActivityRail({
   const domId = useId();
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const [opened, setOpened] = useState<{ owner: string; key: string } | null>(null);
-  const [groupsOpen, setGroupsOpen] = useState<{ owner: string; open: Record<string, boolean> }>({
-    owner,
-    open: {},
-  });
   const entries = useMemo(
     () => foldKeyUses(activityRows(rows, agent, keyUses)),
     [rows, agent, keyUses],
@@ -115,16 +112,15 @@ export function ActivityRail({
     [entries, filter],
   );
   const page = usePagedRows(selected, entryKey, `${owner}:${filter}`);
-  const runs = useMemo(() => groupEntries(entries), [entries]);
-  const groups = useMemo(() => runsOnView(runs, page.rows), [runs, page.rows]);
-  const views = useMemo(
-    () =>
-      new Map<string, EntryView>(
-        page.rows.map((entry) => [entry.key, entryView(entry, model.changes, ended)]),
-      ),
-    [page.rows, model.changes, ended],
-  );
+  // Views come from the whole history, so a failure says what dot did next even when the filter
+  // or the page hides that step.
+  const views = useMemo(() => {
+    const all = withNextMoves(entries.map((entry) => entryView(entry, model.changes, ended)));
+    return new Map(entries.map((entry, index) => [entry.key, all[index] as EntryView]));
+  }, [entries, model.changes, ended]);
+  const viewOf = (entry: ActivityEntry) => views.get(entry.key) as EntryView;
   const plan = planSnapshot ?? model.plan;
+  const handed = useMemo(() => latestFiles(model.results).length, [model.results]);
   const started = !!sessionId || !!plan.length;
   const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
@@ -135,28 +131,9 @@ export function ActivityRail({
       ? steps.findLast((entry) => entry.row.kind === "step" && entry.row.startT <= asOfMs)?.key
       : (() => {
           const last = steps.at(-1);
-          return last && entryView(last, model.changes, ended).state === "doing"
-            ? last.key
-            : undefined;
+          return last && viewOf(last).state === "doing" ? last.key : undefined;
         })();
   const openKey = opened?.owner === owner ? opened.key : null;
-  const groupState = groupsOpen.owner === owner ? groupsOpen.open : {};
-  // Runs older than the followed one fold, but only while the reader follows the live end, where the
-  // end stays put. The run the reader watched until a new one started stays open until the next.
-  const lastRun = runs.at(-1)?.id ?? null;
-  const [followed, setFollowed] = useState<FollowedRun>({ owner, run: lastRun, watched: null });
-  if (followed.owner !== owner) setFollowed({ owner, run: lastRun, watched: null });
-  else if (followed.run !== lastRun && (follow.pinned || followed.run === null))
-    setFollowed({
-      owner,
-      run: lastRun,
-      watched: followed.run !== null && runs.at(-2)?.id === followed.run ? followed.run : null,
-    });
-  const runIndex = new Map(runs.map((run, index) => [run.id, index]));
-  const foldBefore = runIndex.get(followed.run ?? "") ?? 0;
-  const planText = new Map(plan.map((item) => [item.id, item.text]));
-  const headed = runs.length > 1 || (runs[0] !== undefined && runs[0].planItem !== null);
-
   useEffect(() => {
     const pane = timeline.current;
     const preserveSelection = () => {
@@ -186,7 +163,11 @@ export function ActivityRail({
   };
 
   const renderEntry = (entry: ActivityEntry) => {
-    const view = views.get(entry.key) ?? entryView(entry, model.changes, ended);
+    const shown = viewOf(entry);
+    const view =
+      entry.key === currentKey && !shown.time && nowMs !== undefined && !replay
+        ? { ...shown, time: clock(Math.max(0, nowMs - shown.startT)) }
+        : shown;
     const expandable = !!sessionId && hasDetails(entry, model.changes);
     return (
       <ActivityRow
@@ -212,50 +193,10 @@ export function ActivityRail({
     );
   };
 
-  const renderRun = (group: ActivityGroup) => {
-    const meta = groupMeta(
-      group.entries.map((entry) => views.get(entry.key) ?? entryView(entry, model.changes, ended)),
-    );
-    const holdsOpen = group.entries.some(
-      (entry) => entry.key === openKey || entry.key === currentKey,
-    );
-    const open =
-      groupState[group.id] ??
-      (holdsOpen ||
-        group.id === followed.watched ||
-        (runIndex.get(group.id) ?? Number.POSITIVE_INFINITY) >= foldBefore);
-    return (
-      <Disclosure
-        key={group.id}
-        className="activity-group"
-        data-anchor=""
-        summary={(group.planItem && planText.get(group.planItem)) || "Other steps"}
-        meta={[
-          meta.steps ? count(meta.steps, "step", "steps") : "",
-          meta.failed ? `${meta.failed} failed` : "",
-          meta.durationMs >= 1000 ? clock(meta.durationMs) : "",
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-        open={open}
-        onClick={(event) => follow.anchorTo(event.currentTarget)}
-        onOpenChange={(next) => setGroupsOpen({ owner, open: { ...groupState, [group.id]: next } })}
-      >
-        <div className="activity-group-rows">{group.entries.map(renderEntry)}</div>
-      </Disclosure>
-    );
-  };
-
-  const loose = model.changes.filter(
-    (change) =>
-      change.type === "memory" ||
-      !change.step ||
-      !entries.some((entry) => entry.row.kind === "step" && entry.row.id === change.step),
-  );
-
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
-      <div className="rail-h">
+      {/* A tab or the column names it on screen; Replay's transport says how far its record runs. */}
+      <div className="ui-visually-hidden">
         <h2>Activity</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
@@ -282,13 +223,6 @@ export function ActivityRail({
             {plan.length > 0 && (
               <PlanView plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
             )}
-            {model.activity && started && (
-              <div className="activity-extras">
-                <Disclosure summary="Thinking notes" className="activity-disclosure">
-                  <p className="activity-notes">{model.activity}</p>
-                </Disclosure>
-              </div>
-            )}
             {cellId && !replay && (
               <BrowserDownloads
                 key={cellId}
@@ -297,33 +231,24 @@ export function ActivityRail({
                 releaseReady={releaseReady}
               />
             )}
-            {loose.length > 0 && (
-              <section className="activity-section" aria-label="Changes">
-                <h3 className="activity-section-title">Changes</h3>
-                {loose.map((change) => (
-                  <ChangeRow
-                    key={change.id}
-                    id={`${domId}-change-${change.id}`}
-                    change={change}
-                    changes={model.changes}
-                    open={openKey === `change-${change.id}`}
-                    onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
-                    {...(change.type === "memory" ? memoryAction?.(change) : {})}
-                  />
-                ))}
-              </section>
-            )}
             {started && (
               <section className="activity-steps" aria-labelledby={`${domId}-steps`}>
                 <div className="activity-steps-head">
                   <h3 id={`${domId}-steps`}>Steps</h3>
-                  <SegmentedControl
-                    aria-label="Activity filter"
-                    size={24}
-                    items={FILTERS}
-                    value={filter}
-                    onValueChange={(value) => setFilter(value as ActivityFilter)}
-                  />
+                  {/* With no steps yet there is nothing to filter; the row keeps its height. */}
+                  <span
+                    className="activity-filter"
+                    data-idle={entries.length ? undefined : ""}
+                    inert={!entries.length}
+                  >
+                    <SegmentedControl
+                      aria-label="Activity filter"
+                      size={24}
+                      items={FILTERS}
+                      value={filter}
+                      onValueChange={(value) => setFilter(value as ActivityFilter)}
+                    />
+                  </span>
                 </div>
                 {page.hasOlder && (
                   <Button variant="quiet" size="sm" className="activity-page" onClick={page.older}>
@@ -336,7 +261,7 @@ export function ActivityRail({
                   aria-label="Recorded steps"
                   onPointerDownCapture={() => page.freeze()}
                 >
-                  {sessionId && (headed ? groups.map(renderRun) : page.rows.map(renderEntry))}
+                  {sessionId && page.rows.map(renderEntry)}
                 </section>
                 {page.hasNewer && (
                   <Button variant="quiet" size="sm" className="activity-page" onClick={page.newer}>
@@ -348,15 +273,60 @@ export function ActivityRail({
                 )}
                 {(!sessionId || !page.rows.length) && (
                   <p className="activity-empty">
-                    {!sessionId || !entries.length
-                      ? "Steps appear here as dot works."
-                      : "No steps match this filter."}
+                    {sessionId && entries.length
+                      ? "No steps match this filter."
+                      : (empty ??
+                        (replay
+                          ? "No steps to show for this recording."
+                          : "Steps appear here as dot works."))}
                   </p>
                 )}
               </section>
             )}
+            {(model.changes.length > 0 || handed > 0) && (
+              <section className="activity-section" aria-labelledby={`${domId}-files`}>
+                <div className="activity-section-head">
+                  <h3 id={`${domId}-files`}>Files</h3>
+                  <span className="activity-section-meta num">
+                    {[
+                      handed > 0 && count(handed, "handed over", "handed over"),
+                      model.changes.length > 0 && `${model.changes.length} changed`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </div>
+                {handed > 0 && sessionId && (
+                  <HandedOverFiles
+                    api={api}
+                    sessionId={sessionId}
+                    results={model.results}
+                    onMac={isLoopbackPage()}
+                  />
+                )}
+                {model.changes.map((change) => (
+                  <ChangeRow
+                    key={change.id}
+                    id={`${domId}-change-${change.id}`}
+                    change={change}
+                    changes={model.changes}
+                    open={openKey === `change-${change.id}`}
+                    onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
+                    {...(change.type === "memory" ? memoryAction?.(change) : {})}
+                  />
+                ))}
+              </section>
+            )}
             {model.historyTruncated && (
               <p className="activity-note">Older activity is kept in the task log.</p>
+            )}
+            {agent && sessionId && (
+              <UsageFooter
+                model={model}
+                selection={models}
+                modelName={modelName}
+                onSpending={onSpending}
+              />
             )}
           </div>
         </ScrollArea>
@@ -377,7 +347,6 @@ export function ActivityRail({
           </button>
         )}
       </div>
-      {agent && sessionId && <UsageFooter model={model} selection={models} modelName={modelName} />}
     </aside>
   );
 }

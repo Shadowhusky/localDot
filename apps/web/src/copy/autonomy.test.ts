@@ -1,6 +1,6 @@
 import { BALANCED_AUTONOMY, CAREFUL_AUTONOMY } from "@localdot/protocol";
 import { expect, it } from "vitest";
-import { allowedLine, allowWithoutAsking, checksSummary, undoAllowedLabel } from "./autonomy.ts";
+import { allowedLine, checksSummary, undoAllowedLabel } from "./autonomy.ts";
 
 it("says in words what dot stops to ask about", () => {
   expect(checksSummary(BALANCED_AUTONOMY)).toBe(
@@ -48,5 +48,4 @@ it("names the program or destination a connection's choice opened, and how to un
     "Undo allowing connections to chat.example.com:5222 for this task",
   );
   expect(undoAllowedLabel("network", app)).toBe("Undo always allowing connections from wechat");
-  expect(allowWithoutAsking("network")).toBe("Allow connections beyond websites without asking:");
 });

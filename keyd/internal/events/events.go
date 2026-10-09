@@ -11,6 +11,7 @@ const (
 	TypeKeyUse  = "key.use"
 	TypeBudget  = "budget.exceeded"
 	TypeAsk     = "egress.ask"
+	TypeSpend   = "model.spend"
 	TypeDropped = "events.dropped"
 )
 
@@ -45,6 +46,19 @@ type Ask struct {
 	Port   int    `json:"port"`
 	Source int    `json:"source,omitempty"`
 	Via    string `json:"via"`
+}
+
+// Spend is one settled model call. Billed marks a cost the provider stated; a limit of 0 is none.
+type Spend struct {
+	TaskID       string  `json:"taskId"`
+	Route        string  `json:"route"`
+	Model        string  `json:"model"`
+	CostUSD      float64 `json:"costUSD"`
+	Billed       bool    `json:"billed"`
+	TaskSpentUSD float64 `json:"taskSpentUSD"`
+	TaskLimitUSD float64 `json:"taskLimitUSD"`
+	DaySpentUSD  float64 `json:"daySpentUSD"`
+	DayLimitUSD  float64 `json:"dayLimitUSD"`
 }
 
 type Dropped struct {

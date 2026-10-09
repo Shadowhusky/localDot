@@ -18,14 +18,18 @@ export interface SegmentItem {
   label: string;
   icon?: IconName;
   disabledReason?: string;
+  // An amber point at the segment's corner, such as Chat while dot asks and Activity shows.
+  attention?: boolean;
 }
 
 export interface SegmentTrackProps {
   items: readonly SegmentItem[];
   value: string;
   onValueChange(value: string): void;
-  // Track height in px; a touch screen raises either to 44.
-  size?: 24 | 28;
+  // The chosen segment pressed again, such as Replay while a recording plays, to go back to its list.
+  onReselect?(value: string): void;
+  // Track height in px: 32 for a rail's header, 28 for Watch | Replay and filters, 24 inside a list.
+  size?: 24 | 28 | 32;
   className?: string;
   "aria-label"?: string;
 }
@@ -72,6 +76,7 @@ function Segment({
       >
         {item.icon && <Icon name={item.icon} />}
         <span className="ui-segment-label">{item.label}</span>
+        {item.attention && <span className="ui-segment-attention" aria-hidden="true" />}
       </button>
       {tooltip}
     </>
@@ -83,6 +88,7 @@ export function SegmentTrack({
   items,
   value,
   onValueChange,
+  onReselect,
   size = 28,
   className,
   "aria-label": label,
@@ -93,7 +99,9 @@ export function SegmentTrack({
   const focusIndex = index >= 0 ? index : 0;
 
   const select = (item: SegmentItem) => {
-    if (!item.disabledReason && item.value !== value) onValueChange(item.value);
+    if (item.disabledReason) return;
+    if (item.value !== value) onValueChange(item.value);
+    else onReselect?.(item.value);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

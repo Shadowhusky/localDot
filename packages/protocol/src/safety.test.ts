@@ -12,6 +12,7 @@ import {
   AutonomyRule,
   BALANCED_AUTONOMY,
   CAREFUL_AUTONOMY,
+  currentAutonomy,
   DEFAULT_AUTONOMY,
   freezeAutonomy,
   ModelAdmissionWrite,
@@ -21,7 +22,7 @@ import {
 } from "./safety.ts";
 
 describe("safety protocol authority boundaries", () => {
-  it("Balanced is the default: it acts inside the computer and asks for everything that leaves it", () => {
+  it("Balanced is the default: it asks only before acting as the user", () => {
     expect(DEFAULT_AUTONOMY).toBe(BALANCED_AUTONOMY);
     expect(BALANCED_AUTONOMY).toEqual({
       reading: "act",
@@ -31,15 +32,27 @@ describe("safety protocol authority boundaries", () => {
       send: "ask",
       post: "ask",
       delete: "ask",
-      download_execute: "ask",
+      download_execute: "act",
       system_settings: "ask",
+      memory: "act",
+    });
+    expect(CAREFUL_AUTONOMY).toEqual({
+      ...BALANCED_AUTONOMY,
+      computer: "ask",
+      download_execute: "ask",
       memory: "ask",
     });
-    expect(CAREFUL_AUTONOMY).toEqual({ ...BALANCED_AUTONOMY, computer: "ask" });
     for (const preset of [BALANCED_AUTONOMY, CAREFUL_AUTONOMY]) {
       expect(AutonomyPolicy.parse(preset)).toEqual(preset);
       expect(Object.isFrozen(preset)).toBe(true);
     }
+  });
+  it("Balanced as saved before the purpose check reads as today's Balanced", () => {
+    const earlier = { ...BALANCED_AUTONOMY, download_execute: "ask", memory: "ask" } as const;
+    expect(currentAutonomy(earlier)).toBe(BALANCED_AUTONOMY);
+    expect(currentAutonomy(CAREFUL_AUTONOMY)).toBe(CAREFUL_AUTONOMY);
+    const custom = { ...earlier, send: "act" } as const;
+    expect(currentAutonomy(custom)).toBe(custom);
   });
   it("a saved eight-class policy keeps parsing and gains computer at its browsing mode", () => {
     const legacy = {

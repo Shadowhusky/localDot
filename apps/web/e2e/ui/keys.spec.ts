@@ -1,8 +1,8 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, type Harness, keepBaselinesAt, test } from "./harness.ts";
+import { expect, type Harness, runAt, test } from "./harness.ts";
 
 // The Keys sheet beside the page at 1440, and as a sheet over it on a phone.
-keepBaselinesAt("c14", "w39");
+runAt("c14", "w39");
 
 // Opens Keys from the top bar; `then` gets the fixture's origin once the sheet shows.
 async function keys(page: Page, ui: Harness, then?: (origin: string) => Promise<void>) {
@@ -13,12 +13,6 @@ async function keys(page: Page, ui: Harness, then?: (origin: string) => Promise<
   await expect(sheet.getByText("Key isolation", { exact: true })).toBeVisible();
   await then?.(fixture.origin);
   return sheet;
-}
-
-async function shoot(page: Page, ui: Harness, name: string) {
-  await ui.settle();
-  await ui.still();
-  await expect(page).toHaveScreenshot(name);
 }
 
 const rows = (sheet: Locator) =>
@@ -37,13 +31,11 @@ test("keys, empty", async ({ page, ui }) => {
     await expect(sheet.locator(`.keys-row[data-id='${id}']`)).toHaveCount(0);
   }
   await expect(sheet.getByText("No keys yet", { exact: true })).toBeVisible();
-  await shoot(page, ui, "keys-empty.png");
 });
 
 test("keys, list", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await expect(sheet.getByText("openai-fast", { exact: true })).toBeVisible();
-  await shoot(page, ui, "keys-list.png");
 });
 
 test("keys, held while the audit log fails", async ({ page, ui }) => {
@@ -58,7 +50,6 @@ test("keys, held while the audit log fails", async ({ page, ui }) => {
     "aria-disabled",
     "true",
   );
-  await shoot(page, ui, "keys-held.png");
 });
 
 test("keys, a problem shown as the key field takes focus", async ({ page, ui }) => {
@@ -70,7 +61,6 @@ test("keys, a problem shown as the key field takes focus", async ({ page, ui }) 
   await key.focus();
   await expect(sheet.getByText(/is not a host name/)).toBeVisible();
   await expect(sheet.getByLabel("Hosts", { exact: true })).toHaveAttribute("aria-invalid", "true");
-  await shoot(page, ui, "keys-add-error.png");
 });
 
 test("the Web API fields pair up when wide and stack with even gaps on a phone", async ({

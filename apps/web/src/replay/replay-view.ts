@@ -17,6 +17,7 @@ import {
   type Tick,
   type TickKind,
 } from "@localdot/stage";
+import { bytes, count } from "../copy/format.ts";
 
 export interface ChapterView {
   id: string;
@@ -275,19 +276,69 @@ export function dayLabel(value: string, now: Date): string {
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   return started.toLocaleDateString([], {
-    weekday: "short",
+    weekday: "long",
     day: "numeric",
-    month: "short",
+    month: "long",
     ...(started.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
   });
 }
 export function recordedLabel(card: SessionCard, now: Date): string {
   const when = `${dayLabel(card.startedAt, now)} ${clockLabel(card.startedAt)}`;
-  return `${card.verdict === "live" ? "Running" : "Recorded"} · ${when}`;
+  return card.verdict === "live" ? `Running · ${when}` : when;
 }
 export function taskMeta(card: SessionCard): string {
   const length = card.durationMs === null ? "Running" : timeLabel(card.durationMs);
   return `${clockLabel(card.startedAt)} · ${length}`;
+}
+const OUTCOME: Record<SessionCard["verdict"], string> = {
+  done: "",
+  live: "running",
+  stopped: "you stopped it",
+  error: "failed",
+  interrupted: "interrupted",
+};
+// A library row's line under its title. A phone has no duration column, so the length joins it.
+export function rowMeta(card: SessionCard, withLength: boolean): string {
+  return [
+    clockLabel(card.startedAt),
+    withLength && card.durationMs !== null ? timeLabel(card.durationMs) : "",
+    count(card.steps, "step", "steps"),
+    OUTCOME[card.verdict],
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+// The chosen recording's line in the library's preview, with what it cost once that is known.
+export function previewMeta(card: SessionCard, now: Date, spend?: string): string {
+  return [
+    `${dayLabel(card.startedAt, now)} ${clockLabel(card.startedAt)}`,
+    card.durationMs === null ? "Running" : timeLabel(card.durationMs),
+    count(card.steps, "step", "steps"),
+    spend ?? "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+export type LibraryFilter = "all" | "finished" | "stopped";
+export function inFilter(card: Pick<SessionCard, "verdict">, filter: LibraryFilter): boolean {
+  if (filter === "finished") return card.verdict === "done";
+  if (filter === "stopped") return card.verdict !== "done" && card.verdict !== "live";
+  return true;
+}
+// How many recordings the library holds and the room their videos take.
+export function libraryTotal(cards: readonly SessionCard[], more: boolean): string {
+  const size = cards.reduce(
+    (sum, card) =>
+      sum +
+      (card.recordings
+        ? card.recordings.desktop.bytes + card.recordings.browser.bytes
+        : card.recording.bytes),
+    0,
+  );
+  const shown = more
+    ? `${cards.length.toLocaleString()}+ recordings`
+    : count(cards.length, "recording", "recordings");
+  return size > 0 ? `${shown} · ${bytes(size)}` : shown;
 }
 export type VerdictGlyph = { state: "doing" | "done" | "failed" | "skipped"; label: string };
 export function verdictGlyph(verdict: SessionCard["verdict"]): VerdictGlyph {

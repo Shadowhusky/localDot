@@ -1,29 +1,23 @@
-/* The Keys sheet: protection, saved keys and the form, flat on the sheet's surface with one scroller
+/* Settings' Keys section: protection, saved keys and the form, as grouped rows with one scroller
    (the sheet's body). It lays kit parts out and never restyles them. */
 .keys-body {
   display: grid;
-  gap: calc(var(--spacing) * 8);
-  padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
+  gap: var(--_settings-block);
+  min-width: 0;
 }
 
 .keys-section {
   display: grid;
-  gap: calc(var(--spacing) * 3);
   min-width: 0;
-  scroll-margin-top: calc(var(--spacing) * 4);
-}
-
-.keys-section-title {
-  font:
-    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
-  letter-spacing: var(--text-title--letter-spacing);
+  scroll-margin-top: var(--spacing);
 }
 
 .keys-note {
   display: flex;
   gap: calc(var(--spacing) * 1.5);
+  margin: 0 2px calc(var(--spacing) * 2);
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .keys-note[data-alert] {
@@ -41,65 +35,19 @@
   font-family: var(--font-mono);
 }
 
-.keys-stop {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
-  padding-bottom: calc(var(--spacing) * 4);
-  border-bottom: 1px solid var(--color-hairline);
-}
-
-.keys-stop:empty {
-  display: none;
-}
-
-.keys-inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
-}
-
-/* Protection: one 36 px row per safeguard; a problem opens under its row. */
 .keys-protection {
-  display: grid;
   list-style: none;
-}
-
-.keys-status {
-  border-top: 1px solid var(--color-hairline);
-}
-
-.keys-status:last-child {
-  border-bottom: 1px solid var(--color-hairline);
-}
-
-.keys-status-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 3);
-  min-height: calc(var(--spacing) * 9);
-}
-
-.keys-status-name {
-  color: var(--color-fg-1);
 }
 
 .keys-status-state {
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 1.5);
-  color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   text-align: end;
 }
 
 .keys-status[data-tone="bad"] .keys-status-state {
   color: var(--color-fg-1);
-}
-
-.keys-status-state > .ui-icon {
-  color: var(--color-fg-2);
 }
 
 .keys-status-ring {
@@ -109,19 +57,20 @@
   border-radius: var(--radius-full);
 }
 
+/* A problem opens under its row, in line with the row's name. */
 .keys-status-help {
   display: grid;
   gap: calc(var(--spacing) * 2);
-  padding-bottom: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 1.5) 0 var(--spacing) calc(var(--spacing) * 10);
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
+/* The command sits under its sentence, so it never strands a word on a narrow screen. */
 .keys-status-fix {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 1.5);
 }
 
 /* The Details row's chevron lines up with the text above it. */
@@ -131,7 +80,7 @@
 
 .keys-raw {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -146,7 +95,6 @@
 }
 
 .keys-list {
-  display: grid;
   list-style: none;
 }
 
@@ -154,25 +102,17 @@
 .keys-row {
   display: grid;
   grid-template-rows: 1fr;
-  border-top: 1px solid var(--color-hairline);
   transition:
-    grid-template-rows var(--dur-sheet) var(--ease-standard),
-    opacity var(--dur-fade) var(--ease-standard),
-    border-color var(--dur-fade) var(--ease-standard);
-}
-
-.keys-row:last-child {
-  border-bottom: 1px solid var(--color-hairline);
+    grid-template-rows var(--dur-default) var(--ease-standard),
+    opacity var(--dur-fade) var(--ease-standard);
 }
 
 .keys-row[data-leaving] {
   grid-template-rows: 0fr;
-  border-color: transparent;
   opacity: 0;
   transition:
-    grid-template-rows var(--dur-sheet) var(--ease-standard),
-    opacity var(--dur-exit) var(--ease-exit),
-    border-color var(--dur-exit) var(--ease-exit);
+    grid-template-rows var(--dur-default) var(--ease-standard),
+    opacity var(--dur-exit) var(--ease-exit);
 }
 
 @starting-style {
@@ -182,21 +122,14 @@
   }
 }
 
-.keys-row-inner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 3);
+.keys-row > .keys-row-inner {
   min-height: 0;
-  margin-inline: calc(var(--spacing) * -2);
-  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 2);
   overflow: hidden;
-  border-radius: var(--radius-md);
   isolation: isolate;
   transition: background-color var(--dur-fade) var(--ease-standard);
 }
 
-.keys-row[data-armed] .keys-row-inner {
+.keys-row[data-armed] > .keys-row-inner {
   background-color: var(--color-danger-bg);
 }
 
@@ -207,7 +140,7 @@
   border-radius: inherit;
   background-color: var(--color-state-selected);
   opacity: 0;
-  animation: keys-glow calc(var(--dur-spring) * 2.5) var(--ease-standard);
+  animation: keys-glow calc(var(--dur-snappy) * 2.5) var(--ease-standard);
 }
 
 @keyframes keys-glow {
@@ -257,31 +190,6 @@
   content: attr(data-longest);
 }
 
-.keys-monogram {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: calc(var(--spacing) * 5);
-  height: calc(var(--spacing) * 5);
-  border-radius: var(--radius-full);
-  background-color: var(--color-control);
-  color: var(--color-fg-1);
-  font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
-}
-
-.keys-row-text {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-}
-
-.keys-row-name {
-  color: var(--color-fg-1);
-  font-weight: var(--font-weight-medium);
-  overflow-wrap: anywhere;
-}
-
 /* The dot between two facts sits in the gap; a fact that wraps to the start of a line takes its dot
    outside the box, where it is clipped. */
 .keys-row-meta {
@@ -289,8 +197,6 @@
   flex-wrap: wrap;
   column-gap: calc(var(--spacing) * 3);
   overflow: clip;
-  color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   overflow-wrap: anywhere;
 }
 
@@ -305,11 +211,21 @@
   content: "·";
 }
 
-/* Adding a key. */
+/* Adding a key: a raised card under its heading. */
 .keys-form {
   display: grid;
-  gap: calc(var(--spacing) * 4);
+  gap: calc(var(--spacing) * 3);
   min-width: 0;
+}
+
+.keys-form > .ui-segmented {
+  display: grid;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.keys-add-wide {
+  width: 100%;
 }
 
 .keys-pair {
@@ -327,14 +243,15 @@
 .keys-form-actions {
   display: flex;
   align-items: center;
-  gap: calc(var(--spacing) * 3);
+  gap: calc(var(--spacing) * 2);
+  margin-top: 2px;
 }
 
 .keys-form-status {
   flex: 1;
   min-width: 0;
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .keys-form-error {
@@ -343,7 +260,7 @@
   color: var(--color-fg-1);
 }
 
-@media (width < 760px) {
+@media (width < 700px) {
   .keys-pair {
     display: contents;
   }

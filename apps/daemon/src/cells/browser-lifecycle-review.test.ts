@@ -90,7 +90,7 @@ function fixture() {
 }
 
 describe("independent browser lifecycle authority", () => {
-  it("reserves distinct listeners before concurrent different-parent effects", async () => {
+  it("reserves distinct listeners for concurrent different-parent starts; the later one keeps the sign-ins", async () => {
     const f = fixture();
     f.docker.after = (request, reply) => {
       if (request.path !== "/networks/create") return;
@@ -100,7 +100,10 @@ describe("independent browser lifecycle authority", () => {
     };
     const other = sampleRecord();
     f.store.save(other);
-    await Promise.all([f.owner.start(f.parent.id), f.owner.start(other.id)]);
+    const results = await Promise.allSettled([f.owner.start(f.parent.id), f.owner.start(other.id)]);
+    expect(results.map((result) => result.status)).toEqual(["rejected", "fulfilled"]);
+    expect(f.owner.endpoints(f.parent.id)).toBeUndefined();
+    expect(f.owner.endpoints(other.id)).toBeDefined();
     const browserPorts = f.ledger.list().map((record) => record.keydPort);
     expect(new Set(browserPorts).size).toBe(2);
     expect(f.owner.reservedKeydPorts()).toEqual(expect.arrayContaining(browserPorts));

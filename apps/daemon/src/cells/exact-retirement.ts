@@ -106,6 +106,36 @@ export async function requireFreshNames(
   ] as const)
     if (await inspect(d, kind, name)) throw new Error("replacement resource already exists");
 }
+// Removes only these stopped containers, after proving each by its exact ID and labels. Docker
+// refuses to remove one that was started meanwhile, so nothing running is ever forced.
+export async function retireExactContainers(
+  d: Docker,
+  cellId: string,
+  containers: readonly { role: "gate" | "desktop"; id: string }[],
+): Promise<void> {
+  const found: OwnedResource[] = [];
+  for (const { role, id } of containers) {
+    const raw = await inspect(d, "containers", id);
+    if (!raw) continue;
+    const object = owned(raw, "containers", id, cellId, role, id);
+    if (object.running !== false || object.paused === true)
+      throw new Error("resource retirement cannot be confirmed");
+    found.push(object);
+  }
+  for (const object of found) {
+    try {
+      await d.request({
+        method: "DELETE",
+        path: `/containers/${encodeURIComponent(object.id)}`,
+        query: { v: "true" },
+      });
+    } catch (e) {
+      if (!(e instanceof DockerError && e.status === 404)) throw e;
+    }
+    if (await inspect(d, "containers", object.id))
+      throw new Error("resource retirement cannot be confirmed");
+  }
+}
 export async function retireExactCell(
   d: Docker,
   cellId: string,

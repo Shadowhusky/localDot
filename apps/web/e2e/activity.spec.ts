@@ -284,7 +284,7 @@ for (const width of [1280, 390]) {
     test.setTimeout(60_000);
     await page.setViewportSize({ width, height: 800 });
     const proof = await load(page);
-    if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    if (width < 1100) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     const rail = page.getByRole("complementary", { name: "Plan and steps" });
     const plan = rail.getByRole("list", { name: "Task plan", exact: true });
     await expect(plan).toContainText("Send externally");
@@ -311,7 +311,6 @@ for (const width of [1280, 390]) {
     ).toEqual(["step-row", "tool-row", "tool-row", "tool-row", "tool-row"]);
     const stale = steps.getByTestId("step-row");
     await expect(stale).toContainText("Click Save");
-    await expect(stale).toContainText("Not sent");
     await expect(stale).toContainText("The target changed before input.");
     await expect(steps.getByText("The task ended before this step finished.")).toHaveCount(1);
     const filter = rail.getByRole("radiogroup", { name: "Activity filter", exact: true });
@@ -337,8 +336,8 @@ for (const width of [1280, 390]) {
       steps.getByRole("region", { name: "Unified text diff", exact: true }),
     ).toContainText("中文 and English");
     await file.click();
-    const memory = rail.getByRole("region", { name: "Changes", exact: true });
-    await memory.getByRole("button", { name: /Updated memory in MEMORY\.md/ }).click();
+    const memory = rail.getByRole("region", { name: "Files", exact: true });
+    await memory.getByRole("button", { name: /^MEMORY\.md Memory updated/ }).click();
     await expect(
       memory.getByRole("region", { name: "Unified text diff", exact: true }),
     ).toContainText("Prefers concise reports");

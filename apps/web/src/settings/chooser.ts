@@ -11,6 +11,9 @@ import {
 } from "./choices.ts";
 
 export const CHATGPT = "chatgpt";
+export const CLAUDE_CODE = "claude-code";
+// A plan the user signs in to in its own app, which brings its own models and limits.
+export const subscription = (id: string | undefined) => id === CHATGPT || id === CLAUDE_CODE;
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -48,7 +51,7 @@ function providerItem(provider: ProviderSpec): PickerItem {
 export function providerGroups(role: ModelRole, value: string): PickerGroup[] {
   const offered = PROVIDERS.filter((provider) => role !== "local" || provider.local);
   const groups: PickerGroup[] = [];
-  if (value && value !== CHATGPT && !PROVIDERS.some((provider) => provider.id === value))
+  if (value && !subscription(value) && !PROVIDERS.some((provider) => provider.id === value))
     groups.push({
       label: "Chosen before",
       items: [{ value, label: value, disabledReason: "No longer offered" }],
@@ -73,10 +76,11 @@ function subscriptions(role: ModelRole): PickerGroup {
         disabledReason: role === "main" ? undefined : "Main model only",
       },
       {
-        value: "claude-plan",
-        label: "Claude Pro or Max",
-        keywords: "claude code anthropic subscription plan pro max token",
-        disabledReason: "Not allowed in other apps. Use an Anthropic key.",
+        value: CLAUDE_CODE,
+        label: "Claude Code (your plan)",
+        keywords: "claude code anthropic subscription plan pro max",
+        description: "Uses your own Claude Code",
+        disabledReason: role === "main" ? undefined : "Main model only",
       },
     ],
   };
@@ -94,19 +98,18 @@ export function modelItems(
   provider: ProviderSpec | undefined,
   providerId: string,
   models: readonly PickerModel[],
-  subscription: readonly SubscriptionModel[],
+  accountModels: readonly SubscriptionModel[],
   value: string,
 ): PickerItem[] {
-  const items: PickerItem[] =
-    providerId === CHATGPT
-      ? subscription.map((model) => ({ value: model.id, label: model.name, description: model.id }))
-      : models.map((model) => ({
-          value: model.id,
-          label: model.name,
-          keywords: model.id,
-          description: [model.id, priceLine(model)].filter(Boolean).join(" · "),
-          disabledReason: blockedReason(role, providerId, model),
-        }));
+  const items: PickerItem[] = subscription(providerId)
+    ? accountModels.map((model) => ({ value: model.id, label: model.name, description: model.id }))
+    : models.map((model) => ({
+        value: model.id,
+        label: model.name,
+        keywords: model.id,
+        description: [model.id, priceLine(model)].filter(Boolean).join(" · "),
+        disabledReason: blockedReason(role, providerId, model),
+      }));
   if (value && !items.some((item) => item.value === value)) {
     const typed = !!provider && customModelAllowed(provider);
     items.unshift({
@@ -118,7 +121,9 @@ export function modelItems(
             disabledReason:
               providerId === CHATGPT
                 ? "This account no longer offers it"
-                : "Not in the model list now",
+                : providerId === CLAUDE_CODE
+                  ? "Your Claude Code doesn't offer it now"
+                  : "Not in the model list now",
           }),
     });
   }

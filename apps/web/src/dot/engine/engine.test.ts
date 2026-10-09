@@ -247,6 +247,82 @@ describe("dot engine", () => {
     expect(e.pose(3000).plate.rim).toBeCloseTo(1, 3);
   });
 
+  it("bobs as it says a line without changing what it is doing", () => {
+    const e = new DotEngine({ seed: 3, t: 0, state: "acting" });
+    e.say(500, 1200);
+    let peak = 0;
+    for (let t = 500; t < 1700; t += 5) {
+      const pose = e.pose(t);
+      expect(pose.state).toBe("acting");
+      peak = Math.max(peak, pose.talk);
+    }
+    expect(peak).toBeGreaterThan(0.5);
+    expect(e.pose(3000).talk).toBe(0);
+  });
+
+  it("looks at the action point within 120 ms of being told where it is", () => {
+    const e = new DotEngine({ seed: 3, t: 0, state: "acting" });
+    e.pose(1000);
+    e.setFocus({ x: -5, y: -3 }, 1000);
+    const { x, y } = e.pose(1120).gaze;
+    expect(x).toBeLessThan(-4);
+    expect(y).toBeLessThan(-2);
+  });
+
+  it("keeps its eyes on a known action point while acting and observing", () => {
+    const e = new DotEngine({ seed: 9, t: 0, state: "idle" });
+    e.setFocus({ x: 6, y: -4 }, 0);
+    e.setState("acting", 300);
+    expect(e.pose(800).gaze.x).toBeGreaterThan(5);
+    e.setState("observing", 800);
+    for (let t = 1200; t < 4000; t += 100) {
+      const { x, y } = e.pose(t).gaze;
+      expect(Math.abs(x - 6)).toBeLessThan(1.8);
+      expect(Math.abs(y + 4)).toBeLessThan(1.4);
+    }
+  });
+
+  it("dozes with heavy lids but never closes its eyes while the computer is on", () => {
+    const e = new DotEngine({ seed: 4, t: 0, state: "idle" });
+    e.setState("dozing", 300);
+    for (let t = 300; t < 60_000; t += 50) expect(e.pose(t).eyes[0].closed).toBe(0);
+    expect(e.pose(60_000).eyes[0].up).toBeGreaterThan(0.5);
+  });
+
+  it("keeps blinking while it watches the computer", () => {
+    const e = new DotEngine({ seed: 5, t: 0, state: "watching" });
+    const blinks: number[] = [];
+    let closing = false;
+    for (let t = 0; t < 40_000; t += 10) {
+      const shut = e.pose(t).blink > 0.5;
+      if (shut && !closing) blinks.push(t);
+      closing = shut;
+    }
+    const gaps = blinks.slice(1).map((t, i) => t - (blinks[i] as number));
+    expect(blinks.length).toBeGreaterThan(3);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(7000 / 0.8);
+  });
+
+  it("leans its resting gaze where the host says the stage is", () => {
+    const e = new DotEngine({ seed: 7, t: 0, state: "resting" });
+    e.setBias({ x: 4, y: -3 }, 0);
+    e.setState("idle", 300);
+    expect(e.pose(800).gaze.x).toBeCloseTo(4, 0);
+    expect(e.pose(800).gaze.y).toBeCloseTo(-3, 0);
+  });
+
+  it("carries on with what it was doing when it lands at another size", () => {
+    const landed = new DotEngine({ seed: 9, t: 0, state: "thinking", lod: "hero" });
+    const seated = new DotEngine({ seed: 9, t: 0, state: "thinking", lod: "glance" });
+    for (let t = 0; t <= 900; t += 1000 / 60) {
+      landed.pose(t);
+      seated.pose(t);
+    }
+    landed.setLod("glance", 900);
+    for (let t = 900; t <= 4000; t += 250)
+      expect(fingerprint(landed.pose(t)), `at ${t}`).toBe(fingerprint(seated.pose(t)));
+  });
+
   it("jumps ahead after a long gap without replaying it", () => {
     const e = new DotEngine({ seed: 6, t: 0, state: "idle" });
     e.setState("thinking", 100);

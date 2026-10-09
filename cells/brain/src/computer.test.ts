@@ -1,5 +1,14 @@
+import type { ComputerAction } from "@localdot/protocol";
+import { keyCombo } from "@localdot/protocol/keys";
 import { describe, expect, it } from "vitest";
-import { keyCombo, type ProviderComputerInput, toComputerActions } from "./computer.ts";
+import {
+  actInModelSpace,
+  askInModelSpace,
+  elementsOnGrid,
+  type ProviderComputerInput,
+  pointsAtScreen,
+  toComputerActions,
+} from "./computer.ts";
 
 const F = "01JXYZ0000000000000000FRAM";
 
@@ -31,9 +40,9 @@ describe("toComputerActions", () => {
   it("maps keys, typing, scrolling, waiting and zooming", () => {
     expect(
       toComputerActions({ action: "key", text: "ctrl+shift+t", repeat: 2 }, "pixels", F),
-    ).toEqual([{ action: "key", keys: ["ctrl", "shift", "t"], repeat: 2 }]);
+    ).toEqual([{ action: "key", keys: ["ctrl", "shift", "t"], repeat: 2, basedOn: F }]);
     expect(toComputerActions({ action: "type", text: "hello" }, "pixels", F)).toEqual([
-      { action: "type", text: "hello" },
+      { action: "type", text: "hello", basedOn: F },
     ]);
     expect(
       toComputerActions(
@@ -56,7 +65,7 @@ describe("toComputerActions", () => {
       },
     ]);
     expect(toComputerActions({ action: "wait", duration: 90 }, "pixels", F)).toEqual([
-      { action: "wait", ms: 30_000 },
+      { action: "wait", ms: 30_000, basedOn: F },
     ]);
     expect(
       toComputerActions({ action: "zoom", region: [100, 100, 300, 200] }, "pixels", F),
@@ -65,10 +74,10 @@ describe("toComputerActions", () => {
 
   it("repeats a key up to 100 times as one action", () => {
     expect(toComputerActions({ action: "key", text: "]", repeat: 5 }, "pixels", F)).toEqual([
-      { action: "key", keys: ["]"], repeat: 5 },
+      { action: "key", keys: ["]"], repeat: 5, basedOn: F },
     ]);
     expect(toComputerActions({ action: "key", text: "Down", repeat: 100 }, "pixels", F)).toEqual([
-      { action: "key", keys: ["Down"], repeat: 100 },
+      { action: "key", keys: ["Down"], repeat: 100, basedOn: F },
     ]);
     expect(
       typeof toComputerActions({ action: "key", text: "Down", repeat: 101 }, "pixels", F),
@@ -78,10 +87,10 @@ describe("toComputerActions", () => {
   it("holds keys for up to 30 seconds", () => {
     expect(
       toComputerActions({ action: "hold_key", text: "shift", duration: 1.5 }, "pixels", F),
-    ).toEqual([{ action: "hold_key", keys: ["shift"], ms: 1500 }]);
+    ).toEqual([{ action: "hold_key", keys: ["shift"], ms: 1500, basedOn: F }]);
     expect(
       toComputerActions({ action: "hold_key", text: "ctrl+alt", duration: 30 }, "pixels", F),
-    ).toEqual([{ action: "hold_key", keys: ["ctrl", "alt"], ms: 30_000 }]);
+    ).toEqual([{ action: "hold_key", keys: ["ctrl", "alt"], ms: 30_000, basedOn: F }]);
     for (const input of [
       { action: "hold_key", text: "shift" },
       { action: "hold_key", text: "shift", duration: 0 },
@@ -100,18 +109,18 @@ describe("toComputerActions", () => {
       ),
     ).toEqual([
       { action: "click", point: { x: 431, y: 363 }, button: "left", count: 1, basedOn: F },
-      { action: "key", keys: ["ctrl", "a"] },
-      { action: "key", keys: ["BackSpace"] },
-      { action: "type", text: "A9743E" },
-      { action: "key", keys: ["Return"] },
+      { action: "key", keys: ["ctrl", "a"], basedOn: F },
+      { action: "key", keys: ["BackSpace"], basedOn: F },
+      { action: "type", text: "A9743E", basedOn: F },
+      { action: "key", keys: ["Return"], basedOn: F },
     ]);
     expect(toComputerActions({ action: "type", text: "cat", submit: true }, "pixels", F)).toEqual([
-      { action: "type", text: "cat" },
-      { action: "key", keys: ["Return"] },
+      { action: "type", text: "cat", basedOn: F },
+      { action: "key", keys: ["Return"], basedOn: F },
     ]);
     expect(toComputerActions({ action: "type", text: "", clear: true }, "pixels", F)).toEqual([
-      { action: "key", keys: ["ctrl", "a"] },
-      { action: "key", keys: ["BackSpace"] },
+      { action: "key", keys: ["ctrl", "a"], basedOn: F },
+      { action: "key", keys: ["BackSpace"], basedOn: F },
     ]);
   });
 
@@ -360,4 +369,140 @@ it("refuses malformed provider values and inherited names without emitting an ac
   ]) {
     expect(typeof toComputerActions(input as never, "pixels", F)).toBe("string");
   }
+});
+
+describe("askInModelSpace", () => {
+  const ask = (target?: number[]) => ({
+    question: "Sign in",
+    fields: [
+      { id: "email", kind: "email" as const, label: "Email" },
+      { id: "password", kind: "secret" as const, label: "Password", ...(target ? { target } : {}) },
+    ],
+  });
+  it("brings a secret field's target to screen pixels, from whatever grid the model uses", () => {
+    expect(askInModelSpace(ask([500, 250]), "per1000")).toEqual(ask([640, 200]));
+    expect(askInModelSpace(ask([640.4, 200]), "pixels")).toEqual(ask([640, 200]));
+    const untouched = ask();
+    expect(askInModelSpace(untouched, "per1000")).toBe(untouched);
+  });
+  it("tells the model when a target is off the screen", () => {
+    expect(askInModelSpace(ask([1200, 10]), "per1000")).toContain("the target of password");
+    expect(askInModelSpace(ask([1280, 10]), "pixels")).toContain("outside");
+  });
+});
+
+describe("batches", () => {
+  it("runs up to eight steps as one daemon action on the batch's screenshot", () => {
+    const steps = (n: number) => Array.from({ length: n }, () => ({ action: "key", text: "Tab" }));
+    const [batch] = toComputerActions({ action: "batch", steps: steps(8) }, "pixels", F) as [
+      ComputerAction,
+    ];
+    expect(batch.steps).toHaveLength(8);
+    expect(batch.basedOn).toBe(F);
+    expect(batch.steps?.every((step) => !Object.hasOwn(step, "basedOn"))).toBe(true);
+    expect(toComputerActions({ action: "batch", steps: steps(9) }, "pixels", F)).toBe(
+      "batch takes at most 8 steps",
+    );
+  });
+
+  it("names the step it cannot run, and keeps looks and batches out of a batch", () => {
+    expect(
+      toComputerActions(
+        { action: "batch", steps: [{ action: "key", text: "Tab" }, { action: "left_click" }, {}] },
+        "pixels",
+        F,
+      ),
+    ).toBe("batch step 3: Invalid computer action");
+    for (const action of ["screenshot", "zoom", "batch", "cursor_position"])
+      expect(toComputerActions({ action: "batch", steps: [{ action }] }, "pixels", F)).toMatch(
+        /^batch step 1: .* cannot be a step/,
+      );
+    expect(toComputerActions({ action: "batch" }, "pixels", F)).toMatch(/batch needs steps/);
+    expect(
+      toComputerActions({ action: "key", text: "a", steps: [{ action: "key" }] }, "pixels", F),
+    ).toBe("steps are only for a batch");
+  });
+
+  it("carries the call's line for the user on its first daemon action only", () => {
+    const [click, ...rest] = toComputerActions(
+      {
+        action: "type",
+        coordinate: [10, 20],
+        text: "Mum",
+        clear: true,
+        intent: "  Searching for your chat with Mum ",
+      },
+      "pixels",
+      F,
+    ) as ComputerAction[];
+    expect(click?.intent).toBe("Searching for your chat with Mum");
+    expect(rest.length).toBeGreaterThan(0);
+    for (const action of rest) expect(action).not.toHaveProperty("intent");
+    const [batch] = toComputerActions(
+      {
+        action: "batch",
+        intent: "Filling in the form",
+        steps: [{ action: "key", text: "Tab", intent: "a step's own" } as never],
+      },
+      "pixels",
+      F,
+    ) as [ComputerAction];
+    expect(batch.intent).toBe("Filling in the form");
+    expect(batch.steps?.[0]).not.toHaveProperty("intent");
+  });
+
+  it("needs a screenshot to choose a point in any of its steps", () => {
+    const [batch] = toComputerActions(
+      { action: "batch", steps: [{ action: "key", text: "Tab" }, { action: "scroll" }] },
+      "pixels",
+      F,
+    ) as [never];
+    expect(pointsAtScreen(batch)).toBe(true);
+    expect(pointsAtScreen({ action: "batch", steps: [{ action: "key", keys: ["Tab"] }] })).toBe(
+      false,
+    );
+  });
+});
+
+describe("actInModelSpace", () => {
+  it("brings the coordinate to model pixels with the screenshot it was chosen on", () => {
+    expect(actInModelSpace({ action: "click", coordinate: [500, 500] }, "per1000", F)).toEqual({
+      action: "click",
+      coordinate: [640, 400],
+      basedOn: F,
+    });
+  });
+
+  it("drops a coordinate chosen on no screenshot beside a ref, and refuses one alone", () => {
+    expect(
+      actInModelSpace({ action: "click", ref: "e3", coordinate: [5, 5] }, "pixels", undefined),
+    ).toEqual({ action: "click", ref: "e3" });
+    expect(actInModelSpace({ action: "click", coordinate: [5, 5] }, "pixels", undefined)).toMatch(
+      /screenshot/,
+    );
+    expect(actInModelSpace({ action: "click", ref: "e3" }, "pixels", undefined)).toEqual({
+      action: "click",
+      ref: "e3",
+    });
+  });
+});
+
+describe("elementsOnGrid", () => {
+  it("converts only element and control lines, at their ends", () => {
+    expect(
+      elementsOnGrid(
+        [
+          'e9 link "[1, 2, 3, 4]" [0, 0, 640, 400]',
+          '- menu item "Open at (1, 2) [3, 4, 5, 6]" in "Files" at (640, 400) [0, 0, 1280, 800]',
+          "text [640, 400, 640, 400]",
+        ].join("\n"),
+      ),
+    ).toBe(
+      [
+        'e9 link "[1, 2, 3, 4]" [0, 0, 500, 500]',
+        '- menu item "Open at (1, 2) [3, 4, 5, 6]" in "Files" at (500, 500) [0, 0, 1000, 1000]',
+        "text [640, 400, 640, 400]",
+      ].join("\n"),
+    );
+  });
 });

@@ -1,3 +1,4 @@
+import type { StreamPicture } from "../stage/live-stream.ts";
 import { DOCKER_DOWN } from "./errors.ts";
 import type { CellSummary } from "./types.ts";
 
@@ -12,6 +13,12 @@ export interface CellView {
   cell: CellSummary | null;
   status: CellStatus;
   pending: Pending | null;
+  // What this viewer's stage shows of the computer, which the daemon's stream state can lag or
+  // miss: another viewer's relay keeps it live while this one reconnects.
+  picture?: StreamPicture;
+  // This page has had a picture from the computer since it last came up: a stream that drops or
+  // reconnects after that is a reconnect under the last picture, never the computer starting.
+  streamed?: boolean;
 }
 
 export type HudActionKind = "start" | "stop" | "retry" | "resume";
@@ -46,8 +53,19 @@ export interface HudState {
 // crashed cell as "Reconnecting…".
 const RESTART_NOTE = /; restarting \(attempt (\d+) of (\d+)\)$/;
 const STARTING = "Starting your computer. The first start takes about a minute.";
+const UPDATING = "Updating your computer. Your files and sign-ins stay.";
+const UPDATE_UNFINISHED = "The update didn't finish";
+const UPDATE_RECORDS_UNREADABLE = "localDot can't read its update records";
+export const NEEDS_FRESH_START =
+  "The update couldn't be finished. Start fresh to use your computer again.";
 
-export function hudFor({ cell, status, pending }: CellView): HudState {
+export function hudFor({
+  cell,
+  status,
+  pending,
+  picture = "none",
+  streamed = false,
+}: CellView): HudState {
   const idle = pending === null;
   const hud = (
     phase: ComputerPhase,
@@ -74,10 +92,11 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
       "retry",
     );
   }
-  if (pending === "list")
-    return cell?.paused
-      ? hud("frozen", "Paused", "Checking your paused computer.", "resume", false)
-      : hud("checking", "Checking…", "Looking for your computer.", cell ? "stop" : "start");
+  // A list check on a known computer keeps showing it, its controls held until the answer.
+  if (pending === "list" && !cell)
+    return hud("checking", "Checking…", "Looking for your computer.", "start");
+  if (pending === "list" && cell?.paused)
+    return hud("frozen", "Paused", "Checking your paused computer.", "resume", false);
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
     if (pending === "create") return hud("starting", "Starting…", STARTING, "stop", false);
@@ -99,13 +118,18 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
       "retry",
       false,
     );
+  // The daemon stops the computer, moves it onto the new build and starts it: one step to the user.
+  if (cell.updating && (cell.state === "stopping" || cell.state === "starting"))
+    return hud("starting", "Updating…", UPDATING, "stop", false);
+  // Start still retries the update, but the curtain offers Start fresh as the way back.
+  if (cell.needsFreshStart) return hud("failed", "Failed", NEEDS_FRESH_START, "start");
   switch (cell.state) {
     case "starting": {
       if (cell.paused)
         return hud(
           "frozen",
           "Paused",
-          "Your computer is frozen while its connection recovers. Stop it for a clean start.",
+          "Your computer is paused while its connection recovers. Shut it down for a fresh start.",
           "stop",
         );
       const restart = cell.error ? RESTART_NOTE.exec(cell.error) : null;
@@ -140,19 +164,19 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
     return hud(
       "frozen",
       "Paused",
-      "Stopped. Your computer is frozen. Resume it to use it again: programs dot started carry on. Stop it for a clean start.",
+      "Your computer is paused. Resume it to carry on, or shut it down for a fresh start.",
       "resume",
     );
   }
-  switch (cell.stream.connection) {
-    case "live":
-      return hud("live", "Live", "Your computer is live.", "stop");
-    case "stalled":
-    case "disconnected":
-      return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
-    default:
-      return hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
-  }
+  // A stage that has shown the computer keeps its picture through a reconnect.
+  const connection = cell.stream.connection;
+  if (connection === "stalled" || connection === "disconnected" || picture === "held")
+    return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
+  if (connection === "live" || picture === "live")
+    return hud("live", "Ready", "Your computer is live.", "stop");
+  return streamed
+    ? hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop")
+    : hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
 }
 
 const STOP_FAILED = "stop failed: ";
@@ -163,6 +187,10 @@ const DOCKER_ERROR = /^docker (unreachable|\d+) on /;
 // carry Docker's own text, which stays out of the caption.
 function describeCellError(error: string | undefined): string {
   if (!error) return "Your computer could not start.";
+  if (error.startsWith(UPDATE_UNFINISHED))
+    return "The update didn't finish. Turn on your computer to finish it.";
+  if (error.startsWith(UPDATE_RECORDS_UNREADABLE))
+    return "localDot can't read its update records. Restart localDot, then turn on your computer.";
   if (error.startsWith(STOP_FAILED)) {
     return DOCKER_ERROR.test(error.slice(STOP_FAILED.length))
       ? `Your computer didn't stop: ${DOCKER_DOWN}, then stop it again.`

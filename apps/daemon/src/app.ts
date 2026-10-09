@@ -4,18 +4,25 @@ import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { ServiceReadinessReply } from "../../../packages/protocol/src/install-services.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
+import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
+import { type DeliverablesDeps, deliverableRoutes } from "./deliverables/routes.ts";
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
+import type { ExportJobs } from "./exports/jobs.ts";
+import { ExportLinks, exportRoutes } from "./exports/routes.ts";
 import { type GatewayRoutesDeps, gatewayRoutes } from "./gateway/routes.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { installCodeRoutes } from "./install-code-routes.ts";
 import type { InstallCodes } from "./install-codes.ts";
 import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
+import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
+import { type RoutineRoutesDeps, routineRoutes } from "./routines/routes.ts";
+import { type SearchRoutesDeps, searchRoutes } from "./search/routes.ts";
 import type { ManagedServiceReadiness } from "./service-readiness.ts";
 import { NDJSON_TYPE } from "./sessions/ndjson.ts";
 import { eventStreamResponse, type ReplayRoutesDeps, replayRoutes } from "./sessions/routes.ts";
@@ -29,15 +36,21 @@ export interface AppOptions {
   cells?: CellApiDeps;
   desktop?: StreamProxyDeps;
   browser?: BrowserViewerDeps;
+  accounts?: AccountsDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
   agent?: AgentRoutesDeps;
+  search?: SearchRoutesDeps;
   recorder?: Pick<Recorder, "info" | "isLive">;
   replay?: ReplayRoutesDeps;
+  deliverables?: Omit<DeliverablesDeps, "port">;
   installCodes?: InstallCodes;
   serviceReadiness?: Pick<ManagedServiceReadiness, "snapshot">;
   doctorSelfTests?: DoctorSelfTestsDeps;
+  exports?: ExportJobs;
+  notify?: NotifyRoutesDeps;
+  routines?: RoutineRoutesDeps;
 }
 
 export function createApp({
@@ -47,14 +60,20 @@ export function createApp({
   cells,
   desktop,
   browser,
+  accounts,
   ui,
   gateway,
   keys,
   agent,
+  search,
   replay,
+  deliverables,
   installCodes,
   serviceReadiness,
   doctorSelfTests,
+  exports,
+  notify,
+  routines,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
     throw new Error("install codes belong to another daemon");
@@ -116,6 +135,7 @@ export function createApp({
     });
   if (installCodes) installCodeRoutes(app, installCodes);
   if (browser) browserViewerApi(app, browser);
+  if (accounts) accountsRoutes(app, accounts);
 
   app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
 
@@ -145,10 +165,30 @@ export function createApp({
     }
   });
 
+  // What a conversation shows of a task, read whole before its live feed opens: the log without the
+  // events it never shows.
+  app.get("/api/sessions/:id/history", (c) => {
+    const id = c.req.param("id");
+    if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
+    const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
+    if (!Number.isSafeInteger(fromSeq)) return c.text("invalid sequence", 400);
+    try {
+      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, { shown: true });
+    } catch (err) {
+      if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
+      throw err;
+    }
+  });
+
   if (cells) cellRoutes(app, cells);
   if (keys) keyRoutes(app, keys);
   if (agent) agentRoutes(app, agent);
+  if (search) searchRoutes(app, search);
+  if (routines) routineRoutes(app, routines);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (replay) replayRoutes(app, replay);
+  if (deliverables) deliverableRoutes(app, { ...deliverables, port });
+  if (notify) notifyRoutes(app, notify);
+  if (exports) exportRoutes(app, exports, new ExportLinks());
   return app;
 }

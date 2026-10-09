@@ -1,4 +1,4 @@
-import { webcrypto } from "node:crypto";
+import { createECDH, webcrypto } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
@@ -11,10 +11,16 @@ import { parseArgs } from "node:util";
 import {
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
+  CLAUDE_CODE_INSTALL,
+  CLAUDE_CODE_SIGN_IN,
+  CLAUDE_CODE_UPDATE,
+  type ClaudeCodeStatus,
   type KeydRecord,
   microsToMs,
   msToMicros,
   type Point,
+  type ReviseLink,
+  type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -34,8 +40,14 @@ import {
   type ChatgptStatus,
   type CodexAccount,
 } from "../../../daemon/src/agent/codex/account.ts";
+import type { ChatgptSetupControl } from "../../../daemon/src/agent/codex/setup.ts";
+import { Conversations } from "../../../daemon/src/agent/conversation.ts";
+import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
+import { PeopleStore } from "../../../daemon/src/agent/people.ts";
+import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
+import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
   approvalDraft,
   authorizePrepared,
@@ -43,30 +55,51 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { PurposeGate } from "../../../daemon/src/agent/safety/purpose.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
-import { AgentSession } from "../../../daemon/src/agent/session.ts";
+import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
+import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
+import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
+import { ComputerUpdateRefused } from "../../../daemon/src/cells/computer-update.ts";
 import type { CellControls } from "../../../daemon/src/cells/orchestrator.ts";
 import { TicketRegistry } from "../../../daemon/src/cells/secrets.ts";
 import { cellStatusRoute } from "../../../daemon/src/cells/status-stream.ts";
+import { desktopStreamRoute } from "../../../daemon/src/cells/stream-proxy.ts";
+import { StreamTuning } from "../../../daemon/src/cells/stream-tuning.ts";
 import { FakeOrchestrator } from "../../../daemon/src/cells/testing/fake-orchestrator.ts";
 import type { CellRecord, CellSummary } from "../../../daemon/src/cells/types.ts";
 import { monotonicClock } from "../../../daemon/src/clock.ts";
+import {
+  deliverableScenarios,
+  deliverablesDeps,
+} from "../../../daemon/src/deliverables/testing/qa-scenarios.ts";
 import { DesktopdClient } from "../../../daemon/src/desktopd/client.ts";
 import { DesktopdRegistry } from "../../../daemon/src/desktopd/registry.ts";
 import { FakeDesktopd } from "../../../daemon/src/desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../../../daemon/src/event-log.ts";
 import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
+import { ChromeRenderer } from "../../../daemon/src/exports/chrome.ts";
+import { ExportJobs } from "../../../daemon/src/exports/jobs.ts";
+import { exportsStreamRoute } from "../../../daemon/src/exports/routes.ts";
+import { ExportStore } from "../../../daemon/src/exports/store.ts";
+import { FakeRenderer } from "../../../daemon/src/exports/testing/fake-renderer.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
 import type { GuiAction } from "../../../daemon/src/gateway/gateway.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
 import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
+import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
+import { nextDue } from "../../../daemon/src/routines/schedule.ts";
+import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
+import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
+import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
+import { SearchIndex } from "../../../daemon/src/search/search-index.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
@@ -84,7 +117,7 @@ import {
 const require = createRequire(new URL("../../../daemon/package.json", import.meta.url));
 const { getRequestListener } = require("@hono/node-server") as {
   getRequestListener(
-    fetch: (request: Request) => Response | Promise<Response>,
+    fetch: (request: Request, env: unknown) => Response | Promise<Response>,
   ): Parameters<typeof createServer>[0];
 };
 const { values: args } = parseArgs({
@@ -128,11 +161,20 @@ const settingsMode = env.QA_SETTINGS ?? "configured";
 let chatgptState = (env.QA_CHATGPT || undefined) as
   | "signed_in"
   | "signed_out"
+  | "checking"
+  | "check_failed"
   | "not_installed"
   | "unavailable"
   | undefined;
 let deviceCodeOff = false,
   signingIn: ChatgptLogin | undefined;
+// The user's own Claude Code, as its status command would report it.
+let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
+  | "not_installed"
+  | "outdated"
+  | "signed_out"
+  | "signed_in"
+  | undefined;
 let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
@@ -200,6 +242,7 @@ const SETTINGS: Record<string, AgentSettings> = {
   } as AgentSettings,
   empty: {},
   chatgpt: { main: { provider: "chatgpt", model: "sample-plan-model" } } as AgentSettings,
+  "claude-code": { main: { provider: "claude-code", model: "sonnet" } } as AgentSettings,
   plan: {
     main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
   } as AgentSettings,
@@ -221,6 +264,7 @@ let heldAt: number | undefined;
 const base = monotonicClock();
 const clock = { nowMicros: () => (heldAt ?? base.nowMicros()) + skew };
 const log = new EventLog(HOME, clock);
+const conversations = new Conversations(HOME, log);
 const cells = new FakeOrchestrator();
 const tickets = new TicketRegistry();
 const live = new LiveSessions();
@@ -254,10 +298,42 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
       return { ...b, state: "failed", stream: none, error: "not ready after 120s" };
     case "fenced":
       return { ...b, state: "ready", fenced: { revision: 1 } } as CellSummary;
+    case "fresh-start":
+      return {
+        ...b,
+        state: "failed",
+        stream: none,
+        error: "Your computer's update can't be finished. Start fresh to use it again.",
+        needsFreshStart: true,
+      };
   }
 }
 const initial = cellFor(cellKind, cellId);
 if (initial) cells.emit(initial);
+// QA_DESKTOP=<url>,<password> streams a real desktop container's Selkies to the live cell, for
+// measurements (QA_TUNING=0 leaves its quality fixed); the fixture otherwise shows one still frame.
+const [realStream, realPassword] = (env.QA_DESKTOP ?? "").split(",");
+const realDesktop = realStream
+  ? {
+      cells,
+      tickets,
+      vendorDir: fileURLToPath(new URL("../../vendor/selkies", import.meta.url)),
+      tuning:
+        env.QA_TUNING === "0"
+          ? undefined
+          : new StreamTuning({
+              onApply: (_id, quality) => console.log(JSON.stringify({ at: Date.now(), quality })),
+            }),
+    }
+  : undefined;
+if (realStream)
+  cells.endpointsById.set(cellId, {
+    desktopd: { baseUrl: "http://owned-desktop.invalid", token: "" },
+    stream: {
+      baseUrl: realStream,
+      authorization: `Basic ${Buffer.from(`localdot:${realPassword}`).toString("base64")}`,
+    },
+  });
 const origCreate = cells.create.bind(cells);
 cells.create = async (opts) => {
   const created = await origCreate(opts);
@@ -298,14 +374,40 @@ cells.start = async (id) => {
   }, 1500);
 };
 
+// Update: the computer stops, comes back on the new version and is ready a moment later.
+async function updateCell(id: string): Promise<void> {
+  const c = cells.get(id);
+  if (!c?.updateAvailable) throw new ComputerUpdateRefused("Your computer is up to date.");
+  const { updateAvailable: _available, ...rest } = c;
+  const none = { connection: "none" as const, viewers: 0, lastUpstreamAt: null };
+  cells.emit({ ...rest, state: "stopping", updating: true, stream: none });
+  setTimeout(() => cells.emit({ ...rest, state: "starting", updating: true, stream: none }), 800);
+  setTimeout(
+    () =>
+      cells.emit({
+        ...rest,
+        state: "ready",
+        stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+      }),
+    Number(process.env.QA_UPDATE_MS ?? 2500),
+  );
+}
+
 let keys = SAMPLE_KEYS;
 const settingsStore = new SettingsStore(HOME);
 settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
+const people = new PeopleStore(HOME);
+const recentActivity = new RecentActivity({ log, isLive: (id) => live.cellOf(id) !== undefined });
+const searchIndex = new SearchIndex(HOME, { sessions: log });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog: log, notes: memory });
+searchFeed.start();
 const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
 let session: AgentSession | undefined;
+// The user's own hold on the computer, with no task, while it is the live session.
+let holder: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
 let liveStep: string | undefined;
 // A plan task resolves through the daemon's own bindings, frozen at start as the runner does.
@@ -321,6 +423,9 @@ function planSelection(): TaskModelSelection | undefined {
   );
 }
 let teardown = false;
+// How the live task ends when its run is cut: Stop records it stopped, a finished task the user
+// moved on from records it done, and a daemon that went away records nothing.
+const ending = new WeakMap<AgentSession, "done" | "crash">();
 
 function attachLive(owned: AgentSession) {
   live.start(
@@ -333,8 +438,10 @@ function attachLive(owned: AgentSession) {
           () => {
             owned.stop();
             void owned.toolsSettled().then(() => {
+              const how = ending.get(owned);
               try {
-                owned.append("session.end", { reason: "stopped" });
+                if (how !== "crash")
+                  owned.append("session.end", { reason: how === "done" ? "done" : "stopped" });
               } catch {}
               resolve();
             }, resolve);
@@ -344,7 +451,21 @@ function attachLive(owned: AgentSession) {
       }),
   );
 }
-function newSession(title: string, task: string): AgentSession {
+// Ends the live task, as the daemon does, and waits until the computer is free of it.
+async function endLive(how?: "done" | "crash") {
+  const owned = session;
+  if (!owned || owned.stopped) return;
+  if (how) ending.set(owned, how);
+  live.stop(owned.id);
+  await live.settled(owned.id);
+}
+function newSession(
+  title: string,
+  task: string,
+  continues?: string,
+  origin?: SessionOrigin,
+  revises?: ReviseLink,
+): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
     cellId,
@@ -357,9 +478,34 @@ function newSession(title: string, task: string): AgentSession {
   log.append(s.id, {
     agent: "main",
     type: "session.start",
-    data: { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title },
+    data: {
+      screen: { w: 2560, h: 1600, scale: 2 },
+      os: "linux",
+      title,
+      ...(continues ? { continues } : {}),
+      ...(origin ? { origin } : {}),
+      ...(revises ? { revises } : {}),
+    },
   });
   return s;
+}
+
+// An ended task: what the user asked, dot's reply and result. It continues `continues`.
+function endedTask(title: string, reply: string, summary: string, continues?: string): string {
+  const id = log.createSession(title);
+  const append = (type: string, data: Record<string, unknown>) =>
+    log.append(id, { agent: "main", type, data } as never);
+  append("session.start", {
+    screen: { w: 2560, h: 1600, scale: 2 },
+    os: "linux",
+    title,
+    ...(continues ? { continues } : {}),
+  });
+  append("message.user", { messageId: ulid(), kind: "task", text: title });
+  append("message.assistant", { messageId: ulid(), text: reply });
+  append("task.result", { summary, files: [] });
+  append("session.end", { reason: "done" });
+  return id;
 }
 
 type Append = (type: string, data: Record<string, unknown>, step?: string) => void;
@@ -371,7 +517,8 @@ const planItems = (finished: boolean) => [
   { id: "send", text: "Email the report to the team", status: "skipped" },
 ];
 
-function finishTask(s: AgentSession, a: Append) {
+// done: end as the real runner does, with agent.state done, which raises a Done notification.
+function finishTask(s: AgentSession, a: Append, done = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -396,7 +543,7 @@ function finishTask(s: AgentSession, a: Append) {
     ],
   });
   s.setStatus("idle");
-  a("agent.state", { state: "idle" });
+  a("agent.state", { state: done ? "done" : "idle" });
 }
 
 function seedTask(s: AgentSession, finished: boolean) {
@@ -425,7 +572,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   });
   a("plan.set", { items: planItems(finished) });
   const click = ulid();
-  a("step.start", { kind: "gui", planItem: "open" }, click);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "open", intent: "Opening the monthly report to read the sales table" },
+    click,
+  );
   a(
     "action.intent",
     { verb: "click", label: "Open monthly-report.ods", risk: "none", point: { x: 1280, y: 420 } },
@@ -453,7 +604,11 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "allow",
   });
   const typing = ulid();
-  a("step.start", { kind: "gui", planItem: "calc" }, typing);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "calc", intent: "Adding up the net total for each month" },
+    typing,
+  );
   a(
     "action.intent",
     { verb: "type", label: "Type =SUM(F2:F13)", risk: "low", point: { x: 1900, y: 1300 } },
@@ -474,7 +629,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   observe(typing);
   a("step.end", { status: "ok" }, typing);
   const shell = ulid();
-  a("step.start", { kind: "shell", planItem: "calc" }, shell);
+  a(
+    "step.start",
+    { kind: "shell", planItem: "calc", intent: "Checking the totals against the raw data" },
+    shell,
+  );
   a("tool.start", { tool: "shell", title: "Check totals with csvstat" }, shell);
   a(
     "tool.output",
@@ -502,7 +661,7 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "deny",
   });
   const file = ulid();
-  a("step.start", { kind: "file", planItem: "write" }, file);
+  a("step.start", { kind: "file", planItem: "write", intent: "Writing the short report" }, file);
   a(
     "file.change",
     {
@@ -549,7 +708,15 @@ function seedTask(s: AgentSession, finished: boolean) {
     s.setStatus("running");
     a("agent.state", { state: "acting" });
     liveStep = ulid();
-    a("step.start", { kind: "gui", planItem: "calc" }, liveStep);
+    a(
+      "step.start",
+      {
+        kind: "gui",
+        planItem: "calc",
+        intent: "Checking February's net total against revenue minus returns",
+      },
+      liveStep,
+    );
     a(
       "action.intent",
       {
@@ -742,11 +909,23 @@ function seedLongTask(s: AgentSession) {
   );
 }
 
+// QA_EARLIER earlier tasks of the same conversation come before the seeded one.
+let earlier: string | undefined;
+for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
+  earlier = endedTask(
+    n === 0 ? "Find last month's sales table" : `Check the sample figures (${n})`,
+    n === 0
+      ? "I found **sales.xlsx** in Documents. It has one sheet with daily totals for December."
+      : "The figures add up.",
+    n === 0 ? "Found sales.xlsx in Documents." : "Checked the figures.",
+    earlier,
+  );
 if (withSession && initial) {
   heldAt = base.nowMicros();
   session = newSession(
     env.QA_ACTIVITY === "long" ? "Sample · dog drawing" : "Sample · monthly report",
     "Sample task",
+    earlier,
   );
   attachLive(session);
   if (env.QA_ACTIVITY === "long") seedLongTask(session);
@@ -754,6 +933,8 @@ if (withSession && initial) {
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;
 }
+const latestTask = session?.id ?? earlier;
+if (latestTask) conversations.adopt(latestTask);
 
 const native = new FakeDesktopd({
   type: (body) => ({
@@ -793,14 +974,24 @@ const record = (key: string): CellRecord =>
     },
   }) as CellRecord;
 const effects: string[] = [];
+// The parts of the next Stop that fail, as the kill switch names them: keyd, pause, close, stop.
+// keyd-once fails only the first revoke, which the kill switch then retries and confirms.
+const stopFails = new Set<string>();
+const failing = (step: string) => {
+  if (step === "keyd" && stopFails.delete("keyd-once")) throw new Error("keyd failed once");
+  if (stopFails.has(step)) throw new Error(`${step} failed`);
+};
+let revokeAgain = false;
 const controlsFor = (key: string): CellControls => ({
-  waitedForOperation: false,
+  waitedForOperation: revokeAgain,
   pause: async () => {
+    failing("pause");
     effects.push("pause");
     const cell = cells.get(key);
     if (cell) cells.emit({ ...cell, paused: true });
   },
   stop: async () => {
+    failing("stop");
     effects.push("stop");
     await cells.stop(key);
   },
@@ -820,10 +1011,12 @@ const killSwitch = new KillSwitch({
   live,
   keyd: {
     revoke: async () => {
+      failing("keyd");
       effects.push("revoke");
       return 0;
     },
     close: async () => {
+      failing("close");
       effects.push("close");
     },
     isWired: async () => true,
@@ -850,9 +1043,16 @@ const installed: InstalledCodex = {
   codeModeHostBin: join(HOME, "inert/code-mode-host"),
 } as InstalledCodex;
 let installing: Promise<InstalledCodex> | undefined;
+const installedStates = new Set(["signed_in", "signed_out", "checking", "check_failed"]);
+const sandboxChecked = () => {
+  chatgptState = "checking";
+  setTimeout(() => {
+    if (chatgptState === "checking") chatgptState = "signed_out";
+  }, 1500);
+};
 const installer = {
   status: () =>
-    chatgptState === "signed_in" || chatgptState === "signed_out"
+    installedStates.has(chatgptState ?? "")
       ? { state: "ready", version: "0.154.0" }
       : installing
         ? { state: "downloading", receivedBytes: 48 * 1024 * 1024, totalBytes: 116_501_639 }
@@ -860,17 +1060,32 @@ const installer = {
   ensureInstalled: () => {
     installing ??= new Promise((resolve) =>
       setTimeout(() => {
-        chatgptState = "signed_out";
         installing = undefined;
+        sandboxChecked();
         resolve(installed);
       }, 1500),
     );
     return installing;
   },
   verifiedInstallation: async () =>
-    chatgptState === "signed_in" || chatgptState === "signed_out" ? installed : undefined,
+    installedStates.has(chatgptState ?? "") ? installed : undefined,
   cancel: () => {},
 } as unknown as CodexInstaller;
+const setup: ChatgptSetupControl = {
+  sandbox: () =>
+    chatgptState === "checking"
+      ? "checking"
+      : chatgptState === "check_failed"
+        ? "failed"
+        : chatgptState === "signed_in" || chatgptState === "signed_out"
+          ? "passed"
+          : "unchecked",
+  check: async () => {
+    if (chatgptState === "check_failed") sandboxChecked();
+    return setup.sandbox();
+  },
+  confirm: async (status) => status,
+};
 const account = {
   status: async () =>
     ({
@@ -927,6 +1142,50 @@ const harness = () =>
   chatgptState && chatgptState !== "unavailable"
     ? { available: true as const }
     : { available: false as const, reason: CHATGPT_SWITCHED_OFF };
+const claudeCodeStatus = (): ClaudeCodeStatus => {
+  const checkedAt = Date.now();
+  switch (claudeCodeState) {
+    case "signed_in":
+      return {
+        state: "signed_in",
+        version: "2.1.290",
+        plan: "max",
+        models: [
+          { id: "sonnet", name: "Claude Sonnet" },
+          { id: "opus", name: "Claude Opus" },
+        ],
+        checkedAt,
+      };
+    case "signed_out":
+      return {
+        state: "signed_out",
+        version: "2.1.290",
+        reason: "Sign in to Claude Code, then check again.",
+        command: CLAUDE_CODE_SIGN_IN,
+        models: [],
+        checkedAt,
+      };
+    case "outdated":
+      return {
+        state: "outdated",
+        version: "2.1.100",
+        reason: "Update Claude Code, then check again.",
+        command: CLAUDE_CODE_UPDATE,
+        models: [],
+        checkedAt,
+      };
+    default:
+      return {
+        state: "not_installed",
+        reason: "Install Claude Code and sign in there.",
+        command: CLAUDE_CODE_INSTALL,
+        models: [],
+        checkedAt,
+      };
+  }
+};
+// What the user's direct control delivered to the fake computer, in order, with when it arrived.
+const manualInputs: { at: number; input: unknown }[] = [];
 const agent: AgentRoutesDeps = {
   home: HOME,
   settings: settingsStore,
@@ -934,12 +1193,16 @@ const agent: AgentRoutesDeps = {
   keyd: {
     secrets: async () => keys,
     budget: async () => ({
-      perTaskUSD: 2,
-      perDayUSD: 20,
+      perTaskUSD: 0,
+      perDayUSD: 0,
       day: { date: "2026-10-08", spentUSD: 1.2 },
     }),
   } as AgentRoutesDeps["keyd"],
   memory,
+  notesChanged: (file) => searchFeed.reindexNotes(file),
+  people,
+  recentActivity: () => recentActivity.list(),
+  sessionInfo: (ids) => log.sessionInfo(ids),
   skills: () => [
     {
       name: "sample-tables",
@@ -954,6 +1217,7 @@ const agent: AgentRoutesDeps = {
       dir: HOME,
     },
   ],
+  conversations,
   canChangeMemory: () => !session?.controlHeld && !killSwitch.isBusy(cellId),
   taskMutationReady: (owner) =>
     owner === session &&
@@ -965,10 +1229,18 @@ const agent: AgentRoutesDeps = {
     get sessions() {
       return new Map(session ? [[session.id, session]] : []);
     },
-    start: async (key, task) => {
+    start: async (key, task, _signal, options) => {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
-      session = newSession(task.slice(0, 60), task);
+      await endLive();
+      session = newSession(
+        task.slice(0, 60),
+        task,
+        conversations.current() ?? undefined,
+        undefined,
+        options?.revises,
+      );
+      conversations.adopt(session.id);
       budgetHold = undefined;
       raisedDuringPause = false;
       selection = planSelection();
@@ -989,6 +1261,42 @@ const agent: AgentRoutesDeps = {
       }, 800);
       return s;
     },
+    release: async () => {
+      if (session && !session.stopped && session.status !== "idle")
+        throw new AgentError(409, "Finish or stop the current task first.");
+      await endLive("done");
+    },
+    // As the daemon does: a live task's control, or a hold of the user's own that ends at hand-back.
+    hold: async (key) => {
+      if (key !== cellId) throw new Error("unknown cell");
+      if (session && !session.stopped && (session !== holder || session.controlHeld))
+        return { sessionId: session.id, requestId: session.takeControl() };
+      await endLive("done");
+      const continues = conversations.current() ?? undefined;
+      const title = continues ? conversations.title(continues) : undefined;
+      const owned = new AgentSession(log.createSession("You used the computer"), cellId, "", log);
+      log.append(owned.id, {
+        agent: "main",
+        type: "session.start",
+        data: {
+          screen: { w: 2560, h: 1600, scale: 2 },
+          os: "linux",
+          ...(title ? { title } : {}),
+          ...(continues ? { continues } : {}),
+        },
+      });
+      session = owned;
+      holder = owned;
+      conversations.adopt(owned.id);
+      owned.setStatus("idle");
+      const requestId = owned.takeControl();
+      attachLive(owned);
+      void owned.controlReleased(requestId).then(() => {
+        if (session === owned && !owned.stopped) void endLive("done");
+      });
+      return { sessionId: owned.id, requestId };
+    },
+    holds: (key) => !!holder && key === holder.id,
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
         ? { kind: "chatgpt", model: "sample-plan-model" }
@@ -1037,9 +1345,22 @@ const agent: AgentRoutesDeps = {
     owner === session
       ? {
           screen: { w: 2560, h: 1600 },
-          client,
+          client: {
+            input: (request, signal, onPress) => {
+              manualInputs.push({ at: Date.now(), input: request.input });
+              return client.input(request, signal, onPress);
+            },
+            type: (request, onProgress, signal) => {
+              manualInputs.push({ at: Date.now(), input: { kind: "text", text: request.text } });
+              return client.type(request, onProgress, signal);
+            },
+          },
           prepare: async () => {},
           release: () => {},
+          letGo: async () => {
+            manualInputs.push({ at: Date.now(), input: { kind: "let-go" } });
+            await client.release();
+          },
           check: () => {
             const cell = cells.get(cellId);
             if (
@@ -1059,7 +1380,15 @@ const agent: AgentRoutesDeps = {
     session.append(type, data);
   },
   harness,
-  ...(chatgptState ? { chatgpt: { account, installer, availability: harness } } : {}),
+  ...(chatgptState ? { chatgpt: { account, installer, availability: harness, setup } } : {}),
+  ...(claudeCodeState
+    ? {
+        claudeCode: {
+          status: async () => claudeCodeStatus(),
+          check: async () => claudeCodeStatus(),
+        },
+      }
+    : {}),
 };
 const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
   "deriveBits",
@@ -1076,10 +1405,66 @@ const recorder = new Recorder({
   enabled: false,
 });
 const index = new SessionIndex(HOME, { isLive: (id) => live.cellOf(id) !== undefined });
+const routineStore = new RoutineStore(HOME, { now: Date.now, zone: () => "Europe/London" });
+const appEvents = new AppEvents();
+let fixtureLogin: "on" | "off" = "off";
+// Nothing runs here; active routines only learn when they would run next.
+const planRoutines = () => {
+  for (const routine of routineStore.list())
+    if (routine.state === "active" && routine.nextDueAt === null)
+      routineStore.setNextDue(routine.id, nextDue(scheduleOf(routine), Date.now()));
+};
+const routineChanged = (routineId: string) => {
+  const routine = routineStore.get(routineId);
+  if (routine)
+    appEvents.publish({
+      type: "routine.changed",
+      routineId,
+      revision: routine.revision,
+      state: routine.state,
+    });
+};
+
+// Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+const pushKey = createECDH("prime256v1");
+pushKey.generateKeys();
+const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
+const notify = createNotify({
+  home: HOME,
+  eventLog: log,
+  events: appEvents,
+  keyd: {
+    pushKey: async () => ({ publicKey: pushKey.getPublicKey().toString("base64url") }),
+    pushSend: async () => {
+      notified.pushes += 1;
+      return { status: 201, gone: false };
+    },
+  },
+  mac: {
+    available: true,
+    show: async (title, body) => {
+      notified.mac.push([title, body]);
+      return "shown";
+    },
+  },
+});
 
 let app: ReturnType<typeof createApp> | undefined;
+const deliverablesFixture = {
+  home: HOME,
+  assets: ASSETS,
+  log,
+  frames,
+  effects,
+  session: () => session,
+  start: (task: string, revises: ReviseLink) =>
+    agent.runner.start(cellId, task, undefined, { revises }),
+};
+// The node bindings pass through: Open on Mac checks the socket address.
 const server: Server = createServer(
-  getRequestListener((request) => app?.fetch(request) ?? new Response("starting", { status: 503 })),
+  getRequestListener(
+    (request, env) => app?.fetch(request, env) ?? new Response("starting", { status: 503 }),
+  ),
 );
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
@@ -1091,18 +1476,68 @@ await new Promise<void>((resolve, reject) => {
   server.listen(REQUESTED_PORT, "127.0.0.1", resolve);
 });
 const PORT = (server.address() as AddressInfo).port;
+// QA_EXPORTS=fake: videos move only when /__qa/export/* says; chrome: this computer's Chrome makes
+// them for real; otherwise the host can't make videos and Export falls back to the page.
+const exportsMode = env.QA_EXPORTS ?? "none";
+const fakeRenderer = new FakeRenderer();
+if (exportsMode !== "fake") fakeRenderer.able = null;
+const exportJobs = new ExportJobs({
+  store: new ExportStore(HOME),
+  renderer:
+    exportsMode === "chrome"
+      ? new ChromeRenderer({ origin: `http://127.0.0.1:${PORT}`, token: TOKEN })
+      : fakeRenderer,
+});
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
+  exportsStreamRoute(exportJobs),
   cellStatusRoute(cells),
   sessionStreamRoute(log),
+  manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
+  appEventsRoute(appEvents, notify.presence),
+  ...(realDesktop ? [desktopStreamRoute(realDesktop)] : []),
 ]);
+// Settings > Accounts against the daemon's own routes: the web browser's cookie domains.
+let cookieDomains = [
+  { domain: ".google.com", count: 14 },
+  { domain: "accounts.google.com", count: 6 },
+  { domain: "mail.google.com", count: 3 },
+  { domain: "web.telegram.org", count: 2 },
+  { domain: ".github.com", count: 5 },
+  { domain: "www.bbc.co.uk", count: 4 },
+];
+const accounts: AccountsDeps = {
+  cells,
+  browser: {
+    start: async () => ({}) as Awaited<ReturnType<AccountsDeps["browser"]["start"]>>,
+    endpoints: () => ({}) as ReturnType<AccountsDeps["browser"]["endpoints"]>,
+    clearAccounts: async () => {
+      cookieDomains = [];
+    },
+  },
+  client: () => ({
+    cookieDomains: async () => cookieDomains,
+    signOut: async (site) => {
+      const before = cookieDomains.length;
+      cookieDomains = cookieDomains.filter(
+        ({ domain }) => !`.${domain.replace(/^\./u, "")}`.endsWith(`.${site}`),
+      );
+      return before - cookieDomains.length;
+    },
+    close: () => {},
+  }),
+};
 const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
-  cells: { cells, tickets },
+  cells: { cells, tickets, update: updateCell },
+  desktop: realDesktop,
+  accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
+  exports: exportJobs,
   replay: {
     home: HOME,
     eventLog: log,
@@ -1111,8 +1546,42 @@ const routes = createApp({
     thumbs: new Thumbnails(HOME, frames),
     live,
   },
+  deliverables: deliverablesDeps(deliverablesFixture),
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
+  notify: notify.routes,
+  routines: {
+    store: routineStore,
+    scheduler: { replan: planRoutines },
+    launcher: { runNow: () => ulid() },
+    publish: (event) => appEvents.publish(event),
+    redact: (text) => text,
+    zone: () => "Europe/London",
+    now: Date.now,
+    startAtLogin: {
+      status: async () => fixtureLogin,
+      set: async (on) => {
+        fixtureLogin = on ? "on" : "off";
+        return fixtureLogin;
+      },
+    },
+    stopAll: (by) =>
+      stopAll(
+        {
+          cells,
+          live,
+          killSwitch,
+          store: routineStore,
+          launcher: { cancelAll: () => 0 },
+          scheduler: { replan: () => {} },
+          audit: { append: () => {} },
+          publish: (event) => appEvents.publish(event),
+          now: Date.now,
+        },
+        by,
+      ),
+  },
 });
+deliverableScenarios(routes, deliverablesFixture);
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)
@@ -1267,6 +1736,30 @@ function requestApproval(
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return;
   }
+  if (kind === "purpose") {
+    // A tainted task opening an unrelated site with data in its address, through the real purpose
+    // check, its judge finding the site unrelated.
+    session.taint.add("screen", "mail.example.test");
+    session.purpose = new PurposeGate({
+      taint: session.taint,
+      purpose: () => session?.currentPurpose ?? { request: [], plan: [] },
+      judge: () => ({ name: "jev", destinations: async () => [], fits: async () => 0.04 }),
+      trusted: () => false,
+    });
+    const input = { url: "https://paste.example.net/new?text=quarterly%20numbers" };
+    const navigate = toolRisk("browser_navigate", input);
+    if (!navigate) return "no facts";
+    void authorizePrepared(ctx, {
+      tool: "browser_navigate",
+      input,
+      target: null,
+      facts: navigate,
+      revalidate: async () => true,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
   if (repeat > 1) {
     // The card a repeated key press gets under QA_AUTONOMY=careful, from the real authorization.
     const keys = ["bracketright"];
@@ -1300,16 +1793,33 @@ function requestApproval(
             decide(facts, session.autonomy),
             (text) => text,
           )
-        : ({
-            actionClass: "send",
-            risk,
-            title: "Send the monthly report to team@example.test",
-            fields: [
-              ["To", "team@example.test"],
-              ["Subject", "Monthly report (sample)"],
-              ["Attachment", "summary.md"],
-            ],
-          } as never),
+        : kind === "port"
+          ? ({
+              actionClass: "browsing",
+              risk: "medium",
+              title: "WeChat wants to connect to host:8080",
+              fields: [
+                ["App", "WeChat, on your computer"],
+                ["Destination", "host:8080 · TCP"],
+                ["For the task", "Send “hi” to Henry on WeChat"],
+              ],
+              always: [{ scope: "task", label: "For this task" }],
+            } as never)
+          : ({
+              actionClass: "send",
+              risk,
+              title: "Send this email?",
+              fields: [
+                ["From", "henry.liao@example.test (you)"],
+                ["To", "team@example.test · 4 people"],
+                ["Subject", "Monthly report (sample)"],
+                ["Attached", "summary.md · 2 KB"],
+              ],
+              always: [
+                { scope: "task", label: "For this task" },
+                { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
+              ],
+            } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
@@ -1520,11 +2030,238 @@ function liveDrag(held: boolean): string | undefined {
     0,
   );
 }
+// Clicks, a scroll, typing and a key combo played live, each with its travel and its element, so
+// the stage draws the full action vocabulary: a click on a known cell, a right click, a double
+// click, three wheel notches, a formula typed into a field and Ctrl+S.
+function liveActions(): string | undefined {
+  if (!session) return "no session";
+  const owned = session;
+  const now = () => Math.round(microsToMs(log.toSessionT(owned.id, clock.nowMicros())));
+  const later = (ms: number, act: () => void) => setTimeout(act, ms).unref();
+  const cell = (row: number) => ({ x: 1900, y: 424 + row * 64, w: 320, h: 64 });
+  const centre = (r: { x: number; y: number; w: number; h: number }) => ({
+    x: Math.round(r.x + r.w * 0.62),
+    y: Math.round(r.y + r.h * 0.64),
+  });
+  let cursor: Point = { x: 1280, y: 800 };
+  const act = (
+    at: number,
+    verb: "click" | "scroll" | "type" | "key",
+    label: string,
+    input: Record<string, unknown>,
+    box?: { x: number; y: number; w: number; h: number },
+    progress?: string,
+  ) => {
+    const point = box ? centre(box) : undefined;
+    later(at, () => {
+      const step = ulid();
+      const from = cursor;
+      owned.append("step.start", { kind: "gui", planItem: "calc" }, step);
+      owned.append(
+        "action.intent",
+        {
+          verb,
+          label,
+          risk: "none",
+          ...(point && verb !== "type"
+            ? {
+                point,
+                pointer: {
+                  from,
+                  to: point,
+                  startsAt: now() + 120,
+                  durationMs: 420,
+                  seed: 5,
+                  curve: "minjerk-bow-v1",
+                },
+              }
+            : point
+              ? { point }
+              : {}),
+        },
+        step,
+      );
+      if (point && verb !== "type") cursor = point;
+      if (box)
+        later(60, () =>
+          owned.append(
+            "action.target",
+            { target: { point: point as Point, bbox: box, source: "ax", role: "cell" } },
+            step,
+          ),
+        );
+      later(verb === "type" || verb === "key" ? 150 : 650, () => {
+        const pressT = msToMicros(now());
+        owned.append(
+          "action.dispatch",
+          { input, pressT, ringAt: pressT + 20_000, injector: "xtest" },
+          step,
+        );
+        const chars = [...(progress ?? "")];
+        for (const [i, chunk] of chars.entries())
+          later(35 * (i + 1), () =>
+            owned.append("text.progress", { chunk, count: i + 1, masked: false }, step),
+          );
+        later(400 + 35 * chars.length, () => {
+          owned.append("action.result", { ok: true }, step);
+          owned.append("step.end", { status: "ok" }, step);
+        });
+      });
+    });
+  };
+  const click = (button: "left" | "right", count: 1 | 2, box: ReturnType<typeof cell>) => ({
+    kind: "click",
+    button,
+    count,
+    at: centre(box),
+  });
+  act(0, "click", "Select February's net total", click("left", 1, cell(1)), cell(1));
+  act(1800, "click", "Open the menu on March's net total", click("right", 1, cell(2)), cell(2));
+  act(3600, "click", "Edit April's net total", click("left", 2, cell(3)), cell(3));
+  const wheel = cell(7);
+  act(5400, "scroll", "Scroll down", { kind: "scroll", at: centre(wheel), dx: 0, dy: 3 }, wheel);
+  const total = { x: 1900, y: 1256, w: 320, h: 64 };
+  act(
+    7000,
+    "type",
+    "Type =SUM(F2:F13)",
+    { kind: "type", chars: 12, masked: false },
+    total,
+    "=SUM(F2:F13)",
+  );
+  act(9000, "key", "Save the report", { kind: "key", combo: ["ctrl", "s"] });
+}
 function ask(allowText: boolean): string | undefined {
   if (!session) return "no session";
   void session
     .ask("Which report format should I use?", ["Markdown", "Plain text", "PDF"], allowText, 0)
     .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
+    .catch((e) => effects.push(`ask-error:${String(e)}`));
+}
+// Questions with typed fields (design-v2/HITL.md §3), answered through the real answer route.
+// The secret fields' targets are in the screen's pixels (2560x1600).
+const ASK_FORMS: Record<string, AskForm> = {
+  login: {
+    question: "Sign in to your mail so I can read the latest message.",
+    fields: [
+      { id: "username", kind: "text", label: "Username" },
+      {
+        id: "password",
+        kind: "secret",
+        label: "Password",
+        target: {
+          screen: "desktop",
+          point: { x: 1280, y: 760 },
+          bbox: { x: 1040, y: 732, w: 480, h: 56 },
+          site: "mail.example.test",
+        },
+      },
+    ],
+    submit: "Sign in",
+    decline: "Not now",
+  },
+  pin: {
+    question: "The bank app wants your PIN.",
+    fields: [
+      {
+        id: "pin",
+        kind: "secret",
+        label: "PIN",
+        hint: "Typed into the PIN box for you. dot never sees it.",
+        target: { screen: "desktop", point: { x: 1280, y: 800 } },
+      },
+    ],
+    submit: "Enter PIN",
+  },
+  code: {
+    question: "Enter the code the site sent to your phone.",
+    fields: [{ id: "code", kind: "code", label: "Code", length: 6 }],
+    submit: "Send code",
+    decline: "Not now",
+  },
+  choice: {
+    question: "Which report format should I use?",
+    fields: [
+      { id: "format", kind: "choice", label: "Format", options: ["Markdown", "Plain text", "PDF"] },
+    ],
+    submit: "Use this",
+  },
+  multichoice: {
+    question: "What should the summary include?",
+    fields: [
+      {
+        id: "parts",
+        kind: "multichoice",
+        label: "Include",
+        options: ["Totals", "Charts", "Notes from the team"],
+      },
+    ],
+    submit: "Write it",
+  },
+  longtext: {
+    question: "What should the reply to Sam say?",
+    fields: [
+      {
+        id: "reply",
+        kind: "longtext",
+        label: "Reply",
+        hint: "A few lines is enough; I will tidy the wording.",
+      },
+    ],
+    submit: "Draft reply",
+  },
+  confirm: {
+    question: "Delete the 12 old drafts in your mail?",
+    fields: [{ id: "sure", kind: "confirm", label: "Delete 12 drafts" }],
+    submit: "Delete",
+    decline: "Keep them",
+  },
+  details: {
+    question: "A few details for the booking form.",
+    fields: [
+      { id: "guests", kind: "number", label: "Guests" },
+      { id: "arrival", kind: "date", label: "Arrival" },
+      { id: "phone", kind: "phone", label: "Phone" },
+      { id: "site", kind: "url", label: "Hotel website", hint: "The hotel's own page" },
+    ],
+    submit: "Fill in the form",
+  },
+  file: {
+    question: "Which photo should go on the profile?",
+    fields: [{ id: "photo", kind: "file", label: "Photo" }],
+    submit: "Use this photo",
+  },
+  qr: {
+    question: "Scan this with your phone to link the account.",
+    fields: [
+      {
+        id: "pair",
+        kind: "qr",
+        label: "Link your phone",
+        value: "https://pair.example.test/a1b2c3",
+        hint: "Code: A1B2-C3",
+      },
+    ],
+    submit: "Done",
+  },
+  pair: {
+    question: "Show this to the TV to link it.",
+    fields: [{ id: "pair", kind: "qr", label: "Pair the TV", value: "TV-PAIR-4K7Q-82LM" }],
+    submit: "Done",
+  },
+};
+function askForm(name: string): string | undefined {
+  const form = ASK_FORMS[name];
+  if (!form) return `no question named ${name}; try ${Object.keys(ASK_FORMS).join(", ")}`;
+  if (!session) return "no session";
+  void session
+    .askFields(form, 0)
+    .then((a) =>
+      effects.push(
+        `ask:${JSON.stringify(a)}`,
+        ...(a.secrets?.size ? [`ask-secrets:${a.secrets.size}`] : []),
+      ),
+    )
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
 // A field name, or a known localDot key, types into it through the real authorization.
@@ -1583,25 +2320,78 @@ function budget(scope: "task" | "day" = "task"): string | undefined {
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
 }
+// The ways a task stalls that the app must never leave silent.
+function stall(kind: string): string | undefined {
+  if (!session) return "no session";
+  if (kind === "model-busy") {
+    session.append("model.retry", {
+      role: "main",
+      attempt: 3,
+      waitMs: 20_000,
+      status: 529,
+      message: "Overloaded",
+    });
+    session.setStatus("paused");
+    session.append("agent.state", { state: "paused", reason: "model busy" });
+  } else if (kind === "model-refused") {
+    session.setStatus("paused");
+    session.append("agent.state", {
+      state: "paused",
+      reason: "model refused",
+      detail: "400: image input is not supported by this model",
+    });
+  } else if (kind === "action-limit") {
+    endLiveStep();
+    session.setStatus("idle");
+    session.append("agent.state", { state: "idle", reason: "action limit" });
+  } else return "unknown stall";
+}
+// What the task's model calls cost, as keyd reports them: one billed, the rest estimated.
+function spend(): string | undefined {
+  if (!session) return "no session";
+  let task = 0;
+  for (const [costUSD, basis] of [
+    [0.0842, "billed"],
+    [0.0611, "estimated"],
+    [0.0647, "estimated"],
+  ] as const) {
+    task += costUSD;
+    session.append("model.usage", {
+      role: "main",
+      route: "anthropic",
+      model: "claude-sonnet-5-5",
+      inputTokens: 8200,
+      outputTokens: 310,
+    });
+    session.append("model.spend", {
+      route: "anthropic",
+      model: "claude-sonnet-5-5",
+      costUSD,
+      basis,
+      taskSpentUSD: task,
+      daySpentUSD: 1.18 + task,
+    });
+  }
+}
 function endLiveStep() {
   if (!session || !liveStep) return;
   session.append("action.result", { ok: true }, liveStep);
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(): string | undefined {
+function finish(done = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append);
+  finishTask(owned, append, done);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
   if (next) cells.emit(next);
 }
-const STEPS: Record<ScenarioStep, () => string | undefined> = {
+const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | undefined>> = {
   approval: () => requestApproval("high"),
   ask: () => ask(true),
   takeover: () => takeover(),
@@ -1612,13 +2402,25 @@ const STEPS: Record<ScenarioStep, () => string | undefined> = {
   "cell/live": () => setCell("live"),
   "cell/reconnecting": () => setCell("reconnecting"),
   "cell/paused": () => setCell("paused"),
-  "cell/stopped": () => setCell("stopped"),
+  // A computer turned off ends the task it ran, as the daemon does.
+  "cell/stopped": async () => {
+    await endLive(session?.status === "idle" ? "done" : undefined);
+    return setCell("stopped");
+  },
   "cell/failed": () => setCell("failed"),
   "cell/fenced": () => setCell("fenced"),
+  "cell/fresh-start": () => setCell("fresh-start"),
 };
 const reply = (problem: string | undefined) =>
   problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });
 
+// A new version of the computer becomes ready.
+routes.post("/__qa/update", () => {
+  const c = cells.get(cellId);
+  if (!c) return reply("no computer");
+  cells.emit({ ...c, updateAvailable: true });
+  return reply(undefined);
+});
 routes.post("/__qa/approval", async (c) => {
   const call = c.req.header("content-type")?.startsWith("application/json")
     ? ((await c.req.json()) as ToolCall)
@@ -1631,18 +2433,66 @@ routes.post("/__qa/approval", async (c) => {
     }),
   );
 });
+// The video the fake renderer is making: counts it to ?done of ?total, finishes it, or fails it.
+routes.post("/__qa/export/:step", async (c) => {
+  if (exportsMode !== "fake") return reply("start the fixture with QA_EXPORTS=fake");
+  const rendering = fakeRenderer.renders.find((entry) => !entry.settled);
+  if (!rendering) return reply("no video is being made");
+  const step = c.req.param("step");
+  if (step === "progress") {
+    rendering.io.progress(Number(c.req.query("done") ?? 0), Number(c.req.query("total") ?? 0));
+    return reply(undefined);
+  }
+  if (step === "finish") {
+    await rendering.io.write(0, new Uint8Array(Number(c.req.query("bytes") ?? 1024)));
+    rendering.finish(Number(c.req.query("frames") ?? 1800));
+    return reply(undefined);
+  }
+  if (step === "fail") {
+    rendering.fail(c.req.query("message") ?? undefined);
+    return reply(undefined);
+  }
+  return reply("unknown step");
+});
 routes.post("/__qa/keys", () => reply(keySteps()));
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
-routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
+routes.post("/__qa/actions", () => reply(liveActions()));
+routes.post("/__qa/ask", (c) => {
+  const form = c.req.query("fields");
+  return reply(form ? askForm(form) : ask(c.req.query("text") !== "0"));
+});
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),
 );
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
+routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
+routes.post("/__qa/spend", () => reply(spend()));
+// ?steps=pause leaves the computer off; pause,stop leaves the Stop unconfirmed; keyd-once pauses
+// it with a cleanup note.
+routes.post("/__qa/stop-fails", (c) => {
+  stopFails.clear();
+  for (const step of (c.req.query("steps") ?? "").split(",").filter(Boolean)) stopFails.add(step);
+  revokeAgain = stopFails.has("keyd-once");
+  return c.json({ ok: true });
+});
 routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);
   session.uncertainSafetyPause(pause.requestId, pause.revision);
+  return c.json({ ok: true });
+});
+let screenRevision = 0;
+// dot selects the desktop again, as a new task, a screen switch and a hand-back each do.
+routes.post("/__qa/screen", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("screen.switch", {
+    screen: "desktop",
+    cellId,
+    geometry: { w: 2560, h: 1600, scale: 2 },
+    by: "daemon",
+    revision: ++screenRevision,
+  });
   return c.json({ ok: true });
 });
 routes.post("/__qa/step-end", (c) => {
@@ -1652,40 +2502,75 @@ routes.post("/__qa/step-end", (c) => {
   if (pause?.phase === "pausing") session.confirmSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
-// Finishes the open step and starts n more, each after a model call, as a live task does.
+// Finishes the open step and starts the next, after a model call, as a live task does.
+function nextStep(owned: AgentSession, planItem: string) {
+  if (liveStep) {
+    owned.append("action.result", { ok: true }, liveStep);
+    owned.append("step.end", { status: "ok" }, liveStep);
+  }
+  owned.append("key.use", {
+    secretId: "anthropic-main",
+    host: "api.anthropic.com",
+    method: "POST",
+    path: "/v1/messages",
+    decision: "allow",
+  });
+  liveStep = ulid();
+  fill++;
+  owned.append("step.start", { kind: "gui", planItem }, liveStep);
+  owned.append(
+    "action.intent",
+    {
+      verb: "click",
+      label: `Fill area ${fill} with brown`,
+      risk: "none",
+      point: { x: 1200, y: 700 },
+    },
+    liveStep,
+  );
+}
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
+  for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)
+    nextStep(session, c.req.query("item") ?? "colour");
+  return c.json({ ok: true });
+});
+// A busy task for `ms`: dot says a word every 40 ms, a new message every 60 words and takes a
+// step every 600 ms.
+routes.post("/__qa/stream", (c) => {
+  if (!session) return c.text("no session", 409);
   const owned = session;
-  for (let n = Number(c.req.query("n") ?? 1); n > 0; n--) {
-    if (liveStep) {
-      owned.append("action.result", { ok: true }, liveStep);
-      owned.append("step.end", { status: "ok" }, liveStep);
+  const until = Date.now() + Number(c.req.query("ms") ?? 10_000);
+  let messageId = ulid();
+  let words: string[] = [];
+  let tick = 0;
+  const said = () => owned.append("message.assistant", { messageId, text: words.join(" ") });
+  const timer = setInterval(() => {
+    if (teardown || session !== owned) return clearInterval(timer);
+    if (Date.now() > until) {
+      clearInterval(timer);
+      if (words.length) said();
+      return;
     }
-    owned.append("key.use", {
-      secretId: "anthropic-main",
-      host: "api.anthropic.com",
-      method: "POST",
-      path: "/v1/messages",
-      decision: "allow",
-    });
-    liveStep = ulid();
-    fill++;
-    owned.append(
-      "step.start",
-      { kind: "gui", planItem: c.req.query("item") ?? "colour" },
-      liveStep,
-    );
-    owned.append(
-      "action.intent",
-      {
-        verb: "click",
-        label: `Fill area ${fill} with brown`,
-        risk: "none",
-        point: { x: 1200, y: 700 },
-      },
-      liveStep,
-    );
-  }
+    const word = `cell${++tick}`;
+    owned.append("message.delta", { messageId, text: `${words.length ? " " : ""}${word}` });
+    words.push(word);
+    if (words.length === 60) {
+      said();
+      messageId = ulid();
+      words = [];
+    }
+    if (tick % 15 === 0) nextStep(owned, "colour");
+  }, 40);
+  return c.json({ ok: true });
+});
+// dot thinks: its thoughts are never the band's line, which holds dot's last line for the user.
+routes.post("/__qa/think", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("thought.delta", {
+    text:
+      c.req.query("text") ?? "The Net column must be revenue minus returns. Let me check row 3.",
+  });
   return c.json({ ok: true });
 });
 // dot says something in the thread: n messages at once, or one sent word by word (stream=1).
@@ -1717,15 +2602,192 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", () => reply(finish()));
+routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
+// The daemon goes away under the live task (no end is recorded) and comes back without it.
+routes.post("/__qa/crash", async (c) => {
+  if (!session || session.stopped) return c.text("no live task", 409);
+  await endLive("crash");
+  return c.json({ ok: true });
+});
+// A task of another conversation, ended, to continue from Replay.
+routes.post("/__qa/older-task", (c) =>
+  c.json({
+    sessionId: endedTask(
+      "Plan the team offsite",
+      "I drafted a two-day plan in **offsite.md**: Lisbon, 14–15 November.",
+      "Drafted the offsite plan in offsite.md.",
+    ),
+  }),
+);
+// What dot knows: facts you and dot added, people dot reached, a daily note, and recent tasks.
+routes.post("/__qa/knows", (c) => {
+  const insurance = endedTask(
+    "Renew the car insurance before it lapses",
+    "I compared three quotes and renewed with the cheapest.",
+    "Renewed the car insurance with the cheaper quote.",
+  );
+  const henry = endedTask(
+    "Send Henry the quarterly report on WeChat",
+    "Sent the report to Henry on WeChat.",
+    "Sent the quarterly report to Henry.",
+  );
+  memory.addEntry("USER.md", "Allergic to penicillin", true);
+  memory.addEntry("USER.md", "Prefers aisle seats on long flights");
+  memory.apply(insurance, "USER.md", "append", "- Car insurance renews every September");
+  memory.apply(insurance, "MEMORY.md", "append", "- Insurer prefers email over phone calls");
+  const note = memory.appendNote(insurance, "Insurer reference is WINDSCREEN-42");
+  log.append(insurance, {
+    type: "memory.change",
+    agent: "main",
+    data: { file: note.file, patch: note.patch, changeId: note.changeId },
+  } as never);
+  people.record(henry, { name: "Henry Liu", app: "WeChat", handle: "henry_l" });
+  people.record(insurance, {
+    name: "Ana Souza",
+    app: "Email",
+    handle: "ana@example.com",
+    note: "Insurance broker",
+  });
+  people.add({ name: "Mum", app: "Phone", handle: "+44 7700 900123" });
+  return c.json({ ok: true });
+});
+routes.get("/__qa/boot-memory", (c) => c.json(memory.bootMemory()));
+
+// Routines: dot proposes one in the live thread; a routine's own run; a run history to browse.
+const MORNING_BILLS = {
+  name: "Morning bills",
+  instruction:
+    "Check my utility and bank sites for new statements, save the PDFs to Bills and tell me what's due.",
+  when: { kind: "weekdays", time: "08:30" },
+} as const;
+routes.post("/__qa/routine/propose", (c) => {
+  if (!session) return c.text("no session", 409);
+  const routine = routineStore.create(MORNING_BILLS, {
+    state: "proposed",
+    createdFromSession: session.id,
+  });
+  const view = toRoutine(routine, undefined);
+  session.append("routine.proposed", {
+    routineId: routine.id,
+    revision: routine.revision,
+    name: routine.name,
+    summary: view.summary,
+    instruction: routine.instruction,
+    profile: routine.profile,
+    notify: routine.notify,
+    budgetUSD: routine.budgetUSD,
+    approvalWindowMinutes: routine.approvalWindowMinutes,
+    missedPolicy: routine.missedPolicy,
+  });
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id });
+});
+routes.post("/__qa/routine/session", async (c) => {
+  await endLive("done");
+  const routine = routineStore.create(MORNING_BILLS, { state: "active" });
+  session = newSession(MORNING_BILLS.name, MORNING_BILLS.instruction, undefined, {
+    kind: "routine",
+    routineId: routine.id,
+    runId: ulid(),
+    name: MORNING_BILLS.name,
+    dueAt: new Date().toISOString(),
+  });
+  attachLive(session);
+  seedTask(session, false);
+  return c.json({ sessionId: session.id, routineId: routine.id });
+});
+routes.post("/__qa/routine/history", (c) => {
+  const at = (iso: string) => Date.parse(iso);
+  const add = (draft: typeof MORNING_BILLS | Parameters<typeof routineStore.create>[0]) =>
+    routineStore.create(draft, { state: "active" });
+  const bills = add(MORNING_BILLS);
+  const runs = [
+    ["2026-10-06T07:30:00Z", "done", "3 new statements saved to Bills", seeded[0] ?? null],
+    ["2026-10-07T07:30:00Z", "done", "2 new statements saved to Bills", seeded[0] ?? null],
+    ["2026-10-08T07:30:00Z", "missed", "", null],
+    ["2026-10-09T07:30:00Z", "done", "Nothing new", seeded[1] ?? null],
+    [
+      "2026-10-12T07:30:00Z",
+      "needs_you_expired",
+      "Checked two sites; the bank needs you to sign in.",
+      null,
+    ],
+  ] as const;
+  for (const [due, outcome, note, sessionId] of runs)
+    routineStore.recordRun({
+      routineId: bills.id,
+      dueAt: at(due),
+      startedAt: outcome === "missed" ? null : at(due) + 2000,
+      endedAt: at(due) + 240_000,
+      sessionId,
+      outcome,
+      note,
+    });
+  const inbox = add({
+    name: "Inbox sweep",
+    instruction: "Check my inbox, archive newsletters and tell me what needs a reply.",
+    when: { kind: "daily", time: "07:45" },
+    profile: "act_within_rules",
+  });
+  routineStore.recordRun({
+    routineId: inbox.id,
+    dueAt: at("2026-10-09T06:45:00Z"),
+    startedAt: at("2026-10-09T06:45:01Z"),
+    endedAt: at("2026-10-09T06:52:00Z"),
+    sessionId: null,
+    outcome: "done",
+    note: "Archived 14 newsletters; 2 emails need a reply.",
+  });
+  const prices = add({
+    name: "Flight prices",
+    instruction: "Check fares from London to Lisbon for 14 November and tell me if any drop.",
+    when: { kind: "hours", every: 4, from: "08:00" },
+    profile: "read_only",
+    missedPolicy: "skip",
+  });
+  routineStore.update(prices.id, { revision: 1, state: "paused" });
+  add({
+    name: "Weekly report",
+    instruction: "Collect this week's numbers into report.xlsx in Documents.",
+    when: { kind: "weekly", days: [5], time: "16:00" },
+    notify: "always",
+  });
+  planRoutines();
+  for (const routine of routineStore.list()) routineChanged(routine.id);
+  return c.json({ routineId: bills.id });
+});
+routes.post("/__qa/routine/keep", (c) => {
+  const routine = routineStore.list()[0];
+  if (!routine) return c.text("no routine", 409);
+  routineStore.setAbsenceAsked(routine.id, Date.now());
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id });
+});
 routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as CellKind)));
 routes.post("/__qa/chatgpt/:state", (c) => {
   const state = c.req.param("state");
   if (!chatgptState) return c.text("start the fixture with QA_CHATGPT", 409);
-  if (!["signed_in", "signed_out", "not_installed", "unavailable"].includes(state))
+  if (
+    ![
+      "signed_in",
+      "signed_out",
+      "checking",
+      "check_failed",
+      "not_installed",
+      "unavailable",
+    ].includes(state)
+  )
     return c.text("unknown ChatGPT state", 400);
   chatgptState = state as NonNullable<typeof chatgptState>;
   signingIn = undefined;
+  return c.json({ ok: true });
+});
+routes.post("/__qa/claude-code/:state", (c) => {
+  const state = c.req.param("state");
+  if (!claudeCodeState) return c.text("start the fixture with QA_CLAUDE_CODE", 409);
+  if (!["not_installed", "outdated", "signed_out", "signed_in"].includes(state))
+    return c.text("unknown Claude Code state", 400);
+  claudeCodeState = state as NonNullable<typeof claudeCodeState>;
   return c.json({ ok: true });
 });
 routes.post("/__qa/chatgpt/device-code/:mode", (c) => {
@@ -1748,13 +2810,15 @@ routes.get("/__qa/scenarios", (c) =>
     })),
   ),
 );
-routes.post("/__qa/scenario/:name", (c) => {
+routes.post("/__qa/scenario/:name", async (c) => {
   const name = c.req.param("name");
   const wanted = (UI_SCENARIOS as Record<string, UiScenario>)[name];
   if (!wanted) return c.text("unknown scenario", 404);
   if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
-  return reply(STEPS[wanted.step]());
+  return reply(await STEPS[wanted.step]());
 });
+routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
+routes.get("/__qa/notify", (c) => c.json(notified));
 routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,
@@ -1779,7 +2843,7 @@ routes.get("/gallery/*", (c) => {
 
 const atBoot = bootStep(scenario);
 if (atBoot) {
-  const problem = STEPS[atBoot]();
+  const problem = await STEPS[atBoot]();
   if (problem) throw new Error(`${scenarioName}: ${problem}`);
 }
 app = routes;
@@ -1799,12 +2863,15 @@ const shutdown = async () => {
   teardown = true;
   for (const a of pendingApprovals) a.abort();
   try {
+    exportJobs.close();
     if (session) {
       live.stop(session.id);
       session.stop();
     }
     registry.dispose();
+    notify.close();
     index.close();
+    routineStore.close();
     log.close();
   } catch {}
   for (const peer of upgraded) peer.destroy();

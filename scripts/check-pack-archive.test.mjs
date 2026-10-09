@@ -68,6 +68,7 @@ function fixture(extra = {}) {
     "dist/browser-seccomp.json": "{}\n",
     "skills/office-files/SKILL.md": "# Office files\n",
     "web/dist/index.html": "<!doctype html>\n",
+    "web/dist/export.html": "<!doctype html>\n",
     "web/dist/assets/index-Ab12.js": "export {};\n",
     "web/dist/assets/licenses/mediabunny-1.61.0.txt": "Mozilla Public License Version 2.0\n",
     "web/vendor/selkies/LICENSE": "Mozilla Public License Version 2.0\n",

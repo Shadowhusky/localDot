@@ -74,6 +74,7 @@ func TestRoles(t *testing.T) {
 		Brain:   {Role: Brain, Gateway: true},
 		Desktop: {Role: Desktop, Web: true},
 		Browser: {Role: Browser, Web: true},
+		Judge:   {Role: Judge, Bound: true},
 	}
 	for role, want := range cases {
 		got, err := ForRole(role)
@@ -89,6 +90,7 @@ func TestRoles(t *testing.T) {
 func TestConnectDecisions(t *testing.T) {
 	desktop, _ := ForRole(Desktop)
 	brain, _ := ForRole(Brain)
+	judge, _ := ForRole(Judge)
 	bound := map[string]bool{"api.example.test": true}
 	cases := []struct {
 		name   string
@@ -100,6 +102,8 @@ func TestConnectDecisions(t *testing.T) {
 		{"desktop bound host is intercepted", desktop, Target{"api.example.test", 443}, Decision{Allow: true, MITM: true}},
 		{"brain bound host is intercepted", brain, Target{"api.example.test", 443}, Decision{Allow: true, MITM: true}},
 		{"brain has no web", brain, Target{"example.com", 443}, Decision{Reason: ReasonNoWeb}},
+		{"judge bound host is intercepted", judge, Target{"api.example.test", 443}, Decision{Allow: true, MITM: true}},
+		{"judge has no web", judge, Target{"example.com", 443}, Decision{Reason: ReasonNoWeb}},
 		{"tls on 443 only", desktop, Target{"example.com", 8443}, Decision{Reason: ReasonPort}},
 		{"deny list", desktop, Target{"printer.local", 443}, Decision{Reason: ReasonHostDenied}},
 	}
@@ -113,6 +117,7 @@ func TestConnectDecisions(t *testing.T) {
 func TestPlainHTTPDecisions(t *testing.T) {
 	desktop, _ := ForRole(Desktop)
 	brain, _ := ForRole(Brain)
+	judge, _ := ForRole(Judge)
 	cases := []struct {
 		name   string
 		p      Policy
@@ -120,6 +125,7 @@ func TestPlainHTTPDecisions(t *testing.T) {
 		want   Decision
 	}{
 		{"desktop web", desktop, Target{"ports.ubuntu.com", 80}, Decision{Allow: true}},
+		{"judge has no web", judge, Target{"example.com", 80}, Decision{Reason: ReasonNoWeb}},
 		{"http on 80 only", desktop, Target{"example.com", 8080}, Decision{Reason: ReasonPort}},
 		{"deny list", desktop, Target{"nas.home.arpa", 80}, Decision{Reason: ReasonHostDenied}},
 		{"brain has no web", brain, Target{"example.com", 80}, Decision{Reason: ReasonNoWeb}},

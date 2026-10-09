@@ -11,24 +11,28 @@ const hud = (label: string) => (page: Page) =>
   expect(page.getByTestId("hud-status")).toHaveText(label);
 const shows = (find: (page: Page) => Locator) => (page: Page) => expect(find(page)).toBeVisible();
 const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
-  "first-run": shows((page) => page.getByRole("heading", { name: "Set up localDot" })),
+  "first-run": shows((page) => page.getByRole("heading", { name: "Your computer is off" })),
   "model-ready": hud("No computer"),
   starting: hud("Starting…"),
-  ready: hud("Live"),
-  "chatgpt-plan": hud("Live"),
+  ready: hud("Ready"),
+  "chatgpt-plan": hud("Ready"),
   running: hud("Select the Net total cell"),
-  approval: shows((page) => page.getByRole("dialog", { name: /^Send the monthly report/ })),
-  ask: hud("Has a question"),
+  approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),
+  ask: hud("Needs your answer"),
   takeover: hud("Your turn"),
-  budget: hud("Paused · Limit reached"),
+  budget: hud("Spending limit reached"),
   done: hud("Done"),
-  reconnecting: shows((page) => page.locator(".stage-veil.on")),
+  continued: hud("Done"),
+  reconnecting: hud("Reconnecting…"),
   paused: hud("Paused"),
   failed: hud("Failed"),
   fenced: shows((page) =>
     page
       .getByRole("region", { name: "Computer recovery" })
       .getByRole("heading", { name: "This computer is unavailable", exact: true }),
+  ),
+  "fresh-start": shows((page) =>
+    page.getByRole("heading", { name: "Your computer needs a fresh start" }),
   ),
   off: hud("Stopped"),
 };

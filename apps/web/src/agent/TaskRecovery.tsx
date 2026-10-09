@@ -1,5 +1,6 @@
-import { BudgetRaiseRequest } from "@localdot/protocol";
+import { BudgetRaiseRequest, STALL } from "@localdot/protocol";
 import { useState } from "react";
+import { dollars } from "../copy/format.ts";
 import { ownedPause } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
@@ -16,19 +17,37 @@ const UNEXPLAINED =
 export function recoveryMessage(reason: string | undefined, local: boolean): string {
   return knownReason(reason, local)?.text ?? UNEXPLAINED;
 }
+// A task keeps its model; another one takes a new task, and the conversation carries on.
+const ANOTHER_MODEL =
+  "pick another model in Settings, then stop this task and send your message again.";
 function knownReason(
   reason: string | undefined,
   local: boolean,
 ): { title: string; text: string } | undefined {
-  if (reason === "budget")
+  if (reason === STALL.budget)
     return {
-      title: "Paused at the spending limit",
-      text: "dot stopped at the spending limit. Raise it to continue; what was spent stays counted.",
+      title: "I stopped at your spending limit",
+      text: "I stopped at the spending limit. Raise it to continue; what was spent stays counted.",
     };
-  if (reason === "keyd unavailable")
+  if (reason === STALL.keyd)
     return {
-      title: "Keys are offline",
+      title: "I can't reach your keys",
       text: "dot can't reach your keys. Bring Keys back online, check the task, then continue.",
+    };
+  if (reason === STALL.modelBusy)
+    return {
+      title: "The model is busy",
+      text: "I'll try again by myself in a moment, or you can try now.",
+    };
+  if (reason === STALL.modelRefused)
+    return {
+      title: "The model turned down my request",
+      text: `Try again, or ${ANOTHER_MODEL}`,
+    };
+  if (reason === STALL.actionLimit)
+    return {
+      title: "I reached your action limit",
+      text: "I stop after the number of actions you set in Settings. Continue when you're ready; the count starts again.",
     };
   if (reason === "chatgpt sign-in expired" || reason === "chatgpt account changed")
     return {
@@ -40,21 +59,25 @@ function knownReason(
       title: "Paused at your plan's limit",
       text: "Your ChatGPT plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
     };
-  if (reason === "model unavailable")
+  if (reason === "claude code sign-in expired")
     return {
-      title: "The model isn't available",
+      title: "Sign in to Claude Code again",
+      text: "Claude Code on this Mac isn't signed in. Run claude auth login in Terminal, then continue this task.",
+    };
+  if (reason === "claude code plan limit reached")
+    return {
+      title: "Paused at your plan's limit",
+      text: "Your Claude plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
+    };
+  if (reason === STALL.modelUnavailable)
+    return {
+      title: "The model isn't answering",
       text: local
         ? "The local model is unavailable. Start its server and load the chosen model, then continue."
-        : "The chosen model could not continue. Check its provider and access, then continue.",
+        : `I tried several times. Try again now, or ${ANOTHER_MODEL}`,
     };
   return undefined;
 }
-// Whole dollars without cents; anything else to the cent.
-export const dollars = (value: number) =>
-  `$${value.toLocaleString(undefined, {
-    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
-    maximumFractionDigits: 2,
-  })}`;
 // What a step adds to the limit. Two are offered: the smallest that covers what the next request
 // needs, and the one after it.
 const RAISES = [2, 5, 10, 25, 50] as const;
@@ -83,7 +106,7 @@ export function spendingText(data: {
 }
 // The daily limit belongs to the key layer and is shared by every task, so no raise here moves it.
 const DAY_LIMIT =
-  "All tasks share one daily spending limit, and today's is used up. It resets at midnight; resume the task after that. Raising this task's limit does not change it.";
+  "Today's spending limit is used up. All tasks share it, and it resets at midnight.";
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
 
@@ -100,14 +123,28 @@ export function raiseChoice(choice: string, custom: string, limitUSD: number): n
   return Math.round(value * 100) / 100;
 }
 
+// Reasons whose one fix is to try the model again, with another model as the way out.
+const RETRY = new Set<string | undefined>([
+  STALL.modelBusy,
+  STALL.modelRefused,
+  STALL.modelUnavailable,
+]);
+
 export function TaskRecovery({
   agent,
   controls,
   onSettings,
+  onContinue,
+  onCarryOn,
 }: {
   agent: AgentSessionView;
   controls: TaskControls;
-  onSettings(trigger: HTMLButtonElement): void;
+  onSettings(trigger: HTMLButtonElement, section?: "models"): void;
+  // Sends a follow-up that carries on a task the user's action limit stopped.
+  onContinue?(): Promise<boolean>;
+  // Starts the conversation's next task to carry on one that was interrupted; left out while the
+  // computer can't take a task.
+  onCarryOn?(): Promise<boolean>;
 }) {
   const budget = agent.model.budget;
   const need = budget?.data.needUSD;
@@ -117,21 +154,62 @@ export function TaskRecovery({
   const choice = chosen && chosen.budget === budget?.id ? chosen.value : String(steps[0]);
   const [custom, setCustom] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [continuing, setContinuing] = useState(false);
   const state = agent.model.state;
+  const send = (run: () => Promise<boolean>) => {
+    if (continuing) return;
+    setContinuing(true);
+    void run().then((sent) => {
+      setContinuing(false);
+      setProblem(sent ? null : "That didn't go through. Try again.");
+    });
+  };
+  if (agent.interrupted && !controls.fenced)
+    return (
+      <section className="thread-recovery" aria-label="Task recovery">
+        <h3 className="thread-recovery-title">I was cut off before I finished</h3>
+        <p className="thread-recovery-text">
+          localDot restarted while I was working. Continue, and I'll pick up where I left off.
+        </p>
+        <div className="thread-recovery-actions">
+          <Button
+            variant="primary"
+            icon="continue"
+            busy={continuing}
+            disabledReason={onCarryOn ? undefined : "Turn on your computer first"}
+            onClick={() => onCarryOn && send(onCarryOn)}
+          >
+            Continue
+          </Button>
+        </div>
+        {problem && (
+          <p className="thread-recovery-reason" role="alert">
+            {problem}
+          </p>
+        )}
+      </section>
+    );
   // While a Pause holds the task, only a spending limit that still holds it needs this panel.
   const hold = agent.snapshot?.pause ? agent.snapshot.budgetHold : undefined;
+  const limited = state?.state === "idle" && state.reason === STALL.actionLimit;
   if (
     controls.fenced ||
     (agent.snapshot?.pause && !hold) ||
     !agent.sessionId ||
     agent.model.ended ||
     !state ||
+    // A restart after the brain stopped says so on the HUD and needs nothing from the user.
+    (state.state === "error" && /restarting/.test(state.reason ?? "")) ||
     (!hold &&
+      !limited &&
       (!["paused", "error"].includes(state.state) ||
         (state.state === "paused" && ownedPause(state.reason))))
   )
     return null;
-  const subscription = agent.snapshot?.models?.kind === "chatgpt" || !!agent.model.subscription;
+  const subscription =
+    agent.snapshot?.models?.kind === "chatgpt" ||
+    agent.snapshot?.models?.kind === "claude-code" ||
+    !!agent.model.subscription;
   const local =
     agent.snapshot?.models?.kind === "api" &&
     agent.snapshot.models.roles.some(
@@ -159,13 +237,23 @@ export function TaskRecovery({
           .sort((a, b) => b - a)[0],
       )
     : null;
-  const resume = (
+  const retry = RETRY.has(reason);
+  const resume = limited ? (
+    <Button
+      variant="primary"
+      busy={continuing}
+      disabledReason={onContinue ? undefined : "The task can't continue right now."}
+      onClick={() => onContinue && send(onContinue)}
+    >
+      Continue
+    </Button>
+  ) : (
     <Button
       variant={raising ? "secondary" : "primary"}
       disabledReason={controls.canResumeTask ? undefined : "The task can't continue right now."}
       onClick={() => void controls.resume()}
     >
-      {raising ? "Continue without raising" : "Continue"}
+      {raising ? "Continue without raising" : retry ? "Retry now" : "Continue"}
     </Button>
   );
   return (
@@ -182,12 +270,15 @@ export function TaskRecovery({
             : (known?.text ?? UNEXPLAINED)}
       </p>
       {reason && !known && <p className="thread-recovery-reason">Reported reason: {reason}</p>}
+      {retry && state.detail && (
+        <p className="thread-recovery-reason">The model said: {state.detail}</p>
+      )}
       {resets && (
         <p className="thread-recovery-reason">
           {resets.replace(/^Resets/, "Your plan's limit resets")}.
         </p>
       )}
-      {!subscription && budget && (
+      {!subscription && budget && reason === STALL.budget && (
         <div className="thread-recovery-meter">
           <p className="num">
             {dollars(budget.data.spentUSD)} of {dollars(budget.data.limitUSD)} spent
@@ -257,10 +348,27 @@ export function TaskRecovery({
           </div>
         </form>
       ) : (
-        !hold && <div className="thread-recovery-actions">{resume}</div>
+        !hold && (
+          <div className="thread-recovery-actions">
+            {resume}
+            {retry && reason !== STALL.modelBusy && (
+              <Button
+                variant="secondary"
+                onClick={(event) => onSettings(event.currentTarget, "models")}
+              >
+                Change model
+              </Button>
+            )}
+          </div>
+        )
+      )}
+      {limited && problem && (
+        <p className="thread-recovery-reason" role="alert">
+          {problem}
+        </p>
       )}
       {hold && (
-        <p className="thread-recovery-reason">The task stays paused until you press Resume task.</p>
+        <p className="thread-recovery-reason">The task stays paused until you press Continue.</p>
       )}
       <Disclosure summary="Recovery options" className="thread-recovery-options">
         <div className="thread-recovery-actions">

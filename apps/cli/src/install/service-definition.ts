@@ -113,7 +113,12 @@ export function serviceConfigurationId(input: ServiceSettings, identityInput: Re
   return configuration;
 }
 
-type PlistValue = string | number | boolean | readonly string[] | Readonly<Record<string, string>>;
+export type PlistValue =
+  | string
+  | number
+  | boolean
+  | readonly string[]
+  | Readonly<Record<string, string>>;
 const xml = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -134,6 +139,14 @@ function plistValue(value: PlistValue): string {
   return `<dict>${Object.entries(value)
     .map(([k, v]) => `<key>${xml(k)}</key>${plistValue(v)}`)
     .join("")}</dict>`;
+}
+
+export function plistDocument(values: Record<string, PlistValue>): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${Object.entries(
+    values,
+  )
+    .map(([k, v]) => `<key>${k}</key>${plistValue(v)}`)
+    .join("")}</dict></plist>\n`;
 }
 
 /** Pure builder: inputs must already be verified. No filesystem/process effects, no shell, no
@@ -213,14 +226,83 @@ export function defineReleaseServices(
       StandardOutPath: join(settings.state, "logs", `${role}.log`),
       StandardErrorPath: join(settings.state, "logs", `${role}.error.log`),
     };
-    const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${Object.entries(
-      values,
-    )
-      .map(([k, v]) => `<key>${k}</key>${plistValue(v)}`)
-      .join("")}</dict></plist>\n`;
+    const plist = plistDocument(values);
     return Object.freeze({ ...location, arguments: args, contents: plist });
   };
   return Object.freeze({ keyd: definition("keyd"), daemon: definition("daemon") });
+}
+
+export interface LoginServiceLocation {
+  readonly label: string;
+  readonly domain: string;
+  readonly target: string;
+  readonly directory: string;
+  readonly plist: string;
+}
+
+export function loginServiceLocation(input: ServiceSettings): LoginServiceLocation {
+  const settings = { ...input };
+  const home = path(settings.home),
+    userHome = path(settings.userHome);
+  if (!Number.isSafeInteger(settings.uid) || settings.uid <= 0 || settings.uid > 0xffff_fffe)
+    throw invalid();
+  if (!/^[a-f0-9]{32}$/.test(settings.ownerId)) throw invalid();
+  const suffix = createHash("sha256").update(home).digest("hex");
+  const label = `dev.localdot.${suffix}.${settings.ownerId}.login`;
+  const domain = `gui/${settings.uid}`;
+  const directory = join(userHome, "Library", "LaunchAgents");
+  return Object.freeze({
+    label,
+    domain,
+    target: `${domain}/${label}`,
+    directory,
+    plist: join(directory, `${label}.plist`),
+  });
+}
+
+/** Runs only the installed CLI's own `up` path: it takes the install lock, verifies the release
+ * and starts both roles through the journaled lifecycle, the only start keyd's service-exec
+ * admits. The service plists themselves stay RunAtLoad/KeepAlive false.
+ */
+export function defineLoginService(input: ServiceSettings, identityInput: ReleaseIdentity) {
+  const settings = { ...input };
+  for (const field of ["state", "home", "userHome", "node"] as const) path(settings[field]);
+  if (settings.node.includes(":")) throw invalid();
+  const identity = ReleaseIdentity.parse(identityInput);
+  const location = loginServiceLocation(settings);
+  const cli = join(
+    settings.state,
+    "releases",
+    releaseDirectoryName(identity),
+    "app",
+    "bin",
+    "localdot.mjs",
+  );
+  const args = Object.freeze([
+    "/usr/bin/env",
+    "-i",
+    `HOME=${settings.userHome}`,
+    `PATH=${dirname(settings.node)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    "LANG=en_US.UTF-8",
+    `LOCALDOT_HOME=${settings.home}`,
+    settings.node,
+    cli,
+    "up",
+    "--from-login",
+  ]);
+  const contents = plistDocument({
+    Label: location.label,
+    ProgramArguments: args,
+    WorkingDirectory: settings.home,
+    RunAtLoad: true,
+    KeepAlive: false,
+    LimitLoadToSessionType: "Aqua",
+    ProcessType: "Background",
+    Umask: 0o077,
+    StandardOutPath: join(settings.state, "logs", "login.log"),
+    StandardErrorPath: join(settings.state, "logs", "login.log"),
+  });
+  return Object.freeze({ ...location, arguments: args, contents });
 }
 
 /** Hold the installation lock through definition publication and startup. This reopens the

@@ -59,7 +59,7 @@ function ToastStage() {
           <span className="atoms-hud-label">Saving summary.txt</span>
           <time className="atoms-hud-time">0:08</time>
           <Separator orientation="vertical" />
-          <IconButton label="Stop" icon="square" onClick={stopFailed} />
+          <IconButton label="Stop" icon="stop" onClick={stopFailed} />
         </div>
         <Toaster anchor={hud} />
       </div>
@@ -69,9 +69,9 @@ function ToastStage() {
         <Button onClick={moved}>Show one with Undo</Button>
         <Button
           onClick={() => {
-            stopFailed();
-            moved();
             saved();
+            moved();
+            stopFailed();
           }}
         >
           Show three

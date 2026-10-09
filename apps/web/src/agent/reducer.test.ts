@@ -37,6 +37,19 @@ describe("bounded agent projection", () => {
     expect(events.reduce(projectAgentEvent, model)).toBe(model);
     expect(events[0]?.data).toEqual({ messageId: message, text: "pre" });
   });
+  it("keeps the line dot gave a call on the step it starts", () => {
+    const model = reduce([
+      ev(
+        0,
+        "step.start",
+        { kind: "shell", intent: "Checking which paint apps are installed" },
+        "one",
+      ),
+      ev(1, "step.start", { kind: "gui" }, "two"),
+    ]);
+    expect(model.steps.get("one")?.intent).toBe("Checking which paint apps are installed");
+    expect(model.steps.get("two")).not.toHaveProperty("intent");
+  });
   it("retains two legitimately identical user messages with their distinct IDs", () => {
     const model = reduce([
       ev(0, "message.user", { messageId: message, text: "again", kind: "task" }),
@@ -359,5 +372,84 @@ describe("single event feed boundary", () => {
     feed.accept(JSON.stringify(ev(2, "agent.state", { state: "acting" })));
     expect(feed.read().streamError).toBeNull();
     expect(feed.read().model.state?.state).toBe("acting");
+  });
+});
+
+describe("what a task costs and whether its model is being retried", () => {
+  const spend = (seq: number, costUSD: number, basis: "billed" | "estimated", extra = {}) =>
+    ev(seq, "model.spend", {
+      route: "openrouter",
+      model: "glm-5.3",
+      costUSD,
+      basis,
+      taskSpentUSD: seq / 100,
+      daySpentUSD: 1 + seq / 100,
+      ...extra,
+    });
+  it("keeps keyd's running totals, each call at its time, and marks the total an estimate once any part is", () => {
+    const billed = reduce([spend(1, 0.01, "billed"), spend(2, 0.01, "billed")]);
+    expect(billed.spend).toEqual({ taskUSD: 0.02, dayUSD: 1.02, estimated: false });
+    expect(billed.spendCalls.map((call) => [call.atMs, call.usd])).toEqual([
+      [1, 0.01],
+      [2, 0.01],
+    ]);
+    const mixed = reduce([
+      spend(1, 0.01, "estimated"),
+      spend(2, 0.01, "billed", { taskLimitUSD: 5 }),
+    ]);
+    expect(mixed.spend).toEqual({ taskUSD: 0.02, dayUSD: 1.02, estimated: true, taskLimitUSD: 5 });
+  });
+  it("holds a retry until a later state says the model moved on", () => {
+    const retry = (seq: number, waitMs: number, fallback?: string) =>
+      ev(seq, "model.retry", {
+        role: "main",
+        attempt: 1,
+        waitMs,
+        status: 429,
+        message: "busy",
+        ...(fallback ? { fallback } : {}),
+      });
+    expect(reduce([retry(1, 20_000)]).retrying).toBe(true);
+    expect(
+      reduce([retry(1, 20_000), ev(2, "agent.state", { state: "paused", reason: "model busy" })])
+        .retrying,
+    ).toBe(true);
+    expect(reduce([retry(1, 20_000), ev(2, "agent.state", { state: "thinking" })]).retrying).toBe(
+      false,
+    );
+    expect(reduce([retry(1, 0, "qwen")]).retrying).toBe(false);
+  });
+});
+
+describe("routines in a task", () => {
+  it("keeps the task's origin and each routine dot proposed", () => {
+    const origin = {
+      kind: "routine",
+      routineId: id(30000),
+      runId: id(30001),
+      name: "Morning bills",
+      dueAt: "2026-10-12T07:30:00.000Z",
+    } as const;
+    const proposal = {
+      routineId: id(30002),
+      revision: 1,
+      name: "Inbox sweep",
+      summary: "Every day at 07:45 · London time",
+      instruction: "Check my inbox",
+      profile: "ask_first",
+      notify: "changes",
+      budgetUSD: null,
+      approvalWindowMinutes: 60,
+      missedPolicy: "run_once",
+    } as const;
+    const model = reduce([
+      ev(0, "session.start", { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", origin }),
+      ev(1, "routine.proposed", proposal),
+    ]);
+    expect(model.origin).toEqual(origin);
+    expect(model.routineProposals.get(proposal.routineId)).toMatchObject({ ...proposal, seq: 1 });
+    expect(
+      reduce([ev(0, "session.start", { screen: { w: 1, h: 1, scale: 1 }, os: "linux" })]),
+    ).not.toHaveProperty("origin");
   });
 });

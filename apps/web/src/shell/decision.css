@@ -1,0 +1,601 @@
+/* The decision the island grows into (design-v2 §10.16), and the sheet that holds it on a phone. */
+.decision {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
+  color: var(--color-fg-1);
+}
+
+.decision-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 5.5) 0;
+}
+
+.decision-title {
+  margin: 0;
+  font:
+    var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-2--letter-spacing);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* Focus lands on the question so it is read first; it is not a control, so it draws no ring. */
+.decision-title:focus {
+  outline: none;
+}
+
+/* Keys share one column at least 92 px wide, so a longer key never wraps. */
+.decision-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  row-gap: calc(var(--spacing) * 1.5);
+  margin: calc(var(--spacing) * 3.5) 0 0;
+  font: var(--font-weight-normal) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.decision-fact {
+  display: contents;
+}
+
+.decision-fact dt {
+  min-width: 92px;
+  max-width: 160px;
+  padding-right: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+  overflow-wrap: anywhere;
+}
+
+.decision-fact dd {
+  min-width: 0;
+  margin: 0;
+}
+
+/* Every character of a value, in order, with the hidden ones drawn as marks. A long value scrolls
+   inside its row rather than being cut. */
+.approval-value {
+  max-height: calc(var(--text-body--line-height) * 7);
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+.approval-value[tabindex] {
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.approval-value:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: var(--focus-offset);
+}
+
+.approval-blank {
+  color: var(--color-fg-3);
+}
+
+.approval-mark {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 calc(var(--spacing) * 1.25);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-control);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-body--line-height) var(--font-ui);
+  unicode-bidi: isolate;
+}
+
+.approval-hidden {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger-fg);
+}
+
+.approval-value-facts {
+  margin: 2px 0 0;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.approval-value-warning,
+.decision-warning,
+.decision-invalid {
+  margin: calc(var(--spacing) * 1) 0 0;
+  color: var(--color-danger-fg);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.decision-invalid {
+  margin: 0;
+  padding: calc(var(--spacing) * 4) calc(var(--spacing) * 5.5);
+}
+
+.decision-show-all {
+  margin: calc(var(--spacing) * 1) 0 0 calc(var(--spacing) * -3);
+}
+
+.decision-why {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 3.5) 0 0;
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-inset);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-normal) var(--text-callout) / var(--text-note--line-height) var(--font-ui);
+}
+
+.decision-why > .ui-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--color-fg-3);
+}
+
+.decision-upload {
+  margin-top: calc(var(--spacing) * 3.5);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.decision-upload p {
+  margin: 0;
+}
+
+.decision-upload-to {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+}
+
+.decision-upload-to span,
+.decision-upload-note,
+.decision-file-path {
+  color: var(--color-fg-3);
+}
+
+.decision-upload-note {
+  margin-top: calc(var(--spacing) * 1.5);
+}
+
+.decision-upload h3 {
+  margin: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 1.5);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.decision-files {
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--color-separator);
+}
+
+.decision-files li {
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+}
+
+.decision-files li + li {
+  box-shadow: inset 0 1px 0 var(--color-separator);
+}
+
+.decision-file-head {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+}
+
+.decision-file-head span {
+  flex: none;
+  color: var(--color-fg-2);
+}
+
+.decision-file-digest {
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-mono);
+  color: var(--color-fg-2);
+}
+
+.decision-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 4.5) calc(var(--spacing) * 4) calc(var(--spacing) * 4)
+    calc(var(--spacing) * 5.5);
+}
+
+.decision-scope,
+.decision-scope-gap {
+  margin-right: auto;
+}
+
+.decision-actions {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* A phone: the decision rises from the bottom over the thread at its content's height, with no
+   scrim, and never higher than the band, so the stage and dot stay in sight above it. With the
+   keyboard up the band has folded into the island, so only the stage stays. */
+.decision-sheet {
+  --_above: calc(
+    var(--stage-top) +
+    env(safe-area-inset-top) +
+    (100vw - 16px) /
+    1.6 +
+    var(--band-min)
+  );
+  position: fixed;
+  right: 0;
+  bottom: var(--_keyboard, 0px);
+  left: 0;
+  z-index: var(--layer-island);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - var(--_above) - var(--_keyboard, 0px));
+  padding-bottom: max(calc(var(--spacing) * 5), env(safe-area-inset-bottom));
+  transition: bottom var(--dur-default) var(--ease-spring);
+  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+  background-color: var(--color-overlay);
+  box-shadow: var(--shadow-overlay);
+  animation: decision-sheet-in var(--dur-gentle) var(--ease-spring) both;
+}
+
+.decision-sheet[data-keyboard] {
+  --_above: calc(var(--stage-top) + env(safe-area-inset-top) + (100vw - 16px) / 1.6 + 8px);
+}
+
+/* Held sideways a phone has little height: the sheet keeps a readable width, and its body scrolls
+   above the answers. */
+@media (pointer: coarse) and (orientation: landscape) and (height < 500px) {
+  .decision-sheet {
+    width: min(100%, 560px);
+    margin-inline: auto;
+  }
+}
+
+@keyframes decision-sheet-in {
+  from {
+    translate: 0 100%;
+  }
+}
+
+.decision-grabber {
+  flex: none;
+  width: 36px;
+  height: 5px;
+  margin: calc(var(--spacing) * 1.5) auto 0;
+  border-radius: var(--radius-full);
+  background-color: var(--color-grabber);
+}
+
+.decision-sheet-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  height: 28px;
+  margin: calc(var(--spacing) * 1) calc(var(--spacing) * 5) 0;
+  color: var(--color-fg-2);
+  font:
+    var(--text-callout--font-weight) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+}
+
+.decision-attention {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-attention);
+}
+
+.decision-sheet-elapsed {
+  margin-left: auto;
+  color: var(--color-fg-3);
+}
+
+.decision[data-layout="sheet"] .decision-body {
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 5) 0;
+}
+
+.decision[data-layout="sheet"] .decision-title {
+  font:
+    var(--font-weight-semibold) var(--text-sheet-title) / var(--text-sheet-title--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-sheet-title--letter-spacing);
+}
+
+.decision[data-layout="sheet"] .decision-facts {
+  row-gap: calc(var(--spacing) * 2);
+  font:
+    var(--font-weight-normal) var(--text-sheet-fact) / var(--text-sheet-fact--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-sheet-fact--letter-spacing);
+}
+
+.decision[data-layout="sheet"] .decision-fact dt {
+  min-width: 84px;
+  max-width: 120px;
+}
+
+.decision[data-layout="sheet"] .approval-value {
+  max-height: calc(var(--text-sheet-fact--line-height) * 6);
+}
+
+.decision[data-layout="sheet"] .decision-why {
+  margin-top: calc(var(--spacing) * 4);
+  border-radius: var(--radius-group);
+  font: var(--font-weight-normal) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.decision[data-layout="sheet"] .decision-foot {
+  flex-direction: column;
+  align-items: stretch;
+  gap: calc(var(--spacing) * 1);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 5) 0;
+}
+
+.decision[data-layout="sheet"] .decision-scope {
+  align-self: center;
+  min-height: 40px;
+  margin: 0;
+}
+
+.decision[data-layout="sheet"] .decision-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--spacing) * 2.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .decision-sheet {
+    animation: decision-sheet-fade var(--dur-fade) var(--ease-standard) both;
+  }
+
+  @keyframes decision-sheet-fade {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+/* dot's question answered in place (HITL §1–4): fields under dot's message in the thread, in the
+   island over the computer, and in a phone's sheet. */
+.ask {
+  color: var(--color-fg-1);
+}
+
+.ask-fields {
+  --_gap: var(--spacing);
+  display: grid;
+  gap: var(--_gap);
+}
+
+.decision-body > .ask-fields {
+  margin-top: calc(var(--spacing) * 3.5);
+}
+
+/* In the thread the fields follow dot's message without a card of their own; the radio rows and
+   fields carry their own material. */
+.ask[data-layout="thread"] {
+  display: grid;
+  gap: var(--spacing);
+  margin-top: calc(var(--spacing) * 2.5);
+}
+
+/* A plain question's one field: dot's question above already names it. */
+.ask-field-plain > .ui-field-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ask-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ask-fieldset > legend {
+  margin-bottom: calc(var(--spacing) * 1.5);
+  padding: 0;
+}
+
+.ask-reveal {
+  margin-right: calc(var(--spacing) * -2);
+}
+
+.ask-choice {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-options .ui-radio-card-preview {
+  order: 2;
+  margin-left: auto;
+}
+
+.ask-file {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 56px;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 3);
+  border: 1px dashed var(--color-field-line);
+  border-radius: var(--radius-md);
+  background-color: var(--color-field);
+  transition:
+    border-color var(--dur-hover) var(--ease-standard),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+.ask-file[data-over] {
+  border-color: var(--color-fg-2);
+  background-color: var(--color-control);
+}
+
+.ask-file-tile {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-row);
+  background-color: var(--color-raised-2);
+  color: var(--color-fg-2);
+}
+
+.ask-file-text {
+  display: grid;
+  min-width: 0;
+}
+
+.ask-file-name {
+  overflow: hidden;
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-file-meta {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.ask-qr {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* The quiet toggle's words line up with the code above it. */
+.ask-qr > .ui-button {
+  margin-left: calc(var(--spacing) * -3);
+}
+
+.ask-qr-code {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-qr-hint {
+  margin: 0;
+  font:
+    var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-2--letter-spacing);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+
+.ask-qr-link {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: 2px;
+}
+
+/* The text a QR code holds, to copy when the code can't be scanned. */
+.ask-qr-value {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  max-width: 100%;
+}
+
+.ask-qr-value > p {
+  min-width: 0;
+  margin: 0;
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The site a secret is typed into reads first in its note; a hidden character's warning reads as
+   one. */
+.ask-site {
+  color: var(--color-fg-1);
+  font-weight: var(--font-weight-medium);
+}
+
+.ask-warning {
+  color: var(--color-danger-fg);
+  font-weight: var(--font-weight-medium);
+}
+
+/* A key taken out of a field: the banner unfolds under the fields, and folded takes no room, not
+   even the gap. */
+.ask-fields > .ask-key {
+  margin-top: calc(var(--_gap) * -1);
+}
+
+.ask-key .ui-banner {
+  margin-top: calc(var(--spacing) * 2);
+}
+
+.ask-foot {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask-problem {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+.ask-actions {
+  display: flex;
+  flex: none;
+  gap: calc(var(--spacing) * 2);
+}
+
+.ask[data-layout="sheet"] .ask-actions[data-single] {
+  grid-template-columns: 1fr;
+}
+
+.ask[data-layout="sheet"] .ask-problem:empty {
+  display: none;
+}
+
+.ask[data-layout="sheet"] .ask-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--spacing) * 2.5);
+}
+
+.ask[data-layout="sheet"] .ask-fields {
+  --_gap: calc(var(--spacing) * 2);
+}
+
+.ask.decision[data-layout="sheet"] .decision-foot {
+  padding-top: calc(var(--spacing) * 4);
+}

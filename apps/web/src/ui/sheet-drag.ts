@@ -21,8 +21,35 @@ export function rubberband(overshoot: number, dimension: number, constant = 0.55
   return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
 }
 
-export function releaseTo(offset: number, velocity: number, height: number): "dismiss" | "rest" {
-  return offset + project(velocity) > height * DISMISS_AT ? "dismiss" : "rest";
+export type SheetDetent = "fit" | "medium" | "large";
+
+// The top edge of a resting medium or large sheet, below the safe area. overlays.css holds the same
+// numbers: medium keeps the stage in view, large leaves only the top 40.
+export const DETENT_TOP = { medium: 238, large: 40 } as const;
+
+// How far below the highest of them each detent rests.
+export function detentStops(detents: readonly SheetDetent[]): number[] {
+  const tops = detents.map((detent) => (detent === "fit" ? 0 : DETENT_TOP[detent]));
+  const highest = Math.min(...tops);
+  return tops.map((top) => top - highest);
+}
+
+// Where a release comes to rest: the stop nearest where it would land, or off the bottom edge once
+// that landing is past the lowest stop by 30 % of the sheet still showing there.
+export function restingStop(
+  offset: number,
+  velocity: number,
+  stops: readonly number[],
+  height: number,
+): number | "dismiss" {
+  const landing = offset + project(velocity);
+  const lowest = Math.max(...stops);
+  if (landing > lowest + (height - lowest) * DISMISS_AT) return "dismiss";
+  let nearest = 0;
+  stops.forEach((stop, index) => {
+    if (Math.abs(stop - landing) < Math.abs((stops[nearest] as number) - landing)) nearest = index;
+  });
+  return nearest;
 }
 
 interface Sample {
@@ -42,6 +69,10 @@ export interface SheetDragHost {
   scrim: HTMLElement | null;
   // The one scroller of the page on show: a drag starts there only from its top, moving down.
   body(): HTMLElement | null;
+  // Where each of its detents rests, as an offset below the highest.
+  stops(): readonly number[];
+  // Called as a release settles into the detent at this index.
+  rest(index: number): void;
   // Says whether the sheet may close. A sheet with unsaved changes asks first and stays.
   allowDismiss(): boolean;
   close(): void;
@@ -91,7 +122,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     return Number.isFinite(y) ? y : 0;
   };
 
-  const animate = (to: number, velocity: number, done: () => void) => {
+  const animate = (to: number, velocity: number, done: () => void, leaving = false) => {
     const from = offset;
     const params = Math.abs(velocity) >= FLICK_SPEED ? FLICK : SETTLE;
     const start = performance.now();
@@ -100,7 +131,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
       const value = springValue(from, to, velocity, t, params);
       const speed = (springValue(from, to, velocity, t + 0.001, params) - value) / 0.001;
       apply(value);
-      const offscreen = to > 0 && value >= to;
+      const offscreen = leaving && value >= to;
       if (offscreen || (Math.abs(value - to) < 0.5 && Math.abs(speed) < 10)) {
         frame = 0;
         done();
@@ -113,7 +144,8 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
 
   const release = (velocity: number) => {
     const height = panel.offsetHeight;
-    const decision = offset > 0 ? releaseTo(offset, velocity, height) : "rest";
+    const stops = host.stops();
+    const decision = restingStop(offset, velocity, stops, height);
     if (decision === "dismiss" && host.allowDismiss()) {
       if (host.reducedMotion()) {
         // The sheet fades where it is instead of travelling.
@@ -123,15 +155,25 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
         host.close();
         return;
       }
-      animate(height, velocity, () => {
-        scrim?.style.removeProperty("opacity");
-        scrim?.style.removeProperty("transition");
-        host.close();
-      });
+      animate(
+        height,
+        velocity,
+        () => {
+          scrim?.style.removeProperty("opacity");
+          scrim?.style.removeProperty("transition");
+          host.close();
+        },
+        true,
+      );
       return;
     }
-    if (host.reducedMotion()) return settle();
-    animate(0, velocity, settle);
+    const index = decision === "dismiss" ? stops.indexOf(Math.min(...stops)) : decision;
+    const landed = () => {
+      host.rest(index);
+      settle();
+    };
+    if (host.reducedMotion()) return landed();
+    animate(stops[index] ?? 0, velocity, landed);
   };
 
   const begin = (event: PointerEvent, current: Press) => {

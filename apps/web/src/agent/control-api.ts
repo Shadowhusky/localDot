@@ -4,7 +4,8 @@ import {
   keyLikePresent,
   QuestionAnswerRequest,
   StopOutcome,
-  TakeoverInputRequest,
+  TakeComputerReply,
+  TakeControlReply,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
@@ -144,6 +145,12 @@ export function resumeTask(api: ApiClient, sessionId: string, signal: AbortSigna
 }
 export function undoMemory(api: ApiClient, changeId: string, signal: AbortSignal) {
   if (!ULID_PATTERN.test(changeId)) throw new ControlFailure(false);
+  // Memory refuses every change while the user has control: a 503 here changed nothing.
+  const refused = (error: unknown) => {
+    throw error instanceof ControlFailure && error.status === 503
+      ? new ControlFailure(false, 503)
+      : error;
+  };
   return controlRequest(
     api,
     `/api/agent/memory/${changeId}/undo`,
@@ -164,7 +171,7 @@ export function undoMemory(api: ApiClient, changeId: string, signal: AbortSignal
         throw new ControlFailure(true);
       return value.changeId;
     },
-  );
+  ).catch(refused);
 }
 export function loadKnowledge<T>(
   api: ApiClient,
@@ -194,6 +201,24 @@ export function answerQuestion(
     throw new ControlFailure(false);
   return controlRequest(api, `${sessionPath(sessionId)}/answer`, value.data, 204, signal, empty);
 }
+// The user takes the computer, whatever dot is doing; the reply names the control to hand back.
+export function takeControl(api: ApiClient, sessionId: string, signal: AbortSignal) {
+  return controlRequest(
+    api,
+    `${sessionPath(sessionId)}/takeover`,
+    undefined,
+    202,
+    signal,
+    (text) => TakeControlReply.parse(JSON.parse(text)).requestId,
+  );
+}
+// With no task live on the computer, the user's own hold starts; the reply names its session.
+export function takeComputer(api: ApiClient, cellId: string, signal: AbortSignal) {
+  if (!ULID_PATTERN.test(cellId)) throw new ControlFailure(false);
+  return controlRequest(api, `/api/cells/${cellId}/takeover`, undefined, 202, signal, (text) =>
+    TakeComputerReply.parse(JSON.parse(text)),
+  );
+}
 export function returnControl(
   api: ApiClient,
   sessionId: string,
@@ -206,23 +231,6 @@ export function returnControl(
   return controlRequest(
     api,
     `${sessionPath(sessionId)}/takeover/done`,
-    value.data,
-    204,
-    signal,
-    empty,
-  );
-}
-export function manualInput(
-  api: ApiClient,
-  sessionId: string,
-  body: TakeoverInputRequest,
-  signal: AbortSignal,
-): Promise<void> {
-  const value = TakeoverInputRequest.safeParse(body);
-  if (!value.success) throw new ControlFailure(false);
-  return controlRequest(
-    api,
-    `${sessionPath(sessionId)}/takeover/input`,
     value.data,
     204,
     signal,

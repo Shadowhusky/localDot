@@ -57,7 +57,9 @@ export interface ScreenControllerDeps {
   readonly parentCellId: string;
   readonly desktopGeometry: ScreenGeometry;
   desktopReady(): boolean;
-  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop">;
+  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
+  // The browser outlives sessions, so its control revisions are counted across them.
+  revision?(instance: string): number;
   client?(endpoint: ReadyBrowser): Client;
   downloads?(
     endpoint: ReadyBrowser,
@@ -79,11 +81,13 @@ export class ScreenControlError extends Error {
   }
 }
 export class ScreenUnavailableError extends Error {
-  constructor(screen: ScreenName) {
+  constructor(screen: ScreenName, starting = false) {
     super(
-      screen === "browser"
-        ? "The signed-in browser isn't available right now. Keep working on the desktop, or try switching to the browser again in a moment."
-        : "The desktop isn't ready right now. Try switching to it again in a moment.",
+      screen === "desktop"
+        ? "The desktop isn't ready right now. Try switching to it again in a moment."
+        : starting
+          ? "The web browser is still starting. Try switching to it again in a few seconds."
+          : "The web browser isn't available. Carry on with the desktop, which has none of the user's sign-ins, or tell the user what you couldn't do.",
     );
     this.name = "ScreenUnavailableError";
   }
@@ -282,9 +286,12 @@ export class ScreenController {
     this.#actions.abort();
     const completion = Promise.withResolvers<void>();
     this.#holding = completion.promise;
+    // As at a screen switch, a browser that can't confirm the hand-back is stopped on its own;
+    // only one that can't be stopped either contains the session and its computer.
+    const handBack = () => this.#revoke().catch(() => this.#retireBrowser());
     const waits = [
       this.#safe(() => this.deps.fenceRecording()),
-      this.#revoke(),
+      handBack(),
       this.#tail,
       ...this.#active,
     ];
@@ -295,10 +302,7 @@ export class ScreenController {
           throw new ScreenControlError();
         }
         // A browser preparation already in flight may have returned while the queue drained.
-        await this.#revoke().catch(async () => {
-          await this.#fail();
-          throw new ScreenControlError();
-        });
+        await handBack();
         if (epoch === this.#epoch && !this.#closed && !this.#failed) this.#userReady = true;
       })
       .then(completion.resolve, completion.reject);
@@ -397,10 +401,24 @@ export class ScreenController {
       ...(this.#holding ? [this.#holding] : []),
     ])
       .then(async (results) => {
-        // A late preparation cannot outlive the session's terminal receipt.
-        await this.deps.browser.stop(this.deps.parentCellId).catch(() => {
+        // No grant of this session outlives its terminal receipt. A finished task hands the
+        // browser back to the user and leaves it running for the next one (a browser that has
+        // since restarted holds no grant of this session); containment, including a Stop that
+        // arrives while the task finishes, stops it.
+        const owner = this.#browser;
+        const stop = () => this.deps.browser.stop(this.deps.parentCellId);
+        try {
+          if (
+            !contain &&
+            owner &&
+            this.deps.browser.endpoints(this.deps.parentCellId)?.instance ===
+              owner.endpoint.instance
+          )
+            await this.#revoke().catch(stop);
+          if (contain || this.#failed) await stop();
+        } catch {
           throw new ScreenControlError();
-        });
+        }
         this.#browser?.client.close();
         if (results.some((result) => result.status === "rejected")) throw new ScreenControlError();
       })
@@ -456,7 +474,7 @@ export class ScreenController {
             owner.manualPermit = undefined;
             const request = {
               ...this.#identity(owner),
-              revision: ++owner.revision,
+              revision: this.#nextRevision(owner),
               requestId: ulid(),
               holder: "agent" as const,
               owner: { sessionId: scope.sessionId, generation: scope.generation },
@@ -527,7 +545,7 @@ export class ScreenController {
           return result;
         } catch {
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
-            await this.#revoke().catch(() => this.#fail());
+            await this.#revoke().catch(() => this.#retireBrowser());
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
             // complete is uncertainty the session cannot continue past.
@@ -536,7 +554,10 @@ export class ScreenController {
             // The agent asked for a screen that is unavailable. That is an ordinary tool
             // failure once no grant this call requested can still be live.
             if (granted) await this.#revoke().catch(() => this.#retireBrowser());
-            throw new ScreenUnavailableError(screen);
+            throw new ScreenUnavailableError(
+              screen,
+              this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
+            );
           }
           throw new ScreenControlError();
         }
@@ -618,7 +639,7 @@ export class ScreenController {
     owner.manualPermit = undefined;
     const request = {
       ...this.#identity(owner),
-      revision: ++owner.revision,
+      revision: this.#nextRevision(owner),
       requestId: ulid(),
       holder: "user" as const,
     };
@@ -750,6 +771,10 @@ export class ScreenController {
         this.#checkBrowser(owner);
       },
     };
+  }
+  #nextRevision(owner: BrowserOwner): number {
+    owner.revision = this.deps.revision?.(owner.endpoint.instance) ?? owner.revision + 1;
+    return owner.revision;
   }
   #identity(owner: BrowserOwner) {
     const { parentCellId, browserCellId, instance } = owner.endpoint;

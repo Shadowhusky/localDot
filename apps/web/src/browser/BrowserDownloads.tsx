@@ -1,17 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
-import { Icon } from "../ui/Icon.tsx";
+import { Dialog } from "../ui/Dialog.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { changeDownload, listDownloads } from "./download-api.ts";
-import "../agent/safety.css";
 import "./downloads.css";
 
 type Decision = { item: QuarantineItem; action: "release" | "discard" };
 const REFRESH_FAILED = "Downloads could not be refreshed. Check the computer and try again.";
+const KIND: Record<QuarantineItem["kind"], string> = {
+  document: "Document",
+  image: "Image",
+  archive: "Archive",
+  program: "Program",
+  other: "File",
+};
+const decisionTitle = ({ item, action }: Decision) =>
+  action === "discard"
+    ? `Discard ${item.name}?`
+    : item.state === "releasing"
+      ? `Check whether ${item.name} arrived?`
+      : `Save ${item.name} to your computer?`;
 const size = (bytes: number) =>
   bytes < 1024
     ? `${bytes} bytes`
@@ -47,7 +58,6 @@ export function BrowserDownloads({
   const refresh = useRef<() => Promise<void>>(async () => {});
   const poll = useRef<() => Promise<void>>(async () => {});
   const operation = useRef<AbortController | null>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     const epoch = ++owner.current;
@@ -112,18 +122,6 @@ export function BrowserDownloads({
       clearTimeout(timer);
     };
   }, [polling]);
-  useEffect(() => {
-    if (!decision) return;
-    heading.current?.focus({ preventScroll: true });
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !pending) {
-        setDecision(null);
-        trigger.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onEscape);
-    return () => window.removeEventListener("keydown", onEscape);
-  }, [decision, pending]);
   const current = decision && items.find((item) => item.id === decision.item.id);
   const matches = !!current && JSON.stringify(current) === JSON.stringify(decision?.item);
   const confirm = async () => {
@@ -154,15 +152,12 @@ export function BrowserDownloads({
       );
     } catch {
       if (epoch === owner.current)
-        setMessage(
-          "The change was not confirmed. Refresh the download status before trying again.",
-        );
+        setMessage("Couldn't confirm that change. Refresh, then try again.");
     } finally {
       if (epoch === owner.current) {
         operation.current = null;
         setPending(false);
         setDecision(null);
-        trigger.current?.focus();
         await refresh.current();
       }
     }
@@ -175,7 +170,7 @@ export function BrowserDownloads({
   return (
     <section className="activity-section browser-downloads" aria-label="Browser downloads">
       <div className="activity-section-head">
-        <h3 className="activity-section-title">Downloads</h3>
+        <h3>Downloads</h3>
         <span className="activity-section-meta">
           {waiting ? `${waiting} waiting` : count(visible.length, "file", "files")}
         </span>
@@ -188,15 +183,16 @@ export function BrowserDownloads({
           data-testid="download-row"
         >
           <div className="activity-row-head">
-            <Icon name="download" className="activity-row-icon" />
-            <span className="activity-row-title">{item.name}</span>
-            <span className="activity-row-metric num">{size(item.bytes)}</span>
             <StatusGlyph
               state={
                 item.state === "released" ? "done" : item.state === "failed" ? "failed" : "todo"
               }
               label={stateLabel(item)}
             />
+            <span className="activity-row-text">
+              <span className="activity-row-title">{item.name}</span>
+            </span>{" "}
+            <span className="activity-row-time num">{size(item.bytes)}</span>
           </div>
           <div className="download-detail">
             <p className="activity-detail-note">
@@ -219,7 +215,7 @@ export function BrowserDownloads({
                     }
                     onClick={(event) => choose(item, "release", event.currentTarget)}
                   >
-                    {item.state === "releasing" ? "Check delivery" : "Review & release"}
+                    {item.state === "releasing" ? "Check delivery" : "Review"}
                   </Button>
                 )}
                 {(item.state === "held" || item.state === "failed") && (
@@ -257,84 +253,71 @@ export function BrowserDownloads({
           {message}
         </p>
       )}
-      {decision &&
-        createPortal(
-          <div className="approval-overlay download-overlay">
-            <section
-              className="approval-card"
-              role="dialog"
-              aria-modal="false"
-              aria-labelledby="download-decision-title"
-            >
-              <div className="approval-content">
-                <p className="safety-eyebrow">Browser download · Your decision</p>
-                <h2 id="download-decision-title" tabIndex={-1} ref={heading}>
-                  {decision.action === "discard"
-                    ? "Discard this download?"
-                    : decision.item.state === "releasing"
-                      ? "Check earlier delivery"
-                      : "Release to this computer?"}
-                </h2>
-                <dl>
-                  {[
-                    ["File", decision.item.name],
-                    ["Size", `${size(decision.item.bytes)} (${decision.item.bytes} bytes)`],
-                    ["Source", decision.item.source],
-                    ["Type", decision.item.kind],
-                    ["SHA-256", decision.item.sha256],
-                    ...(decision.action === "release"
-                      ? [["Destination", "This computer’s Downloads folder"]]
-                      : []),
-                  ].map(([label, text]) => (
-                    <div key={label}>
-                      <dt>{label}</dt>
-                      <dd>{text}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-              <div className="approval-footer">
-                <p role="status">
-                  {!matches
-                    ? "This download changed. Cancel and refresh its status."
-                    : pending
-                      ? "Checking the file and confirming the operation…"
-                      : decision.action === "discard"
-                        ? "This removes the held copy. You will need to download it again to recover it."
-                        : decision.item.state === "releasing"
-                          ? "Check whether the earlier transfer reached the computer."
-                          : "Save this verified file to the computer’s Downloads folder."}
-                </p>
-                <div className="safety-actions download-decision-actions">
-                  <button
-                    type="button"
-                    disabled={
-                      !matches || pending || (decision.action === "release" && !releaseReady)
-                    }
-                    onClick={() => void confirm()}
-                  >
-                    {decision.action === "discard"
-                      ? "Discard download"
-                      : decision.item.state === "releasing"
-                        ? "Check delivery"
-                        : "Release once"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => {
-                      setDecision(null);
-                      trigger.current?.focus();
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </section>
-          </div>,
-          document.body,
+      <Dialog
+        open={!!decision}
+        onClose={() => {
+          if (!pending) setDecision(null);
+        }}
+        anchor={trigger}
+        title={decision ? decisionTitle(decision) : ""}
+        description={
+          !decision
+            ? undefined
+            : !matches
+              ? "This file changed since you opened it. Cancel, then review it again."
+              : decision.action === "discard"
+                ? "The held copy is removed. To get it back, download it again."
+                : decision.item.state === "releasing"
+                  ? "An earlier save may not have finished. Check whether it reached your computer."
+                  : "dot downloaded this in its browser. It stays here until you choose."
+        }
+        facts={
+          decision
+            ? [
+                ["Size", size(decision.item.bytes)],
+                ["From", decision.item.source],
+                ["Kind", KIND[decision.item.kind]],
+                ...(decision.action === "release"
+                  ? ([["Saves to", "Downloads on your computer"]] as const)
+                  : []),
+                [
+                  "SHA-256",
+                  <span key="digest" className="download-digest">
+                    {decision.item.sha256}
+                  </span>,
+                ],
+              ]
+            : undefined
+        }
+      >
+        <Button
+          variant="quiet"
+          disabledReason={pending ? "Wait for this to finish." : undefined}
+          onClick={() => setDecision(null)}
+        >
+          Cancel
+        </Button>
+        {decision && (
+          <Button
+            variant={decision.action === "discard" ? "destructive" : "primary"}
+            busy={pending}
+            disabledReason={
+              !matches
+                ? "This file changed. Review it again."
+                : decision.action === "release" && !releaseReady
+                  ? "Turn the computer back on to save a file."
+                  : undefined
+            }
+            onClick={() => void confirm()}
+          >
+            {decision.action === "discard"
+              ? "Discard"
+              : decision.item.state === "releasing"
+                ? "Check delivery"
+                : "Save to computer"}
+          </Button>
         )}
+      </Dialog>
     </section>
   );
 }

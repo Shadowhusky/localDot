@@ -1,4 +1,4 @@
-import type { ActivitySpan, RecordingGap } from "@localdot/protocol";
+import type { ActivitySpan, RecordingGap, RecordingInfo, ScreenName } from "@localdot/protocol";
 import { chapters, type SessionModel } from "@localdot/stage";
 import type { ApiClient } from "../lib/api.ts";
 import { type ReplayState, replayOrigin } from "../replay/useReplay.ts";
@@ -17,6 +17,27 @@ export interface ExportContext {
   atMs: number;
 }
 
+// Where an export reads one screen's recording from.
+export function recordingSource(
+  info: RecordingInfo,
+  at: { sessionId: string; screen: ScreenName; origin: string; authorization: string },
+): ReplaySource {
+  return {
+    screen: at.screen,
+    ...(info.manifest.width && info.manifest.height
+      ? { geometry: { w: info.manifest.width, h: info.manifest.height, scale: 1 } }
+      : {}),
+    sessionId: at.sessionId,
+    origin: at.origin,
+    authorization: at.authorization,
+    video:
+      info.servedBytes > 0 && !["none", "failed", "expired"].includes(info.manifest.state)
+        ? { upto: info.live ? info.upto : null }
+        : null,
+    gaps: info.manifest.gaps,
+  };
+}
+
 export function exportContext(
   api: ApiClient,
   sessionId: string,
@@ -32,20 +53,12 @@ export function exportContext(
     model: replay.model,
     activity: info.manifest.activity,
     gaps: info.manifest.gaps,
-    source: {
-      screen: replay.screen,
-      ...(info.manifest.width && info.manifest.height
-        ? { geometry: { w: info.manifest.width, h: info.manifest.height, scale: 1 } }
-        : {}),
+    source: recordingSource(info, {
       sessionId,
+      screen: replay.screen,
       origin: replayOrigin(api),
       authorization: api.authorization(),
-      video:
-        info.servedBytes > 0 && !["none", "failed", "expired"].includes(info.manifest.state)
-          ? { upto: info.live ? info.upto : null }
-          : null,
-      gaps: info.manifest.gaps,
-    },
+    }),
     whole: { fromMs: map.startMs, toMs: map.endMs },
     chapter: chapter ? { fromMs: chapter.startT, toMs: chapter.endT } : null,
     selection: replay.selection,

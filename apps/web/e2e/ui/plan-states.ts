@@ -20,7 +20,7 @@ async function stageBox(page: Page, label: string) {
       stage: r && [r.x, r.y, r.width, r.height].map(Math.round),
       classes: stage?.className,
       hud: document.querySelector("[data-testid=hud-status]")?.textContent,
-      caption: document.querySelector(".caption")?.textContent,
+      caption: document.querySelector(".narration")?.textContent,
       title: document.title,
       rim: !!document.querySelector(".rim"),
     };
@@ -47,7 +47,7 @@ try {
     page.on("pageerror", (e) => log(`[${size.n}] pageerror ${e.message}`));
     const shot = (name: string) => page.screenshot({ path: `${OUT}/states-${size.n}-${name}.png` });
     await page.goto(f.issue());
-    await page.getByRole("heading", { name: "Set up localDot" }).waitFor({ timeout: 15000 });
+    await page.getByRole("heading", { name: "Your computer is off" }).waitFor({ timeout: 15000 });
     await stageBox(page, `[${size.n}] first-run`);
     await page.getByRole("button", { name: "Turn on" }).first().click();
     await page.waitForTimeout(1500);

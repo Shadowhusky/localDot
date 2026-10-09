@@ -68,8 +68,8 @@ const screenshots = new Screenshots(captureFile(uid));
 const native = AtspiAccessibility.launch(process.env, monoNow);
 native.warm();
 const cdp = new ChromiumPerception({
-  originProvider: async (win) => {
-    const frame = await native.content(win, 1500);
+  originProvider: async (win, dpr) => {
+    const frame = await native.content(win, 1500, dpr);
     return frame ? { x: frame.x, y: frame.y } : undefined;
   },
 });

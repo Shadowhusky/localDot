@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useId, useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Field } from "./Field.tsx";
 import { SegmentedControl, type SegmentItem } from "./SegmentedControl.tsx";
 import { TabPanel, Tabs } from "./Tabs.tsx";
@@ -25,6 +25,26 @@ function Speed({ start = "normal" }: { start?: string }) {
 }
 
 describe("SegmentedControl", () => {
+  it("tells a press on the chosen segment apart from a change", () => {
+    const onValueChange = vi.fn();
+    const onReselect = vi.fn();
+    render(
+      <SegmentedControl
+        aria-label="Mode"
+        items={SPEEDS}
+        value="normal"
+        onValueChange={onValueChange}
+        onReselect={onReselect}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "1×" }));
+    expect(onReselect).toHaveBeenCalledWith("normal");
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("radio", { name: "2×" }));
+    expect(onReselect).toHaveBeenCalledTimes(1);
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it("is a radio group whose chosen segment alone takes Tab", () => {
     render(<Speed />);
     screen.getByRole("radiogroup", { name: "Speed" });
@@ -59,6 +79,27 @@ describe("SegmentedControl", () => {
     expect(track.style.getPropertyValue("--_index")).toBe("1");
     fireEvent.click(screen.getByRole("radio", { name: "4×" }));
     expect(track.style.getPropertyValue("--_index")).toBe("3");
+  });
+
+  it("puts an amber point on a segment that needs you, without changing its name", () => {
+    render(
+      <SegmentedControl
+        aria-label="Pane"
+        size={32}
+        items={[
+          { value: "chat", label: "Chat", attention: true },
+          { value: "activity", label: "Activity" },
+        ]}
+        value="activity"
+        onValueChange={() => {}}
+      />,
+    );
+    const chat = screen.getByRole("radio", { name: "Chat" });
+    expect(chat.querySelector(".ui-segment-attention")?.getAttribute("aria-hidden")).toBe("true");
+    expect(
+      screen.getByRole("radio", { name: "Activity" }).querySelector(".ui-segment-attention"),
+    ).toBeNull();
+    expect(screen.getByRole("radiogroup").dataset.size).toBe("32");
   });
 
   it("explains an unavailable segment and keeps its choice", () => {

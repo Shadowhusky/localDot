@@ -20,8 +20,8 @@ test("a new task after Stop asks for no images from the stopped task", async ({ 
   await expect(page.getByTestId("hud-status")).toHaveText("Select the Net total cell");
   await page.getByTestId("hud-stop-session").click();
   await expect(page.getByText("Stopped. Your computer is paused.")).toBeVisible();
-  await page.getByRole("button", { name: "Resume computer" }).first().click();
-  const task = page.getByRole("textbox", { name: "New task" });
+  await page.getByRole("button", { name: "Resume" }).first().click();
+  const task = page.getByRole("textbox", { name: "Message" });
   await expect(task).toBeEnabled();
   await task.fill("Make a new sample report");
   await task.press("Enter");

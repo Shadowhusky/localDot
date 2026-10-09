@@ -98,6 +98,12 @@ export class RulesStore {
           (rule.scope === "destination" && rule.destination === place.destination)),
     );
   }
+  // A host the user has allowed something on, always: where dot may send what it read.
+  trusts(host: string): boolean {
+    return this.list().rules.some(
+      (rule) => rule.site !== undefined && new URL(rule.site).hostname === host,
+    );
+  }
   // Returns the new rule, or nothing when the same rule is already saved.
   add(
     actionClass: ActionClass,

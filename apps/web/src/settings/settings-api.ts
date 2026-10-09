@@ -1,4 +1,4 @@
-import { AgentSettingsDocument, SECRET_ID_PATTERN } from "@localdot/protocol";
+import { AgentSettingsDocument, ClaudeCodeStatus, SECRET_ID_PATTERN } from "@localdot/protocol";
 import { PROVIDERS } from "@localdot/providers";
 import { z } from "zod";
 import type { ApiClient } from "../lib/api.ts";
@@ -24,17 +24,24 @@ export const ProviderIndex = z
       })
       .nullable(),
     keyLayer: z.enum(["online", "offline"]),
-    defaultTaskBudgetUSD: AgentSettingsDocument.shape.taskBudgetUSD.unwrap().nullable(),
     subscriptions: z
       .array(
-        z.strictObject({
-          id: z.literal("chatgpt"),
-          name: z.literal("ChatGPT plan"),
-          available: z.boolean(),
-          reason: z.string().max(512).optional(),
-        }),
+        z.discriminatedUnion("id", [
+          z.strictObject({
+            id: z.literal("chatgpt"),
+            name: z.literal("ChatGPT plan"),
+            available: z.boolean(),
+            reason: z.string().max(512).optional(),
+          }),
+          z.strictObject({
+            id: z.literal("claude-code"),
+            name: z.literal("Claude Code (your plan)"),
+            available: z.boolean(),
+            reason: z.string().max(512).optional(),
+          }),
+        ]),
       )
-      .max(1),
+      .max(2),
     keys: z
       .array(
         z.strictObject({
@@ -202,6 +209,24 @@ export async function saveSettings(
   if (!saved.success || JSON.stringify(saved.data) !== JSON.stringify(parsed.data))
     throw new SettingsFailure(true);
   return saved.data;
+}
+// The user's own Claude Code, as its status command reports it; check runs that command again.
+export async function loadClaudeCode(
+  api: ApiClient,
+  fresh: boolean,
+  signal?: AbortSignal,
+): Promise<ClaudeCodeStatus> {
+  const parsed = ClaudeCodeStatus.safeParse(
+    await request(
+      api,
+      fresh ? "POST" : "GET",
+      fresh ? "/api/agent/claude-code/check" : "/api/agent/claude-code",
+      16 * 1024,
+      signal,
+    ),
+  );
+  if (!parsed.success) throw new SettingsFailure(false);
+  return parsed.data;
 }
 export async function refreshCatalog(api: ApiClient, signal?: AbortSignal): Promise<void> {
   const parsed = z

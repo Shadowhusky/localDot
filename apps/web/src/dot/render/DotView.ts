@@ -1,7 +1,8 @@
-import { DotEngine, type EyePose } from "../engine/engine.ts";
-import { clamp, smoothstep } from "../engine/math.ts";
-import type { DotState, Lod } from "../engine/states.ts";
+import { DotEngine, type EyePose, type Point } from "../engine/engine.ts";
+import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
+import { GLOSS_STOPS, PEARL_STOPS, SHEEN_STOPS, VOID } from "./dot-colours.ts";
+import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
 import { addView, type Frameable, now, removeView } from "./scheduler.ts";
 
@@ -27,18 +28,8 @@ function svg<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
-function stops(gradient: Element, list: [offset: number, color: string, opacity?: number][]): void {
-  for (const [offset, color, opacity] of list) {
-    svg(
-      "stop",
-      {
-        offset,
-        "stop-color": color,
-        ...(opacity === undefined ? {} : { "stop-opacity": opacity }),
-      },
-      gradient,
-    );
-  }
+function stops(gradient: Element, list: [offset: number, color: string][]): void {
+  for (const [offset, color] of list) svg("stop", { offset, "stop-color": color }, gradient);
 }
 
 interface Eye {
@@ -150,25 +141,13 @@ export class DotView implements Frameable {
     ] as const) {
       svg("stop", { offset, class: `dot-stop-${name}` }, eyeFill);
     }
-    stops(svg("radialGradient", { id: `dot${this.id}-gloss` }, defs), [
-      [0, "#ffffff", 0.75],
-      [0.55, "#ffffff", 0.22],
-      [1, "#ffffff", 0],
-    ]);
-    stops(svg("radialGradient", { id: `dot${this.id}-pearl`, cx: 0.37, cy: 0.3, r: 0.78 }, defs), [
-      [0, "#f6f7f8"],
-      [0.36, "#eceef0"],
-      [0.68, "#d3d6db"],
-      [0.9, "#a9adb5"],
-      [1, "#8d929a"],
-    ]);
+    stops(svg("radialGradient", { id: `dot${this.id}-gloss` }, defs), GLOSS_STOPS);
+    stops(
+      svg("radialGradient", { id: `dot${this.id}-pearl`, cx: 0.37, cy: 0.3, r: 0.78 }, defs),
+      PEARL_STOPS,
+    );
     const edge = { cx: 0.3, cy: 0.62, r: 0.95, fx: 0.3, fy: 0.62 };
-    stops(svg("radialGradient", { id: `dot${this.id}-sheen`, ...edge }, defs), [
-      [0, "#ffffff", 0],
-      [0.86, "#ffffff", 0],
-      [0.97, "#ffffff", 0.55],
-      [1, "#ffffff", 0],
-    ]);
+    stops(svg("radialGradient", { id: `dot${this.id}-sheen`, ...edge }, defs), SHEEN_STOPS);
     const xenon = svg("radialGradient", { id: `dot${this.id}-xenon`, ...edge }, defs);
     for (const [offset, opacity] of [
       [0, 0],
@@ -184,7 +163,7 @@ export class DotView implements Frameable {
     svg("circle", { ...disc, class: "dot-pearl", fill: ref("pearl") }, svgBody);
     svg("circle", { ...disc, class: "dot-pearl", fill: ref("sheen") }, svgBody);
     this.svgXenon = svg("circle", { ...disc, fill: ref("xenon"), opacity: 0 }, svgBody);
-    this.svgDim = svg("circle", { ...disc, fill: "#0a0b0d", opacity: 0 }, svgBody);
+    this.svgDim = svg("circle", { ...disc, fill: VOID, opacity: 0 }, svgBody);
 
     const eyes = svg("g", { "clip-path": ref("body") }, face);
     const eye = (side: "L" | "R"): Eye => {
@@ -219,6 +198,30 @@ export class DotView implements Frameable {
 
   setReducedMotion(on: boolean): void {
     this.engine.setReducedMotion(on, now());
+  }
+
+  react(name: Reaction): void {
+    this.engine.react(name, now());
+  }
+
+  setFocus(p: Point | null): void {
+    this.engine.setFocus(p, now());
+  }
+
+  setBias(b: Point): void {
+    this.engine.setBias(b, now());
+  }
+
+  setPlaces(places: Partial<{ composer: Point; card: Point }>): void {
+    this.engine.setPlaces(places, now());
+  }
+
+  say(ms: number): void {
+    this.engine.say(now(), ms);
+  }
+
+  hop(): void {
+    this.engine.hop(now());
   }
 
   setSize(size: number): void {
@@ -327,47 +330,16 @@ export class DotView implements Frameable {
 
   private renderEye(e: Eye, s: EyePose, devPerUnit: number): void {
     const c = e.cache;
-    const d = this.detail;
-    const f = s.frame;
-    let ex = 32 + f.cx;
-    let ey = 32 + f.cy;
-    if (d.snap) {
-      ex = Math.round(ex * devPerUnit * 2) / (devPerUnit * 2);
-      ey = Math.round(ey * devPerUnit * 2) / (devPerUnit * 2);
-    }
+    const g = eyeGeometry(s, this.detail, devPerUnit);
     this.attr(
       e.g,
       c,
       "m",
       "transform",
-      `matrix(${num(f.a)} ${num(f.b)} ${num(f.c)} ${num(f.d)} ${num(ex)} ${num(ey)})`,
+      `matrix(${num(g.a)} ${num(g.b)} ${num(g.c)} ${num(g.d)} ${num(g.ex)} ${num(g.ey)})`,
     );
-    this.attr(e.g, c, "o", "opacity", s.opacity.toFixed(3));
-
-    const scale = s.scale * d.eyeScale;
-    const w = 5.4 * scale;
-    const h = 10 * scale * s.sy;
-    const hw = w / 2;
-    const hh = h / 2;
-    const { happy, closed } = s;
-    let up = Math.max(s.up, closed * 0.93);
-    let lo = Math.max(s.lo, happy * 0.86);
-    const dip = closed * 0.22 * h + Math.min(up, 0.6) * 0.09 * h;
-    const arch = happy * 0.3 * h + s.loArch * h;
-    // A blink never closes below one device pixel, so it still reads at the badge size.
-    const minOpen = 1 / devPerUnit;
-    if (Math.max(1 - up - lo, 0) * h < minOpen && happy < 0.5 && closed < 0.5) {
-      const keep = clamp(1 - minOpen / h, 0, 1);
-      const total = up + lo || 1;
-      up = keep * (up / total);
-      lo = keep * (lo / total);
-    }
-    // The visible eye is the capsule between the upper lid (level, tilt, a slight dip as it lowers)
-    // and the lower lid (level, arch).
-    const W = hw + 2.5;
-    const top = -hh + up * h;
-    const bottom = hh - lo * h;
-    const slope = Math.tan((s.tilt * d.tiltGain * Math.PI) / 180);
+    this.attr(e.g, c, "o", "opacity", g.opacity.toFixed(3));
+    const { W, top, bottom, slope, dip, arch } = g.lid;
     this.attr(
       e.lid,
       c,
@@ -376,54 +348,41 @@ export class DotView implements Frameable {
       `M${num(-W)} ${num(top - slope * W)} Q0 ${num(top + 2 * dip)} ${num(W)} ${num(top + slope * W)} ` +
         `L${num(W)} ${num(bottom)} Q0 ${num(bottom - 2 * arch)} ${num(-W)} ${num(bottom)} Z`,
     );
-    const capsule = (1 - smoothstep(0.7, 1, happy)) * (1 - smoothstep(0.78, 1, closed));
-    this.attr(e.shape, c, "x", "x", num(-hw));
-    this.attr(e.shape, c, "y", "y", num(-hh));
-    this.attr(e.shape, c, "w", "width", num(w));
-    this.attr(e.shape, c, "h", "height", num(h));
-    this.attr(e.shape, c, "rx", "rx", num(hw));
-    this.attr(e.shape, c, "ro", "opacity", capsule.toFixed(3));
-    const fill = d.gloss ? `url(#dot${this.id}-eye)` : "";
+    this.attr(e.shape, c, "x", "x", num(-g.hw));
+    this.attr(e.shape, c, "y", "y", num(-g.hh));
+    this.attr(e.shape, c, "w", "width", num(2 * g.hw));
+    this.attr(e.shape, c, "h", "height", num(2 * g.hh));
+    this.attr(e.shape, c, "rx", "rx", num(g.hw));
+    this.attr(e.shape, c, "ro", "opacity", g.capsule.toFixed(3));
+    const fill = this.detail.gloss ? `url(#dot${this.id}-eye)` : "";
     if (c.fill !== fill) {
       c.fill = fill;
       e.shape.style.setProperty("fill", fill);
     }
-    if (d.gloss && capsule > 0.01) {
-      // A soft reflection of the key softbox (upper left), not a cartoon sparkle.
-      this.attr(e.gloss, c, "gx", "cx", num(-0.85 * scale));
-      this.attr(e.gloss, c, "gy", "cy", num(-hh + 2.7 * scale));
-      this.attr(e.gloss, c, "grx", "rx", num(1.05 * scale));
-      this.attr(e.gloss, c, "gry", "ry", num(2.1 * scale));
-      this.attr(e.gloss, c, "go", "opacity", (0.5 * capsule).toFixed(3));
+    if (g.gloss) {
+      this.attr(e.gloss, c, "gx", "cx", num(g.gloss.cx));
+      this.attr(e.gloss, c, "gy", "cy", num(g.gloss.cy));
+      this.attr(e.gloss, c, "grx", "rx", num(g.gloss.rx));
+      this.attr(e.gloss, c, "gry", "ry", num(g.gloss.ry));
+      this.attr(e.gloss, c, "go", "opacity", g.gloss.opacity.toFixed(3));
     } else {
       this.attr(e.gloss, c, "go", "opacity", "0");
     }
-    // Happy and sleeping arcs morph in as the lids close instead of swapping sprites.
-    const ha = smoothstep(0.45, 0.92, happy);
-    if (ha > 0.001) {
-      const aw = hw + 0.75 * scale;
+    this.arc(e.happy, c, "h", g.happy);
+    this.arc(e.closed, c, "c", g.closed);
+  }
+
+  private arc(node: SVGPathElement, c: Cache, key: string, a: Arc): void {
+    if (a.opacity > 0.001) {
       this.attr(
-        e.happy,
+        node,
         c,
-        "hd",
+        `${key}d`,
         "d",
-        `M${num(-aw)} ${num(1.1 * scale)} Q0 ${num(-4.1 * scale)} ${num(aw)} ${num(1.1 * scale)}`,
+        `M${num(-a.aw)} ${num(a.y)} Q0 ${num(a.peak)} ${num(a.aw)} ${num(a.y)}`,
       );
-      this.attr(e.happy, c, "hw", "stroke-width", num(2.1 * scale));
+      this.attr(node, c, `${key}w`, "stroke-width", num(a.stroke));
     }
-    this.attr(e.happy, c, "ho", "opacity", ha.toFixed(3));
-    const ca = smoothstep(0.5, 0.95, closed);
-    if (ca > 0.001) {
-      const aw = hw + 0.45 * scale;
-      this.attr(
-        e.closed,
-        c,
-        "cd",
-        "d",
-        `M${num(-aw)} ${num(1.9 * scale)} Q0 ${num(4.9 * scale)} ${num(aw)} ${num(1.9 * scale)}`,
-      );
-      this.attr(e.closed, c, "cw", "stroke-width", num(1.9 * scale));
-    }
-    this.attr(e.closed, c, "co", "opacity", ca.toFixed(3));
+    this.attr(node, c, `${key}o`, "opacity", a.opacity.toFixed(3));
   }
 }

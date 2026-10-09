@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   CHATGPT_INSTALL_FIRST,
   CHATGPT_SWITCHED_OFF,
@@ -7,15 +9,34 @@ import {
 } from "@localdot/codex-harness";
 import {
   ActionClass,
+  AddMemoryEntryRequest,
+  AddPersonRequest,
   ApprovalAnswer,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
+  ContinueConversation,
+  EditMemoryEntryRequest,
+  EditPersonRequest,
   HandbackRequest,
   type KeydRecord,
+  MEMORY_ENTRY_ID,
+  MemoryEntriesReply,
+  MemoryEntryChangeReply,
+  MemoryEntryRevision,
+  MemoryFileName,
+  NOTES_FILE,
   PauseRequest,
+  PeopleReply,
+  Person,
+  PersonChangeReply,
+  PersonRevision,
   QuestionAnswerRequest,
+  RecentActivityReply,
+  type RecentTask,
   ResumeSafetyRequest,
   scanKeyLike,
+  type TakeComputerReply,
+  type TakeControlReply,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -30,22 +51,29 @@ import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import {
   BindingError,
   CHATGPT,
-  checkChatgptChoice,
+  CLAUDE_CODE,
+  checkPlanChoices,
   pricingOf,
   type ResolvedRole,
   resolveRole,
 } from "./bindings.ts";
 import type { CatalogStore } from "./catalog-store.ts";
+import type { ClaudeCodeSetup } from "./claude-code/setup.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
+import { type ChatgptSetupControl, SANDBOX_REASONS } from "./codex/setup.ts";
+import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
-import { MemoryError, type MemoryStore } from "./memory.ts";
-import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
+import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
+import { PeopleError, type PeopleStore, type StoredPerson } from "./people.ts";
+import { AgentError, type AgentRunner, CLAUDE_CODE_OFF, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
+import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
+import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 
 export interface UploadAccess {
   tools: Pick<DesktopdTools, "putFile">;
@@ -58,13 +86,31 @@ export interface AgentRoutesDeps {
     Partial<
       Pick<
         AgentRunner,
-        "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "budgetHoldOf" | "sessions"
+        | "selectionOf"
+        | "terminalOf"
+        | "pauseTask"
+        | "resumeSafety"
+        | "budgetHoldOf"
+        | "sessions"
+        | "release"
+        | "hold"
+        | "holds"
       >
     >;
+  conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
-  keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
-  memory: Pick<MemoryStore, "readBoth" | "undo">;
+  keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
+  memory: Pick<
+    MemoryStore,
+    "readBoth" | "undo" | "entries" | "notes" | "addEntry" | "editEntry" | "deleteEntry"
+  >;
+  // A daily-notes file the user changed, for search to read again.
+  notesChanged?(file: string): void;
+  people?: Pick<PeopleStore, "list" | "add" | "edit" | "remove">;
+  // The tasks the next one hears about, whether or not the user has switched that off.
+  recentActivity?(): RecentTask[];
+  sessionInfo?(ids: readonly string[]): Map<string, { title: string | null; startedAt: string }>;
   skills(): SkillInfo[];
   canChangeMemory?(): boolean;
   taskMutationReady?(session: AgentSession): boolean;
@@ -80,7 +126,9 @@ export interface AgentRoutesDeps {
     account: CodexAccount;
     installer: CodexInstaller;
     availability(): HarnessAvailability;
+    setup: ChatgptSetupControl;
   };
+  claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -199,6 +247,7 @@ function fail(error: unknown): Response {
     );
   if (error instanceof MemoryError)
     return new Response("memory change is unavailable", { status: error.status });
+  if (error instanceof PeopleError) return new Response(error.message, { status: error.status });
   if (error instanceof SettingsError)
     return new Response("agent settings are unavailable", { status: error.status });
   if (error instanceof RuleError) return new Response(error.message, { status: error.status });
@@ -206,6 +255,8 @@ function fail(error: unknown): Response {
     return new Response("the selected models or keys are unavailable", { status: 400 });
   if (error instanceof SessionStoppedError || error instanceof ControlHeldError)
     return new Response("task control changed", { status: 409 });
+  if (error instanceof PausedStepError)
+    return new Response("Pause is changing; try again in a moment", { status: 409 });
   if (error instanceof DesktopdError)
     return new Response("the computer transfer failed", {
       status: error.status === 413 || error.status === 409 ? error.status : 502,
@@ -232,34 +283,47 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       reason: CHATGPT_SWITCHED_OFF,
     };
   if (deps.chatgpt) {
-    const { account, installer } = deps.chatgpt;
+    const { account, installer, setup } = deps.chatgpt;
     const installed = () => {
       if (installer.status().state !== "ready") throw new AccountError(409, CHATGPT_INSTALL_FIRST);
       const availability = harness();
       if (!availability.available)
         throw new AccountError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
+      const sandbox = setup.sandbox();
+      if (sandbox !== "passed") throw new AccountError(409, SANDBOX_REASONS[sandbox]);
     };
+    const progress = () => ({ install: installer.status(), sandbox: setup.sandbox() });
     chatgptRoutes(app, {
       account: {
         status: async (opts) => {
-          const availability = harness(),
-            install = installer.status();
+          const availability = harness();
           if (!availability.available)
             return {
               ...availability,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
-              install,
+              ...progress(),
             };
-          if (install.state !== "ready")
+          if (installer.status().state !== "ready")
             return {
               available: true,
               reason: CHATGPT_INSTALL_FIRST,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
-              install,
+              ...progress(),
             };
-          return { ...(await account.status(opts)), install: installer.status() };
+          // An installation that predates this check, or a check a restart interrupted.
+          if (setup.sandbox() === "unchecked") void setup.check();
+          const sandbox = setup.sandbox();
+          if (sandbox !== "passed")
+            return {
+              available: true,
+              reason: SANDBOX_REASONS[sandbox],
+              codexVersion: CODEX_VERSION,
+              state: "unavailable" as const,
+              ...progress(),
+            };
+          return { ...(await setup.confirm(await account.status(opts))), ...progress() };
         },
         login: async (method) => {
           installed();
@@ -272,7 +336,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         },
         refresh: async () => {
           installed();
-          return { ...(await account.refresh()), install: installer.status() };
+          return { ...(await setup.confirm(await account.refresh())), ...progress() };
         },
       },
     });
@@ -286,10 +350,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
         // Installation is explicitly requested and daemon-owned; a disconnected HTTP caller
         // does not cancel the shared flight. Its separate cancel action remains available.
+        // The sandbox check follows on its own, before any sign-in can start.
         if (!flight) {
           const work = installer.ensureInstalled(new AbortController().signal);
           flight = work;
           void work
+            .then(() => setup.check())
             .catch(() => {})
             .finally(() => {
               if (flight === work) flight = undefined;
@@ -305,6 +371,34 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         check(c.req.raw.signal);
         installer.cancel();
         return c.body(null, 204);
+      }),
+    );
+    app.post(
+      "/api/agent/chatgpt/check",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        const availability = harness();
+        if (!availability.available)
+          throw new RouteError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
+        if (installer.status().state !== "ready") throw new RouteError(409, CHATGPT_INSTALL_FIRST);
+        void setup.check();
+        return c.json({ sandbox: setup.sandbox() }, 202);
+      }),
+    );
+  }
+  const claudeCode = deps.claudeCode;
+  if (claudeCode) {
+    app.get(
+      "/api/agent/claude-code",
+      route(async (c) => c.json(await claudeCode.status())),
+    );
+    app.post(
+      "/api/agent/claude-code/check",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        return c.json(await claudeCode.check());
       }),
     );
   }
@@ -338,19 +432,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const catalog = deps.catalog.get();
       let keys: KeydRecord[] = [];
-      let defaultTaskBudgetUSD: number | null = null;
       let keyLayer: "online" | "offline" = "online";
       try {
         keys = await deps.keyd.secrets();
-        if (deps.keyd.budget) {
-          try {
-            const budget = await deps.keyd.budget();
-            const checked = AgentSettings.shape.taskBudgetUSD.unwrap().safeParse(budget.perTaskUSD);
-            if (checked.success) defaultTaskBudgetUSD = checked.data;
-          } catch (error) {
-            if (!(error instanceof KeydUnavailableError)) throw error;
-          }
-        }
       } catch (error) {
         if (!(error instanceof KeydUnavailableError)) throw error;
         keyLayer = "offline";
@@ -359,8 +443,15 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
-        defaultTaskBudgetUSD,
-        subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
+        subscriptions: [
+          { id: CHATGPT, name: "ChatGPT plan", ...harness() },
+          {
+            id: CLAUDE_CODE,
+            name: "Claude Code (your plan)",
+            available: !!claudeCode,
+            ...(claudeCode ? {} : { reason: CLAUDE_CODE_OFF }),
+          },
+        ],
         keys: keys
           .filter((key) => key.kind === "llm")
           .map((key) => ({
@@ -419,11 +510,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/settings",
     route(async (c) => {
       const parsed = await json(c.req.raw, AgentSettings);
-      for (const role of ["main", "fast", "local"] as const) {
-        const choice = parsed[role];
-        if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
-      }
-      if (parsed.main?.provider !== CHATGPT) {
+      checkPlanChoices(parsed);
+      if (parsed.main?.provider !== CHATGPT && parsed.main?.provider !== CLAUDE_CODE) {
         const keys = await deps.keyd.secrets();
         check(c.req.raw.signal);
         const catalog = deps.catalog.get();
@@ -435,7 +523,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         if (active.length) pricingOf(active);
       }
       check(c.req.raw.signal);
-      return c.json(deps.settings.put(parsed));
+      const saved = deps.settings.put(parsed);
+      // A task start retries this; until then keyd keeps the daily limit it had.
+      await syncDayLimit(deps.keyd, saved.dayBudgetUSD).catch(() =>
+        console.error("keyd's daily spending limit could not be updated"),
+      );
+      return c.json(saved);
     }),
   );
   app.post(
@@ -454,6 +547,44 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({ sessionId: result.id }, 202);
     }),
   );
+  const conversations = deps.conversations;
+  if (conversations) {
+    // A finished task waiting for a follow-up ends, so the next message starts the chosen one.
+    const release = async (signal: AbortSignal) => {
+      try {
+        await deps.runner.release?.(signal);
+      } catch (error) {
+        if (error instanceof AgentError) throw new RouteError(409, error.message);
+        throw error;
+      }
+      check(signal);
+    };
+    app.get(
+      "/api/conversation",
+      route((c) => c.json(conversations.snapshot())),
+    );
+    app.post(
+      "/api/conversation/new",
+      route(async (c) => {
+        await empty(c.req.raw);
+        await release(c.req.raw.signal);
+        conversations.begin();
+        return c.json(conversations.snapshot());
+      }),
+    );
+    app.post(
+      "/api/conversation/continue",
+      route(async (c) => {
+        const { sessionId } = await json(c.req.raw, ContinueConversation);
+        if (!conversations.has(sessionId)) throw new RouteError(404, "no such task");
+        if (conversations.current() !== sessionId) {
+          await release(c.req.raw.signal);
+          if (!conversations.select(sessionId)) throw new RouteError(404, "no such task");
+        }
+        return c.json(conversations.snapshot());
+      }),
+    );
+  }
   app.get(
     "/api/agent/sessions/:id",
     route((c) => {
@@ -480,6 +611,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
         ...(s.pendingTakeover ? { pendingTakeover: s.pendingTakeover } : {}),
         ...(s.manualControl ? { manualControl: s.manualControl } : {}),
+        ...(deps.runner.holds?.(s.id) ? { holder: true } : {}),
       });
     }),
   );
@@ -490,6 +622,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const parsed = await json(c.req.raw, Message);
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (deps.runner.holds?.(s.id))
+        throw new RouteError(409, "hand back the computer, then message dot");
       s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
       return c.body(null, 202);
     }),
@@ -573,12 +707,46 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const parsed = await json(c.req.raw, QuestionAnswerRequest);
       check(c.req.raw.signal);
-      const ok = s.answer(
-        parsed.askId,
-        parsed.option,
-        parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
-      );
+      const ok = parsed.declined
+        ? s.decline(parsed.askId)
+        : parsed.fields
+          ? s.answerFields(parsed.askId, parsed.fields, (text) => redact(text, s.id, s.cellId))
+          : s.answer(
+              parsed.askId,
+              parsed.option,
+              parsed.text === undefined ? undefined : redact(parsed.text, s.id, s.cellId, 2000),
+            );
       return ok ? c.body(null, 204) : c.text("that question is not waiting", 409);
+    }),
+  );
+  // The user takes the computer whatever dot is doing; the reply names the control to hand back.
+  app.post(
+    "/api/agent/sessions/:id/takeover",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      // A hold the user handed back is ending; the computer's own route starts the next one.
+      if (
+        s.stopped ||
+        deps.taskMutationReady?.(s) === false ||
+        (deps.runner.holds?.(s.id) && !s.controlHeld)
+      )
+        throw new RouteError(409, "the computer is not ready to hand over");
+      return c.json({ requestId: s.takeControl() } satisfies TakeControlReply, 202);
+    }),
+  );
+  // The user takes the computer whether or not a task is at work on it.
+  app.post(
+    "/api/cells/:id/takeover",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (!deps.runner.hold) throw new RouteError(503, "taking control is unavailable");
+      const reply = await deps.runner.hold(cellId, c.req.raw.signal);
+      return c.json(reply satisfies TakeComputerReply, 202);
     }),
   );
   app.post(
@@ -772,6 +940,13 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/memory",
     route((c) => c.json(deps.memory.readBoth())),
   );
+  const writable = () => {
+    if (deps.canChangeMemory?.() === false)
+      throw new RouteError(503, "memory is not available to change");
+  };
+  const changed = (file: string) => {
+    if (NOTES_FILE.test(file)) deps.notesChanged?.(file);
+  };
   app.post(
     "/api/agent/memory/:changeId/undo",
     route(async (c) => {
@@ -779,18 +954,169 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!ULID_PATTERN.test(changeId)) throw new RouteError(400, "invalid memory change id");
       await empty(c.req.raw);
       check(c.req.raw.signal);
-      if (deps.canChangeMemory?.() === false)
-        throw new RouteError(409, "memory is not available to change");
+      writable();
       const change = deps.memory.undo(changeId);
-      deps.appendTo(change.sessionId, "memory.change", {
-        file: change.file,
-        patch: change.patch,
-        changeId: change.changeId,
-        undoes: change.undoes,
-      });
+      changed(change.file);
+      if (change.sessionId)
+        deps.appendTo(change.sessionId, "memory.change", {
+          file: change.file,
+          patch: change.patch,
+          changeId: change.changeId,
+          undoes: change.undoes,
+        });
       return c.json({ changeId: change.changeId });
     }),
   );
+  const titles = (sources: readonly ({ kind: string } & { sessionId?: string })[]) =>
+    deps.sessionInfo?.([
+      ...new Set(sources.flatMap((s) => (s.kind === "task" && s.sessionId ? [s.sessionId] : []))),
+    ]) ?? new Map<string, { title: string | null }>();
+  const titled = <T extends { source: StoredEntry["source"] | StoredPerson["source"] }>(
+    item: T,
+    info: Map<string, { title: string | null }>,
+  ) => ({
+    ...item,
+    source:
+      item.source.kind === "task"
+        ? {
+            kind: "task" as const,
+            sessionId: item.source.sessionId,
+            title: info.get(item.source.sessionId)?.title ?? null,
+          }
+        : item.source,
+  });
+  const idParam = (c: Context, pattern: RegExp) => {
+    const id = c.req.param("id") ?? "";
+    if (!pattern.test(id)) throw new RouteError(400, "invalid id");
+    return id;
+  };
+  app.get(
+    "/api/agent/memory/entries",
+    route((c) => {
+      const files = (["USER.md", "MEMORY.md"] as const).map((file) => ({
+        file,
+        entries: deps.memory.entries(file),
+      }));
+      const notes = deps.memory.notes();
+      const info = titles([...files, ...notes].flatMap((f) => f.entries.map((e) => e.source)));
+      const shown = (f: { file: string; entries: StoredEntry[] }) => ({
+        file: f.file,
+        entries: f.entries.map((e) => titled(e, info)),
+      });
+      return c.json(
+        MemoryEntriesReply.parse({
+          dir: join(deps.home, "memory").replace(homedir(), "~"),
+          files: files.map(shown),
+          notes: notes.map(shown),
+        }),
+      );
+    }),
+  );
+  app.post(
+    "/api/agent/memory/entries",
+    route(async (c) => {
+      const body = await json(c.req.raw, AddMemoryEntryRequest);
+      writable();
+      const { change, entry } = deps.memory.addEntry(body.file, body.text, body.pinned ?? false);
+      return c.json(
+        MemoryEntryChangeReply.parse({
+          changeId: change.changeId,
+          entry: titled(entry, titles([entry.source])),
+        }),
+        201,
+      );
+    }),
+  );
+  app.put(
+    "/api/agent/memory/entries/:id",
+    route(async (c) => {
+      const id = idParam(c, MEMORY_ENTRY_ID);
+      const body = await json(c.req.raw, EditMemoryEntryRequest);
+      writable();
+      const { change, entry } = deps.memory.editEntry(body.file, id, body.revision, {
+        ...(body.text === undefined ? {} : { text: body.text }),
+        ...(body.pinned === undefined ? {} : { pinned: body.pinned }),
+      });
+      changed(body.file);
+      return c.json(
+        MemoryEntryChangeReply.parse({
+          changeId: change.changeId,
+          entry: titled(entry, titles([entry.source])),
+        }),
+      );
+    }),
+  );
+  app.delete(
+    "/api/agent/memory/entries/:id",
+    route(async (c) => {
+      const id = idParam(c, MEMORY_ENTRY_ID);
+      const file = MemoryFileName.safeParse(c.req.query("file"));
+      const revision = MemoryEntryRevision.safeParse(c.req.query("revision"));
+      if (!file.success || !revision.success) throw new RouteError(400, "invalid memory entry");
+      await empty(c.req.raw);
+      writable();
+      const { change } = deps.memory.deleteEntry(file.data, id, revision.data);
+      changed(file.data);
+      return c.json(MemoryEntryChangeReply.parse({ changeId: change.changeId }));
+    }),
+  );
+  const people = deps.people;
+  if (people) {
+    const personView = (person: StoredPerson) =>
+      Person.parse(titled(person, titles([person.source])));
+    app.get(
+      "/api/agent/people",
+      route((c) => {
+        const list = people.list();
+        const info = titles(list.map((p) => p.source));
+        return c.json(PeopleReply.parse({ people: list.map((p) => titled(p, info)) }));
+      }),
+    );
+    app.post(
+      "/api/agent/people",
+      route(async (c) => {
+        const body = await json(c.req.raw, AddPersonRequest);
+        writable();
+        return c.json(PersonChangeReply.parse({ person: personView(people.add(body)) }), 201);
+      }),
+    );
+    app.put(
+      "/api/agent/people/:id",
+      route(async (c) => {
+        const id = idParam(c, ULID_PATTERN);
+        const { revision, ...patch } = await json(c.req.raw, EditPersonRequest);
+        writable();
+        return c.json(
+          PersonChangeReply.parse({ person: personView(people.edit(id, revision, patch)) }),
+        );
+      }),
+    );
+    app.delete(
+      "/api/agent/people/:id",
+      route(async (c) => {
+        const id = idParam(c, ULID_PATTERN);
+        const revision = PersonRevision.safeParse(c.req.query("revision"));
+        if (!revision.success) throw new RouteError(400, "invalid person");
+        await empty(c.req.raw);
+        writable();
+        people.remove(id, revision.data);
+        return c.json(PersonChangeReply.parse({}));
+      }),
+    );
+  }
+  const recent = deps.recentActivity;
+  if (recent)
+    app.get(
+      "/api/agent/recent-activity",
+      route((c) =>
+        c.json(
+          RecentActivityReply.parse({
+            enabled: deps.settings.get().recentActivity !== "off",
+            tasks: recent(),
+          }),
+        ),
+      ),
+    );
   app.get(
     "/api/agent/skills",
     route((c) =>

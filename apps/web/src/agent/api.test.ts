@@ -13,6 +13,9 @@ it("accepts only the exact task identity and current strict status document", ()
   data.status = "ended";
   expect(snapshot.status).toBe("running");
 });
+it("reads the user's own hold on the computer", () => {
+  expect(parseAgentSnapshot({ ...valid, holder: true }, sessionId, cellId).holder).toBe(true);
+});
 for (const [label, value] of [
   ["null", null],
   ["array", []],
@@ -29,6 +32,7 @@ for (const [label, value] of [
   ["invalid brain", { ...valid, brainCellId: "unsafe" }],
   ["manual state without ownership", { ...valid, manualControl: "ready" }],
   ["unknown manual state", { ...valid, pendingTakeover: cellId, manualControl: "safe" }],
+  ["a hold flag other than true", { ...valid, holder: false }],
   ["unknown fields", { ...valid, credential: "inert-do-not-echo" }],
   ["inherited fields", Object.create(valid)],
 ] as const) {

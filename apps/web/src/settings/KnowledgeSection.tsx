@@ -1,58 +1,76 @@
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
+import { Group, GroupHead, GroupRow } from "../ui/Group.tsx";
+import { Skeleton } from "../ui/Skeleton.tsx";
+import { MemoryEditor } from "./memory/MemoryEditor.tsx";
+import { PeopleList } from "./memory/PeopleList.tsx";
+import { RecentActivity, type RecentActivityControl } from "./memory/RecentActivity.tsx";
+import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 
-// Read only: the skills dot can use and the notes it keeps.
-export function KnowledgeSection({ knowledge }: { knowledge: Knowledge }) {
+// What dot remembers, who it reaches for the user, what it hears about recent tasks, and the
+// skills it can use.
+export function KnowledgeSection({
+  knowledge,
+  known,
+  recentActivity,
+  onOpenTask,
+}: {
+  knowledge: Knowledge;
+  known: WhatDotKnows;
+  recentActivity?: RecentActivityControl;
+  onOpenTask?(sessionId: string): void;
+}) {
   const checking = knowledge.skillsPhase === "loading" || knowledge.skillsPhase === "unknown";
-  const reading = knowledge.memoryPhase === "loading";
   return (
     <div className="settings-knowledge">
-      <h4 className="settings-group-title">Skills</h4>
-      {knowledge.skillsPhase === "error" ? (
-        <div className="settings-inline">
-          <p className="settings-note">Skills couldn't be read.</p>
-          <Button variant="quiet" size="sm" onClick={knowledge.reloadSkills}>
-            Try again
-          </Button>
-        </div>
-      ) : checking ? (
-        <p role="status" className="settings-note">
-          Reading skills…
-        </p>
-      ) : knowledge.skills.length ? (
-        <ul className="settings-skills" aria-label="Skills">
-          {knowledge.skills.map((skill) => (
-            <li key={`${skill.source}:${skill.name}`}>
-              <span className="settings-skill-name">{skill.name}</span>
-              <Badge>{skill.source === "user" ? "Yours" : "Built in"}</Badge>
-              <span className="settings-skill-description">{skill.description}</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="settings-note">No skills yet.</p>
-      )}
-      <h4 className="settings-group-title">Memory</h4>
-      {knowledge.memory ? (
-        <>
-          <p className="settings-label">About you</p>
-          <pre className="settings-well">{knowledge.memory.user || "Nothing yet."}</pre>
-          <p className="settings-label">Its notes</p>
-          <pre className="settings-well">{knowledge.memory.memory || "Nothing yet."}</pre>
-        </>
-      ) : (
-        <div className="settings-inline">
-          <p className="settings-note">
-            {knowledge.memoryPhase === "error"
-              ? "Memory couldn't be read. Check the connection and try again."
-              : "What dot remembers about you and your work."}
-          </p>
-          <Button variant="quiet" size="sm" busy={reading} onClick={knowledge.rereadMemory}>
-            Show memory
-          </Button>
-        </div>
-      )}
+      <p className="settings-lede">
+        What dot remembers, the people it reaches and your recent tasks. It all stays on this Mac.
+      </p>
+      <MemoryEditor known={known} knowledge={knowledge} onOpenTask={onOpenTask} />
+      <PeopleList known={known} onOpenTask={onOpenTask} />
+      {recentActivity && <RecentActivity control={recentActivity} tasks={known.recent} />}
+      <div>
+        <GroupHead title="Skills" />
+        {knowledge.skillsPhase === "error" ? (
+          <Group>
+            <GroupRow
+              label="Couldn't load skills"
+              trailing={
+                <Button variant="quiet" size="sm" onClick={knowledge.reloadSkills}>
+                  Try again
+                </Button>
+              }
+            />
+          </Group>
+        ) : checking ? (
+          <Group aria-busy="true">
+            <GroupRow
+              label={<Skeleton loading width="12ch" />}
+              detail={<Skeleton loading width="28ch" />}
+            />
+          </Group>
+        ) : knowledge.skills.length ? (
+          <Group>
+            <ul className="settings-skills" aria-label="Skills">
+              {knowledge.skills.map((skill) => (
+                <li key={`${skill.source}:${skill.name}`}>
+                  <GroupRow
+                    label={skill.name}
+                    detail={<span className="settings-skill-description">{skill.description}</span>}
+                    trailing={<Badge>{skill.source === "user" ? "Yours" : "Built in"}</Badge>}
+                  />
+                </li>
+              ))}
+            </ul>
+          </Group>
+        ) : (
+          <Group>
+            <EmptyState icon="book" title="No skills yet" />
+          </Group>
+        )}
+      </div>
     </div>
   );
 }

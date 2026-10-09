@@ -38,7 +38,7 @@ describe("role card", () => {
     const view = render(<RoleCard {...props} />);
     const main = card("Main model");
     expect(within(main).getByText("Tools")).toBeTruthy();
-    expect(within(main).getByText("Can use files and the shell, not the screen")).toBeTruthy();
+    expect(within(main).getByText(/Can use files and the shell, not the screen\./)).toBeTruthy();
     expect(combo(main, "Key").textContent).toBe("inherited-key");
     view.rerender(<RoleCard {...props} keys={[]} />);
     fireEvent.keyDown(combo(main, "Key"), { key: "ArrowDown" });
@@ -52,7 +52,7 @@ describe("role card", () => {
     const view = render(<RoleCard {...props} />);
     expect(within(card("Main model")).queryByRole("combobox", { name: "Key" })).toBeNull();
     view.rerender(<RoleCard {...props} value={{ provider: "azure", model: "fixture" }} />);
-    expect(screen.getByText("The endpoint's address is set with the key.")).toBeTruthy();
+    expect(screen.getByText(/The endpoint's address is set with the key\./)).toBeTruthy();
     const add = screen.getByRole("button", { name: "Add key" });
     fireEvent.click(add);
     expect(props.onKeys).toHaveBeenCalledWith("main", "azure", add);
@@ -64,6 +64,28 @@ describe("role card", () => {
     expect(
       screen.getByText("Keys can't be read right now. Reconnect, then choose one."),
     ).toBeTruthy();
+  });
+  it("offers to add a key from the Key row's list, and as a button while there is none", () => {
+    const props = base();
+    const view = render(<RoleCard {...props} />);
+    const key = combo(card("Main model"), "Key");
+    fireEvent.keyDown(key, { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("option", { name: "Add a key…" }));
+    expect(props.onKeys).toHaveBeenCalledWith("main", "openai", key);
+    expect(props.onChange).not.toHaveBeenCalled();
+    view.rerender(
+      <RoleCard {...props} value={{ provider: "openai", model: "text-a" }} keys={[]} />,
+    );
+    expect(screen.queryByRole("combobox", { name: "Key" })).toBeNull();
+    expect(screen.getByText("No keys for OpenAI yet. Add one.")).toBeTruthy();
+    view.rerender(
+      <RoleCard
+        {...props}
+        value={{ provider: "openai", model: "text-a" }}
+        keys={[]}
+        keyLayer="offline"
+      />,
+    );
     expect(screen.getByRole("button", { name: "Add key" }).getAttribute("aria-disabled")).toBe(
       "true",
     );
@@ -145,7 +167,7 @@ describe("role card", () => {
       <RoleCard
         {...base()}
         modelRole="local"
-        inactive
+        inactive="Off while the main model uses the ChatGPT plan."
         value={{ provider: "ollama", model: "q" }}
       />,
     );

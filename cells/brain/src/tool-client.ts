@@ -3,6 +3,8 @@ import {
   BootConfig,
   type BrainEvent,
   BrainEvents,
+  ComputerAction,
+  computerWorkMs,
   InboxReply,
   MODEL_SCREEN,
   PauseSnapshot,
@@ -32,8 +34,11 @@ const WAITS_ON_USER = new Set([
   "browser_read",
   "browser_navigate",
   "browser_upload",
+  "browser_act",
   "remember",
   "done",
+  "routine",
+  "follow_up_at",
 ]);
 const transcriptReply = z.object({ messages: z.array(TranscriptMessage) });
 const regionSchema = z
@@ -111,6 +116,7 @@ export class ToolClient {
   readonly #baseUrl: string;
   readonly #fetch: typeof fetch;
   #closing?: Promise<void>;
+  #runWindowMs = 0;
 
   constructor(
     baseUrl: string,
@@ -144,7 +150,11 @@ export class ToolClient {
       "GET",
       "/v1/boot",
       undefined,
-      (b) => BootConfig.parse(JSON.parse(b)),
+      (b) => {
+        const boot = BootConfig.parse(JSON.parse(b));
+        this.#runWindowMs = boot.run ? boot.run.approvalWindowMinutes * 60_000 : 0;
+        return boot;
+      },
       BASE_TIMEOUT_MS,
       signal,
       [],
@@ -228,9 +238,16 @@ export class ToolClient {
   tool(name: string, callId: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     let timeoutMs: number | undefined = TOOL_WORK_MS;
     if (name === "shell") timeoutMs = ((ShellInput.parse(input).timeout_sec ?? 120) + 10) * 1000;
-    else if (name === "ask_user") timeoutMs = 30 * 60_000 + 10_000;
+    else if (name === "computer") {
+      const action = ComputerAction.safeParse(input);
+      if (action.success) timeoutMs = computerWorkMs(action.data);
+    }
+    // The user has thirty minutes, or a routine's own window; a secret answer is then typed into
+    // its field.
+    else if (name === "ask_user") timeoutMs = Math.max(30 * 60_000, this.#runWindowMs) + 60_000;
     else if (name === "request_takeover") timeoutMs = undefined;
-    if (timeoutMs !== undefined && WAITS_ON_USER.has(name)) timeoutMs += APPROVAL_TIMEOUT_MS;
+    if (timeoutMs !== undefined && WAITS_ON_USER.has(name))
+      timeoutMs += Math.max(APPROVAL_TIMEOUT_MS, this.#runWindowMs);
     return this.#json(
       "POST",
       `/v1/tools/${encodeURIComponent(name)}`,

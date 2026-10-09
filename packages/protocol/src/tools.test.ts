@@ -12,6 +12,7 @@ import {
   TranscriptAppend,
   TranscriptMessage,
 } from "./tool-api.ts";
+import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 import { GenericComputerInput, isToolName, TOOL_INPUTS, TOOL_NAMES } from "./tools.ts";
 
 const base = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "main" } as const;
@@ -26,12 +27,18 @@ describe("the v1 tool table", () => {
       "browser_read",
       "browser_navigate",
       "browser_upload",
+      "browser_act",
+      "find",
       "switch_screen",
       "update_plan",
       "ask_user",
       "request_takeover",
       "remember",
+      "recall",
+      "people",
       "done",
+      "routine",
+      "follow_up_at",
     ]);
     expect(isToolName("shell")).toBe(true);
     expect(isToolName("switch_screen")).toBe(true);
@@ -44,6 +51,26 @@ describe("the v1 tool table", () => {
       expect(isToolName(name)).toBe(false);
     }
     expect(Object.keys(TOOL_INPUTS).sort()).toEqual([...TOOL_NAMES].sort());
+  });
+
+  it("takes daily notes, bounded recall and flat people lookups", () => {
+    expect(TOOL_INPUTS.remember.safeParse({ file: "notes", op: "append", text: "x" }).success).toBe(
+      true,
+    );
+    expect(
+      TOOL_INPUTS.remember.safeParse({ file: "notes/2026-10-08.md", op: "append", text: "x" })
+        .success,
+    ).toBe(false);
+    expect(TOOL_INPUTS.recall.safeParse({ query: "x", limit: 8 }).success).toBe(true);
+    expect(TOOL_INPUTS.recall.safeParse({ query: "x", limit: 9 }).success).toBe(false);
+    expect(TOOL_INPUTS.recall.safeParse({ query: "" }).success).toBe(false);
+    expect(TOOL_INPUTS.people.safeParse({ op: "find", query: "Henry" }).success).toBe(true);
+    expect(
+      TOOL_INPUTS.people.safeParse({ op: "save", name: "Henry", app: "WeChat", handle: "henry_l" })
+        .success,
+    ).toBe(true);
+    expect(TOOL_INPUTS.people.safeParse({ op: "delete", name: "Henry" }).success).toBe(false);
+    expect(JSON.stringify(z.toJSONSchema(TOOL_INPUTS.people))).not.toMatch(/anyOf|oneOf/);
   });
 
   it("gives the generic computer tool a JSON Schema Gemini accepts: arrays, never tuples", () => {
@@ -92,6 +119,24 @@ describe("the v1 tool table", () => {
         [4, 5],
       ]),
     ]).toEqual([false, false, false]);
+  });
+
+  it("lets every call that acts carry dot's line for the user, described for the model", () => {
+    for (const schema of [
+      GenericComputerInput,
+      TOOL_INPUTS.computer,
+      TOOL_INPUTS.browser_act,
+      TOOL_INPUTS.shell,
+    ]) {
+      const intent = (z.toJSONSchema(schema) as { properties: Record<string, unknown> }).properties
+        .intent as { type: string; description: string };
+      expect(intent.type).toBe("string");
+      expect(intent.description).toContain("at most 12 words");
+      expect(intent.description).toContain("Opening Telegram to send your message");
+    }
+    expect(TOOL_INPUTS.shell.safeParse({ command: "ls", intent: "x".repeat(300) }).success).toBe(
+      true,
+    );
   });
 
   it("gives Codex's computer schema no tuple or union either", () => {
@@ -391,5 +436,31 @@ describe("agent events", () => {
         data: { askId: ID, question: "q".repeat(1001), options: [], allowText: true },
       }),
     ).toThrow();
+  });
+});
+
+describe("routine tools", () => {
+  it("are in the v1 table", () => {
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(["routine", "follow_up_at"]));
+    expect(TOOL_INPUTS.routine).toBe(RoutineToolInput);
+    expect(TOOL_INPUTS.follow_up_at).toBe(FollowUpAtInput);
+  });
+  it("give the model no way to activate, fund or loosen a routine", () => {
+    const parsed = RoutineToolInput.parse({
+      op: "propose",
+      name: "Bills",
+      instruction: "Check bills",
+      when: { kind: "daily", time: "08:30" },
+      active: true,
+      budget_usd: 50,
+      approval_window: 240,
+    });
+    expect(parsed).not.toHaveProperty("active");
+    expect(parsed).not.toHaveProperty("budget_usd");
+    expect(parsed).not.toHaveProperty("approval_window");
+    expect(RoutineToolInput.safeParse({ op: "propose", profile: "act_within_rules" }).success).toBe(
+      false,
+    );
+    expect(FollowUpAtInput.safeParse({ at: "2026-10-12 15:00", note: "x" }).success).toBe(false);
   });
 });

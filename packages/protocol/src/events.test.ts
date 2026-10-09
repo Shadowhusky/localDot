@@ -61,6 +61,14 @@ describe("parseEvent", () => {
     ).toThrow();
   });
 
+  it("accepts a memory change to a dated daily notes file only", () => {
+    const change = (file: string) =>
+      parseEvent({ ...base, type: "memory.change", data: { file, patch: "" } });
+    expect(change("notes/2026-10-08.md").type).toBe("memory.change");
+    for (const file of ["notes/../USER.md", "notes/x.md", "notes/2026-10-08.txt"])
+      expect(() => change(file)).toThrow();
+  });
+
   it("rejects an unknown event type", () => {
     expect(() => parseEvent({ ...base, type: "action.teleport", data: {} })).toThrow();
   });

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OutputStore } from "./output-store.ts";
+import { OutputStore, outputPath } from "./output-store.ts";
 
 const homes: string[] = [];
 afterEach(() => {
@@ -45,7 +45,7 @@ describe("atomic bounded output sink", () => {
   it("streams chunks to private files without reading into one response buffer", async () => {
     const f = fixture();
     const result = await f.store.save(f.session, "out.txt", bytes("first", "second"), f.scope);
-    expect(result).toEqual({ path: join(realpathSync(f.out), "out.txt"), bytes: 11 });
+    expect(result).toEqual({ path: join(realpathSync(f.out), "out.txt"), bytes: 11, version: 1 });
     expect(readFileSync(result.path, "utf8")).toBe("firstsecond");
     expect(statSync(result.path).mode & 0o777).toBe(0o600);
     expect(statSync(f.out).mode & 0o777).toBe(0o700);
@@ -135,5 +135,58 @@ describe("atomic bounded output sink", () => {
     f.controller.abort();
     await expect(f.store.save(f.session, "out.txt", bytes("x"), f.scope)).rejects.toThrow();
     expect(readdirSync(f.home)).toEqual([]);
+  });
+});
+
+describe("output versions", () => {
+  it("keeps every version and points out/<name> at the newest", async () => {
+    const f = fixture();
+    const v1 = await f.store.save(f.session, "totals.csv", bytes("a,b\n1,2\n"), f.scope);
+    const v2 = await f.store.save(f.session, "totals.csv", bytes("a,b\n1,3\n"), f.scope);
+    expect([v1.version, v2.version]).toEqual([1, 2]);
+    expect(
+      readdirSync(join(f.home, "sessions", f.session, "versions", "totals.csv")).sort(),
+    ).toEqual(["1", "2"]);
+    expect(
+      readFileSync(join(f.home, outputPath(f.session, "totals.csv", 1) as string), "utf8"),
+    ).toBe("a,b\n1,2\n");
+    expect(
+      readFileSync(join(f.home, outputPath(f.session, "totals.csv", 2) as string), "utf8"),
+    ).toBe("a,b\n1,3\n");
+    expect(readFileSync(join(f.out, "totals.csv"), "utf8")).toBe("a,b\n1,3\n");
+    expect(readdirSync(f.out)).toEqual(["totals.csv"]);
+  });
+  it("numbers versions per name and never reuses a number after a failed save", async () => {
+    const f = fixture();
+    await f.store.save(f.session, "a.txt", bytes("1"), f.scope);
+    await expect(f.store.save(f.session, "a.txt", bytes("x".repeat(17)), f.scope)).rejects.toThrow(
+      /limit/,
+    );
+    expect((await f.store.save(f.session, "b.txt", bytes("1"), f.scope)).version).toBe(1);
+    expect((await f.store.save(f.session, "a.txt", bytes("2"), f.scope)).version).toBe(2);
+    expect(readdirSync(join(f.home, "sessions", f.session, "versions", "a.txt")).sort()).toEqual([
+      "1",
+      "2",
+    ]);
+  });
+  it("saves small outputs synchronously through the same path", () => {
+    const f = fixture();
+    expect(f.store.saveBytes(f.session, "n.md", Buffer.from("# hi\n")).version).toBe(1);
+    expect(f.store.saveBytes(f.session, "n.md", Buffer.from("# hi!\n")).version).toBe(2);
+    expect(readFileSync(join(f.out, "n.md"), "utf8")).toBe("# hi!\n");
+    expect(() => f.store.saveBytes(f.session, "n.md", Buffer.alloc(17))).toThrow(/limit/);
+  });
+  it("refuses a linked versions folder and invalid version paths", async () => {
+    const f = fixture();
+    await f.store.save(f.session, "ok.txt", bytes("ok"), f.scope);
+    const versions = join(f.home, "sessions", f.session, "versions");
+    rmSync(versions, { recursive: true });
+    symlinkSync(f.home, versions);
+    await expect(f.store.save(f.session, "ok.txt", bytes("x"), f.scope)).rejects.toThrow(/link/);
+    expect(readFileSync(join(f.out, "ok.txt"), "utf8")).toBe("ok");
+    expect(outputPath(f.session, "ok.txt", 0)).toBeUndefined();
+    expect(outputPath(f.session, "../ok.txt", 1)).toBeUndefined();
+    expect(outputPath("not-a-ulid", "ok.txt", 1)).toBeUndefined();
+    expect(outputPath(f.session, "ok.txt", null)).toBe(`sessions/${f.session}/out/ok.txt`);
   });
 });

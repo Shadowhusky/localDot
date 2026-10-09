@@ -185,6 +185,26 @@ describe("ReplayVideo ownership and scheduling", () => {
     video.close();
   });
 
+  it("previews a drag from key frames alone, then seeks the exact frame on release", async () => {
+    const video = await ReplayVideo.open(source);
+    for (const target of [125, 345, 330, 2210, 140, 350]) {
+      (await video.want(target, "preview"))?.close();
+      expect(video.stats().openFrames).toBe(1);
+    }
+    expect(fixture.samples).not.toHaveBeenCalled();
+    expect(fixture.getSample.mock.calls.map(([seconds]) => seconds * 1000)).toEqual([
+      100, 300, 2200, 100, 300,
+    ]);
+    expect(video.stats().decoded).toBe(5);
+    const released = await video.want(345, "exact");
+    expect(released?.timestamp).toBe(340_000);
+    released?.close();
+    expect(fixture.samples).toHaveBeenCalledTimes(1);
+    video.close();
+    expect(video.stats().openFrames).toBe(0);
+    expect(samples.every((sample) => sample.close.mock.calls.length === 1)).toBe(true);
+  });
+
   it("settles shutdown during a decode and closes its late sample", async () => {
     const entered = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();

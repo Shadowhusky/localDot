@@ -15,6 +15,8 @@ function job(state: Partial<ExportJobState>): ExportJob {
     file: null,
     note: null,
     context: null,
+    where: null,
+    waiting: false,
     ...state,
   };
   return {
@@ -37,7 +39,7 @@ it("keeps Export focusable but off, and says why, where the browser cannot make 
   render(
     <ExportButton ref={null} job={job({})} open={false} disabledReason={reason} onOpen={onOpen} />,
   );
-  const trigger = screen.getByRole("button", { name: "Export MP4" });
+  const trigger = screen.getByRole("button", { name: "Export video" });
   expect(trigger.getAttribute("aria-disabled")).toBe("true");
   expect(trigger.hasAttribute("disabled")).toBe(false);
   expect(document.getElementById(trigger.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
@@ -52,7 +54,7 @@ it("turns into a ring that fills while a video is made with the popover put away
   const { rerender } = render(
     <ExportButton ref={null} job={exporting} open={false} onOpen={() => {}} />,
   );
-  const trigger = screen.getByRole("button", { name: "Export MP4" });
+  const trigger = screen.getByRole("button", { name: "Export video" });
   expect(trigger.hasAttribute("data-ring")).toBe(true);
   expect(ring().getAttribute("aria-valuenow")).toBe("30");
   expect(ring().getAttribute("aria-valuemax")).toBe("120");
@@ -73,7 +75,7 @@ it("holds a check once the video is ready, and opens even while the page would r
     />,
   );
   expect(ring().hasAttribute("data-complete")).toBe(true);
-  const trigger = screen.getByRole("button", { name: "Export MP4" });
+  const trigger = screen.getByRole("button", { name: "Export video" });
   expect(trigger.hasAttribute("aria-disabled")).toBe(false);
   fireEvent.click(trigger);
   expect(onOpen).toHaveBeenCalledOnce();

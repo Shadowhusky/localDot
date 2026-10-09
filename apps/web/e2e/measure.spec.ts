@@ -48,7 +48,7 @@ test("measure fps and CPU at 2x", async ({ page }) => {
   );
   await page.getByRole("button", { name: "Turn on" }).first().click();
   const cellId = ((await (await created).json()) as { id: string }).id;
-  await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 300_000 });
   const canvas = page.locator("canvas.stage-canvas");
   await expect
     .poll(async () => Number(await canvas.getAttribute("data-frames")), { timeout: 60_000 })

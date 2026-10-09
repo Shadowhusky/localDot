@@ -1,20 +1,27 @@
-import { RING_FADE_MS, RING_PX, RING_SCALE_MS } from "@localdot/stage";
+import type { Point, Rect } from "@localdot/protocol";
+import { cameraFor, toCanvas } from "@localdot/stage";
 
-// The mockup's arrow (c-theatre.html), tip at the origin, 24 px tall at scale 1, tilted 12°.
-const ARROW = [0, 0, 0, 17.6, 4.5, 13.3, 7.5, 20.2, 10.8, 18.8, 7.9, 12.2, 14.2, 12.2];
-export const CURSOR_HEIGHT_PX = 24;
-export const CURSOR_TILT_RAD = (-12 * Math.PI) / 180;
-const ARROW_SCALE = CURSOR_HEIGHT_PX / 20.2;
+// The macOS arrow of the design-v2 board, tip at the origin, as drawn in its 22 px box.
+const ARROW = [0, 0, 0, 15.6, 4.2, 11.5, 7.1, 18.1, 9.8, 16.9, 7, 10.4, 12.9, 10.4];
+export const ARROW_BOX_PX = 22;
+// The name chip needs room beside the cursor; on a small stage the cursor goes without it.
+export const CHIP_MIN_STAGE_PX = 600;
 
-export function cursorPolygon(scale: number): number[] {
-  return ARROW.map((v) => v * ARROW_SCALE * scale);
+export function cursorPolygon(): number[] {
+  return [...ARROW];
 }
 
-// Research §4.3.3: scale 0.6→1.0 over 225 ms (ease-out), opacity 0.7→0 over 300 ms.
-export function ringRadius(p: number): { outer: number; alpha: number } {
-  const u = Math.min(1, (p * RING_FADE_MS) / RING_SCALE_MS);
-  const eased = 1 - (1 - u) ** 3;
-  return { outer: (RING_PX / 2) * (0.6 + 0.4 * eased), alpha: 0.7 * (1 - p) };
+// The cursor's box height on a stage this many CSS px wide (design-v2 §12).
+export function cursorSizePx(stageWidth: number): number {
+  if (stageWidth >= 800) return 22;
+  if (stageWidth >= 600) return 18;
+  return 16;
+}
+
+// A focus ring's corner on the element's box padded 3, as the board draws it: 9 px, or half its
+// height on a small element.
+export function targetRadius(height: number): number {
+  return Math.min(9, (height + 6) / 2);
 }
 
 export function videoPlacement(
@@ -24,4 +31,29 @@ export function videoPlacement(
   const sx = screen.w / frame.w;
   const sy = screen.h / frame.h;
   return { sx, sy, mismatch: sx !== 1 || sy !== 1 };
+}
+
+// How far a target ring reaches past what it rings, in CSS px: overlays.ts pads a box by 6 under a
+// 6 px halo, and draws a 14 px circle round a point under the same halo.
+const RING_BOX_REACH_PX = 9;
+const RING_POINT_REACH_PX = 17;
+
+// The part of a stage `stage` CSS px in size that a field's target ring covers, in the same px.
+export function targetRingBox(
+  mark: { point: Point; bbox?: Rect },
+  screen: { w: number; h: number },
+  stage: { w: number; h: number },
+): Rect {
+  const camera = cameraFor({
+    stageW: stage.w,
+    stageH: stage.h,
+    desktopW: screen.w,
+    desktopH: screen.h,
+    zoom: 1,
+  });
+  const reach = mark.bbox ? RING_BOX_REACH_PX : RING_POINT_REACH_PX;
+  const at = toCanvas(camera, mark.bbox ?? mark.point);
+  const w = (mark.bbox?.w ?? 0) * camera.scale;
+  const h = (mark.bbox?.h ?? 0) * camera.scale;
+  return { x: at.x - reach, y: at.y - reach, w: w + 2 * reach, h: h + 2 * reach };
 }

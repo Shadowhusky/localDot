@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LocalDotEvent } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
 import { recoveryMessage } from "./TaskRecovery.tsx";
@@ -193,14 +193,107 @@ it("keeps the usage details open while a phone's toolbar hides", () => {
     "true",
   );
 });
+it("shows a Claude Code task's usage as the Claude plan's, never as money", () => {
+  const model = projectAgentEvent(
+    projectAgentEvent(
+      emptyAgentModel(),
+      event(0, "subscription.usage", {
+        provider: "claude-code",
+        plan: "max",
+        windows: [{ window: "primary", usedPercent: 40, windowMinutes: 300 }],
+        limitReached: false,
+      }),
+    ),
+    event(1, "model.usage", {
+      role: "main",
+      route: "claude-code",
+      model: "claude-sonnet-5-5",
+      inputTokens: 1200,
+      outputTokens: 300,
+    }),
+  );
+  const selection = { kind: "claude-code" as const, model: "sonnet" };
+  render(<UsageDetails model={model} selection={selection} />);
+  expect(screen.getByRole("heading", { name: "Claude plan · max" })).toBeTruthy();
+  expect(screen.getByRole("meter", { name: "5 hours window" })).toBeTruthy();
+  expect(document.body.textContent).toContain("Claude Code · 1 call");
+  expect(document.body.textContent).not.toContain("$");
+  expect(usageSummary(model, selection)).toBe("sonnet · 1.5K tokens");
+  expect(recoveryMessage("claude code sign-in expired", false)).toContain("claude auth login");
+});
 it("says a task that runs on a plan uses the plan's limits", () => {
   const roles = [{ role: "main" as const, provider: "minimax-coding-plan", model: "MiniMax-M3" }];
   const view = render(
     <UsageDetails model={emptyAgentModel()} selection={{ kind: "api", roles, plan: true }} />,
   );
-  expect(screen.getByText("Uses your plan's limits.")).toBeTruthy();
+  expect(screen.getByText("Included in your plan. Uses your plan's limits.")).toBeTruthy();
   view.rerender(<UsageDetails model={emptyAgentModel()} selection={{ kind: "api", roles }} />);
-  expect(screen.queryByText("Uses your plan's limits.")).toBeNull();
+  expect(screen.queryByText(/Uses your plan's limits/)).toBeNull();
+});
+
+describe("what a task cost, shown quietly", () => {
+  const roles = [{ role: "main" as const, provider: "openrouter", model: "glm-5.3" }];
+  const spent = (basis: "billed" | "estimated", extra = {}) =>
+    [
+      event(0, "model.usage", {
+        role: "main",
+        route: "openrouter",
+        model: "glm-5.3",
+        inputTokens: 24_000,
+        outputTokens: 1_100,
+      }),
+      event(1, "model.spend", {
+        route: "openrouter",
+        model: "glm-5.3",
+        costUSD: 0.21,
+        basis,
+        taskSpentUSD: 0.21,
+        daySpentUSD: 0.21,
+        ...extra,
+      }),
+    ].reduce(projectAgentEvent, emptyAgentModel());
+  it("says what the provider billed plainly, and marks an estimate with ≈", () => {
+    expect(usageSummary(spent("billed"), { kind: "api", roles })).toBe(
+      "glm-5.3 · 25.1K tokens · $0.21",
+    );
+    expect(usageSummary(spent("estimated"), { kind: "api", roles })).toBe(
+      "glm-5.3 · 25.1K tokens · ≈\u00a0$0.21",
+    );
+    expect(usageSummary(spent("billed"), { kind: "api", roles, plan: true })).toBe(
+      "glm-5.3 · 25.1K tokens",
+    );
+  });
+  it("shows this task and today, says there is no limit, and offers to set one", () => {
+    const onSpending = vi.fn();
+    render(
+      <UsageDetails
+        model={spent("estimated", { daySpentUSD: 1.4 })}
+        selection={{ kind: "api", roles }}
+        onSpending={onSpending}
+      />,
+    );
+    const text = screen.getByRole("region", { name: "Task usage" }).textContent;
+    expect(text).toContain("This task≈\u00a0$0.21");
+    expect(text).toContain("TodayAll tasks≈\u00a0$1.40");
+    expect(text).toContain("OpenRouter · 1 call · ≈\u00a0$0.21");
+    expect(text).toContain("≈ is an estimate from token counts and list prices.");
+    expect(text).toContain("No spending limit");
+    fireEvent.click(screen.getByRole("button", { name: "Set a limit…" }));
+    expect(onSpending).toHaveBeenCalledOnce();
+  });
+  it("names the limits the user set, and leaves out the estimate note when all was billed", () => {
+    render(
+      <UsageDetails
+        model={spent("billed", { taskLimitUSD: 5, dayLimitUSD: 20 })}
+        selection={{ kind: "api", roles }}
+        onSpending={vi.fn()}
+      />,
+    );
+    const text = screen.getByRole("region", { name: "Task usage" }).textContent;
+    expect(text).toContain("Limit $5 per task · $20 a day");
+    expect(text).not.toContain("≈");
+    expect(screen.getByRole("button", { name: "Change…" })).toBeTruthy();
+  });
 });
 it("names each provider as the registry does", () => {
   const model = projectAgentEvent(

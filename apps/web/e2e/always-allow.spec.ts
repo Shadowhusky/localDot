@@ -40,9 +40,23 @@ async function api<T>(path: string, origin: string): Promise<T> {
 async function requestSend(page: Page, origin: string) {
   const response = await page.request.post(`${origin}/__qa/approval?always=1`);
   expect(response.ok()).toBe(true);
-  const card = page.locator(".approval-card");
+  const card = page.locator(".decision");
   await expect(card).toBeVisible();
   return card;
+}
+
+// How far a yes reaches is chosen first; Send then answers with it.
+async function allow(page: Page, scope: string, phone: boolean) {
+  const trigger = page.getByRole("combobox", { name: "How long this answer lasts" });
+  if (phone) {
+    expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await trigger.tap();
+  } else await trigger.click();
+  const option = page.getByRole("option", { name: scope });
+  await expect(option).toBeVisible();
+  if (phone) await option.tap();
+  else await option.click();
+  await press(page, "Send", phone);
 }
 
 async function press(page: Page, name: string, phone: boolean) {
@@ -61,20 +75,10 @@ for (const size of SIZES)
     const page = await open(owned ?? browser, size);
     try {
       const origin = fixture?.origin ?? "";
-      const card = await requestSend(page, origin);
-      const toggle = await press(page, "Always allow…", size.phone);
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-      const choices = card.getByRole("group", { name: /^Allow sending messages without asking/ });
-      await expect(choices.getByRole("button")).toHaveText([
-        "For this task",
-        "On mail.example.test",
-      ]);
-      if (size.phone)
-        for (const control of [toggle, ...(await choices.getByRole("button").all())])
-          expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-      await press(page, "On mail.example.test", size.phone);
+      await requestSend(page, origin);
+      await allow(page, "On mail.example.test", size.phone);
 
-      await expect(page.locator(".approval-card")).toHaveCount(0);
+      await expect(page.locator(".decision")).toHaveCount(0);
       await expect(page.getByRole("status").filter({ hasText: "Allowed on" })).toHaveText(
         "Allowed on mail.example.test: sending messages.",
       );
@@ -104,9 +108,7 @@ for (const size of SIZES)
         expect((await remove.boundingBox())?.height).toBeGreaterThanOrEqual(44);
         await remove.tap();
       } else await remove.click();
-      await expect(
-        sheet.getByText("Nothing yet. Use Always allow on a request to add one."),
-      ).toBeVisible();
+      await expect(sheet.getByText("Nothing allowed yet")).toBeVisible();
       await expect(list).toHaveCount(0);
       expect((await api<{ rules: unknown[] }>("/api/agent/rules", origin)).rules).toEqual([]);
     } finally {
@@ -120,9 +122,8 @@ test("Undo from the status line takes back a task allowance", async ({ browser }
   try {
     const origin = fixture?.origin ?? "";
     await requestSend(page, origin);
-    await press(page, "Always allow…", false);
-    await press(page, "For this task", false);
-    await expect(page.locator(".approval-card")).toHaveCount(0);
+    await allow(page, "For this task", false);
+    await expect(page.locator(".decision")).toHaveCount(0);
     const status = page.getByRole("status").filter({ hasText: "this task" });
     await expect(status).toHaveText("Allowed for this task: sending messages.");
     await press(page, "Undo allowing sending messages for this task", false);

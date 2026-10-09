@@ -9,12 +9,18 @@ export class TaskAutonomy {
   readonly #allowed = new Map<ActionClass, RuleChange>();
   // Connections allowed for this task, by destination: one yes never opens every port.
   readonly #destinations = new Map<string, RuleChange>();
-  constructor(private readonly rules?: Pick<RulesStore, "matches" | "add">) {}
+  constructor(
+    private readonly rules?: Pick<RulesStore, "matches" | "add"> &
+      Partial<Pick<RulesStore, "trusts">>,
+  ) {}
   signedIn(screen: ScreenName): boolean {
     return screen === "browser" || this.#desktopSignedIn;
   }
   signIn(screen: ScreenName): void {
     if (screen === "desktop") this.#desktopSignedIn = true;
+  }
+  trusts(host: string): boolean {
+    return this.rules?.trusts?.(host) === true;
   }
   relaxes(actionClass: ActionClass, place: Place): boolean {
     const scopes = ALWAYS_SCOPES[actionClass];

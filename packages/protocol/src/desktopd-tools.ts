@@ -102,6 +102,21 @@ export const BrowserReadRequest = z.object({
   maxChars: z.number().int().min(500).max(100_000).default(20_000),
 });
 export type BrowserReadRequest = z.input<typeof BrowserReadRequest>;
+export const ELEMENT_REF = /^e[1-9][0-9]{0,15}$/;
+// An interactive element on screen, in model pixels; its ref names its DevTools node.
+export const PageElement = z.object({
+  ref: z.string().regex(ELEMENT_REF),
+  role: z.string().max(64),
+  name: z.string().max(200),
+  box: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+  value: z.string().max(200).optional(),
+  checked: z.enum(["true", "false", "mixed"]).optional(),
+  disabled: z.literal(true).optional(),
+  expanded: z.boolean().optional(),
+  secret: z.literal(true).optional(),
+});
+export type PageElement = z.infer<typeof PageElement>;
+
 export const BrowserReadResult = z.object({
   url: z.string(),
   title: z.string(),
@@ -109,6 +124,7 @@ export const BrowserReadResult = z.object({
   // A compact outline of the page's accessibility tree: one "role name" line per node.
   outline: z.string(),
   truncated: z.boolean(),
+  elements: z.array(PageElement).max(300).optional(),
 });
 export type BrowserReadResult = z.infer<typeof BrowserReadResult>;
 

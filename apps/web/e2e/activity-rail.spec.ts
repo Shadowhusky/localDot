@@ -3,8 +3,8 @@ import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixtu
 import { ENGINES } from "./ui-fixture.ts";
 
 // The Activity rail against the fixture daemon's long hand-drawing task: one scroller, the live
-// step in view, older runs folded, rows that unfold in place, and new steps that never move what
-// the reader is looking at.
+// step in view, one flat row per step, rows that unfold in place, and new steps that never move
+// what the reader is looking at.
 test.describe.configure({ timeout: 120_000 });
 
 const DESKTOP: BrowserContextOptions = { viewport: { width: 1440, height: 900 } };
@@ -32,7 +32,7 @@ async function open(engine: keyof typeof ENGINES, options: BrowserContextOptions
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1180)
+  if ((options.viewport?.width ?? 0) < 1100)
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
   const rail = page.getByRole("complementary", { name: "Plan and steps" });
   await expect(rail.locator("[data-current]")).toHaveCount(1);
@@ -61,19 +61,12 @@ function inView(page: Page, selector: string) {
 }
 
 for (const [engine, size, options] of MATRIX) {
-  test(`a long task opens on its live step, in one scroller, with older runs folded (${engine} ${size})`, async () => {
+  test(`a long task opens on its live step, in one scroller, as flat rows (${engine} ${size})`, async () => {
     const { browser, page, rail } = await open(engine, options);
     await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
     await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
     expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
-    await expect(rail.getByRole("button", { name: /^Open the paint app/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    await expect(rail.getByRole("button", { name: /^Colour the dog in/ })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    await expect(rail.locator(".activity-group, .ui-disclosure")).toHaveCount(0);
     // The plan header stays in view, as a strip of the plan's progress once the list scrolls away.
     await expect(rail.locator(".plan-head")).toHaveAttribute("data-stuck");
     expect(
@@ -82,7 +75,6 @@ for (const [engine, size, options] of MATRIX) {
         .evaluateAll((parts) => parts.map((part) => part.getAttribute("data-state"))),
     ).toEqual(["done", "done", "done", "doing", "todo", "skipped"]);
     // Every model call uses a key; those fold into their step. Only the blocked use is a row.
-    await rail.getByRole("button", { name: /^Sketch the dog's outline/ }).click();
     await expect(rail.getByTestId("key-use")).toHaveCount(1);
     await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");
     // No text in the rail reaches past its edges, whatever the scrollbar takes.
@@ -104,9 +96,7 @@ for (const [engine, size, options] of MATRIX) {
       }),
     ).toEqual([]);
     if (size === "phone")
-      for (const target of await rail
-        .locator(".activity-row-head, .ui-disclosure-trigger, .ui-segment")
-        .all()) {
+      for (const target of await rail.locator(".activity-row-head, .ui-segment").all()) {
         const box = await target.boundingBox();
         if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
       }
@@ -193,18 +183,11 @@ for (const engine of ["chrome", "webkit"] as const) {
   });
 }
 
-test("a blocked key use stays under the plan item it happened in when only tools show (chrome)", async () => {
-  const { browser, page, rail } = await open("chrome", DESKTOP);
+test("a blocked key use keeps its own row when only tools show (chrome)", async () => {
+  const { browser, rail } = await open("chrome", DESKTOP);
   await rail.getByRole("radio", { name: "Tools" }).click();
-  const name = /^Sketch the dog's outline/;
-  await rail.getByRole("button", { name }).click();
   await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");
-  await expect(
-    rail.locator(".activity-group", { has: page.getByRole("button", { name }) }),
-  ).toContainText("Blocked stock-images key");
-  await expect(rail.getByRole("button", { name: /^Open the paint app/ })).toHaveText(
-    "Open the paint app 1 step · 0:02",
-  );
+  await expect(rail.getByTestId("step-row")).toHaveCount(0);
   await browser.close();
 });
 

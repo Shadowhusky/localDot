@@ -9,21 +9,13 @@ import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Meter } from "../ui/Meter.tsx";
+import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { Progress } from "../ui/Progress.tsx";
+import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { chatgptSteps, megabytes } from "./chatgpt-steps.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
-
-const FAILURES = {
-  unsupported_platform: "ChatGPT support is unavailable on this platform.",
-  download_failed: "The download didn't finish. Check the connection and try again.",
-  integrity_failed: "The download didn't pass its check. Try the download again.",
-  unsafe_archive: "The download couldn't be installed safely. Try the download again.",
-  storage_failed: "ChatGPT support couldn't be saved. Check free space and try again.",
-  cancelled: "Installation was cancelled. You can install again when ready.",
-};
-
-const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 
 function limitName(minutes: number | undefined, fallback: string): string {
   if (minutes === 10_080) return "Weekly limit";
@@ -45,8 +37,9 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
   const status = account.summary;
   const install = status?.install;
   const ready = status?.available === true && install?.state === "ready";
-  const signingIn = ready && status.state === "signing_in";
-  const signedIn = ready && status.state === "signed_in";
+  const checked = ready && status.sandbox === "passed";
+  const signingIn = checked && status.state === "signing_in";
+  const signedIn = checked && status.state === "signed_in";
   const refused = account.error === CHATGPT_DEVICE_CODE_OFF;
   const waitReason = account.blocked
     ? "Paused while this page is offline or hidden"
@@ -61,7 +54,7 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
   const cancelReason =
     account.blocked || account.busy?.startsWith("cancel_") ? "Cancelling…" : undefined;
   return (
-    <section className="settings-card settings-chatgpt" aria-labelledby="chatgpt-title">
+    <section className="settings-chatgpt" aria-labelledby="chatgpt-title">
       <header className="settings-card-head">
         <div>
           <h4 id="chatgpt-title" className="settings-card-title">
@@ -111,57 +104,60 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
         </p>
       )}
 
-      {status?.available && install?.state === "not_installed" && (
-        <>
-          <p className="settings-note">
-            {account.installWatching
-              ? "Getting ready to install ChatGPT support…"
-              : "Install ChatGPT support to sign in with your account."}
-          </p>
-          {!account.installWatching && (
-            <div className="settings-actions">
-              <Button
-                variant="primary"
-                {...press("install")}
-                onClick={() => void account.install()}
-              >
-                Install ChatGPT support
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-      {status?.available && install?.state === "failed" && (
-        <>
-          <p className="settings-note">{FAILURES[install.code]}</p>
-          {install.code !== "unsupported_platform" && (
-            <div className="settings-actions">
-              <Button {...press("install")} onClick={() => void account.install()}>
-                Try again
-              </Button>
-            </div>
-          )}
-        </>
+      {status?.available && !signedIn && (
+        <ol className="settings-steps" aria-label="Setup">
+          {chatgptSteps(status, account.installWatching).map((step) => (
+            <li key={step.id} className="settings-step" data-state={step.state}>
+              <StatusGlyph state={step.state} className="settings-step-glyph" />
+              <span className="settings-step-text">
+                <span className="settings-step-name">{step.title}</span>
+                <span className="settings-step-detail">{step.detail}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
       )}
       {(install?.state === "downloading" || install?.state === "verifying") && (
-        <div className="settings-download">
-          <p className="settings-note">
-            {install.state === "verifying"
-              ? "Checking ChatGPT support…"
-              : install.totalBytes === undefined
-                ? `Downloading ChatGPT support… ${megabytes(install.receivedBytes)}`
-                : `Downloading ChatGPT support… ${megabytes(install.receivedBytes)} of ${megabytes(install.totalBytes)}`}
-          </p>
-          <Progress
-            label="ChatGPT download progress"
-            {...(install.state === "downloading" && install.totalBytes !== undefined
-              ? {
-                  value: install.receivedBytes,
-                  max: install.totalBytes,
-                  valueText: `${megabytes(install.receivedBytes)} of ${megabytes(install.totalBytes)}`,
-                }
-              : {})}
-          />
+        <Progress
+          label="ChatGPT download progress"
+          {...(install.state === "downloading" && install.totalBytes !== undefined
+            ? {
+                value: install.receivedBytes,
+                max: install.totalBytes,
+                valueText: `${megabytes(install.receivedBytes)} of ${megabytes(install.totalBytes)}`,
+              }
+            : {})}
+        />
+      )}
+      {status?.available && install?.state === "not_installed" && !account.installWatching && (
+        <div className="settings-actions">
+          <Button variant="primary" {...press("install")} onClick={() => void account.install()}>
+            Install ChatGPT support
+          </Button>
+        </div>
+      )}
+      {status?.available &&
+        install?.state === "failed" &&
+        install.code !== "unsupported_platform" && (
+          <div className="settings-actions">
+            <Button {...press("install")} onClick={() => void account.install()}>
+              Try again
+            </Button>
+          </div>
+        )}
+      {ready && status.sandbox === "failed" && (
+        <div className="settings-actions">
+          <Button variant="primary" {...press("check")} onClick={() => void account.checkSandbox()}>
+            Check again
+          </Button>
+        </div>
+      )}
+      {/* Sign-in comes next: it waits in its place while the check runs. */}
+      {ready && (status.sandbox === "checking" || status.sandbox === "unchecked") && (
+        <div className="settings-actions">
+          <Button variant="primary" disabledReason="Wait for the safety check to finish">
+            Sign in with code
+          </Button>
         </div>
       )}
       {account.canCancelInstall && (
@@ -176,13 +172,11 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
         </div>
       )}
 
-      {ready && (status.state === "signed_out" || status.state === "expired") && (
+      {checked && (status.state === "signed_out" || status.state === "expired") && (
         <>
-          <p className="settings-note">
-            {status.state === "expired"
-              ? "Your sign-in expired. Sign in again, then resume the paused task."
-              : "Sign in with your ChatGPT account using a code."}
-          </p>
+          {status.state === "expired" && (
+            <p className="settings-note">Sign in again, then resume the paused task.</p>
+          )}
           {status.state === "signed_out" && (
             // The same line in the same place when a code start is refused, so nothing moves; the
             // new key makes it a fresh alert that screen readers announce.
@@ -296,7 +290,7 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
         onClose={() => setConfirm(null)}
         anchor={more}
         title={confirm === "logout" ? "Sign out of ChatGPT?" : "Refresh this account?"}
-        description="This pauses current ChatGPT work. When the account is ready, use Resume task to continue."
+        description="This pauses current ChatGPT work. When the account is ready, press Continue on the computer."
       >
         <Button onClick={() => setConfirm(null)}>Keep account</Button>
         <Button
@@ -327,7 +321,7 @@ function SignedIn({ account }: { account: ChatgptControls }) {
         </span>
         <span className="settings-account-text">
           <span className="settings-account-email">
-            {email ? `Signed in as ${email}` : "Signed in"}
+            {email ? <MiddleTruncate text={`Signed in as ${email}`} /> : "Signed in"}
           </span>
           <span className="settings-note">{checkedAt(status.checkedAt)}</span>
         </span>

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EarlierTurns } from "./conversation.ts";
 import {
   AgentState,
   Heartbeat,
@@ -9,6 +10,8 @@ import {
   ThoughtDelta,
 } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { RECENT_TASKS, RecentLine } from "./recent-activity.ts";
+import { SessionRun } from "./routines.ts";
 
 // The brain's tool API (spec "Ports": 4751). The brain calls only these, through its gate, with
 // its own bearer token; everything it may do to the computer or the user goes through them.
@@ -69,18 +72,16 @@ export const SkillSummary = z.object({
 });
 export type SkillSummary = z.infer<typeof SkillSummary>;
 
+// The check-ins are the user's to turn on: without maxTurns dot never asks "Keep going?", and
+// without maxFailedCalls repeated failures go back to the model as a cue to change approach.
 export const AgentLimits = z.object({
-  maxTurns: z.number().int().positive(),
-  maxFailedCalls: z.number().int().positive(),
+  maxTurns: z.number().int().positive().optional(),
+  maxFailedCalls: z.number().int().positive().optional(),
   maxRetries: z.number().int().nonnegative(),
 });
 export type AgentLimits = z.infer<typeof AgentLimits>;
 
-export const DEFAULT_AGENT_LIMITS: AgentLimits = {
-  maxTurns: 150,
-  maxFailedCalls: 5,
-  maxRetries: 3,
-};
+export const DEFAULT_AGENT_LIMITS: AgentLimits = { maxRetries: 8 };
 
 export const BootConfig = z.object({
   sessionId: z.string().regex(ULID_PATTERN),
@@ -102,6 +103,12 @@ export const BootConfig = z.object({
   resume: z.boolean(),
   // The highest durably acknowledged inbox sequence, not the last item fetched.
   inboxAfter: z.number().int().nonnegative(),
+  // What was said earlier in the conversation this task continues.
+  earlier: EarlierTurns.optional(),
+  // The user's last few tasks, newest first, unless they turned this off.
+  recent: z.array(RecentLine).max(RECENT_TASKS).optional(),
+  // Present when a routine started this task: the brain is told it runs unattended.
+  run: SessionRun.optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 

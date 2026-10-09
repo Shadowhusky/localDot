@@ -45,6 +45,10 @@ function setup() {
       skipIdle: true,
       size: { w: 1280, h: 800 },
       captions: true,
+      overlays: true,
+      fps: 30,
+      quality: "high",
+      format: "mp4",
     },
     source: {
       sessionId,

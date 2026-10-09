@@ -43,7 +43,7 @@ async function open(
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1180)
+  if ((options.viewport?.width ?? 0) < 1100)
     await page.getByRole("tab", { name: /^Conversation/ }).click();
   const thread = page.getByRole("region", { name: "Conversation history" });
   await expect(thread.locator(".thread-row").first()).toBeVisible();
@@ -306,7 +306,7 @@ for (const [engine, size, options] of [
     await qa("budget");
     const recovery = thread.getByRole("region", { name: "Task recovery" });
     await expect(recovery).toContainText("$4 of $5 spent");
-    const title = recovery.getByRole("heading", { name: "Paused at the spending limit" });
+    const title = recovery.getByRole("heading", { name: "I stopped at your spending limit" });
     const raise = recovery.getByRole("button", { name: "Raise to $7 and continue" });
     await expect.poll(() => onScreen(page, title)).toBe(true);
     await expect.poll(() => onScreen(page, raise)).toBe(true);

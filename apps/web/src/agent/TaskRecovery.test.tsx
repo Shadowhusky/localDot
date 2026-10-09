@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { raiseChoice, raiseSteps, spendingText, TaskRecovery } from "./TaskRecovery.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -138,4 +138,110 @@ it("starts from the first step that covers a refusal that arrives after the card
   const view = render(<TaskRecovery agent={later} {...props} />);
   view.rerender(<TaskRecovery agent={agent} {...props} />);
   expect(screen.getByRole("button", { name: "Raise to $7 and continue" })).toBeTruthy();
+});
+
+describe("never silent: a line from dot and the one action that fixes it", () => {
+  const stalled = (state: "paused" | "idle" | "error", reason: string, detail?: string) => {
+    const agent = agentWith(reason);
+    return {
+      ...agent,
+      snapshot: agent.snapshot
+        ? { ...agent.snapshot, status: state === "idle" ? "idle" : "paused" }
+        : null,
+      model: { ...agent.model, state: { state, reason, ...(detail ? { detail } : {}) } },
+    } as AgentSessionView;
+  };
+  it("offers Retry now while dot waits on a busy model", () => {
+    const resume = vi.fn(async () => true);
+    render(
+      <TaskRecovery
+        agent={stalled("paused", "model busy")}
+        controls={{ ...controls, canResumeTask: true, resume }}
+        onSettings={vi.fn()}
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Task recovery" });
+    expect(region.textContent).toContain("The model is busy");
+    expect(screen.queryByRole("button", { name: "Change model" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    expect(resume).toHaveBeenCalledOnce();
+  });
+  it("says what the model said when it turned dot down, with Retry now and Change model", () => {
+    const onSettings = vi.fn();
+    render(
+      <TaskRecovery
+        agent={stalled("paused", "model refused", "400: image input is not supported")}
+        controls={{ ...controls, canResumeTask: true, resume: vi.fn(async () => true) }}
+        onSettings={onSettings}
+      />,
+    );
+    expect(screen.getByText("The model said: 400: image input is not supported")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Change model" }));
+    expect(onSettings).toHaveBeenCalledWith(expect.any(HTMLButtonElement), "models");
+    expect(screen.getByRole("button", { name: "Retry now" })).toBeTruthy();
+  });
+  it("continues a task the action limit stopped with a message, and says if it didn't go through", async () => {
+    const onContinue = vi.fn(async () => false);
+    render(
+      <TaskRecovery
+        agent={stalled("idle", "action limit")}
+        controls={controls}
+        onSettings={vi.fn()}
+        onContinue={onContinue}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Task recovery" }).textContent).toContain(
+      "I reached your action limit",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(onContinue).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+  it("stays out of the way while dot starts again by itself", () => {
+    render(
+      <TaskRecovery
+        agent={stalled("error", "the brain stopped; restarting from saved history")}
+        controls={controls}
+        onSettings={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
+  });
+});
+
+it("offers to carry on a task localDot went away under, and says when that can't happen yet", async () => {
+  const interrupted: AgentSessionView = {
+    ...agentWith("user"),
+    interrupted: true,
+    model: { ...emptyAgentModel(), state: { state: "acting" }, ended: { reason: "stopped" } },
+    snapshot: { sessionId, cellId: "01JXYZ0000000000000000CE11", status: "ended", toolCalls: 0 },
+  };
+  const view = render(
+    <TaskRecovery agent={interrupted} controls={controls} onSettings={vi.fn()} />,
+  );
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect(region.querySelector("h3")?.textContent).toBe("I was cut off before I finished");
+  expect(screen.getByRole("button", { name: "Continue" }).getAttribute("aria-disabled")).toBe(
+    "true",
+  );
+  const carryOn = vi.fn(async () => true);
+  view.rerender(
+    <TaskRecovery
+      agent={interrupted}
+      controls={controls}
+      onSettings={vi.fn()}
+      onCarryOn={carryOn}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(carryOn).toHaveBeenCalledOnce();
+  view.rerender(
+    <TaskRecovery
+      agent={{ ...interrupted, interrupted: false }}
+      controls={controls}
+      onSettings={vi.fn()}
+      onCarryOn={carryOn}
+    />,
+  );
+  expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
 });

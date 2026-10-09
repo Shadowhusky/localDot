@@ -1,5 +1,7 @@
 import type {
+  AskUserInput,
   BootConfig,
+  BrowserActInput,
   ComputerAction,
   InboxItem,
   ModelBinding,
@@ -7,10 +9,22 @@ import type {
   TranscriptMessage,
   UpdatePlanInput,
 } from "@localdot/protocol";
-import { isToolName, RESUME_WAIT_REASON } from "@localdot/protocol";
+import {
+  EARLIER_CHARS,
+  earlierRecord,
+  isToolName,
+  RESUME_WAIT_REASON,
+  STALL,
+} from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
-import { toComputerActions } from "./computer.ts";
+import {
+  actInModelSpace,
+  askInModelSpace,
+  elementsOnGrid,
+  pointsAtScreen,
+  toComputerActions,
+} from "./computer.ts";
 import {
   compactionEntry,
   compactionMessage,
@@ -25,11 +39,33 @@ import {
 } from "./context.ts";
 import type { EventSink } from "./events.ts";
 import { imagesInToolResults } from "./models.ts";
-import { type PlanLine, systemPrompt } from "./prompt.ts";
+import { type PlanLine, screenHands, systemPrompt } from "./prompt.ts";
 import type { ToolClient } from "./tool-client.ts";
 import { toolSet } from "./tools.ts";
 
 export type RunOutcome = "done" | "gave_up" | "stopped";
+
+// Tools that act on the screen: one that failed skips the turn's later ones.
+const ACTS_ON_SCREEN = new Set(["computer", "browser_act"]);
+// Tools whose screenshot shows the screen after them.
+const SHOWS_SCREEN = new Set(["computer", "browser_act", "browser_navigate"]);
+const LEFT_OUT = "(Screenshot left out: a later action in this turn returned a newer one.)";
+// The longest line said before a computer call that goes with the call, as its step's line does.
+const MAX_OPENING = 120;
+
+const fullFrames = (result: ToolResult) =>
+  result.content.filter((c) => c.type === "image" && !c.region).length;
+
+function withoutFrames(result: ToolResult): ToolResult {
+  if (!fullFrames(result)) return result;
+  return {
+    ...result,
+    content: [
+      ...result.content.filter((c) => c.type === "text" || c.region),
+      { type: "text", text: LEFT_OUT },
+    ],
+  };
+}
 
 // pi-agent-core's event contract and hooks (spec "Loop"): what a host can watch and veto.
 export type AgentEvent =
@@ -78,7 +114,22 @@ interface Call {
 
 const RETRYABLE = (status: number | undefined) =>
   status === undefined || status === 408 || status === 409 || status === 429 || status >= 500;
+// A busy or unreachable model is tried again after 2, 4, 8 … s, at most a minute apart, or after
+// what its Retry-After asks if longer, up to five minutes.
+const RETRY_FIRST_MS = 2000;
+const RETRY_MAX_MS = 60_000;
+const RETRY_AFTER_MAX_MS = 300_000;
+// A wait this long is the user's to see and cut short with Retry now; the inbox is checked this
+// often while it lasts.
+const LONG_WAIT_MS = 5000;
+const POLL_MS = 1000;
+// Without the user's failure check-in, this many failed actions in a row go back to the model as
+// a cue to change approach.
+const FAILURE_CUE = 3;
 const COMPACT_AT = 0.6;
+// The most of the model's window what was said earlier in the conversation may take, in
+// estimateTokens' characters per token.
+const EARLIER_SHARE = 0.15;
 const MAX_NUDGES = 2;
 
 const defaultSleep = (ms: number, signal: AbortSignal) =>
@@ -99,6 +150,29 @@ interface ModelStep {
   binding: ModelBinding;
   basedOn?: string;
 }
+
+function retryAfterMs(error: unknown): number | undefined {
+  if (!APICallError.isInstance(error)) return undefined;
+  const headers = error.responseHeaders ?? {};
+  const header = (name: string) =>
+    Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+  const ms = Number(header("retry-after-ms"));
+  if (Number.isFinite(ms) && ms >= 0) return ms;
+  const after = header("retry-after")?.trim();
+  if (!after) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(after)) return Number(after) * 1000;
+  const at = Date.parse(after);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
+}
+
+export function retryWaitMs(attempt: number, error?: unknown): number {
+  const backoff = Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** (attempt - 1));
+  const asked = retryAfterMs(error);
+  return asked === undefined ? backoff : Math.min(RETRY_AFTER_MAX_MS, Math.max(backoff, asked));
+}
+
+const FAILURE_NOTE = (n: number) =>
+  `Your last ${n} actions failed. Don't repeat them: look at what went wrong and try another way, such as a different control, the keyboard instead of the mouse, or another app or tool. Ask the user (ask_user) or hand them the computer (request_takeover) only if there is truly no way forward.`;
 
 let nextId = 0;
 const callId = (prefix: string) =>
@@ -190,7 +264,17 @@ export class Agent {
     const { boot, sink } = this.#o;
     signal.throwIfAborted();
     if (!boot.resume) {
-      const first: ModelMessage = { role: "user", content: [{ type: "text", text: boot.task }] };
+      const earlier = earlierRecord(
+        boot.earlier ?? [],
+        Math.min(EARLIER_CHARS, Math.floor(this.#binding().contextTokens * EARLIER_SHARE * 3.5)),
+      );
+      const first: ModelMessage = {
+        role: "user",
+        content: [
+          ...(earlier ? [{ type: "text" as const, text: earlier }] : []),
+          { type: "text", text: boot.task },
+        ],
+      };
       if (this.#binding().computer !== "none") {
         const shot = await this.#o.api.tool(
           "computer",
@@ -225,19 +309,23 @@ export class Agent {
       // Paused skipped calls are not a decision from the user to end the task.
       await this.#waitSafety(signal);
       const limits = boot.limits;
-      if (this.#turns >= limits.maxTurns) {
+      if (limits.maxTurns !== undefined && this.#turns >= limits.maxTurns) {
         if (
           !(await this.#keepGoing(`This task has taken ${this.#turns} steps. Keep going?`, signal))
         )
           return "gave_up";
         this.#turns = 0;
       }
-      if (this.#failed >= limits.maxFailedCalls) {
+      if (limits.maxFailedCalls !== undefined && this.#failed >= limits.maxFailedCalls) {
         if (
           !(await this.#keepGoing(`My last ${this.#failed} actions failed. Keep trying?`, signal))
         )
           return "gave_up";
         this.#failed = 0;
+      } else if (limits.maxFailedCalls === undefined && this.#failed >= FAILURE_CUE) {
+        this.#history.push({ role: "user", content: FAILURE_NOTE(this.#failed) });
+        this.#failed = 0;
+        await this.#persist(signal);
       }
       this.#turns += 1;
       this.#o.onEvent?.({ type: "turn_start", turn: this.#turns });
@@ -300,6 +388,9 @@ export class Agent {
       this.#history.push({ role: "user", content: item.text ?? "" });
       this.#persisted = this.#history.length;
       this.#sources.set(item.messageId, { seq: item.seq, text: item.text ?? "" });
+      // The user spoke: every count toward a check-in starts again.
+      this.#turns = 0;
+      this.#failed = 0;
     }
     await this.#acknowledge(signal);
   }
@@ -354,9 +445,10 @@ export class Agent {
     return reply.items;
   }
 
-  // Paused (budget, or every model unavailable): wait for the user's resume, or anything they say.
-  async #waitForResume(reason: string, signal: AbortSignal): Promise<boolean> {
-    this.#o.sink.state("paused", reason);
+  // Paused (budget, a refused request, or every model unavailable): wait for the user's resume,
+  // or anything they say, then go on thinking.
+  async #waitForResume(reason: string, signal: AbortSignal, detail?: string): Promise<boolean> {
+    this.#o.sink.state("paused", reason, detail);
     await this.#o.sink.flush();
     signal.throwIfAborted();
     for (;;) {
@@ -364,9 +456,29 @@ export class Agent {
       if (items === "stopped" || signal.aborted) return false;
       if (items.length) {
         await this.#deliverFollowUps(signal);
+        this.#o.sink.state("thinking");
         return true;
       }
     }
+  }
+
+  // Before a model call is tried again. A long wait shows as paused, so the user sees it and can
+  // cut it short: Retry now posts a resume, and anything they say retries at once too.
+  async #backoff(waitMs: number, signal: AbortSignal): Promise<"stopped" | undefined> {
+    const sleep = this.#o.sleep ?? defaultSleep;
+    if (waitMs < LONG_WAIT_MS) await sleep(waitMs, signal);
+    else {
+      this.#o.sink.state("paused", STALL.modelBusy);
+      await this.#o.sink.flush();
+      for (let left = waitMs; left > 0; left -= POLL_MS) {
+        await sleep(Math.min(left, POLL_MS), signal);
+        const items = await this.#drain(0, signal);
+        if (items === "stopped") return "stopped";
+        if (items.length) break;
+      }
+    }
+    signal.throwIfAborted();
+    this.#o.sink.state("thinking");
   }
 
   async #keepGoing(question: string, signal: AbortSignal): Promise<boolean> {
@@ -402,6 +514,14 @@ export class Agent {
       signal.throwIfAborted();
       const binding = this.#binding();
       const calls: Call[] = [];
+      // Anthropic's own computer tool has no field for dot's line, so dot says it just before
+      // its computer actions. That line goes with the call, beside dot, not into the
+      // conversation: a short opening waits until the reply shows what follows it.
+      let opening = screenHands(binding) === "calls" ? "" : undefined;
+      const say = (text: string) => {
+        sink.text(text);
+        this.#o.onEvent?.({ type: "message_update", delta: text });
+      };
       // This exact pruned prompt and full-frame basis belong to the whole returned tool batch.
       const messages = pruneScreenshots(this.#history);
       const basedOn = newestFullFrame(messages);
@@ -418,12 +538,25 @@ export class Agent {
         for await (const part of result.fullStream) {
           signal.throwIfAborted();
           if (part.type === "text-delta") {
-            sink.text(part.text);
-            this.#o.onEvent?.({ type: "message_update", delta: part.text });
+            if (opening === undefined) say(part.text);
+            else {
+              opening += part.text;
+              if (opening.length > MAX_OPENING || opening.trim().includes("\n")) {
+                say(opening);
+                opening = undefined;
+              }
+            }
           } else if (part.type === "reasoning-delta") {
             sink.push({ type: "thought.delta", data: { text: part.text } });
           } else if (part.type === "tool-call") {
-            calls.push(part as Call);
+            const line = opening?.trim();
+            if (line && part.toolName === "computer" && !part.invalid)
+              calls.push({ ...part, input: { intent: line, ...(part.input as object) } } as Call);
+            else {
+              if (opening) say(opening);
+              calls.push(part as Call);
+            }
+            opening = undefined;
           } else if (part.type === "error") {
             throw part.error;
           } else if (part.type === "finish") {
@@ -442,6 +575,7 @@ export class Agent {
             });
           }
         }
+        if (opening) say(opening);
         signal.throwIfAborted();
         const response = await result.response;
         signal.throwIfAborted();
@@ -470,18 +604,21 @@ export class Agent {
           if (!(await this.#waitForResume("budget", signal))) return "stopped";
           continue;
         }
+        const detail = status ? `${status}: ${message}` : message;
+        // Waiting for the user, never giving up silently: they can retry, or change the model.
         if (!RETRYABLE(status)) {
-          sink.state("error", `the model refused the request: ${message}`);
-          return "gave_up";
+          if (!(await this.#waitForResume(STALL.modelRefused, signal, detail))) return "stopped";
+          attempt = 0;
+          continue;
         }
         attempt += 1;
         if (attempt <= boot.limits.maxRetries) {
-          const waitMs = 1000 * 2 ** (attempt - 1);
+          const waitMs = retryWaitMs(attempt, err);
           sink.push({
             type: "model.retry",
             data: { role: this.#role, attempt, waitMs, ...(status ? { status } : {}), message },
           });
-          await (this.#o.sleep ?? defaultSleep)(waitMs, signal);
+          if ((await this.#backoff(waitMs, signal)) === "stopped") return "stopped";
           continue;
         }
         if (this.#role === "main" && this.#o.models.local && boot.models.local) {
@@ -500,18 +637,18 @@ export class Agent {
           });
           continue;
         }
-        if (!(await this.#waitForResume("model unavailable", signal))) return "stopped";
+        if (!(await this.#waitForResume(STALL.modelUnavailable, signal, detail))) return "stopped";
         attempt = 0;
         this.#role = "main";
       }
     }
   }
 
-  // The turn's calls, in order: a failed computer action stops the rest of the batch (spec "Tools").
+  // The turn's calls, in order: a failed screen action stops the rest of the batch (spec "Tools").
+  // Only the turn's newest screen goes back to the model: an earlier action's is already old.
   async #runCalls(step: ModelStep, signal: AbortSignal): Promise<RunOutcome | undefined> {
     const { calls, binding, basedOn } = step;
-    const parts: ReturnType<typeof resultParts>["part"][] = [];
-    const images: ReturnType<typeof resultParts>["images"] = [];
+    const done: { call: Call; result: ToolResult }[] = [];
     let batchFailed = false;
     let batchPaused = false;
     let final: RunOutcome | undefined;
@@ -541,7 +678,7 @@ export class Agent {
           ok: false,
           content: [{ type: "text", text: "Skipped: the task already ended." }],
         };
-      } else if (batchFailed && call.toolName === "computer") {
+      } else if (batchFailed && ACTS_ON_SCREEN.has(call.toolName)) {
         skipped = true;
         result = {
           ok: false,
@@ -561,19 +698,26 @@ export class Agent {
       signal.throwIfAborted();
       if (!result.ok && result.pause !== true && !skipped) {
         this.#failed += 1;
-        if (call.toolName === "computer") batchFailed = true;
+        if (ACTS_ON_SCREEN.has(call.toolName)) batchFailed = true;
       } else if (result.ok) this.#failed = 0;
       if (result.pause === true) batchPaused = true;
       if (result.final) final = result.ok && call.toolName === "done" ? "done" : "stopped";
-      const r = resultParts(call.toolCallId, call.toolName, result, imagesInToolResults(binding));
-      parts.push(r.part);
-      images.push(...r.images);
+      done.push({ call, result });
       this.#o.onEvent?.({
         type: "tool_execution_end",
         callId: info.callId,
         name: info.name,
         ok: result.ok,
       });
+    }
+    const newest = done.findLastIndex(({ result }) => fullFrames(result) > 0);
+    const parts: ReturnType<typeof resultParts>["part"][] = [];
+    const images: ReturnType<typeof resultParts>["images"] = [];
+    for (const [i, { call, result }] of done.entries()) {
+      const shown = i < newest && SHOWS_SCREEN.has(call.toolName) ? withoutFrames(result) : result;
+      const r = resultParts(call.toolCallId, call.toolName, shown, imagesInToolResults(binding));
+      parts.push(r.part);
+      images.push(...r.images);
     }
     this.#history.push({ role: "tool", content: parts });
     if (images.length)
@@ -609,13 +753,30 @@ export class Agent {
     if (call.toolName === "computer") {
       const actions = toComputerActions(call.input as never, binding.coords, basedOn);
       if (typeof actions === "string") return fail(actions);
-      if (!basedOn && actions.some((a) => a.action === "click" || a.action === "scroll"))
+      if (!basedOn && actions.some(pointsAtScreen))
         return fail("Take a full screenshot before choosing a point on the desktop.");
       result = await this.#computer(call.toolCallId, actions, signal);
       if (actions[0]?.action === "cursor_position" && binding.coords === "per1000")
         result = this.#cursorPer1000(result);
     } else {
-      result = await this.#o.api.tool(call.toolName, call.toolCallId, call.input, signal);
+      const input =
+        call.toolName === "ask_user"
+          ? askInModelSpace(call.input as AskUserInput, binding.coords)
+          : call.toolName === "browser_act"
+            ? actInModelSpace(call.input as BrowserActInput, binding.coords, basedOn)
+            : call.input;
+      if (typeof input === "string") return fail(input);
+      result = await this.#o.api.tool(call.toolName, call.toolCallId, input, signal);
+      if (
+        (call.toolName === "browser_read" || call.toolName === "find") &&
+        binding.coords === "per1000"
+      )
+        result = {
+          ...result,
+          content: result.content.map((c) =>
+            c.type === "text" ? { ...c, text: elementsOnGrid(c.text) } : c,
+          ),
+        };
     }
     signal.throwIfAborted();
     if (call.toolName === "update_plan" && result.ok)
