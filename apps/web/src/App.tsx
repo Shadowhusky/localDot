@@ -147,6 +147,13 @@ import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
 import { showToast, Toaster } from "./ui/Toast.tsx";
 import "./app.css";
+import { speechLanguage } from "./voice/language.ts";
+import { useListening } from "./voice/listening.ts";
+import { useVoicePrefs } from "./voice/prefs.ts";
+import { useReadAloud } from "./voice/read-aloud.ts";
+import { useVoiceSupport, voiceRoute } from "./voice/support.ts";
+import { browserLanguages } from "./voice/useVoice.ts";
+import { LISTENING_LINE } from "./voice/words.ts";
 
 export interface AppProps {
   fetchImpl?: typeof fetch;
@@ -545,6 +552,19 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  // Talking to dot: its listening pose and line, Settings → Voice, and replies read aloud.
+  const hearing = useListening();
+  const voicePrefs = useVoicePrefs();
+  const voiceBrowser = browserLanguages();
+  const voiceLanguage = speechLanguage(voicePrefs.value.language, voiceBrowser);
+  const voiceSupport = useVoiceSupport(api, voiceLanguage);
+  useReadAloud({
+    on: voicePrefs.value.readAloud,
+    sessionId: agent.sessionId,
+    history: !!agent.history,
+    messages: agent.model.messages,
+    language: voiceLanguage,
+  });
   // The conversation the user just chose: its thread clears at once and stays clear until the
   // chosen conversation is the one on show, so the one left behind never draws again.
   const [switching, setSwitching] = useState<{ to: string | null } | null>(null);
@@ -1373,8 +1393,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
-  const bandLine = idle ? idle.text : narration;
-  const bandSpeaker = idle ? "dot" : speaker;
+  const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
+  const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
@@ -1555,15 +1575,17 @@ function Theatre({ api }: { api: ApiClient }) {
                     line={bandLine}
                     speaker={bandSpeaker}
                     reveal={!!asked && narration === asked}
-                    forUser={!atWork(appStatus.row)}
+                    forUser={hearing || !atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
-                    idle={!!idle}
+                    idle={!hearing && !!idle}
                     action={
-                      tipAction && {
-                        label: tipAction.label,
-                        run: (trigger) => openTip(tipAction, trigger),
-                      }
+                      hearing || !tipAction
+                        ? undefined
+                        : {
+                            label: tipAction.label,
+                            run: (trigger) => openTip(tipAction, trigger),
+                          }
                     }
                     onHover={setOverBand}
                   />
@@ -1884,6 +1906,15 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
+          voice={{
+            prefs: voicePrefs.value,
+            saved: voicePrefs.saved,
+            change: voicePrefs.change,
+            route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
+            browser: voiceBrowser,
+            downloading: voiceSupport.downloading,
+            download: voiceSupport.download,
+          }}
           stopNote={stopNote}
           stream={streamChoice}
           stop={sheetStopControl}
@@ -2139,9 +2170,11 @@ function Theatre({ api }: { api: ApiClient }) {
                   done: false,
                   nod: setupStep,
                 }
-              : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+              : hearing
+                ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
+                : dotFeed(appStatus, session.sessionId ? session.model : null, now)
           }
-          line={onboarding.open || bandSpeaker !== "dot" ? "" : bandLine}
+          line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
         />
       )}
       <Announcer />

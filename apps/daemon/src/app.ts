@@ -28,6 +28,7 @@ import { NDJSON_TYPE } from "./sessions/ndjson.ts";
 import { eventStreamResponse, type ReplayRoutesDeps, replayRoutes } from "./sessions/routes.ts";
 import { serveUi } from "./static-ui.ts";
 import { tokensMatch } from "./token.ts";
+import { type VoiceRoutesDeps, voiceRoutes } from "./voice/routes.ts";
 
 export interface AppOptions {
   token: string;
@@ -51,6 +52,7 @@ export interface AppOptions {
   exports?: ExportJobs;
   notify?: NotifyRoutesDeps;
   routines?: RoutineRoutesDeps;
+  voice?: VoiceRoutesDeps;
 }
 
 export function createApp({
@@ -74,6 +76,7 @@ export function createApp({
   exports,
   notify,
   routines,
+  voice,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
     throw new Error("install codes belong to another daemon");
@@ -189,6 +192,7 @@ export function createApp({
   if (replay) replayRoutes(app, replay);
   if (deliverables) deliverableRoutes(app, { ...deliverables, port });
   if (notify) notifyRoutes(app, notify);
+  if (voice) voiceRoutes(app, voice);
   if (exports) exportRoutes(app, exports, new ExportLinks());
   return app;
 }

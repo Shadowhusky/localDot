@@ -1656,9 +1656,192 @@
   display: none;
 }
 
+/* While the user talks, the waveform takes the field's place inside the pill, up to the mic, and
+   the field keeps its size underneath, so the toolbar doesn't move. */
+.composer-card[data-layout="pill"][data-voice] .composer-hint {
+  position: absolute;
+  inset: 0 calc(36px + 32px + var(--spacing) * 3) 0 0;
+  z-index: 2;
+  display: flex;
+  padding-left: var(--spacing);
+  border-radius: calc(var(--spacing) * 5.5) 0 0 calc(var(--spacing) * 5.5);
+  background-color: var(--color-raised);
+}
+
 .composer-card[data-layout="pill"] :is(.composer-pop, .composer-send) {
   order: 3;
   margin-bottom: 2px;
+}
+
+/* The mic is attach's size, so it sits on the pill's floor as attach does. */
+.composer-card[data-layout="pill"] .composer-pop:has(> .voice-mic) {
+  margin-right: calc(var(--spacing) / 2);
+  margin-bottom: 0;
+}
+
+/* Talking to dot (the composer's mic). Quiet until held; while it listens, a soft face behind the
+   glyph breathes with the voice, and the row beside it shows the time, a live waveform and where the
+   words are made. Sliding away arms the cancel in the destructive colour. */
+.voice-mic {
+  position: relative;
+  display: inline-grid;
+  -webkit-touch-callout: none;
+}
+
+.voice-mic > .ui-icon-button {
+  grid-area: 1 / 1;
+}
+
+.voice-mic-halo {
+  grid-area: 1 / 1;
+  border-radius: var(--radius-row);
+  background-color: var(--color-control);
+  opacity: 0;
+  scale: 0.8;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    scale var(--dur-snappy) var(--ease-spring),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+.voice-mic[data-voice] > .voice-mic-halo {
+  opacity: 1;
+  scale: calc(1 + var(--_level, 0) * 0.2);
+  transition-duration: var(--dur-press), var(--dur-hover), var(--dur-hover);
+}
+
+.voice-mic[data-voice="finishing"] > .voice-mic-halo {
+  scale: 1;
+  opacity: 0.6;
+}
+
+.voice-mic[data-away] > .voice-mic-halo {
+  background-color: var(--color-danger-bg);
+  scale: 1;
+}
+
+.composer-card[data-layout="pill"] .voice-mic-halo {
+  border-radius: var(--radius-full);
+}
+
+/* While the user talks, or a turn just went wrong, the row's start is the voice's: it covers
+   attach and the send menu up to the mic, so the waveform has room and nothing else competes. */
+.composer-card[data-voice] .composer-bar {
+  position: relative;
+}
+
+/* Out of the row, the hint no longer pushes the mic and Send to its end. */
+.composer-card[data-voice]:not([data-layout="pill"]) .composer-pop:has(> .voice-mic) {
+  margin-left: auto;
+}
+
+.composer-card[data-voice]:not([data-layout="pill"]) .composer-hint {
+  position: absolute;
+  inset: 0 calc(28px + 32px + var(--spacing) * 2) 0 0;
+  z-index: 2;
+  display: flex;
+  background-color: var(--color-raised);
+}
+
+.voice-strip,
+.voice-notice {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  min-height: calc(var(--spacing) * 8);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  animation: voice-in var(--dur-fade) var(--ease-standard);
+}
+
+/* Its first word lines up with the message's text above it. */
+.voice-strip {
+  gap: calc(var(--spacing) * 2.5);
+  padding-inline: calc(var(--spacing) * 2) calc(var(--spacing) * 1.5);
+}
+
+.voice-time {
+  min-width: 3.5ch;
+  color: var(--color-fg-2);
+  font-weight: var(--font-weight-medium);
+}
+
+.voice-wave {
+  flex: 1;
+  min-width: 0;
+  height: calc(var(--spacing) * 5);
+  color: var(--color-fg-1);
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.voice-strip[data-away] .voice-wave {
+  opacity: 0.3;
+}
+
+/* Wide enough for every label it takes, so the waveform keeps its width when one changes. */
+.voice-tail {
+  min-width: 8em;
+  text-align: start;
+  color: var(--color-fg-3);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.voice-strip[data-away] .voice-tail {
+  color: var(--color-danger-fg);
+}
+
+.voice-cancel {
+  margin-right: calc(var(--spacing) * -1);
+}
+
+.voice-notice {
+  gap: calc(var(--spacing) * 1.5);
+  padding-inline: var(--spacing);
+  color: var(--color-fg-2);
+}
+
+.voice-notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A phone's one-line pill has room for the waveform and where the words are made only. */
+.composer-card[data-layout="pill"] .voice-time {
+  display: none;
+}
+
+.composer-card[data-layout="pill"] .voice-notice > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+}
+
+@keyframes voice-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-mic[data-voice] > .voice-mic-halo,
+  .voice-mic[data-away] > .voice-mic-halo {
+    scale: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .voice-mic[data-voice] {
+    outline: 1px solid Highlight;
+  }
+
+  .voice-wave {
+    color: CanvasText;
+  }
 }
 
 .thread-recovery-custom > .ui-collapse-inner {

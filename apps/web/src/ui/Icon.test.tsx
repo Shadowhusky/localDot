@@ -92,6 +92,8 @@ const PLANNED: IconName[] = [
   "plus",
   // Settings › Notifications: a phone's row.
   "smartphone",
+  // Talking to dot: the composer's mic and Settings › Voice.
+  "mic",
   // Research: many sources.
   "library",
 ];

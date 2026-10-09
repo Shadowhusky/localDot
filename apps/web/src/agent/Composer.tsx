@@ -33,6 +33,8 @@ import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
+import { useVoice } from "../voice/useVoice.ts";
+import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
 import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
@@ -170,12 +172,15 @@ const ComposerField = memo(function ComposerField({
   label,
   placeholder,
   unavailable,
+  listening,
   describedBy,
   events,
 }: {
   label: string;
   placeholder: string;
   unavailable: boolean;
+  // While the user talks, the words land here and the field waits for them.
+  listening: boolean;
   describedBy?: string;
   events: FieldEvents;
 }) {
@@ -188,8 +193,9 @@ const ComposerField = memo(function ComposerField({
       maxRows={8}
       maxLength={LIMIT}
       autoComplete="off"
-      readOnly={unavailable}
+      readOnly={unavailable || listening}
       aria-disabled={unavailable || undefined}
+      aria-busy={listening || undefined}
       aria-describedby={describedBy}
       {...events}
     />
@@ -423,6 +429,27 @@ export function Composer(props: ComposerProps) {
     const input = form.current?.querySelector("textarea");
     if (input) measure(input);
   }, [guard.notice, measure]);
+  // Spoken words land in the field as typed ones do; once final they are checked like a paste.
+  const voice = useVoice({
+    api: props.api,
+    field,
+    enabled: !props.keysOpen && !props.controlBlocked,
+    live: props.layout !== "pill",
+    changed: (input, caret) => {
+      revision.current += 1;
+      if (caret !== undefined) {
+        guardOwner.current.check(input);
+        if (!touch) {
+          input.focus();
+          input.setSelectionRange(caret, caret);
+        }
+        announce("composer", "Your words are in the message.");
+      }
+      measure(input);
+      if (problemShown.current !== null) setProblem(null);
+    },
+  });
+  const talking = voice.state.phase !== "idle";
   // dot has the message: its files went with it, and the draft clears unless it changed since.
   const delivered = (record: Delivery) => {
     announce(
@@ -541,7 +568,7 @@ export function Composer(props: ComposerProps) {
   };
   const submit = (later = false) => {
     const input = field();
-    if (!input || pending.current || composing.current || replying.current) return;
+    if (!input || pending.current || composing.current || replying.current || talking) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
       measure(input);
@@ -769,20 +796,22 @@ export function Composer(props: ComposerProps) {
   const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
   const reason = blockedReason(props, online, mode);
-  const sendReason = sending
-    ? "Sending…"
-    : uncertain
-      ? "Choose what to do with your last message first."
-      : guard.notice
-        ? "Discard the key or move it to Keys first."
-        : connect
-          ? "Choose a model first"
-          : (reason ??
-            (uploads.blocked
-              ? "Wait for your files to finish uploading."
-              : text.blank
-                ? "Write a message first."
-                : undefined));
+  const sendReason = talking
+    ? "Finish talking first."
+    : sending
+      ? "Sending…"
+      : uncertain
+        ? "Choose what to do with your last message first."
+        : guard.notice
+          ? "Discard the key or move it to Keys first."
+          : connect
+            ? "Choose a model first"
+            : (reason ??
+              (uploads.blocked
+                ? "Wait for your files to finish uploading."
+                : text.blank
+                  ? "Write a message first."
+                  : undefined));
   const attachReason = guard.notice
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
@@ -850,6 +879,7 @@ export function Composer(props: ComposerProps) {
         ref={form}
         className="composer-card"
         data-layout={pill ? "pill" : undefined}
+        data-voice={talking || voice.notice ? "" : undefined}
         aria-label="Message dot"
         data-dragging={dragging || undefined}
         onSubmit={(event) => {
@@ -925,6 +955,7 @@ export function Composer(props: ComposerProps) {
                   : "Message dot"
           }
           unavailable={!!unavailable}
+          listening={talking}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}
         />
@@ -947,7 +978,9 @@ export function Composer(props: ComposerProps) {
             />
           )}
           <div className="composer-hint">
-            {note && <span className="composer-note">{note}</span>}
+            <VoiceStrip voice={voice}>
+              {note && <span className="composer-note">{note}</span>}
+            </VoiceStrip>
           </div>
           <Pop shown={near}>
             {near && (
@@ -983,6 +1016,9 @@ export function Composer(props: ComposerProps) {
               Send after this task
             </MenuItem>
           </Menu>
+          <Pop shown={!pill || text.blank || talking || !!voice.notice}>
+            <VoiceButton voice={voice} size={pill ? 36 : 28} />
+          </Pop>
           <IconButton
             type="submit"
             className="composer-send"

@@ -47,6 +47,16 @@ export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
 
   useEffect(() => presence.current?.setReducedMotion(reduced), [reduced]);
   useEffect(() => presence.current?.view.setState(state), [state]);
+  // Listening to the user talk, dot looks at where the words go.
+  useEffect(() => {
+    if (feed.state !== "listening") return;
+    const rect = document.querySelector(".composer-card")?.getBoundingClientRect();
+    if (rect)
+      presence.current?.lookAtComposer({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+  }, [feed.state]);
   useEffect(() => presence.current?.view.setControl(feed.control), [feed.control]);
   const fx = feed.focus?.x;
   const fy = feed.focus?.y;
