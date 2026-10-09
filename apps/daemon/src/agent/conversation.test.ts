@@ -1,7 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConversationSnapshot, ulid } from "@localdot/protocol";
+import {
+  ConversationSnapshot,
+  EARLIER_CHARS,
+  EARLIER_LEFT_OUT,
+  earlierRecord,
+  ulid,
+} from "@localdot/protocol";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../event-log.ts";
@@ -177,6 +183,25 @@ describe("what was said earlier", () => {
     const turns = f.open().earlier(previous);
     expect(turns.some((turn) => turn.includes("An old task"))).toBe(false);
     expect(turns.at(-1)).toMatch(/^The user: Step 8 /);
+  });
+
+  it("hands over no more than the record can hold, and says when older turns are left out", async () => {
+    const f = setup();
+    const first = await f.task("The first task");
+    let previous = first;
+    for (let n = 0; n < 3; n++) {
+      for (let r = 0; r < 120; r++) f.reply(previous, `Reply ${n}.${r} ${"z".repeat(150)}`);
+      f.end(previous, "done");
+      previous = await f.task(`Task ${n}`, previous);
+    }
+    f.end(previous, "done");
+    const turns = f.open().earlier(previous);
+    expect(turns.reduce((sum, turn) => sum + turn.length + 1, 0)).toBeLessThanOrEqual(
+      EARLIER_CHARS,
+    );
+    expect(turns[0]).toBe(EARLIER_LEFT_OUT);
+    expect(turns.at(-1)).toBe("The user: Task 2");
+    expect(earlierRecord(turns)?.match(/left out/g)).toHaveLength(1);
   });
 });
 

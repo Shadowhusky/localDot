@@ -3,6 +3,7 @@ import {
   CONVERSATION_TASKS,
   type ConversationSnapshot,
   EARLIER_CHARS,
+  EARLIER_LEFT_OUT,
   EARLIER_TURN_CHARS,
   EARLIER_TURNS,
   type LocalDotEvent,
@@ -95,15 +96,20 @@ export class Conversations {
   // What was said in the conversation up to and including this task, for the task that continues
   // it: the newest turns, as many as the record holds.
   earlier(sessionId: string): string[] {
+    const chain = this.chain(sessionId);
     const turns: string[] = [];
     let used = 0;
-    for (const id of this.chain(sessionId).sessions.reverse()) {
+    for (const id of chain.sessions.reverse()) {
       const own = this.#turns(id);
-      turns.unshift(...own);
-      used += own.reduce((sum, turn) => sum + turn.length + 1, 0);
-      if (used >= EARLIER_CHARS) break;
+      for (let at = own.length - 1; at >= 0; at--) {
+        const turn = own[at] ?? "";
+        if (turns.length + 1 === EARLIER_TURNS || used + turn.length + 1 > EARLIER_CHARS)
+          return [EARLIER_LEFT_OUT, ...turns];
+        turns.unshift(turn);
+        used += turn.length + 1;
+      }
     }
-    return turns.slice(-EARLIER_TURNS);
+    return chain.more ? [EARLIER_LEFT_OUT, ...turns] : turns;
   }
 
   #turns(sessionId: string): string[] {
