@@ -20,7 +20,7 @@ import {
 import { FRAME_UPLOAD, frameUploader } from "./frame-upload.ts";
 import { videoPlacement } from "./geometry.ts";
 import { Overlays } from "./overlays.ts";
-import type { Presenter } from "./pump.ts";
+import { FrameRate, type Presenter } from "./pump.ts";
 import type { StageTheme } from "./theme.ts";
 
 export interface PresenterOptions {
@@ -46,11 +46,15 @@ export class PixiPresenter implements Presenter {
   readonly screen = new Container();
   readonly video = new Sprite();
   readonly overlays: Overlays;
+  // Frames handed in, and frames painted: one superseded before a render is closed unseen.
+  received = 0;
   presented = 0;
+  readonly #painted = new FrameRate(performance.now());
   warned = false;
   #source: ImageSource | null = null;
   // The newest frame, uploaded at the next render; one it supersedes is closed unseen.
   #next: VideoFrame | null = null;
+  #latestSize: { w: number; h: number } | null = null;
   #frameSize: { w: number; h: number } | null = null;
   #screen: { w: number; h: number } | null = null;
   #backdrop = false;
@@ -91,8 +95,14 @@ export class PixiPresenter implements Presenter {
     this.overlays.setViewport(opts.width, opts.height);
   }
 
+  // The newest frame's, so the camera frames a new size from the render that uploads it.
   get frameSize(): { w: number; h: number } | null {
-    return this.#frameSize;
+    return this.#latestSize;
+  }
+
+  // Painted frames per second.
+  get fps(): number {
+    return this.#painted.fps;
   }
 
   // Owns the frame: it is closed after its upload, or at once when a newer one supersedes it.
@@ -100,7 +110,10 @@ export class PixiPresenter implements Presenter {
     this.#backdrop = options?.backdrop === true;
     this.#next?.close();
     this.#next = frame;
-    this.presented += 1;
+    this.received += 1;
+    const w = frame.displayWidth;
+    const h = frame.displayHeight;
+    if (this.#latestSize?.w !== w || this.#latestSize.h !== h) this.#latestSize = { w, h };
   }
 
   #upload(frame: VideoFrame): void {
@@ -148,6 +161,7 @@ export class PixiPresenter implements Presenter {
     this.#source?.destroy();
     this.#source = null;
     this.#frameSize = null;
+    this.#latestSize = null;
   }
 
   // The session's screen is the world; a frame of another size is drawn into it, not the reverse.
@@ -205,9 +219,14 @@ export class PixiPresenter implements Presenter {
     this.#next = null;
     try {
       if (frame) this.#upload(frame);
-      const level = this.#tint(performance.now());
+      const now = performance.now();
+      const level = this.#tint(now);
       this.video.tint = (level << 16) | (level << 8) | level;
       this.app.renderer.render(this.app.stage);
+      if (frame) {
+        this.presented += 1;
+        this.#painted.count(now);
+      }
     } finally {
       frame?.close();
     }

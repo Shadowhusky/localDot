@@ -22,6 +22,25 @@ export interface PumpOptions {
   onError?: (err: unknown) => void;
 }
 
+// Frames per second, over windows of at least a second.
+export class FrameRate {
+  fps = 0;
+  #start: number;
+  #frames = 0;
+
+  constructor(now: number) {
+    this.#start = now;
+  }
+
+  count(now: number): void {
+    this.#frames += 1;
+    if (now - this.#start < 1000) return;
+    this.fps = Math.round((this.#frames * 1000) / (now - this.#start));
+    this.#frames = 0;
+    this.#start = now;
+  }
+}
+
 // One frame in, one upload out: the loop presents each decoded frame as it arrives and never
 // re-uploads on a display tick (A20).
 export function pumpFrames(
@@ -34,9 +53,7 @@ export function pumpFrames(
   const reportEveryMs = opts.reportEveryMs ?? 500;
   const reader = readable.getReader();
   let presented = 0;
-  let windowStart = now();
-  let windowFrames = 0;
-  let fps = 0;
+  const rate = new FrameRate(now());
   let lastReportAt = Number.NEGATIVE_INFINITY;
 
   const show = (frame: VideoFrame) => {
@@ -49,16 +66,11 @@ export function pumpFrames(
       throw err;
     }
     presented += 1;
-    windowFrames += 1;
     const t = now();
-    if (t - windowStart >= 1000) {
-      fps = Math.round((windowFrames * 1000) / (t - windowStart));
-      windowFrames = 0;
-      windowStart = t;
-    }
+    rate.count(t);
     if (presented === 1 || t - lastReportAt >= reportEveryMs) {
       lastReportAt = t;
-      report({ presented, fps, lastFrameAt: t, width, height });
+      report({ presented, fps: rate.fps, lastFrameAt: t, width, height });
     }
   };
 

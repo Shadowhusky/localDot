@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LINGER_MS } from "./render-gate.ts";
 import type { WorkerIn, WorkerOut } from "./worker-protocol.ts";
 
@@ -19,6 +20,7 @@ vi.mock("./pixi-presenter.ts", () => ({
       },
       setScreen() {},
       setCamera() {},
+      setDim() {},
       draw() {},
       render() {
         state.renders += 1;
@@ -27,13 +29,29 @@ vi.mock("./pixi-presenter.ts", () => ({
     }),
   },
 }));
+beforeEach(() => {
+  state.renders = 0;
+  state.pending = false;
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.resetModules();
 });
 
-it("renders a still stage once, sleeps, and wakes for a frame", async () => {
+let seq = 0;
+const ev = (type: string, tMs: number, data: Record<string, unknown>): LocalDotEvent =>
+  ({
+    v: 1,
+    id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N",
+    seq: seq++,
+    t: msToMicros(tMs),
+    agent: "main",
+    type,
+    data,
+  }) as LocalDotEvent;
+
+async function worker() {
   const scope: {
     onmessage: ((e: { data: WorkerIn }) => void) | null;
     postMessage(m: WorkerOut): void;
@@ -48,14 +66,26 @@ it("renders a still stage once, sleeps, and wakes for a frame", async () => {
   vi.stubGlobal("setTimeout", (fn: () => void) => timers.push(fn));
   vi.stubGlobal("clearTimeout", () => {});
   await import("./render-worker.ts");
-  const send = (data: WorkerIn) => scope.onmessage?.({ data });
+  let queue = Promise.resolve();
+  const send = (data: WorkerIn) => {
+    scope.onmessage?.({ data });
+    // The worker handles its messages in order on one promise chain; this waits for that turn.
+    queue = queue.then(() => new Promise((done) => setImmediate(done)));
+    return queue;
+  };
   const step = (ms: number) => {
     now += ms;
     const due = frames.splice(0);
     for (const fn of due) fn(now);
     return due.length;
   };
-  send({
+  // Waits out the stage's linger, then runs its idle look.
+  const settle = () => {
+    for (let ms = 0; ms <= LINGER_MS; ms += 16) step(16);
+    for (const look of timers.splice(0)) look();
+    step(16);
+  };
+  await send({
     type: "init",
     canvas: {} as OffscreenCanvas,
     width: 1280,
@@ -65,6 +95,11 @@ it("renders a still stage once, sleeps, and wakes for a frame", async () => {
     reducedMotion: false,
   });
   await vi.waitFor(() => expect(frames).toHaveLength(1));
+  return { send, step, settle, frames, timers, now: () => now };
+}
+
+it("renders a still stage once, sleeps, and wakes for a frame", async () => {
+  const { send, step, frames, timers } = await worker();
   step(16);
   expect(state.renders).toBe(1);
   // Nothing changes: the display frames go by without a render, then the worker stops asking.
@@ -78,4 +113,35 @@ it("renders a still stage once, sleeps, and wakes for a frame", async () => {
   step(16);
   expect(state.renders).toBe(2);
   send({ type: "stop" });
+});
+
+it("does not render a still stage for each word dot streams", async () => {
+  const { send, step, settle, now } = await worker();
+  await send({
+    type: "clock",
+    clock: { offsetMicros: 0, originMicros: msToMicros(performance.timeOrigin) },
+  });
+  await send({
+    type: "events",
+    events: [
+      ev("session.start", 0, { screen: { w: 1280, h: 800, scale: 1 }, os: "linux" }),
+      ev("agent.state", 1, { state: "acting" }),
+    ],
+  });
+  step(16);
+  settle();
+  const still = state.renders;
+  expect(still).toBeGreaterThan(0);
+  const messageId = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0M";
+  for (let word = 0; word < 25; word++) {
+    await send({
+      type: "events",
+      events: [ev("message.delta", now(), { messageId, text: ` word${word}` })],
+    });
+    step(40);
+  }
+  expect(state.renders).toBe(still);
+  await send({ type: "view", view: { dim: true } });
+  step(16);
+  expect(state.renders).toBe(still + 1);
 });
