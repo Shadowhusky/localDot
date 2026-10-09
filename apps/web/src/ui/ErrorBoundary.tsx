@@ -9,7 +9,11 @@ export interface ErrorBoundaryProps {
   // Over the page rather than in the part's place: for a part that floats, such as a sheet.
   floating?: boolean;
   className?: string;
+  // A part the page can do without, such as dot: it leaves no card and draws itself again later.
+  quiet?: boolean;
 }
+
+const QUIET_RETRY_MS = 5000;
 
 interface State {
   failed: boolean;
@@ -26,11 +30,24 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
     return { failed: true };
   }
 
+  #retry: ReturnType<typeof setTimeout> | undefined;
+
   reload = () => this.setState(({ attempt }) => ({ failed: false, attempt: attempt + 1 }));
+
+  componentDidCatch() {
+    if (!this.props.quiet) return;
+    clearTimeout(this.#retry);
+    this.#retry = setTimeout(this.reload, QUIET_RETRY_MS);
+  }
+
+  componentWillUnmount() {
+    clearTimeout(this.#retry);
+  }
 
   render() {
     if (!this.state.failed)
       return <Fragment key={this.state.attempt}>{this.props.children}</Fragment>;
+    if (this.props.quiet) return null;
     return (
       <div
         className={clsx("ui-part-failed", this.props.className)}

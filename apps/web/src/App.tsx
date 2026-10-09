@@ -2321,25 +2321,27 @@ function Theatre({ api }: { api: ApiClient }) {
         </ErrorBoundary>
       </Presence>
       {showDot.value && (
-        <PresenceLayer
-          place={place}
-          feed={
-            onboarding.open
-              ? {
-                  state: STEP_DOT[setupStep],
-                  control: false,
-                  attention: false,
-                  focus: null,
-                  dispatched: null,
-                  done: false,
-                  nod: setupStep,
-                }
-              : hearing
-                ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
-                : dotFeed(appStatus, session.sessionId ? session.model : null, now)
-          }
-          line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
-        />
+        <ErrorBoundary quiet>
+          <PresenceLayer
+            place={place}
+            feed={
+              onboarding.open
+                ? {
+                    state: STEP_DOT[setupStep],
+                    control: false,
+                    attention: false,
+                    focus: null,
+                    dispatched: null,
+                    done: false,
+                    nod: setupStep,
+                  }
+                : hearing
+                  ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
+                  : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+            }
+            line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
+          />
+        </ErrorBoundary>
       )}
       <Announcer />
     </div>
