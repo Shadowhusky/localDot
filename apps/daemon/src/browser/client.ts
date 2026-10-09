@@ -113,6 +113,16 @@ const page = BrowserReadResult.extend({
   outline: z.string().max(20000),
 }).strict();
 const stopped = identity.extend({ stopped: z.literal(true) });
+const cookieDomains = z.strictObject({
+  domains: z
+    .array(
+      z.strictObject({
+        domain: z.string().min(1).max(256),
+        count: z.number().int().positive(),
+      }),
+    )
+    .max(5000),
+});
 const BODY_LIMIT = 65536;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
 
@@ -223,6 +233,33 @@ export class BrowserClient {
 
   tabs(scope: BrowserScope): Promise<z.infer<typeof tabs>> {
     return this.#json("GET", "/tabs", undefined, scope, 3000, tabs, 65536);
+  }
+
+  // Cookie domains and how many cookies each holds; browserd never returns cookie values.
+  async cookieDomains(scope: BrowserScope): Promise<{ domain: string; count: number }[]> {
+    const reply = await this.#json(
+      "GET",
+      "/accounts/cookies",
+      undefined,
+      scope,
+      10000,
+      cookieDomains,
+      1024 * 1024,
+    );
+    return reply.domains;
+  }
+
+  async signOut(site: string, scope: BrowserScope): Promise<number> {
+    const reply = await this.#json(
+      "POST",
+      "/accounts/sign-out",
+      { site },
+      scope,
+      30000,
+      z.strictObject({ cookies: z.number().int().nonnegative() }),
+      1024,
+    );
+    return reply.cookies;
   }
 
   async armDownloads(raw: BrowserDownloadBinding, scope: BrowserScope): Promise<void> {

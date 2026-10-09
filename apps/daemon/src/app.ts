@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { ServiceReadinessReply } from "../../../packages/protocol/src/install-services.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
+import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
@@ -29,6 +30,7 @@ export interface AppOptions {
   cells?: CellApiDeps;
   desktop?: StreamProxyDeps;
   browser?: BrowserViewerDeps;
+  accounts?: AccountsDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
@@ -47,6 +49,7 @@ export function createApp({
   cells,
   desktop,
   browser,
+  accounts,
   ui,
   gateway,
   keys,
@@ -116,6 +119,7 @@ export function createApp({
     });
   if (installCodes) installCodeRoutes(app, installCodes);
   if (browser) browserViewerApi(app, browser);
+  if (accounts) accountsRoutes(app, accounts);
 
   app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
 

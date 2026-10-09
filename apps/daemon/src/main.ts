@@ -381,6 +381,7 @@ const app = createApp({
   cells: { cells: orchestrator, tickets, replacement, reset },
   desktop,
   browser: browserViewer,
+  accounts: { cells: orchestrator, browser },
   ui: { dir: webDir("dist") },
   gateway: {
     registry,

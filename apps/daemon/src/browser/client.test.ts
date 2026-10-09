@@ -73,6 +73,25 @@ const typeRequest = {
 const typeResult = { done: true, count: 2, firstPressMono: 1, armedMono: 0, injector: "xtest" };
 
 describe("daemon browser client", () => {
+  it("reads cookie domains and signs out of a site, refusing a reply that carries more", async () => {
+    let body = "";
+    let reply: unknown = { domains: [{ domain: "google.com", count: 2 }] };
+    const f = await fixture((request, response) => {
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () =>
+        send(response, request.url === "/accounts/sign-out" ? { cookies: 2 } : reply),
+      );
+    });
+    expect(await f.client.cookieDomains(f.scope)).toEqual([{ domain: "google.com", count: 2 }]);
+    expect(await f.client.signOut("google.com", f.scope)).toBe(2);
+    expect(JSON.parse(body)).toEqual({ site: "google.com" });
+    expect(f.seen.map((entry) => entry.path)).toEqual(["/accounts/cookies", "/accounts/sign-out"]);
+    reply = { domains: [{ domain: "google.com", count: 2, value: "secret" }] };
+    await expect(f.client.cookieDomains(f.scope)).rejects.toThrow("could not be read");
+  });
+
   it("sends only the private manual permit and accepts count-only confirmations", async () => {
     let body: unknown;
     const f = await fixture((request, response) => {
