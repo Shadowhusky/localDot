@@ -43,6 +43,8 @@ describe("dot's working rules", () => {
       "a secret field whose target is the password box",
       "Prefer a password or code to a QR code",
       "Use request_takeover only for a CAPTCHA, a device approval",
+      "then wait for them to hand control back",
+      "a link a desktop app opens there has none of the user's sign-ins, so open it with browser_navigate",
       "never get around it with tunnels, proxies or port forwards",
       "never name tools or localDot's internal parts",
     ])
