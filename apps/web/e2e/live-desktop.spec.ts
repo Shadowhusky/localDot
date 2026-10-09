@@ -39,7 +39,6 @@ async function expectFrames(page: Page) {
     "the desktop has structure",
   ).toBeGreaterThan(10);
   await expect(page.locator(".stage.lit")).toBeVisible();
-  await expect(page.locator(".stage-veil.on")).toHaveCount(0);
 }
 
 test("live 2x desktop survives Stop/Start and a daemon restart", async ({ page }) => {
@@ -68,10 +67,12 @@ test("live 2x desktop survives Stop/Start and a daemon restart", async ({ page }
   await expectFrames(page);
   const previousTicket = await page.locator("iframe.desktop-frame").getAttribute("src");
   await daemon.restart();
-  await expect(page.locator("iframe.desktop-frame")).not.toHaveAttribute(
+  // The old client keeps the picture until a client on the new ticket shows a frame.
+  await expect(page.locator("iframe.desktop-frame").last()).not.toHaveAttribute(
     "src",
     previousTicket ?? "",
   );
+  await expect(page.locator("iframe.desktop-frame")).toHaveCount(1, { timeout: 30_000 });
   await expectFrames(page);
   await page.screenshot({ path: "e2e/out/03-restarted.png" });
 

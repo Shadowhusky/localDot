@@ -52,7 +52,6 @@
   --spacing-caption-top: 26px;
   --spacing-caption-gap: 8px;
   --spacing-client-frame: 2px;
-  --spacing-client-frame-off: -20px;
   --radius-stage: var(--radius-lg);
   /* What a rail is drawn on, so its sticky headers cover what scrolls under them. */
   --rail-surface: var(--color-void);

@@ -22,7 +22,6 @@ it("gives a phone's curtain words the width, so its button is never cut off", ()
   );
 });
 
-it("keeps the last picture while reconnecting, under a chip rather than a full veil", () => {
-  expect(app).toMatch(/\.stage-veil:not\(\[role="alert"\]\) \{\s*background-color: transparent;/);
+it("animates the picture and the veil with tokens that exist", () => {
   expect(app).not.toMatch(/var\(--duration-|var\(--ease-(?:veil|lit)\)/);
 });

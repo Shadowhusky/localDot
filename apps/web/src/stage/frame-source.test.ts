@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { frameTapSupport, tapVideoTrack } from "./frame-source.ts";
+import { type FrameSource, framePath, frameTapSupport, tapVideoTrack } from "./frame-source.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -92,8 +92,9 @@ describe("frame source", () => {
   });
 });
 
-// Safari has no MediaStreamTrackProcessor; frames come from the client's <video> instead.
-function stubCallbackVideo(trackId = "t9") {
+// Safari has no MediaStreamTrackProcessor on the page: its worker reads a clone of the track, or
+// the frames the client's <video> presents are copied.
+function stubCallbackVideo(trackId = "t9", clones?: string[]) {
   vi.stubGlobal("OffscreenCanvas", class {});
   const made: { close: ReturnType<typeof vi.fn> }[] = [];
   vi.stubGlobal(
@@ -108,8 +109,11 @@ function stubCallbackVideo(trackId = "t9") {
   let pending: ((now: number, meta: unknown) => void) | undefined;
   const cancelled: number[] = [];
   let next = 0;
+  const track = clones
+    ? { id: trackId, clone: () => ({ id: `${trackId}-clone`, stop: () => clones.push("stop") }) }
+    : { id: trackId };
   const video = {
-    srcObject: { getVideoTracks: () => [{ id: trackId }] },
+    srcObject: { getVideoTracks: () => [track] },
     readyState: 0,
     requestVideoFrameCallback: (cb: (now: number, meta: unknown) => void) => {
       pending = cb;
@@ -164,5 +168,57 @@ describe("frame source without MediaStreamTrackProcessor", () => {
     expect(cancelled).toHaveLength(1);
     fire();
     expect(made).toHaveLength(0);
+  });
+});
+
+describe("frame source for a worker that reads tracks", () => {
+  it("hands the worker a clone of the client's track, with no seed from WebKit's stale video", () => {
+    const clones: string[] = [];
+    const { video, made } = stubCallbackVideo("t9", clones);
+    const source = tapVideoTrack({ ...video, readyState: 4 });
+    expect(source?.track).toMatchObject({ id: "t9-clone" });
+    expect(source?.first).toBeUndefined();
+    expect(made).toHaveLength(0);
+    expect(source?.frames).toBeTypeOf("function");
+    source?.stop();
+    expect(clones).toEqual(["stop"]);
+  });
+
+  it("leaves a track the worker took to the worker", () => {
+    const clones: string[] = [];
+    const { video } = stubCallbackVideo("t9", clones);
+    const source = tapVideoTrack(video);
+    if (!source) throw new Error("no source");
+    source.track = undefined;
+    source.stop();
+    expect(clones).toEqual([]);
+  });
+
+  it("leaves the clone out once the worker's read proved to show nothing", () => {
+    const clones: string[] = [];
+    const { video } = stubCallbackVideo("t9", clones);
+    const source = tapVideoTrack(video, { tracks: false });
+    expect(source?.track).toBeUndefined();
+    expect(source?.frames).toBeTypeOf("function");
+  });
+});
+
+describe("frame path", () => {
+  const track = {} as MediaStreamTrack;
+  const readable = new ReadableStream<VideoFrame>();
+  const frames = () => {};
+  const source = (parts: Partial<FrameSource>): FrameSource => ({
+    trackId: "t",
+    stop: () => {},
+    ...parts,
+  });
+
+  it("takes the fastest way the browser and its worker allow", () => {
+    expect(framePath(source({ readable }), null)).toBe("stream");
+    expect(framePath(source({ track, frames }), true)).toBe("track");
+    expect(framePath(source({ track, frames }), false)).toBe("presented");
+    expect(framePath(source({ track, frames }), null)).toBe("presented");
+    expect(framePath(source({ frames }), true)).toBe("presented");
+    expect(framePath(source({ track }), false)).toBeNull();
   });
 });
