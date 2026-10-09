@@ -235,8 +235,11 @@ export class DotEngine {
   setLod(lod: Lod, t: number): void {
     this.advance(t);
     if (lod === this.lod) return;
+    const rich = this.rich;
     this.lod = lod;
-    this.enter(this.current, t, null);
+    // Only a change in what the body may do restarts the state; a resize alone, as dot lands from a
+    // flight, carries on with whatever it was doing.
+    if (this.rich !== rich) this.enter(this.current, t, null);
   }
 
   setReducedMotion(on: boolean, t: number): void {

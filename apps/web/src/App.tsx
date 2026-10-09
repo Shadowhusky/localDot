@@ -1571,6 +1571,7 @@ function Theatre({ api }: { api: ApiClient }) {
       {showDot.value && (
         <PresenceLayer
           place={place}
+          provisional={curtain.up && curtain.phase === "checking"}
           feed={
             onboarding.open
               ? {
