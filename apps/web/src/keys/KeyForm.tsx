@@ -53,11 +53,13 @@ export interface KeyFormProps {
   // Offers Cancel, which clears the form, then calls this.
   onCancel?(): void;
 }
-export interface KeyFormPreset {
-  readonly requestId: number;
-  readonly provider: Provider;
-  readonly baseURL?: string;
-}
+export type KeyFormPreset =
+  | { readonly requestId: number; readonly provider: Provider; readonly baseURL?: string }
+  // A web API key with its host and header filled in, such as Jev's.
+  | {
+      readonly requestId: number;
+      readonly web: Pick<KeyDraft, "id" | "hosts" | "header" | "format">;
+    };
 export interface KeyIntake {
   // A synchronous one-shot DOM handoff, never a secret string prop or deferred queue.
   receive(source: HTMLInputElement, provider?: Provider): boolean;
@@ -143,16 +145,21 @@ export function KeyForm({
   }, [active]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a new preset resets the form
   useLayoutEffect(() => {
-    if (!preset || !Object.hasOwn(PROVIDER_NAMES, preset.provider)) return;
+    if (!preset) return;
+    if ("provider" in preset && !Object.hasOwn(PROVIDER_NAMES, preset.provider)) return;
     if (valueRef.current) valueRef.current.value = "";
     report();
     revision.current++;
-    setDraft({
-      ...EMPTY_DRAFT,
-      kind: "llm",
-      provider: preset.provider,
-      baseURL: preset.baseURL ?? "",
-    });
+    setDraft(
+      "web" in preset
+        ? { ...EMPTY_DRAFT, ...preset.web, kind: "http" }
+        : {
+            ...EMPTY_DRAFT,
+            kind: "llm",
+            provider: preset.provider,
+            baseURL: preset.baseURL ?? "",
+          },
+    );
     setProblem(null);
     setSaved(null);
     setTried(false);

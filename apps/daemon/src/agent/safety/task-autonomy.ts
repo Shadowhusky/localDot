@@ -7,12 +7,18 @@ import { ALWAYS_SCOPES, type Place, type RulesStore, ruleChange } from "./rules.
 export class TaskAutonomy {
   #desktopSignedIn = false;
   readonly #allowed = new Map<ActionClass, RuleChange>();
-  constructor(private readonly rules?: Pick<RulesStore, "matches" | "add">) {}
+  constructor(
+    private readonly rules?: Pick<RulesStore, "matches" | "add"> &
+      Partial<Pick<RulesStore, "trusts">>,
+  ) {}
   signedIn(screen: ScreenName): boolean {
     return screen === "browser" || this.#desktopSignedIn;
   }
   signIn(screen: ScreenName): void {
     if (screen === "desktop") this.#desktopSignedIn = true;
+  }
+  trusts(host: string): boolean {
+    return this.rules?.trusts?.(host) === true;
   }
   relaxes(actionClass: ActionClass, place: Place): boolean {
     const scopes = ALWAYS_SCOPES[actionClass];

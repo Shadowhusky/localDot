@@ -49,6 +49,17 @@
   margin-top: calc(var(--spacing) * 5);
 }
 
+.sign-in-form {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  width: 100%;
+  margin-top: calc(var(--spacing) * 5);
+}
+
+.sign-in-form > .ui-button {
+  justify-self: start;
+}
+
 .sign-in-foot {
   margin-top: calc(var(--spacing) * 4);
   color: var(--color-fg-3);
@@ -80,10 +91,11 @@
 
 .command-chip code {
   min-width: 0;
-  overflow-x: auto;
   color: var(--color-fg-1);
   font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
   user-select: all;
 }
 

@@ -237,7 +237,7 @@ describe("Export video", () => {
     fireEvent.click(preset("Fast"));
     fireEvent.click(speed("3×"));
     more();
-    fireEvent.click(screen.getByRole("switch", { name: /Captions/ }));
+    fireEvent.click(screen.getByRole("switch", { name: /Show the current step/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save…" }));
     const [chosenContext, request, expected] = started(job);
     expect(chosenContext).toMatchObject({ sessionId });
@@ -247,7 +247,7 @@ describe("Export video", () => {
       toMs: 60_000,
       speed: 3,
       skipIdle: true,
-      captions: false,
+      captions: true,
       overlays: true,
       size: { w: 1280, h: 800 },
       fps: 15,
@@ -288,7 +288,7 @@ describe("Export video", () => {
     await show(fakeJob());
     expect(preset("Custom")).toHaveProperty("checked", true);
     fireEvent.click(preset("Fast"));
-    expect(JSON.parse(localStorage.getItem("localdot.export.v1") ?? "{}")).toMatchObject({
+    expect(JSON.parse(localStorage.getItem("localdot.export.v2") ?? "{}")).toMatchObject({
       preset: "fast",
     });
   });

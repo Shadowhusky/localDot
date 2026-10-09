@@ -14,9 +14,11 @@ import { problemText } from "../keys/keys-api.ts";
 import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ChatgptPanel } from "../settings/ChatgptPanel.tsx";
+import { ClaudeCodePanel } from "../settings/ClaudeCodePanel.tsx";
 import { matchingKeys, type RoleChoice } from "../settings/choices.ts";
 import type { ProviderIndex } from "../settings/settings-api.ts";
 import { useChatgpt } from "../settings/useChatgpt.ts";
+import { useClaudeCode } from "../settings/useClaudeCode.ts";
 import { Button } from "../ui/Button.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -34,6 +36,7 @@ import {
 } from "./steps.tsx";
 import type { OnboardingControl } from "./useOnboarding.ts";
 import {
+  appKind,
   CUSTOM_PROVIDERS,
   kindOf,
   nextStep,
@@ -79,6 +82,7 @@ export interface SetupDraft {
 const FIRST_PROVIDER: Record<ThinkKind, string> = {
   api: "anthropic",
   chatgpt: "chatgpt",
+  "claude-code": "claude-code",
   plan: "minimax-coding-plan",
   local: "lmstudio",
   custom: "openai-compatible",
@@ -135,6 +139,12 @@ export function Onboarding(props: OnboardingProps) {
     [],
   );
   const chatgpt = useChatgpt(api, draft.kind === "chatgpt" && (step === "key" || step === "model"));
+  const claude = useClaudeCode(
+    api,
+    draft.kind === "claude-code" && (step === "key" || step === "model"),
+  );
+  // The models of the plan app chosen here, which the main model is one of.
+  const appModels = draft.kind === "claude-code" ? claude.models : chatgpt.models;
 
   // The column's content leaves before the next comes in; the rest of the page stays put.
   const [shown, setShown] = useState(step);
@@ -173,10 +183,10 @@ export function Onboarding(props: OnboardingProps) {
     ? models.some((model) => model.id === draft.model)
       ? draft.model
       : (recommended?.id ?? "")
-    : draft.kind === "chatgpt"
-      ? chatgpt.models.some((model) => model.id === draft.model)
+    : appKind(draft.kind)
+      ? appModels.some((model) => model.id === draft.model)
         ? draft.model
-        : (chatgpt.models[0]?.id ?? "")
+        : (appModels[0]?.id ?? "")
       : draft.model.trim();
   const allModels = index?.providers.find((row) => row.id === draft.provider)?.models ?? [];
   const fastPick = catalog ? recommendedFast(allModels, mainModel) : undefined;
@@ -248,7 +258,8 @@ export function Onboarding(props: OnboardingProps) {
     );
 
   const mainChoice = (): RoleChoice => {
-    if (draft.kind === "chatgpt") return { provider: "chatgpt", model: mainModel };
+    if (draft.kind === "chatgpt" || draft.kind === "claude-code")
+      return { provider: draft.kind, model: mainModel };
     if (draft.kind === "local") return { provider: draft.provider, model: mainModel };
     const key = chosenKey?.id ?? progress.key;
     return {
@@ -274,7 +285,7 @@ export function Onboarding(props: OnboardingProps) {
             else delete choices.fast;
             return { ...form, choices, prices };
           },
-          { subscriptionModels: chatgpt.models },
+          { subscriptionModels: appModels },
         ),
       () => {
         props.onSaved();
@@ -289,7 +300,7 @@ export function Onboarding(props: OnboardingProps) {
       () =>
         saveSetup(api, (form) => ({ ...form, autonomy: policy }), {
           autonomy: policy,
-          subscriptionModels: chatgpt.models,
+          subscriptionModels: appModels,
         }),
       () => {
         props.onSaved();
@@ -300,6 +311,11 @@ export function Onboarding(props: OnboardingProps) {
   const keyStep = () => {
     if (draft.kind === "chatgpt")
       return { reason: chatgpt.canStart ? undefined : "Sign in with ChatGPT first", run: advance };
+    if (draft.kind === "claude-code")
+      return {
+        reason: claude.canStart ? undefined : "Set up Claude Code first",
+        run: () => advance({ provider: draft.provider }),
+      };
     if (draft.kind === "local") return { run: () => advance({ provider: draft.provider }) };
     if (draft.kind === "custom" && !/^https:\/\//.test(draft.address.trim()))
       return { reason: "Enter the server's https:// address first", run: () => {} };
@@ -326,8 +342,7 @@ export function Onboarding(props: OnboardingProps) {
 
   const modelName = (() => {
     const id = saved?.main?.model ?? mainModel;
-    if (draft.kind === "chatgpt")
-      return chatgpt.models.find((model) => model.id === id)?.name ?? id;
+    if (appKind(draft.kind)) return appModels.find((model) => model.id === id)?.name ?? id;
     return allModels.find((model) => model.id === id)?.name ?? id;
   })();
 
@@ -358,7 +373,12 @@ export function Onboarding(props: OnboardingProps) {
             <ThinksStep
               value={draft.kind}
               chatgptReason={
-                index?.subscriptions[0]?.available === false
+                index?.subscriptions.find((row) => row.id === "chatgpt")?.available === false
+                  ? "Not available on this Mac yet."
+                  : undefined
+              }
+              claudeReason={
+                index?.subscriptions.find((row) => row.id === "claude-code")?.available === false
                   ? "Not available on this Mac yet."
                   : undefined
               }
@@ -395,6 +415,8 @@ export function Onboarding(props: OnboardingProps) {
         const body =
           draft.kind === "chatgpt" ? (
             <ChatgptPanel account={chatgpt} />
+          ) : draft.kind === "claude-code" ? (
+            <ClaudeCodePanel claude={claude} titled={false} />
           ) : draft.kind === "local" ? (
             <LocalStep value={draft.provider} onChange={pick} />
           ) : draft.kind === "custom" ? (
@@ -443,19 +465,18 @@ export function Onboarding(props: OnboardingProps) {
       case "model":
         return {
           title: "Which model should do the work?",
-          sub:
-            draft.kind === "chatgpt"
-              ? "One of your plan's models. Change it any time in Settings."
-              : catalog
-                ? "Picked for your key. Change it any time in Settings."
-                : "Type the model's name as your server shows it.",
+          sub: appKind(draft.kind)
+            ? "One of your plan's models. Change it any time in Settings."
+            : catalog
+              ? "Picked for your key. Change it any time in Settings."
+              : "Type the model's name as your server shows it.",
           body: (
             <ModelStep
               kind={draft.kind}
               provider={draft.provider}
-              models={draft.kind === "chatgpt" ? [] : models}
+              models={appKind(draft.kind) ? [] : models}
               allModels={allModels}
-              subscriptionModels={chatgpt.models}
+              subscriptionModels={appModels}
               main={mainModel}
               recommended={recommended?.id}
               typedModel={draft.model}
@@ -631,8 +652,12 @@ const KEY_COPY: Record<ThinkKind, { title: string; sub: string }> = {
     sub: "Choose your plan, then paste its key. It stays in your Mac's keychain.",
   },
   chatgpt: {
-    title: "Sign in with ChatGPT",
-    sub: "dot uses your ChatGPT plan. Sign in once on this Mac.",
+    title: "Set up your ChatGPT plan",
+    sub: "dot uses your ChatGPT plan. Set it up once on this Mac.",
+  },
+  "claude-code": {
+    title: "Set up Claude Code",
+    sub: "dot works through your own Claude Code on this Mac. Install it and sign in there, once.",
   },
   local: {
     title: "Which app runs your model?",

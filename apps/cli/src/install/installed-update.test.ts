@@ -24,6 +24,11 @@ const mock = vi.hoisted(() => ({
   remove: vi.fn(),
   contain: vi.fn(),
   runtimes: vi.fn(),
+  sync: vi.fn(),
+}));
+vi.mock("./login-agent.ts", () => ({
+  syncLoginAgent: mock.sync,
+  nodeLoginAgentHost: () => ({ fake: true }),
 }));
 vi.mock("./promote-release.ts", () => ({ installedReleaseVerifier: () => mock.release }));
 vi.mock("./service-journal.ts", async (original) => ({
@@ -284,4 +289,22 @@ it("checks both selected identity and fresh service readiness", async () => {
     await f.records.save({ ...f.old, id: "fedcba98-7654-4321-abcd-123456789abc" });
   });
   await expect(host.healthy(f.previous.release, signal())).rejects.toThrow();
+});
+it("re-points the login agent at the release it just started", async () => {
+  const f = await fixture();
+  mock.sync.mockResolvedValue("on");
+  expect((await activateUpdate(f.host(), f.candidate.release, signal())).phase).toBe("committed");
+  expect(mock.sync).toHaveBeenCalledWith(
+    expect.objectContaining({ release: f.candidate.release }),
+    { fake: true },
+    expect.any(AbortSignal),
+  );
+});
+it("still reports a successful update when re-pointing the login agent fails", async () => {
+  const f = await fixture();
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+  mock.sync.mockRejectedValue(new Error("Start at login could not be changed safely."));
+  expect((await activateUpdate(f.host(), f.candidate.release, signal())).phase).toBe("committed");
+  expect(quiet).toHaveBeenCalledWith(expect.stringContaining("start at login"));
+  quiet.mockRestore();
 });

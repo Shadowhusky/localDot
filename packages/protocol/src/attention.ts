@@ -18,3 +18,37 @@ export function mostUrgent(levels: Iterable<Attention | null>): Attention | null
       top = level;
   return top;
 }
+
+// The notification ledger's levels: the same order, with failed kept apart from blocked (they rank
+// the same) and none for a session that asks nothing.
+export const AttentionLevel = schema.enum([
+  "needs_you",
+  "blocked",
+  "failed",
+  "done",
+  "working",
+  "none",
+]);
+export type AttentionLevel = schema.infer<typeof AttentionLevel>;
+
+const orderRank = (level: Attention) => ATTENTION_ORDER.length - ATTENTION_ORDER.indexOf(level);
+
+export const ATTENTION_RANK: Readonly<Record<AttentionLevel, number>> = Object.freeze({
+  needs_you: orderRank("needs_you"),
+  blocked: orderRank("blocked"),
+  failed: orderRank("blocked"),
+  done: orderRank("done"),
+  working: orderRank("working"),
+  none: 0,
+});
+
+// Sorts the most urgent first.
+export function compareAttention(a: AttentionLevel, b: AttentionLevel): number {
+  return ATTENTION_RANK[b] - ATTENTION_RANK[a];
+}
+
+export function topAttention(levels: Iterable<AttentionLevel>): AttentionLevel {
+  let top: AttentionLevel = "none";
+  for (const level of levels) if (ATTENTION_RANK[level] > ATTENTION_RANK[top]) top = level;
+  return top;
+}

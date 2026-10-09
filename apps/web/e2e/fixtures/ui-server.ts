@@ -1,4 +1,4 @@
-import { webcrypto } from "node:crypto";
+import { createECDH, webcrypto } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
@@ -11,10 +11,15 @@ import { parseArgs } from "node:util";
 import {
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
+  CLAUDE_CODE_INSTALL,
+  CLAUDE_CODE_SIGN_IN,
+  CLAUDE_CODE_UPDATE,
+  type ClaudeCodeStatus,
   type KeydRecord,
   microsToMs,
   msToMicros,
   type Point,
+  type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -34,9 +39,12 @@ import {
   type ChatgptStatus,
   type CodexAccount,
 } from "../../../daemon/src/agent/codex/account.ts";
+import type { ChatgptSetupControl } from "../../../daemon/src/agent/codex/setup.ts";
 import { Conversations } from "../../../daemon/src/agent/conversation.ts";
 import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
+import { PeopleStore } from "../../../daemon/src/agent/people.ts";
+import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
@@ -46,11 +54,13 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { PurposeGate } from "../../../daemon/src/agent/safety/purpose.ts";
 import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
+import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
 import { ComputerUpdateRefused } from "../../../daemon/src/cells/computer-update.ts";
 import type { CellControls } from "../../../daemon/src/cells/orchestrator.ts";
@@ -77,8 +87,14 @@ import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
 import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
+import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
+import { nextDue } from "../../../daemon/src/routines/schedule.ts";
+import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
+import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
+import { SearchFeed } from "../../../daemon/src/search/search-feed.ts";
+import { SearchIndex } from "../../../daemon/src/search/search-index.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
@@ -140,11 +156,20 @@ const settingsMode = env.QA_SETTINGS ?? "configured";
 let chatgptState = (env.QA_CHATGPT || undefined) as
   | "signed_in"
   | "signed_out"
+  | "checking"
+  | "check_failed"
   | "not_installed"
   | "unavailable"
   | undefined;
 let deviceCodeOff = false,
   signingIn: ChatgptLogin | undefined;
+// The user's own Claude Code, as its status command would report it.
+let claudeCodeState = (env.QA_CLAUDE_CODE || undefined) as
+  | "not_installed"
+  | "outdated"
+  | "signed_out"
+  | "signed_in"
+  | undefined;
 let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
 const replays = Number(env.QA_REPLAYS ?? 2);
 const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
@@ -212,6 +237,7 @@ const SETTINGS: Record<string, AgentSettings> = {
   } as AgentSettings,
   empty: {},
   chatgpt: { main: { provider: "chatgpt", model: "sample-plan-model" } } as AgentSettings,
+  "claude-code": { main: { provider: "claude-code", model: "sonnet" } } as AgentSettings,
   plan: {
     main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
   } as AgentSettings,
@@ -366,6 +392,11 @@ let keys = SAMPLE_KEYS;
 const settingsStore = new SettingsStore(HOME);
 settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
+const people = new PeopleStore(HOME);
+const recentActivity = new RecentActivity({ log, isLive: (id) => live.cellOf(id) !== undefined });
+const searchIndex = new SearchIndex(HOME, { sessions: log });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog: log, notes: memory });
+searchFeed.start();
 const ledger = { limit: 5, spent: 4 };
 let budgetHold: "task" | "day" | undefined;
 let raisedDuringPause = false;
@@ -423,7 +454,12 @@ async function endLive(how?: "done" | "crash") {
   live.stop(owned.id);
   await live.settled(owned.id);
 }
-function newSession(title: string, task: string, continues?: string): AgentSession {
+function newSession(
+  title: string,
+  task: string,
+  continues?: string,
+  origin?: SessionOrigin,
+): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
     cellId,
@@ -441,6 +477,7 @@ function newSession(title: string, task: string, continues?: string): AgentSessi
       os: "linux",
       title,
       ...(continues ? { continues } : {}),
+      ...(origin ? { origin } : {}),
     },
   });
   return s;
@@ -473,7 +510,8 @@ const planItems = (finished: boolean) => [
   { id: "send", text: "Email the report to the team", status: "skipped" },
 ];
 
-function finishTask(s: AgentSession, a: Append) {
+// done: end as the real runner does, with agent.state done, which raises a Done notification.
+function finishTask(s: AgentSession, a: Append, done = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -498,7 +536,7 @@ function finishTask(s: AgentSession, a: Append) {
     ],
   });
   s.setStatus("idle");
-  a("agent.state", { state: "idle" });
+  a("agent.state", { state: done ? "done" : "idle" });
 }
 
 function seedTask(s: AgentSession, finished: boolean) {
@@ -978,9 +1016,16 @@ const installed: InstalledCodex = {
   codeModeHostBin: join(HOME, "inert/code-mode-host"),
 } as InstalledCodex;
 let installing: Promise<InstalledCodex> | undefined;
+const installedStates = new Set(["signed_in", "signed_out", "checking", "check_failed"]);
+const sandboxChecked = () => {
+  chatgptState = "checking";
+  setTimeout(() => {
+    if (chatgptState === "checking") chatgptState = "signed_out";
+  }, 1500);
+};
 const installer = {
   status: () =>
-    chatgptState === "signed_in" || chatgptState === "signed_out"
+    installedStates.has(chatgptState ?? "")
       ? { state: "ready", version: "0.154.0" }
       : installing
         ? { state: "downloading", receivedBytes: 48 * 1024 * 1024, totalBytes: 116_501_639 }
@@ -988,17 +1033,32 @@ const installer = {
   ensureInstalled: () => {
     installing ??= new Promise((resolve) =>
       setTimeout(() => {
-        chatgptState = "signed_out";
         installing = undefined;
+        sandboxChecked();
         resolve(installed);
       }, 1500),
     );
     return installing;
   },
   verifiedInstallation: async () =>
-    chatgptState === "signed_in" || chatgptState === "signed_out" ? installed : undefined,
+    installedStates.has(chatgptState ?? "") ? installed : undefined,
   cancel: () => {},
 } as unknown as CodexInstaller;
+const setup: ChatgptSetupControl = {
+  sandbox: () =>
+    chatgptState === "checking"
+      ? "checking"
+      : chatgptState === "check_failed"
+        ? "failed"
+        : chatgptState === "signed_in" || chatgptState === "signed_out"
+          ? "passed"
+          : "unchecked",
+  check: async () => {
+    if (chatgptState === "check_failed") sandboxChecked();
+    return setup.sandbox();
+  },
+  confirm: async (status) => status,
+};
 const account = {
   status: async () =>
     ({
@@ -1055,6 +1115,48 @@ const harness = () =>
   chatgptState && chatgptState !== "unavailable"
     ? { available: true as const }
     : { available: false as const, reason: CHATGPT_SWITCHED_OFF };
+const claudeCodeStatus = (): ClaudeCodeStatus => {
+  const checkedAt = Date.now();
+  switch (claudeCodeState) {
+    case "signed_in":
+      return {
+        state: "signed_in",
+        version: "2.1.290",
+        plan: "max",
+        models: [
+          { id: "sonnet", name: "Claude Sonnet" },
+          { id: "opus", name: "Claude Opus" },
+        ],
+        checkedAt,
+      };
+    case "signed_out":
+      return {
+        state: "signed_out",
+        version: "2.1.290",
+        reason: "Sign in to Claude Code, then check again.",
+        command: CLAUDE_CODE_SIGN_IN,
+        models: [],
+        checkedAt,
+      };
+    case "outdated":
+      return {
+        state: "outdated",
+        version: "2.1.100",
+        reason: "Update Claude Code, then check again.",
+        command: CLAUDE_CODE_UPDATE,
+        models: [],
+        checkedAt,
+      };
+    default:
+      return {
+        state: "not_installed",
+        reason: "Install Claude Code and sign in there.",
+        command: CLAUDE_CODE_INSTALL,
+        models: [],
+        checkedAt,
+      };
+  }
+};
 // What the user's direct control delivered to the fake computer, in order, with when it arrived.
 const manualInputs: { at: number; input: unknown }[] = [];
 const agent: AgentRoutesDeps = {
@@ -1070,6 +1172,10 @@ const agent: AgentRoutesDeps = {
     }),
   } as AgentRoutesDeps["keyd"],
   memory,
+  notesChanged: (file) => searchFeed.reindexNotes(file),
+  people,
+  recentActivity: () => recentActivity.list(),
+  sessionInfo: (ids) => log.sessionInfo(ids),
   skills: () => [
     {
       name: "sample-tables",
@@ -1241,7 +1347,15 @@ const agent: AgentRoutesDeps = {
     session.append(type, data);
   },
   harness,
-  ...(chatgptState ? { chatgpt: { account, installer, availability: harness } } : {}),
+  ...(chatgptState ? { chatgpt: { account, installer, availability: harness, setup } } : {}),
+  ...(claudeCodeState
+    ? {
+        claudeCode: {
+          status: async () => claudeCodeStatus(),
+          check: async () => claudeCodeStatus(),
+        },
+      }
+    : {}),
 };
 const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
   "deriveBits",
@@ -1258,6 +1372,49 @@ const recorder = new Recorder({
   enabled: false,
 });
 const index = new SessionIndex(HOME, { isLive: (id) => live.cellOf(id) !== undefined });
+const routineStore = new RoutineStore(HOME, { now: Date.now, zone: () => "Europe/London" });
+const appEvents = new AppEvents();
+let fixtureLogin: "on" | "off" = "off";
+// Nothing runs here; active routines only learn when they would run next.
+const planRoutines = () => {
+  for (const routine of routineStore.list())
+    if (routine.state === "active" && routine.nextDueAt === null)
+      routineStore.setNextDue(routine.id, nextDue(scheduleOf(routine), Date.now()));
+};
+const routineChanged = (routineId: string) => {
+  const routine = routineStore.get(routineId);
+  if (routine)
+    appEvents.publish({
+      type: "routine.changed",
+      routineId,
+      revision: routine.revision,
+      state: routine.state,
+    });
+};
+
+// Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+const pushKey = createECDH("prime256v1");
+pushKey.generateKeys();
+const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
+const notify = createNotify({
+  home: HOME,
+  eventLog: log,
+  events: appEvents,
+  keyd: {
+    pushKey: async () => ({ publicKey: pushKey.getPublicKey().toString("base64url") }),
+    pushSend: async () => {
+      notified.pushes += 1;
+      return { status: 201, gone: false };
+    },
+  },
+  mac: {
+    available: true,
+    show: async (title, body) => {
+      notified.mac.push([title, body]);
+      return "shown";
+    },
+  },
+});
 
 let app: ReturnType<typeof createApp> | undefined;
 const server: Server = createServer(
@@ -1290,6 +1447,7 @@ attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
+  appEventsRoute(appEvents, notify.presence),
   ...(realDesktop ? [desktopStreamRoute(realDesktop)] : []),
 ]);
 // Settings > Accounts against the daemon's own routes: the web browser's cookie domains.
@@ -1331,6 +1489,7 @@ const routes = createApp({
   accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
   exports: exportJobs,
   replay: {
@@ -1342,6 +1501,38 @@ const routes = createApp({
     live,
   },
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
+  notify: notify.routes,
+  routines: {
+    store: routineStore,
+    scheduler: { replan: planRoutines },
+    launcher: { runNow: () => ulid() },
+    publish: (event) => appEvents.publish(event),
+    redact: (text) => text,
+    zone: () => "Europe/London",
+    now: Date.now,
+    startAtLogin: {
+      status: async () => fixtureLogin,
+      set: async (on) => {
+        fixtureLogin = on ? "on" : "off";
+        return fixtureLogin;
+      },
+    },
+    stopAll: (by) =>
+      stopAll(
+        {
+          cells,
+          live,
+          killSwitch,
+          store: routineStore,
+          launcher: { cancelAll: () => 0 },
+          scheduler: { replan: () => {} },
+          audit: { append: () => {} },
+          publish: (event) => appEvents.publish(event),
+          now: Date.now,
+        },
+        by,
+      ),
+  },
 });
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
@@ -1494,6 +1685,30 @@ function requestApproval(
       .then((permit) =>
         effects.push(`approval:${permit ? (permit.approved ? "approve" : "act") : "refused"}`),
       )
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
+  if (kind === "purpose") {
+    // A tainted task opening an unrelated site with data in its address, through the real purpose
+    // check, its judge finding the site unrelated.
+    session.taint.add("screen", "mail.example.test");
+    session.purpose = new PurposeGate({
+      taint: session.taint,
+      purpose: () => session?.currentPurpose ?? { request: [], plan: [] },
+      judge: () => ({ name: "jev", destinations: async () => [], fits: async () => 0.04 }),
+      trusted: () => false,
+    });
+    const input = { url: "https://paste.example.net/new?text=quarterly%20numbers" };
+    const navigate = toolRisk("browser_navigate", input);
+    if (!navigate) return "no facts";
+    void authorizePrepared(ctx, {
+      tool: "browser_navigate",
+      input,
+      target: null,
+      facts: navigate,
+      revalidate: async () => true,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return;
   }
@@ -2116,13 +2331,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(): string | undefined {
+function finish(done = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append);
+  finishTask(owned, append, done);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -2338,7 +2553,7 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", () => reply(finish()));
+routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
   if (!session || session.stopped) return c.text("no live task", 409);
@@ -2355,14 +2570,175 @@ routes.post("/__qa/older-task", (c) =>
     ),
   }),
 );
+// What dot knows: facts you and dot added, people dot reached, a daily note, and recent tasks.
+routes.post("/__qa/knows", (c) => {
+  const insurance = endedTask(
+    "Renew the car insurance before it lapses",
+    "I compared three quotes and renewed with the cheapest.",
+    "Renewed the car insurance with the cheaper quote.",
+  );
+  const henry = endedTask(
+    "Send Henry the quarterly report on WeChat",
+    "Sent the report to Henry on WeChat.",
+    "Sent the quarterly report to Henry.",
+  );
+  memory.addEntry("USER.md", "Allergic to penicillin", true);
+  memory.addEntry("USER.md", "Prefers aisle seats on long flights");
+  memory.apply(insurance, "USER.md", "append", "- Car insurance renews every September");
+  memory.apply(insurance, "MEMORY.md", "append", "- Insurer prefers email over phone calls");
+  const note = memory.appendNote(insurance, "Insurer reference is WINDSCREEN-42");
+  log.append(insurance, {
+    type: "memory.change",
+    agent: "main",
+    data: { file: note.file, patch: note.patch, changeId: note.changeId },
+  } as never);
+  people.record(henry, { name: "Henry Liu", app: "WeChat", handle: "henry_l" });
+  people.record(insurance, {
+    name: "Ana Souza",
+    app: "Email",
+    handle: "ana@example.com",
+    note: "Insurance broker",
+  });
+  people.add({ name: "Mum", app: "Phone", handle: "+44 7700 900123" });
+  return c.json({ ok: true });
+});
+routes.get("/__qa/boot-memory", (c) => c.json(memory.bootMemory()));
+
+// Routines: dot proposes one in the live thread; a routine's own run; a run history to browse.
+const MORNING_BILLS = {
+  name: "Morning bills",
+  instruction:
+    "Check my utility and bank sites for new statements, save the PDFs to Bills and tell me what's due.",
+  when: { kind: "weekdays", time: "08:30" },
+} as const;
+routes.post("/__qa/routine/propose", (c) => {
+  if (!session) return c.text("no session", 409);
+  const routine = routineStore.create(MORNING_BILLS, {
+    state: "proposed",
+    createdFromSession: session.id,
+  });
+  const view = toRoutine(routine, undefined);
+  session.append("routine.proposed", {
+    routineId: routine.id,
+    revision: routine.revision,
+    name: routine.name,
+    summary: view.summary,
+    instruction: routine.instruction,
+    profile: routine.profile,
+    notify: routine.notify,
+    budgetUSD: routine.budgetUSD,
+    approvalWindowMinutes: routine.approvalWindowMinutes,
+    missedPolicy: routine.missedPolicy,
+  });
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id });
+});
+routes.post("/__qa/routine/session", async (c) => {
+  await endLive("done");
+  const routine = routineStore.create(MORNING_BILLS, { state: "active" });
+  session = newSession(MORNING_BILLS.name, MORNING_BILLS.instruction, undefined, {
+    kind: "routine",
+    routineId: routine.id,
+    runId: ulid(),
+    name: MORNING_BILLS.name,
+    dueAt: new Date().toISOString(),
+  });
+  attachLive(session);
+  seedTask(session, false);
+  return c.json({ sessionId: session.id, routineId: routine.id });
+});
+routes.post("/__qa/routine/history", (c) => {
+  const at = (iso: string) => Date.parse(iso);
+  const add = (draft: typeof MORNING_BILLS | Parameters<typeof routineStore.create>[0]) =>
+    routineStore.create(draft, { state: "active" });
+  const bills = add(MORNING_BILLS);
+  const runs = [
+    ["2026-10-06T07:30:00Z", "done", "3 new statements saved to Bills", seeded[0] ?? null],
+    ["2026-10-07T07:30:00Z", "done", "2 new statements saved to Bills", seeded[0] ?? null],
+    ["2026-10-08T07:30:00Z", "missed", "", null],
+    ["2026-10-09T07:30:00Z", "done", "Nothing new", seeded[1] ?? null],
+    [
+      "2026-10-12T07:30:00Z",
+      "needs_you_expired",
+      "Checked two sites; the bank needs you to sign in.",
+      null,
+    ],
+  ] as const;
+  for (const [due, outcome, note, sessionId] of runs)
+    routineStore.recordRun({
+      routineId: bills.id,
+      dueAt: at(due),
+      startedAt: outcome === "missed" ? null : at(due) + 2000,
+      endedAt: at(due) + 240_000,
+      sessionId,
+      outcome,
+      note,
+    });
+  const inbox = add({
+    name: "Inbox sweep",
+    instruction: "Check my inbox, archive newsletters and tell me what needs a reply.",
+    when: { kind: "daily", time: "07:45" },
+    profile: "act_within_rules",
+  });
+  routineStore.recordRun({
+    routineId: inbox.id,
+    dueAt: at("2026-10-09T06:45:00Z"),
+    startedAt: at("2026-10-09T06:45:01Z"),
+    endedAt: at("2026-10-09T06:52:00Z"),
+    sessionId: null,
+    outcome: "done",
+    note: "Archived 14 newsletters; 2 emails need a reply.",
+  });
+  const prices = add({
+    name: "Flight prices",
+    instruction: "Check fares from London to Lisbon for 14 November and tell me if any drop.",
+    when: { kind: "hours", every: 4, from: "08:00" },
+    profile: "read_only",
+    missedPolicy: "skip",
+  });
+  routineStore.update(prices.id, { revision: 1, state: "paused" });
+  add({
+    name: "Weekly report",
+    instruction: "Collect this week's numbers into report.xlsx in Documents.",
+    when: { kind: "weekly", days: [5], time: "16:00" },
+    notify: "always",
+  });
+  planRoutines();
+  for (const routine of routineStore.list()) routineChanged(routine.id);
+  return c.json({ routineId: bills.id });
+});
+routes.post("/__qa/routine/keep", (c) => {
+  const routine = routineStore.list()[0];
+  if (!routine) return c.text("no routine", 409);
+  routineStore.setAbsenceAsked(routine.id, Date.now());
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id });
+});
 routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as CellKind)));
 routes.post("/__qa/chatgpt/:state", (c) => {
   const state = c.req.param("state");
   if (!chatgptState) return c.text("start the fixture with QA_CHATGPT", 409);
-  if (!["signed_in", "signed_out", "not_installed", "unavailable"].includes(state))
+  if (
+    ![
+      "signed_in",
+      "signed_out",
+      "checking",
+      "check_failed",
+      "not_installed",
+      "unavailable",
+    ].includes(state)
+  )
     return c.text("unknown ChatGPT state", 400);
   chatgptState = state as NonNullable<typeof chatgptState>;
   signingIn = undefined;
+  return c.json({ ok: true });
+});
+routes.post("/__qa/claude-code/:state", (c) => {
+  const state = c.req.param("state");
+  if (!claudeCodeState) return c.text("start the fixture with QA_CLAUDE_CODE", 409);
+  if (!["not_installed", "outdated", "signed_out", "signed_in"].includes(state))
+    return c.text("unknown Claude Code state", 400);
+  claudeCodeState = state as NonNullable<typeof claudeCodeState>;
   return c.json({ ok: true });
 });
 routes.post("/__qa/chatgpt/device-code/:mode", (c) => {
@@ -2393,6 +2769,7 @@ routes.post("/__qa/scenario/:name", async (c) => {
   return reply(await STEPS[wanted.step]());
 });
 routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
+routes.get("/__qa/notify", (c) => c.json(notified));
 routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,
@@ -2443,7 +2820,9 @@ const shutdown = async () => {
       session.stop();
     }
     registry.dispose();
+    notify.close();
     index.close();
+    routineStore.close();
     log.close();
   } catch {}
   for (const peer of upgraded) peer.destroy();

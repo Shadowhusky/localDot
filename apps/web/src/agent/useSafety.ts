@@ -112,11 +112,12 @@ export function useSafety(props: SafetyProps) {
     current.current.api === op.api &&
     current.current.cell?.id === op.cell &&
     current.current.agent.sessionId === op.session;
-  const fresh = (p = current.current, requireFocus = true) => {
+  const fresh = (p = current.current) => {
     const f = p.feed.read();
     return (
       mounted.current &&
-      (!requireFocus || (focused.current && document.hasFocus())) &&
+      focused.current &&
+      document.hasFocus() &&
       p.agent.fresh &&
       p.agent.authorityEpoch === f.epoch &&
       f.cellId === p.cell?.id &&
@@ -571,12 +572,6 @@ export function useSafety(props: SafetyProps) {
     allowed,
     undoAllowed,
     dismissAllowed,
-    canNotify:
-      fresh(props, false) &&
-      !!approval &&
-      approval.expiresAt > Date.now() &&
-      sameCard(approval, props.feed.read().model.approval) &&
-      !props.agent.model.pendingTakeover,
     canApprove:
       fresh(props) &&
       !operation.current &&

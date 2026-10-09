@@ -2,12 +2,19 @@ import { setTimeout as delay } from "node:timers/promises";
 import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
+  type AutonomyPolicy,
   BootConfig,
   type CheckIns,
+  type ClaudeCodeStatus,
   DEFAULT_AGENT_LIMITS,
+  freezeAutonomy,
+  isJevKey,
   type KeydRecord,
   type ModelBinding,
+  type RecentLine,
   SESSION_PAUSE_REASONS,
+  SessionOrigin,
+  SessionRun,
   type SkillSummary,
   STALL,
   type TakeComputerReply,
@@ -27,7 +34,8 @@ import {
   BindingError,
   bindingOf,
   CHATGPT,
-  checkChatgptChoice,
+  CLAUDE_CODE,
+  checkPlanChoices,
   planOnly,
   pricingOf,
   type ResolvedRole,
@@ -36,14 +44,20 @@ import {
   taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
+import { ClaudeCodeCleanupError, type ClaudeCodeDriver } from "./claude-code/driver.ts";
 import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
+import type { RecentActivity } from "./recent-activity.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
+import { gatewayCompletion } from "./safety/judge-model.ts";
+import { jevJudge, modelJudge } from "./safety/judges.ts";
+import { judgeChoice, PurposeGate, type PurposeJudge, unreadableJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
+import { taintMemory } from "./safety/taint.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
@@ -56,6 +70,7 @@ const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
+export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
 // What Replay calls the user's own time on the computer.
 const HOLD_TITLE = "You used the computer";
 // The brain checks in only where the user asked it to.
@@ -72,6 +87,18 @@ export interface TerminalTaskSnapshot {
   readonly status: "ended";
   readonly toolCalls: number;
   readonly models?: TaskModelSelection;
+}
+export interface TaskStartOptions {
+  readonly origin?: SessionOrigin;
+  // Replaces the user's autonomy for this task.
+  readonly autonomy?: AutonomyPolicy;
+  // Replaces the user's task budget for this task.
+  readonly budgetUSD?: number;
+  // Marks the session unattended: approval cards wait this long, then the step is refused.
+  readonly approvalWindowMs?: number;
+  // 0..IDLE_MS; routines pass 0 so the task ends right after done.
+  readonly idleMs?: number;
+  readonly run?: SessionRun;
 }
 export class AgentError extends Error {
   constructor(
@@ -100,7 +127,8 @@ export interface AgentRunnerDeps {
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
-  memory: Pick<MemoryStore, "readBoth">;
+  memory: Pick<MemoryStore, "bootMemory">;
+  recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
     Partial<Pick<Conversations, "title">>;
@@ -112,6 +140,8 @@ export interface AgentRunnerDeps {
   limits?: AgentLimits;
   sleep?(ms: number, signal: AbortSignal): Promise<void>;
   idleMs?: number;
+  // Asks Jev, through keyd, with the named key.
+  jev?(secretId: string, body: unknown, signal: AbortSignal): Promise<unknown>;
   codex?: {
     driver: Pick<CodexDriver, "run"> &
       Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">>;
@@ -119,11 +149,19 @@ export interface AgentRunnerDeps {
     ended?(sessionId: string): void | Promise<void>;
     authGeneration?(): number;
   };
+  claudeCode?: {
+    driver: Pick<ClaudeCodeDriver, "run"> &
+      Partial<
+        Pick<ClaudeCodeDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">
+      >;
+    status(): Promise<Pick<ClaudeCodeStatus, "state" | "reason">>;
+  };
 }
 // "none": the user's own hold on the computer, which no model works on.
 type ModelSelection =
   | { kind: "api"; roles: readonly ResolvedRole[]; pricing: TaskPricing; initialBudget?: number }
   | { kind: "chatgpt"; model: string; denyRead: readonly string[] }
+  | { kind: "claude-code"; model: string }
   | { kind: "none" };
 interface Runtime {
   session: AgentSession;
@@ -145,12 +183,14 @@ interface Runtime {
   backoff?: AbortController;
   // Ended from its wait for a follow-up, because the user moved to another conversation.
   released?: boolean;
+  idleMs?: number;
 }
 class CleanupUncertain extends Error {}
 function uncertain(error: unknown): boolean {
   return (
     error instanceof BrainCleanupError ||
     error instanceof CodexCleanupError ||
+    error instanceof ClaudeCodeCleanupError ||
     error instanceof CleanupUncertain ||
     (error instanceof AggregateError && error.errors.some(uncertain))
   );
@@ -158,6 +198,9 @@ function uncertain(error: unknown): boolean {
 const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal });
 const budgetHold = (rt: Runtime) =>
   rt.pause === "budget" ? (rt.budgetScope ?? "task") : undefined;
+// A plan's own app does the model's work outside localDot's brain cell and key layer.
+const native = (selection: ModelSelection) =>
+  selection.kind === "chatgpt" || selection.kind === "claude-code";
 
 // One serialized lifecycle owns each task. Generation retirement is synchronous; Docker and
 // keyd settlement happen afterward, before a replacement can be admitted.
@@ -236,9 +279,42 @@ export class AgentRunner {
       throw new AgentError(409, "the computer is paused or changing state");
     return cell;
   }
-  async start(cellId: string, task: string, signal?: AbortSignal): Promise<AgentSession> {
+  async start(
+    cellId: string,
+    task: string,
+    signal?: AbortSignal,
+    options: TaskStartOptions = {},
+  ): Promise<AgentSession> {
     if (!ULID_PATTERN.test(cellId) || !task.trim() || task.length > 8000)
       throw new AgentError(400, "invalid task");
+    const origin =
+      options.origin === undefined ? undefined : SessionOrigin.safeParse(options.origin);
+    if (origin && !origin.success) throw new AgentError(400, "invalid task origin");
+    const run = options.run === undefined ? undefined : SessionRun.safeParse(options.run);
+    if (run && !run.success) throw new AgentError(400, "invalid task run");
+    const budget = options.budgetUSD;
+    if (
+      budget !== undefined &&
+      !(Number.isFinite(budget) && budget > 0 && budget <= 10_000 && Math.round(budget * 1e6) >= 1)
+    )
+      throw new AgentError(400, "invalid task budget");
+    const idle = options.idleMs;
+    if (idle !== undefined && !(Number.isSafeInteger(idle) && idle >= 0 && idle <= IDLE_MS))
+      throw new AgentError(400, "invalid idle time");
+    const window = options.approvalWindowMs;
+    if (
+      window !== undefined &&
+      !(Number.isSafeInteger(window) && window >= 60_000 && window <= 14_400_000)
+    )
+      throw new AgentError(400, "invalid approval window");
+    let autonomyOverride: AutonomyPolicy | undefined;
+    if (options.autonomy !== undefined) {
+      try {
+        autonomyOverride = freezeAutonomy(options.autonomy);
+      } catch {
+        throw new AgentError(400, "invalid task autonomy");
+      }
+    }
     this.#ready(cellId);
     signal?.throwIfAborted();
     if (this.#starting.has(cellId)) throw new AgentError(409, "a task is already starting");
@@ -258,18 +334,23 @@ export class AgentRunner {
           : this.deps.live.settled(current));
       }
       let selection: ModelSelection;
-      if (settings.main?.provider === CHATGPT) {
-        for (const role of ["main", "fast", "local"] as const) {
-          const choice = settings[role];
-          if (choice?.provider === CHATGPT) {
-            try {
-              checkChatgptChoice(role, choice);
-            } catch (error) {
-              if (error instanceof BindingError) throw new AgentError(400, error.message);
-              throw error;
-            }
-          }
-        }
+      // Undefined when the saved keys couldn't be read.
+      let keys: KeydRecord[] | undefined = [];
+      try {
+        checkPlanChoices(settings);
+      } catch (error) {
+        if (error instanceof BindingError) throw new AgentError(400, error.message);
+        throw error;
+      }
+      if (settings.main?.provider === CLAUDE_CODE) {
+        const claude = this.deps.claudeCode;
+        if (!claude) throw new AgentError(400, CLAUDE_CODE_OFF);
+        const status = await claude.status();
+        signal?.throwIfAborted();
+        if (status.state !== "signed_in")
+          throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
+        selection = { kind: "claude-code", model: settings.main.model };
+      } else if (settings.main?.provider === CHATGPT) {
         const codex = this.deps.codex;
         if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
         if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
@@ -285,7 +366,7 @@ export class AgentRunner {
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
       } else {
-        const keys = await this.deps.keyd.secrets();
+        keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
         const roles = this.resolveRoles(keys, settings);
         // Settings saved while keyd was away reach it here, before the task's first model call.
@@ -297,36 +378,62 @@ export class AgentRunner {
           kind: "api",
           roles,
           pricing: pricingOf(roles),
-          ...(settings.taskBudgetUSD === undefined
+          ...((budget ?? settings.taskBudgetUSD) === undefined
             ? {}
-            : { initialBudget: settings.taskBudgetUSD }),
+            : { initialBudget: budget ?? settings.taskBudgetUSD }),
         };
       }
+      // A plan's own models need no key; only a Jev key can check where data goes. Keys that
+      // can't be read leave the check unable to answer, never off.
+      if (native(selection) && settings.purposeCheck !== "off")
+        keys = await this.deps.keyd.secrets().then(
+          (all) => all.filter(isJevKey),
+          () => undefined,
+        );
       signal?.throwIfAborted();
       const cell = this.#ready(cellId);
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
-      // A conversation record that can't be read never keeps a task from starting.
+      // A conversation record that can't be read never keeps a task from starting. A routine's
+      // run is its own thread: it neither continues nor takes over the user's conversation.
       let continues: string | undefined;
       let earlier: string[] = [];
-      try {
-        continues = this.deps.conversations?.current() ?? undefined;
-        earlier = continues ? (this.deps.conversations?.earlier(continues) ?? []) : [];
-      } catch {
-        console.error("the earlier conversation could not be read");
-        continues = undefined;
-        earlier = [];
-      }
-      const id = this.deps.eventLog.createSession(task.slice(0, 200));
+      if (!origin)
+        try {
+          continues = this.deps.conversations?.current() ?? undefined;
+          earlier = continues ? (this.deps.conversations?.earlier(continues) ?? []) : [];
+        } catch {
+          console.error("the earlier conversation could not be read");
+          continues = undefined;
+          earlier = [];
+        }
+      let recent: RecentLine[] = [];
+      if (settings.recentActivity !== "off" && this.deps.recentActivity)
+        try {
+          recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
+        } catch {
+          console.error("recent activity could not be read");
+        }
+      const title = (
+        origin?.success && origin.data.kind === "routine" ? origin.data.name : task
+      ).slice(0, 200);
+      const id = this.deps.eventLog.createSession(title);
       const session = new AgentSession(
         id,
         cellId,
         task,
         this.deps.eventLog,
-        settings.autonomy,
+        autonomyOverride ?? settings.autonomy,
         new RulesStore(this.deps.home),
+        {
+          ...(window !== undefined ? { approvalTtlMs: window } : {}),
+          ...(run?.success ? { run: run.data } : {}),
+        },
       );
       session.earlier = earlier;
+      // dot's earlier replies may repeat what a page said: they never unlock memory writes.
+      if (earlier.length) session.tainted = true;
+      session.recent = recent;
       session.actionLimit = settings.checkIns?.actions;
       const rt: Runtime = {
         session,
@@ -336,7 +443,15 @@ export class AgentRunner {
         epoch: 0,
         initialized: false,
         serial: Promise.resolve(),
+        ...(idle !== undefined ? { idleMs: idle } : {}),
       };
+      const judge = this.#judge(rt, settings, keys);
+      session.purpose = new PurposeGate({
+        taint: session.taint,
+        purpose: () => session.currentPurpose,
+        judge: () => judge,
+        trusted: (host) => session.taskAutonomy.trusts(host),
+      });
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
       try {
@@ -344,10 +459,14 @@ export class AgentRunner {
         session.append("session.start", {
           screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
           os: "linux",
-          title: task.slice(0, 200),
+          title,
           ...(continues ? { continues } : {}),
+          ...(origin?.success ? { origin: origin.data } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
+        if (recent.length)
+          session.taint.add("memory", "recent activity", recent.map((r) => r.title).join("\n"));
         this.#safety(rt);
         this.deps.live.start(
           cellId,
@@ -362,15 +481,46 @@ export class AgentRunner {
         this.#runtime.delete(id);
         throw error;
       }
-      try {
-        this.deps.conversations?.adopt(id);
-      } catch {
-        console.error("the current conversation could not be saved");
-      }
+      if (!origin)
+        try {
+          this.deps.conversations?.adopt(id);
+        } catch {
+          console.error("the current conversation could not be saved");
+        }
       return session;
     } finally {
       this.#starting.delete(cellId);
     }
+  }
+  #judge(
+    rt: Runtime,
+    settings: AgentSettings,
+    keys: KeydRecord[] | undefined,
+  ): PurposeJudge | undefined {
+    if (!keys) return unreadableJudge;
+    const fast =
+      rt.selection.kind === "api"
+        ? rt.selection.roles.find((role) => role.role === "fast")
+        : undefined;
+    const choice = judgeChoice(settings.purposeCheck, keys, fast !== undefined);
+    const jev = this.deps.jev;
+    if (choice?.kind === "jev" && jev)
+      return jevJudge((body, signal) => jev(choice.secretId, body, signal));
+    if (choice?.kind !== "model" || !fast) return undefined;
+    return modelJudge(
+      gatewayCompletion(
+        () => (rt.brain ? bindingOf(fast, rt.brain.surrogates) : undefined),
+        () => (rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined),
+      ),
+    );
+  }
+  // A parked (approval, question, takeover, budget) or idle task ends here without the kill
+  // switch: no revoke and no freeze. The runner's own finally block appends session.end.
+  end(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session || session.stopped) return false;
+    session.stop();
+    return true;
   }
   // Ends a finished task that waits for a follow-up, so the next message starts a new task in
   // whichever conversation is current. A task still at work is left alone and refused.
@@ -531,13 +681,13 @@ export class AgentRunner {
         ),
       sleep: this.deps.sleep ?? sleep,
       mode: rt.selection.kind === "api" ? "api" : "native",
-      ...(rt.selection.kind === "chatgpt"
+      ...(native(rt.selection)
         ? {
             native: {
               pause: (
                 pause: Pick<import("@localdot/protocol").PauseSnapshot, "requestId" | "revision">,
               ) => {
-                const driver = this.deps.codex?.driver;
+                const driver = this.#nativeDriver(rt);
                 if (!driver?.pauseAtBoundary)
                   throw new Error("native Pause receipt is unavailable");
                 return driver.pauseAtBoundary(rt.session, pause);
@@ -546,7 +696,7 @@ export class AgentRunner {
                 pause: Pick<import("@localdot/protocol").PauseSnapshot, "requestId" | "revision">,
                 receipt: import("./codex/native-pause.ts").NativePauseReceipt,
               ) => {
-                const driver = this.deps.codex?.driver;
+                const driver = this.#nativeDriver(rt);
                 if (!driver?.resumeAtBoundary)
                   throw new Error("native Resume receipt is unavailable");
                 return driver.resumeAtBoundary(rt.session, pause, receipt);
@@ -557,6 +707,13 @@ export class AgentRunner {
         : {}),
     });
     return rt.safety;
+  }
+  #nativeDriver(rt: Runtime) {
+    return rt.selection.kind === "chatgpt"
+      ? this.deps.codex?.driver
+      : rt.selection.kind === "claude-code"
+        ? this.deps.claudeCode?.driver
+        : undefined;
   }
   isChatgpt(id: string): boolean {
     return this.#runtime.get(id)?.selection.kind === "chatgpt";
@@ -571,8 +728,8 @@ export class AgentRunner {
   selectionOf(id: string) {
     const selection = this.#runtime.get(id)?.selection;
     if (!selection || selection.kind === "none") return undefined;
-    return selection.kind === "chatgpt"
-      ? { kind: "chatgpt" as const, model: selection.model }
+    return selection.kind === "chatgpt" || selection.kind === "claude-code"
+      ? { kind: selection.kind, model: selection.model }
       : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
@@ -619,6 +776,8 @@ export class AgentRunner {
     if (rt.selection.kind === "none") throw new AgentError(409, "no task is at work");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
+    if (rt.selection.kind === "claude-code")
+      throw new AgentError(409, "A Claude Code task uses your plan's limits, not a budget.");
     if (planOnly(rt.selection.roles))
       throw new AgentError(409, "This task uses your plan's limits.");
     await this.#exclusive(rt, async () => {
@@ -686,7 +845,7 @@ export class AgentRunner {
     this.deps.fences?.capture(
       session.cellId,
       session.id,
-      rt?.selection.kind === "chatgpt" ? "native" : "api",
+      rt && native(rt.selection) ? "native" : "api",
     );
     if (rt?.containment) return rt.containment;
     const work = Promise.resolve()
@@ -756,11 +915,7 @@ export class AgentRunner {
     if (this.#starting.has(cellId) || this.deps.live.idleOperationPending(cellId)) return false;
     const tasks = [...this.#runtime.values()].filter((rt) => rt.session.cellId === cellId);
     for (const rt of tasks) {
-      this.deps.fences.capture(
-        cellId,
-        rt.session.id,
-        rt.selection.kind === "chatgpt" ? "native" : "api",
-      );
+      this.deps.fences.capture(cellId, rt.session.id, native(rt.selection) ? "native" : "api");
       rt.session.stop();
     }
     const retirement = (async () => {
@@ -888,7 +1043,12 @@ export class AgentRunner {
           code =
             rt.selection.kind === "chatgpt"
               ? await this.deps.codex?.driver.run(session, { model: rt.selection.model, resume })
-              : await this.#brainRun(rt, skills, resume);
+              : rt.selection.kind === "claude-code"
+                ? await this.deps.claudeCode?.driver.run(session, {
+                    model: rt.selection.model,
+                    resume,
+                  })
+                : await this.#brainRun(rt, skills, resume);
         } catch (error) {
           if (uncertain(error)) throw error;
           if (session.stopped) break;
@@ -926,7 +1086,7 @@ export class AgentRunner {
           const idleWait = new AbortController();
           rt.idleWait = idleWait;
           try {
-            const idleMs = this.deps.idleMs ?? IDLE_MS;
+            const idleMs = rt.idleMs ?? this.deps.idleMs ?? IDLE_MS;
             let asked = await session.waitForUser(idleMs, idleWait.signal);
             // While the user has the computer, a finished task waits for them rather than the clock.
             while (!asked && session.controlHeld) {
@@ -949,7 +1109,9 @@ export class AgentRunner {
               reason:
                 rt.selection.kind === "chatgpt"
                   ? "The ChatGPT task kept stopping."
-                  : "the brain kept crashing",
+                  : rt.selection.kind === "claude-code"
+                    ? "Claude Code kept stopping."
+                    : "the brain kept crashing",
             });
             break;
           }
@@ -958,7 +1120,9 @@ export class AgentRunner {
             reason:
               rt.selection.kind === "chatgpt"
                 ? `Codex stopped (exit ${code ?? "unknown"}); restarting`
-                : "the brain stopped; restarting from saved history",
+                : rt.selection.kind === "claude-code"
+                  ? "Claude Code stopped; restarting from saved history"
+                  : "the brain stopped; restarting from saved history",
           });
           const interrupted = new AbortController();
           rt.backoff = interrupted;
@@ -999,8 +1163,8 @@ export class AgentRunner {
         }
       }
       if (
-        rt.selection.kind === "chatgpt" &&
-        this.deps.codex?.driver.retirementConfirmed?.(session.id) === true
+        native(rt.selection) &&
+        this.#nativeDriver(rt)?.retirementConfirmed?.(session.id) === true
       )
         this.deps.fences?.confirmNativeRetirement(session.cellId, session.id);
       if (session.stopped && reason === "done") reason = "stopped";
@@ -1092,6 +1256,8 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
+        const memory = this.deps.memory.bootMemory();
+        taintMemory(session.taint, memory);
         const boot = BootConfig.parse({
           sessionId: session.id,
           task: session.task,
@@ -1101,12 +1267,14 @@ export class AgentRunner {
             ...(models.local ? { local: models.local } : {}),
           },
           proxy: { url: brain.proxyUrl, token: brain.proxyToken },
-          memory: this.deps.memory.readBoth(),
+          memory,
           skills,
           limits: this.deps.limits ?? rt.limits,
           resume,
           inboxAfter: session.delivered,
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
+          ...(session.recent.length ? { recent: [...session.recent] } : {}),
+          ...(session.run ? { run: session.run } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

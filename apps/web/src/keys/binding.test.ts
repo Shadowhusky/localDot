@@ -212,7 +212,7 @@ describe("valueProblem", () => {
 
 describe("Claude plan tokens", () => {
   const SENTENCE =
-    "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";
   it("refuses a pasted plan token with the sentence, whatever the key is for", () => {
     for (const value of [`sk-ant-oat01-${"a".repeat(95)}`, `sk-ant-oat02-${"b".repeat(40)}`])
       expect(valueProblem(value)).toBe(SENTENCE);

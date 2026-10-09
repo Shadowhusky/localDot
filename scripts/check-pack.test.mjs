@@ -76,6 +76,26 @@ describe("shipping package inventory audit (without running npm)", () => {
   it("accepts a clean complete inventory with current build license and viewer manifest paths", () => {
     expect(pkg().check()).toEqual([]);
   });
+  it("accepts the Home Screen app files at the web root and nothing else beside them", () => {
+    expect(
+      pkg({
+        "web/dist/sw.js": "self.addEventListener('push', () => {});\n",
+        "web/dist/manifest.webmanifest": '{"name":"localDot"}\n',
+        "web/dist/icons/icon-192.png": Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      }).check(),
+    ).toEqual([]);
+    for (const path of [
+      "web/dist/icons/notes.txt",
+      "web/dist/icons/other.png",
+      "web/dist/other.js",
+    ])
+      expect(
+        pkg({ [path]: "x" })
+          .check()
+          .some((p) => p.includes("not in the allowlist")),
+      ).toBe(true);
+  });
+
   it("refuses a linked package root and a directory pretending to be a file", () => {
     const f = pkg(),
       alias = join(f.dir, "alias");

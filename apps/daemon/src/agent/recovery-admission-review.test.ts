@@ -116,7 +116,7 @@ it("refuses held-memory mutation before any durable file or journal change", asy
   const response = await f.app.request(`/api/agent/memory/${f.change.changeId}/undo`, {
     method: "POST",
   });
-  expect.soft(response.status, "held owner must refuse the exact Undo").toBe(409);
+  expect.soft(response.status, "held owner must refuse the exact Undo").toBe(503);
   expect
     .soft(f.memory.readBoth().memory, "held owner must preserve actual memory bytes")
     .toContain("Durable fixture fact");

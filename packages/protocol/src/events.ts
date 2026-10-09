@@ -3,6 +3,14 @@ import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import { TaintSource } from "./purpose.ts";
+import {
+  MissedPolicy,
+  RoutineName,
+  RoutineNotify,
+  RoutineProfile,
+  SessionOrigin,
+} from "./routines.ts";
 import { ActionClass, AlwaysOption, ApprovalCard, PauseSnapshot } from "./safety.ts";
 import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
@@ -48,6 +56,8 @@ export const SessionStart = event(
     title: z.string().max(200).optional(),
     // The earlier task this one continues, in the same conversation.
     continues: z.string().regex(ULID_PATTERN).optional(),
+    // What started this task when the user did not: a routine or a follow-up.
+    origin: SessionOrigin.optional(),
   }),
 );
 export const SessionEnd = event(
@@ -254,10 +264,11 @@ export const PauseChange = event(
   z.object({ paused: z.boolean(), atStepBoundary: z.boolean() }),
 );
 // changeId names the change so the UI can undo it; undoes names the change an undo reverted.
+export const NOTES_FILE = /^notes\/\d{4}-\d{2}-\d{2}\.md$/;
 export const MemoryChange = event(
   "memory.change",
   z.object({
-    file: z.enum(["USER.md", "MEMORY.md"]),
+    file: z.union([z.enum(["USER.md", "MEMORY.md"]), z.string().regex(NOTES_FILE)]),
     patch: z.string(),
     changeId: z.string().regex(ULID_PATTERN).optional(),
     undoes: z.string().regex(ULID_PATTERN).optional(),
@@ -352,6 +363,8 @@ export const AskRequest = event(
     declinable: z.literal(false).optional(),
   }),
 );
+// The task read private data from here; what it read is never recorded.
+export const SafetyTaint = event("safety.taint", TaintSource);
 export const SafetyPause = event(
   "safety.pause",
   z.object({ revision: z.number().int().nonnegative(), pause: PauseSnapshot.optional() }).strict(),
@@ -450,6 +463,23 @@ export const ModelSpend = event("model.spend", ModelSpendData);
 
 export const SubscriptionUsage = event("subscription.usage", SubscriptionUsageData);
 
+// dot drafted a routine in this task; it runs only after the user saves it.
+export const RoutineProposed = event(
+  "routine.proposed",
+  z.strictObject({
+    routineId: z.string().regex(ULID_PATTERN),
+    revision: z.number().int().positive(),
+    name: RoutineName,
+    summary: z.string().max(200),
+    instruction: z.string().max(8000),
+    profile: RoutineProfile,
+    notify: RoutineNotify,
+    budgetUSD: z.number().min(0.01).max(100).nullable(),
+    approvalWindowMinutes: z.number().int().min(5).max(240),
+    missedPolicy: MissedPolicy,
+  }),
+);
+
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
   SessionEnd,
@@ -490,6 +520,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   AskRequest,
   AskAnswer,
   SafetyPause,
+  SafetyTaint,
   TakeoverRequest,
   TakeoverEnd,
   TaskResult,
@@ -497,6 +528,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   ModelRetry,
   ModelSpend,
   SubscriptionUsage,
+  RoutineProposed,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
 export type EventType = LocalDotEvent["type"];

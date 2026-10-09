@@ -32,6 +32,8 @@ export interface ApprovalResolution {
   note?: string;
   // The card's own option the user chose, never one the answer described.
   always?: { readonly actionClass: ActionClass; readonly option: AlwaysOption };
+  // The hosts an approved purpose card asked about.
+  destinations?: readonly string[];
 }
 interface Pending {
   readonly binding: ActionBinding;
@@ -66,6 +68,7 @@ export class ApprovalBroker {
     private readonly now: () => number = Date.now,
     private readonly publishRequest: (card: ApprovalCard) => void = () => {},
     private readonly publishResolution: (resolution: ApprovalResolution) => void = () => {},
+    private readonly ttlMs: number = APPROVAL_TIMEOUT_MS,
   ) {}
   pending(sessionId: string): ApprovalCard | undefined {
     const card = this.#pending.get(sessionId)?.card;
@@ -97,7 +100,7 @@ export class ApprovalBroker {
       approvalId: ulid(),
       generation: binding.generation,
       revision: ++this.#revision,
-      expiresAt: this.now() + APPROVAL_TIMEOUT_MS,
+      expiresAt: this.now() + this.ttlMs,
     });
     const outcome = await new Promise<ApprovalOutcome>((resolve) => {
       const finish = (
@@ -121,13 +124,16 @@ export class ApprovalBroker {
             ...(always && result === "approve"
               ? { always: { actionClass: card.actionClass, option: always } }
               : {}),
+            ...(card.destinations && result === "approve"
+              ? { destinations: [...card.destinations] }
+              : {}),
           });
         } catch {
           // A missing completion event cannot revive a consumed card.
         }
       };
       const abort = () => finish("stale", "timeout");
-      const timer = setTimeout(() => finish("deny", "timeout"), APPROVAL_TIMEOUT_MS);
+      const timer = setTimeout(() => finish("deny", "timeout"), this.ttlMs);
       timer.unref?.();
       this.#pending.set(binding.sessionId, {
         binding: privateBinding,

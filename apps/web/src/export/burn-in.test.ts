@@ -75,9 +75,9 @@ describe("the export's burned-in caption", () => {
     expect(drawn.texts[0]?.style.fontFamily).toBe(theme.font);
     expect(JSON.stringify(drawn.texts[0]?.style)).not.toMatch(/arial/i);
     expect(drawn.texts[0]?.style.fontSize).toBe(20);
-    layer.draw("Playing at 2×", "Open the report", null);
+    layer.draw("Open the report", null);
     expect(layer.visible).toBe(true);
-    expect(drawn.texts[0]?.text).toBe("Open the report · Playing at 2×");
+    expect(drawn.texts[0]?.text).toBe("Open the report");
     expect(drawn.rects.at(-1)?.radius).toBe(12);
     expect(drawn.fills.at(-1)).toEqual({ color: 0x0e0f12, alpha: 0.92 });
     const chip = drawn.rects.at(-1);
@@ -86,15 +86,15 @@ describe("the export's burned-in caption", () => {
 
   it("puts a gap's note in the same chip, and shows nothing when there is nothing to say", () => {
     const layer = new ExportBurnIn(theme, 1920, 1200);
-    layer.draw("Playing at 2×", "Open the report", "user-control");
+    layer.draw("Open the report", "user-control");
     expect(drawn.texts.at(-1)?.text.split("\n")).toHaveLength(2);
     expect(drawn.texts.at(-1)?.text).not.toContain("Open the report");
-    layer.draw(null, null, null);
+    layer.draw(null, null);
     expect(layer.visible).toBe(false);
   });
 
-  it("clips a long step label and keeps the speed after it", () => {
-    expect(burnInText("Playing at 4×", "x".repeat(80), null)).toMatch(/^x{59}… · Playing at 4×$/);
-    expect(burnInText(null, null, null)).toBeNull();
+  it("clips a long step label and never names the speed", () => {
+    expect(burnInText("x".repeat(80), null)).toMatch(/^x{59}…$/);
+    expect(burnInText(null, null)).toBeNull();
   });
 });

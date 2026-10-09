@@ -280,6 +280,25 @@ describe("key routes", () => {
     ).toBe(400);
   });
 
+  it("still removes a key whose name was reserved after it was added", async () => {
+    const at = "2026-10-01T00:00:00Z";
+    keyd.records.set("webpush-vapid", {
+      id: "webpush-vapid",
+      kind: "http",
+      hosts: ["api.example.test"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    });
+    const res = await app.request(url("/api/keys/webpush-vapid"), {
+      method: "DELETE",
+      headers: json,
+    });
+    expect(res.status).toBe(204);
+    expect(keyd.records.has("webpush-vapid")).toBe(false);
+  });
+
   it("say the key layer is offline when keyd is not running", async () => {
     await keyd.stop();
     const res = await app.request(url("/api/keys"), { headers: json });

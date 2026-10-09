@@ -5,11 +5,20 @@ import { gazeTo } from "./gaze.ts";
 import { placeElement } from "./places.ts";
 import type { PresencePlace } from "./presence-rules.ts";
 import { DotView } from "./render/DotView.ts";
-import { now } from "./render/scheduler.ts";
 
 const FADE_MS = 150;
 // Idle wander leans this far toward the stage's centre.
 const BIAS_SHARE = 0.75;
+// A flight is drawn ahead at this step and handed to the compositor, so a busy page never stalls it.
+const STEP_MS = 1000 / 60;
+const LONGEST_FLIGHT_MS = 3000;
+
+// The frame time the compositor draws animations at, which flights share so a new one starts
+// exactly where the last one is on screen.
+function frameTime(): number {
+  const t = document.timeline?.currentTime;
+  return typeof t === "number" ? t : performance.now();
+}
 
 function boxOf(element: Element | null): Box | null {
   if (!element) return null;
@@ -37,9 +46,9 @@ export class Presence {
   private readonly frame: HTMLElement;
   private readonly host: HTMLElement;
   private flight: Flight | null = null;
+  private motion: Animation | null = null;
   private place: PresencePlace | null = null;
   private drawn = 0;
-  private raf = 0;
   private fade: ReturnType<typeof setTimeout> | undefined;
   private reduced: boolean;
   private focus: Point | null = null;
@@ -85,13 +94,14 @@ export class Presence {
       }, FADE_MS);
       return;
     }
-    const t = now();
+    const t = frameTime();
     const current = this.flight.at(t);
-    this.view.hop();
+    // One flight at a time: a new place mid-flight bends the path, with no second take-off.
+    if (current.settled) this.view.hop();
     this.frame.dataset.flying = "";
     this.draw(Math.max(current.size, box.size));
     this.flight.fly(box, t, from === "badge");
-    this.run();
+    this.animate(t);
   }
 
   // The place moved under dot: a window resize lands it there, anything else is followed.
@@ -105,13 +115,14 @@ export class Presence {
       box.size === target.size
     )
       return;
-    if (resized && !this.raf) {
+    if (resized && !this.motion) {
       this.land(box);
       return;
     }
+    const t = frameTime();
     this.draw(Math.max(this.drawn, box.size));
-    this.flight.follow(box, now());
-    this.run();
+    this.flight.follow(box, t);
+    this.animate(t);
   }
 
   // The action point on the stage, as fractions of its width and height.
@@ -127,7 +138,7 @@ export class Presence {
   }
 
   destroy(): void {
-    cancelAnimationFrame(this.raf);
+    this.motion?.cancel();
     clearTimeout(this.fade);
     this.view.destroy();
   }
@@ -145,36 +156,53 @@ export class Presence {
     this.view.setSize(size);
   }
 
-  private position(box: Box): void {
+  private transform(box: Box): string {
     const k = box.size / this.drawn;
-    this.frame.style.transform = `translate3d(${box.x.toFixed(2)}px, ${box.y.toFixed(2)}px, 0) scale(${k.toFixed(4)})`;
+    return `translate3d(${box.x.toFixed(2)}px, ${box.y.toFixed(2)}px, 0) scale(${k.toFixed(4)})`;
   }
 
   private land(box: Box): void {
-    cancelAnimationFrame(this.raf);
-    this.raf = 0;
-    if (this.flight) this.flight.jump(box, now());
+    if (this.flight) this.flight.jump(box, frameTime());
     else this.flight = new Flight(box);
     this.draw(box.size);
-    this.position(box);
+    // The resting place is written before the flight lets go, so no frame falls between them.
+    this.frame.style.transform = this.transform(box);
+    this.motion?.cancel();
+    this.motion = null;
     delete this.frame.dataset.flying;
     this.settled();
   }
 
-  private run(): void {
-    if (this.raf) return;
-    const tick = () => {
-      this.raf = 0;
-      if (!this.flight) return;
-      const box = this.flight.at(now());
-      if (box.settled) {
-        this.land(box);
-        return;
-      }
-      this.position(box);
-      this.raf = requestAnimationFrame(tick);
-    };
-    this.raf = requestAnimationFrame(tick);
+  // Replaces the flight on screen with the one from t on. The new one starts at the frame the last
+  // one is drawn at, from the same place and speed, so the switch can't be seen.
+  private animate(t: number): void {
+    const flight = this.flight;
+    if (!flight) return;
+    const frames: Keyframe[] = [];
+    let at = t;
+    for (let box = flight.at(at); !box.settled && at - t < LONGEST_FLIGHT_MS; box = flight.at(at)) {
+      frames.push({ transform: this.transform(box) });
+      at += STEP_MS;
+    }
+    if (!frames.length || typeof this.frame.animate !== "function") {
+      this.land(flight.target);
+      return;
+    }
+    frames.push({ transform: this.transform(flight.target) });
+    this.motion?.cancel();
+    const motion = this.frame.animate(frames, {
+      duration: at - t,
+      easing: "linear",
+      fill: "forwards",
+    });
+    motion.startTime = t;
+    this.motion = motion;
+    motion.finished.then(
+      () => {
+        if (this.motion === motion) this.land(flight.target);
+      },
+      () => {},
+    );
   }
 
   private centre(): Point | null {

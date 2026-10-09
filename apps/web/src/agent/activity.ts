@@ -285,11 +285,16 @@ export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]
 }
 
 export function changeView(change: AgentChange): EntryView {
+  const notes = change.type === "memory" && change.path.startsWith("notes/");
   const verb =
     change.type === "memory"
       ? change.undoes
-        ? "Memory change undone"
-        : "Memory updated"
+        ? notes
+          ? "Daily note undone"
+          : "Memory change undone"
+        : notes
+          ? "Added to today's notes"
+          : "Memory updated"
       : change.op === "create"
         ? "Created"
         : change.op === "delete"

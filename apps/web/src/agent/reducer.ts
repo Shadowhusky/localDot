@@ -472,6 +472,20 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       };
       break;
     }
+    case "session.start":
+      if (e.data.origin) next = { ...next, origin: e.data.origin };
+      break;
+    case "routine.proposed":
+      next = {
+        ...next,
+        routineProposals: put(
+          model.routineProposals,
+          e.data.routineId,
+          { ...e.data, id: e.id, seq: e.seq },
+          L.routineProposals,
+        ),
+      };
+      break;
     case "task.result":
       next = {
         ...next,

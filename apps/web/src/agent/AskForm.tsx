@@ -83,7 +83,7 @@ const TEXT_INPUT: Partial<Record<AskField["kind"], Partial<TextFieldProps>>> = {
 // backs every surface, so what is typed in one shows in the others.
 export function AskForm({ draft, layout, answer, reason, upload, receiveKey }: AskFormProps) {
   const state = useAskState(draft);
-  const titleId = useId();
+  const titleId = `ask-${draft.question.askId}`;
   const composing = useRef(false);
   const touch = useMediaQuery(TOUCH);
   const form = useRef<HTMLFormElement>(null);
@@ -212,7 +212,7 @@ export function AskForm({ draft, layout, answer, reason, upload, receiveKey }: A
         body
       ) : (
         <div className="decision-body">
-          <h2 id={titleId} className="decision-title">
+          <h2 id={titleId} tabIndex={-1} className="decision-title">
             <RevealedText text={question.question} />
           </h2>
           {asked.hidden && <p className="decision-warning">{hiddenWarning(asked)}</p>}

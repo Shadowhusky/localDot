@@ -29,6 +29,9 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   the page), `pin`, `code`, `choice`, `multichoice`, `longtext`, `confirm`, `details` (number, date,
   phone and web address), `file`, `qr` (a link) or `pair` (plain text). Answers go through the real
   answer route; `GET /__qa/state` lists them under `effects`, secret answers only counted.
+- **Notifications:** the fixture records what would reach the Mac and phones instead of sending
+  it: `GET /__qa/notify` lists Mac banners (`mac`, title and body) and counts phone pushes.
+  `POST /__qa/finish?done=1` ends the task as the real runner does, which raises a Done.
 - **Update:** `POST /__qa/update` makes a new version of the computer ready (the island's one-time
   notice and Settings' Update row); `QA_UPDATE_MS` sets how long the update then takes.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while

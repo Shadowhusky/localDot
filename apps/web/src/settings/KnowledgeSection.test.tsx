@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { type Knowledge, useKnowledge } from "../agent/useKnowledge.ts";
 import { createApi } from "../lib/api.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
+import { knownFixture } from "./testing.ts";
 
 afterEach(() => {
   cleanup();
@@ -19,7 +20,7 @@ it("shows skills as plain text without editors", () => {
     reloadSkills: vi.fn(),
     rereadMemory: vi.fn(),
   };
-  render(<KnowledgeSection knowledge={knowledge} />);
+  render(<KnowledgeSection knowledge={knowledge} known={knownFixture()} />);
   const skills = screen.getByRole("list", { name: "Skills" });
   expect(skills.querySelectorAll("form,input,textarea,button,img,b")).toHaveLength(0);
   expect(screen.getByText("<img src=x>")).toBeTruthy();
@@ -27,11 +28,11 @@ it("shows skills as plain text without editors", () => {
 });
 
 function Fixture({ api }: { api: ReturnType<typeof createApi> }) {
-  return <KnowledgeSection knowledge={useKnowledge(api, null, true)} />;
+  return <KnowledgeSection knowledge={useKnowledge(api, null, true)} known={knownFixture()} />;
 }
 
 it.each(["hidden", "offline"] as const)(
-  "offers Show memory again after a read cancelled by going %s",
+  "offers Show the file again after a read cancelled by going %s",
   async (kind) => {
     let hidden = false,
       online = true;
@@ -49,10 +50,10 @@ it.each(["hidden", "offline"] as const)(
     });
     render(<Fixture api={api} />);
     await waitFor(() => expect(screen.getByText("No skills yet.")).toBeTruthy());
-    const show = () => screen.getByRole("button", { name: "Show memory" });
+    const show = () => screen.getByRole("button", { name: /^Show the file/ });
     act(() => show().click());
-    expect(show().getAttribute("aria-disabled")).toBe("true");
-    expect(requests).toHaveLength(2);
+    act(() => show().click());
+    expect(requests, "one read while one is pending").toHaveLength(2);
     await act(async () => {
       if (kind === "hidden") {
         hidden = true;
@@ -72,9 +73,7 @@ it.each(["hidden", "offline"] as const)(
     });
     expect(document.body.textContent).not.toContain("stale retired result");
     expect(requests, "no automatic replay of cancelled read").toHaveLength(2);
-    expect(
-      show().getAttribute("aria-disabled"),
-      "the cancelled request must leave a usable explicit retry",
-    ).toBeNull();
+    act(() => show().click());
+    expect(requests, "the cancelled request leaves a usable explicit retry").toHaveLength(3);
   },
 );

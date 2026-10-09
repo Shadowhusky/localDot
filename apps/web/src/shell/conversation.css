@@ -619,6 +619,10 @@
   overflow-wrap: anywhere;
 }
 
+.thread-question-text:focus {
+  outline: none;
+}
+
 /* What dot did this turn: what it is doing now, and the steps under a fold. */
 .thread-work {
   display: grid;

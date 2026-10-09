@@ -1,15 +1,36 @@
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
+import { Group, GroupHead, GroupRow } from "../ui/Group.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
+import { MemoryEditor } from "./memory/MemoryEditor.tsx";
+import { PeopleList } from "./memory/PeopleList.tsx";
+import { RecentActivity, type RecentActivityControl } from "./memory/RecentActivity.tsx";
+import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 
-// Read only: the skills dot can use and the notes it keeps.
-export function KnowledgeSection({ knowledge }: { knowledge: Knowledge }) {
+// What dot remembers, who it reaches for the user, what it hears about recent tasks, and the
+// skills it can use.
+export function KnowledgeSection({
+  knowledge,
+  known,
+  recentActivity,
+  onOpenTask,
+}: {
+  knowledge: Knowledge;
+  known: WhatDotKnows;
+  recentActivity?: RecentActivityControl;
+  onOpenTask?(sessionId: string): void;
+}) {
   const checking = knowledge.skillsPhase === "loading" || knowledge.skillsPhase === "unknown";
-  const reading = knowledge.memoryPhase === "loading";
   return (
     <div className="settings-knowledge">
+      <p className="settings-lede">
+        What dot remembers, who you reach through it and what it hears about your recent tasks. It
+        stays on this Mac, and you can change or remove any of it.
+      </p>
+      <MemoryEditor known={known} knowledge={knowledge} onOpenTask={onOpenTask} />
+      <PeopleList known={known} onOpenTask={onOpenTask} />
+      {recentActivity && <RecentActivity control={recentActivity} tasks={known.recent} />}
       <div>
         <GroupHead title="Skills" />
         {knowledge.skillsPhase === "error" ? (
@@ -48,34 +69,6 @@ export function KnowledgeSection({ knowledge }: { knowledge: Knowledge }) {
           <Group>
             <GroupRow label="No skills yet." />
           </Group>
-        )}
-      </div>
-      <div>
-        <GroupHead
-          title="Memory"
-          aside={
-            !knowledge.memory && (
-              <Button variant="quiet" size="sm" busy={reading} onClick={knowledge.rereadMemory}>
-                Show memory
-              </Button>
-            )
-          }
-        />
-        {knowledge.memory ? (
-          <Group>
-            <GroupRow label="About you">
-              <pre className="settings-well">{knowledge.memory.user || "Nothing yet."}</pre>
-            </GroupRow>
-            <GroupRow label="Its notes">
-              <pre className="settings-well">{knowledge.memory.memory || "Nothing yet."}</pre>
-            </GroupRow>
-          </Group>
-        ) : (
-          <GroupNote>
-            {knowledge.memoryPhase === "error"
-              ? "Memory couldn't be read. Check the connection and try again."
-              : "What dot remembers about you and your work."}
-          </GroupNote>
         )}
       </div>
     </div>

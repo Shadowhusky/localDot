@@ -43,6 +43,36 @@ export function serveUi(app: Hono, dir: string): void {
         "cache-control": "no-store",
       });
     });
+  // The phone's Home Screen app: its manifest, its service worker (push and notification taps only,
+  // no caching) and its icons. Never immutable: these names carry no content hash. The worker runs
+  // under the policy it is served with, so it gets the page's.
+  for (const path of ["/sw.js", "/manifest.webmanifest"]) {
+    app.get(path, (c) => {
+      const file = readStatic(dir, path);
+      if (!file) return c.text("not found", 404, NOSNIFF);
+      return c.body(file.body, 200, {
+        ...NOSNIFF,
+        ...UI_CSP,
+        "content-type": file.type,
+        "cache-control": "no-cache",
+      });
+    });
+  }
+  app.get("/icons/*", (c) => {
+    let rel: string;
+    try {
+      rel = decodeURIComponent(new URL(c.req.url).pathname).slice("/icons".length);
+    } catch {
+      return c.text("bad path", 400, NOSNIFF);
+    }
+    const file = readStatic(join(dir, "icons"), rel);
+    if (file?.type !== "image/png") return c.text("not found", 404, NOSNIFF);
+    return c.body(file.body, 200, {
+      ...NOSNIFF,
+      "content-type": file.type,
+      "cache-control": "public, max-age=86400",
+    });
+  });
   // Rooted at dist/assets, so an encoded separator ("/assets/..%2findex.html") can't reach the
   // page and serve it with the assets' immutable caching.
   app.get("/assets/*", (c) => {

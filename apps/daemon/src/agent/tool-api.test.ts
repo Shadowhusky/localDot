@@ -533,9 +533,14 @@ describe("the tools", () => {
       "tool.start",
       "tool.output",
       "tool.output",
+      "safety.taint",
       "tool.end",
       "step.end",
     ]);
+    expect(h.events().find((e) => e.type === "safety.taint")?.data).toEqual({
+      kind: "files",
+      origin: "command output",
+    });
   });
 
   it("writes files with a file.change for the diff panel", async () => {

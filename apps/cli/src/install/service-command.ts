@@ -55,6 +55,19 @@ export function runServiceObservation(
   return launchctl([operation], signal);
 }
 
+/** Unloads this installation's login job from the current GUI session. The target is always
+ * derived by loginServiceLocation; "not loaded" counts as done (launchctl exits 3 or 113).
+ */
+export function runLoginAgentBootout(
+  target: string,
+  signal: AbortSignal,
+): Promise<ServiceCommandResult> {
+  signal.throwIfAborted();
+  if (!/^gui\/[1-9][0-9]*\/dev\.localdot\.[a-f0-9]{64}\.[a-f0-9]{32}\.login$/.test(target))
+    throw failure();
+  return launchctl(["bootout", target], signal);
+}
+
 function launchctl(args: string[], signal: AbortSignal): Promise<ServiceCommandResult> {
   return new Promise((resolve, reject) => {
     const create = () =>

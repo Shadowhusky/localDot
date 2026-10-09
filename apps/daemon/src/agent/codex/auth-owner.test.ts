@@ -48,7 +48,7 @@ interface Holder {
 function fixture(
   extra: Pick<
     import("./auth-owner.ts").CodexAuthOwnerDeps,
-    "taskDenyRead" | "extraDenyRead" | "pauseForAuth"
+    "taskDenyRead" | "extraDenyRead" | "pauseForAuth" | "sandboxReason"
   > = {},
 ) {
   const top = mkdtempSync("/tmp/ld11-"),
@@ -801,6 +801,45 @@ describe("one registered ChatGPT credential owner", () => {
   });
 });
 
+describe("this Mac's sandbox check", () => {
+  it("launches no Codex process for the account or a task until the check passes", async () => {
+    const UNCHECKED = "ChatGPT support needs a quick safety check on this Mac.";
+    let reason: string | undefined = UNCHECKED;
+    const f = fixture({ sandboxReason: () => reason });
+    expect(await f.owner.status({ fresh: true })).toEqual({
+      available: false,
+      codexVersion: "0.154.0",
+      state: "unavailable",
+      reason: UNCHECKED,
+    });
+    for (const attempt of [
+      () => f.owner.login(),
+      () => f.owner.refresh(),
+      () => f.owner.logout(),
+      () => f.owner.acquireTask(f.session().id, new AbortController().signal),
+    ])
+      await expect(attempt()).rejects.toMatchObject({ status: 503, message: UNCHECKED });
+    expect(f.owner.canResume(f.owner.authGeneration)).toBe(false);
+    expect(mocks.launch).not.toHaveBeenCalled();
+    reason = undefined;
+    expect(await f.owner.status()).toMatchObject({ state: "signed_in" });
+    expect(mocks.launch).toHaveBeenCalledTimes(1);
+  });
+  it("closes the account again when a later check fails", async () => {
+    const FAILED = "ChatGPT support didn't pass its safety check on this Mac, so it stays off.";
+    let reason: string | undefined;
+    const f = fixture({ sandboxReason: () => reason });
+    expect(await f.owner.status()).toMatchObject({ state: "signed_in" });
+    expect(f.owner.canResume(f.owner.authGeneration)).toBe(true);
+    reason = FAILED;
+    expect(await f.owner.status()).toMatchObject({ state: "unavailable", reason: FAILED });
+    expect(f.owner.canResume(f.owner.authGeneration)).toBe(false);
+    await expect(
+      f.owner.acquireTask(f.session().id, new AbortController().signal),
+    ).rejects.toMatchObject({ status: 503, message: FAILED });
+    expect(mocks.launch).toHaveBeenCalledTimes(1);
+  });
+});
 describe("auth mutation journal failures", () => {
   it.each(["login", "logout", "refresh"] as const)(
     "still retires and pauses every later session during %s",

@@ -1,6 +1,6 @@
 import { clipText, type FindInput, type ToolResult } from "@localdot/protocol";
 import { untrusted } from "../untrusted.ts";
-import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { append, fail, type ToolCallContext, type ToolDeps, taintScreen, text } from "./deps.ts";
 import { corners } from "./elements.ts";
 
 const LIMIT = 20;
@@ -32,6 +32,12 @@ export async function findTool(
   );
   ctx.check();
   ctx.session.tainted = true;
+  // Names on a signed-in screen are private like a screenshot of it.
+  taintScreen(
+    ctx,
+    undefined,
+    found.elements.map((e) => `${e.name ?? ""} ${e.window ?? ""}`).join("\n"),
+  );
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
   const scale = deps.scaleOf(ctx.session.cellId) ?? 1;

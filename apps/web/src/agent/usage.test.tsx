@@ -193,6 +193,34 @@ it("keeps the usage details open while a phone's toolbar hides", () => {
     "true",
   );
 });
+it("shows a Claude Code task's usage as the Claude plan's, never as money", () => {
+  const model = projectAgentEvent(
+    projectAgentEvent(
+      emptyAgentModel(),
+      event(0, "subscription.usage", {
+        provider: "claude-code",
+        plan: "max",
+        windows: [{ window: "primary", usedPercent: 40, windowMinutes: 300 }],
+        limitReached: false,
+      }),
+    ),
+    event(1, "model.usage", {
+      role: "main",
+      route: "claude-code",
+      model: "claude-sonnet-5-5",
+      inputTokens: 1200,
+      outputTokens: 300,
+    }),
+  );
+  const selection = { kind: "claude-code" as const, model: "sonnet" };
+  render(<UsageDetails model={model} selection={selection} />);
+  expect(screen.getByRole("heading", { name: "Claude plan · max" })).toBeTruthy();
+  expect(screen.getByRole("meter", { name: "5 hours window" })).toBeTruthy();
+  expect(document.body.textContent).toContain("Claude Code · 1 call");
+  expect(document.body.textContent).not.toContain("$");
+  expect(usageSummary(model, selection)).toBe("sonnet · 1.5K tokens");
+  expect(recoveryMessage("claude code sign-in expired", false)).toContain("claude auth login");
+});
 it("says a task that runs on a plan uses the plan's limits", () => {
   const roles = [{ role: "main" as const, provider: "minimax-coding-plan", model: "MiniMax-M3" }];
   const view = render(

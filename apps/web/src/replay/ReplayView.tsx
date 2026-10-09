@@ -47,6 +47,7 @@ import {
   taskTitle,
   timeLabel,
 } from "./replay-view.ts";
+import { useTaskSearch } from "./search-api.ts";
 import {
   type ContinueTask,
   continuable,
@@ -256,7 +257,8 @@ function Library({
   const roomy = useMediaQuery(PREVIEW_ROOM) && !phone;
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
-  const shown = shownCards(tasks.cards, search, filter);
+  const matches = useTaskSearch(api, search);
+  const shown = shownCards(tasks.cards, search, filter, matches);
   const card = shown.find((entry) => entry.id === chosen) ?? shown[0] ?? null;
   useEscape(visible, onGoLive);
   useEffect(() => {
@@ -305,6 +307,7 @@ function Library({
             index={tasks}
             search={search}
             filter={filter}
+            matches={matches}
             selectedId={roomy ? (card?.id ?? null) : null}
             onSelect={roomy ? onChoose : onOpen}
             onDeleted={onDeleted}

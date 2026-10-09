@@ -470,6 +470,31 @@ describe("desktopd input routes", () => {
     expect(x.calls).toEqual(["release_all"]);
   });
 
+  it("lets typing still on its way land before it releases, so its answer covers it", async () => {
+    const x = fakeX();
+    const a = fullApp(x);
+    const typing = await a.request("/type", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({
+        text: "abc",
+        masked: false,
+        pace: { firstMs: 30, firstCount: 60, restMs: 0 },
+      }),
+    });
+    const reader = typing.body?.getReader();
+    await reader?.read();
+    const released = a.request("/release", { method: "POST", headers: bearer });
+    while (!(await reader?.read())?.done) {}
+    expect(await (await released).json()).toMatchObject({ keys: 2, buttons: 1 });
+    expect(x.calls.filter((cmd) => cmd === "char" || cmd === "release_all")).toEqual([
+      "char",
+      "char",
+      "char",
+      "release_all",
+    ]);
+  });
+
   it("keeps a held button down and names the buttons still down", async () => {
     const x = fakeX();
     const res = await fullApp(x).request("/held", { method: "POST", headers: bearer });

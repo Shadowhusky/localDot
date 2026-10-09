@@ -14,20 +14,22 @@
     "seed-session": "tsx src/seed-main.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.282",
     "@hono/node-server": "2.1.3",
+    "@localdot/codex-harness": "workspace:*",
     "@localdot/protocol": "workspace:*",
     "@localdot/providers": "workspace:*",
     "@localdot/stage": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "hono": "4.13.12",
+    "mediabunny": "1.61.0",
     "sharp": "0.35.5",
     "undici": "8.11.2",
     "ws": "8.22.0",
-    "zod": "4.6.5",
-    "@localdot/codex-harness": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.31.0",
-    "mediabunny": "1.61.0"
+    "zod": "4.6.5"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.127.0",
     "@types/ws": "8.18.2",
     "ai": "7.0.123",
     "tsx": "4.23.15"

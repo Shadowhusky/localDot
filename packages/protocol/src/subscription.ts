@@ -13,7 +13,7 @@ export type SubscriptionWindow = z.infer<typeof SubscriptionWindow>;
 
 export const SubscriptionUsageData = z
   .object({
-    provider: z.literal("chatgpt"),
+    provider: z.enum(["chatgpt", "claude-code"]),
     plan: z.string().max(64).optional(),
     windows: z.array(SubscriptionWindow).max(2),
     limitReached: z.boolean(),
@@ -65,6 +65,10 @@ export const CodexInstallState = z.discriminatedUnion("state", [
   z.object({ state: z.literal("failed"), code: CodexInstallFailure }).strict(),
 ]);
 export type CodexInstallState = z.infer<typeof CodexInstallState>;
+
+// This Mac's own check that Codex's sandbox holds, run after installation and on version changes.
+export const ChatgptSandbox = z.enum(["unchecked", "checking", "passed", "failed"]);
+export type ChatgptSandbox = z.infer<typeof ChatgptSandbox>;
 
 // ChatGPT ships device code sign-in switched off for personal accounts.
 export const CHATGPT_DEVICE_CODE_OFF =

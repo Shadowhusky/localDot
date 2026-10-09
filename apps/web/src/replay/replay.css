@@ -97,6 +97,43 @@
   list-style: none;
 }
 
+/* What a search found in a task's words, in place of its usual meta line. */
+.replay-match {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-mark {
+  border-radius: var(--radius-xs);
+  background-color: var(--color-state-selected);
+  color: var(--color-fg-1);
+}
+
+.replay-note {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3) calc(var(--spacing) * 2.5)
+    calc(var(--spacing) * 2.5);
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.replay-note-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.replay-note-day {
+  color: var(--color-fg-3);
+}
+
 /* A deleted row folds its height away as it fades. */
 .replay-task {
   display: grid;

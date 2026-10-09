@@ -70,4 +70,23 @@ describe("openSocket", () => {
     handle.close();
     expect(refused).toEqual([1, 3]);
   });
+  it("sends only while a connection is open, and never queues", () => {
+    const handle = openSocket({
+      url: "ws://127.0.0.1:4750/api/events",
+      protocols: ["localdot.v1"],
+      handlers: { onMessage: () => {} },
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+      backoffMs: { min: 100, max: 400 },
+    });
+    expect(handle.send("early")).toBe(false);
+    const socket = FakeWebSocket.instances[0];
+    socket?.onopen?.();
+    expect(handle.send("hello")).toBe(true);
+    socket?.onclose?.();
+    expect(handle.send("late")).toBe(false);
+    expect(socket?.sent).toEqual(["hello"]);
+    vi.advanceTimersByTime(100);
+    expect(FakeWebSocket.instances[1]?.sent).toEqual([]);
+    handle.close();
+  });
 });

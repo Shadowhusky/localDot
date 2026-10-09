@@ -88,6 +88,11 @@ describe("first-run setup", () => {
   it("knows how a saved main model thinks", () => {
     expect(kindOf("anthropic")).toBe("api");
     expect(kindOf("chatgpt")).toBe("chatgpt");
+    expect(kindOf("claude-code")).toBe("claude-code");
+    expect(thinksWith("claude-code", "claude-code")).toBe("Claude Code");
+    expect(parseProgress(JSON.stringify({ step: "key", kind: "claude-code" })).kind).toBe(
+      "claude-code",
+    );
     expect(kindOf("alibaba-coding-plan")).toBe("plan");
     expect(kindOf("ollama")).toBe("local");
     expect(kindOf("anthropic-compatible")).toBe("custom");

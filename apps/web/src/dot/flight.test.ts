@@ -60,6 +60,52 @@ describe("dot's flight between places", () => {
     expect(flight.at(300).y).toBeGreaterThan(badge.y + 50);
   });
 
+  it("takes off once: sent on mid-flight, it turns at once and keeps its speed", () => {
+    const badge: Box = { x: 300, y: 60, size: 32 };
+    const ELSEWHERE: Box = { x: 900, y: 100, size: 120 };
+    const again = new Flight(badge);
+    const turned = new Flight(badge);
+    again.fly(DOCK, 0, true);
+    turned.fly(DOCK, 0, true);
+    const T = 300;
+    const v = (a: Box, b: Box, dt: number) => ({ x: (b.x - a.x) / dt, y: (b.y - a.y) / dt });
+    const dt = 0.01;
+    const before = v(again.at(T - dt), again.at(T), dt);
+    again.fly(ELSEWHERE, T, true);
+    turned.fly(ELSEWHERE, T);
+    const after = v(again.at(T), again.at(T + dt), dt);
+    expect(Math.hypot(before.x, before.y)).toBeGreaterThan(0.5);
+    expect(Math.abs(after.x - before.x)).toBeLessThan(0.01);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(0.01);
+    for (const t of [T + 60, T + 120, T + 300]) expect(again.at(t)).toEqual(turned.at(t));
+  });
+
+  it("keeps its curve when its seat shifts mid-flight", () => {
+    const plain = new Flight(HERO);
+    plain.fly(DOCK, 0);
+    const shifted = new Flight(HERO);
+    shifted.fly(DOCK, 0);
+    shifted.follow({ ...DOCK, y: DOCK.y + 2 }, 200);
+    for (const t of [250, 320, 400]) {
+      expect(Math.abs(shifted.at(t).x - plain.at(t).x), `x at ${t}`).toBeLessThan(1);
+      expect(Math.abs(shifted.at(t).y - plain.at(t).y), `y at ${t}`).toBeLessThan(3);
+    }
+  });
+
+  it("reads its path without changing it, so the path can be drawn ahead", () => {
+    const badge: Box = { x: 300, y: 60, size: 32 };
+    const ahead = new Flight(badge);
+    const fresh = new Flight(badge);
+    ahead.fly(DOCK, 0, true);
+    fresh.fly(DOCK, 0, true);
+    for (let t = 0; t <= 1200; t += FRAME) ahead.at(t);
+    // Its seat shifts while it is still growing out of the badge.
+    const shifted = { ...DOCK, y: DOCK.y + 2 };
+    ahead.follow(shifted, 60);
+    fresh.follow(shifted, 60);
+    for (const t of [60, 200, 400, 900]) expect(ahead.at(t)).toEqual(fresh.at(t));
+  });
+
   it("follows a place that moves under it", () => {
     const flight = new Flight(DOCK);
     flight.follow({ ...DOCK, y: DOCK.y + 30 }, 0);

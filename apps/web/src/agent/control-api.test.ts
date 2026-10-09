@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { answerQuestion, ControlFailure, returnControl, stopTask } from "./control-api.ts";
+import {
+  answerQuestion,
+  ControlFailure,
+  returnControl,
+  stopTask,
+  undoMemory,
+} from "./control-api.ts";
 
 const SESSION = "01JXYZ0000000000000000SESS",
   ID = "01JXYZ00000000000000000001";
@@ -110,4 +116,11 @@ it("bounds actual ack bytes, rejects false length/UTF8, and never reflects refus
   ).catch((error: unknown) => error);
   expect(error).toMatchObject({ uncertain: false, status: 409 });
   expect(String(error)).not.toContain("private diagnostic");
+});
+it("takes memory Undo's 503 as a refusal: memory doesn't change while the user has control", async () => {
+  const signal = new AbortController().signal;
+  const answer = (status: number) =>
+    undoMemory(fixture(vi.fn<typeof fetch>(async () => new Response("", { status }))), ID, signal);
+  await expect(answer(503)).rejects.toMatchObject({ uncertain: false, status: 503 });
+  await expect(answer(502)).rejects.toMatchObject({ uncertain: true, status: 502 });
 });

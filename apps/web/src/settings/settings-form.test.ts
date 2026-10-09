@@ -322,6 +322,32 @@ describe("configuration validation before explicit save", () => {
     draft.choices.main = { provider: "ollama", model: "local" };
     expect(validateForm(draft, saved, index)).toMatchObject({ ok: false });
   });
+  it("saves Claude Code as the main model with one of its own models, and keeps the rest", () => {
+    const index = providerFixture();
+    index.keys = [];
+    const saved = {
+      main: { provider: "openai", model: "stored-paid", key: "deleted" },
+      fast: { provider: "openai", model: "stored-paid", key: "deleted" },
+      taskBudgetUSD: 8,
+    };
+    const draft = formOf(saved);
+    draft.choices.main = { provider: "claude-code", model: "sonnet" };
+    expect(validateForm(draft, saved, index, [{ id: "sonnet", name: "Sonnet" }])).toEqual({
+      ok: true,
+      document: { ...saved, main: { provider: "claude-code", model: "sonnet" } },
+    });
+    expect(validateForm(draft, saved, index)).toEqual({
+      ok: false,
+      problems: ["Main: set up Claude Code and choose one of its models."],
+    });
+    draft.choices.main = { provider: "claude-code", model: "sonnet", key: "anthropic" };
+    expect(validateForm(draft, saved, index, [{ id: "sonnet", name: "Sonnet" }])).toEqual({
+      ok: false,
+      problems: [
+        "Main: Claude Code is available for main only, without an API key or manual price.",
+      ],
+    });
+  });
   it("reports every problem at once instead of the first one", () => {
     const d = formOf({ main: { provider: "ollama", model: "custom" } });
     d.choices.local = { provider: "ollama", model: "" };
@@ -355,6 +381,36 @@ describe("configuration validation before explicit save", () => {
       ok: true,
       document: { main: { provider: "ollama", model: "custom" } },
     });
+  });
+  it("has the purpose check on (Auto) unless the user turned it off, and saves only Off", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.purposeCheck).toBe(true);
+    expect(formOf({ main, purposeCheck: "off" }).purposeCheck).toBe(false);
+    expect(validateForm({ ...d, purposeCheck: false }, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, purposeCheck: "off" },
+    });
+    expect(
+      validateForm({ ...d, purposeCheck: true }, { main, purposeCheck: "off" }, providerFixture()),
+    ).toEqual({ ok: true, document: { main } });
+  });
+  it("tells tasks about recent ones unless the user turned it off, and saves only Off", () => {
+    const main = { provider: "ollama", model: "custom" } as const;
+    const d = formOf({ main });
+    expect(d.recentActivity).toBe(true);
+    expect(formOf({ main, recentActivity: "off" }).recentActivity).toBe(false);
+    expect(validateForm({ ...d, recentActivity: false }, { main }, providerFixture())).toEqual({
+      ok: true,
+      document: { main, recentActivity: "off" },
+    });
+    expect(
+      validateForm(
+        { ...d, recentActivity: true },
+        { main, recentActivity: "off" },
+        providerFixture(),
+      ),
+    ).toEqual({ ok: true, document: { main } });
   });
   it("keeps the limits and check-ins the user turned on, and drops ones turned off", () => {
     const saved = {

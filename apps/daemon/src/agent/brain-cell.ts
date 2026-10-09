@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   KeydOpened,
-  SecretId,
+  SECRET_ID_PATTERN,
   SURROGATE_PATTERN,
   TaskPricing,
   ULID_PATTERN,
@@ -149,6 +149,14 @@ export class BrainCells {
   reservedPorts(): number[] {
     return [...this.#reserved];
   }
+  // A listener port for the daemon's own judge, from the same range, never one a brain or a
+  // computer holds.
+  reservePort(): number {
+    return this.#allocate();
+  }
+  releasePort(port: number): void {
+    this.#reserved.delete(port);
+  }
   #allocate(): number {
     if (this.#sweeping || this.#sweepFailed)
       throw new BrainStateError("brain startup cleanup is incomplete");
@@ -167,8 +175,14 @@ export class BrainCells {
     const signal = opts.signal;
     checkAbort(signal);
     if (!ULID_PATTERN.test(opts.sessionId)) throw new TypeError("invalid brain session id");
-    const secrets = opts.secrets.map((id) => SecretId.parse(id));
-    if (secrets.length > 32 || new Set(secrets).size !== secrets.length)
+    // The shape only: keyd decides which keys exist, including one stored before its name was
+    // reserved, which still works until the user removes it.
+    const secrets = [...opts.secrets];
+    if (
+      secrets.length > 32 ||
+      new Set(secrets).size !== secrets.length ||
+      !secrets.every((id) => SECRET_ID_PATTERN.test(id))
+    )
       throw new TypeError("invalid brain secrets");
     const pricing = TaskPricing.parse(opts.pricing);
     const budget = opts.budgetUSD;

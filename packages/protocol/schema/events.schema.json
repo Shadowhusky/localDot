@@ -1036,6 +1036,14 @@
                 },
                 "editable": {
                   "type": "boolean"
+                },
+                "checked": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false",
+                    "mixed"
+                  ]
                 }
               },
               "required": [
@@ -2303,6 +2311,20 @@
               "type": "string",
               "maxLength": 200
             },
+            "why": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "destinations": {
+              "minItems": 1,
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253
+              }
+            },
             "partial": {
               "minItems": 1,
               "maxItems": 16,
@@ -2576,6 +2598,14 @@
                 },
                 "editable": {
                   "type": "boolean"
+                },
+                "checked": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false",
+                    "mixed"
+                  ]
                 }
               },
               "required": [
@@ -3054,10 +3084,18 @@
           "type": "object",
           "properties": {
             "file": {
-              "type": "string",
-              "enum": [
-                "USER.md",
-                "MEMORY.md"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "USER.md",
+                    "MEMORY.md"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^notes\\/\\d{4}-\\d{2}-\\d{2}\\.md$"
+                }
               ]
             },
             "patch": {
@@ -3893,7 +3931,8 @@
                 "user",
                 "timeout",
                 "stop",
-                "pause"
+                "pause",
+                "control"
               ]
             }
           },
@@ -4050,6 +4089,75 @@
         },
         "type": {
           "type": "string",
+          "const": "safety.taint"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "screen",
+                "memory",
+                "files",
+                "recall"
+              ]
+            },
+            "origin": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "kind",
+            "origin"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
           "const": "takeover.request"
         },
         "data": {
@@ -4072,6 +4180,10 @@
             "note": {
               "type": "string",
               "maxLength": 500
+            },
+            "by": {
+              "type": "string",
+              "const": "user"
             }
           },
           "required": [
@@ -4564,7 +4676,10 @@
           "properties": {
             "provider": {
               "type": "string",
-              "const": "chatgpt"
+              "enum": [
+                "chatgpt",
+                "claude-code"
+              ]
             },
             "plan": {
               "type": "string",

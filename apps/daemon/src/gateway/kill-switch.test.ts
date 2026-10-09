@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SELFTEST_CHECKS } from "@localdot/protocol";
+import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient } from "../cells/docker.ts";
 import { CellOrchestrator, type OrchestratorDeps } from "../cells/orchestrator.ts";
@@ -11,6 +11,8 @@ import type { CellSummary, DesktopdHealth } from "../cells/types.ts";
 import { CELL_FILES_DIR, CellKeydWiring } from "../keyd/cell-wiring.ts";
 import { KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import { type FakeKeyd, startFakeKeyd } from "../keyd/testing/fake-keyd.ts";
+import { stopAll } from "../routines/stop-all.ts";
+import { RoutineStore } from "../routines/store.ts";
 import { KillSwitch, type StopOutcome } from "./kill-switch.ts";
 import { LiveSessions } from "./live.ts";
 
@@ -599,5 +601,67 @@ describe("kill-switch races and failed resume", () => {
     const outcome = await killSwitch.stopSession(SESSION);
     expect(outcome).toMatchObject({ revoked: false, paused: true });
     expect(JSON.stringify(outcome)).not.toContain("private-key");
+  });
+});
+
+describe("Stop everything", () => {
+  it("stops two running sessions, pauses the routine and revokes both computers within 2 s", async () => {
+    const f = await readyCell(50);
+    const second = await f.cells.create({ scale: 2 });
+    await until(() => f.cells.get(second.id)?.state === "ready");
+    const one = ulid(),
+      two = ulid();
+    f.live.start(f.id, one, untilAborted);
+    f.live.start(second.id, two, untilAborted);
+    const home = mkdtempSync(join(tmpdir(), "local dot's stop-all-"));
+    const store = new RoutineStore(home, { now: Date.now, zone: () => "Europe/London" });
+    cleanup.push(() => {
+      store.close();
+      rmSync(home, { recursive: true, force: true });
+    });
+    const routine = store.create(
+      { name: "Morning bills", instruction: "x", when: { kind: "daily", time: "08:30" } },
+      { state: "active" },
+    );
+    const started = Date.now();
+    const outcome = await stopAll(
+      {
+        cells: f.cells,
+        live: f.live,
+        killSwitch: f.killSwitch,
+        store,
+        launcher: { cancelAll: () => 0 },
+        scheduler: { replan: () => {} },
+        audit: { append: () => {} },
+        publish: () => {},
+        now: Date.now,
+      },
+      "user",
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(outcome.confirmed).toBe(true);
+    expect(outcome.sessions.map((s) => s.sessionId).sort()).toEqual([one, two].sort());
+    expect(f.live.get(f.id)).toBeUndefined();
+    expect(f.live.get(second.id)).toBeUndefined();
+    expect(store.get(routine.id)).toMatchObject({ state: "paused", pausedReason: "stop_all" });
+    expect(keyd.cells.get(f.id)?.revoked).toBeGreaterThanOrEqual(1);
+    expect(keyd.cells.get(second.id)?.revoked).toBeGreaterThanOrEqual(1);
+    expect(f.cells.get(f.id)?.paused).toBe(true);
+    expect(f.cells.get(second.id)?.paused).toBe(true);
+  });
+
+  it("freezes a computer with no task and leaves a frozen one alone", async () => {
+    const { cells, killSwitch, id, desktop } = await readyCell(30);
+    expect(await killSwitch.stopIdleCell(id)).toEqual({
+      revoked: true,
+      paused: true,
+      closed: false,
+      stopped: false,
+      errors: [],
+    });
+    expect(keyd.cells.get(id)?.revoked).toBe(1);
+    expect(desktop()?.paused).toBe(true);
+    expect(cells.get(id)?.paused).toBe(true);
+    expect(await killSwitch.stopIdleCell(id)).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ import {
   type BrowserNavigateInput,
   clipText,
   isToolName,
+  type PeopleInput,
   TOOL_INPUTS,
   type ToolName,
   type ToolResult,
@@ -28,8 +29,11 @@ import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { findTool } from "./find.ts";
+import { peopleTool, saveRefusal } from "./people.ts";
 import { updatePlanTool } from "./plan.ts";
+import { recallTool } from "./recall.ts";
 import { rememberTool } from "./remember.ts";
+import { followUpAtTool, routineTool } from "./routine.ts";
 import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
 import { startWorkClock } from "./work-clock.ts";
@@ -61,7 +65,11 @@ const STEP_KIND: Record<ToolName, string> = {
   ask_user: "ask",
   request_takeover: "ask",
   remember: "think",
+  recall: "think",
+  people: "think",
   done: "think",
+  routine: "think",
+  follow_up_at: "think",
 };
 
 function blocked(
@@ -232,6 +240,11 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
+    const refusal =
+      name === "people"
+        ? saveRefusal(session, frozen as PeopleInput, deps.tools.people)
+        : undefined;
+    if (refusal) return { status: 200, result: fail(refusal) };
     // Public pages open in the web browser, where the user's sign-ins are; local addresses
     // only resolve on the desktop.
     let fellBack = false;
@@ -278,7 +291,7 @@ async function dispatchAdmitted(
         throw new Error("The selected screen does not match this tool call.");
       ctx.check();
     }
-    const facts = toolRisk(name, frozen);
+    const facts = toolRisk(name, frozen, (id) => deps.tools.routines?.name(id));
     if (facts) {
       ctx.permit = await authorizePrepared(ctx, {
         tool: name,
@@ -353,8 +366,20 @@ async function dispatchAdmitted(
       case "remember":
         result = await rememberTool(t, ctx, input);
         break;
+      case "recall":
+        result = await recallTool(t, ctx, input);
+        break;
+      case "people":
+        result = await peopleTool(t, ctx, input);
+        break;
       case "done":
         result = await doneTool(t, ctx, input);
+        break;
+      case "routine":
+        result = await routineTool(t, ctx, input);
+        break;
+      case "follow_up_at":
+        result = await followUpAtTool(t, ctx, input);
         break;
     }
     // Containment intentionally stopped the session; its terminal refusal has no image/event.

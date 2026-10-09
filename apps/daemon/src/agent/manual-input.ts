@@ -13,6 +13,9 @@ export interface ManualDesktop {
   // Present on a screen that keeps a button down between inputs: lets go of every key and button
   // there, cancelling a drag rather than dropping it. A screen without it takes clicks only.
   letGo?(): Promise<void>;
+  // Present where the computer can answer once everything sent before has landed, letting go of
+  // anything left down: input whose landing was unknown is then settled.
+  confirm?(): Promise<void>;
 }
 export type ManualDesktopSource = (
   session: AgentSession,
@@ -40,7 +43,7 @@ export async function sendManualInput(
     } catch {
       failure = new ManualInputUncertain();
     }
-    lease.finish(failure instanceof ManualInputUncertain);
+    lease.finish(failure instanceof ManualInputUncertain, access?.confirm?.bind(access));
   }
   if (failure) throw failure;
 }
@@ -62,13 +65,14 @@ export function openManualDesktop(
 }
 
 // One input onto the screen. A failure once anything may have reached the computer is
-// ManualInputUncertain: the fence then holds until Stop contains the desktop.
+// ManualInputUncertain: the fence then holds until the computer confirms it, or Stop.
 export async function deliverManualInput(
   lease: ManualLease,
   access: ManualDesktop,
   input: ManualStreamInput,
+  cutBy: AbortSignal = lease.signal,
 ): Promise<void> {
-  const operation = AbortSignal.any([lease.signal, AbortSignal.timeout(30_000)]);
+  const operation = AbortSignal.any([cutBy, AbortSignal.timeout(30_000)]);
   const check = () => {
     if (operation.aborted) throw new ControlHeldError();
     lease.check();
@@ -103,10 +107,11 @@ export async function deliverManualInput(
         },
         operation,
       );
-    check();
   } catch {
     throw new ManualInputUncertain();
   }
+  // Its receipt says it landed whole; control that changed meanwhile only ends the input here.
+  check();
 }
 
 export function manualFailure(error: unknown, lease: ManualLease, session: AgentSession): Error {

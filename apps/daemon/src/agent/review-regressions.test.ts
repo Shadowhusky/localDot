@@ -29,7 +29,7 @@ describe("review regression boundaries", () => {
       text: "X",
       old_text: "\ud83d",
     });
-    expect(() => memory.apply(ulid(), input.file, input.op, input.text, input.old_text)).toThrow();
+    expect(() => memory.apply(ulid(), "USER.md", input.op, input.text, input.old_text)).toThrow();
     expect(readdirSync(join(home, "memory/.history"))).toEqual(oldHistory);
     expect(readFileSync(join(home, "memory/USER.md"))).toEqual(oldBytes);
     expect.soft(readdirSync(join(home, "memory"))).not.toContain(".pending.json");
