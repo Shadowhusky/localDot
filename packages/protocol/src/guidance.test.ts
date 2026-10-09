@@ -19,8 +19,10 @@ describe("dot's working rules", () => {
   });
 
   it("send predictable inputs together in the way the model's tools allow", () => {
-    expect(workingRules("batch")).toContain("into one computer call");
-    expect(workingRules("calls")).toContain("computer calls of a predictable sequence in one turn");
+    expect(workingRules("batch")).toContain("Return, into one computer call");
+    expect(workingRules("calls")).toContain(
+      "Return, in one turn; they stop at the first that fails",
+    );
     for (const mode of ["batch", "calls"] as const) {
       const rules = workingRules(mode);
       expect(rules).toContain("drawing (drag along a path)");

@@ -6,9 +6,10 @@
 export type ScreenHands = "batch" | "calls" | "none";
 
 const SEQUENCES: Record<Exclude<ScreenHands, "none">, string> = {
-  batch: "Batch a predictable sequence of inputs into one computer call",
+  batch:
+    "Batch a predictable sequence of inputs, such as click a field, type, Tab, type, Return, into one computer call.",
   calls:
-    "Make the computer calls of a predictable sequence in one turn (they stop at the first that fails)",
+    "Make the computer calls of a predictable sequence, such as click a field, type, Tab, type, Return, in one turn; they stop at the first that fails.",
 };
 
 export function workingRules(hands: ScreenHands): string {
@@ -16,7 +17,7 @@ export function workingRules(hands: ScreenHands): string {
     hands === "none"
       ? ["Check results with browser_read, the shell and the files tool."]
       : [
-          `${SEQUENCES[hands]}, such as click a field, type, Tab, type, Return. Keep pixel actions for what needs the mouse: drawing (drag along a path), dragging, sliders, canvases. Open apps with Super+Space and their name.`,
+          `${SEQUENCES[hands]} Keep pixel actions for what needs the mouse: drawing (drag along a path), dragging, sliders, canvases. Open apps with Super+Space and their name.`,
           "Actions return the new screen, so don't screenshot to check; read text with browser_read and small details with zoom.",
         ];
   return [
