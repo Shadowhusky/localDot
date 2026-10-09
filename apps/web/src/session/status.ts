@@ -368,7 +368,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (state === "thinking") return running("thinking", "Thinking…", "Thinking…", control);
   if (state === "observing")
     return running("observing", "Checking the screen", "Checking the screen.", control);
-  return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
+  return running("working", "Working", n ? "Working…" : "Starting…", control);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the
