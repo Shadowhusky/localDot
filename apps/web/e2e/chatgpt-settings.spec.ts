@@ -196,7 +196,16 @@ async function fixture(supported = true) {
       throw new Error("No task event expected");
     },
     harness: available,
-    chatgpt: { account, installer, availability: available },
+    chatgpt: {
+      account,
+      installer,
+      availability: available,
+      setup: {
+        sandbox: () => (install.state === "ready" ? "passed" : "unchecked"),
+        check: async () => (install.state === "ready" ? "passed" : "unchecked"),
+        confirm: async (status) => status,
+      },
+    },
   };
   agentRoutes(app, deps);
   serveUi(app, fileURLToPath(new URL("../dist", import.meta.url)));

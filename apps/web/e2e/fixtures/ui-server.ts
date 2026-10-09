@@ -34,6 +34,7 @@ import {
   type ChatgptStatus,
   type CodexAccount,
 } from "../../../daemon/src/agent/codex/account.ts";
+import type { ChatgptSetupControl } from "../../../daemon/src/agent/codex/setup.ts";
 import { Conversations } from "../../../daemon/src/agent/conversation.ts";
 import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
@@ -134,6 +135,8 @@ const settingsMode = env.QA_SETTINGS ?? "configured";
 let chatgptState = (env.QA_CHATGPT || undefined) as
   | "signed_in"
   | "signed_out"
+  | "checking"
+  | "check_failed"
   | "not_installed"
   | "unavailable"
   | undefined;
@@ -945,9 +948,16 @@ const installed: InstalledCodex = {
   codeModeHostBin: join(HOME, "inert/code-mode-host"),
 } as InstalledCodex;
 let installing: Promise<InstalledCodex> | undefined;
+const installedStates = new Set(["signed_in", "signed_out", "checking", "check_failed"]);
+const sandboxChecked = () => {
+  chatgptState = "checking";
+  setTimeout(() => {
+    if (chatgptState === "checking") chatgptState = "signed_out";
+  }, 1500);
+};
 const installer = {
   status: () =>
-    chatgptState === "signed_in" || chatgptState === "signed_out"
+    installedStates.has(chatgptState ?? "")
       ? { state: "ready", version: "0.154.0" }
       : installing
         ? { state: "downloading", receivedBytes: 48 * 1024 * 1024, totalBytes: 116_501_639 }
@@ -955,17 +965,32 @@ const installer = {
   ensureInstalled: () => {
     installing ??= new Promise((resolve) =>
       setTimeout(() => {
-        chatgptState = "signed_out";
         installing = undefined;
+        sandboxChecked();
         resolve(installed);
       }, 1500),
     );
     return installing;
   },
   verifiedInstallation: async () =>
-    chatgptState === "signed_in" || chatgptState === "signed_out" ? installed : undefined,
+    installedStates.has(chatgptState ?? "") ? installed : undefined,
   cancel: () => {},
 } as unknown as CodexInstaller;
+const setup: ChatgptSetupControl = {
+  sandbox: () =>
+    chatgptState === "checking"
+      ? "checking"
+      : chatgptState === "check_failed"
+        ? "failed"
+        : chatgptState === "signed_in" || chatgptState === "signed_out"
+          ? "passed"
+          : "unchecked",
+  check: async () => {
+    if (chatgptState === "check_failed") sandboxChecked();
+    return setup.sandbox();
+  },
+  confirm: async (status) => status,
+};
 const account = {
   status: async () =>
     ({
@@ -1208,7 +1233,7 @@ const agent: AgentRoutesDeps = {
     session.append(type, data);
   },
   harness,
-  ...(chatgptState ? { chatgpt: { account, installer, availability: harness } } : {}),
+  ...(chatgptState ? { chatgpt: { account, installer, availability: harness, setup } } : {}),
 };
 const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
   "deriveBits",
@@ -2283,7 +2308,16 @@ routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as Cell
 routes.post("/__qa/chatgpt/:state", (c) => {
   const state = c.req.param("state");
   if (!chatgptState) return c.text("start the fixture with QA_CHATGPT", 409);
-  if (!["signed_in", "signed_out", "not_installed", "unavailable"].includes(state))
+  if (
+    ![
+      "signed_in",
+      "signed_out",
+      "checking",
+      "check_failed",
+      "not_installed",
+      "unavailable",
+    ].includes(state)
+  )
     return c.text("unknown ChatGPT state", 400);
   chatgptState = state as NonNullable<typeof chatgptState>;
   signingIn = undefined;

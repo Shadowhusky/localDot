@@ -41,6 +41,7 @@ import {
 import type { CatalogStore } from "./catalog-store.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
+import { type ChatgptSetupControl, SANDBOX_REASONS } from "./codex/setup.ts";
 import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
@@ -95,6 +96,7 @@ export interface AgentRoutesDeps {
     account: CodexAccount;
     installer: CodexInstaller;
     availability(): HarnessAvailability;
+    setup: ChatgptSetupControl;
   };
 }
 
@@ -249,34 +251,47 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       reason: CHATGPT_SWITCHED_OFF,
     };
   if (deps.chatgpt) {
-    const { account, installer } = deps.chatgpt;
+    const { account, installer, setup } = deps.chatgpt;
     const installed = () => {
       if (installer.status().state !== "ready") throw new AccountError(409, CHATGPT_INSTALL_FIRST);
       const availability = harness();
       if (!availability.available)
         throw new AccountError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
+      const sandbox = setup.sandbox();
+      if (sandbox !== "passed") throw new AccountError(409, SANDBOX_REASONS[sandbox]);
     };
+    const progress = () => ({ install: installer.status(), sandbox: setup.sandbox() });
     chatgptRoutes(app, {
       account: {
         status: async (opts) => {
-          const availability = harness(),
-            install = installer.status();
+          const availability = harness();
           if (!availability.available)
             return {
               ...availability,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
-              install,
+              ...progress(),
             };
-          if (install.state !== "ready")
+          if (installer.status().state !== "ready")
             return {
               available: true,
               reason: CHATGPT_INSTALL_FIRST,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
-              install,
+              ...progress(),
             };
-          return { ...(await account.status(opts)), install: installer.status() };
+          // An installation that predates this check, or a check a restart interrupted.
+          if (setup.sandbox() === "unchecked") void setup.check();
+          const sandbox = setup.sandbox();
+          if (sandbox !== "passed")
+            return {
+              available: true,
+              reason: SANDBOX_REASONS[sandbox],
+              codexVersion: CODEX_VERSION,
+              state: "unavailable" as const,
+              ...progress(),
+            };
+          return { ...(await setup.confirm(await account.status(opts))), ...progress() };
         },
         login: async (method) => {
           installed();
@@ -289,7 +304,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         },
         refresh: async () => {
           installed();
-          return { ...(await account.refresh()), install: installer.status() };
+          return { ...(await setup.confirm(await account.refresh())), ...progress() };
         },
       },
     });
@@ -303,10 +318,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
         // Installation is explicitly requested and daemon-owned; a disconnected HTTP caller
         // does not cancel the shared flight. Its separate cancel action remains available.
+        // The sandbox check follows on its own, before any sign-in can start.
         if (!flight) {
           const work = installer.ensureInstalled(new AbortController().signal);
           flight = work;
           void work
+            .then(() => setup.check())
             .catch(() => {})
             .finally(() => {
               if (flight === work) flight = undefined;
@@ -322,6 +339,18 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         check(c.req.raw.signal);
         installer.cancel();
         return c.body(null, 204);
+      }),
+    );
+    app.post(
+      "/api/agent/chatgpt/check",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        if (!deps.chatgpt?.availability().available)
+          throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
+        if (installer.status().state !== "ready") throw new RouteError(409, CHATGPT_INSTALL_FIRST);
+        void setup.check();
+        return c.json({ sandbox: setup.sandbox() }, 202);
       }),
     );
   }

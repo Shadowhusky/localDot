@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CodexInstallState, InstalledCodex } from "@localdot/codex-harness";
-import { type KeydRecord, ulid } from "@localdot/protocol";
+import { type ChatgptSandbox, type KeydRecord, ulid } from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,8 @@ import { DesktopdTools } from "../desktopd/tools-client.ts";
 import { EventLog } from "../event-log.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import type { ChatgptStatus } from "./codex/account.ts";
+import { SANDBOX_REASONS } from "./codex/setup.ts";
 import { TRANSFER_BYTES } from "./download.ts";
 import { MemoryStore } from "./memory.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
@@ -719,21 +721,34 @@ describe("ChatGPT settings and installation integration", () => {
       verifiedInstallation: vi.fn(async () => undefined),
       cancel: vi.fn(() => {}),
     };
-    let available = true;
+    let available = true,
+      sandbox: ChatgptSandbox = "unchecked";
+    const plan = {
+      sandbox: () => sandbox,
+      check: vi.fn(async () => {
+        if (install.state === "ready" && sandbox !== "passed") sandbox = "checking";
+        return sandbox;
+      }),
+      confirm: vi.fn(async (status: ChatgptStatus) => status),
+    };
     const f = await setup({
-      chatgpt: { account, installer, availability: () => ({ available }) },
+      chatgpt: { account, installer, availability: () => ({ available }), setup: plan },
       harness: () => ({ available }),
     });
     return {
       ...f,
       account,
       installer,
+      plan,
       gate,
       setInstall(value: CodexInstallState) {
         install = value;
       },
       setAvailable(value: boolean) {
         available = value;
+      },
+      setSandbox(value: ChatgptSandbox) {
+        sandbox = value;
       },
     };
   }
@@ -801,21 +816,94 @@ describe("ChatGPT settings and installation integration", () => {
     expect(install.status).toBe(503);
     expect(await install.text()).toBe("ChatGPT support can't be installed on this computer.");
   });
-  it.each(["/install", "/install/cancel"])("requires the install token for %s", async (path) => {
-    const f = await installedFixture(),
-      log = new EventLog(f.home);
-    const app = createApp({ token: "i".repeat(43), port: 4750, eventLog: log, agent: f.deps });
-    try {
-      expect(
-        (await app.request(`http://127.0.0.1:4750/api/agent/chatgpt${path}`, { method: "POST" }))
-          .status,
-      ).toBe(401);
-      expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
-      expect(f.installer.cancel).not.toHaveBeenCalled();
-    } finally {
-      log.close();
-    }
+  it("checks this Mac's sandbox after installation, before any sign-in", async () => {
+    const f = await installedFixture();
+    expect((await f.send("POST", "/api/agent/chatgpt/install")).status).toBe(202);
+    expect(f.plan.check).not.toHaveBeenCalled();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    f.gate.resolve({
+      version: "0.154.0",
+      platform: "darwin-arm64",
+      binDir: "/fixture",
+      codexBin: "/fixture/codex",
+      codeModeHostBin: "/fixture/host",
+    });
+    await vi.waitFor(() => expect(f.plan.check).toHaveBeenCalledTimes(1));
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "unavailable",
+      reason: SANDBOX_REASONS.checking,
+      install: { state: "ready" },
+      sandbox: "checking",
+    });
+    const login = await f.send("POST", "/api/agent/chatgpt/login", {});
+    expect(login.status).toBe(409);
+    expect(await login.text()).toBe(SANDBOX_REASONS.checking);
+    expect((await f.send("POST", "/api/agent/chatgpt/refresh")).status).toBe(409);
+    expect(f.account.status).not.toHaveBeenCalled();
+    expect(f.account.login).not.toHaveBeenCalled();
+    f.setSandbox("passed");
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "signed_out",
+      sandbox: "passed",
+    });
+    expect(f.plan.confirm).toHaveBeenCalledTimes(1);
+    expect((await f.send("POST", "/api/agent/chatgpt/login", {})).status).toBe(202);
   });
+  it("starts a check for an installation that has none and keeps a failed check closed", async () => {
+    const f = await installedFixture();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      state: "unavailable",
+      sandbox: "checking",
+    });
+    expect(f.plan.check).toHaveBeenCalledTimes(1);
+    f.setSandbox("failed");
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "unavailable",
+      reason: SANDBOX_REASONS.failed,
+      sandbox: "failed",
+    });
+    expect(f.plan.check).toHaveBeenCalledTimes(1);
+    expect((await f.send("POST", "/api/agent/chatgpt/login", {})).status).toBe(409);
+    const again = await f.send("POST", "/api/agent/chatgpt/check");
+    expect(again.status).toBe(202);
+    expect(await again.json()).toEqual({ sandbox: "checking" });
+    expect(f.plan.check).toHaveBeenCalledTimes(2);
+    expect(f.account.status).not.toHaveBeenCalled();
+  });
+  it("refuses a check before installation or with a body", async () => {
+    const f = await installedFixture();
+    const early = await f.send("POST", "/api/agent/chatgpt/check");
+    expect(early.status).toBe(409);
+    expect(await early.text()).toBe("Install ChatGPT support first.");
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    expect((await f.send("POST", "/api/agent/chatgpt/check", {})).status).toBe(400);
+    f.setAvailable(false);
+    expect((await f.send("POST", "/api/agent/chatgpt/check")).status).toBe(503);
+    expect(f.plan.check).not.toHaveBeenCalled();
+  });
+  it.each(["/install", "/install/cancel", "/check"])(
+    "requires the install token for %s",
+    async (path) => {
+      const f = await installedFixture(),
+        log = new EventLog(f.home);
+      const app = createApp({ token: "i".repeat(43), port: 4750, eventLog: log, agent: f.deps });
+      try {
+        expect(
+          (await app.request(`http://127.0.0.1:4750/api/agent/chatgpt${path}`, { method: "POST" }))
+            .status,
+        ).toBe(401);
+        expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+        expect(f.installer.cancel).not.toHaveBeenCalled();
+        expect(f.plan.check).not.toHaveBeenCalled();
+      } finally {
+        log.close();
+      }
+    },
+  );
 });
 
 describe("bounded user file transfers", () => {

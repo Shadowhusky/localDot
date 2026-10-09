@@ -10,12 +10,14 @@ const installed = {
   codexVersion: "0.154.0",
   state: "signed_out",
   install: { state: "ready", version: "0.154.0" },
+  sandbox: "passed",
 };
 const absent = {
   available: true,
   codexVersion: "0.154.0",
   state: "unavailable",
   install: { state: "not_installed" },
+  sandbox: "unchecked",
 };
 function view(fetchImpl: typeof fetch) {
   const api = createApi("inert-review", { origin: "https://owned.invalid", fetchImpl });

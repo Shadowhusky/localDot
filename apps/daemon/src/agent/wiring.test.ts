@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CODEX_MANIFEST_SHA256,
@@ -7,6 +7,9 @@ import {
   CodexInstallError,
   type CodexInstaller,
   type HarnessAvailability,
+  NativeCheckError,
+  stampAccount,
+  stampNative,
 } from "@localdot/codex-harness";
 import { ulid } from "@localdot/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +32,8 @@ const m = vi.hoisted(() => ({
   endpoints: [] as McpEndpointInput[],
   available: { available: true } as HarnessAvailability,
   record: {} as Record<string, unknown>,
+  host: { system: "25G83", runtime: "0.0.78" },
+  check: vi.fn(),
   installed: false,
   ensure: vi.fn(),
   verify: vi.fn(),
@@ -44,6 +49,8 @@ const m = vi.hoisted(() => ({
 vi.mock("@localdot/codex-harness", async (original) => ({
   ...(await original<typeof import("@localdot/codex-harness")>()),
   harnessAvailability: () => m.available,
+  checkHost: () => m.host,
+  checkNativeSandbox: (...args: unknown[]) => m.check(...args),
 }));
 vi.mock("../../../../harness/codex/acceptance/record.json", () => ({ default: m.record }));
 vi.mock("@hono/node-server", () => ({ serve: (...args: unknown[]) => m.serve(...args) }));
@@ -147,6 +154,7 @@ function gate<T>() {
 const fixtures: { agent: ReturnType<typeof createAgent>; log: EventLog; base: string }[] = [];
 beforeEach(() => {
   for (const fn of [
+    m.check,
     m.ensure,
     m.verify,
     m.cancel,
@@ -167,7 +175,18 @@ beforeEach(() => {
   m.available = { available: true };
   for (const key of Object.keys(m.record)) delete m.record[key];
   m.installed = false;
-  m.verify.mockResolvedValue(undefined);
+  m.verify.mockImplementation(async () =>
+    m.installed
+      ? {
+          version: "0.154.0",
+          platform: "darwin-arm64",
+          binDir: "/owned/bin/x",
+          codexBin: "/owned/bin/x/codex",
+          codeModeHostBin: "/owned/bin/x/codex-code-mode-host",
+        }
+      : undefined,
+  );
+  m.check.mockImplementation(async () => ({ host: m.host, reportSha256: "c".repeat(64) }));
   m.ensure.mockResolvedValue({ version: "0.154.0" });
   m.authClose.mockResolvedValue(undefined);
   m.sweep.mockResolvedValue(0);
@@ -195,7 +214,7 @@ afterEach(async () => {
   }
   vi.restoreAllMocks();
 });
-function setup(options: { codex?: boolean; unsafe?: boolean } = {}) {
+function setup(options: { codex?: boolean; unsafe?: boolean; record?: unknown } = {}) {
   const base = mkdtempSync("/tmp/ld12-wire-"),
     home = join(base, "daemon"),
     realHome = join(base, "real-home");
@@ -207,6 +226,12 @@ function setup(options: { codex?: boolean; unsafe?: boolean } = {}) {
     cellId = ulid(),
     frameId = ulid();
   if (options.unsafe) symlinkSync(realHome, join(home, "codex"));
+  if (options.record) {
+    mkdirSync(join(home, "codex"), { mode: 0o700 });
+    writeFileSync(join(home, "codex", "acceptance.json"), JSON.stringify(options.record), {
+      mode: 0o600,
+    });
+  }
   let endpoint = { baseUrl: "http://127.0.0.1:1", token: "d".repeat(43) };
   let cell: CellSummary = {
     id: cellId,
@@ -301,48 +326,126 @@ describe("ChatGPT production integration", () => {
     expect(m.verify).toHaveBeenCalledTimes(1);
     expect(m.ensure).not.toHaveBeenCalled();
     expect(m.status).not.toHaveBeenCalled();
+    expect(m.check).not.toHaveBeenCalled();
   });
-  const accepted = () => ({
+  const released = () => ({
     format: 1,
     codexVersion: CODEX_VERSION,
     platform: `${process.platform}-${process.arch}`,
     manifestSha256: CODEX_MANIFEST_SHA256,
     nativeSandbox: { passed: true, inputSha256: "a".repeat(64), reportSha256: "b".repeat(64) },
-    realAccount: { passed: true, reportSha256: "c".repeat(64) },
+    realAccount: { passed: false },
   });
   const pending = {
     available: false,
     reason: "ChatGPT plan support isn't switched on in this version yet.",
   };
+  const signedIn = {
+    available: true,
+    state: "signed_in",
+    codexVersion: "0.154.0",
+    account: { email: "person@example.test", plan: "plus" },
+  };
+  const choose = (f: ReturnType<typeof setup>) =>
+    f.agent.routes.settings.put({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
+  const recordOf = (f: ReturnType<typeof setup>) =>
+    JSON.parse(readFileSync(join(f.home, "codex", "acceptance.json"), "utf8"));
   it.each([
     ["no record", {}],
     ["no native sandbox stamp", { nativeSandbox: { passed: false } }],
-    ["no real-account stamp", { realAccount: { passed: false } }],
     ["another Codex version", { codexVersion: "0.155.0" }],
     ["another release manifest", { manifestSha256: "0".repeat(64) }],
-  ])("keeps the plan switched off after installation with %s", async (name, patch) => {
-    if (name !== "no record") Object.assign(m.record, accepted(), patch);
+  ])("keeps the plan switched off without release evidence: %s", async (name, patch) => {
+    if (name !== "no record") Object.assign(m.record, released(), patch);
     m.installed = true;
     const f = setup();
     await f.agent.start();
     expect(f.agent.routes.harness?.()).toEqual(pending);
-    f.agent.routes.settings.put({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
+    choose(f);
     await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
       status: 400,
     });
+    expect(m.check).not.toHaveBeenCalled();
     expect(m.status).not.toHaveBeenCalled();
     expect(m.run).not.toHaveBeenCalled();
     expect(m.ensure).not.toHaveBeenCalled();
   });
-  it("opens the plan only with the complete committed acceptance record", async () => {
-    Object.assign(m.record, accepted());
-    m.installed = true;
+  it("lets the plan be chosen and set up with the release evidence, before this Mac's stamps", async () => {
+    Object.assign(m.record, released());
     const f = setup();
     await f.agent.start();
     expect(f.agent.routes.harness?.()).toEqual({ available: true });
     expect(f.agent.routes.chatgpt?.availability()).toEqual({ available: true });
+    expect(f.agent.routes.chatgpt?.setup.sandbox()).toBe("unchecked");
+    choose(f);
+    await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "Install ChatGPT support first.",
+    });
     m.available = { available: false, reason: "fixture unsupported platform" };
     expect(f.agent.routes.harness?.()).toEqual(m.available);
+  });
+  it("checks this Mac's sandbox at startup, then opens tasks after the first verified sign-in", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    const f = setup();
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.check).toHaveBeenCalledTimes(1);
+    expect(recordOf(f)).toMatchObject({
+      nativeSandbox: { passed: true, system: "25G83", runtime: "0.0.78" },
+      realAccount: { passed: false },
+    });
+    choose(f);
+    m.status.mockResolvedValueOnce({
+      available: true,
+      state: "signed_out",
+      codexVersion: "0.154.0",
+    });
+    await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "ChatGPT plan: sign in under Settings first.",
+    });
+    expect(recordOf(f).realAccount).toEqual({ passed: false });
+    m.status.mockResolvedValue(signedIn);
+    expect((await f.agent.runner.start(f.cellId, "Fixture task")).task).toBe("Fixture task");
+    expect(recordOf(f).realAccount).toMatchObject({ passed: true });
+  });
+  it("keeps tasks closed when this Mac's sandbox check fails", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    m.check.mockRejectedValue(new NativeCheckError("task nested"));
+    const f = setup();
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("failed"));
+    choose(f);
+    m.status.mockResolvedValue(signedIn);
+    await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "ChatGPT support didn't pass its safety check on this Mac, so it stays off.",
+    });
+    expect(m.status).not.toHaveBeenCalled();
+    expect(m.run).not.toHaveBeenCalled();
+    expect(() => readFileSync(join(f.home, "codex", "acceptance.json"))).toThrow();
+  });
+  it("checks again after a macOS update and keeps the user's account stamp", async () => {
+    Object.assign(m.record, released());
+    m.installed = true;
+    const old = { system: "25F70", runtime: m.host.runtime };
+    const f = setup({
+      record: stampAccount(stampNative(undefined, old, "d".repeat(64), 1), old, 2),
+    });
+    await f.agent.start();
+    const plan = f.agent.routes.chatgpt?.setup;
+    await vi.waitFor(() => expect(plan?.sandbox()).toBe("passed"));
+    expect(m.check).toHaveBeenCalledTimes(1);
+    expect(recordOf(f)).toMatchObject({
+      nativeSandbox: { passed: true, system: "25G83" },
+      realAccount: { passed: true, checkedAt: 2 },
+    });
   });
   it.each([false, true])(
     "does not construct a launcher for absent or unsafe roots: unsafe=%s",

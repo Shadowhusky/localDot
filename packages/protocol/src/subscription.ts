@@ -66,6 +66,10 @@ export const CodexInstallState = z.discriminatedUnion("state", [
 ]);
 export type CodexInstallState = z.infer<typeof CodexInstallState>;
 
+// This Mac's own check that Codex's sandbox holds, run after installation and on version changes.
+export const ChatgptSandbox = z.enum(["unchecked", "checking", "passed", "failed"]);
+export type ChatgptSandbox = z.infer<typeof ChatgptSandbox>;
+
 // ChatGPT ships device code sign-in switched off for personal accounts.
 export const CHATGPT_DEVICE_CODE_OFF =
   "Turn on device code sign-in in ChatGPT under Settings → Security first.";

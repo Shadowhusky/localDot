@@ -2,15 +2,20 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import {
+  CHATGPT_INSTALL_FIRST,
   CHATGPT_SWITCHED_OFF,
   CODEX_VERSION,
   CodexInstallError,
   type CodexInstaller,
-  codexAccepted,
+  checkHost,
+  checkNativeSandbox,
+  codexReleased,
   type HarnessAvailability,
   harnessAvailability,
   type OwnedCodexRoots,
   prepareOwnedCodexRoots,
+  readLocalAcceptance,
+  writeLocalAcceptance,
 } from "@localdot/codex-harness";
 import { type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
 import type { BrowserScope } from "../browser/client.ts";
@@ -38,6 +43,7 @@ import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
+import { ChatgptSetup, SANDBOX_REASONS, SETUP_UNSAVED } from "./codex/setup.ts";
 import { Conversations } from "./conversation.ts";
 import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
@@ -219,12 +225,14 @@ export function createAgent(d: AgentWiringDeps) {
     if (closing) return { available: false, reason: "The ChatGPT account service is closed." };
     return harnessAvailability();
   };
+  // Whether the plan can be chosen and set up here. Tasks also need this Mac's own stamps.
   const harness = (): HarnessAvailability => {
     const availability = platform();
-    return availability.available && !codexAccepted()
+    return availability.available && !codexReleased()
       ? { available: false, reason: CHATGPT_SWITCHED_OFF }
       : availability;
   };
+  let setup: ChatgptSetup | undefined;
   const auth = roots
     ? new CodexAuthOwner({
         roots,
@@ -232,8 +240,19 @@ export function createAgent(d: AgentWiringDeps) {
           [...runner.sessions.values()].filter((session) => runner.isChatgpt(session.id)),
         taskDenyRead: (id) => runner.codexDenyReadOf(id),
         pauseForAuth: (session, generation) => runner.pauseForAuth(session, generation),
+        sandboxReason: () => (setup ? setup.reason() : SANDBOX_REASONS.unchecked),
       })
     : undefined;
+  if (auth && roots) {
+    const owned = roots;
+    setup = new ChatgptSetup({
+      installer: auth.installer,
+      host: checkHost,
+      check: (installed, signal) => checkNativeSandbox({ roots: owned, installed, signal }),
+      read: () => readLocalAcceptance(owned),
+      write: (record) => writeLocalAcceptance(owned, record),
+    });
+  }
   const installWork = new Set<Promise<unknown>>();
   const tracked = <T>(work: Promise<T>): Promise<T> => {
     installWork.add(work);
@@ -386,10 +405,21 @@ export function createAgent(d: AgentWiringDeps) {
             authGeneration: () => auth.authGeneration,
             account: {
               status: async (opts) => {
-                const availability = harness();
-                return availability.available
-                  ? auth.status(opts)
-                  : { ...availability, codexVersion: CODEX_VERSION, state: "unavailable" as const };
+                const availability = harness(),
+                  reason = !availability.available
+                    ? (availability.reason ?? CHATGPT_SWITCHED_OFF)
+                    : auth.installer.status().state !== "ready"
+                      ? CHATGPT_INSTALL_FIRST
+                      : setup?.reason();
+                const off = (why: string) => ({
+                  available: false,
+                  reason: why,
+                  codexVersion: CODEX_VERSION,
+                  state: "unavailable" as const,
+                });
+                if (reason || !setup) return off(reason ?? CHATGPT_SWITCHED_OFF);
+                const status = await setup.confirm(await auth.status(opts));
+                return status.state === "signed_in" && !setup.ready() ? off(SETUP_UNSAVED) : status;
               },
             },
           },
@@ -600,7 +630,9 @@ export function createAgent(d: AgentWiringDeps) {
     manual,
     home: d.home,
     harness,
-    ...(auth && installer ? { chatgpt: { account: auth, installer, availability: platform } } : {}),
+    ...(auth && installer && setup
+      ? { chatgpt: { account: auth, installer, availability: platform, setup } }
+      : {}),
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -645,6 +677,9 @@ export function createAgent(d: AgentWiringDeps) {
             if (!(error instanceof CodexInstallError)) throw error;
           }
           if (closing) throw new Error("agent is closed");
+          // A new pin, macOS build or sandbox runtime is checked again before anything launches.
+          if (setup && harness().available && installer.status().state === "ready")
+            void tracked(setup.check());
         }
         await new Promise<void>((resolve, reject) => {
           server = serve(
@@ -671,6 +706,7 @@ export function createAgent(d: AgentWiringDeps) {
       unsubscribe();
       transfers.close();
       installer?.cancel();
+      const setupClosed = setup?.close();
       const authClosed = auth?.close();
       const containments = [...runner.sessions.values()].map((session) =>
         runner.contain(session, "shutdown"),
@@ -689,6 +725,7 @@ export function createAgent(d: AgentWiringDeps) {
         const outcomes = await Promise.allSettled([
           closeListener(),
           transfers.settled(),
+          setupClosed,
           authClosed,
           ...[...installWork].map((work) =>
             work.catch((error) => {

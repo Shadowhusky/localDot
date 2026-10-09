@@ -630,8 +630,8 @@ const KEY_COPY: Record<ThinkKind, { title: string; sub: string }> = {
     sub: "Choose your plan, then paste its key. It stays in your Mac's keychain.",
   },
   chatgpt: {
-    title: "Sign in with ChatGPT",
-    sub: "dot uses your ChatGPT plan. Sign in once on this Mac.",
+    title: "Set up your ChatGPT plan",
+    sub: "dot uses your ChatGPT plan. Set it up once on this Mac.",
   },
   local: {
     title: "Which app runs your model?",
