@@ -15,6 +15,7 @@ import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
+import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
 import { requestResearch, researchWait } from "./agent/research.ts";
@@ -99,6 +100,8 @@ import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { subscription } from "./settings/chooser.ts";
 import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
+import { modelNames } from "./settings/model-names.ts";
+import { currentOption, type ModelOption, modelGroups } from "./settings/model-options.ts";
 import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
@@ -142,7 +145,7 @@ import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
-import { Announcer } from "./ui/Announcer.tsx";
+import { Announcer, announce } from "./ui/Announcer.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
@@ -422,6 +425,10 @@ function Theatre({ api }: { api: ApiClient }) {
           ? claudeModels
           : providerIndex?.providers.find((row) => row.id === provider)?.models
       )?.find((model) => model.id === id)?.name,
+    [providerIndex, accountModels, claudeModels],
+  );
+  const names = useMemo(
+    () => modelNames(providerIndex, { chatgpt: accountModels, claudeCode: claudeModels }),
     [providerIndex, accountModels, claudeModels],
   );
   const mainChoice = settings.saved?.main;
@@ -1141,6 +1148,69 @@ function Theatre({ api }: { api: ApiClient }) {
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
+  const chatgptReady = settings.chatgpt.canStart;
+  const claudeReady = settings.claudeCode.canStart;
+  const modelChoices = useMemo(
+    () =>
+      modelGroups(
+        settings.saved,
+        providerIndex,
+        {
+          chatgpt: { ready: chatgptReady, models: accountModels },
+          claudeCode: { ready: claudeReady, models: claudeModels },
+        },
+        names,
+      ),
+    [settings.saved, providerIndex, chatgptReady, accountModels, claudeReady, claudeModels, names],
+  );
+  // The model being saved, which the chip shows meanwhile.
+  const [modelSaving, setModelSaving] = useState<ModelOption | null>(null);
+  const [phoneModels, setPhoneModels] = useState(false);
+  const phoneModelsAnchor = useRef<HTMLElement | null>(null);
+  const taskModels = agent.snapshot?.models;
+  // The task runs on another model than the one saved now: the next task takes the saved one.
+  const modelChanged =
+    !!mainChoice &&
+    !!taskModels &&
+    !agent.model.ended &&
+    (taskModels.kind === "api"
+      ? !taskModels.roles.some(
+          (role) =>
+            role.role === "main" &&
+            role.provider === mainChoice.provider &&
+            role.model === mainChoice.model,
+        )
+      : taskModels.kind !== mainChoice.provider || taskModels.model !== mainChoice.model);
+  // A task at work keeps its model; one chosen meanwhile starts with the next task.
+  const taskWorking = !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle";
+  const modelNext = modelChanged && taskWorking;
+  const modelLabel =
+    modelSaving?.name ?? (mainChoice ? names.name(mainChoice.provider, mainChoice.model) : "");
+  const chooseModel = async (option: ModelOption) => {
+    setModelSaving(option);
+    const saved = await settings.chooseMain(option.choice);
+    setModelSaving(null);
+    if (!saved) {
+      showToast({
+        title: `Couldn't switch to ${option.name}`,
+        description: "Try again, or choose it in Settings.",
+        tone: "danger",
+      });
+      return;
+    }
+    announce(
+      "model",
+      taskWorking
+        ? `${option.name} starts with the next task.`
+        : `dot uses ${option.name} from your next message.`,
+    );
+  };
+  const modelMenu = {
+    groups: modelChoices,
+    current: modelSaving?.id ?? currentOption(settings.saved),
+    working: taskWorking,
+    onChoose: (option: ModelOption) => void chooseModel(option),
+  };
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -1730,6 +1800,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               reveal={reveal}
+              names={names}
               computerReady={cell?.state === "ready" && !cell.paused}
               computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
@@ -1776,6 +1847,20 @@ function Theatre({ api }: { api: ApiClient }) {
                         disabledReason: researchWait(agent),
                         run: requestResearch,
                       },
+                      ...(mainChoice
+                        ? [
+                            {
+                              label: `${modelNext ? "Next task" : "Model"}: ${modelLabel}`,
+                              icon: "cpu" as const,
+                              disabledReason: modelSaving ? "Saving…" : undefined,
+                              run: (trigger: HTMLButtonElement) => {
+                                settings.browseAccounts();
+                                phoneModelsAnchor.current = trigger;
+                                setPhoneModels(true);
+                              },
+                            },
+                          ]
+                        : []),
                       {
                         label: "Replay",
                         icon: "history",
@@ -1894,9 +1979,34 @@ function Theatre({ api }: { api: ApiClient }) {
                   onTaskStarted={session.check}
                   layout={phone ? "pill" : "card"}
                   reply={askDraft ? replyAsk : undefined}
+                  modelChanged={modelChanged}
+                  model={
+                    mainChoice && (
+                      <ModelChip
+                        {...modelMenu}
+                        name={modelLabel}
+                        next={modelNext}
+                        disabledReason={modelSaving ? "Saving…" : undefined}
+                        onPeek={settings.browseAccounts}
+                        onManage={(trigger) => showSettings(trigger, "models")}
+                      />
+                    )
+                  }
                 />
               }
             />
+            {phone && (
+              <ModelMenu
+                {...modelMenu}
+                open={phoneModels}
+                onClose={() => setPhoneModels(false)}
+                anchor={phoneModelsAnchor}
+                side="top"
+                align="end"
+                dim
+                onManage={(trigger) => showSettings(trigger, "models")}
+              />
+            )}
           </ErrorBoundary>
         </RailPanel>
       </div>

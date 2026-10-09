@@ -10,9 +10,17 @@ export function tailOf(text: string): number {
 }
 
 // A value too long for its line loses its middle, so both ends stay readable; the whole value is
-// its tooltip and what a screen reader reads.
-export function MiddleTruncate({ text, className }: { text: string; className?: string }) {
-  const at = text.length - tailOf(text);
+// its tooltip and what a screen reader reads. `tail` keeps that many last characters instead.
+export function MiddleTruncate({
+  text,
+  tail = tailOf(text),
+  className,
+}: {
+  text: string;
+  tail?: number;
+  className?: string;
+}) {
+  const at = text.length - tail;
   return (
     <span className={clsx("ui-middle", className)} title={text}>
       <span aria-hidden="true">{text.slice(0, at)}</span>

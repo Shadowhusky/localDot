@@ -84,6 +84,10 @@ export interface ComposerProps {
   reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
+  // The model chip, in a card's row.
+  model?: ReactNode;
+  // The main model saved since this task started: a message at rest starts a task on it.
+  modelChanged?: boolean;
 }
 // What became of a message sent as a reply: it answered the question, it turned the question down
 // and goes on as a message, it did not arrive, or it was held with the reason why.
@@ -582,7 +586,8 @@ export function Composer(props: ComposerProps) {
     // Research starts a task of its own; at rest, a conversation's next task continues it.
     const resting = now.agent.snapshot?.status === "idle" && !later;
     const asked = modeFor(now, later ? "followup" : "steer");
-    const chosen = researchNow.current && asked === "followup" && resting ? "new" : asked;
+    const chosen =
+      (researchNow.current || now.modelChanged) && asked === "followup" && resting ? "new" : asked;
     if (chosen === "new" && now.configured === false) {
       now.onSettings?.(input);
       return;
@@ -830,11 +835,13 @@ export function Composer(props: ComposerProps) {
   const researchLine = !researchReason && (research || suggested);
   const shownResearch = useRef(research);
   if (researchLine) shownResearch.current = research;
+  const switching =
+    !!props.modelChanged && mode === "followup" && props.agent.snapshot?.status === "idle";
   const sendLabel = researching
     ? "Start research"
     : newConversation
       ? "Start task"
-      : mode === "new"
+      : mode === "new" || switching
         ? "Send"
         : mode === "followup"
           ? "Send follow-up"
@@ -981,6 +988,7 @@ export function Composer(props: ComposerProps) {
               onToggle={() => setResearch((on) => !on)}
             />
           )}
+          {!pill && props.model}
           <div className="composer-hint">
             <VoiceStrip voice={voice}>
               {note && <span className="composer-note">{note}</span>}
