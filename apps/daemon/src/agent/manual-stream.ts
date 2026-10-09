@@ -10,7 +10,7 @@ import {
   openManualDesktop,
 } from "./manual-input.ts";
 import { AgentError } from "./runner.ts";
-import type { AgentSession, ManualLease } from "./session.ts";
+import { type AgentSession, ControlHeldError, type ManualLease } from "./session.ts";
 
 const QUEUE_LIMIT = 4096;
 const TEXT_LIMIT = 4000;
@@ -169,6 +169,9 @@ export class ManualStream {
     try {
       await deliverManualInput(lease, access, input);
     } catch (error) {
+      // A pointer moving with nothing held changes nothing on the computer, wherever it stopped.
+      if (input.kind === "move" && !this.#held.size && lease.signal.aborted)
+        throw new ControlHeldError();
       if (
         !(error instanceof ManualInputRejected) &&
         !(error instanceof AgentError && error.status === 400)

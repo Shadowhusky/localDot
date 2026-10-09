@@ -79,6 +79,8 @@ export async function deliverManualInput(
     throw new AgentError(400, "input is outside the desktop");
   await access.prepare(input);
   check(); // Hand-back, Stop or endpoint replacement during preflight cannot deliver input.
+  // Before it leaves: typing that lands only in part still counts.
+  if (input.kind === "text" || input.kind === "key") lease.typed();
   try {
     if (input.kind === "text") {
       const result = await access.client.type(
@@ -101,7 +103,6 @@ export async function deliverManualInput(
         },
         operation,
       );
-    if (input.kind === "text" || input.kind === "key") lease.typed();
     check();
   } catch {
     throw new ManualInputUncertain();

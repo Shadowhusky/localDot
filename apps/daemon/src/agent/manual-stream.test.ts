@@ -331,6 +331,70 @@ describe("the user's direct control stream", () => {
     expect(f.session.manualControl).toBe("unconfirmed");
     expect(await f.session.handback(f.requestId, undefined)).toBe(false);
     expect(await refusal(f.open())).toBe(409);
+    f.session.stop();
+    await f.session.toolsSettled();
+    // Some of it may have landed, so the takeover's end says the user typed.
+    expect(f.log.read(f.id).find((event) => event.type === "takeover.end")?.data).toEqual({
+      requestId: f.requestId,
+      by: "stop",
+      typed: true,
+    });
+  });
+
+  it("closes as soon as hand-back or Stop ends the user's control, and nothing sent after it lands", async () => {
+    for (const ending of ["handback", "stop"] as const) {
+      const f = await setup(),
+        closes: number[] = [];
+      const stream = new ManualStream(f.session, f.requestId, f.desktop, {
+        send: () => {},
+        close: (code) => closes.push(code),
+      });
+      if (ending === "handback")
+        expect(await f.session.handback(f.requestId, undefined)).toBe(true);
+      else f.session.stop();
+      // The page may not have heard yet: its socket closes without waiting for more input.
+      await vi.waitFor(() => expect(closes).toEqual([MANUAL_STREAM_CLOSE.changed]));
+      stream.push({ kind: "text", text: "late" });
+      stream.push({ kind: "key", combo: ["enter"] });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(f.desktop).not.toHaveBeenCalled();
+      expect(f.fake.calls).toEqual([]);
+    }
+  });
+
+  it("hands back cleanly when it cuts short a pointer moving with nothing held", async () => {
+    const f = await setup(),
+      closes: number[] = [],
+      started = Promise.withResolvers<void>();
+    const hanging = vi.fn<ManualDesktopSource>(
+      (): ManualDesktop => ({
+        screen: { w: 2560, h: 1600 },
+        client: {
+          input: (_request: unknown, signal?: AbortSignal) => {
+            started.resolve();
+            return new Promise((_resolve, reject) =>
+              signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+            );
+          },
+          type: async () => {
+            throw new Error("unexpected typing");
+          },
+        } as unknown as ManualDesktop["client"],
+        prepare: async () => {},
+        check: () => {},
+        release: () => {},
+        letGo: async () => {},
+      }),
+    );
+    const stream = new ManualStream(f.session, f.requestId, hanging, {
+      send: () => {},
+      close: (code) => closes.push(code),
+    });
+    stream.push({ kind: "move", at: { x: 10, y: 20 } });
+    await started.promise;
+    expect(await f.session.handback(f.requestId, undefined)).toBe(true);
+    expect(closes).toEqual([MANUAL_STREAM_CLOSE.changed]);
+    expect(f.session.manualControl).not.toBe("unconfirmed");
   });
 
   it("closes on anything but one input per message, before it reaches the computer", async () => {
