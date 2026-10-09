@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { parsePort } from "../../daemon/src/port.ts";
-import { parseArgs } from "./args.ts";
+import { HELP, parseArgs } from "./args.ts";
 import { runCli } from "./run.ts";
 import type { CommandContextInput } from "./runtime.ts";
 
@@ -15,6 +15,7 @@ function fixture(args: string[], env: NodeJS.ProcessEnv = {}) {
     })),
     default: vi.fn(async () => 0),
     up: vi.fn(async () => 0),
+    startAtLogin: vi.fn(async () => 0),
     update: vi.fn(async () => 0),
     down: vi.fn(async () => 0),
     logs: vi.fn(async () => 0),
@@ -231,5 +232,63 @@ describe("operational CLI dispatch", () => {
     f.controller.abort();
     expect(await f.run()).toBe(130);
     expect(f.runtime.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("start at login commands", () => {
+  it.each([
+    [["up", "--at-login"], { kind: "up", atLogin: true }],
+    [["up", "--from-login"], { kind: "up", fromLogin: true }],
+    [["start-at-login", "on"], { kind: "start-at-login", operation: "on" }],
+    [["start-at-login", "off"], { kind: "start-at-login", operation: "off" }],
+    [["start-at-login", "status"], { kind: "start-at-login", operation: "status" }],
+  ])("parses %j", (args, command) => {
+    expect(parseArgs(args)).toEqual(command);
+  });
+  it.each([
+    [["up", "--at-login", "--from-login"]],
+    [["up", "--at-login", "--at-login"]],
+    [["up", "--login"]],
+    [["start-at-login"]],
+    [["start-at-login", "maybe"]],
+  ])("refuses %j", (args) => {
+    expect(parseArgs(args)).toBeUndefined();
+  });
+  it("documents start at login in help", () => {
+    expect(HELP).toContain("localdot start-at-login on|off|status");
+    expect(HELP).toContain("localdot up --at-login");
+    expect(HELP).not.toContain("--from-login");
+  });
+  it("routes up --at-login with its option", async () => {
+    const f = fixture(["up", "--at-login"], { LOCALDOT_HOME: "/private/test-home" });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.up).toHaveBeenCalledExactlyOnceWith(
+      { home: "/private/test-home", signal: f.controller.signal },
+      f.io,
+      { atLogin: true },
+    );
+  });
+  it("routes start-at-login without resolving the daemon context", async () => {
+    const f = fixture(["start-at-login", "status"], { LOCALDOT_HOME: "/private/test-home" });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.startAtLogin).toHaveBeenCalledExactlyOnceWith(
+      { home: "/private/test-home", signal: f.controller.signal },
+      "status",
+      f.io,
+    );
+    expect(f.runtime.context).not.toHaveBeenCalled();
+  });
+});
+
+describe("stop everything", () => {
+  it("parses stop --all and refuses mixing it with --cell", () => {
+    expect(parseArgs(["stop", "--all"])).toEqual({ kind: "stop", all: true });
+    expect(parseArgs(["stop", "--all", "--cell", cell])).toBeUndefined();
+    expect(HELP).toContain("localdot stop --all");
+  });
+  it("routes stop --all to the stop runtime", async () => {
+    const f = fixture(["stop", "--all"], { LOCALDOT_HOME: "/private/test-home" });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.stop).toHaveBeenCalledWith(expect.objectContaining({ all: true }), f.io);
   });
 });

@@ -1,5 +1,5 @@
 import type { BootConfig, ModelBinding } from "@localdot/protocol";
-import { type ScreenHands, workingRules } from "@localdot/protocol/guidance";
+import { type ScreenHands, thisRunSection, workingRules } from "@localdot/protocol/guidance";
 
 export interface PlanLine {
   text: string;
@@ -54,7 +54,7 @@ ${escapeMemory(boot.memory.user.trim())}
 </user_file>
 <user_file name="MEMORY.md">
 ${escapeMemory(boot.memory.memory.trim())}
-</user_file>${skills}${planText}`;
+</user_file>${skills}${planText}${thisRunSection(boot.run)}`;
 }
 
 function escapeMemory(text: string): string {

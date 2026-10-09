@@ -30,6 +30,7 @@ import { filesTool } from "./files.ts";
 import { findTool } from "./find.ts";
 import { updatePlanTool } from "./plan.ts";
 import { rememberTool } from "./remember.ts";
+import { followUpAtTool, routineTool } from "./routine.ts";
 import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
 import { startWorkClock } from "./work-clock.ts";
@@ -62,6 +63,8 @@ const STEP_KIND: Record<ToolName, string> = {
   request_takeover: "ask",
   remember: "think",
   done: "think",
+  routine: "think",
+  follow_up_at: "think",
 };
 
 function blocked(
@@ -278,7 +281,7 @@ async function dispatchAdmitted(
         throw new Error("The selected screen does not match this tool call.");
       ctx.check();
     }
-    const facts = toolRisk(name, frozen);
+    const facts = toolRisk(name, frozen, (id) => deps.tools.routines?.name(id));
     if (facts) {
       ctx.permit = await authorizePrepared(ctx, {
         tool: name,
@@ -355,6 +358,12 @@ async function dispatchAdmitted(
         break;
       case "done":
         result = await doneTool(t, ctx, input);
+        break;
+      case "routine":
+        result = await routineTool(t, ctx, input);
+        break;
+      case "follow_up_at":
+        result = await followUpAtTool(t, ctx, input);
         break;
     }
     // Containment intentionally stopped the session; its terminal refusal has no image/event.

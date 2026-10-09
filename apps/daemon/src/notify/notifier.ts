@@ -3,6 +3,7 @@ import {
   type AttentionItem,
   NOTIFY_COPY,
   type NotifyTestResult,
+  type RoutineAppEvent,
 } from "@localdot/protocol";
 import { type AttentionLedger, taskTitle } from "./attention.ts";
 import type { MacNotifier } from "./mac.ts";
@@ -17,25 +18,7 @@ export const SETTLE_MS = 1_500;
 const REMEMBERED_KEYS = 512;
 
 // A routine run's news: the routine.run app event (title: "<name>: <outcome>").
-export interface RoutineRunNotice {
-  type: "routine.run";
-  routineId: string;
-  runId: string;
-  outcome:
-    | "pending"
-    | "running"
-    | "done"
-    | "needs_you"
-    | "needs_you_expired"
-    | "failed"
-    | "skipped"
-    | "missed"
-    | "budget"
-    | "stopped";
-  sessionId: string | null;
-  notify: boolean;
-  title: string;
-}
+export type RoutineRunNotice = Extract<RoutineAppEvent, { type: "routine.run" }>;
 
 export const isRoutineRun = (event: { type: string }): event is RoutineRunNotice =>
   event.type === "routine.run";

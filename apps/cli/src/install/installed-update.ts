@@ -4,6 +4,7 @@ import {
   sameManagedService,
 } from "../../../../packages/protocol/src/install-services.ts";
 import { ReleaseIdentity } from "../../../../packages/protocol/src/install-update.ts";
+import { type LoginAgentHost, nodeLoginAgentHost, syncLoginAgent } from "./login-agent.ts";
 import { prepareInstalledRuntimes } from "./prepare-runtimes.ts";
 import { installedReleaseVerifier } from "./promote-release.ts";
 import { releaseLayout } from "./release-layout.ts";
@@ -30,6 +31,7 @@ export function installedUpdateHost(
   scopeInput: ServiceScope,
   verifiedKeydPath: string,
   candidateInput?: ServiceConfiguration,
+  loginHost: LoginAgentHost = nodeLoginAgentHost(scopeInput.uid),
 ): UpdateTransactionHost {
   const scope = { ...scopeInput };
   const bound = (input: ServiceConfiguration) => {
@@ -112,6 +114,12 @@ export function installedUpdateHost(
       await prepareInstalledRuntimes(config, verifiedKeydPath, signal);
       await selected(release);
       await startServiceLifecycle(services, config, signal);
+      try {
+        await syncLoginAgent(config, loginHost, signal);
+      } catch {
+        // The update succeeded; a stale login agent is corrected by the next `localdot up`.
+        console.error("localdot: start at login could not be re-pointed at the new release");
+      }
     },
     async healthy(release, signal) {
       signal.throwIfAborted();

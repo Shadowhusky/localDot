@@ -15,6 +15,7 @@ import {
   microsToMs,
   msToMicros,
   type Point,
+  type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -76,6 +77,9 @@ import { setPublicOrigin } from "../../../daemon/src/guard.ts";
 import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
+import { nextDue } from "../../../daemon/src/routines/schedule.ts";
+import { stopAll } from "../../../daemon/src/routines/stop-all.ts";
+import { RoutineStore, scheduleOf, toRoutine } from "../../../daemon/src/routines/store.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
 import { readStatic } from "../../../daemon/src/static-files.ts";
@@ -420,7 +424,12 @@ async function endLive(how?: "done" | "crash") {
   live.stop(owned.id);
   await live.settled(owned.id);
 }
-function newSession(title: string, task: string, continues?: string): AgentSession {
+function newSession(
+  title: string,
+  task: string,
+  continues?: string,
+  origin?: SessionOrigin,
+): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
     cellId,
@@ -438,6 +447,7 @@ function newSession(title: string, task: string, continues?: string): AgentSessi
       os: "linux",
       title,
       ...(continues ? { continues } : {}),
+      ...(origin ? { origin } : {}),
     },
   });
   return s;
@@ -1256,9 +1266,27 @@ const recorder = new Recorder({
   enabled: false,
 });
 const index = new SessionIndex(HOME, { isLive: (id) => live.cellOf(id) !== undefined });
+const routineStore = new RoutineStore(HOME, { now: Date.now, zone: () => "Europe/London" });
+const appEvents = new AppEvents();
+let fixtureLogin: "on" | "off" = "off";
+// Nothing runs here; active routines only learn when they would run next.
+const planRoutines = () => {
+  for (const routine of routineStore.list())
+    if (routine.state === "active" && routine.nextDueAt === null)
+      routineStore.setNextDue(routine.id, nextDue(scheduleOf(routine), Date.now()));
+};
+const routineChanged = (routineId: string) => {
+  const routine = routineStore.get(routineId);
+  if (routine)
+    appEvents.publish({
+      type: "routine.changed",
+      routineId,
+      revision: routine.revision,
+      state: routine.state,
+    });
+};
 
 // Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
-const appEvents = new AppEvents();
 const pushKey = createECDH("prime256v1");
 pushKey.generateKeys();
 const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
@@ -1353,6 +1381,37 @@ const routes = createApp({
   },
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
+  routines: {
+    store: routineStore,
+    scheduler: { replan: planRoutines },
+    launcher: { runNow: () => ulid() },
+    publish: (event) => appEvents.publish(event),
+    redact: (text) => text,
+    zone: () => "Europe/London",
+    now: Date.now,
+    startAtLogin: {
+      status: async () => fixtureLogin,
+      set: async (on) => {
+        fixtureLogin = on ? "on" : "off";
+        return fixtureLogin;
+      },
+    },
+    stopAll: (by) =>
+      stopAll(
+        {
+          cells,
+          live,
+          killSwitch,
+          store: routineStore,
+          launcher: { cancelAll: () => 0 },
+          scheduler: { replan: () => {} },
+          audit: { append: () => {} },
+          publish: (event) => appEvents.publish(event),
+          now: Date.now,
+        },
+        by,
+      ),
+  },
 });
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
@@ -2345,6 +2404,116 @@ routes.post("/__qa/older-task", (c) =>
     ),
   }),
 );
+// Routines: dot proposes one in the live thread; a routine's own run; a run history to browse.
+const MORNING_BILLS = {
+  name: "Morning bills",
+  instruction:
+    "Check my utility and bank sites for new statements, save the PDFs to Bills and tell me what's due.",
+  when: { kind: "weekdays", time: "08:30" },
+} as const;
+routes.post("/__qa/routine/propose", (c) => {
+  if (!session) return c.text("no session", 409);
+  const routine = routineStore.create(MORNING_BILLS, {
+    state: "proposed",
+    createdFromSession: session.id,
+  });
+  const view = toRoutine(routine, undefined);
+  session.append("routine.proposed", {
+    routineId: routine.id,
+    revision: routine.revision,
+    name: routine.name,
+    summary: view.summary,
+    instruction: routine.instruction,
+    profile: routine.profile,
+    notify: routine.notify,
+    budgetUSD: routine.budgetUSD,
+    approvalWindowMinutes: routine.approvalWindowMinutes,
+    missedPolicy: routine.missedPolicy,
+  });
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id });
+});
+routes.post("/__qa/routine/session", async (c) => {
+  await endLive("done");
+  const routine = routineStore.create(MORNING_BILLS, { state: "active" });
+  session = newSession(MORNING_BILLS.name, MORNING_BILLS.instruction, undefined, {
+    kind: "routine",
+    routineId: routine.id,
+    runId: ulid(),
+    name: MORNING_BILLS.name,
+    dueAt: new Date().toISOString(),
+  });
+  attachLive(session);
+  seedTask(session, false);
+  return c.json({ sessionId: session.id, routineId: routine.id });
+});
+routes.post("/__qa/routine/history", (c) => {
+  const at = (iso: string) => Date.parse(iso);
+  const add = (draft: typeof MORNING_BILLS | Parameters<typeof routineStore.create>[0]) =>
+    routineStore.create(draft, { state: "active" });
+  const bills = add(MORNING_BILLS);
+  const runs = [
+    ["2026-10-06T07:30:00Z", "done", "3 new statements saved to Bills", seeded[0] ?? null],
+    ["2026-10-07T07:30:00Z", "done", "2 new statements saved to Bills", seeded[0] ?? null],
+    ["2026-10-08T07:30:00Z", "missed", "", null],
+    ["2026-10-09T07:30:00Z", "done", "Nothing new", seeded[1] ?? null],
+    [
+      "2026-10-12T07:30:00Z",
+      "needs_you_expired",
+      "Checked two sites; the bank needs you to sign in.",
+      null,
+    ],
+  ] as const;
+  for (const [due, outcome, note, sessionId] of runs)
+    routineStore.recordRun({
+      routineId: bills.id,
+      dueAt: at(due),
+      startedAt: outcome === "missed" ? null : at(due) + 2000,
+      endedAt: at(due) + 240_000,
+      sessionId,
+      outcome,
+      note,
+    });
+  const inbox = add({
+    name: "Inbox sweep",
+    instruction: "Check my inbox, archive newsletters and tell me what needs a reply.",
+    when: { kind: "daily", time: "07:45" },
+    profile: "act_within_rules",
+  });
+  routineStore.recordRun({
+    routineId: inbox.id,
+    dueAt: at("2026-10-09T06:45:00Z"),
+    startedAt: at("2026-10-09T06:45:01Z"),
+    endedAt: at("2026-10-09T06:52:00Z"),
+    sessionId: null,
+    outcome: "done",
+    note: "Archived 14 newsletters; 2 emails need a reply.",
+  });
+  const prices = add({
+    name: "Flight prices",
+    instruction: "Check fares from London to Lisbon for 14 November and tell me if any drop.",
+    when: { kind: "hours", every: 4, from: "08:00" },
+    profile: "read_only",
+    missedPolicy: "skip",
+  });
+  routineStore.update(prices.id, { revision: 1, state: "paused" });
+  add({
+    name: "Weekly report",
+    instruction: "Collect this week's numbers into report.xlsx in Documents.",
+    when: { kind: "weekly", days: [5], time: "16:00" },
+    notify: "always",
+  });
+  planRoutines();
+  for (const routine of routineStore.list()) routineChanged(routine.id);
+  return c.json({ routineId: bills.id });
+});
+routes.post("/__qa/routine/keep", (c) => {
+  const routine = routineStore.list()[0];
+  if (!routine) return c.text("no routine", 409);
+  routineStore.setAbsenceAsked(routine.id, Date.now());
+  routineChanged(routine.id);
+  return c.json({ routineId: routine.id });
+});
 routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as CellKind)));
 routes.post("/__qa/chatgpt/:state", (c) => {
   const state = c.req.param("state");
@@ -2435,6 +2604,7 @@ const shutdown = async () => {
     registry.dispose();
     notify.close();
     index.close();
+    routineStore.close();
     log.close();
   } catch {}
   for (const peer of upgraded) peer.destroy();

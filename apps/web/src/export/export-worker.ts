@@ -169,10 +169,9 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
         cancelled();
         peakOpenFrames = Math.max(peakOpenFrames, Number(!!incoming) + Number(!!held));
         const scene = request.overlays ? sceneAt(start.model, time, view) : null;
-        const label = plan.labelAt(index);
         const caption = plan.captionAt(index);
         const gap = plan.gapAt(index);
-        const next = frameLook(picture, scene, burnInText(label, caption, gap));
+        const next = frameLook(picture, scene, burnInText(caption, gap));
         const changed = next !== look;
         if (!held || changed || index - held.from >= plan.fps) {
           let sample: VideoSample;
@@ -185,7 +184,7 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
               else presenter.clearVideo();
             }
             presenter.draw(scene);
-            burnIn.draw(label, caption, gap);
+            burnIn.draw(caption, gap);
             presenter.render();
             if (hashes) {
               const { pixels } = presenter.app.renderer.extract.pixels({

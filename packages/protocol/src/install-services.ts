@@ -119,3 +119,12 @@ export const ServiceJournal = z
     return true;
   }, "service phase must match its job observations");
 export type ServiceJournal = z.infer<typeof ServiceJournal>;
+
+// The user's start-at-login choice. Public configuration only; the plist is derived from the
+// journaled service configuration, never from this record.
+export const StartAtLoginRecord = z.strictObject({
+  v: z.literal(1),
+  enabled: z.boolean(),
+  changedAt: z.iso.datetime(),
+});
+export type StartAtLoginRecord = z.infer<typeof StartAtLoginRecord>;

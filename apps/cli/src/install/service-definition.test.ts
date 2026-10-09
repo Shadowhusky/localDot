@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   IMAGE_ROLES,
   imageRef,
@@ -11,8 +12,10 @@ import {
 } from "../../../../packages/protocol/src/release.ts";
 import { sampleManifest } from "../../../../packages/protocol/src/testing/sample-release.ts";
 import {
+  defineLoginService,
   defineReleaseServices,
   installedServiceDefinitions,
+  loginServiceLocation,
   type ServiceSettings,
   serviceConfigurationId,
   serviceLocation,
@@ -221,4 +224,78 @@ it("separates ownership generations and refuses malformed ownership inputs", () 
     expect(() =>
       defineReleaseServices({ ...settings, ownerId: id }, f.identity, f.manifest),
     ).toThrow();
+});
+
+const loginSettings = {
+  state: "/Users/sam/.localdot/install",
+  home: "/Users/sam/.localdot",
+  userHome: "/Users/sam",
+  node: "/Users/sam/.localdot/install/runtime/node/bin/node",
+  dockerSocket: "/Users/sam/.docker/run/docker.sock",
+  uid: 501,
+  port: 4750,
+  ownerId: "a".repeat(32),
+};
+const loginRelease = {
+  version: "0.4.0",
+  packageSha256: "b".repeat(64),
+  manifestSha256: "c".repeat(64),
+};
+
+describe("start at login agent", () => {
+  it("lives in the user's LaunchAgents folder under a per-installation label", () => {
+    const suffix = createHash("sha256").update(loginSettings.home).digest("hex");
+    const label = `dev.localdot.${suffix}.${"a".repeat(32)}.login`;
+    expect(loginServiceLocation(loginSettings)).toEqual({
+      label,
+      domain: "gui/501",
+      target: `gui/501/${label}`,
+      directory: "/Users/sam/Library/LaunchAgents",
+      plist: `/Users/sam/Library/LaunchAgents/${label}.plist`,
+    });
+  });
+
+  it("runs the installed CLI's verified up path once at login, with a cleared environment", () => {
+    const login = defineLoginService(loginSettings, loginRelease);
+    expect(login.arguments).toEqual([
+      "/usr/bin/env",
+      "-i",
+      "HOME=/Users/sam",
+      "PATH=/Users/sam/.localdot/install/runtime/node/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "LANG=en_US.UTF-8",
+      "LOCALDOT_HOME=/Users/sam/.localdot",
+      "/Users/sam/.localdot/install/runtime/node/bin/node",
+      `/Users/sam/.localdot/install/releases/${"b".repeat(64)}-${"c".repeat(64)}/app/bin/localdot.mjs`,
+      "up",
+      "--from-login",
+    ]);
+    expect(login.contents).toContain("<key>RunAtLoad</key><true/>");
+    expect(login.contents).toContain("<key>KeepAlive</key><false/>");
+    expect(login.contents).toContain("<key>LimitLoadToSessionType</key><string>Aqua</string>");
+    expect(login.contents).toContain("<key>Umask</key><integer>63</integer>");
+    expect(login.contents).toContain(
+      "<key>StandardOutPath</key><string>/Users/sam/.localdot/install/logs/login.log</string>",
+    );
+    expect(login.contents).not.toMatch(/token|secret|LOCALDOT_PORT|DOCKER_HOST/i);
+  });
+
+  it("escapes XML and refuses unsafe paths", () => {
+    const odd = { ...loginSettings, userHome: "/Users/s&m" };
+    expect(defineLoginService(odd, loginRelease).contents).toContain(
+      "<string>HOME=/Users/s&amp;m</string>",
+    );
+    for (const bad of ["relative/home", "/Users/sam/../x", "/Users/sam\nx", "/"])
+      expect(() => defineLoginService({ ...loginSettings, userHome: bad }, loginRelease)).toThrow(
+        "Invalid localDot service configuration.",
+      );
+  });
+
+  it("leaves the two service plists without RunAtLoad or KeepAlive", () => {
+    const { manifest, identity } = fixture();
+    const services = defineReleaseServices(settings, identity, manifest);
+    for (const role of ["keyd", "daemon"] as const) {
+      expect(services[role].contents).toContain("<key>RunAtLoad</key><false/>");
+      expect(services[role].contents).toContain("<key>KeepAlive</key><false/>");
+    }
+  });
 });

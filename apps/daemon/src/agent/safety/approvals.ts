@@ -66,6 +66,7 @@ export class ApprovalBroker {
     private readonly now: () => number = Date.now,
     private readonly publishRequest: (card: ApprovalCard) => void = () => {},
     private readonly publishResolution: (resolution: ApprovalResolution) => void = () => {},
+    private readonly ttlMs: number = APPROVAL_TIMEOUT_MS,
   ) {}
   pending(sessionId: string): ApprovalCard | undefined {
     const card = this.#pending.get(sessionId)?.card;
@@ -97,7 +98,7 @@ export class ApprovalBroker {
       approvalId: ulid(),
       generation: binding.generation,
       revision: ++this.#revision,
-      expiresAt: this.now() + APPROVAL_TIMEOUT_MS,
+      expiresAt: this.now() + this.ttlMs,
     });
     const outcome = await new Promise<ApprovalOutcome>((resolve) => {
       const finish = (
@@ -127,7 +128,7 @@ export class ApprovalBroker {
         }
       };
       const abort = () => finish("stale", "timeout");
-      const timer = setTimeout(() => finish("deny", "timeout"), APPROVAL_TIMEOUT_MS);
+      const timer = setTimeout(() => finish("deny", "timeout"), this.ttlMs);
       timer.unref?.();
       this.#pending.set(binding.sessionId, {
         binding: privateBinding,

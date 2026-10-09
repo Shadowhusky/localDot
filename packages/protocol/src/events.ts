@@ -3,6 +3,13 @@ import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import {
+  MissedPolicy,
+  RoutineName,
+  RoutineNotify,
+  RoutineProfile,
+  SessionOrigin,
+} from "./routines.ts";
 import { ActionClass, AlwaysOption, ApprovalCard, PauseSnapshot } from "./safety.ts";
 import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
@@ -48,6 +55,8 @@ export const SessionStart = event(
     title: z.string().max(200).optional(),
     // The earlier task this one continues, in the same conversation.
     continues: z.string().regex(ULID_PATTERN).optional(),
+    // What started this task when the user did not: a routine or a follow-up.
+    origin: SessionOrigin.optional(),
   }),
 );
 export const SessionEnd = event(
@@ -450,6 +459,23 @@ export const ModelSpend = event("model.spend", ModelSpendData);
 
 export const SubscriptionUsage = event("subscription.usage", SubscriptionUsageData);
 
+// dot drafted a routine in this task; it runs only after the user saves it.
+export const RoutineProposed = event(
+  "routine.proposed",
+  z.strictObject({
+    routineId: z.string().regex(ULID_PATTERN),
+    revision: z.number().int().positive(),
+    name: RoutineName,
+    summary: z.string().max(200),
+    instruction: z.string().max(8000),
+    profile: RoutineProfile,
+    notify: RoutineNotify,
+    budgetUSD: z.number().min(0.01).max(100).nullable(),
+    approvalWindowMinutes: z.number().int().min(5).max(240),
+    missedPolicy: MissedPolicy,
+  }),
+);
+
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
   SessionEnd,
@@ -497,6 +523,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   ModelRetry,
   ModelSpend,
   SubscriptionUsage,
+  RoutineProposed,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
 export type EventType = LocalDotEvent["type"];

@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import type { AttentionChangeEvent } from "@localdot/protocol";
+import { type AttentionChangeEvent, type RoutineAppEvent, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createApp } from "./app.ts";
@@ -79,12 +79,14 @@ describe("app events", () => {
   it("delivers to every listener even when one throws", () => {
     const events = new AppEvents();
     const seen = vi.fn();
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
     events.subscribe(() => {
       throw new Error("listener bug");
     });
     events.subscribe(seen);
     events.publish(change);
     expect(seen).toHaveBeenCalledWith(change);
+    quiet.mockRestore();
   });
 
   it("streams events to a signed-in socket and refuses one without the token", async () => {
@@ -155,6 +157,42 @@ describe("app events", () => {
     events.publish(change);
     await vi.waitFor(() => expect(onPhone).toEqual([change]));
     await vi.waitFor(() => expect(onMac).toEqual([{ ...change, page: true }, change]));
+    mac.close();
+    phone.close();
+  });
+
+  it("streams routine events to every signed-in device, the phone too", async () => {
+    setPublicOrigin("https://mac.example.ts.net");
+    const { events, open } = await start();
+    const mac = await open();
+    const phone = await open(true, "mac.example.ts.net");
+    const heard = (socket: WebSocket) => {
+      const got: RoutineAppEvent[] = [];
+      socket.on("message", (data) => got.push(JSON.parse(String(data))));
+      return got;
+    };
+    const onMac = heard(mac);
+    const onPhone = heard(phone);
+    const routineId = ulid();
+    const changed: RoutineAppEvent = {
+      type: "routine.changed",
+      routineId,
+      revision: 2,
+      state: "active",
+    };
+    const run: RoutineAppEvent = {
+      type: "routine.run",
+      routineId,
+      runId: ulid(),
+      outcome: "done",
+      sessionId: null,
+      notify: true,
+      title: "Morning bills: Done",
+    };
+    events.publish(changed);
+    events.publish(run);
+    await vi.waitFor(() => expect(onMac).toEqual([changed, run]));
+    await vi.waitFor(() => expect(onPhone).toEqual([changed, run]));
     mac.close();
     phone.close();
   });

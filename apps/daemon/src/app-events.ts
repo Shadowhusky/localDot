@@ -1,8 +1,9 @@
-import { type AttentionChangeEvent, ClientMessage } from "@localdot/protocol";
+import { type AttentionChangeEvent, ClientMessage, type RoutineAppEvent } from "@localdot/protocol";
 import type { PresenceBoard } from "./notify/presence.ts";
 import { tokenSocketServer, type UpgradeRoute } from "./upgrade-router.ts";
 
-export type AppEvent = AttentionChangeEvent;
+// App-wide notices for every signed-in client, whatever task they are looking at.
+export type AppEvent = AttentionChangeEvent | RoutineAppEvent;
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost):\d+$/;
 
@@ -25,7 +26,8 @@ export class AppEvents {
   }
 }
 
-// GET /api/events. A client may send its presence and confirm a notification it showed.
+// GET /api/events (WebSocket, install token). A client may send its presence and confirm a
+// notification it showed.
 export function appEventsRoute(events: AppEvents, presence?: PresenceBoard): UpgradeRoute {
   const wss = tokenSocketServer({ maxPayload: 1024 });
   return {
