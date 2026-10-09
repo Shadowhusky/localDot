@@ -310,6 +310,12 @@ export type RememberInput = z.infer<typeof RememberInput>;
 export const DoneInput = z.object({
   summary: z.string().min(1).max(8000),
   files: z.array(z.string().min(1).max(1024)).max(16).optional(),
+  checked: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe('What you confirmed about the files yourself, such as "opens, 4 sheets".')
+    .optional(),
 });
 export type DoneInput = z.infer<typeof DoneInput>;
 

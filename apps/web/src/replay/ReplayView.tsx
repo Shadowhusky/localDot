@@ -1,7 +1,9 @@
 import { microsToMs, type SessionCard, type SessionVerdict } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { bytes } from "../copy/format.ts";
+import { isLoopbackPage } from "../deliverables/api.ts";
+import { RecordingFiles } from "../deliverables/RecordingFiles.tsx";
+import { exportRequest, withinRecording } from "../deliverables/replay-link.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type DotFeed, recordedPresence } from "../dot/dot-feed.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
@@ -416,17 +418,12 @@ function RecordingPreview({
             <h3 id={`${card.id}-files`} className="replay-files-title">
               Files
             </h3>
-            <ul>
-              {summary.files.map((file) => (
-                <li key={file.path} className="replay-file">
-                  <Icon name="file-text" size={16} />
-                  <span className="replay-file-text">
-                    <span className="replay-file-name">{file.name}</span>
-                    <span className="replay-file-path num">{bytes(file.bytes)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <RecordingFiles
+              api={api}
+              sessionId={card.id}
+              files={summary.files}
+              onMac={isLoopbackPage()}
+            />
           </section>
         )}
       </div>
@@ -525,7 +522,9 @@ function Player({
   showDot: boolean;
 }) {
   const stage = useRef<StageHandle>(null);
-  const onHost = hostCanMake(useHostExports(hostExports));
+  const hostView = useHostExports(hostExports);
+  const onHost = hostCanMake(hostView);
+  const hostAnswered = !!hostView.host && hostView.host.state !== "checking";
   const area = useRef<HTMLElement>(null);
   const replay = useReplay(api, sessionId, stage, { onGoLive, onExit: onLibrary });
   const phone = useMediaQuery(HANDHELD);
@@ -633,6 +632,30 @@ function Player({
   const feed: DotFeed = lost ? { ...recorded.feed, state: "error" } : recorded.feed;
   useEffect(() => setReplayPresence({ feed, line }));
   const support = exportSupport();
+  // A link from a result asks for its part of the recording: Export opens on it once the recording
+  // has loaded, where the Export button would open, and the address forgets the request.
+  const asked = useRef(exportRequest(window.location.search));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the recording having loaded is the trigger.
+  useEffect(() => {
+    const range = asked.current;
+    if (!range || !replay.info || !replay.map) return;
+    const here = exportSupport().ok;
+    // Without this browser's encoder, the host may not have said yet whether it can make it.
+    if (!here && !onHost && !hostAnswered) return;
+    asked.current = null;
+    const address = new URL(window.location.href);
+    address.searchParams.delete("export");
+    try {
+      window.history.replaceState(window.history.state, "", address);
+    } catch {}
+    if (!here && !onHost) return;
+    replay.run({ kind: "pause" });
+    const running = job.snapshot().context;
+    const base = running ?? exportContext(api, sessionId, replay);
+    const selection = running ? null : withinRecording(base.whole, range);
+    const context = selection ? { ...base, selection } : base;
+    setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
+  }, [replay.info, replay.map, onHost, hostAnswered]);
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
   const chapterRows: StepRowView[] = chapters(replay.model, endedAt).map((chapter) => {

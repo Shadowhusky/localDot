@@ -6,6 +6,7 @@ export * from "./brand-tokens.ts";
 export * from "./claude-code.ts";
 export * from "./computer-reset.ts";
 export * from "./conversation.ts";
+export * from "./deliverables.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";
 export * from "./events.ts";

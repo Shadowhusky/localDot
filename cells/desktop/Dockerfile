@@ -14,7 +14,7 @@ ARG CODIUM_SHA256_AMD64=5f5c00a9da9d232e4c84e9eee68bbdeb4d8737462022626ce3bdb694
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       at-spi2-core python3-venv python3-xlib xinput libnss3-tools xz-utils x11-utils webp \
-      libreoffice-calc libreoffice-writer libreoffice-impress libreoffice-gtk3 \
+      libreoffice-calc libreoffice-writer libreoffice-impress libreoffice-gtk3 poppler-utils \
       gimp ffmpeg imagemagick pandoc \
       fonts-inter fonts-jetbrains-mono fonts-noto-cjk fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/*
