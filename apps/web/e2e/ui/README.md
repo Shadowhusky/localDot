@@ -29,6 +29,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   the page), `pin`, `code`, `choice`, `multichoice`, `longtext`, `confirm`, `details` (number, date,
   phone and web address), `file`, `qr` (a link) or `pair` (plain text). Answers go through the real
   answer route; `GET /__qa/state` lists them under `effects`, secret answers only counted.
+- **Update:** `POST /__qa/update` makes a new version of the computer ready (the island's one-time
+  notice and Settings' Update row); `QA_UPDATE_MS` sets how long the update then takes.
 - **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while
   `POST /__qa/stream?ms=<n>` streams a busy task. `QA_CPU_THROTTLE=6` slows Chrome to a phone's CPU.
 - **Gallery:** `pnpm --filter @localdot/web build:gallery` builds `gallery.html` into

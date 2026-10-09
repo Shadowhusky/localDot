@@ -32,6 +32,8 @@ import { deliverText } from "./agent/write-api.ts";
 import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
+import { useFreshStart } from "./cells/useFreshStart.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
@@ -347,6 +349,8 @@ function Theatre({ api }: { api: ApiClient }) {
     retry,
     selectReady,
   } = useCell(api);
+  const computerUpdate = useComputerUpdate(api, cell);
+  const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
   const rules = useRules(api, settings.open);
@@ -798,6 +802,14 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
+  // The daemon refuses an Update in these cases too; the button says so before it is pressed.
+  const updateWait =
+    agent.snapshot?.holder === true || yours
+      ? "Hand back the computer first"
+      : task && task.phase !== "finished"
+        ? "Wait for dot to finish"
+        : undefined;
+  useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -1120,7 +1132,12 @@ function Theatre({ api }: { api: ApiClient }) {
           : !replayId && taskStalled(agent, performance.now())
             ? SLOW_LINE
             : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-              ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
+              ? narrationLine(
+                  appStatus.row,
+                  appStatus.caption.text,
+                  // Out of touch, dot's last words are old news; the caption says what is going on.
+                  linkLost ? null : agent.model.said,
+                )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const asked = agent.model.pendingAsk
@@ -1249,6 +1266,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     phase={curtain.phase}
                     first={!cell && listed.length === 0}
                     waking={pending === "start" || pending === "create"}
+                    updating={!!cell?.updating}
                     caption={computer.caption}
                     notice={error ?? stoppedOff(controls.stopStatus)}
                     action={computerAction}
@@ -1270,6 +1288,7 @@ function Theatre({ api }: { api: ApiClient }) {
                           }
                         : undefined
                     }
+                    freshStart={freshStart.curtain}
                     showDot={showDot.value}
                   />
                 </Presence>
@@ -1422,6 +1441,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               computerReady={cell?.state === "ready" && !cell.paused}
+              computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
                 agent.sessionId && (agent.model.ended || task?.phase === "finished")
@@ -1616,6 +1636,8 @@ function Theatre({ api }: { api: ApiClient }) {
           stop={sheetStopControl}
           stopAll={settingsStopAll}
           startAtLogin={settingsLogin}
+          update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
+          freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
           open={settings.open}
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}

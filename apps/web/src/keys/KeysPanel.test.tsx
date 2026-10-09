@@ -658,10 +658,10 @@ describe("Keys", () => {
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     render(<KeysSheet open keys={controller({ health: { online: false } })} onClose={() => {}} />);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Copy the command localdot doctor" }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     });
     expect(writeText).toHaveBeenCalledWith("localdot doctor");
-    expect(screen.getByText("Copied")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
   });
 
   it("names network protection's state on the Keys button, where only the amber point shows it", () => {

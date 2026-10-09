@@ -332,7 +332,6 @@
 
 /* The way to turn key protection back on, right under the line that says it is off. */
 .onboarding-fix {
-  display: flex;
   margin-top: calc(var(--spacing) * -1.5);
 }
 

@@ -368,7 +368,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (state === "thinking") return running("thinking", "Thinking…", "Thinking…", control);
   if (state === "observing")
     return running("observing", "Checking the screen", "Checking the screen.", control);
-  return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
+  return running("working", "Working", n ? "Working…" : "Starting…", control);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the
@@ -509,7 +509,7 @@ const DOWN = new Set<ComputerPhase>([
 // A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
 // computer that is down outranks it too but leaves its Stop. A finished task keeps its verdict
 // only while the computer is live.
-const LOST_CAPTION = "Lost touch with the task for a moment. Reconnecting.";
+const LOST_CAPTION = "I've lost touch with your Mac. Reconnecting…";
 const UNCONFIRMED_CAPTION = "I couldn't confirm that I stopped. Press Stop again to be sure.";
 
 export function statusFor({
@@ -558,7 +558,7 @@ export function statusFor({
     computer: computer.phase,
     label,
     caption: lost
-      ? { speaker: "system", text: LOST_CAPTION }
+      ? { speaker: "dot", text: LOST_CAPTION }
       : halting === "unconfirmed"
         ? { speaker: "dot", text: UNCONFIRMED_CAPTION }
         : {

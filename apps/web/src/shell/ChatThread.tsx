@@ -54,6 +54,7 @@ export function ChatThread({
   onReplay,
   onReplayTask,
   computerReady = false,
+  computerUpdating = false,
   sessions = NO_SESSIONS,
   more = false,
   pending = false,
@@ -78,6 +79,7 @@ export function ChatThread({
   onReplay?: () => void;
   onReplayTask?: (sessionId: string) => void;
   computerReady?: boolean;
+  computerUpdating?: boolean;
   // The conversation's tasks, oldest first; the one shown is its latest.
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
@@ -140,6 +142,7 @@ export function ChatThread({
       onReplay={onReplay}
       onReplayTask={onReplayTask}
       computerReady={computerReady}
+      computerUpdating={computerUpdating}
       composer={composer}
       ask={ask}
       lead={lead}
