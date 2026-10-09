@@ -1,4 +1,5 @@
 import type {
+  AskUserInput,
   BootConfig,
   ComputerAction,
   InboxItem,
@@ -10,7 +11,7 @@ import type {
 import { EARLIER_CHARS, earlierRecord, isToolName, RESUME_WAIT_REASON } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
-import { toComputerActions } from "./computer.ts";
+import { askInModelSpace, toComputerActions } from "./computer.ts";
 import {
   compactionEntry,
   compactionMessage,
@@ -628,7 +629,12 @@ export class Agent {
       if (actions[0]?.action === "cursor_position" && binding.coords === "per1000")
         result = this.#cursorPer1000(result);
     } else {
-      result = await this.#o.api.tool(call.toolName, call.toolCallId, call.input, signal);
+      const input =
+        call.toolName === "ask_user"
+          ? askInModelSpace(call.input as AskUserInput, binding.coords)
+          : call.input;
+      if (typeof input === "string") return fail(input);
+      result = await this.#o.api.tool(call.toolName, call.toolCallId, input, signal);
     }
     signal.throwIfAborted();
     if (call.toolName === "update_plan" && result.ok)

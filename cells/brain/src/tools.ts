@@ -81,17 +81,17 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     switch_screen: tool({
       description:
-        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Use request_takeover when a site needs the user to sign in. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
+        "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. When a site needs the user to sign in, ask for the details with ask_user fields. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
       inputSchema: SwitchScreenInput,
     }),
     ask_user: tool({
       description:
-        "Ask the user a question and wait for the answer. Only when you cannot continue without the user's information or a choice that would change the result; otherwise pick a sensible default and mention it in your summary. Never ask for permission: the safety system asks the user before consequential steps. Offer up to six short options when you can.",
+        'Ask the user a question and wait for the answer. Only when you cannot continue without the user\'s information or a choice that would change the result; otherwise pick a sensible default and mention it in your summary. Never ask for permission: the safety system asks the user before consequential steps. For a quick choice, offer up to six short options. To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short label): text, longtext, secret (a password, PIN or recovery code), code (a one-time code; length if you know it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a file and you get its path) or qr (shows value as a QR code for the user\'s other device). Name the buttons with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the field at target ([x, y] in the computer tool\'s coordinates), or into the field that has keyboard focus when there is no target; you only learn that it was provided. Answers come back by field id. If the user declines, carry on without it.',
       inputSchema: AskUserInput,
     }),
     request_takeover: tool({
       description:
-        "Hand the screen to the user. Only for a login, 2FA, a CAPTCHA or payment card entry, or after you have tried at least two different approaches and cannot continue; say in the note what you tried. You never type credentials or card numbers yourself.",
+        "Hand the screen to the user. Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in the note what they need to do. For passwords and codes, ask with ask_user fields instead.",
       inputSchema: RequestTakeoverInput,
     }),
     remember: tool({

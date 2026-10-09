@@ -1,4 +1,10 @@
-import { ComputerAction, type CoordSpaceName, MAX_DRAG_MS, type Point } from "@localdot/protocol";
+import {
+  type AskUserInput,
+  ComputerAction,
+  type CoordSpaceName,
+  MAX_DRAG_MS,
+  type Point,
+} from "@localdot/protocol";
 import { checkCombo, checkModifiers } from "@localdot/protocol/keys";
 import { modelPoint } from "@localdot/providers";
 
@@ -248,6 +254,26 @@ function typeSteps(
 // Provider output is untrusted even when an SDK validates its advertised tool schema. Refuse
 // malformed fields before coercion, and validate the normalized daemon wire shape as a final fence.
 // One provider action is one daemon action, except `type` with its options (typeSteps).
+// ask_user's secret targets, from the model's coordinate space to model pixels; the message for
+// the model when one is off the screen.
+export function askInModelSpace(
+  input: AskUserInput,
+  coords: CoordSpaceName,
+): AskUserInput | string {
+  if (!input.fields?.some((field) => field.target)) return input;
+  const fields: NonNullable<AskUserInput["fields"]> = [];
+  for (const field of input.fields) {
+    if (!field.target) {
+      fields.push(field);
+      continue;
+    }
+    const p = modelPoint(field.target, coords);
+    if (!p.ok) return `ask_user: the target of ${field.id}: ${p.error}`;
+    fields.push({ ...field, target: [p.point.x, p.point.y] });
+  }
+  return { ...input, fields };
+}
+
 export function toComputerActions(
   input: ProviderComputerInput,
   coords: CoordSpaceName,

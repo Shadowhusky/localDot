@@ -195,6 +195,18 @@ describe("Agent", () => {
       expect(prompt).toContain("Invalid input for shell");
     });
 
+    it("sends ask_user's secret target to the daemon in screen pixels", async () => {
+      const field = (target: number[]) => ({
+        question: "Sign in",
+        fields: [{ id: "password", kind: "secret", label: "Password", target }],
+      });
+      const t = agent([call("ask_user", field([500, 250])), call("done", { summary: "x" })], {
+        boot: { models: { main: binding({ computer: "generic", coords: "per1000" }) } },
+      });
+      await t.run();
+      expect(t.f.toolCalls.find((c) => c.name === "ask_user")?.input).toEqual(field([640, 200]));
+    });
+
     it("declares switch_screen but never a tool outside the table", async () => {
       const t = agent([call("done", { summary: "x" })]);
       await t.run();

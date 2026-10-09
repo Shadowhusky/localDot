@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { keyCombo, type ProviderComputerInput, toComputerActions } from "./computer.ts";
+import {
+  askInModelSpace,
+  keyCombo,
+  type ProviderComputerInput,
+  toComputerActions,
+} from "./computer.ts";
 
 const F = "01JXYZ0000000000000000FRAM";
 
@@ -360,4 +365,24 @@ it("refuses malformed provider values and inherited names without emitting an ac
   ]) {
     expect(typeof toComputerActions(input as never, "pixels", F)).toBe("string");
   }
+});
+
+describe("askInModelSpace", () => {
+  const ask = (target?: number[]) => ({
+    question: "Sign in",
+    fields: [
+      { id: "email", kind: "email" as const, label: "Email" },
+      { id: "password", kind: "secret" as const, label: "Password", ...(target ? { target } : {}) },
+    ],
+  });
+  it("brings a secret field's target to screen pixels, from whatever grid the model uses", () => {
+    expect(askInModelSpace(ask([500, 250]), "per1000")).toEqual(ask([640, 200]));
+    expect(askInModelSpace(ask([640.4, 200]), "pixels")).toEqual(ask([640, 200]));
+    const untouched = ask();
+    expect(askInModelSpace(untouched, "per1000")).toBe(untouched);
+  });
+  it("tells the model when a target is off the screen", () => {
+    expect(askInModelSpace(ask([1200, 10]), "per1000")).toContain("the target of password");
+    expect(askInModelSpace(ask([1280, 10]), "pixels")).toContain("outside");
+  });
 });
