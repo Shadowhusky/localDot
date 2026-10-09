@@ -541,7 +541,6 @@ export function Conversation({
     return { older: watch("older"), newer: watch("newer") };
   }, [moveAt]);
   const reading = () => {
-    foot.current?.style.removeProperty("min-height");
     follow.interrupt();
     setHolding(null);
     if (!held.current) return;
