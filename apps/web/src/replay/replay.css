@@ -169,8 +169,20 @@
   padding-inline: calc(var(--spacing) * 4);
 }
 
+/* With nothing chosen, dot waits above the empty rail's words, so it is never left over the list. */
 .replay-rail-empty {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.replay-rail-dot {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  margin-bottom: calc(var(--spacing) * -4);
 }
 
 /* The chosen recording, in the rail: its picture with a play disc, dot with its last line, then its
@@ -524,6 +536,43 @@
 
 .replay-gap-body {
   margin-top: 2px;
+}
+
+/* A failed load says what happened and offers to try again beside it. */
+.replay-error {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 2.5) calc(var(--spacing) * 2.5)
+    calc(var(--spacing) * 4);
+}
+
+/* With nothing loaded there is no picture to read over: the words sit in the middle of the empty
+   stage, as its own content, with the way to try again under them. */
+.replay-error[data-place="centre"] {
+  top: 50%;
+  bottom: auto;
+  flex-direction: column;
+  max-width: min(320px, calc(100% - var(--spacing) * 8));
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  text-align: center;
+  translate: -50% -50%;
+}
+
+.replay-error[data-place="centre"] .replay-gap-title {
+  font:
+    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-3--letter-spacing);
+}
+
+.replay-error[data-place="centre"] .replay-gap-body {
+  margin-top: var(--spacing);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
 }
 
 /* The scrubber: a 4 px track in a 24 px reach, the played part in the text colour, a tick at each

@@ -1,4 +1,5 @@
 import { GenericComputerInput } from "@localdot/protocol";
+import { workingRules } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
 import { systemPrompt } from "./prompt.ts";
@@ -6,7 +7,7 @@ import { binding, bootConfig } from "./testing/scripted.ts";
 import { toolSet } from "./tools.ts";
 
 describe("the model's advertised tools and instructions", () => {
-  it("exposes exactly twelve daemon-dispatched tools with no execute functions", () => {
+  it("exposes exactly fourteen daemon-dispatched tools with no execute functions", () => {
     const tools = toolSet(binding());
     expect(Object.keys(tools).sort()).toEqual(
       [
@@ -15,6 +16,8 @@ describe("the model's advertised tools and instructions", () => {
         "files",
         "browser_read",
         "browser_upload",
+        "browser_act",
+        "find",
         "browser_navigate",
         "switch_screen",
         "update_plan",
@@ -44,6 +47,31 @@ describe("the model's advertised tools and instructions", () => {
       expect(description, action).toContain(action);
     for (const field of ["path", "button", "start_coordinate", "modifier"])
       expect(description, field).toContain(field);
+  });
+  it("asks for fewer turns with the tools the model has", () => {
+    const prompt = (over: Parameters<typeof binding>[0]) =>
+      systemPrompt(bootConfig(), binding(over), [], new Date("2026-10-09T00:00:00Z"));
+    expect(prompt({ computer: "generic" })).toContain(workingRules("batch"));
+    expect(prompt({ computer: "anthropic-toolset" })).toContain(workingRules("calls"));
+    expect(prompt({ computer: "anthropic-legacy" })).toContain(workingRules("calls"));
+    for (const blind of [prompt({ vision: false }), prompt({ computer: "none" })]) {
+      expect(blind).toContain(workingRules("none"));
+      expect(blind).toContain("You cannot see the screen");
+    }
+    expect(toolSet(binding({ vision: false })).find).toBeUndefined();
+    expect(toolSet(binding({ vision: false })).browser_act).toBeDefined();
+  });
+  it("keeps the prompt short and free of localDot's internal names", () => {
+    for (const over of [{ computer: "generic" as const }, {}, { vision: false }]) {
+      const prompt = systemPrompt(
+        bootConfig({ memory: { user: "", memory: "" } }),
+        binding(over),
+        [],
+        new Date("2026-10-09T00:00:00Z"),
+      );
+      expect(prompt.length).toBeLessThan(4000);
+      expect(prompt).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
+    }
   });
   it("does not label model-written memory as user instructions or allow it to close its delimiter", () => {
     const prompt = systemPrompt(

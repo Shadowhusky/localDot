@@ -29,6 +29,7 @@ export function useExportProbe(api: ApiClient, sessionId: string, replay: Replay
             throw new Error("Replay was closed.");
           }
           sources = [];
+          const startedAt = performance.now();
           let peakOpenFrames = 0;
           let peakEncodeQueue = 0;
           handle = startExport({
@@ -39,7 +40,11 @@ export function useExportProbe(api: ApiClient, sessionId: string, replay: Replay
               speed: 1,
               skipIdle: true,
               captions: true,
+              overlays: true,
               size: { w: 1280, h: 800 },
+              fps: 30,
+              quality: "high",
+              format: "mp4",
               ...options,
             },
             sink,
@@ -61,6 +66,7 @@ export function useExportProbe(api: ApiClient, sessionId: string, replay: Replay
             hashes: result.hashes,
             peakOpenFrames,
             peakEncodeQueue,
+            ms: performance.now() - startedAt,
           };
         } finally {
           handle = null;

@@ -37,6 +37,8 @@ export interface ActivityRailProps {
   rows: TimelineRow<StepRowView>[];
   keyUses?: readonly KeyUseState[];
   sessionId: string | null;
+  // What the steps say while there are none, in place of their own words.
+  empty?: string;
   cellId?: string;
   releaseReady?: boolean;
   scale: number;
@@ -76,6 +78,7 @@ export function ActivityRail({
   rows,
   keyUses,
   sessionId,
+  empty,
   cellId,
   releaseReady = false,
   scale,
@@ -228,13 +231,20 @@ export function ActivityRail({
               <section className="activity-steps" aria-labelledby={`${domId}-steps`}>
                 <div className="activity-steps-head">
                   <h3 id={`${domId}-steps`}>Steps</h3>
-                  <SegmentedControl
-                    aria-label="Activity filter"
-                    size={24}
-                    items={FILTERS}
-                    value={filter}
-                    onValueChange={(value) => setFilter(value as ActivityFilter)}
-                  />
+                  {/* With no steps yet there is nothing to filter; the row keeps its height. */}
+                  <span
+                    className="activity-filter"
+                    data-idle={entries.length ? undefined : ""}
+                    inert={!entries.length}
+                  >
+                    <SegmentedControl
+                      aria-label="Activity filter"
+                      size={24}
+                      items={FILTERS}
+                      value={filter}
+                      onValueChange={(value) => setFilter(value as ActivityFilter)}
+                    />
+                  </span>
                 </div>
                 {page.hasOlder && (
                   <Button variant="quiet" size="sm" className="activity-page" onClick={page.older}>
@@ -259,9 +269,12 @@ export function ActivityRail({
                 )}
                 {(!sessionId || !page.rows.length) && (
                   <p className="activity-empty">
-                    {!sessionId || !entries.length
-                      ? "Steps appear here as dot works."
-                      : "No steps match this filter."}
+                    {sessionId && entries.length
+                      ? "No steps match this filter."
+                      : (empty ??
+                        (replay
+                          ? "No steps to show for this recording."
+                          : "Steps appear here as dot works."))}
                   </p>
                 )}
               </section>

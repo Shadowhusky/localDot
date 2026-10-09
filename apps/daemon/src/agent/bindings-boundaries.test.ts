@@ -112,9 +112,9 @@ describe("role binding and immutable task pricing boundaries", () => {
       catalog(),
       [key("constructor", "anthropic")],
     );
-    expect(() => bindingOf(main, {})).toThrow(/valid surrogate/);
+    expect(() => bindingOf(main, {})).toThrow(/key is not ready/);
     expect(() => bindingOf(main, Object.create({ constructor: surrogate }))).toThrow(
-      /valid surrogate/,
+      /key is not ready/,
     );
     expect(bindingOf(main, { constructor: surrogate }).surrogate).toBe(surrogate);
   });

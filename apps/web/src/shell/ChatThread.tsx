@@ -54,6 +54,7 @@ export function ChatThread({
   onReplay,
   onReplayTask,
   computerReady = false,
+  computerUpdating = false,
   sessions = NO_SESSIONS,
   more = false,
   pending = false,
@@ -78,6 +79,7 @@ export function ChatThread({
   onReplay?: () => void;
   onReplayTask?: (sessionId: string) => void;
   computerReady?: boolean;
+  computerUpdating?: boolean;
   // The conversation's tasks, oldest first; the one shown is its latest.
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
@@ -88,7 +90,7 @@ export function ChatThread({
   start?: ReactNode;
 }) {
   const model = agent?.model;
-  const ended = model?.ended?.reason;
+  const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
   const sessionId = agent?.sessionId ?? null;
   const steps = useMemo<WorkStep[]>(() => (model ? workSteps(rows, model) : []), [rows, model]);
   const items = useMemo(
@@ -135,10 +137,10 @@ export function ChatThread({
       api={api}
       sessionId={sessionId}
       recovery={recovery}
-      error={agent?.error}
       onReplay={onReplay}
       onReplayTask={onReplayTask}
       computerReady={computerReady}
+      computerUpdating={computerUpdating}
       composer={composer}
       ask={ask}
       lead={lead}

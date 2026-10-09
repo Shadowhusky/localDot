@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CellView, type ComputerPhase, hudFor } from "./hud-state.ts";
+import { type CellView, type ComputerPhase, hudFor, NEEDS_FRESH_START } from "./hud-state.ts";
 import type { CellSummary } from "./types.ts";
 
 const cell = (
@@ -26,6 +26,24 @@ const DOCKER_DOWN = "docker unreachable on /networks/create: ENOENT; is Docker D
 const RESTART_NOTE = "desktop container exited with 137; restarting (attempt 2 of 5)";
 
 describe("hudFor", () => {
+  it("reads this viewer's picture beside the daemon's stream state", () => {
+    const phase = (
+      connection: CellSummary["stream"]["connection"],
+      picture?: "none" | "live" | "held",
+    ) => hudFor({ ...known(cell("ready", connection)), picture }).phase;
+    // Another viewer keeps the daemon's stream live while this one's client reconnects.
+    expect(phase("live", "held")).toBe("reconnecting");
+    // This viewer's relay reconnecting: it keeps its picture instead of raising the curtain.
+    expect(phase("connecting", "held")).toBe("reconnecting");
+    expect(phase("none", "held")).toBe("reconnecting");
+    // Frames already shown while the daemon's state catches up.
+    expect(phase("connecting", "live")).toBe("live");
+    expect(phase("stalled", "live")).toBe("reconnecting");
+    expect(phase("connecting", "none")).toBe("connecting");
+    expect(phase("connecting")).toBe("connecting");
+    expect(phase("live")).toBe("live");
+  });
+
   it("keeps frozen computers paused regardless of stream state, with pending controls disabled", () => {
     for (const connection of ["none", "connecting", "live", "stalled", "disconnected"] as const) {
       const paused = { ...cell("ready", connection), paused: true as const };
@@ -35,7 +53,9 @@ describe("hudFor", () => {
         action: { kind: "resume", enabled: true },
         live: false,
       });
-      expect(hud.caption).toContain("programs dot started carry on");
+      expect(hud.caption).toBe(
+        "Your computer is paused. Resume it to carry on, or shut it down for a fresh start.",
+      );
       expect(hudFor(known(paused, "resume")).action).toEqual({ kind: "resume", enabled: false });
       expect(hudFor(known(paused, "stop")).action.enabled).toBe(false);
     }
@@ -201,5 +221,49 @@ describe("hudFor", () => {
       expect(hud.phase, hud.label).toBe(phase);
       expect(hud.live, hud.label).toBe(phase === "live");
     }
+  });
+
+  it("shows an update's stop and start as one waking step that offers no control", () => {
+    for (const state of ["stopping", "starting"] as const) {
+      expect(hudFor(known({ ...cell(state), updating: true }))).toMatchObject({
+        phase: "starting",
+        label: "Updating…",
+        action: { kind: "stop", enabled: false },
+      });
+    }
+    const unfinished = cell(
+      "failed",
+      "none",
+      "The update didn't finish. Turn on your computer to finish it.",
+    );
+    expect(hudFor(known(unfinished))).toMatchObject({
+      phase: "failed",
+      caption: "The update didn't finish. Turn on your computer to finish it.",
+      action: { kind: "start", enabled: true },
+    });
+    const unreadable =
+      "localDot can't read its update records. Restart localDot, then turn on your computer.";
+    expect(hudFor(known(cell("failed", "none", unreadable))).caption).toBe(unreadable);
+  });
+
+  it("names Start fresh when an update can't be finished, whatever the daemon's words", () => {
+    const refused = "Your computer's update can't be finished. Start fresh to use it again.";
+    for (const state of ["failed", "stopped"] as const) {
+      const hud = hudFor(known({ ...cell(state, "none", refused), needsFreshStart: true }));
+      expect(hud).toMatchObject({
+        phase: "failed",
+        caption: NEEDS_FRESH_START,
+        action: { kind: "start", enabled: true },
+      });
+    }
+    expect(NEEDS_FRESH_START).toMatch(/Start fresh/);
+    // Without the mark, the same words read as an ordinary failure to start.
+    expect(hudFor(known(cell("failed", "none", refused))).caption).toBe(
+      "Your computer could not start.",
+    );
+    // A fenced computer still recovers through Replace computer.
+    expect(
+      hudFor(known({ ...cell("ready"), fenced: { revision: 1 }, needsFreshStart: true })).phase,
+    ).toBe("unavailable");
   });
 });

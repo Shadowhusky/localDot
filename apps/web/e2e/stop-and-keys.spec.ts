@@ -89,7 +89,6 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
   await expect(page.getByRole("button", { name: "Stop computer" })).toBeVisible();
   expect(docker("inspect", "--format", "{{.State.Paused}}", desktopContainer(cellId))).toBe("true");
   await expect(page.locator("iframe.desktop-frame")).toHaveCount(0);
-  await expect(page.locator(".stage-veil.on")).toHaveCount(0);
   await expect(page.locator(".narration")).toContainText("programs dot started carry on");
   await expect(page.locator(".stage.frozen > canvas")).toHaveCSS("opacity", "0.55");
   await page.screenshot({ path: "e2e/out/paused.png" });
@@ -129,7 +128,7 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
   await daemon.keyd.stop();
   await page.getByRole("button", { name: "Resume computer" }).click();
   await expect(page.locator(".narration")).toHaveText(
-    /the key layer is offline: start keyd, then resume the computer/,
+    /key protection is off: turn it back on, then resume the computer/,
   );
   await expect(page.getByTestId("hud-status")).toHaveText("Paused", { timeout: 20_000 });
   expect(docker("inspect", "--format", "{{.State.Paused}}", desktopContainer(cellId))).toBe("true");

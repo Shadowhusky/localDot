@@ -394,7 +394,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(replay(budget, 8000)).toMatchObject({
       row: "limit",
-      label: "Reached your spending limit",
+      label: "Spending limit reached",
       control: false,
     });
     expect(replay(budget, 9100)).toMatchObject({ row: "working", control: true });
@@ -469,7 +469,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).status,
     ).toMatchObject({ label: "Resuming…", control: false, elapsedS: 9, actions: stopsTask });
     expect(view([...typed(), ev("safety.pause", 1100, pause("uncertain"))], 9500)).toMatchObject({
-      task: { row: "paused", phase: "waiting", label: "Pause unconfirmed" },
+      task: { row: "paused", phase: "waiting", label: "Pause not confirmed" },
       status: { actions: stopsTask, control: false, elapsedS: null },
     });
   });
@@ -518,7 +518,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(task).toMatchObject({
       row: "limit",
       phase: "waiting",
-      label: "Reached your spending limit",
+      label: "Spending limit reached",
     });
     expect(status).toMatchObject({
       actions: stopsTask,
@@ -575,7 +575,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ["model refused", "Model turned down a request", "recovery"],
       ["model unavailable", "Model not answering", "recovery"],
       ["keyd unavailable", "Keys are offline", "recovery"],
-      ["budget", "Reached your spending limit", "limit"],
+      ["budget", "Spending limit reached", "limit"],
     ])("names a pause for %s", (reason, label, row) => {
       const stalled = [
         ...typed(),
@@ -813,8 +813,17 @@ const STATES: Record<string, Status> = {
   "off, task open": underTask(computerIn({ state: "stopped" })),
   "failed, task open": underTask(computerIn(FAILED)),
   "fenced, task open": underTask(computerIn(FENCED)),
+  "reconnecting, task running": underTask(stream("stalled")),
+  "approval, reconnecting": at([...start(), approvalRequest(1500)], 9500, stream("stalled")),
+  "question, reconnecting": at([...typed(), asked(1500)], 9500, stream("stalled")),
   "task stopping": statusFor({ computer: live, task: typing(), stop: "stopping" }),
   "stop unconfirmed": statusFor({ computer: live, task: typing(), stop: "unconfirmed" }),
+  "out of touch": statusFor({ computer: live, task: typing(), link: "lost" }),
+  "frozen by Stop": statusFor({
+    computer: computerIn({ paused: true }),
+    task: null,
+    stop: "stopped",
+  }),
   approval: at([...start(), approvalRequest(1500)]),
   question: at([...typed(), asked(1500)]),
   takeover: at([...typed(), takeoverRequest(1500)]),
@@ -842,6 +851,13 @@ const STATES: Record<string, Status> = {
   working: at(typed()),
   done: at(ended("done")),
   stopped: at(ended("stopped")),
+  interrupted: statusFor({
+    computer: live,
+    task: taskHud(
+      { ...foldEvents(emptyModel(), typed()), ended: { t: 1500, reason: "interrupted" } },
+      9500,
+    ),
+  }),
   failed: at(ended("error")),
   "ready for more": at([...typed(), ev("agent.state", 1700, { state: "idle" })]),
   ready: alone(live),
@@ -852,7 +868,11 @@ const STATES: Record<string, Status> = {
 const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "system"][] = [
   // A task Stop outranks every row.
   ["task stopping", "stopping", "Stopping…", "resting", "working", "dot"],
-  ["stop unconfirmed", "stopping", "Stop unconfirmed", "error", "blocked", "dot"],
+  ["stop unconfirmed", "stopping", "Stop not confirmed", "error", "blocked", "dot"],
+  // A Stop that paused the computer names what happened, and leaves the computer's own controls.
+  ["frozen by Stop", "computer", "Stopped", "resting", null, "system"],
+  // A running task whose feed has been out of touch for a moment keeps its row and says so.
+  ["out of touch", "acting", "Reconnecting…", "reconnecting", "working", "dot"],
   // 1. The computer is not live, or nothing runs on it. A computer that is off, failing or not
   // up yet holds the row over an open task; a late picture or a list check does not.
   ["checking", "computer", "Checking…", "waking", null, "system"],
@@ -876,6 +896,11 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["off, task open", "computer", "Stopped", "sleeping", null, "system"],
   ["failed, task open", "computer", "Failed", "error", "blocked", "system"],
   ["fenced, task open", "computer", "Unavailable", "error", "blocked", "system"],
+  // A reconnect leaves dot in charge, but the label says why the picture holds still.
+  ["reconnecting, task running", "acting", "Reconnecting…", "acting", "working", "dot"],
+  // What waits on the user keeps its label through a reconnect.
+  ["approval, reconnecting", "approval", "Needs your OK", "waiting", "needs_you", "system"],
+  ["question, reconnecting", "question", "Needs your answer", "waiting", "needs_you", "dot"],
   // 2–4. Approval, question, takeover.
   ["approval", "approval", "Needs your OK", "waiting", "needs_you", "system"],
   ["question", "question", "Needs your answer", "waiting", "needs_you", "dot"],
@@ -884,11 +909,11 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   // 5. The user's Pause.
   ["pausing", "pausing", "Pausing after this step", "thinking", "working", "system"],
   ["paused", "paused", "Paused", "resting", null, "system"],
-  ["pause unconfirmed", "paused", "Pause unconfirmed", "resting", null, "system"],
+  ["pause unconfirmed", "paused", "Pause not confirmed", "resting", null, "system"],
   ["resuming", "resuming", "Resuming…", "thinking", "working", "system"],
   // 6. Budget or plan recovery.
-  ["spending limit", "limit", "Reached your spending limit", "waiting", "needs_you", "system"],
-  ["needs attention", "recovery", "Needs attention", "resting", "blocked", "system"],
+  ["spending limit", "limit", "Spending limit reached", "waiting", "needs_you", "dot"],
+  ["needs attention", "recovery", "Needs attention", "resting", "blocked", "dot"],
   // 7–9. dot at work.
   ["acting", "acting", "Typing =SUM(F2:F13)", "acting", "working", "dot"],
   ["just acted", "acting", "Typed =SUM(F2:F13)", "acting", "working", "dot"],
@@ -898,6 +923,8 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   // 10–11. The task is over, or there is none.
   ["done", "done", "Done", "idle", "done", "system"],
   ["stopped", "stopped", "Task stopped", "idle", null, "system"],
+  // A task localDot went away under: dot says so and offers to carry on.
+  ["interrupted", "interrupted", "Task interrupted", "idle", null, "dot"],
   ["failed", "failed", "Task failed", "error", "blocked", "system"],
   ["ready for more", "ready", "Ready", "idle", null, "system"],
   ["ready", "ready", "Ready", "idle", null, "system"],
@@ -920,7 +947,7 @@ describe("one status model for every surface (T10)", () => {
   it("has a row in the table for every fixture, and every row and phase the model gives", () => {
     expect(TABLE.map(([name]) => name).sort()).toEqual(Object.keys(STATES).sort());
     const rows = new Set(Object.values(STATES).map((status) => status.row));
-    expect(rows.size).toBe(19);
+    expect(rows.size).toBe(20);
     const phases = new Set(Object.values(STATES).map((status) => status.computer));
     expect(phases.size).toBe(12);
   });
@@ -1027,6 +1054,10 @@ describe("one status model for every surface (T10)", () => {
       "pausing",
       "approval",
       "question",
+      "out of touch",
+      "reconnecting, task running",
+      "approval, reconnecting",
+      "question, reconnecting",
     ];
     const stopping = ["task stopping", "stop unconfirmed"];
     for (const [name, status] of Object.entries(STATES))
@@ -1049,6 +1080,10 @@ describe("one status model for every surface (T10)", () => {
       { kind: "resume", enabled: false },
       { kind: "stop", enabled: false },
     ]);
+    expect(STATES["frozen by Stop"]?.actions.map((action) => action.kind)).toEqual([
+      "resume",
+      "stop",
+    ]);
     expect(STATES.off?.actions).toEqual([{ kind: "start", enabled: true }]);
     // The task keeps its Stop on a computer that can't carry it. With no computer, that Stop is
     // the only control, so Welcome's Turn on waits until the task ends.
@@ -1056,4 +1091,17 @@ describe("one status model for every surface (T10)", () => {
       if (name.endsWith(", task open")) expect(status.actions, name).toEqual(stopsTask);
     expect(STATES.done?.actions).toEqual([{ kind: "stop", enabled: true }]);
   });
+});
+
+it("says nothing about a lost link once the task is over", () => {
+  expect(statusFor({ computer: live, task: null, link: "lost" }).label).toBe("Ready");
+});
+
+it("never leaves an interrupted task silent: dot says so and asks to carry on", () => {
+  const status = STATES.interrupted as Status;
+  expect(status.caption).toEqual({
+    speaker: "dot",
+    text: "I was cut off before I finished. Shall I continue?",
+  });
+  expect(status.actions).toEqual([{ kind: "stop", enabled: true }]);
 });

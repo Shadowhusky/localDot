@@ -110,7 +110,7 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
       if (!parsed.success) return c.text(parsed.error.message, 400);
       const beforeSession = unavailable(c, cells, deps);
       if (beforeSession) return beforeSession;
-      if (live.get(cellId)) return c.text("a session is already live on this cell", 409);
+      if (live.get(cellId)) return c.text("a task is already live on this computer", 409);
       if (live.idleOperationPending(cellId))
         return c.text("the computer has an operation in progress", 409);
       const sessionId = eventLog.createSession(parsed.data.title);
@@ -136,7 +136,7 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
 
   app.get("/api/cells/:id/live", (c) => {
     const id = c.req.param("id") ?? "";
-    if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
+    if (!ULID_PATTERN.test(id)) return c.text("invalid computer id", 400);
     const sessionId = deps.live?.get(id);
     return sessionId ? c.json({ sessionId }) : c.body(null, 204);
   });
@@ -153,9 +153,9 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
 
   app.post("/api/cells/:id/resume", async (c) => {
     const id = c.req.param("id") ?? "";
-    if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
+    if (!ULID_PATTERN.test(id)) return c.text("invalid computer id", 400);
     const cell = cells.get(id);
-    if (!cell) return c.text("unknown cell", 404);
+    if (!cell) return c.text("unknown computer", 404);
     if (cell.fenced || cell.replacementPending)
       return c.text("the computer is fenced or awaiting replacement confirmation", 409);
     if (!cell.paused) return c.text("the computer is not paused", 409);
@@ -168,7 +168,7 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
       await deps.killSwitch.resume(id);
     } catch (err) {
       if (err instanceof KeydUnavailableError || err instanceof KeyLayerError)
-        return c.text("the key layer is offline: start keyd, then resume the computer", 503);
+        return c.text("key protection is off: turn it back on, then resume the computer", 503);
       if (err instanceof CellControlConflict) return c.text(err.message, 409);
       return c.text("the computer could not resume; try again", 502);
     }
@@ -196,7 +196,7 @@ export async function withReadyCell(
   if (blocked) return blocked;
   const id = c.req.param("id") ?? "";
   const d = deps.registry.for(id);
-  if (!d) return c.text("cell has no desktopd endpoint", 503);
+  if (!d) return c.text("the computer is not connected", 503);
   try {
     return await fn(d);
   } catch (err) {
@@ -212,15 +212,15 @@ export async function withReadyCell(
 
 function unavailable(c: Context, cells: CellApi, deps: GatewayRoutesDeps): Response | undefined {
   const id = c.req.param("id") ?? "";
-  if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
+  if (!ULID_PATTERN.test(id)) return c.text("invalid computer id", 400);
   const cell = cells.get(id);
-  if (!cell) return c.text("unknown cell", 404);
-  if (cell.state !== "ready") return c.text(`cell is ${cell.state}`, 409);
+  if (!cell) return c.text("unknown computer", 404);
+  if (cell.state !== "ready") return c.text(`the computer is ${cell.state}`, 409);
   if (cell.fenced || cell.replacementPending)
     return c.text("the computer is fenced or awaiting replacement confirmation", 409);
   if (cell.paused) return c.text("the computer is paused: resume it first", 409);
   if (deps.killSwitch?.isBusy?.(id))
     return c.text("the computer is changing state; try again", 409);
-  if (deps.live?.get(id)) return c.text("a session is already live on this cell", 409);
+  if (deps.live?.get(id)) return c.text("a task is already live on this computer", 409);
   return undefined;
 }

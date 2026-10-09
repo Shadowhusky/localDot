@@ -47,6 +47,10 @@ async function setup() {
       skipIdle: false,
       captions: false,
       size: { w: 1280, h: 800 },
+      overlays: true,
+      fps: 30,
+      quality: "high",
+      format: "mp4",
     },
     source: {
       sessionId,

@@ -500,31 +500,153 @@ describe("settings inspector", () => {
   });
   it("offers Shut down on every size, and on a phone also the task's Stop and how it went", () => {
     const shutDown = vi.fn();
+    const note = { line: "Stopped. Your computer is paused." };
     const view = render(
       <SettingsSheet
         {...props()}
         stop={{ label: "Shut down", enabled: true, run: shutDown }}
-        taskControls={<p>Stopping…</p>}
+        stopNote={note}
       />,
     );
     fireEvent.click(within(sheet()).getByRole("button", { name: "Shut down" }));
     expect(shutDown).toHaveBeenCalledOnce();
-    expect(within(sheet()).queryByText("Stopping…")).toBeNull();
+    expect(within(sheet()).queryByText(note.line)).toBeNull();
     view.unmount();
     const run = vi.fn();
     const stop = { label: "Stop", enabled: true, run };
     onPhone();
     {
-      const later = render(
-        <SettingsSheet {...props()} stop={stop} taskControls={<p>Stopping…</p>} />,
-      );
+      const later = render(<SettingsSheet {...props()} stop={stop} />);
       fireEvent.click(within(sheet()).getByRole("button", { name: "Stop" }));
       expect(run).toHaveBeenCalledOnce();
-      expect(within(sheet()).getByText("Stopping…")).toBeTruthy();
-      // Stopped, the computer has no Stop to offer, and the sheet still says how it went.
-      later.rerender(<SettingsSheet {...props()} taskControls={<p>Stopped.</p>} />);
+      // Stopped, the computer has no Stop to offer, and its row still says how it went, with
+      // what couldn't be confirmed behind Details.
+      later.rerender(
+        <SettingsSheet
+          {...props()}
+          stopNote={{ ...note, details: ["Couldn't confirm that your keys were locked away."] }}
+        />,
+      );
       expect(within(sheet()).queryByRole("button", { name: "Stop" })).toBeNull();
-      expect(within(sheet()).getByText("Stopped.")).toBeTruthy();
+      expect(within(sheet()).getByText(note.line)).toBeTruthy();
+      const details = within(sheet()).getByRole("button", { name: "Details" });
+      expect(details.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(details);
+      expect(
+        within(sheet()).getByText("Couldn't confirm that your keys were locked away."),
+      ).toBeTruthy();
     }
+  });
+
+  it("offers Update for a new version even with the computer off, and keeps the row while it runs", () => {
+    const run = vi.fn();
+    const update = { available: true, busy: false, error: null, run };
+    const view = render(<SettingsSheet {...props()} update={update} />);
+    expect(within(sheet()).getByText("A new version of your computer is ready")).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Update" }));
+    expect(run).toHaveBeenCalledOnce();
+    view.rerender(
+      <SettingsSheet
+        {...props()}
+        stop={{ label: "Shut down", enabled: true, run: vi.fn() }}
+        update={{ ...update, busy: true }}
+      />,
+    );
+    expect(within(sheet()).getByText("Updating your computer…")).toBeTruthy();
+    expect(within(sheet()).getByRole("button", { name: "Update" }).getAttribute("aria-busy")).toBe(
+      "true",
+    );
+    expect(
+      within(sheet()).getByRole("button", { name: "Shut down" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    view.rerender(<SettingsSheet {...props()} update={{ ...update, available: false }} />);
+    expect(within(sheet()).queryByText(/new version/)).toBeNull();
+  });
+
+  it("holds Update, saying why, while dot works or you hold the computer", () => {
+    const run = vi.fn();
+    render(
+      <SettingsSheet
+        {...props()}
+        update={{
+          available: true,
+          busy: false,
+          error: null,
+          waitReason: "Wait for dot to finish",
+          run,
+        }}
+      />,
+    );
+    const button = within(sheet()).getByRole("button", { name: "Update" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button);
+    expect(run).not.toHaveBeenCalled();
+    expect(within(sheet()).getByText("A new version of your computer is ready")).toBeTruthy();
+  });
+
+  it("offers Start fresh for the computer behind a confirm, and holds it while dot works", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const run = vi.fn();
+    const freshStart = { available: true, busy: false, error: null, run };
+    const view = render(<SettingsSheet {...props()} freshStart={freshStart} />);
+    expect(
+      within(sheet()).getByText("Erases your computer's files. Your sign-ins stay."),
+    ).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Start fresh" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Start fresh?" });
+    expect(
+      within(dialog).getByText("Your computer's files are erased. Your sign-ins are kept."),
+    ).toBeTruthy();
+    expect(run).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start fresh" }));
+    expect(run).toHaveBeenCalledOnce();
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    view.rerender(
+      <SettingsSheet
+        {...props()}
+        freshStart={{ ...freshStart, waitReason: "Wait for dot to finish" }}
+      />,
+    );
+    const held = within(sheet()).getByRole("button", { name: "Start fresh" });
+    expect(held.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(held);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(run).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <SettingsSheet
+        {...props()}
+        freshStart={{ ...freshStart, error: "Starting fresh didn't finish. Try again." }}
+      />,
+    );
+    expect(within(sheet()).getByText("Starting fresh didn't finish. Try again.")).toBeTruthy();
+  });
+
+  it("offers Auto, Sharp and Smooth for the stream in Your computer, on every size", () => {
+    const change = vi.fn();
+    const stream = { value: "auto" as const, saved: true, change };
+    const view = render(<SettingsSheet {...props()} stream={stream} />);
+    const choice = within(sheet()).getByRole("radiogroup", { name: "Stream quality" });
+    expect(within(sheet()).getByRole("button", { name: "Your computer" })).toBeTruthy();
+    expect(
+      within(choice)
+        .getAllByRole("radio")
+        .map((radio) => [radio.textContent, radio.getAttribute("aria-checked")]),
+    ).toEqual([
+      ["Auto", "true"],
+      ["Sharp", "false"],
+      ["Smooth", "false"],
+    ]);
+    fireEvent.click(within(choice).getByRole("radio", { name: "Smooth" }));
+    expect(change).toHaveBeenCalledWith("smooth");
+    view.rerender(<SettingsSheet {...props()} stream={{ ...stream, saved: false }} />);
+    expect(within(sheet()).getByText(/This browser couldn't save it/)).toBeTruthy();
+    view.unmount();
+    onPhone();
+    render(<SettingsSheet {...props()} stream={stream} />);
+    expect(within(sheet()).getByRole("radiogroup", { name: "Stream quality" })).toBeTruthy();
   });
 });

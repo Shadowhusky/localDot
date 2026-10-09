@@ -217,6 +217,28 @@ describe("private Codex MCP capability", () => {
     ]);
     expect(f.results).toEqual(["computer", "computer"]);
   });
+  it("bases browser_act's coordinate on the turn's screenshot, whatever the caller says", async () => {
+    const f = await fixture();
+    await call(f.c, "browser_act", {
+      action: "click",
+      ref: "e4",
+      coordinate: [100, 200],
+      basedOn: ulid(),
+    });
+    expect(f.calls.map((c) => c.input)).toEqual([
+      { action: "click", ref: "e4", coordinate: [100, 200], basedOn: f.frame },
+    ]);
+  });
+  it("refuses a batch longer than a model's batch without dispatching it", async () => {
+    const f = await fixture();
+    const key = { action: "key", keys: ["Tab"] };
+    const long = await call(f.c, "computer", { action: "batch", steps: Array(9).fill(key) });
+    expect(long.result).toMatchObject({ isError: true });
+    expect(JSON.stringify(long.result)).toContain("at most 8 steps");
+    expect(f.calls).toEqual([]);
+    await call(f.c, "computer", { action: "batch", steps: Array(8).fill(key) });
+    expect(f.calls).toHaveLength(1);
+  });
   it("dispatches unknown names through the same daemon policy and generation context", async () => {
     let context: unknown;
     const f = await fixture({

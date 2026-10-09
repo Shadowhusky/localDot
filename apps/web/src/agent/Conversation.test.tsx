@@ -104,6 +104,16 @@ describe("the conversation thread", () => {
     expect(document.querySelector(".thread-empty + .thread-outbox")).not.toBeNull();
   });
 
+  it("says the computer is updating instead of asking to turn it on", () => {
+    const view = render(<Conversation items={[]} truncated={false} />);
+    expect(screen.getByText("Turn on your computer, then ask dot to do something.")).toBeTruthy();
+    view.rerender(<Conversation items={[]} truncated={false} computerUpdating />);
+    expect(
+      screen.getByText("Your computer is updating. Ask dot once it's back, in about a minute."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Turn on your computer/)).toBeNull();
+  });
+
   it("keeps a streaming message in place as its text grows and when it finishes", () => {
     const writing = { ...message("reply", "Look", "assistant"), final: false };
     const view = render(<Conversation items={items([writing])} truncated={false} />);

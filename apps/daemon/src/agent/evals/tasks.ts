@@ -14,16 +14,22 @@ import {
 } from "./checks.ts";
 import { type OracleView, type Policy, pixel } from "./oracle.ts";
 import {
+  act,
+  batch,
   click,
   colourExtent,
   doubleClick,
   drag,
   ellipse,
+  find,
   findBlock,
+  foundAt,
   key,
   modifierClick,
   near,
   type Rect,
+  read,
+  refOf,
   type Step,
   scripted,
   stroke,
@@ -394,6 +400,117 @@ const webForm: EvalTask = {
   check: async (cell) => jsonVerdict(textOf(cell, "Downloads/form.json"), FORM),
 };
 
+// The same form as predictable sequences: each runs as one batch with one screenshot at its end.
+const webFormBatch: EvalTask = {
+  ...webForm,
+  id: "web-form-batch",
+  maxHandoffs: 0,
+  oracle: () => {
+    const top = (v: OracleView) => formTop(v) as number;
+    return scripted(
+      [
+        {
+          name: "fill in the top of the form",
+          ready: (v) => formTop(v) !== undefined,
+          act: (v) => [
+            batch(
+              click(400, top(v) + 74),
+              type(FORM.name),
+              key("Tab"),
+              key("n"),
+              key("Tab"),
+              key("space"),
+              key("Tab"),
+              type("10082026"),
+            ),
+          ],
+        },
+        {
+          name: "set the bell volume, order the packing and submit",
+          act: (v) => [
+            batch(
+              click(200 + 8 + 0.7 * 384, top(v) + 282),
+              click(300, top(v) + 402),
+              key("alt+Up", 2),
+              click(280, top(v) + 522),
+            ),
+          ],
+        },
+      ],
+      "Filled in and submitted the delivery form.",
+    );
+  },
+};
+
+const RESERVATION = {
+  query: "Dune",
+  book: "Dune Messiah",
+  name: "Robin Hale",
+  branch: "Riverside",
+  notify: true,
+};
+// A web flow by element refs: no screenshot, no pixel.
+const webRefs: EvalTask = {
+  id: "web-refs",
+  prompt:
+    "The city library's catalogue is open in Chromium. Search it for Dune, reserve Dune Messiah for Robin Hale with pickup at the Riverside branch, and ask to be texted when it is ready.",
+  requires: [],
+  maxHandoffs: 0,
+  timeoutMs: 300_000,
+  setup: async (cell) => {
+    cell.write(`${HOME}/eval/library.html`, fixture("library.html"));
+    cell.launch(["/usr/local/bin/localdot-chromium", `file://${HOME}/eval/library.html`]);
+    await waitForWindow(cell, (w) => /^City library - Chromium$/.test(w.title), 120_000);
+  },
+  oracle: () => {
+    const refs: Record<string, string> = {};
+    const listed = (v: OracleView, wanted: [key: string, role: string, name: string][]) => {
+      for (const [key, role, name] of wanted) {
+        const ref = refOf(v, role, name);
+        if (ref) refs[key] = ref;
+      }
+      return wanted.every(([key]) => refs[key]);
+    };
+    const ref = (key: string) => refs[key] as string;
+    return scripted(
+      [
+        {
+          name: "read the page",
+          act: () => [read()],
+          done: (v) => listed(v, [["search", "searchbox", "Search the catalogue"]]),
+        },
+        {
+          name: "search for Dune",
+          act: () => [act("fill", ref("search"), { text: "Dune", submit: true }), read()],
+          done: (v) => listed(v, [["reserve", "button", "Reserve Dune Messiah"]]),
+        },
+        {
+          name: "reserve Dune Messiah",
+          act: () => [act("click", ref("reserve")), read()],
+          done: (v) =>
+            listed(v, [
+              ["who", "textbox", "Your name"],
+              ["branch", "combobox", "Pickup branch"],
+              ["notify", "checkbox", "Text me when it is ready"],
+              ["confirm", "button", "Confirm reservation"],
+            ]),
+        },
+        {
+          name: "fill in the reservation and confirm it",
+          act: () => [
+            act("fill", ref("who"), { text: RESERVATION.name }),
+            act("select", ref("branch"), { text: RESERVATION.branch }),
+            act("check", ref("notify")),
+            act("click", ref("confirm")),
+          ],
+        },
+      ],
+      "Reserved Dune Messiah for Robin Hale at the Riverside branch.",
+    );
+  },
+  check: async (cell) => jsonVerdict(textOf(cell, "Downloads/reservation.json"), RESERVATION),
+};
+
 // Thunar's detailed list: rows 28 px apart under the column header, names in the first column.
 const thunarRow = (w: Rect, index: number) => ({ x: w.x + 229, y: w.y + 101 + 28 * index });
 
@@ -550,14 +667,76 @@ const textKeyboard: EvalTask = {
     ),
 };
 
+// The same edit with the dialog's controls found by name instead of by their offsets.
+const textFind: EvalTask = {
+  ...textKeyboard,
+  id: "text-find",
+  maxHandoffs: 0,
+  oracle: () => {
+    const dialog = (v: OracleView) => windowTitled(v, /^Find and Replace$/);
+    const at: Record<string, [number, number]> = {};
+    const found = (v: OracleView, names: string[]) => {
+      for (const name of names) {
+        const point = foundAt(v, name);
+        if (point) at[name] = point;
+      }
+      return names.every((name) => at[name]);
+    };
+    const press = (name: string) => click(...(at[name] as [number, number]));
+    return scripted(
+      [
+        {
+          name: "open Find and Replace",
+          ready: (v) => !!windowTitled(v, /notes\.txt - Mousepad$/),
+          act: () => [key("ctrl+r")],
+          done: (v) => !!dialog(v),
+        },
+        {
+          name: "type the search and the replacement, and find the controls",
+          act: () => [
+            batch(type("fox"), key("Tab"), type("cat")),
+            find("Replace all in:"),
+            find("Close"),
+          ],
+          done: (v) => found(v, ["Replace all in:", "Close"]),
+        },
+        {
+          name: "replace in the whole document",
+          act: () => [press("Replace all in:"), find("Replace All")],
+          done: (v) => found(v, ["Replace All"]),
+        },
+        // Mousepad 0.7 replaces one match per Replace All; the document holds two. The button
+        // redraws as it works, so the second press goes on the screen after the first.
+        { name: "replace all", act: () => [press("Replace All")] },
+        {
+          name: "replace the rest and close the dialog",
+          act: () => [batch(press("Replace All"), press("Close"))],
+          done: (v) => !dialog(v),
+        },
+        {
+          name: "delete the last word of the second line and save",
+          act: () => [
+            batch(key("ctrl+Home"), key("Down"), key("End"), key("BackSpace", 3), key("ctrl+s")),
+          ],
+          done: (v) => windowTitled(v, /notes\.txt - Mousepad$/)?.title.startsWith("*") === false,
+        },
+      ],
+      "Replaced every fox with cat, deleted the last word and saved.",
+    );
+  },
+};
+
 export const TASKS: readonly EvalTask[] = [
   gimpDrawShape,
   gimpPickColour,
   calcFill,
   webForm,
+  webFormBatch,
+  webRefs,
   filesDragDrop,
   filesMultiSelect,
   textKeyboard,
+  textFind,
 ];
 
 export const noopPolicy: Policy = () => [["done", { summary: "Nothing to do." }]];

@@ -13,9 +13,9 @@ import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
+import { taskStalled } from "./agent/heartbeat.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
-import { StopControl } from "./agent/StopControl.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
@@ -26,11 +26,14 @@ import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
+import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
 import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
+import { useFreshStart } from "./cells/useFreshStart.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
@@ -55,7 +58,12 @@ import { Onboarding } from "./onboarding/Onboarding.tsx";
 import { setupSteps } from "./onboarding/setup.ts";
 import { useOnboarding } from "./onboarding/useOnboarding.ts";
 import { STEP_DOT } from "./onboarding/wizard.ts";
-import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
+import {
+  PREVIEW_ROOM,
+  RECORDED_TASK,
+  type RecordedTitle,
+  ReplayView,
+} from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
 import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
@@ -94,14 +102,18 @@ import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
+import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
+import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 import { isApple } from "./ui/Kbd.tsx";
+import { useMediaQuery } from "./ui/media.ts";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
@@ -119,6 +131,8 @@ type RailView = "chat" | "activity";
 const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
 const OPENING_MAX_MS = 2000;
+// How long the task's feed may be out of touch before the island says it is reconnecting.
+const LINK_LOST_MS = 1500;
 const FROM_WATCH = { fromWatch: true };
 const FROM_LIBRARY = { fromLibrary: true };
 // Replay's address names the recording that plays, or this for the library of recordings.
@@ -128,6 +142,7 @@ const replayAddress = (selected: string | null) =>
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
+const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -257,11 +272,14 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
+  const streamChoice = useStreamPreference();
   const [replayId, setReplayId] = useState<string | null>(() =>
     replayAddress(new URLSearchParams(window.location.search).get("replay")),
   );
   const playing = replayId === LIBRARY ? null : replayId;
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  // The recordings couldn't be listed: Replay opens anyway and says so, with Try again.
+  const [replayUnlisted, setReplayUnlisted] = useState(false);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
   // An export keeps going when Replay closes or moves to another task.
@@ -324,6 +342,8 @@ function Theatre({ api }: { api: ApiClient }) {
     retry,
     selectReady,
   } = useCell(api);
+  const computerUpdate = useComputerUpdate(api, cell);
+  const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
   const rules = useRules(api, settings.open);
@@ -410,8 +430,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
     wasSettingsOpen.current = settings.open;
   }, [settings.open]);
-  const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
+  const [picture, setPicture] = useState<StreamPicture>("none");
   const conversation = useConversation(api);
   const session = useLiveSession(
     api,
@@ -437,16 +457,26 @@ function Theatre({ api }: { api: ApiClient }) {
       .get("/api/session-index?limit=1", { signal: controller.signal })
       .then((data) => {
         const page = SessionIndexPage.parse(data);
-        if (!controller.signal.aborted && historyRevision === historyOwner.current)
+        if (!controller.signal.aborted && historyRevision === historyOwner.current) {
           setNewestReplayId(page.sessions[0]?.id ?? null);
+          setReplayUnlisted(false);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setReplayUnlisted(true);
+      });
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
   const selectedScreen = agent.model.screen ?? agent.snapshot?.screen;
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
+  const hud = hudFor({
+    cell,
+    status,
+    pending,
+    picture: physicalStageCell === cell ? picture : "none",
+  });
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
   const phone = layout === "phone";
@@ -455,6 +485,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
   const island = useRef<HTMLDivElement>(null);
+  const toastAnchor = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
@@ -553,7 +584,11 @@ function Theatre({ api }: { api: ApiClient }) {
     return plan.kind === "answer" ? "answered" : "declined";
   };
   const manualLive =
-    yours && controls.canInput && physicalStageCell?.state === "ready" && !physicalStageCell.paused;
+    yours &&
+    controls.canInput &&
+    physicalStageCell?.state === "ready" &&
+    !physicalStageCell.paused &&
+    !(selectedScreen?.screen === "browser" && browserScreen.stale);
   const manual = useManualChannel(
     api,
     manualLive ? agent.sessionId : null,
@@ -572,6 +607,21 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     if (pasteRefused) showToast({ title: pasteRefused, tone: "danger" });
   }, [pasteRefused]);
+  const lastScreen = useRef(shownScreen);
+  useEffect(() => {
+    if (replayId || lastScreen.current === shownScreen) return;
+    lastScreen.current = shownScreen;
+    showToast({
+      id: "screen",
+      title:
+        shownScreen === "browser" ? "dot moved to the web browser" : "dot is back on the desktop",
+    });
+  }, [replayId, shownScreen]);
+  const browserProblem =
+    !replayId && shownScreen === "browser" && !browserScreen.cell ? browserScreen.error : undefined;
+  useEffect(() => {
+    if (browserProblem) showToast({ id: "screen", title: browserProblem, tone: "danger" });
+  }, [browserProblem]);
   const shownView: RailView =
     railView === "activity" && (layout === "wide" || phone) ? "chat" : railView;
   const guardStart = () => {
@@ -616,6 +666,22 @@ function Theatre({ api }: { api: ApiClient }) {
       return false;
     }
   };
+  // An interrupted task carries on as the conversation's next one.
+  const carryOn = async () => {
+    if (!cell) return false;
+    try {
+      await deliverText(api, {
+        cellId: cell.id,
+        sessionId: null,
+        mode: "new",
+        text: "Continue where you left off.",
+      });
+      session.check();
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const stageCell =
     physicalStageCell && controls.stopStatus.phase === "paused"
       ? { ...physicalStageCell, paused: true as const }
@@ -624,10 +690,10 @@ function Theatre({ api }: { api: ApiClient }) {
         : physicalStageCell;
   // The displayed screen owns video visibility. Parent lifecycle controls still
   // use the desktop HUD, even when only the separate browser has a live viewer.
-  const stageHud = hudFor({ cell: stageCell, status, pending });
+  const stageHud = hudFor({ cell: stageCell, status, pending, picture });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
-      ? hudFor({ cell: stageCell, status, pending })
+      ? stageHud
       : hud;
   // Which conversation and task the thread shows is not known yet.
   const threadPending =
@@ -657,6 +723,14 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
+  // The daemon refuses an Update in these cases too; the button says so before it is pressed.
+  const updateWait =
+    agent.snapshot?.holder === true || yours
+      ? "Hand back the computer first"
+      : task && task.phase !== "finished"
+        ? "Wait for dot to finish"
+        : undefined;
+  useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -667,6 +741,11 @@ function Theatre({ api }: { api: ApiClient }) {
         ? "Just a moment…"
         : undefined;
   const computer = error ? { ...containedHud, caption: error } : containedHud;
+  // A task feed out of touch for a moment says nothing; one that stays out says so in the island.
+  const linkLost = useHeldFor(
+    !!session.sessionId && (agent.connection === "lost" || agent.availability === "error"),
+    LINK_LOST_MS,
+  );
   const appStatus = statusFor({
     computer: {
       ...computer,
@@ -692,8 +771,11 @@ function Theatre({ api }: { api: ApiClient }) {
       ? "stopping"
       : controls.stopStatus.phase === "unconfirmed"
         ? "unconfirmed"
-        : null,
+        : controls.stopStatus.phase === "paused"
+          ? "stopped"
+          : null,
     canStop: controls.canStop,
+    link: linkLost ? "lost" : null,
     mayControl:
       !controls.fenced &&
       agent.fresh &&
@@ -705,6 +787,8 @@ function Theatre({ api }: { api: ApiClient }) {
   const sheetStop = appStatus.actions.find(
     (action) => action.kind === "stop" || (phone && action.kind === "stop-task"),
   );
+  const stopped = stopNotice(controls.stopStatus);
+  const stopNote = stopped ? { line: stopped.title, details: stopped.details } : undefined;
   const sheetStopControl = sheetStop && {
     label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
     enabled: sheetStop.enabled,
@@ -741,6 +825,7 @@ function Theatre({ api }: { api: ApiClient }) {
     reason: conversationReason,
   };
   const curtain = useCurtain(appStatus.computer, !!replayId);
+  useStopToast(controls.stopStatus, controls.recheck, curtain.up);
   const stageBox = useRef<HTMLDivElement>(null);
   const fullScreen = useFullScreen({
     available: !curtain.up && !replayId,
@@ -762,10 +847,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const setupKnown = !!settings.saved;
   const onboarding = useOnboarding({ known: setupKnown, configured: !!settings.saved?.main });
   const setupStep = onboarding.progress.step;
+  const previewRoom = useMediaQuery(PREVIEW_ROOM) && !phone;
   const place = presencePlace({
     showDot: showDot.value,
     curtain: curtain.up,
     replaying: !!replayId,
+    browsing: replayId === LIBRARY && !previewRoom,
     keyboard,
     setup: onboarding.open,
     full,
@@ -958,9 +1045,16 @@ function Theatre({ api }: { api: ApiClient }) {
         ? UNCONFIRMED_LINE
         : yours && phone
           ? PHONE_CONTROL_LINE
-          : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-            ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
-            : "";
+          : !replayId && taskStalled(agent, performance.now())
+            ? SLOW_LINE
+            : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+              ? narrationLine(
+                  appStatus.row,
+                  appStatus.caption.text,
+                  // Out of touch, dot's last words are old news; the caption says what is going on.
+                  linkLost ? null : agent.model.said,
+                )
+              : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const asked = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
@@ -1022,7 +1116,10 @@ function Theatre({ api }: { api: ApiClient }) {
             : replayId
               ? (shownRecording?.title ?? RECORDED_TASK)
               : (session.model.title ??
-                (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                ((curtain.up && !agent.sessionId && conversation.sessions.length === 0) ||
+                // Until the shown task's history is in, its title is unknown, not new.
+                threadPending ||
+                (!!session.sessionId && agent.history !== true)
                   ? undefined
                   : "New conversation"))
         }
@@ -1051,7 +1148,7 @@ function Theatre({ api }: { api: ApiClient }) {
           )
         }
         mode={replayId ? "replay" : "watch"}
-        replayEnabled={!!(replayId || newestReplayId)}
+        replayEnabled={!!(replayId || newestReplayId || replayUnlisted)}
         onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
         onModeAgain={() => {
           if (playing) selectReplay(LIBRARY);
@@ -1073,7 +1170,7 @@ function Theatre({ api }: { api: ApiClient }) {
               boxRef={stageBox}
               onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
               light={appStatus.control ? "dot" : yours ? "you" : "none"}
-              live={stageHud.live}
+              live={stageHud.live || stageHud.phase === "reconnecting"}
               frozen={!!stageHud.paused}
               curtain={
                 <Presence show={curtain.up}>
@@ -1081,8 +1178,9 @@ function Theatre({ api }: { api: ApiClient }) {
                     phase={curtain.phase}
                     first={!cell && listed.length === 0}
                     waking={pending === "start" || pending === "create"}
+                    updating={!!cell?.updating}
                     caption={computer.caption}
-                    notice={error}
+                    notice={error ?? stoppedOff(controls.stopStatus)}
                     action={computerAction}
                     onAction={() => computerAction && onComputer[computerAction.kind]()}
                     replace={
@@ -1102,6 +1200,7 @@ function Theatre({ api }: { api: ApiClient }) {
                           }
                         : undefined
                     }
+                    freshStart={freshStart.curtain}
                     showDot={showDot.value}
                   />
                 </Presence>
@@ -1128,20 +1227,17 @@ function Theatre({ api }: { api: ApiClient }) {
                     onExitFull={fullScreen.exit}
                     onRowWidth={setIslandWidth}
                     fields={askFields}
+                    noticesRef={toastAnchor}
                     notices={
-                      <>
-                        <StopControl controls={controls} inIsland />
-                        <SafetyNotes
-                          safety={safety}
-                          agent={agent}
-                          cell={cell}
-                          visible={sheetsClosed}
-                          replaying={!!replayId}
-                        />
-                      </>
+                      <SafetyNotes
+                        safety={safety}
+                        agent={agent}
+                        cell={cell}
+                        visible={sheetsClosed}
+                      />
                     }
                   />
-                  <Toaster anchor={island} />
+                  <Toaster anchor={toastAnchor} />
                 </>
               }
               band={
@@ -1196,14 +1292,6 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               }
             >
-              {!replayId && selectedScreen && (
-                <div className="screen-label" role="status">
-                  {selectedScreen.screen === "browser" ? "Web browser" : "Desktop"}
-                  {selectedScreen.screen === "browser" && !browserScreen.cell && (
-                    <span> · {browserScreen.error ?? "Connecting…"}</span>
-                  )}
-                </div>
-              )}
               <Stage
                 ref={stage}
                 mode={replayId ? "replay" : "live"}
@@ -1215,6 +1303,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 api={api}
                 reconnects={reconnects + browserScreen.reconnects}
                 listed={listed}
+                onPicture={setPicture}
                 manual={
                   yours && manualGeometry && !agent.model.ended
                     ? {
@@ -1264,6 +1353,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               computerReady={cell?.state === "ready" && !cell.paused}
+              computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
                 agent.sessionId && (agent.model.ended || task?.phase === "finished")
@@ -1306,7 +1396,9 @@ function Theatre({ api }: { api: ApiClient }) {
                         icon: "history",
                         startsGroup: true,
                         disabledReason:
-                          replayId || newestReplayId ? undefined : "No recordings yet",
+                          replayId || newestReplayId || replayUnlisted
+                            ? undefined
+                            : "No recordings yet",
                         run: () => selectReplay(LIBRARY),
                       },
                       {
@@ -1370,6 +1462,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   controls={controls}
                   onSettings={showSettings}
                   onContinue={continueTask}
+                  onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
                 />
               }
               ask={askThread}
@@ -1429,8 +1522,11 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
-          taskControls={<StopControl controls={controls} />}
+          stopNote={stopNote}
+          stream={streamChoice}
           stop={sheetStopControl}
+          update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
+          freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
           open={settings.open}
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}

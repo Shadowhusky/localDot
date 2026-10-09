@@ -55,18 +55,23 @@ it("waits for the physical browser status and never copies desktop stream health
   expect(parent.stream.connection).toBe("live");
 });
 
-it("drops stale frames immediately when the stream closes and requires a new status after reconnect", async () => {
+it("keeps the last browser on screen while its status reconnects, stale until a new status", async () => {
   vi.useFakeTimers();
   const { result } = renderHook(() => useBrowserScreen(api, parent, selection));
   act(() => socket().onopen?.());
+  expect(result.current).toMatchObject({ cell: null, stale: false });
   send(browser);
+  expect(result.current).toMatchObject({ cell: { id: selection.cellId }, stale: false });
   act(() => socket().onclose?.());
-  expect(result.current.cell).toBeNull();
+  expect(result.current).toMatchObject({ cell: { id: selection.cellId }, stale: true });
   await act(() => vi.advanceTimersByTimeAsync(500));
   act(() => socket().onopen?.());
-  expect(result.current.cell).toBeNull();
-  send(browser);
+  expect(result.current).toMatchObject({ cell: { id: selection.cellId }, stale: true });
   expect(result.current.reconnects).toBe(1);
+  send(browser);
+  expect(result.current).toMatchObject({ cell: { id: selection.cellId }, stale: false });
+  send({ ...browser, createdAt: "old" });
+  expect(result.current).toMatchObject({ cell: null, stale: false });
 });
 
 it("retires a same-ID previous revision, pauses with its parent, and ignores late old messages", () => {

@@ -20,16 +20,19 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),
   ask: hud("Needs your answer"),
   takeover: hud("Your turn"),
-  budget: hud("Reached your spending limit"),
+  budget: hud("Spending limit reached"),
   done: hud("Done"),
   continued: hud("Done"),
-  reconnecting: shows((page) => page.locator(".stage-veil.on")),
+  reconnecting: hud("Reconnecting…"),
   paused: hud("Paused"),
   failed: hud("Failed"),
   fenced: shows((page) =>
     page
       .getByRole("region", { name: "Computer recovery" })
       .getByRole("heading", { name: "This computer is unavailable", exact: true }),
+  ),
+  "fresh-start": shows((page) =>
+    page.getByRole("heading", { name: "Your computer needs a fresh start" }),
   ),
   off: hud("Stopped"),
 };

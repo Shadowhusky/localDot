@@ -1,4 +1,6 @@
+import { cameraFor, toCanvas } from "@localdot/stage";
 import { expect, it } from "vitest";
+import { videoPlacement } from "./geometry.ts";
 import { manualPoint } from "./manual-point.ts";
 
 it("uses actual letterboxed backing-store coordinates across DPR changes and touch-sized layouts", () => {
@@ -26,4 +28,35 @@ it("follows a pressed pointer to the desktop's edge instead of dropping it", () 
     x: 2559,
     y: 1599,
   });
+});
+it("maps a touch on a phone stage to the desktop pixel the worker draws under it, at any frame size", () => {
+  const screen = { w: 2560, h: 1600 };
+  const rect = { left: 8, top: 24, width: 374, height: 233.75 };
+  const backing = { w: Math.round(rect.width * 3), h: Math.round(rect.height * 3) };
+  const camera = cameraFor({
+    stageW: backing.w,
+    stageH: backing.h,
+    desktopW: screen.w,
+    desktopH: screen.h,
+    zoom: 1,
+  });
+  for (const frame of [screen, { w: 1280, h: 800 }]) {
+    const { sx, sy } = videoPlacement(frame, screen);
+    for (const [fx, fy] of [
+      [0, 0],
+      [frame.w / 2, frame.h / 2],
+      [frame.w - 1, frame.h - 1],
+    ] as const) {
+      const world = { x: (fx + 0.25) * sx, y: (fy + 0.25) * sy };
+      const drawn = toCanvas(camera, world);
+      const touch = {
+        x: rect.left + (drawn.x * rect.width) / backing.w,
+        y: rect.top + (drawn.y * rect.height) / backing.h,
+      };
+      expect(manualPoint(rect, screen, touch, backing)).toEqual({
+        x: Math.floor(world.x),
+        y: Math.floor(world.y),
+      });
+    }
+  }
 });

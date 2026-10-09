@@ -413,6 +413,12 @@
     flex-wrap: wrap;
   }
 
+  /* On its own line under the label, aligned with the label's text. */
+  .settings-stream-choice {
+    width: calc(100% - var(--spacing) * 10);
+    margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 1.5) calc(var(--spacing) * 10);
+  }
+
   .settings-autonomy-row > .ui-segmented {
     flex-basis: 100%;
   }
@@ -428,4 +434,33 @@
   .settings-footer > .ui-button {
     flex: 1;
   }
+}
+
+/* Both wordings hold the row's height, so it never moves when Update starts. */
+.settings-update-label {
+  display: grid;
+  text-wrap: balance;
+}
+
+.settings-update-label > span {
+  grid-area: 1 / 1;
+  align-self: end;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.settings-update-label > span:not([data-shown]) {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    visibility 0s linear var(--dur-fade);
+}
+
+.settings-computer-error {
+  color: var(--color-danger-fg);
+}
+
+/* How the last Stop went: Details sits under the computer's name, past its tile. */
+.settings-stop-details {
+  margin: calc(var(--spacing) * 0.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);
 }

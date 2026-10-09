@@ -27,6 +27,8 @@ describe("where the one live dot is", () => {
 
   it("docks in Replay whatever the curtain or the keyboard does, and is nowhere when it is off", () => {
     expect(presencePlace({ ...LIVE, replaying: true, curtain: true, keyboard: true })).toBe("dock");
+    // A phone's list of recordings has no place for dot, so it doesn't hang over the list.
+    expect(presencePlace({ ...LIVE, replaying: true, browsing: true })).toBeNull();
     for (const curtain of [false, true])
       for (const keyboard of [false, true])
         expect(presencePlace({ ...LIVE, showDot: false, curtain, keyboard })).toBeNull();

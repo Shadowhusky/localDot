@@ -10,40 +10,20 @@
     "half-pixel": 2,
     "stray-stylesheet": 1
   },
-  "src/agent/controls.css": {
-    "control-selector": 1,
-    "radius-literal": 2,
-    "spacing-literal": 6,
-    "stray-stylesheet": 1
-  },
   "src/agent/output.css": {
     "stray-stylesheet": 1,
     "type-literal": 1
   },
-  "src/agent/safety.css": {
-    "control-selector": 8,
-    "radius-literal": 2,
-    "raw-colour": 13,
-    "spacing-literal": 12,
-    "stray-stylesheet": 1,
-    "token-fallback": 2,
-    "type-literal": 5
-  },
   "src/app.css": {
-    "radius-literal": 1,
-    "spacing-literal": 6,
+    "spacing-literal": 5,
     "stray-stylesheet": 1,
-    "type-literal": 2
-  },
-  "src/browser/BrowserDownloads.tsx": {
-    "native-control": 2,
-    "native-disabled": 2
+    "type-literal": 1
   },
   "src/browser/downloads.css": {
     "stray-stylesheet": 1
   },
   "src/cells/errors.ts": {
-    "banned-copy": 5
+    "banned-copy": 1
   },
   "src/cells/hud-state.ts": {
     "banned-copy": 1

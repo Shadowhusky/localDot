@@ -160,6 +160,18 @@ export function repeatsWhileHeld(combo: readonly string[]): boolean {
   });
 }
 
+// xdotool-style combos ("ctrl+shift+t", "Return"): the gateway's key names, which keyName maps
+// onto X keysyms. A trailing "+" is the plus key: "ctrl++", or "+" alone.
+export function keyCombo(text: string): string[] | undefined {
+  const trimmed = text.trim();
+  const plus = trimmed === "+" || /\+\s*\+$/.test(trimmed);
+  const rest = plus ? trimmed.replace(/\+?\s*\+$/, "") : trimmed;
+  const keys = [...(rest ? rest.split("+").map((k) => k.trim()) : []), ...(plus ? ["+"] : [])];
+  return keys.length >= 1 && keys.length <= 8 && keys.every((k) => k.length > 0 && k.length <= 32)
+    ? keys
+    : undefined;
+}
+
 // Every name of a combo resolves, or the first that does not names its close matches.
 export function checkCombo(combo: readonly string[]): string | undefined {
   for (const key of combo) {
