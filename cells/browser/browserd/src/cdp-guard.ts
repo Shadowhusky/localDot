@@ -14,7 +14,18 @@ const filter = schema.tuple([
   schema.strictObject({ exclude: schema.literal(true) }),
 ]);
 
+const cookieText = schema.string().max(4096);
 const commands = Object.freeze({
+  "Storage.getCookies": empty,
+  "Network.deleteCookies": schema.strictObject({
+    name: cookieText,
+    domain: schema.string().min(1).max(256),
+    path: cookieText,
+  }),
+  "Storage.clearDataForOrigin": schema.strictObject({
+    origin: schema.string().min(1).max(270),
+    storageTypes: schema.literal("all"),
+  }),
   "DOMSnapshot.captureSnapshot": schema.strictObject({
     computedStyles: schema.array(schema.never()).length(0),
   }),
@@ -190,7 +201,9 @@ export function guardCdpCommand(
   const parsed = commands[name].safeParse(rawParams);
   if (!parsed.success) throw new CdpRefused("params");
   const params = frozenParams(parsed.data as Record<string, unknown>);
-  const pageCommand = /^(Page|DOM|DOMSnapshot|Accessibility|Runtime)\./u.test(name);
+  const pageCommand =
+    /^(Page|DOM|DOMSnapshot|Accessibility|Runtime|Network)\./u.test(name) ||
+    name === "Storage.clearDataForOrigin";
   if (pageCommand || (name === "Target.setAutoAttach" && sessionId !== undefined)) {
     if (
       !sessionId ||
@@ -212,6 +225,12 @@ export function guardCdpCommand(
   )
     throw new CdpRefused("scope");
   if (name === "Page.navigate" && !navigable(params.url)) throw new CdpRefused("url");
+  if (name === "Storage.clearDataForOrigin") {
+    const origin = String(params.origin);
+    const scheme = /^https?:\/\//u.exec(origin)?.[0];
+    if (!scheme || !navigable(`${origin}/`) || new URL(origin).origin !== origin)
+      throw new CdpRefused("url");
+  }
   if (name === "Browser.cancelDownload" && !capabilities.ownsDownload(params.guid as string))
     throw new CdpRefused("download");
   if (

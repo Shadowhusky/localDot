@@ -36,6 +36,24 @@ const attachOptions = Object.freeze({
   filter,
 });
 
+const cookieList = schema.object({
+  cookies: schema
+    .array(
+      schema.object({
+        name: schema.string().max(4096),
+        domain: schema.string().min(1).max(256),
+        path: schema.string().max(4096),
+      }),
+    )
+    .max(50_000),
+});
+
+export interface BrowserCookie {
+  readonly name: string;
+  readonly domain: string;
+  readonly path: string;
+}
+
 export class BrowserTargetError extends Error {
   constructor(readonly reason: "closed" | "protocol" | "busy" | "stale" | "unready") {
     super(`Browser target refused: ${reason}`);
@@ -648,6 +666,15 @@ export class BrowserTargets {
       { signal },
     );
     this.#checkOpen();
+  }
+
+  // Names and scopes only: cookie values never leave Chromium through browserd.
+  async cookies(): Promise<readonly BrowserCookie[]> {
+    this.#checkOpen();
+    const parsed = cookieList.safeParse(await this.#broker.send("Storage.getCookies", {}));
+    this.#checkOpen();
+    if (!parsed.success) throw new BrowserTargetError("protocol");
+    return parsed.data.cookies.map(({ name, domain, path }) => ({ name, domain, path }));
   }
 
   async cancelDownload(guid: string, signal?: AbortSignal): Promise<void> {

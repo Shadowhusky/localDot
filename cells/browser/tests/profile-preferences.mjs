@@ -13,7 +13,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { afterEach, test } from "node:test";
-import { prepareProfilePreferences } from "../browserd/src/profile-preferences.ts";
+import {
+  prepareProfilePreferences,
+  releaseProfileLocks,
+} from "../browserd/src/profile-preferences.ts";
 
 const roots = [];
 afterEach(async () => {
@@ -125,4 +128,25 @@ test("an already stopped preparation creates no profile files", async () => {
   stop.abort();
   await assert.rejects(prepareProfilePreferences(f.profile, stop.signal));
   assert.deepEqual(await readdir(f.inner), []);
+});
+
+test("releases another cell's stale profile locks without following them", async () => {
+  const f = await fixture();
+  const target = `${f.root}/kept`;
+  await writeFile(target, "kept", { mode: 0o600 });
+  await symlink("browser-01jxyz0000000000000000000a-123", `${f.profile}/SingletonLock`);
+  await symlink(target, `${f.profile}/SingletonCookie`);
+  await writeFile(`${f.inner}/Cookies`, "private-fixture-cookie", { mode: 0o600 });
+  await releaseProfileLocks(f.profile, alive());
+  assert.deepEqual((await readdir(f.profile)).sort(), ["Default"]);
+  assert.equal(await readFile(target, "utf8"), "kept");
+  assert.equal(await readFile(`${f.inner}/Cookies`, "utf8"), "private-fixture-cookie");
+  await releaseProfileLocks(f.profile, alive());
+});
+
+test("refuses a lock name that is not a link", async () => {
+  const f = await fixture();
+  await writeFile(`${f.profile}/SingletonLock`, "", { mode: 0o600 });
+  await assert.rejects(releaseProfileLocks(f.profile, alive()));
+  assert.deepEqual((await readdir(f.profile)).sort(), ["Default", "SingletonLock"]);
 });

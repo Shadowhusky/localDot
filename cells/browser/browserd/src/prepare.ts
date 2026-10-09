@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
-import { prepareProfilePreferences } from "./profile-preferences.ts";
+import { prepareProfilePreferences, releaseProfileLocks } from "./profile-preferences.ts";
 import {
   BROWSER_DOWNLOAD_DIR,
   BROWSER_PROFILE_DIR,
@@ -182,6 +182,7 @@ export async function prepareBrowserRuntime(
     }
     check(signal);
     await directory(BROWSER_PROFILE_DIR, "profile");
+    await releaseProfileLocks(BROWSER_PROFILE_DIR, signal);
     await prepareProfilePreferences(BROWSER_PROFILE_DIR, signal);
     check(signal);
     const certificate = await lstat(CERTIFICATE);

@@ -9,7 +9,10 @@ import { browserRuntimeConfig } from "./runtime-config.ts";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn(), execFile: vi.fn() }));
 vi.mock("node:fs/promises", () => ({ lstat: vi.fn(), mkdir: vi.fn(), open: vi.fn() }));
-vi.mock("./profile-preferences.ts", () => ({ prepareProfilePreferences: vi.fn() }));
+vi.mock("./profile-preferences.ts", () => ({
+  prepareProfilePreferences: vi.fn(),
+  releaseProfileLocks: vi.fn(),
+}));
 
 const config = browserRuntimeConfig({
   LOCALDOT_BROWSER_CELL_ID: "01J00000000000000000000001",
