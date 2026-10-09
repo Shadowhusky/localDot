@@ -310,6 +310,8 @@ export type RememberInput = z.infer<typeof RememberInput>;
 export const DoneInput = z.object({
   summary: z.string().min(1).max(8000),
   files: z.array(z.string().min(1).max(1024)).max(16).optional(),
+  // What dot confirmed about its files itself, such as "opens, 4 sheets".
+  checked: z.string().min(1).max(200).optional(),
 });
 export type DoneInput = z.infer<typeof DoneInput>;
 
