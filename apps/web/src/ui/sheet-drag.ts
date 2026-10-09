@@ -25,7 +25,7 @@ export type SheetDetent = "fit" | "medium" | "large";
 
 // The top edge of a resting medium or large sheet, below the safe area. overlays.css holds the same
 // numbers: medium keeps the stage in view, large leaves only the top 40.
-export const DETENT_TOP = { medium: 214, large: 40 } as const;
+export const DETENT_TOP = { medium: 238, large: 40 } as const;
 
 // How far below the highest of them each detent rests.
 export function detentStops(detents: readonly SheetDetent[]): number[] {

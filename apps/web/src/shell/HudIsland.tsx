@@ -13,6 +13,7 @@ import {
   decisionTop,
   type IslandShape,
   islandAttention,
+  islandTop,
   liftOverScrim,
   type PauseSlot,
   type TakeSlot,
@@ -63,21 +64,17 @@ export interface HudIslandProps {
   notices?: ReactNode;
   // The foot of those notes, where toasts hang so the two never overlap.
   noticesRef?: RefObject<HTMLDivElement | null>;
-  // While the user has the computer the island rises into the top bar, where the bar has room.
-  rise?: boolean;
-  // The stage fills the screen: the island sits inside the picture's top edge, Take control is an
-  // icon and the way out of full screen follows it.
+  // The stage fills the screen: the island shrinks to its minimal shape, Take control is an icon
+  // and the way out of full screen follows it.
   full?: boolean;
   onExitFull?(): void;
-  // The width of the island's row, as it changes.
-  onRowWidth?(width: number): void;
   // The island's anchor, with the decision it grew into.
   ref?: RefObject<HTMLDivElement | null>;
   // A decision never covers the rings on these; it drops under them instead.
   fields?: StageFields;
 }
 
-// Status and the task's controls in one glass island hung on the stage's top edge. Every slot has a
+// Status and the task's controls in one glass island over the stage's top edge. Every slot has a
 // fixed width and keeps its place while dot thinks, acts and checks the screen; only a change of
 // shape changes the island's width, and the glass behind it follows on a spring.
 export function HudIsland({
@@ -96,10 +93,8 @@ export function HudIsland({
   decision,
   notices,
   noticesRef,
-  rise = false,
   full = false,
   onExitFull,
-  onRowWidth,
   ref,
   fields,
 }: HudIslandProps) {
@@ -109,8 +104,6 @@ export function HudIsland({
   const row = useRef<HTMLDivElement>(null);
   const plate = useRef<HTMLSpanElement>(null);
   const card = useRef<HTMLDivElement>(null);
-  const rowWidth = useRef(onRowWidth);
-  rowWidth.current = onRowWidth;
   const open = !!decision && shape === "task";
   useLift(anchor, plate);
   // The card keeps what it last showed while it fades back into the island.
@@ -129,7 +122,6 @@ export function HudIsland({
     const root = anchor.current;
     if (!content || !glass || !root) return;
     const fit = () => {
-      rowWidth.current?.(content.offsetWidth);
       const grown = open ? card.current : null;
       if (!grown) {
         glass.style.width = `${content.offsetWidth}px`;
@@ -147,7 +139,8 @@ export function HudIsland({
       const stage = root.parentElement;
       if (!stage) return;
       const box = { w: stage.clientWidth, h: stage.clientHeight };
-      const hung = -content.offsetHeight / 2 - HEADER_GROWTH;
+      const gap = Number.parseFloat(getComputedStyle(root).getPropertyValue("--island-gap")) || 0;
+      const hung = islandTop(content.offsetHeight, gap) - HEADER_GROWTH;
       const top = decisionTop({
         hung,
         size: { w: width, h: height },
@@ -180,12 +173,7 @@ export function HudIsland({
   // A phone keeps Hand back in its toolbar, so its island ends at Stop.
   const handSlot = !(yours && phone);
   return (
-    <div
-      className="island-anchor"
-      ref={anchor}
-      data-risen={(yours && rise && !full) || undefined}
-      data-full={full || undefined}
-    >
+    <div className="island-anchor" ref={anchor} data-full={full || undefined}>
       <div
         className="island"
         data-shape={shape}

@@ -35,8 +35,8 @@ describe("sheet drag", () => {
     expect(restingStop(300, -800, [0], height)).toBe(0);
   });
 
-  it("rests medium 174 px under large, and a lone detent at the top", () => {
-    expect(detentStops(["medium", "large"])).toEqual([174, 0]);
+  it("rests medium 198 px under large, and a lone detent at the top", () => {
+    expect(detentStops(["medium", "large"])).toEqual([198, 0]);
     expect(detentStops(["large"])).toEqual([0]);
     expect(detentStops(["fit"])).toEqual([0]);
   });
@@ -48,11 +48,11 @@ describe("sheet drag", () => {
     expect(restingStop(60, 0, stops, height)).toBe(1);
     expect(restingStop(120, 0, stops, height)).toBe(0);
     // A flick up from medium throws it to large; a gentle one down from large lands in medium.
-    expect(restingStop(174, -900, stops, height)).toBe(1);
+    expect(restingStop(198, -900, stops, height)).toBe(1);
     expect(restingStop(10, 400, stops, height)).toBe(0);
     // Past medium by 30 % of what shows there, it closes.
-    expect(restingStop(174 + 180, 0, stops, height)).toBe(0);
-    expect(restingStop(174 + 195, 0, stops, height)).toBe("dismiss");
+    expect(restingStop(198 + 180, 0, stops, height)).toBe(0);
+    expect(restingStop(198 + 195, 0, stops, height)).toBe("dismiss");
   });
 
   it("reads velocity over the last 100 ms of movement", () => {
