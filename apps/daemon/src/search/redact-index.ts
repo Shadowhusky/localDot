@@ -18,7 +18,7 @@ function chunk(text: string): string {
 
 // Long tokens go first, so every chunk can end on a non-token character and no key is split.
 export function redactForIndex(text: string): string {
-  let rest = text.replace(/[]/g, " ").replace(LONG_TOKEN, INDEX_REDACTED);
+  let rest = text.replace(/[\uE000\uE001]/g, " ").replace(LONG_TOKEN, INDEX_REDACTED);
   let out = "";
   while (rest.length > KEY_SCAN_CHARS) {
     let cut = KEY_SCAN_CHARS;

@@ -1,5 +1,5 @@
-export const START = "";
-export const END = "";
+export const START = "\uE000";
+export const END = "\uE001";
 
 // Words only: quotes, operators and punctuation never reach FTS5's query syntax.
 export function searchTerms(raw: string): string[] {

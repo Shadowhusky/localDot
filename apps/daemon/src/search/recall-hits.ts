@@ -11,6 +11,6 @@ export function recallHits(
     title: r.title ?? (r.kind === "note" ? "Daily note" : "Untitled task"),
     day: (r.startedAt ?? r.at).slice(0, 10),
     kind: r.kind,
-    snippet: r.snippet.replace(/[]/g, ""),
+    snippet: r.snippet.replace(/[\uE000\uE001]/g, ""),
   }));
 }

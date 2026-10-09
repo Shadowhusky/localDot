@@ -57,7 +57,7 @@ describe.each([false, true])("search index (forceLike=%s)", (forceLike) => {
     expect(rows.find((r) => r.sessionId === car)).toMatchObject({
       title: "Renew the car insurance",
     });
-    expect(rows[0]?.snippet).toMatch(/insurance/i);
+    expect(rows[0]?.snippet).toMatch(/\uE000insurance\uE001/i);
   });
   it("excludes a task and filters by kind", () => {
     const { log, index } = setup(forceLike);

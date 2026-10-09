@@ -29,7 +29,7 @@ describe("search in the Tasks library", () => {
       asked.push(q);
       expect(init?.signal).toBeTruthy();
       return Response.json({
-        hits: [hit(TASK, "Travel insurance was optional"), hit(null, "a note")],
+        hits: [hit(TASK, "Travel \uE000insurance\uE001 was optional"), hit(null, "a note")],
         complete: true,
         mode: "fts",
       });
@@ -79,7 +79,7 @@ describe("search in the Tasks library", () => {
     expect(short.container.textContent).toBe("a b");
   });
   it("marks matched words and keeps everything else as text", () => {
-    const { container } = render(<Highlight text={"abc<script>"} />);
+    const { container } = render(<Highlight text={"a\uE000b\uE001c<script>"} />);
     expect([...container.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["b"]);
     expect(screen.getByText("c<script>")).toBeTruthy();
     expect(container.querySelector("script")).toBeNull();

@@ -17,6 +17,6 @@ describe("index redaction", () => {
     expect(redactForIndex(text)).toBe(INDEX_REDACTED);
   });
   it("replaces tokens of 256 or more key characters and strips match markers", () => {
-    expect(redactForIndex(`${"b".repeat(300)} ok x`)).toBe(`${INDEX_REDACTED} ok  x `);
+    expect(redactForIndex(`${"b".repeat(300)} ok \uE000x\uE001`)).toBe(`${INDEX_REDACTED} ok  x `);
   });
 });

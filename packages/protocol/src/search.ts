@@ -4,8 +4,8 @@ import { ULID_PATTERN } from "./ids.ts";
 export const SearchKind = z.enum(["title", "user", "assistant", "summary", "step", "file", "note"]);
 export type SearchKind = z.infer<typeof SearchKind>;
 export const SEARCH_QUERY_MAX = 200;
-export const SEARCH_MARK_START = "";
-export const SEARCH_MARK_END = "";
+export const SEARCH_MARK_START = "\uE000";
+export const SEARCH_MARK_END = "\uE001";
 export const SearchHit = z.strictObject({
   sessionId: z.string().regex(ULID_PATTERN).nullable(),
   title: z.string().max(200).nullable(),

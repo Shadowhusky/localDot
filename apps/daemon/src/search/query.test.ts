@@ -20,13 +20,13 @@ describe("search query building", () => {
   it("detects CJK and marks LIKE snippets", () => {
     expect(hasCjk("保险")).toBe(true);
     expect(hasCjk("insurance")).toBe(false);
-    expect(likeSnippet("续保汽车保险的报价", ["保险"])).toBe("续保汽车保险的报价");
+    expect(likeSnippet("续保汽车保险的报价", ["保险"])).toBe("续保汽车\uE000保险\uE001的报价");
   });
   it("clips long snippets and keeps markers balanced", () => {
-    const long = `${"a".repeat(390)}${"b".repeat(200)}`;
+    const long = `${"a".repeat(390)}\uE000${"b".repeat(200)}\uE001`;
     const clipped = clipSnippet(long);
     expect(clipped.length).toBeLessThanOrEqual(400);
-    expect(clipped.split("").length).toBe(clipped.split("").length);
+    expect(clipped.split("\uE000").length).toBe(clipped.split("\uE001").length);
     expect(clipSnippet("short")).toBe("short");
   });
 });
