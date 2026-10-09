@@ -1,4 +1,4 @@
-import { type CSSProperties, memo, type ReactNode, type Ref } from "react";
+import { memo, type ReactNode, type Ref } from "react";
 import type { KeyStatus } from "../keys/useKeys.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
@@ -25,15 +25,12 @@ export interface TopBarProps {
   settingsOpen: boolean;
   onSettings(trigger: HTMLButtonElement): void;
   settingsRef?: Ref<HTMLButtonElement>;
-  // The risen island's width: the centre is its alone, and the title yields.
-  centre?: number;
   // At the very end: what has no place of its own, such as Stop everything.
   more?: ReactNode;
-  ref?: Ref<HTMLElement>;
 }
 
-// The wordmark and what is on the stage; the empty centre the island rises into; then the modes,
-// Settings and Keys. It redraws only when one of these changes, never with the task.
+// The wordmark and what is on the stage, then the modes, Settings and Keys. It redraws only when one
+// of these changes, never with the task.
 export const TopBar = memo(function TopBar({
   title,
   note,
@@ -49,9 +46,7 @@ export const TopBar = memo(function TopBar({
   settingsOpen,
   onSettings,
   settingsRef,
-  centre,
   more,
-  ref,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
     { value: "watch", label: "Watch" },
@@ -62,12 +57,7 @@ export const TopBar = memo(function TopBar({
     },
   ];
   return (
-    <header
-      ref={ref}
-      className="bar"
-      data-centre={centre ? "" : undefined}
-      style={centre ? ({ "--bar-centre": `${centre}px` } as CSSProperties) : undefined}
-    >
+    <header className="bar">
       <div className="bar-l">
         <span className="bar-wordmark">localDot</span>
         {title && (

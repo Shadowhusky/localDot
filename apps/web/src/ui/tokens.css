@@ -414,17 +414,18 @@
   --breakpoint-laptop: 1100px;
   --breakpoint-wide: 1880px;
 
-  /* The stage is placed first and everything else around it. */
+  /* The stage is placed first and everything else around it. Over it, under the top bar, a strip
+     is kept for the island whether it shows or not: 4, the island, then the gap over the picture. */
   --bar-h: 52px;
   --rail-w: 368px;
   --rail-inset: 8px;
   --gutter: 20px;
-  --stage-top: 76px;
+  --stage-top: 104px;
   --band-min: 112px;
   --island-h: 40px;
-  --island-rise: 48px;
+  --island-gap: 8px;
   --control-strip-w: 380px;
-  --sheet-medium-top: 214px;
+  --sheet-medium-top: 238px;
   --sheet-large-top: 40px;
 }
 
@@ -472,6 +473,8 @@
       --text-narration: 0.9375rem;
       --text-narration--line-height: 1.3125rem;
       --gutter: 16px;
+      /* No top bar: 8, the island, then the gap over the picture, under the safe area. */
+      --stage-top: 48px;
       --island-h: 32px;
       --radius-island: 16px;
     }

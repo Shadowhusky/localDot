@@ -9,7 +9,6 @@ import {
   buildPlaybackMap,
   busySpans,
   chapters,
-  idleAt,
   mergeSpans,
   playDuration,
   type SessionModel,
@@ -56,7 +55,6 @@ export interface ExportPlan {
   // Seconds of the video in which something moves; the rest is a still picture, encoded once.
   movingS: number;
   sessionMsAt(frame: number): number;
-  labelAt(frame: number): string | null;
   captionAt(frame: number): string | null;
   gapAt(frame: number): RecordingGapReason | null;
 }
@@ -82,11 +80,6 @@ export function validSize(size: ExportSize): boolean {
 
 export function speedText(speed: number): string {
   return `${Number(speed.toFixed(2))}×`;
-}
-
-export function exportSpeedLabel(speed: number, idleNow: boolean): string | null {
-  if (speed === 1) return idleNow ? "Idle skipped" : null;
-  return `Playing at ${speedText(speed)}${idleNow ? " · idle skipped" : ""}`;
 }
 
 // Bits per pixel of each frame the encoder is asked for, at 30 fps. A screen changes little from one
@@ -215,10 +208,6 @@ export function planExport(
     bitrate: exportBitrate(request.size, fps, request.quality),
     movingS: Math.min(frames / fps, busyMs / (1000 * speed)),
     sessionMsAt,
-    labelAt(frame) {
-      const time = sessionMsAt(frame);
-      return captions ? exportSpeedLabel(speed, idleAt(map, time)) : null;
-    },
     captionAt(frame) {
       const time = sessionMsAt(frame);
       if (!captions) return null;

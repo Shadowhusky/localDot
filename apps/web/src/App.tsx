@@ -98,7 +98,7 @@ import {
   takeReason,
   takeSlot,
 } from "./shell/island.ts";
-import { useCentreRoom, useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { narrationLine } from "./shell/narration.ts";
@@ -565,7 +565,6 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const island = useRef<HTMLDivElement>(null);
   const toastAnchor = useRef<HTMLDivElement>(null);
-  const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
     cell,
@@ -1015,11 +1014,6 @@ function Theatre({ api }: { api: ApiClient }) {
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
-  // While the user has the computer the island rises into the top bar's centre, where it fits.
-  const [islandWidth, setIslandWidth] = useState(0);
-  const centreRoom = useCentreRoom(bar);
-  const centre =
-    shape === "control" && islandWidth > 0 && islandWidth <= centreRoom ? islandWidth : undefined;
   const sheetsClosed = !settings.open;
   const decision = replayId
     ? null
@@ -1247,9 +1241,7 @@ function Theatre({ api }: { api: ApiClient }) {
         settingsOpen={settings.open}
         onSettings={showSettings}
         settingsRef={settingsButton}
-        centre={centre}
         more={barMore}
-        ref={bar}
       />
       <div className="watch" hidden={!!replayId} inert={!!replayId}>
         <main className="stage-col" aria-label="Computer">
@@ -1310,10 +1302,8 @@ function Theatre({ api }: { api: ApiClient }) {
                     onHandBack={() => void handBack.run()}
                     onComputer={onComputer}
                     decision={grown}
-                    rise={centre !== undefined}
                     full={full}
                     onExitFull={fullScreen.exit}
-                    onRowWidth={setIslandWidth}
                     fields={askFields}
                     noticesRef={toastAnchor}
                     notices={

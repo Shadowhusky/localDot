@@ -9,7 +9,7 @@ export interface StageFrameProps {
   light: StageLight;
   live: boolean;
   frozen: boolean;
-  // The HUD island, hung on the stage's top edge.
+  // The HUD island, in the strip over the stage's top edge.
   island?: ReactNode;
   // Covers the stage, or the stage and the band on a phone, while there is no picture to show.
   curtain?: ReactNode;

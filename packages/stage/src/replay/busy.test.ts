@@ -2,7 +2,7 @@ import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { expect, it } from "vitest";
 import { emptyModel, foldEvents } from "../model.ts";
 import { TARGET_FADE_MS, TARGET_HOLD_MS } from "../timing.ts";
-import { busySpans } from "./busy.ts";
+import { ACTIVITY_TAIL_MS, busySpans } from "./busy.ts";
 import { buildPlaybackMap, idleAt } from "./playback-map.ts";
 
 let seq = 0;
@@ -73,6 +73,26 @@ it("keeps video activity and step edges, while clipping and merging overlap", ()
     { from: 5000, to: 5600 },
     { from: 7000, to: 8000 },
   ]);
+});
+it("skips screen changes while dot is only thinking, and keeps them during and just after an action", () => {
+  const m = foldEvents(emptyModel(), [
+    ev("session.start", 0, { screen: { w: 1, h: 1, scale: 1 }, os: "linux" }),
+    ev("action.intent", 10000, { verb: "click", label: "A", risk: "none" }),
+    ev("action.result", 11000, { ok: true }),
+    ev("agent.state", 11500, { state: "thinking" }),
+    ev("session.end", 60000, { reason: "done" }),
+  ]);
+  const caretBlinks = Array.from({ length: 40 }, (_, i) => ({
+    from: (13000 + i * 1000) * 1000,
+    to: (13000 + i * 1000 + 50) * 1000,
+  }));
+  const spans = busySpans(m, [{ from: 11200000, to: 12200000 }, ...caretBlinks], 60000);
+  expect(spans).toEqual([
+    { from: 0, to: 1000 },
+    { from: 10000, to: 12200 + ACTIVITY_TAIL_MS },
+  ]);
+  const map = buildPlaybackMap(0, 60000, spans, true);
+  expect(idleAt(map, 30000)).toBe(true);
 });
 it("ends cancellation at its target tail and merges repeated marks", () => {
   const m = foldEvents(emptyModel(), [
