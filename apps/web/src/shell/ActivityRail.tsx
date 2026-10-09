@@ -54,6 +54,8 @@ export interface ActivityRailProps {
   agent?: AgentModel;
   models?: TaskModelSelection;
   modelName?(provider: string, model: string): string | undefined;
+  // Opens the spending limits from the usage popover.
+  onSpending?(trigger: HTMLElement): void;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
     onUndo?: (changeId: string) => void;
@@ -93,6 +95,7 @@ export function ActivityRail({
   memoryAction,
   models,
   modelName,
+  onSpending,
   asOfMs,
   onSelect,
   planSnapshot,
@@ -380,7 +383,14 @@ export function ActivityRail({
           </button>
         )}
       </div>
-      {agent && sessionId && <UsageFooter model={model} selection={models} modelName={modelName} />}
+      {agent && sessionId && (
+        <UsageFooter
+          model={model}
+          selection={models}
+          modelName={modelName}
+          onSpending={onSpending}
+        />
+      )}
     </aside>
   );
 }

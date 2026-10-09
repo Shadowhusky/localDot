@@ -2,7 +2,9 @@ import { type ReactNode, useMemo } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
 import { leftToReplay, useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
+import type { SpendCall } from "../agent/model.ts";
 import { threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
+import { billedPerCall } from "../agent/UsageFooter.tsx";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
@@ -10,6 +12,8 @@ import type { StepRowView } from "../session/session-view.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Presence } from "../ui/Presence.tsx";
 import "./conversation.css";
+
+const NO_SPEND: readonly SpendCall[] = [];
 
 const NO_ROWS: TimelineRow<StepRowView>[] = [];
 const NO_SESSIONS: readonly string[] = [];
@@ -78,7 +82,11 @@ export function ConversationRail({
     [model],
   );
   const working = !!live && live.phase !== "finished" && !ended;
-  const thread = useMemo(() => withWork(items, steps, working), [items, steps, working]);
+  const spends = model && billedPerCall(agent?.snapshot?.models) ? model.spendCalls : NO_SPEND;
+  const thread = useMemo(
+    () => withWork(items, steps, working, spends),
+    [items, steps, working, spends],
+  );
   const latest = useMemo(() => ({ sessionId, items: thread }), [sessionId, thread]);
   const earlier = useEarlierThread(api, sessions, latest);
   const shown = useMemo(() => {

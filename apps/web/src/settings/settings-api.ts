@@ -24,7 +24,6 @@ export const ProviderIndex = z
       })
       .nullable(),
     keyLayer: z.enum(["online", "offline"]),
-    defaultTaskBudgetUSD: AgentSettingsDocument.shape.taskBudgetUSD.unwrap().nullable(),
     subscriptions: z
       .array(
         z.strictObject({

@@ -57,6 +57,11 @@ export function Hud({ status, onStart, onStop, onStopSession, onResume, onRetry 
             {status.elapsedS} s
           </span>
         )}
+        {status.countdownS != null && (
+          <span className="t num" data-testid="hud-countdown" aria-live="off">
+            in {status.countdownS} s
+          </span>
+        )}
       </span>
       {button(status.actions[0])}
       {button(status.actions[1])}

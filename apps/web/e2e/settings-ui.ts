@@ -70,11 +70,8 @@ export async function saveFixtureModel(page: Page): Promise<Locator> {
   await choose(page, main.getByRole("combobox", { name: "Key", exact: true }), "fixture");
   await main.getByRole("textbox", { name: "Input price", exact: true }).fill("1");
   await main.getByRole("textbox", { name: "Output price", exact: true }).fill("1");
-  await sheet
-    .getByRole("radiogroup", { name: "Limit per task" })
-    .getByRole("radio", { name: "Custom" })
-    .click();
-  await sheet.getByRole("textbox", { name: "Custom limit", exact: true }).fill("0.05");
+  await sheet.getByRole("switch", { name: "Spending limit", exact: true }).check();
+  await sheet.getByRole("textbox", { name: "Per task", exact: true }).fill("0.05");
   await sheet
     .getByRole("radiogroup", { name: "Work in its computer" })
     .getByRole("radio", { name: "Ask me" })

@@ -1,8 +1,10 @@
 import {
   type Attention,
+  microsToMs,
   msToSeconds,
   type PauseSnapshot,
   SESSION_PAUSE_REASONS,
+  STALL,
 } from "@localdot/protocol";
 import {
   type ActionState,
@@ -27,6 +29,9 @@ export interface TaskFacts {
   // The reason on the latest agent.state.
   readonly reason: string | null;
   readonly result: boolean;
+  // A model call waiting to be tried again: when, in session ms, and whether the model could be
+  // reached at all.
+  readonly retry: { readonly atMs: number; readonly unreachable: boolean } | null;
 }
 
 export type TaskRow =
@@ -38,6 +43,8 @@ export type TaskRow =
   | "paused"
   | "resuming"
   | "recovery"
+  | "retrying"
+  | "limit"
   | "acting"
   | "thinking"
   | "observing"
@@ -55,6 +62,8 @@ export interface TaskHud {
   readonly label: string;
   readonly caption: string;
   readonly elapsedS: number | null;
+  // Seconds until dot tries again, while it waits on a busy model.
+  readonly countdownS: number | null;
   readonly control: boolean;
 }
 
@@ -68,6 +77,13 @@ export function taskFacts(model: AgentModel): TaskFacts {
     pause: model.safetyPause?.phase ?? null,
     reason: model.state?.reason ?? null,
     result: model.results.length > 0,
+    retry:
+      model.retrying && model.retry
+        ? {
+            atMs: microsToMs(model.retry.at) + model.retry.data.waitMs,
+            unreachable: model.retry.data.status === undefined,
+          }
+        : null,
   };
 }
 
@@ -143,6 +159,15 @@ function pausing(model: SessionModel, step: StepState, at: AgentStateAt, nowMs: 
   }
   return requestT !== undefined && requestT <= at.t;
 }
+// A Pause asked for after a recovery pause publishes no state of its own, and holds the task.
+function replayReason(model: SessionModel, at: AgentStateAt, nowMs: number): string | null {
+  for (let i = model.marks.length - 1; i >= 0; i--) {
+    const mark = model.marks[i];
+    if (!mark || mark.t <= at.t) break;
+    if (mark.t <= nowMs && mark.type === "safety.pause") return null;
+  }
+  return at.reason ?? null;
+}
 function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): string {
   if (at.state !== "waiting_user" && at.state !== "paused") return at.state;
   const step = stepAt(model, nowMs);
@@ -150,6 +175,31 @@ function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): stri
   if (at.state === "waiting_user") return settledSince(model, at, nowMs) ? "acting" : at.state;
   return step && pausing(model, step, at, nowMs) ? "pausing" : at.state;
 }
+
+// What a task paused on, other than its own Pause or a question, says on the HUD.
+const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> = {
+  [STALL.budget]: {
+    row: "limit",
+    label: "Reached your spending limit",
+    caption: "I stopped at the spending limit you set.",
+  },
+  [STALL.modelBusy]: {
+    row: "retrying",
+    label: "Model busy · retrying",
+    caption: "The model is busy. I'll try again in a moment.",
+  },
+  [STALL.modelUnavailable]: {
+    row: "recovery",
+    label: "Model not answering",
+    caption: "The model isn't answering.",
+  },
+  [STALL.modelRefused]: {
+    row: "recovery",
+    label: "Model turned down a request",
+    caption: "The model turned down my request.",
+  },
+  [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
+};
 
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
@@ -172,6 +222,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     label,
     caption,
     elapsedS: null,
+    countdownS: null,
     control: false,
   });
   const waiting = (row: TaskRow, label: string, caption: string): TaskHud => ({
@@ -180,6 +231,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     label,
     caption,
     elapsedS: null,
+    countdownS: null,
     control: false,
   });
   const running = (row: TaskRow, label: string, caption: string, control: boolean): TaskHud => ({
@@ -188,6 +240,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     label,
     caption,
     elapsedS,
+    countdownS: null,
     control,
   });
 
@@ -198,6 +251,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   }
   const at = agentStateAt(model, nowMs);
   const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
+  const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.");
   if (facts?.question != null)
     return waiting("question", "Has a question", facts.question || "Waiting for your answer.");
@@ -210,13 +264,37 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     return waiting("paused", "Pause unconfirmed", "Pause is unconfirmed.");
   if (facts?.pause) return waiting("paused", "Paused", "Paused.");
 
+  // A busy or unreachable model is tried again by itself, and the wait counts down.
+  if (facts?.retry) {
+    const leftS = Math.ceil((facts.retry.atMs - nowMs) / 1000);
+    const why = facts.retry.unreachable ? "Can't reach the model" : "Model busy";
+    return {
+      ...running(
+        "retrying",
+        leftS > 0 ? `${why} · retrying` : "Retrying…",
+        facts.retry.unreachable
+          ? "I can't reach the model. I'll try again in a moment."
+          : "The model is busy. I'll try again in a moment.",
+        false,
+      ),
+      elapsedS: null,
+      countdownS: leftS > 0 ? leftS : null,
+    };
+  }
   if (state === "waiting_user") return waiting("waiting", "Waiting for you", "Waiting for you.");
-  if (state === "paused")
-    return facts?.reason === "budget"
-      ? waiting("recovery", "Paused · Limit reached", "Paused at the spending limit.")
+  if (state === "paused") {
+    const stall = STALLED[reason ?? ""];
+    return stall
+      ? waiting(stall.row, stall.label, stall.caption)
       : waiting("recovery", "Paused", "Paused.");
-  if (state === "error") return waiting("recovery", "Needs attention", "The task needs attention.");
+  }
+  if (state === "error")
+    return /restarting/.test(reason ?? "")
+      ? running("working", "Starting again…", "Starting again where I left off.", false)
+      : waiting("recovery", "Needs attention", "The task needs attention.");
   if (state === "done") return finished("done", "Done", "Done.");
+  if (state === "idle" && reason === STALL.actionLimit)
+    return waiting("limit", "Reached your action limit", "I stopped at the action limit you set.");
   if (state === "idle")
     return facts?.result
       ? finished("done", "Done", "Done.")
@@ -252,6 +330,7 @@ export interface Status {
   readonly label: string;
   readonly caption: { readonly speaker: "dot" | "system"; readonly text: string };
   readonly elapsedS: number | null;
+  readonly countdownS: number | null;
   // The HUD's controls, in order; never empty.
   readonly actions: readonly HudAction[];
   // dot has control: the xenon rim.
@@ -298,6 +377,8 @@ const TASK_POSE: Record<TaskRow, DotState> = {
   paused: "resting",
   resuming: "thinking",
   recovery: "resting",
+  retrying: "thinking",
+  limit: "waiting",
   acting: "acting",
   working: "acting",
   thinking: "thinking",
@@ -316,6 +397,8 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
   paused: null,
   resuming: "working",
   recovery: "blocked",
+  retrying: "working",
+  limit: "needs_you",
   acting: "working",
   working: "working",
   thinking: "working",
@@ -390,6 +473,7 @@ export function statusFor({
       text: own?.caption ?? computer.caption,
     },
     elapsedS: running?.elapsedS ?? null,
+    countdownS: stop ? null : (running?.countdownS ?? null),
     actions,
     control: (running?.control ?? false) && mayControl,
     dotPose:

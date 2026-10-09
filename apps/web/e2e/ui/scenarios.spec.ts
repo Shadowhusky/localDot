@@ -20,7 +20,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   approval: shows((page) => page.getByRole("dialog", { name: /^Send the monthly report/ })),
   ask: hud("Has a question"),
   takeover: hud("Your turn"),
-  budget: hud("Paused · Limit reached"),
+  budget: hud("Reached your spending limit"),
   done: hud("Done"),
   continued: hud("Done"),
   reconnecting: shows((page) => page.locator(".stage-veil.on")),

@@ -15,7 +15,7 @@ const STATUS: Record<UiScenarioName, { control: string; label: string; pose: str
     approval: { control: "Stop", label: "Needs your OK", pose: "waiting" },
     ask: { control: "Stop", label: "Has a question", pose: "waiting" },
     takeover: { control: "Stop", label: "Your turn", pose: "your-turn" },
-    budget: { control: "Stop", label: "Paused · Limit reached", pose: "resting" },
+    budget: { control: "Stop", label: "Reached your spending limit", pose: "waiting" },
     done: { control: "Stop computer", label: "Done", pose: "idle" },
     continued: { control: "Stop computer", label: "Done", pose: "idle" },
     reconnecting: {

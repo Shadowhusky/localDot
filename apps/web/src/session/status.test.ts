@@ -316,17 +316,18 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("agent.state", 1001, { state: "paused", reason: "keyd unavailable" }),
     ];
     expect(replay(unconfirmed, 500).label).toBe("Pausing after this step");
-    // Replay has no Pause phase, so an unconfirmed Pause reads as Paused; it waits all the same.
+    // Replay has no Pause phase, so an unconfirmed Pause reads as the pause that followed it; it
+    // waits all the same.
     for (const at of [2000, 60_000]) {
       const { phase, control } = liveAt(unconfirmed, at);
-      expect(replay(unconfirmed, at)).toMatchObject({ label: "Paused", phase, control });
+      expect(replay(unconfirmed, at)).toMatchObject({ label: "Keys are offline", phase, control });
     }
     // A recovery pause is no Pause request, even over a cut step or after an earlier Pause.
     const recovery = [
       ...cut.slice(0, 8),
       ev("agent.state", 5000, { state: "paused", reason: "keyd unavailable" }),
     ];
-    expect(replay(recovery, 6000)).toMatchObject({ label: "Paused", phase: "waiting" });
+    expect(replay(recovery, 6000)).toMatchObject({ label: "Keys are offline", phase: "waiting" });
     const afterPause = [
       ...typed(),
       ev("safety.pause", 1100, pause("pausing")),
@@ -336,7 +337,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("step.start", 2100, { kind: "gui" }, "s2"),
       ev("agent.state", 5000, { state: "paused", reason: "keyd unavailable" }),
     ];
-    expect(replay(afterPause, 6000).label).toBe("Paused");
+    expect(replay(afterPause, 6000).label).toBe("Keys are offline");
     const secondPause = [
       ...afterPause.slice(0, -1),
       ev(
@@ -389,7 +390,11 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("approval.resolve", 1600, { approvalId: ID, decision: "deny", by: "timeout" }),
       ev("step.start", 9000, { kind: "gui" }, "s2"),
     ];
-    expect(replay(budget, 8000)).toMatchObject({ row: "recovery", control: false });
+    expect(replay(budget, 8000)).toMatchObject({
+      row: "limit",
+      label: "Reached your spending limit",
+      control: false,
+    });
     expect(replay(budget, 9100)).toMatchObject({ row: "working", control: true });
   });
 
@@ -464,16 +469,97 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     const budget = [...typed(), ev("agent.state", 1500, { state: "paused", reason: "budget" })];
     const { task, status } = view(budget, 9500);
     expect(task).toMatchObject({
-      row: "recovery",
+      row: "limit",
       phase: "waiting",
-      label: "Paused · Limit reached",
+      label: "Reached your spending limit",
     });
-    expect(status).toMatchObject({ actions: stopsTask, control: false, elapsedS: null });
+    expect(status).toMatchObject({
+      actions: stopsTask,
+      control: false,
+      elapsedS: null,
+      attention: "needs_you",
+    });
     const keyLayer = [
       ...typed(),
       ev("agent.state", 1500, { state: "paused", reason: "keyd unavailable" }),
     ];
-    expect(view(keyLayer, 9500).task.label).toBe("Paused");
+    expect(view(keyLayer, 9500).task.label).toBe("Keys are offline");
+  });
+
+  describe("never silent: every stall has its own status", () => {
+    const retry = (tMs: number, waitMs: number, status?: number) =>
+      ev("model.retry", tMs, {
+        role: "main",
+        attempt: 3,
+        waitMs,
+        ...(status ? { status } : {}),
+        message: "overloaded",
+      });
+    it("counts down to a busy model's next try, then says it is retrying", () => {
+      const busy = [
+        ...typed(),
+        retry(2000, 20_000, 529),
+        ev("agent.state", 2001, { state: "paused", reason: "model busy" }),
+      ];
+      expect(view(busy, 2500)).toMatchObject({
+        task: { row: "retrying", phase: "running", label: "Model busy · retrying", countdownS: 20 },
+        status: { label: "Model busy · retrying", countdownS: 20, elapsedS: null },
+      });
+      expect(view(busy, 21_100).task.countdownS).toBe(1);
+      expect(view(busy, 22_100).task).toMatchObject({ label: "Retrying…", countdownS: null });
+      expect(
+        view([...busy, ev("agent.state", 22_200, { state: "thinking" })], 22_300).task,
+      ).toMatchObject({
+        row: "thinking",
+        countdownS: null,
+      });
+    });
+    it("says when the model can't be reached, and waits out even a short retry out loud", () => {
+      const lost = [...typed(), retry(2000, 4000)];
+      expect(view(lost, 2000).task).toMatchObject({
+        label: "Can't reach the model · retrying",
+        countdownS: 4,
+      });
+      expect(view([...lost, ev("agent.state", 6000, { state: "thinking" })], 6100).task.row).toBe(
+        "thinking",
+      );
+    });
+    it.each([
+      ["model refused", "Model turned down a request", "recovery"],
+      ["model unavailable", "Model not answering", "recovery"],
+      ["keyd unavailable", "Keys are offline", "recovery"],
+      ["budget", "Reached your spending limit", "limit"],
+    ])("names a pause for %s", (reason, label, row) => {
+      const stalled = [
+        ...typed(),
+        ev("agent.state", 1500, { state: "paused", reason, detail: "400: bad image" }),
+      ];
+      expect(view(stalled, 9500).task).toMatchObject({ row, label, phase: "waiting" });
+    });
+    it("says the user's action limit stopped the task, and that it waits for them", () => {
+      const limit = [
+        ...typed(),
+        ev("agent.state", 1500, { state: "idle", reason: "action limit" }),
+      ];
+      expect(view(limit, 9500)).toMatchObject({
+        task: { row: "limit", phase: "waiting", label: "Reached your action limit" },
+        status: { attention: "needs_you", actions: stopsTask },
+      });
+    });
+    it("says dot is starting again after its process stopped", () => {
+      const restart = [
+        ...typed(),
+        ev("agent.state", 1500, {
+          state: "error",
+          reason: "the brain stopped; restarting from saved history",
+        }),
+      ];
+      expect(view(restart, 9500).task).toMatchObject({
+        row: "working",
+        phase: "running",
+        label: "Starting again…",
+      });
+    });
   });
 
   it("follows a user Pause from pausing to paused, then back to work after Resume", () => {
@@ -754,7 +840,7 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["pause unconfirmed", "paused", "Pause unconfirmed", "resting", null, "system"],
   ["resuming", "resuming", "Resuming…", "thinking", "working", "system"],
   // 6. Budget or plan recovery.
-  ["spending limit", "recovery", "Paused · Limit reached", "resting", "blocked", "system"],
+  ["spending limit", "limit", "Reached your spending limit", "waiting", "needs_you", "system"],
   ["needs attention", "recovery", "Needs attention", "resting", "blocked", "system"],
   // 7–9. dot at work.
   ["acting", "acting", "Typing =SUM(F2:F13)", "acting", "working", "dot"],
@@ -787,7 +873,7 @@ describe("one status model for every surface (T10)", () => {
   it("has a row in the table for every fixture, and every row and phase the model gives", () => {
     expect(TABLE.map(([name]) => name).sort()).toEqual(Object.keys(STATES).sort());
     const rows = new Set(Object.values(STATES).map((status) => status.row));
-    expect(rows.size).toBe(18);
+    expect(rows.size).toBe(19);
     const phases = new Set(Object.values(STATES).map((status) => status.computer));
     expect(phases.size).toBe(12);
   });
@@ -850,7 +936,7 @@ describe("one status model for every surface (T10)", () => {
       [
         "the spending limit over an action in flight",
         at([...start(), ev("agent.state", 100, { state: "paused", reason: "budget" })], 500),
-        "recovery",
+        "limit",
       ],
       [
         "an action in flight over thinking",

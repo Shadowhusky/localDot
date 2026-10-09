@@ -1,4 +1,10 @@
-import { ApprovalCard, LocalDotEvent as EventSchema, type LocalDotEvent } from "@localdot/protocol";
+import {
+  ApprovalCard,
+  LocalDotEvent as EventSchema,
+  type LocalDotEvent,
+  microsToMs,
+  STALL,
+} from "@localdot/protocol";
 import {
   type AgentConnection,
   type AgentFeed,
@@ -30,6 +36,7 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "rule.created",
   "rule.removed",
   "budget.exceeded",
+  "model.retry",
   "subscription.usage",
 ]);
 function put<T>(
@@ -97,7 +104,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = { ...next, activity: ((model.activity ?? "") + e.data.text).slice(0, L.messageText) };
       break;
     case "agent.state":
-      next = { ...next, state: { ...e.data } };
+      next = {
+        ...next,
+        state: { ...e.data },
+        retrying: model.retrying && e.data.state === "paused" && e.data.reason === STALL.modelBusy,
+      };
       break;
     case "session.end":
       next = { ...next, ended: { ...e.data }, pendingAsk: null, pendingTakeover: null };
@@ -180,7 +191,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       break;
     }
     case "model.retry":
-      next = { ...next, retry: { id: e.id, at: e.t, data: { ...e.data } } };
+      next = {
+        ...next,
+        retry: { id: e.id, at: e.t, data: { ...e.data } },
+        retrying: e.data.waitMs > 0 && !e.data.fallback,
+      };
       break;
     case "subscription.usage":
       next = {
@@ -195,6 +210,28 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "budget.exceeded":
       next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
       break;
+    case "model.spend": {
+      const estimated = e.data.basis === "estimated";
+      const call = {
+        atMs: microsToMs(e.t),
+        route: e.data.route,
+        model: e.data.model,
+        usd: e.data.costUSD,
+        estimated,
+      };
+      next = {
+        ...next,
+        spend: {
+          taskUSD: e.data.taskSpentUSD,
+          dayUSD: e.data.daySpentUSD,
+          estimated: (model.spend?.estimated ?? false) || estimated,
+          ...(e.data.taskLimitUSD === undefined ? {} : { taskLimitUSD: e.data.taskLimitUSD }),
+          ...(e.data.dayLimitUSD === undefined ? {} : { dayLimitUSD: e.data.dayLimitUSD }),
+        },
+        spendCalls: [...model.spendCalls, call].slice(-L.spendCalls),
+      };
+      break;
+    }
     case "message.user": {
       const seen = model.messages.get(e.data.messageId);
       const queued =

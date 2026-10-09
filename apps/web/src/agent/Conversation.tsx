@@ -221,10 +221,13 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         startMs={item.startMs}
         live={null}
         ended={endedOf(item, thread)}
+        spend={item.spend}
       />
     ),
     same: (was, now, then, thread) =>
       was.startMs === now.startMs &&
+      was.spend?.usd === now.spend?.usd &&
+      was.spend?.estimated === now.spend?.estimated &&
       endedOf(was, then) === endedOf(now, thread) &&
       sameSteps(was.steps, now.steps),
   },

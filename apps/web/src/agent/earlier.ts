@@ -48,7 +48,7 @@ export async function readThread(
   });
   const items = threadItems(model.messages.values(), model.questions.values(), model.results);
   const steps = workSteps(timelineRows(stepRows(stage), stage.keyUses), model);
-  return owned(withWork(items, steps, false), sessionId);
+  return owned(withWork(items, steps, false, model.spendCalls), sessionId);
 }
 
 // The conversation's tasks before the one shown, oldest first, as one thread. The shown task's

@@ -10,12 +10,9 @@ import {
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { MoneyField } from "../ui/MoneyField.tsx";
 import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
-import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { AutonomyMatrix } from "./AutonomyMatrix.tsx";
@@ -30,7 +27,9 @@ import {
 } from "./choices.ts";
 import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
+import { CheckIns, SpendingLimits } from "./Limits.tsx";
 import { RoleCard } from "./RoleCard.tsx";
+import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { RulesView } from "./useRules.ts";
 import "./settings.css";
@@ -38,7 +37,7 @@ import "./settings.css";
 // How long "Saved" stays in the footer after a save.
 const SAVED_MS = 1200;
 
-export type SettingsSection = "models" | "autonomy" | "knowledge";
+export type SettingsSection = "models" | "autonomy" | "spending" | "knowledge";
 
 export type CatalogState = "loading" | "ready" | "empty" | "stale" | "refreshing" | "offline";
 
@@ -76,11 +75,10 @@ export interface SettingsSheetProps {
   rules?: RulesView;
   manualPrices?: Partial<Record<ModelRole, { input: string; output: string }>>;
   onPrice?(role: ModelRole, value: { input: string; output: string }): void;
-  budget?: {
-    value: string;
-    useDefault: boolean;
-    defaultUSD: number | null;
-    change(value: string, useDefault: boolean): void;
+  spending?: { value: SpendingDraft; change(next: SpendingDraft): void };
+  checkIns?: {
+    value: CheckInsDraft;
+    change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
   knowledge?: Knowledge;
   // A phone's sheet covers the page and its Stop, so it carries one, with what Stop reports.
@@ -198,6 +196,10 @@ export function SettingsSheet(props: SettingsSheetProps) {
       section
         ?.querySelector<HTMLElement>("#settings-knowledge-title")
         ?.focus({ preventScroll: true });
+    } else if (props.focusSection === "spending") {
+      const section = sheet.querySelector<HTMLElement>("#settings-spending");
+      if (section) bringToTop(section);
+      section?.querySelector<HTMLElement>("[role=switch]")?.focus({ preventScroll: true });
     } else if (props.focusSection === "autonomy") {
       const section = sheet.querySelector<HTMLElement>("#settings-autonomy");
       if (section) bringToTop(section);
@@ -394,15 +396,18 @@ function SettingsSections(props: SettingsSheetProps) {
             onChange={props.onAutonomy}
             rules={props.rules}
           />
+          {props.checkIns && (
+            <CheckIns value={props.checkIns.value} onChange={props.checkIns.change} />
+          )}
         </Section>
       )}
 
-      {props.budget && !chatgptMain && (
+      {props.spending && !chatgptMain && (
         <Section id="settings-spending" title="Spending">
           {planOnly(props.choices) ? (
             <p className="settings-note">Your plan's own limits apply, so no limit is needed.</p>
           ) : (
-            <Spending budget={props.budget} />
+            <SpendingLimits value={props.spending.value} onChange={props.spending.change} />
           )}
         </Section>
       )}
@@ -432,41 +437,6 @@ function Revert({ disabledReason, onRevert }: { disabledReason?: string; onRever
     >
       Revert
     </Button>
-  );
-}
-
-function Spending({ budget }: { budget: NonNullable<SettingsSheetProps["budget"]> }) {
-  const fallback = budget.defaultUSD;
-  return (
-    <div className="settings-spending">
-      <Field
-        label="Limit per task"
-        description="Applies to new tasks. A task stops before it spends more. It isn't your bill."
-      >
-        <SegmentedControl
-          value={budget.useDefault ? "default" : "custom"}
-          items={[
-            {
-              value: "default",
-              label: fallback === null ? "Default" : `Default ($${fallback})`,
-              disabledReason: fallback === null ? "No default is set" : undefined,
-            },
-            { value: "custom", label: "Custom" },
-          ]}
-          onValueChange={(choice) => budget.change(budget.value, choice === "default")}
-        />
-      </Field>
-      <Collapse open={!budget.useDefault}>
-        <Field label="Custom limit">
-          <MoneyField
-            value={budget.value}
-            maxLength={64}
-            placeholder="2.00"
-            onValueChange={(value) => budget.change(value, false)}
-          />
-        </Field>
-      </Collapse>
-    </div>
   );
 }
 

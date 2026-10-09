@@ -1,4 +1,4 @@
-import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
+import { keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
 import {
   type DragEvent,
   memo,
@@ -37,6 +37,13 @@ import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
 import { DeliveryFailure, deliverText, type MessageMode, type TextDelivery } from "./write-api.ts";
+
+// dot waits on its model for these, and anything the user says sends it back to the model.
+const TRIES_AGAIN = new Set<string | undefined>([
+  STALL.modelBusy,
+  STALL.modelRefused,
+  STALL.modelUnavailable,
+]);
 
 const LIMIT = 8000;
 // A phone: Return starts a new line there, and Send sends.
@@ -647,7 +654,9 @@ export function Composer(props: ComposerProps) {
       : takeover
         ? "You keep control of the computer"
         : props.agent.snapshot?.status === "paused"
-          ? "Sending won't resume the task"
+          ? TRIES_AGAIN.has(props.agent.model.state?.reason)
+            ? "Sending tries the model again"
+            : "Sending won't resume the task"
           : undefined;
   const notices = [
     problem && { text: problem, alert: true },

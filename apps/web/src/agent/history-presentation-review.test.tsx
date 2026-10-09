@@ -138,6 +138,7 @@ it("HUD live status contains only phase while elapsed time and Stop remain outsi
     label: "Working",
     caption: { speaker: "dot", text: "" },
     elapsedS: 1,
+    countdownS: null,
     actions: [{ kind: "stop-task", enabled: true }],
     control: true,
     dotPose: "acting",

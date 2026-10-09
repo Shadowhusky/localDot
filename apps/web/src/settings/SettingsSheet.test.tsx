@@ -337,7 +337,7 @@ describe("settings inspector", () => {
         }}
         subscriptionModels={[{ id: "account-model", name: "Reported account model" }]}
         manualPrices={{ fast: { input: "2", output: "3" } }}
-        budget={{ value: "8", useDefault: false, defaultUSD: 2, change: vi.fn() }}
+        spending={{ value: { on: true, task: "8", day: "" }, change: vi.fn() }}
       />,
     );
     const main = screen.getByRole("region", { name: "Main model" });
@@ -353,18 +353,18 @@ describe("settings inspector", () => {
   });
   it("says a plan uses its own limits instead of asking for a price or a limit", () => {
     const p = props();
-    const budget = { value: "8", useDefault: false, defaultUSD: 2, change: vi.fn() };
+    const spending = { value: { on: false, task: "", day: "" }, change: vi.fn() };
     const plan = { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" };
     const view = render(
       <SettingsSheet
         {...p}
         choices={{ main: plan, local: { provider: "ollama", model: "local-model" } }}
-        budget={budget}
+        spending={spending}
       />,
     );
-    const spending = screen.getByRole("region", { name: "Spending" });
-    expect(within(spending).getByText(/Your plan's own limits apply/)).toBeTruthy();
-    expect(within(spending).queryByRole("textbox")).toBeNull();
+    const section = screen.getByRole("region", { name: "Spending" });
+    expect(within(section).getByText(/Your plan's own limits apply/)).toBeTruthy();
+    expect(within(section).queryByRole("textbox")).toBeNull();
     const main = screen.getByRole("region", { name: "Main model" });
     expect(within(main).getByText("Uses your plan's limits.")).toBeTruthy();
     expect(
@@ -374,13 +374,38 @@ describe("settings inspector", () => {
       <SettingsSheet
         {...p}
         choices={{ main: plan, fast: { provider: "zai", model: "glm-5v-turbo", key: "zai" } }}
-        budget={budget}
+        spending={spending}
       />,
     );
     const paid = screen.getByRole("region", { name: "Spending" });
-    expect(within(paid).getByRole("textbox", { name: "Custom limit" })).toBeTruthy();
-    fireEvent.click(within(paid).getByRole("radio", { name: "Default ($2)" }));
-    expect(budget.change).toHaveBeenCalledWith("8", true);
+    const limit = within(paid).getByRole("switch", { name: "Spending limit" });
+    expect((limit as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(limit);
+    expect(spending.change).toHaveBeenCalledWith({ on: true, task: "", day: "" });
+  });
+  it("offers each check-in off, and a number once one is on", () => {
+    const change = vi.fn();
+    const off = { on: false, value: "150" };
+    render(
+      <SettingsSheet
+        {...props()}
+        autonomy={DEFAULT_AUTONOMY}
+        onAutonomy={vi.fn()}
+        checkIns={{
+          value: { steps: off, failures: { on: true, value: "5" }, actions: off },
+          change,
+        }}
+      />,
+    );
+    const steps = screen.getByRole("switch", { name: "After a number of steps" });
+    expect((steps as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole("textbox", { name: "Steps" })).toBeNull();
+    fireEvent.click(steps);
+    expect(change).toHaveBeenCalledWith("steps", { on: true, value: "150" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Failed actions" }), {
+      target: { value: "7x" },
+    });
+    expect(change).toHaveBeenLastCalledWith("failures", { on: true, value: "7" });
   });
   it("marks an autonomy choice that differs from the saved one", () => {
     const onAutonomy = vi.fn();

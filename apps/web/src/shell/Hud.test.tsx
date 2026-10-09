@@ -22,6 +22,7 @@ const task = (row: TaskHud["row"], label: string, control = false): TaskHud => (
   label,
   caption: label,
   elapsedS: 7,
+  countdownS: null,
   control,
 });
 const handlers = () => ({

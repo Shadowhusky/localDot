@@ -20,6 +20,7 @@ import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
+import { deliverText } from "./agent/write-api.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
@@ -498,6 +499,21 @@ function Theatre({ api }: { api: ApiClient }) {
   const taskStop = () => {
     void controls.stop();
   };
+  // Carries on a task the user's action limit stopped: their message starts the count again.
+  const continueTask = async () => {
+    if (!cell || !agent.sessionId) return false;
+    try {
+      await deliverText(api, {
+        cellId: cell.id,
+        sessionId: agent.sessionId,
+        mode: "followup",
+        text: "Continue.",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const stageCell =
     physicalStageCell && controls.stopStatus.phase === "paused"
       ? { ...physicalStageCell, paused: true as const }
@@ -740,7 +756,12 @@ function Theatre({ api }: { api: ApiClient }) {
                 titled={!narrow}
                 newConversation={narrow ? undefined : newConversation}
                 recovery={
-                  <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
+                  <TaskRecovery
+                    agent={agent}
+                    controls={controls}
+                    onSettings={showSettings}
+                    onContinue={continueTask}
+                  />
                 }
                 answer={
                   question && !agent.model.ended ? (
@@ -887,6 +908,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
                 models={agent.snapshot?.models}
                 modelName={modelName}
+                onSpending={(trigger) => showSettings(trigger, "spending")}
                 memoryAction={(change) => {
                   const status =
                     controls.status?.kind === "memory" && controls.status.target === change.changeId
@@ -1026,15 +1048,11 @@ function Theatre({ api }: { api: ApiClient }) {
         onAutonomy={settings.changeAutonomy}
         knowledge={settingsKnowledge}
         rules={rules}
-        budget={
-          settings.draft
-            ? {
-                value: settings.draft.budget,
-                useDefault: settings.draft.defaultBudget,
-                defaultUSD: settings.index?.defaultTaskBudgetUSD ?? null,
-                change: settings.budget,
-              }
-            : undefined
+        spending={
+          settings.draft ? { value: settings.draft.spending, change: settings.spending } : undefined
+        }
+        checkIns={
+          settings.draft ? { value: settings.draft.checkIns, change: settings.checkIn } : undefined
         }
       />
       <KeysSheet

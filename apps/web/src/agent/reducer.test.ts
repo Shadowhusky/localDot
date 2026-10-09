@@ -328,3 +328,49 @@ describe("single event feed boundary", () => {
     expect(feed.read().model.state?.state).toBe("acting");
   });
 });
+
+describe("what a task costs and whether its model is being retried", () => {
+  const spend = (seq: number, costUSD: number, basis: "billed" | "estimated", extra = {}) =>
+    ev(seq, "model.spend", {
+      route: "openrouter",
+      model: "glm-5.3",
+      costUSD,
+      basis,
+      taskSpentUSD: seq / 100,
+      daySpentUSD: 1 + seq / 100,
+      ...extra,
+    });
+  it("keeps keyd's running totals, each call at its time, and marks the total an estimate once any part is", () => {
+    const billed = reduce([spend(1, 0.01, "billed"), spend(2, 0.01, "billed")]);
+    expect(billed.spend).toEqual({ taskUSD: 0.02, dayUSD: 1.02, estimated: false });
+    expect(billed.spendCalls.map((call) => [call.atMs, call.usd])).toEqual([
+      [1, 0.01],
+      [2, 0.01],
+    ]);
+    const mixed = reduce([
+      spend(1, 0.01, "estimated"),
+      spend(2, 0.01, "billed", { taskLimitUSD: 5 }),
+    ]);
+    expect(mixed.spend).toEqual({ taskUSD: 0.02, dayUSD: 1.02, estimated: true, taskLimitUSD: 5 });
+  });
+  it("holds a retry until a later state says the model moved on", () => {
+    const retry = (seq: number, waitMs: number, fallback?: string) =>
+      ev(seq, "model.retry", {
+        role: "main",
+        attempt: 1,
+        waitMs,
+        status: 429,
+        message: "busy",
+        ...(fallback ? { fallback } : {}),
+      });
+    expect(reduce([retry(1, 20_000)]).retrying).toBe(true);
+    expect(
+      reduce([retry(1, 20_000), ev(2, "agent.state", { state: "paused", reason: "model busy" })])
+        .retrying,
+    ).toBe(true);
+    expect(reduce([retry(1, 20_000), ev(2, "agent.state", { state: "thinking" })]).retrying).toBe(
+      false,
+    );
+    expect(reduce([retry(1, 0, "qwen")]).retrying).toBe(false);
+  });
+});
