@@ -11,6 +11,7 @@ import {
   type Target,
 } from "@localdot/protocol";
 import { markOf, type TimelineMark } from "./marks.ts";
+import { lastSentence } from "./said.ts";
 
 export interface Progress {
   t: number;
@@ -81,12 +82,17 @@ export interface StepState {
   // dot's line for the user about the call this step starts.
   intent?: string;
 }
-// What dot has said to the user, by message: the tail of its words and when they last grew.
+// What dot has said to the user, by message: the tail of its words, and each sentence it finished
+// with when, so a moment in Replay shows the line the live band showed then.
 export interface SaidState {
   id: string;
-  t: number;
   text: string;
   final: boolean;
+  lines: SaidLine[];
+}
+export interface SaidLine {
+  t: number;
+  text: string;
 }
 export interface PlanItemState {
   id: string;
@@ -267,16 +273,13 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
       case "message.assistant": {
         const said = model.said.findLast((entry) => entry.id === e.data.messageId);
         if (said?.final) break;
-        const text =
-          e.type === "message.assistant" ? e.data.text : (said?.text ?? "") + e.data.text;
-        const entry = {
-          id: e.data.messageId,
-          t,
-          text: text.slice(-SAID_TAIL),
-          final: e.type === "message.assistant",
-        };
-        if (said) Object.assign(said, entry);
+        const final = e.type === "message.assistant";
+        const text = (final ? e.data.text : (said?.text ?? "") + e.data.text).slice(-SAID_TAIL);
+        const entry = said ?? { id: e.data.messageId, text, final, lines: [] };
+        if (said) Object.assign(said, { text, final });
         else model.said.push(entry);
+        const line = lastSentence(text, final);
+        if (line && line !== entry.lines.at(-1)?.text) entry.lines.push({ t, text: line });
         const mark = markOf(e);
         if (mark) model.marks.push(mark);
         break;

@@ -108,6 +108,12 @@ function knownEnd(model: SessionModel, activity: ActivitySpan[]): number {
   return endMs;
 }
 
+// The caption at a moment of the recording: the band's line then, before any hold.
+export function bandLineAt(model: SessionModel, time: number): string {
+  const hud = taskHud(model, time);
+  return narrationLine(hud.row, hud.caption, model, time);
+}
+
 // The band's line at each frame, each held long enough to read in the video, as the band holds it.
 function heldLines(frames: number, fps: number, lineAt: (frame: number) => string): string[] {
   const hold = Math.ceil((LINE_HOLD_MS * fps) / 1000);
@@ -205,11 +211,7 @@ export function planExport(
     captionAt(frame) {
       sessionMsAt(frame);
       if (!captions) return null;
-      captionTrack ??= heldLines(frames, fps, (index) => {
-        const time = sessionMsAt(index);
-        const hud = taskHud(model, time);
-        return narrationLine(hud.row, hud.caption, model, time);
-      });
+      captionTrack ??= heldLines(frames, fps, (index) => bandLineAt(model, sessionMsAt(index)));
       return captionTrack[frame] || null;
     },
     gapAt(frame) {

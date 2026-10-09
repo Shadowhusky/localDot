@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { emptyModel } from "@localdot/stage";
+import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
+import { emptyModel, foldEvents } from "@localdot/stage";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -406,6 +407,47 @@ describe("Export video", () => {
     expect(job.save).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(job.reset).toHaveBeenCalledOnce();
+  });
+
+  it("previews the caption the video will show: dot's line at the playhead", async () => {
+    const at = (type: string, tMs: number, data: object, step?: string, seq = 0) =>
+      ({
+        v: 1,
+        id: sessionId,
+        seq,
+        t: msToMicros(tMs),
+        agent: "main",
+        ...(step ? { step } : {}),
+        type,
+        data,
+      }) as LocalDotEvent;
+    const model = foldEvents(emptyModel(), [
+      at("session.start", 0, { screen: { w: 1280, h: 800, scale: 1 }, os: "linux" }, undefined, 0),
+      at("message.user", 0, { messageId: sessionId, text: "Sum the sales", kind: "task" }, "", 1),
+      at("agent.state", 15_000, { state: "acting" }, undefined, 2),
+      at(
+        "step.start",
+        15_000,
+        { kind: "gui", intent: "Opening the monthly report to read the sales table" },
+        "s1",
+        3,
+      ),
+      at(
+        "action.intent",
+        15_010,
+        { verb: "click", label: "Open monthly-report.ods", risk: "none" },
+        "s1",
+        4,
+      ),
+      at("action.result", 15_400, { ok: true }, "s1", 5),
+      at("step.end", 15_450, { status: "ok" }, "s1", 6),
+      at("agent.state", 15_500, { state: "thinking" }, undefined, 7),
+    ]);
+    model.ended = { t: 60_000, reason: "done" };
+    await show(fakeJob(), context({ model }));
+    expect(document.querySelector(".export-preview-caption")?.textContent).toBe(
+      "Opening the monthly report to read the sales table",
+    );
   });
 });
 

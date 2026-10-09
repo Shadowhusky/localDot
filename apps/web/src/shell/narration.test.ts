@@ -2,7 +2,7 @@ import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { STATE_CAPTIONS, taskHud } from "../session/status.ts";
-import { LONG_THINK_MS, lastSentence, narrationLine } from "./narration.ts";
+import { LONG_THINK_MS, narrationLine } from "./narration.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 const MESSAGE = "01J9ZQ3V8Y7X6W5T4S3R2Q1P1A";
@@ -140,6 +140,70 @@ describe("the narrator's line while dot works", () => {
     expect(band(model, 200 + LONG_THINK_MS + 1000)).toBe("The code screen is up.");
   });
 
+  it("shows a streamed sentence in Replay from when it was finished, as the live band did", () => {
+    const events = [
+      ...session(),
+      ...click("s1", 1000, "Click “Telegram”", "Opening Telegram to send your message"),
+      ev("message.delta", 1800, { messageId: FOLLOW_UP, text: "Telegram is open. I'll find " }),
+      ev("message.delta", 2200, { messageId: FOLLOW_UP, text: "Mum next." }),
+      ev("message.assistant", 2600, {
+        messageId: FOLLOW_UP,
+        text: "Telegram is open. I'll find Mum next.",
+      }),
+    ];
+    const replayed = fold(events);
+    for (const t of [1600, 1900, 2300, 2700]) {
+      const live = fold(events.filter((event) => event.t <= msToMicros(t)));
+      expect(band(replayed, t)).toBe(band(live, t));
+    }
+    expect(band(replayed, 1900)).toBe("Telegram is open.");
+  });
+
+  it("moves on to a plan item dot starts after its last line", () => {
+    const model = fold([
+      ...session(),
+      ...click("s1", 1000, "Click “Telegram”", "Opening Telegram to send your message"),
+      ev("plan.set", 3000, {
+        items: [
+          { id: "p1", text: "Open Telegram", status: "done" },
+          { id: "p2", text: "Find Mum's chat", status: "doing" },
+        ],
+      }),
+      ev("plan.set", 3500, {
+        items: [
+          { id: "p1", text: "Open Telegram", status: "done" },
+          { id: "p2", text: "Find Mum's chat", status: "doing" },
+          { id: "p3", text: "Send the message", status: "todo" },
+        ],
+      }),
+      ev("message.assistant", 4000, { messageId: FOLLOW_UP, text: "Searching for Mum." }),
+    ]);
+    expect(band(model, 2000)).toBe("Opening Telegram to send your message");
+    expect(band(model, 3200)).toBe("Find Mum's chat");
+    expect(band(model, 3700)).toBe("Find Mum's chat");
+    expect(band(model, 4100)).toBe("Searching for Mum.");
+  });
+
+  it("says still working on an item that only looks like a doing word", () => {
+    const think = (item: string) => {
+      const model = fold([
+        ...session(),
+        ev("plan.set", 100, { items: [{ id: "p1", text: item, status: "doing" }] }),
+        ev("agent.state", 200, { state: "thinking" }),
+      ]);
+      return band(model, 200 + LONG_THINK_MS);
+    };
+    expect(think("Morning briefing email")).toBe("Still working on Morning briefing email");
+    expect(think("Spring cleaning list")).toBe("Still working on Spring cleaning list");
+    expect(think("Running the export script")).toBe("Still running the export script");
+    expect(think("Writing the reply")).toBe("Still writing the reply");
+    const lined = fold([
+      ...session(),
+      ...click("s1", 1000, "Click “Inbox”", "Morning check of your inbox"),
+    ]);
+    expect(band(lined, 1500 + LONG_THINK_MS)).toBe("Morning check of your inbox");
+  });
+
   it("shows a line as plain words", () => {
     const model = fold([
       ...session(),
@@ -171,43 +235,5 @@ describe("the narrator's line around the user", () => {
       "Starting again where I left off.",
     );
     expect(narrationLine("thinking", "Thinking…", null, 1200)).toBe("Thinking…");
-  });
-});
-
-describe("dot's last sentence", () => {
-  it("waits for a streaming sentence to reach its stop, but takes the last one once the words end", () => {
-    expect(lastSentence("Opening the sheet. Now checking the", false)).toBe("Opening the sheet.");
-    expect(lastSentence("Now checking the", false)).toBe("");
-    expect(lastSentence("Now checking the totals", true)).toBe("Now checking the totals");
-    expect(lastSentence("A list:\n- Open the report\n", false)).toBe("Open the report");
-    expect(lastSentence("Read the totals.Checking F3 next.", false)).toBe("Checking F3 next.");
-    expect(lastSentence("Saved report.ods to Node.JS docs.", true)).toBe(
-      "Saved report.ods to Node.JS docs.",
-    );
-  });
-
-  it("reads Markdown as plain words on one line, leaving code and tables out", () => {
-    expect(
-      lastSentence(
-        "## Plan\n\nI'll read **row 15** in [the sheet](https://x.test).\n\n```sh\nls -la\n```\n| a | b |",
-        true,
-      ),
-    ).toBe("I'll read row 15 in the sheet.");
-    expect(lastSentence("Checking `F3`\nagainst the _total_.", true)).toBe("against the total.");
-  });
-
-  it("keeps a long sentence whole, for the band to fit to the width it has", () => {
-    const sentence =
-      "I'm going to compare every month's net figure against revenue minus returns, starting with February and working down the sheet.";
-    expect(lastSentence(sentence, true)).toBe(sentence);
-  });
-
-  it("cuts only a runaway sentence, at a word, with an ellipsis", () => {
-    const line = lastSentence(
-      `I'm going to compare every month's net figure against revenue minus returns, ${"then the next month, ".repeat(12)}and so on down the sheet.`,
-      true,
-    );
-    expect(line).toMatch(/^I'm going to compare every month's net figure .* then the next…$/);
-    expect(line.length).toBeLessThanOrEqual(241);
   });
 });

@@ -1,5 +1,5 @@
 import { microsToMs } from "@localdot/protocol";
-import type { KeyUseState } from "@localdot/stage";
+import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
 import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
@@ -223,7 +223,8 @@ export function entryView(
     (kind === "file" ? fileTitle(own) : "") ||
     (kind ? KIND_TITLES[kind] : "Step");
   // dot's own line for the call leads its first row; what it did moves to the meta line.
-  const intent = agent?.intent ?? computer?.intent;
+  const given = agent?.intent ?? computer?.intent;
+  const intent = (given && plainText(given)) || undefined;
   const title = intent ?? what;
   const failed = state === "failed" || state === "skipped";
   const reason = failed

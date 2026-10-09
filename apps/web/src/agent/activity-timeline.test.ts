@@ -195,6 +195,19 @@ describe("the activity timeline", () => {
     });
   });
 
+  it("shows dot's line for a call as plain words, as the band does", () => {
+    const entry: ActivityEntry = {
+      key: "c",
+      keys: [],
+      row: stepRow("c", 0, undefined, {
+        intent: "Saving **report.ods** to `~/Documents`",
+        tool: { name: "shell", title: "cp report.ods ~/Documents" },
+        status: "ok",
+      }),
+    };
+    expect(entryView(entry, [], false).title).toBe("Saving report.ods to ~/Documents");
+  });
+
   it("says in a failed row what dot did next: tried again, made room and tried again, or moved on", () => {
     const view = (title: string, state: EntryView["state"] = "done", meta = ""): EntryView => ({
       testId: "step-row",

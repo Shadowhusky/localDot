@@ -200,26 +200,33 @@ describe("foldEvents", () => {
 
 describe("what dot says", () => {
   const MESSAGE = "01J9ZQ3V8Y7X6W5T4S3R2Q1P1A";
-  it("keeps each call's line on its step, and the tail of each message with when it last grew", () => {
+  it("keeps each call's line on its step, and the tail of each message with when each sentence ended", () => {
     const model = foldEvents(emptyModel(), [
       ev("step.start", 10, { kind: "shell", intent: "Checking which apps are installed" }, "s1"),
       ev("step.start", 20, { kind: "gui" }, "s2"),
-      ev("message.delta", 30, { messageId: MESSAGE, text: "x".repeat(700) }),
-      ev("message.delta", 40, { messageId: MESSAGE, text: " Opening it now." }),
+      ev("message.delta", 30, { messageId: MESSAGE, text: `${"x".repeat(700)}. Found the ` }),
+      ev("message.delta", 40, { messageId: MESSAGE, text: "report." }),
+      ev("message.delta", 45, { messageId: MESSAGE, text: " Opening it now." }),
     ]);
     expect(model.steps.map((step) => step.intent)).toEqual([
       "Checking which apps are installed",
       undefined,
     ]);
     expect(model.said).toHaveLength(1);
-    expect(model.said[0]).toMatchObject({ id: MESSAGE, t: 40, final: false });
+    expect(model.said[0]).toMatchObject({ id: MESSAGE, final: false });
     expect(model.said[0]?.text).toHaveLength(600);
     expect(model.said[0]?.text.endsWith(" Opening it now.")).toBe(true);
+    expect(model.said[0]?.lines.slice(1)).toEqual([
+      { t: 40, text: "Found the report." },
+      { t: 45, text: "Opening it now." },
+    ]);
     foldEvents(model, [
       ev("message.assistant", 50, { messageId: MESSAGE, text: "Opened it." }),
       ev("message.delta", 60, { messageId: MESSAGE, text: " late" }),
     ]);
-    expect(model.said).toEqual([{ id: MESSAGE, t: 50, text: "Opened it.", final: true }]);
+    expect(model.said[0]).toMatchObject({ text: "Opened it.", final: true });
+    expect(model.said[0]?.lines.at(-1)).toEqual({ t: 50, text: "Opened it." });
+    expect(model.said[0]?.lines).toHaveLength(4);
   });
 
   it("starts a turn at each task or follow-up, not at a steer", () => {

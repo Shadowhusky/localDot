@@ -45,6 +45,17 @@ it("brings the first line after a silence in at once", () => {
   expect(line()?.textContent).toBe("dot: Opening Telegram");
 });
 
+it("brings a line for the user in at once, without waiting out the last line's hold", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Which report?" speaker="dot" showDot forUser />);
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Which report?");
+  band.rerender(<NarratorBand line="Sign in to your bank" speaker="dot" showDot reveal />);
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Sign in to your bank");
+});
+
 it("names its speaker on screen only when dot isn't beside it", () => {
   render(<NarratorBand line="Checking the totals" speaker="dot" showDot={false} />);
   expect(document.querySelector(".narration-speaker")?.textContent).toBe("dot");
