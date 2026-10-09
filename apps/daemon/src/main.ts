@@ -37,6 +37,7 @@ import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
 import { StreamTuning } from "./cells/stream-tuning.ts";
 import { monotonicClock } from "./clock.ts";
+import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { EventLog } from "./event-log.ts";
@@ -502,6 +503,13 @@ const app = createApp({
     thumbs: new Thumbnails(home, frames),
     live,
   },
+  deliverables: deliverablesFor(home, eventLog, frames, {
+    computers: () => orchestrator.list(),
+    access: running.computerAccess,
+    start: (cellId, task, signal, opts) => running.runner.start(cellId, task, signal, opts),
+    upload: running.routes.desktop,
+    redactUserText: running.routes.redactUserText,
+  }),
   cells: {
     cells: orchestrator,
     tickets,

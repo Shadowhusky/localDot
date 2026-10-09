@@ -66,6 +66,10 @@ import { StreamTuning } from "../../../daemon/src/cells/stream-tuning.ts";
 import { FakeOrchestrator } from "../../../daemon/src/cells/testing/fake-orchestrator.ts";
 import type { CellRecord, CellSummary } from "../../../daemon/src/cells/types.ts";
 import { monotonicClock } from "../../../daemon/src/clock.ts";
+import {
+  deliverableScenarios,
+  deliverablesDeps,
+} from "../../../daemon/src/deliverables/testing/qa-scenarios.ts";
 import { DesktopdClient } from "../../../daemon/src/desktopd/client.ts";
 import { DesktopdRegistry } from "../../../daemon/src/desktopd/registry.ts";
 import { FakeDesktopd } from "../../../daemon/src/desktopd/testing/fake-desktopd.ts";
@@ -102,7 +106,7 @@ import {
 const require = createRequire(new URL("../../../daemon/package.json", import.meta.url));
 const { getRequestListener } = require("@hono/node-server") as {
   getRequestListener(
-    fetch: (request: Request) => Response | Promise<Response>,
+    fetch: (request: Request, env: unknown) => Response | Promise<Response>,
   ): Parameters<typeof createServer>[0];
 };
 const { values: args } = parseArgs({
@@ -1325,8 +1329,19 @@ const notify = createNotify({
 });
 
 let app: ReturnType<typeof createApp> | undefined;
+const deliverablesFixture = {
+  home: HOME,
+  assets: ASSETS,
+  log,
+  frames,
+  effects,
+  session: () => session,
+};
+// The node bindings pass through: Open on Mac checks the socket address.
 const server: Server = createServer(
-  getRequestListener((request) => app?.fetch(request) ?? new Response("starting", { status: 503 })),
+  getRequestListener(
+    (request, env) => app?.fetch(request, env) ?? new Response("starting", { status: 503 }),
+  ),
 );
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
@@ -1394,6 +1409,7 @@ const routes = createApp({
     thumbs: new Thumbnails(HOME, frames),
     live,
   },
+  deliverables: deliverablesDeps(deliverablesFixture),
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
   routines: {
@@ -1428,6 +1444,7 @@ const routes = createApp({
       ),
   },
 });
+deliverableScenarios(routes, deliverablesFixture);
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)
