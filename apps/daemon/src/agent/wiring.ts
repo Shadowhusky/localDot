@@ -22,6 +22,7 @@ import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
+import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
 import type { EventLog } from "../event-log.ts";
@@ -46,6 +47,8 @@ import type { ToolPolicy } from "./policy.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
+import { ConnectionApprovals } from "./safety/connections.ts";
+import { RulesStore } from "./safety/rules.ts";
 import type { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
@@ -580,12 +583,31 @@ export function createAgent(d: AgentWiringDeps) {
       d.eventLog.append(id, { type, agent: "main", data } as never);
     },
   };
+  const connections = new ConnectionApprovals({
+    keyd: d.keyd,
+    task: (cellId) => {
+      const live = d.live.get(cellId);
+      const session = live ? runner.get(live) : undefined;
+      return session && !session.stopped ? session : undefined;
+    },
+    rules: new RulesStore(d.home),
+    owner: async (cellId, port) => {
+      const endpoint = d.cells.endpoints(cellId)?.desktopd;
+      return endpoint ? new DesktopdClient(endpoint).connectionOwner(port) : undefined;
+    },
+    cells: () =>
+      d.cells
+        .list()
+        .filter((cell) => cell.state === "ready")
+        .map((cell) => cell.id),
+  });
   let server: ReturnType<typeof serve> | undefined,
     startPromise: Promise<void> | undefined,
     closePromise: Promise<void> | undefined;
   return {
     runner,
     routes,
+    connections,
     // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.
     // Unlike agent tasks, they have no AgentSession whose runner can contain a lost reply.
     async prepareDesktopTask(cellId: string, sessionId: string, signal: AbortSignal) {

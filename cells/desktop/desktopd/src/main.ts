@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { createDesktopdApp, monoNow } from "./app.ts";
 import { MIN_TOKEN_LENGTH } from "./auth.ts";
 import { prepareDesktopBrowser } from "./browser-profile.ts";
+import { connectionOwner } from "./connection-owner.ts";
 import { launchApp } from "./launch.ts";
 import { captureFile, Screenshots } from "./perception/capture.ts";
 import { ChromiumPerception } from "./perception/cdp.ts";
@@ -81,6 +82,7 @@ const app = createDesktopdApp({
     browser: new PageBrowser(),
   },
   selfTest: cachedSelfTest(() => runSelfTest(selfTestConfigFromEnv(process.env), nodeProbes())),
+  connectionOwner: (port) => connectionOwner(port),
   token,
   scale,
   display: process.env.DISPLAY ?? ":1",

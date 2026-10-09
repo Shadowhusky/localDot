@@ -1,5 +1,6 @@
 import {
   ClockResult,
+  ConnectionOwner,
   type FindRequest,
   HeldResult,
   HitTestResult,
@@ -52,6 +53,23 @@ export class DesktopdClient {
 
   clock(): Promise<ClockResult> {
     return this.#json("GET", "/clock", undefined, TIMEOUT_MS.clock, ClockResult.parse);
+  }
+
+  // The program holding the connection from a local TCP port; undefined when desktopd cannot say.
+  async connectionOwner(port: number): Promise<string | undefined> {
+    try {
+      return (
+        await this.#json(
+          "GET",
+          `/connection-owner?port=${port}`,
+          undefined,
+          TIMEOUT_MS.clock,
+          ConnectionOwner.parse,
+        )
+      ).app;
+    } catch {
+      return undefined;
+    }
   }
 
   // A repeated or held key, or a drag, answers as NDJSON: `onPress` hears each press of a repeat,

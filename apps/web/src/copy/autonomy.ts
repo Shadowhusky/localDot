@@ -25,6 +25,7 @@ const CLASS_WORK: Readonly<Record<ActionClass, string>> = {
   upload: "uploading your files",
   credentials: "entering passwords, codes and card details",
   unknown: "unclear steps",
+  network: "connections beyond websites",
 };
 
 export function allowWithoutAsking(actionClass: ActionClass): string {
@@ -33,12 +34,26 @@ export function allowWithoutAsking(actionClass: ActionClass): string {
 
 const lower = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 
+// A connection's choice names the program or the destination it opened.
+function connectionChoice(option: AlwaysOption): string {
+  if (option.scope === "app") return `connections from ${option.app}`;
+  return `connections to ${option.destination}`;
+}
+
 export function allowedLine(actionClass: ActionClass, option: AlwaysOption): string {
+  if (actionClass === "network")
+    return option.scope === "task"
+      ? `Allowed for this task: ${connectionChoice(option)}.`
+      : `Always allowed: ${connectionChoice(option)}.`;
   const where = option.scope === "always" ? "Always allowed" : `Allowed ${lower(option.label)}`;
   return `${where}: ${CLASS_WORK[actionClass]}.`;
 }
 
 export function undoAllowedLabel(actionClass: ActionClass, option: AlwaysOption): string {
+  if (actionClass === "network")
+    return option.scope === "task"
+      ? `Undo allowing ${connectionChoice(option)} for this task`
+      : `Undo always allowing ${connectionChoice(option)}`;
   return option.scope === "always"
     ? `Undo always allowing ${CLASS_WORK[actionClass]}`
     : `Undo allowing ${CLASS_WORK[actionClass]} ${lower(option.label)}`;

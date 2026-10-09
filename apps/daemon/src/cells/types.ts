@@ -53,7 +53,9 @@ export interface CellRecord {
   createdAt: string;
   scale: Scale;
   keydPort: number;
-  tokens: { desktopd: string; stream: string };
+  // capture: the gate's credential for the connections it captures; computers made before
+  // capture existed have none and reach out only through the proxy.
+  tokens: { desktopd: string; stream: string; capture?: string };
   docker: CellDocker;
 }
 

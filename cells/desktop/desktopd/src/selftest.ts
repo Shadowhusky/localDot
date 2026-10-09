@@ -8,7 +8,10 @@ import type { SelfTestCheck, SelfTestReport } from "@localdot/protocol";
 
 // The cell's boot self-test (spec, trust rule 1 and success criterion 5): the cell reaches
 // nothing but its gate, and through the gate exactly its own keyd listener, which wants its token.
-// Every check fails closed: a check that cannot reach a conclusion fails.
+// A computer with capture sends everything else into its link to the gate (cells/gate/link.sh),
+// whose names are placeholders and whose connections keyd decides: a direct probe there must end
+// at keyd's refusal, never at the address it named. Every check fails closed: a check that cannot
+// reach a conclusion fails.
 
 type CheckKind = SelfTestCheck["kind"];
 
@@ -20,7 +23,8 @@ export interface ProxyReply {
 // The network and file primitives, injected so the checks can be tested without a cell.
 export interface Probes {
   readFile(path: string): Promise<string | undefined>;
-  // "connected", or why not (an errno code or "timeout").
+  // Why it did not connect (an errno code or "timeout"), or once connected: "answered" when the
+  // peer sent data, "closed" when it ended the connection first, "open" when it did neither.
   tcpConnect(host: string, port: number, timeoutMs: number): Promise<string>;
   // The addresses a name resolves to through the cell's resolver, or why not.
   resolve(name: string, timeoutMs: number): Promise<string[] | string>;
@@ -53,8 +57,9 @@ interface CheckConfig extends SelfTestConfig {
 }
 
 // Addresses only a route out could reach: a public anycast resolver on both families, and Docker
-// Desktop's host address, where LM Studio (1234) and Ollama (11434) would answer.
-const PUBLIC_V4 = { host: "1.1.1.1", port: 443 };
+// Desktop's host address, where LM Studio (1234) and Ollama (11434) would answer. The IPv4 probe
+// uses SMTP, which keyd refuses at once, so a captured probe never waits for the user.
+const PUBLIC_V4 = { host: "1.1.1.1", port: 25 };
 const PUBLIC_V6 = { host: "2606:4700:4700::1111", port: 443 };
 const PUBLIC_NAME = "example.com";
 const HOST_NAMES = ["host.docker.internal", "gateway.docker.internal"];
@@ -66,6 +71,11 @@ const HOST_PORTS = [1234, 11434];
 const GATEWAY_PORTS = [53, 80];
 const HEALTH_URL = "http://keyd.ldot/health";
 const UNREACHABLE = new Set(["ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT", "timeout"]);
+// Through the link the gate accepts and keyd refuses: the connection ends before a byte arrives.
+const NOT_REACHED = new Set([...UNREACHABLE, "closed"]);
+// The gate's end of the link (cells/gate/link.sh), and its placeholder addresses for names.
+const LINK_GATE = "192.0.0.1";
+const PLACEHOLDERS = { prefix: [198, 18], bits: 15 } as const;
 const NO_DNS = new Set([
   "ENOTFOUND",
   "ENODATA",
@@ -144,8 +154,10 @@ async function noDefaultRoute(probes: Probes): Promise<SelfTestCheck> {
   ]);
   const v4 = ipv4Routes(v4Text);
   if (!v4) return fail("route", "isolation", "unreadable or malformed IPv4 routes");
-  if (v4.some((r) => r.destination === 0 && r.mask === 0))
-    return fail("route", "isolation", "an IPv4 default route exists");
+  const defaults = v4.filter((r) => r.destination === 0 && r.mask === 0);
+  const link = defaults.length > 0;
+  if (defaults.some((r) => r.iface !== "ld0" || r.gateway !== addressValue(LINK_GATE)))
+    return fail("route", "isolation", "an IPv4 default route bypasses the gate's link");
   if (v6 === undefined) return fail("route", "isolation", "cannot read IPv6 routes");
   for (const line of v6.split("\n").filter((s) => s.trim())) {
     const fields = line.trim().split(/\s+/);
@@ -161,7 +173,16 @@ async function noDefaultRoute(probes: Probes): Promise<SelfTestCheck> {
     if (fields[0] === "0".repeat(32) && fields[1] === "00" && fields[9] !== "lo")
       return fail("route", "isolation", "an IPv6 default route exists");
   }
-  return pass("route", "isolation", "no default route");
+  return pass(
+    "route",
+    "isolation",
+    link ? "default route through the gate's link only" : "no default route",
+  );
+}
+
+// An IPv4 address as ipv4Routes decodes one.
+function addressValue(address: string): number {
+  return address.split(".").reduce((ip, part) => ip * 256 + Number(part), 0);
 }
 
 async function noDirect(
@@ -171,16 +192,26 @@ async function noDirect(
   probes: Probes,
 ): Promise<SelfTestCheck> {
   const result = await probes.tcpConnect(target.host, target.port, cfg.remainingMs());
-  return UNREACHABLE.has(result)
+  return NOT_REACHED.has(result)
     ? pass(id, "isolation", `${target.host}:${target.port}: ${result}`)
     : fail(id, "isolation", `${target.host}:${target.port} answered or the probe was inconclusive`);
 }
 
 async function noDns(cfg: CheckConfig, probes: Probes): Promise<SelfTestCheck> {
   const result = await probes.resolve(PUBLIC_NAME, cfg.remainingMs());
-  return typeof result === "string" && NO_DNS.has(result)
-    ? pass("dns", "isolation", `${PUBLIC_NAME}: ${result}`)
-    : fail("dns", "isolation", `${PUBLIC_NAME} resolved or the probe was inconclusive`);
+  if (typeof result === "string")
+    return NO_DNS.has(result)
+      ? pass("dns", "isolation", `${PUBLIC_NAME}: ${result}`)
+      : fail("dns", "isolation", `${PUBLIC_NAME}: the probe was inconclusive`);
+  return result.length > 0 && result.every(placeholder)
+    ? pass("dns", "isolation", `${PUBLIC_NAME}: the gate's placeholder`)
+    : fail("dns", "isolation", `${PUBLIC_NAME} resolved to a real address`);
+}
+
+function placeholder(address: string): boolean {
+  if (isIP(address) !== 4) return false;
+  const [a = -1, b = -1] = address.split(".").map(Number);
+  return a === PLACEHOLDERS.prefix[0] && b >> 1 === PLACEHOLDERS.prefix[1] >> 1;
 }
 
 async function noHost(cfg: CheckConfig, probes: Probes): Promise<SelfTestCheck> {
@@ -189,7 +220,7 @@ async function noHost(cfg: CheckConfig, probes: Probes): Promise<SelfTestCheck> 
     const outcomes = await Promise.all(
       HOST_PORTS.map((port) => probes.tcpConnect(host, port, cfg.remainingMs())),
     );
-    return outcomes.every((r) => UNREACHABLE.has(r));
+    return outcomes.every((r) => NOT_REACHED.has(r));
   };
   const results = await Promise.all([
     unreachable(HOST_ADDRESS),
@@ -395,14 +426,21 @@ export function nodeProbes(): Probes {
     tcpConnect: (host, port, timeoutMs) =>
       new Promise<string>((resolve) => {
         const socket = connect({ host, port });
+        let connected = false;
         const done = (result: string) => {
           clearTimeout(deadline);
           socket.destroy();
           resolve(result);
         };
-        const deadline = setTimeout(() => done("timeout"), timeoutMs);
-        socket.once("connect", () => done("connected"));
-        socket.once("error", (err: NodeJS.ErrnoException) => done(err.code ?? "probe error"));
+        const deadline = setTimeout(() => done(connected ? "open" : "timeout"), timeoutMs);
+        socket.once("connect", () => {
+          connected = true;
+          socket.once("data", () => done("answered"));
+          socket.once("close", () => done("closed"));
+        });
+        socket.once("error", (err: NodeJS.ErrnoException) =>
+          done(connected ? "closed" : (err.code ?? "probe error")),
+        );
       }),
     resolve: async (name, timeoutMs) => {
       const resolver = new dns.Resolver({ timeout: timeoutMs, tries: 1 });

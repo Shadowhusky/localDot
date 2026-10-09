@@ -20,6 +20,7 @@ import {
   type ApprovalChecks,
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
+import { ConnectionCards } from "./safety/connections.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
@@ -102,6 +103,7 @@ export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly taskAutonomy: TaskAutonomy;
   readonly #approvals: ApprovalBroker;
+  readonly connections: ConnectionCards;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
   });
@@ -187,6 +189,24 @@ export class AgentSession {
             this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
         } catch (error) {
           note = `Approved once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
+        }
+        this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
+        if (change) this.append("rule.created", change);
+      },
+    );
+    this.connections = new ConnectionCards(
+      ({ fields, ...card }) => {
+        this.append("approval.request", { ...card, kind: "permission", preview: { fields } });
+      },
+      ({ always, ...resolution }) => {
+        let change: RuleChange | undefined;
+        let note = resolution.note;
+        try {
+          change =
+            always &&
+            this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+        } catch (error) {
+          note = `Allowed once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
         }
         this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
         if (change) this.append("rule.created", change);
@@ -1126,6 +1146,7 @@ export class AgentSession {
     this.#stopping = true;
     this.status = "ended";
     this.#approvals.cancel(this.id);
+    this.connections.cancel("The task ended, so the connection stays closed.");
     const generation = this.generation;
     if (generation) this.retireBrain(generation);
     this.abort.abort(new SessionStoppedError());

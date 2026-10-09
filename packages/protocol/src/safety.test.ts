@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentSettingsDocument } from "./agent-settings.ts";
 import { ulid } from "./ids.ts";
 import {
+  AlwaysOption,
   APPROVAL_FIELD_CHARS,
   APPROVAL_VALUE_CHARS,
   ApprovalAnswer,
@@ -248,6 +249,41 @@ describe("safety protocol authority boundaries", () => {
       { ...rule, id: "1" },
     ])
       expect(AutonomyRule.safeParse(changed).success).toBe(false);
+  });
+  it("a connection's options and rules name a host and port, and only where they belong", () => {
+    const rule = {
+      id: ulid(),
+      behavior: "act",
+      actionClass: "network",
+      scope: "destination",
+      destination: "chat.example.com:5222",
+      label: "Always for chat.example.com:5222",
+      createdAt: 1,
+      createdFrom: ulid(),
+    };
+    expect(AutonomyRule.safeParse(rule).success).toBe(true);
+    for (const destination of [
+      "[2001:db8::7]:8443",
+      "203.0.113.9:80",
+      "xn--bcher-kva.example:6667",
+    ])
+      expect(AutonomyRule.safeParse({ ...rule, destination }).success).toBe(true);
+    for (const destination of [
+      "chat.example.com",
+      "chat.example.com:0",
+      "chat.example.com:65536",
+      "Chat.example.com:5222",
+      "chat.example.com:05222",
+      "localhost:5222",
+      "2001:db8::7:8443",
+    ])
+      expect(AutonomyRule.safeParse({ ...rule, destination }).success, destination).toBe(false);
+    const { destination: _, ...noDestination } = rule;
+    expect(AutonomyRule.safeParse(noDestination).success).toBe(false);
+    expect(AutonomyRule.safeParse({ ...rule, scope: "app", app: "wechat" }).success).toBe(false);
+    const task = { scope: "task", label: "For this task", destination: rule.destination };
+    expect(AlwaysOption.safeParse(task).success).toBe(true);
+    expect(AlwaysOption.safeParse({ ...task, scope: "always" }).success).toBe(false);
   });
   it("Pause/Resume DTOs and snapshots refuse optimistic or extra grants", () => {
     const requestId = ulid();

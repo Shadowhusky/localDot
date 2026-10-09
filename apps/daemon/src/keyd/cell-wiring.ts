@@ -52,6 +52,7 @@ export class CellKeydWiring implements CellKeyd {
           role: "desktop",
           port: record.keydPort,
           secrets,
+          ...(record.tokens.capture ? { captureToken: record.tokens.capture } : {}),
         });
         if (opened.cellId !== record.id || opened.port !== record.keydPort)
           throw new KeyLayerError("keyd opened a different cell or listener");

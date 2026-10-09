@@ -7,6 +7,8 @@ import { ALWAYS_SCOPES, type Place, type RulesStore, ruleChange } from "./rules.
 export class TaskAutonomy {
   #desktopSignedIn = false;
   readonly #allowed = new Map<ActionClass, RuleChange>();
+  // Connections allowed for this task, by destination: one yes never opens every port.
+  readonly #destinations = new Map<string, RuleChange>();
   constructor(private readonly rules?: Pick<RulesStore, "matches" | "add">) {}
   signedIn(screen: ScreenName): boolean {
     return screen === "browser" || this.#desktopSignedIn;
@@ -16,8 +18,12 @@ export class TaskAutonomy {
   }
   relaxes(actionClass: ActionClass, place: Place): boolean {
     const scopes = ALWAYS_SCOPES[actionClass];
+    const forTask =
+      actionClass === "network"
+        ? place.destination !== undefined && this.#destinations.has(place.destination)
+        : this.#allowed.has(actionClass);
     return (
-      (scopes.includes("task") && this.#allowed.has(actionClass)) ||
+      (scopes.includes("task") && forTask) ||
       (scopes.some((scope) => scope !== "task") && this.rules?.matches(actionClass, place) === true)
     );
   }
@@ -27,6 +33,18 @@ export class TaskAutonomy {
     approvalId: string,
   ): RuleChange | undefined {
     if (!ALWAYS_SCOPES[actionClass].includes(option.scope)) return undefined;
+    if (option.scope === "task" && actionClass === "network") {
+      if (option.destination === undefined || this.#destinations.has(option.destination))
+        return undefined;
+      const change = {
+        scope: option.scope,
+        actionClass,
+        label: option.label,
+        destination: option.destination,
+      };
+      this.#destinations.set(option.destination, change);
+      return change;
+    }
     if (option.scope === "task") {
       if (this.#allowed.has(actionClass)) return undefined;
       const change = { scope: option.scope, actionClass, label: option.label };
@@ -37,6 +55,11 @@ export class TaskAutonomy {
     return rule && ruleChange(rule);
   }
   revoke(actionClass: ActionClass): RuleChange | undefined {
+    if (actionClass === "network") {
+      const [first] = this.#destinations.values();
+      this.#destinations.clear();
+      return first && { scope: "task", actionClass, label: first.label };
+    }
     const change = this.#allowed.get(actionClass);
     this.#allowed.delete(actionClass);
     return change;

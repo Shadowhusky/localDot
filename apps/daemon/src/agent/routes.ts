@@ -472,6 +472,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         autonomy: s.autonomy,
         ...(s.screens ? { screen: s.screens.selection } : {}),
         ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
+        ...(s.connections.pending ? { connection: s.connections.pending } : {}),
         ...(s.safetyPause ? { pause: s.safetyPause } : {}),
         ...(budgetHold ? { budgetHold } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
@@ -498,9 +499,14 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const s = active(c.req.param("id") ?? "");
       const generation = s.generation;
-      if (!generation || s.controlHeld) throw new RouteError(409, "approval is not waiting");
       const parsed = await json(c.req.raw, ApprovalAnswer);
       check(c.req.raw.signal);
+      // A connection's card is no step of the agent's: it is answered whatever the brain is doing.
+      if (s.connections.owns(parsed.approvalId))
+        return s.connections.answer(parsed)
+          ? c.body(null, 204)
+          : c.text("approval is not waiting", 409);
+      if (!generation || s.controlHeld) throw new RouteError(409, "approval is not waiting");
       if (!s.isCurrent(generation) || s.controlHeld)
         throw new RouteError(409, "approval owner changed");
       return s.answerApproval(parsed) ? c.body(null, 204) : c.text("approval is not waiting", 409);

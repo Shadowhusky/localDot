@@ -28,6 +28,11 @@ export function cellNames(id: string, prefix = NAME_PREFIX) {
   };
 }
 
+// The one-shot helper that sets up a desktop's link (linkSpec) is gone once it has run.
+export function linkName(id: string, prefix = NAME_PREFIX) {
+  return `${prefix}link-${id}`;
+}
+
 // Plain --internal still exposes Docker Desktop VM listeners on the bridge gateway (S3, D14).
 // IPv6 is pinned off: the isolated gateway option covers IPv4 only.
 export function isolatedNetworkSpec(name: string) {
@@ -63,17 +68,27 @@ export function homeVolumeSpec(name: string, cellId?: string) {
   };
 }
 
+// The two ends of the IP-in-IP link a desktop's outbound traffic crosses to its gate in
+// (cells/gate/link.sh): DS-Lite's own pair from the IETF protocol space, which keyd never dials.
+export const LINK = { gate: "192.0.0.1", desktop: "192.0.0.2" } as const;
+
+// A desktop's gate with a capture token starts as root with only what its entrypoint needs to take
+// the desktop's traffic (NET_ADMIN) and then become nobody with no capabilities at all.
+const CAPTURE_CAPS = ["NET_ADMIN", "SETUID", "SETGID", "SETPCAP"];
+
 export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) {
   const d = record.docker;
   const address = record.kind === "browser" ? record.docker.browserIp : record.docker.desktopIp;
+  const capture = record.kind === "desktop" ? record.tokens.capture : undefined;
   return {
     Image: image,
-    User: "nobody",
+    User: capture ? "root" : "nobody",
     Env: [
       `LD_INTERNAL_ADDR=${d.gateInternalIp}`,
       `LD_EGRESS_ADDR=${d.gateEgressIp}`,
       `LD_DESKTOP_ADDR=${address}`,
       `LD_KEYD_PORT=${record.keydPort}`,
+      ...(capture ? [`LD_CAPTURE_TOKEN=${capture}`] : []),
     ],
     Labels: {
       "localdot.cell": record.id,
@@ -88,6 +103,7 @@ export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) 
         [GATE_PORTS.stream]: [{ HostIp: "127.0.0.1", HostPort: "" }],
       },
       CapDrop: ["ALL"],
+      ...(capture ? { CapAdd: CAPTURE_CAPS } : {}),
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],
       Memory: 64 * 1024 ** 2,
@@ -96,6 +112,30 @@ export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) 
     },
     NetworkingConfig: {
       EndpointsConfig: { [d.egressNetwork]: { IPAMConfig: { IPv4Address: d.gateEgressIp } } },
+    },
+  };
+}
+
+// A one-shot helper that sets up the desktop's end of its link and routes the desktop's traffic
+// into it. It shares the desktop's network namespace, holds NET_ADMIN only for that, and exits;
+// the desktop itself never has NET_ADMIN, so nothing in it can change the route.
+export function linkSpec(record: CellRecord, image: string) {
+  const d = record.docker;
+  return {
+    Image: image,
+    User: "root",
+    Entrypoint: ["/link.sh"],
+    Cmd: [d.desktopIp, d.gateInternalIp, LINK.desktop, LINK.gate, "default"],
+    Labels: { "localdot.cell": record.id, "localdot.role": "link" },
+    HostConfig: {
+      NetworkMode: `container:${d.desktop}`,
+      CapDrop: ["ALL"],
+      CapAdd: ["NET_ADMIN"],
+      ReadonlyRootfs: true,
+      SecurityOpt: ["no-new-privileges"],
+      Memory: 32 * 1024 ** 2,
+      PidsLimit: 16,
+      LogConfig: LOG_CONFIG,
     },
   };
 }
@@ -164,6 +204,8 @@ export function desktopSpec(record: CellRecord, image: string, stream: StreamOpt
     Labels: { "localdot.cell": record.id, "localdot.role": "desktop" },
     HostConfig: {
       NetworkMode: d.internalNetwork,
+      // Names resolve to the gate's placeholders, which only keyd turns into addresses.
+      ...(record.tokens.capture ? { Dns: [d.gateInternalIp] } : {}),
       Mounts: [{ Type: "volume", Source: d.homeVolume, Target: "/config" }],
       Tmpfs: {
         "/run/localdot-desktop-browser":

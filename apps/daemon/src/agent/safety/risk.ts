@@ -136,6 +136,7 @@ const titles: Record<ActionClass, string> = {
   upload: "Upload your files",
   credentials: "Enter a password or code yourself",
   unknown: "Unclear step",
+  network: "Connect beyond websites",
 };
 export function buildApprovalCard(
   facts: RiskFacts,

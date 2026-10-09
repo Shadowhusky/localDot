@@ -19,6 +19,7 @@ export const ActionClass = z.enum([
   "upload",
   "credentials",
   "unknown",
+  "network",
 ]);
 export type ActionClass = z.infer<typeof ActionClass>;
 export const EDITABLE_ACTION_CLASSES = [
@@ -112,6 +113,7 @@ export const ACTION_CLASS_LABELS: Readonly<Record<ActionClass, string>> = Object
   upload: "Upload your files",
   credentials: "Passwords, codes and card details",
   unknown: "Unclear steps on signed-in sites",
+  network: "Connections beyond websites",
 });
 export function freezeAutonomy(value: unknown = DEFAULT_AUTONOMY): Readonly<AutonomyPolicy> {
   return AutonomyPolicy.parse(value);
@@ -128,7 +130,7 @@ const Id = z.string().regex(ULID_PATTERN);
 const Counter = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 // A card waits for the user; the ceiling matches the Codex path's 24-hour tool timeout.
 export const APPROVAL_TIMEOUT_MS = 86_400_000;
-export const AlwaysScope = z.enum(["task", "site", "app", "always"]);
+export const AlwaysScope = z.enum(["task", "site", "app", "always", "destination"]);
 export type AlwaysScope = z.infer<typeof AlwaysScope>;
 const Origin = z
   .string()
@@ -140,17 +142,30 @@ const Origin = z
       new URL(value).origin === value,
     "site must be an exact http(s) origin",
   );
-const placed = (value: { scope: AlwaysScope; site?: string; app?: string }) =>
+// A connection's host and port as one text, an IPv6 address in brackets: what a network rule names.
+export const DESTINATION_PATTERN =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\[[0-9a-f:.]+\]):(?:[1-9]\d{0,4})$/;
+const Destination = z
+  .string()
+  .max(262)
+  .regex(DESTINATION_PATTERN)
+  .refine((value) => Number(value.slice(value.lastIndexOf(":") + 1)) <= 65535, "port");
+const placed = (value: { scope: AlwaysScope; site?: string; app?: string; destination?: string }) =>
   (value.scope === "site") === (value.site !== undefined) &&
-  (value.scope === "app") === (value.app !== undefined);
+  (value.scope === "app") === (value.app !== undefined) &&
+  // A connection allowed for the task names its destination too.
+  (value.scope === "destination"
+    ? value.destination !== undefined
+    : value.destination === undefined || value.scope === "task");
 export const AlwaysOption = z
   .strictObject({
     scope: AlwaysScope,
     label: safeText(200),
     site: Origin.optional(),
     app: safeText(128).optional(),
+    destination: Destination.optional(),
   })
-  .refine(placed, "a site or app goes only with its own scope");
+  .refine(placed, "a site, app or destination goes only with its own scope");
 export type AlwaysOption = z.infer<typeof AlwaysOption>;
 export const AutonomyRule = z
   .strictObject({
@@ -160,11 +175,12 @@ export const AutonomyRule = z
     scope: AlwaysScope.exclude(["task"]),
     site: Origin.optional(),
     app: safeText(128).optional(),
+    destination: Destination.optional(),
     label: safeText(200),
     createdAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     createdFrom: Id,
   })
-  .refine(placed, "a site or app goes only with its own scope");
+  .refine(placed, "a site, app or destination goes only with its own scope");
 export type AutonomyRule = z.infer<typeof AutonomyRule>;
 // The answer names a scope only; the site, app and class come from the card the daemon wrote.
 export const ApprovalAnswer = z

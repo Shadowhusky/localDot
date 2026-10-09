@@ -10,6 +10,9 @@ import {
   internalNetworkSpec,
   isolatedNetworkSpec,
   keydEnv,
+  LINK,
+  linkName,
+  linkSpec,
   streamOptions,
 } from "./spec.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
@@ -227,5 +230,53 @@ describe("container logs", () => {
     const bounded = { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } };
     expect(gateSpec(record, "g").HostConfig.LogConfig).toEqual(bounded);
     expect(desktopSpec(record, "d", streamOptions()).HostConfig.LogConfig).toEqual(bounded);
+  });
+});
+
+describe("capture", () => {
+  const captured = { ...record, tokens: { ...record.tokens, capture: "c".repeat(43) } };
+
+  it("starts a capturing gate as root with only what its entrypoint needs before it drops them", () => {
+    const spec = gateSpec(captured, "localdot/gate:dev");
+    expect(spec.User).toBe("root");
+    expect(spec.HostConfig).toMatchObject({
+      CapDrop: ["ALL"],
+      CapAdd: ["NET_ADMIN", "SETUID", "SETGID", "SETPCAP"],
+      ReadonlyRootfs: true,
+      SecurityOpt: ["no-new-privileges"],
+    });
+    expect(spec.Env).toContain(`LD_CAPTURE_TOKEN=${"c".repeat(43)}`);
+  });
+
+  it("points a capturing desktop's names at its gate and never gives the desktop NET_ADMIN", () => {
+    const spec = desktopSpec(captured, "localdot/desktop:dev", streamOptions());
+    expect(spec.HostConfig).toMatchObject({ Dns: ["172.24.0.10"], CapDrop: ["NET_RAW"] });
+    expect("CapAdd" in spec.HostConfig).toBe(false);
+    expect(spec.Env.join("\n")).not.toContain("c".repeat(43));
+  });
+
+  it("keeps a computer made before capture as it was", () => {
+    expect(gateSpec(record, "i").User).toBe("nobody");
+    expect("CapAdd" in gateSpec(record, "i").HostConfig).toBe(false);
+    expect(gateSpec(record, "i").Env.some((e) => e.startsWith("LD_CAPTURE_TOKEN="))).toBe(false);
+    expect("Dns" in desktopSpec(record, "i", streamOptions()).HostConfig).toBe(false);
+  });
+
+  it("links the desktop to its gate from a one-shot helper in the desktop's network namespace", () => {
+    const spec = linkSpec(captured, "localdot/gate:dev");
+    expect(spec).toMatchObject({
+      Image: "localdot/gate:dev",
+      User: "root",
+      Entrypoint: ["/link.sh"],
+      Cmd: ["172.24.0.11", "172.24.0.10", LINK.desktop, LINK.gate, "default"],
+      HostConfig: {
+        NetworkMode: `container:${record.docker.desktop}`,
+        CapDrop: ["ALL"],
+        CapAdd: ["NET_ADMIN"],
+        ReadonlyRootfs: true,
+        SecurityOpt: ["no-new-privileges"],
+      },
+    });
+    expect(linkName(record.id, "ldtest-l5-")).toBe(`ldtest-l5-link-${record.id}`);
   });
 });

@@ -113,6 +113,8 @@ export interface AgentModel {
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
   readonly approval?: ApprovalCard | null;
+  // A connection's card, which waits for the user beside the task's own decisions.
+  readonly connection?: ApprovalCard | null;
   readonly approvalOutcome?: ApprovalOutcome;
   readonly safetyPaused?: { readonly paused: boolean; readonly atStepBoundary: boolean };
   readonly safetyPause?: EventOf<"safety.pause">["data"]["pause"];

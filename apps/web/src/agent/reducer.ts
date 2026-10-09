@@ -104,14 +104,20 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       break;
     case "approval.request": {
       const { kind: _kind, target: _target, preview, ...card } = e.data;
-      next = { ...next, approval: ApprovalCard.parse({ ...card, fields: preview.fields }) };
+      const parsed = ApprovalCard.parse({ ...card, fields: preview.fields });
+      next =
+        parsed.actionClass === "network"
+          ? { ...next, connection: parsed }
+          : { ...next, approval: parsed };
       break;
     }
     case "approval.resolve": {
-      const card = model.approval?.approvalId === e.data.approvalId ? model.approval : null;
+      const card =
+        [model.approval, model.connection].find((c) => c?.approvalId === e.data.approvalId) ?? null;
       next = {
         ...next,
-        ...(card ? { approval: null } : {}),
+        ...(card && card === model.approval ? { approval: null } : {}),
+        ...(card && card === model.connection ? { connection: null } : {}),
         approvalOutcome: {
           approvalId: e.data.approvalId,
           decision: e.data.decision,

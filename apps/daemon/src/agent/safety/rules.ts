@@ -31,10 +31,12 @@ export const ALWAYS_SCOPES: Readonly<Record<ActionClass, readonly AlwaysScope[]>
   upload: ["task"],
   credentials: [],
   unknown: ["task"],
+  network: ["task", "app", "destination"],
 };
 export interface Place {
   readonly site?: string;
   readonly app?: string;
+  readonly destination?: string;
 }
 
 const Rule = AutonomyRule.refine((rule) => ALWAYS_SCOPES[rule.actionClass].includes(rule.scope));
@@ -92,7 +94,8 @@ export class RulesStore {
         ALWAYS_SCOPES[actionClass].includes(rule.scope) &&
         (rule.scope === "always" ||
           (rule.scope === "site" && rule.site === place.site) ||
-          (rule.scope === "app" && rule.app === place.app)),
+          (rule.scope === "app" && rule.app === place.app) ||
+          (rule.scope === "destination" && rule.destination === place.destination)),
     );
   }
   // Returns the new rule, or nothing when the same rule is already saved.
@@ -107,7 +110,8 @@ export class RulesStore {
         rule.actionClass === actionClass &&
         rule.scope === option.scope &&
         rule.site === option.site &&
-        rule.app === option.app,
+        rule.app === option.app &&
+        rule.destination === option.destination,
     );
     if (same) return undefined;
     if (rules.length >= MAX_RULES)
@@ -119,6 +123,7 @@ export class RulesStore {
       scope: option.scope,
       ...(option.site === undefined ? {} : { site: option.site }),
       ...(option.app === undefined ? {} : { app: option.app }),
+      ...(option.destination === undefined ? {} : { destination: option.destination }),
       label: option.label,
       createdAt: this.now(),
       createdFrom,
@@ -142,7 +147,15 @@ export class RulesStore {
   }
 }
 
-export function ruleChange({ id, scope, actionClass, label, site, app }: AutonomyRule): RuleChange {
+export function ruleChange({
+  id,
+  scope,
+  actionClass,
+  label,
+  site,
+  app,
+  destination,
+}: AutonomyRule): RuleChange {
   return {
     id,
     scope,
@@ -150,5 +163,6 @@ export function ruleChange({ id, scope, actionClass, label, site, app }: Autonom
     label,
     ...(site === undefined ? {} : { site }),
     ...(app === undefined ? {} : { app }),
+    ...(destination === undefined ? {} : { destination }),
   };
 }

@@ -93,6 +93,16 @@
   gap: 8px;
   margin: 0;
 }
+.connection-why {
+  margin: calc(var(--spacing) * -2) 0 calc(var(--spacing) * 4);
+  color: var(--color-text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.connection-card dd {
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
 .approval-card dl div {
   display: grid;
   grid-template-columns: minmax(80px, 1fr) minmax(0, 3fr);

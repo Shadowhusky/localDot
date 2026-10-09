@@ -51,6 +51,7 @@ export interface DesktopdDeps {
   clockMono?: () => number;
   perception?: PerceptionDeps;
   selfTest?: () => Promise<SelfTestReport>;
+  connectionOwner?(port: number): Promise<string | undefined>;
   tools?: ToolRouteDeps;
   prepareBrowser?(
     taskId: string,
@@ -171,6 +172,14 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
   });
 
   app.get("/clock", (c) => c.json({ mono: clock() }));
+
+  // Which program a connection waiting at keyd comes from, for the card that asks the user.
+  app.get("/connection-owner", async (c) => {
+    const port = Number(c.req.query("port"));
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return c.text("bad port", 400);
+    const owner = await deps.connectionOwner?.(port);
+    return owner ? c.json({ app: owner }) : c.text("unknown", 404);
+  });
 
   const withX = (fn: (x: XHelper) => Promise<Response>) => async () => {
     if (!deps.x?.alive) return new Response("x helper not available", { status: 503 });

@@ -168,7 +168,7 @@ describe("forwarder boundary and connection lifetime", () => {
   it("bounds HTTP and CONNECT handshakes while allowing established tunnels to stay idle", async () => {
     const gate = createServer(() => {});
     gate.on("connect", () => {});
-    const port = await proxy(gate, { handshakeTimeoutMs: 40 });
+    const port = await proxy(gate, { handshakeTimeoutMs: 40, tunnelTimeoutMs: 40 });
     expect((await get(port).catch(() => undefined))?.status).toBe(504);
     const tunnel = await new Promise<number>((resolve, reject) => {
       const req = request({
@@ -210,6 +210,25 @@ describe("forwarder boundary and connection lifetime", () => {
     expect(client.destroyed).toBe(false);
     client.write("still live");
     expect(((await once(client, "data"))[0] as Buffer).toString()).toBe("still live");
+    client.destroy();
+  });
+
+  it("waits for keyd's answer on a held CONNECT past the request bound, naming the program's port", async () => {
+    const seen: (string | undefined)[] = [];
+    const gate = createServer();
+    gate.on("connect", (req, socket) => {
+      seen.push(req.headers["x-localdot-source"] as string | undefined);
+      setTimeout(() => socket.write("HTTP/1.1 200 Connection Established\r\n\r\n"), 150);
+    });
+    const port = await proxy(gate, { handshakeTimeoutMs: 40 });
+    const client = connect(port, "127.0.0.1");
+    sockets.add(client);
+    client.on("error", () => {});
+    await once(client, "connect");
+    client.write("CONNECT chat.example.test:5222 HTTP/1.1\r\nHost: chat.example.test:5222\r\n\r\n");
+    const [answer] = await once(client, "data");
+    expect((answer as Buffer).toString()).toBe("HTTP/1.1 200 Connection Established\r\n\r\n");
+    expect(seen).toEqual([String(client.localPort)]);
     client.destroy();
   });
 

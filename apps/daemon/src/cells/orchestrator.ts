@@ -21,6 +21,8 @@ import {
   gateSpec,
   homeVolumeSpec,
   internalNetworkSpec,
+  linkName,
+  linkSpec,
   NAME_PREFIX,
 } from "./spec.ts";
 import type { CellStore } from "./store.ts";
@@ -62,6 +64,8 @@ export interface OrchestratorDeps {
   probeStream(endpoint: CellEndpoints["stream"]): Promise<boolean>;
   // Docker-backed tests pass "localdot-test-", so they never create or touch a real cell's objects.
   namePrefix?: string;
+  // Added to every Docker object a cell gets, so a test's cleanup can filter by its label alone.
+  labels?: Readonly<Record<string, string>>;
   sleep?: (ms: number) => Promise<void>;
   readyTimeoutMs?: number;
   watchEveryMs?: number;
@@ -475,7 +479,7 @@ export class CellOrchestrator {
       const internal = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
-        body: internalNetworkSpec(names.internalNetwork, id),
+        body: this.#labeled(internalNetworkSpec(names.internalNetwork, id)),
       });
       undo.push({
         what: `network ${names.internalNetwork}`,
@@ -485,7 +489,7 @@ export class CellOrchestrator {
       const egress = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
-        body: egressNetworkSpec(names.egressNetwork, id),
+        body: this.#labeled(egressNetworkSpec(names.egressNetwork, id)),
       });
       undo.push({
         what: `network ${names.egressNetwork}`,
@@ -497,7 +501,7 @@ export class CellOrchestrator {
       const volume = await this.#docker.request<{ Name: string; Labels?: Record<string, string> }>({
         method: "POST",
         path: "/volumes/create",
-        body: homeVolumeSpec(names.homeVolume, id),
+        body: this.#labeled(homeVolumeSpec(names.homeVolume, id)),
       });
       if (
         volume.Name !== names.homeVolume ||
@@ -527,7 +531,7 @@ export class CellOrchestrator {
         createdAt: new Date().toISOString(),
         scale,
         keydPort,
-        tokens: { desktopd: newCellToken(), stream: newCellToken() },
+        tokens: { desktopd: newCellToken(), stream: newCellToken(), capture: newCellToken() },
         docker: {
           ...names,
           gateInternalIp: hostAddress(internalSubnet, GATE_OFFSET),
@@ -546,7 +550,7 @@ export class CellOrchestrator {
           method: "POST",
           path: "/containers/create",
           query: { name },
-          body: spec,
+          body: this.#labeled(spec),
         });
         if (!made.Id || typeof made.Id !== "string")
           throw new Error("container identity unavailable");
@@ -1042,6 +1046,7 @@ export class CellOrchestrator {
           method: "POST",
           path: objectPath("containers", d.desktop, "start"),
         });
+        if (record.tokens.capture) await this.#link(record);
       }
       // Every start publishes new host ports (Review Focus 2).
       const ports = await this.#readPorts(d.gate);
@@ -1428,6 +1433,50 @@ export class CellOrchestrator {
   }
 
   // v=true also removes the anonymous volumes an image's VOLUME lines create.
+  // A fresh desktop's network namespace has no link to its gate yet: a one-shot helper adds it.
+  async #link(record: CellRecord): Promise<void> {
+    const name = linkName(record.id, this.#namePrefix);
+    const create = () =>
+      this.#docker.request<{ Id: string }>({
+        method: "POST",
+        path: "/containers/create",
+        query: { name },
+        body: this.#labeled(linkSpec(record, this.#images.gate)),
+      });
+    const made = await create().catch(async (err) => {
+      if (!isStatus(err, 409)) throw err;
+      // A helper an interrupted start left behind goes only if it is this cell's own.
+      const stale = await this.#docker.request<{
+        Id: string;
+        Config: { Labels?: Record<string, string> };
+      }>({
+        method: "GET",
+        path: objectPath("containers", name, "json"),
+      });
+      const labels = stale.Config.Labels ?? {};
+      if (labels["localdot.cell"] !== record.id || labels["localdot.role"] !== "link") throw err;
+      await this.#removeContainer(stale.Id);
+      return create();
+    });
+    try {
+      await this.#docker.request({
+        method: "POST",
+        path: objectPath("containers", made.Id, "start"),
+      });
+      const { StatusCode } = await this.#docker.request<{ StatusCode: number }>({
+        method: "POST",
+        path: objectPath("containers", made.Id, "wait"),
+      });
+      if (StatusCode !== 0) throw new Error("the computer's network link could not be set up");
+    } finally {
+      await this.#removeContainer(made.Id).catch(() => {});
+    }
+  }
+
+  #labeled<T extends { Labels?: Record<string, string> }>(spec: T): T {
+    return this.deps.labels ? { ...spec, Labels: { ...spec.Labels, ...this.deps.labels } } : spec;
+  }
+
   #removeContainer(name: string): Promise<unknown> {
     return this.#docker.request({
       method: "DELETE",

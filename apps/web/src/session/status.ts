@@ -60,7 +60,8 @@ export interface TaskHud {
 
 export function taskFacts(model: AgentModel): TaskFacts {
   return {
-    approval: !!model.approval,
+    // A connection's card needs the user as much as the task's own decision does.
+    approval: !!model.approval || !!model.connection,
     question: model.pendingAsk ? (model.questions.get(model.pendingAsk)?.question ?? "") : null,
     takeover: model.pendingTakeover
       ? (model.takeovers.get(model.pendingTakeover)?.note ?? "")

@@ -182,6 +182,39 @@ describe("bounded agent projection", () => {
     expect(model.changes[0]?.truncated).toBe(true);
     expect(model.historyTruncated).toBe(true);
   });
+  it("holds a connection's card beside the task's own decision and clears each by its own answer", () => {
+    const card = (seq: number, approvalId: string, actionClass: string, title: string) =>
+      ev(seq, "approval.request", {
+        approvalId,
+        generation: 1,
+        revision: 1,
+        expiresAt: 9_000_000,
+        actionClass,
+        risk: actionClass === "network" ? "medium" : "high",
+        title,
+        kind: "permission",
+        preview: { fields: [["Destination", "chat.example.com:5222"]] },
+      });
+    const connection = id(31000),
+      approval = id(31001);
+    const both = reduce([
+      card(0, connection, "network", "wechat wants to connect to chat.example.com:5222"),
+      card(1, approval, "send", "Send as you"),
+    ]);
+    expect(both.connection?.approvalId).toBe(connection);
+    expect(both.approval?.approvalId).toBe(approval);
+    const answered = projectAgentEvent(
+      both,
+      ev(2, "approval.resolve", { approvalId: connection, decision: "approve", by: "user" }),
+    );
+    expect(answered.connection).toBeNull();
+    expect(answered.approval?.approvalId).toBe(approval);
+    expect(answered.approvalOutcome).toEqual({
+      approvalId: connection,
+      decision: "approve",
+      actionClass: "network",
+    });
+  });
   it("keeps the last decision's note and the Always allow choice it saved, until removed", () => {
     const approval = id(30000),
       rule = id(30001);

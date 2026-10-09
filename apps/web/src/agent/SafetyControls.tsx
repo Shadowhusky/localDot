@@ -3,6 +3,7 @@ import type { CellSummary } from "../cells/types.ts";
 import { AllowedNotice, AlwaysAllow } from "./AlwaysAllow.tsx";
 import { ApprovalCard } from "./ApprovalCard.tsx";
 import { notifyApproval } from "./approval-notification.ts";
+import { ConnectionCard } from "./ConnectionCard.tsx";
 import { taskStalled } from "./heartbeat.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { SafetyView } from "./useSafety.ts";
@@ -70,9 +71,33 @@ export function SafetyControls({
   const status = agent.snapshot?.status;
   const budgetHold = agent.snapshot?.budgetHold;
   const taskOpen = !replaying && !!agent.sessionId && status !== "ended" && status !== "idle";
+  const notifications = (
+    <div className="notification-control">
+      <button
+        type="button"
+        disabled={permission === "granted" || permission === "unsupported" || !visible}
+        onClick={() => void enable()}
+      >
+        {permission === "granted" ? "Notifications enabled" : "Enable decision notifications"}
+      </button>
+      {notificationError && <p role="status">{notificationError}</p>}
+    </div>
+  );
   return (
     <div className="safety-controls">
-      {approval && (
+      {approval?.actionClass === "network" && (
+        <ConnectionCard
+          key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
+          card={approval}
+          enabled={visible && safety.canApprove}
+          visible={visible}
+          pending={safety.pending === "approval"}
+          onDecision={safety.answerApproval}
+        >
+          {notifications}
+        </ConnectionCard>
+      )}
+      {approval && approval.actionClass !== "network" && (
         <ApprovalCard
           key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
           card={approval}
@@ -89,18 +114,7 @@ export function SafetyControls({
                 canApprove={canApprove}
                 onDecision={safety.answerApproval}
               />
-              <div className="notification-control">
-                <button
-                  type="button"
-                  disabled={permission === "granted" || permission === "unsupported" || !visible}
-                  onClick={() => void enable()}
-                >
-                  {permission === "granted"
-                    ? "Notifications enabled"
-                    : "Enable decision notifications"}
-                </button>
-                {notificationError && <p role="status">{notificationError}</p>}
-              </div>
+              {notifications}
             </>
           )}
         </ApprovalCard>

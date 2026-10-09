@@ -87,6 +87,7 @@ async function setup(
     sleep?: (ms: number) => Promise<void>;
     makeStore?: (home: string) => CellStore;
     externalKeydPorts?: () => Iterable<number>;
+    labels?: Record<string, string>;
   } = {},
 ) {
   fake = await startFakeDocker();
@@ -103,6 +104,7 @@ async function setup(
     probeStream: async () => (opts.stream ?? (() => true))(),
     sleep: opts.sleep ?? (async () => {}),
     readyTimeoutMs: opts.readyTimeoutMs ?? 5000,
+    ...(opts.labels ? { labels: opts.labels } : {}),
     watchEveryMs: 0,
     restartBackoffMs: opts.restartBackoffMs ?? [0, 0],
     ...(opts.externalKeydPorts ? { externalKeydPorts: opts.externalKeydPorts } : {}),
@@ -171,6 +173,97 @@ describe("CellOrchestrator.create", () => {
       baseUrl: "http://127.0.0.1:50001",
       authorization: `Basic ${Buffer.from(`localdot:${record?.tokens.stream}`).toString("base64")}`,
     });
+  });
+
+  it("links each started desktop to its gate with a one-shot helper and leaves none behind", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const record = store.get(cell.id);
+    if (record?.kind !== "desktop" || !record.tokens.capture) throw new Error("no capture token");
+    const gate = fake.state.containers.get(record.docker.gate)?.body as
+      | { User?: string; Env?: string[] }
+      | undefined;
+    expect(gate?.User).toBe("root");
+    expect(gate?.Env).toContain(`LD_CAPTURE_TOKEN=${record.tokens.capture}`);
+    const link = `localdot-link-${cell.id}`;
+    const create = fake.state.calls.find(
+      (c) => c.path === "/containers/create" && c.query.get("name") === link,
+    );
+    expect(create?.body).toMatchObject({
+      Entrypoint: ["/link.sh"],
+      HostConfig: { NetworkMode: `container:${record.docker.desktop}`, CapAdd: ["NET_ADMIN"] },
+    });
+    const order = fake.state.calls.map((c) => `${c.method} ${c.path}`);
+    expect(order.indexOf(`POST /containers/${record.docker.desktop}/start`)).toBeLessThan(
+      order.indexOf(`POST /containers/id-${link}/start`),
+    );
+    expect(order).toContain(`POST /containers/id-${link}/wait`);
+    expect(fake.state.containers.has(link)).toBe(false);
+    await orchestrator.stop(cell.id);
+    await orchestrator.start(cell.id);
+    await stateOf(cell.id, "ready");
+    expect(
+      fake.state.calls.filter(
+        (c) => c.method === "POST" && c.path === `/containers/id-${link}/wait`,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("clears a link helper an interrupted start left behind only when it is this cell's own", async () => {
+    const { orchestrator, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    await orchestrator.stop(cell.id);
+    const name = `localdot-link-${cell.id}`;
+    const leftover = (labels: Record<string, string>) =>
+      fake.state.containers.set(name, {
+        name,
+        body: { Image: "localdot/gate:dev", Labels: labels, HostConfig: {} },
+        running: false,
+        paused: false,
+        files: new Map(),
+        exitCode: 0,
+        starts: 0,
+        ports: {},
+        networks: {},
+      });
+    leftover({ "localdot.cell": cell.id, "localdot.role": "link" });
+    await orchestrator.start(cell.id);
+    await stateOf(cell.id, "ready");
+    expect(fake.state.containers.has(name)).toBe(false);
+    await orchestrator.stop(cell.id);
+    leftover({ "localdot.cell": "someone-else", "localdot.role": "link" });
+    await orchestrator.start(cell.id).catch(() => {});
+    await stateOf(cell.id, "failed");
+    expect(fake.state.containers.get(name)?.body.Labels?.["localdot.cell"]).toBe("someone-else");
+    expect(
+      fake.state.calls.some((c) => c.method === "DELETE" && c.path === `/containers/${name}`),
+    ).toBe(false);
+  });
+
+  it("fails the start when the desktop's link cannot be set up", async () => {
+    const { orchestrator, stateOf } = await setup();
+    fake.state.failRequests.add("POST /containers/id-localdot-link-");
+    const cell = await orchestrator.create({ scale: 2 }).catch(() => undefined);
+    const id = cell?.id ?? orchestrator.list()[0]?.id;
+    if (id) await stateOf(id, "failed");
+    expect(orchestrator.list().every((c) => c.state !== "ready")).toBe(true);
+  });
+
+  it("labels every Docker object it creates with the labels it was given", async () => {
+    const { orchestrator, stateOf } = await setup({ labels: { "dev.localdot.test": "unit" } });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const created = fake.state.calls.filter(
+      (c) => c.method === "POST" && c.path.endsWith("/create"),
+    );
+    expect(created.length).toBe(6);
+    for (const call of created)
+      expect((call.body as { Labels?: Record<string, string> }).Labels).toMatchObject({
+        "dev.localdot.test": "unit",
+        "localdot.cell": cell.id,
+      });
   });
 
   it("undoes everything when the desktop container cannot be created", async () => {
@@ -270,10 +363,11 @@ describe("CellOrchestrator lifecycle", () => {
     const { orchestrator, stateOf } = await setup();
     const cell = await orchestrator.create({ scale: 2 });
     await stateOf(cell.id, "ready");
+    const before = fake.state.calls.length;
     await orchestrator.remove(cell.id);
-    const deletes = fake.state.calls.filter(
-      (c) => c.method === "DELETE" && c.path.startsWith("/containers/"),
-    );
+    const deletes = fake.state.calls
+      .slice(before)
+      .filter((c) => c.method === "DELETE" && c.path.startsWith("/containers/"));
     expect(deletes.map((c) => Object.fromEntries(c.query))).toEqual([
       { force: "true", v: "true" },
       { force: "true", v: "true" },

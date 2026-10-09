@@ -31,6 +31,19 @@ describe("Codex developer instructions", () => {
     expect(text).toContain("~/skills/office");
     expect(text).toContain("SKILL.md");
   });
+  it("never works around the network rules, and says when a connection waits or was refused", () => {
+    const text = codexInstructions({
+      memory: { user: "", memory: "" },
+      skills: [],
+      today: new Date("2026-10-09T12:00:00Z"),
+    });
+    for (const rule of [
+      "Never build tunnels, proxies, relays or port forwards to get around these rules.",
+      "If a connection is waiting for the user's approval or was refused, say so plainly",
+      "waits until the user allows it on a card",
+    ])
+      expect(text).toContain(rule);
+  });
   it("works inside the computer without asking, and asks or hands over only when blocked", () => {
     const text = codexInstructions({
       memory: { user: "", memory: "" },

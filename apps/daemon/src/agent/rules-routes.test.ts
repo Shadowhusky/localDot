@@ -251,3 +251,47 @@ describe("Always allow routes", () => {
     }
   });
 });
+
+describe("a connection's card", () => {
+  it("is answered through the task's approval route whatever the brain is doing, and its Always is listed", async () => {
+    const f = setup();
+    const { session, app } = f;
+    const decision = session.connections.request({
+      app: "wechat",
+      host: "chat.example.com",
+      port: 5222,
+    });
+    const card = session.connections.pending;
+    if (!card) throw new Error("no card");
+    const generation = session.generation;
+    if (generation) session.retireBrain(generation);
+    const post = (body: unknown) =>
+      app.request(`http://127.0.0.1/api/agent/sessions/${session.id}/approvals/answer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const answer = {
+      approvalId: card.approvalId,
+      generation: card.generation,
+      revision: card.revision,
+      decision: "approve",
+      always: "destination",
+    };
+    expect((await post({ ...answer, revision: card.revision + 1 })).status).toBe(409);
+    expect((await post(answer)).status).toBe(204);
+    await expect(decision).resolves.toMatchObject({ allow: true });
+    const listed = (await (await f.send("GET", "/api/agent/rules")).json()) as {
+      rules: AutonomyRule[];
+    };
+    expect(listed.rules).toMatchObject([
+      {
+        actionClass: "network",
+        scope: "destination",
+        destination: "chat.example.com:5222",
+        label: "Always for chat.example.com:5222",
+      },
+    ]);
+    expect((await post(answer)).status).toBe(409);
+  });
+});

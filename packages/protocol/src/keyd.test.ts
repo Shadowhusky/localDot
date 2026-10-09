@@ -173,6 +173,21 @@ describe("keyd replies", () => {
       "events.dropped",
     );
     expect(() => KeydEvent.parse({ ...keyUse, type: "key.leak" })).toThrow();
+    const ask = {
+      type: "egress.ask",
+      cell: "c1",
+      time: "t",
+      data: {
+        id: "0".repeat(32),
+        host: "chat.example.com",
+        port: 5222,
+        source: 40000,
+        via: "capture",
+      },
+    };
+    expect(KeydEvent.parse(ask).type).toBe("egress.ask");
+    expect(() => KeydEvent.parse({ ...ask, data: { ...ask.data, port: 0 } })).toThrow();
+    expect(() => KeydEvent.parse({ ...ask, data: { ...ask.data, via: "tunnel" } })).toThrow();
     expect(() =>
       KeydEvent.parse({ ...keyUse, data: { ...keyUse.data, decision: "maybe" } }),
     ).toThrow();

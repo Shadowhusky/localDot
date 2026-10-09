@@ -45,10 +45,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
   sessionStorage.clear();
 });
-function fixture(fetchImpl: typeof fetch, approval: Card | null = card) {
+function fixture(
+  fetchImpl: typeof fetch,
+  approval: Card | null = card,
+  extra: { connection?: Card; pendingTakeover?: string } = {},
+) {
   document.body.tabIndex = -1;
   document.body.focus();
-  const model = { ...emptyAgentModel(), approval };
+  const model = {
+    ...emptyAgentModel(),
+    approval,
+    ...(extra.connection ? { connection: extra.connection } : {}),
+    ...(extra.pendingTakeover ? { pendingTakeover: extra.pendingTakeover } : {}),
+  };
   let state: AgentFeedState = {
     cellId: CELL,
     sessionId: SESSION,
@@ -78,6 +87,7 @@ function fixture(fetchImpl: typeof fetch, approval: Card | null = card) {
       toolCalls: 0,
       autonomy: DEFAULT_AUTONOMY,
       ...(approval ? { approval } : {}),
+      ...(extra.connection ? { connection: extra.connection } : {}),
     },
     availability: "ready",
     error: null,
@@ -117,6 +127,45 @@ function fixture(fetchImpl: typeof fetch, approval: Card | null = card) {
     },
   };
 }
+it("shows a connection's card behind the task's own decision, answerable while the user holds the computer", async () => {
+  const connection: Card = {
+    ...card,
+    approvalId: OTHER,
+    actionClass: "network",
+    risk: "medium",
+    title: "wechat wants to connect to chat.example.com:5222",
+    fields: [["Destination", "chat.example.com:5222"]],
+  };
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const both = fixture(fetchImpl, card, { connection });
+  expect(both.result.current.approval?.approvalId).toBe(ID);
+  both.unmount();
+  const held = fixture(fetchImpl, null, { connection, pendingTakeover: ID });
+  expect(held.result.current.approval?.approvalId).toBe(OTHER);
+  expect(held.result.current.canApprove).toBe(true);
+  const free = fixture(fetchImpl, null, { connection });
+  expect(free.result.current.canPause).toBe(true);
+  const value = {
+    approvalId: OTHER,
+    generation: 1,
+    revision: 1,
+    decision: "approve",
+    always: "task",
+  };
+  expect((connection.always ?? []).length).toBe(0);
+  await act(async () => {
+    expect(await held.result.current.answerApproval(value)).toBe(false);
+    expect(await held.result.current.answerApproval({ ...value, always: undefined })).toBe(true);
+  });
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+    approvalId: OTHER,
+    generation: 1,
+    revision: 1,
+    decision: "approve",
+  });
+  const blocked = fixture(fetchImpl, card, { pendingTakeover: ID });
+  expect(blocked.result.current.canApprove).toBe(false);
+});
 it("Approve once submits exactly the current DTO once and never accepts body extras or model prose", async () => {
   const late = Promise.withResolvers<Response>(),
     fetchImpl = vi.fn<typeof fetch>(async () => late.promise),

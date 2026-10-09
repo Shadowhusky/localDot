@@ -17,6 +17,8 @@ export const GATE_PROXY_PORT = 3128;
 export const PROXY_TOKEN_FILE = "/etc/localdot/cell/proxy-token";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const HANDSHAKE_TIMEOUT_MS = 30_000;
+// keyd holds a CONNECT to anything but the web for up to two minutes while the user decides.
+const TUNNEL_TIMEOUT_MS = 150_000;
 // Headers that describe one hop are never relayed. The client's Proxy-Authorization is replaced
 // with the cell's token, and Proxy-Authenticate never reaches a client, so nothing prompts for it.
 const HOP = new Set([
@@ -35,6 +37,7 @@ export interface ForwarderOptions {
   gate: { host: string; port: number } | undefined;
   readToken(): string | undefined;
   handshakeTimeoutMs?: number;
+  tunnelTimeoutMs?: number;
 }
 
 type Ready =
@@ -156,7 +159,14 @@ function forwardTunnel(
       port,
       method: "CONNECT",
       path: req.url,
-      headers: { host: req.url, "proxy-authorization": ready.authorization },
+      headers: {
+        host: req.url,
+        "proxy-authorization": ready.authorization,
+        // The program's own port, so the card that asks the user can name the program.
+        ...("remotePort" in client && typeof client.remotePort === "number"
+          ? { "x-localdot-source": String(client.remotePort) }
+          : {}),
+      },
       agent,
     }),
   );
@@ -168,7 +178,7 @@ function forwardTunnel(
   const deadline = setTimeout(() => {
     refuseRaw(client, 504, { "X-Localdot-Reason": "gate-timeout" });
     up.destroy();
-  }, opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
+  }, opts.tunnelTimeoutMs ?? TUNNEL_TIMEOUT_MS);
   up.once("close", () => clearTimeout(deadline));
   client.once("close", () => {
     clearTimeout(deadline);

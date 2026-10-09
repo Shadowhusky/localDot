@@ -335,8 +335,18 @@ const startup = async () => {
 void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup()).catch(() =>
   console.error("startup cleanup, replacement recovery or cell reconcile failed"),
 );
-const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
+const keydEvents = new KeydEventRouter({
+  keyd,
+  live,
+  eventLog,
+  ask: (cellId, held) => void agent.connections.ask(cellId, held),
+  asksMissed: () => void agent.connections.sweep(),
+});
+// keyd holds a connection for two minutes; a missed event is picked up well within that.
+const sweepAsks = setInterval(() => void agent.connections.sweep(), 15_000);
+sweepAsks.unref();
 shutdown.push(
+  () => clearInterval(sweepAsks),
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
   () => browserRecovery.close(),
