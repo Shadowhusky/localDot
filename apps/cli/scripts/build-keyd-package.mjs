@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   KEYD_IDENTIFIER,
+  KEYD_NATIVE_IDENTIFIER,
   KEYD_PACKAGE,
   RELEASE_VERSION,
 } from "../../../packages/protocol/src/release.ts";
-import { verifyReleaseKeyd } from "../src/install/keyd-verification.ts";
+import { verifyReleaseKeyd, verifyReleaseKeydNative } from "../src/install/keyd-verification.ts";
 import { KEYD_RELEASE_TEAM_ID } from "../src/install/release-trust.ts";
 
 const execute = promisify(execFile),
@@ -31,41 +32,64 @@ async function go(args) {
   return JSON.parse(stdout);
 }
 
-/** Local author build only. It reads an already-signed trimpath binary and cached public license
- * inputs; it never signs, downloads modules, executes keyd, notarizes or publishes anything.
- * verify is an offline test seam, not a release configuration option.
- */
-export async function buildKeydPackage({ output, binary, version }, verify = verifyReleaseKeyd) {
-  if (typeof version !== "string" || version.length > 64 || !RELEASE_VERSION.test(version))
-    throw failure();
-  const path = await realpath(binary),
-    bytes = await boundedFile(path, 16 * 1024 * 1024),
-    sha256 = hash(bytes);
-  const expected = {
-    package: KEYD_PACKAGE,
-    path: "bin/keyd",
-    sha256,
-    identifier: KEYD_IDENTIFIER,
-    teamId: KEYD_RELEASE_TEAM_ID,
-  };
-  const abort = new AbortController().signal;
-  await verify(path, expected, abort);
-  const info = await go(["version", "-m", "-json", path]),
-    env = await go(["env", "-json", "GOROOT", "GOPATH", "GOVERSION"]);
+// Both executables are trimpath cgo builds of this module for darwin/arm64 with the Go here.
+function checkBuild(info, command, goVersion) {
   const settings = new Map((info.Settings ?? []).map((item) => [item.Key, item.Value]));
   if (
-    info.Path !== "github.com/shadowhusky/localdot/keyd/cmd/keyd" ||
+    info.Path !== `github.com/shadowhusky/localdot/keyd/cmd/${command}` ||
     info.Main?.Path !== "github.com/shadowhusky/localdot/keyd" ||
-    info.GoVersion !== env.GOVERSION ||
+    info.GoVersion !== goVersion ||
     settings.get("GOOS") !== "darwin" ||
     settings.get("GOARCH") !== "arm64" ||
     settings.get("CGO_ENABLED") !== "1" ||
     settings.get("-trimpath") !== "true" ||
     settings.get("-buildmode") !== "exe" ||
     settings.get("-race") === "true" ||
-    !Array.isArray(info.Deps) ||
-    info.Deps.length > 32
+    !Array.isArray(info.Deps ?? []) ||
+    (info.Deps ?? []).length > 32
   )
+    throw failure();
+}
+
+/** Local author build only. It reads already-signed trimpath binaries of keyd and keyd-native
+ * and cached public license inputs; it never signs, downloads modules, executes either,
+ * notarizes or publishes anything. verify and verifyNative are offline test seams, not release
+ * configuration options.
+ */
+export async function buildKeydPackage(
+  { output, binary, native, version },
+  verify = verifyReleaseKeyd,
+  verifyNative = verifyReleaseKeydNative,
+) {
+  if (typeof version !== "string" || version.length > 64 || !RELEASE_VERSION.test(version))
+    throw failure();
+  const path = await realpath(binary),
+    bytes = await boundedFile(path, 16 * 1024 * 1024),
+    nativePath = await realpath(native),
+    nativeBytes = await boundedFile(nativePath, 16 * 1024 * 1024);
+  const expected = {
+    package: KEYD_PACKAGE,
+    path: "bin/keyd",
+    sha256: hash(bytes),
+    identifier: KEYD_IDENTIFIER,
+    teamId: KEYD_RELEASE_TEAM_ID,
+    native: {
+      path: "bin/keyd-native",
+      sha256: hash(nativeBytes),
+      identifier: KEYD_NATIVE_IDENTIFIER,
+    },
+  };
+  const abort = new AbortController().signal;
+  await verify(path, expected, abort);
+  await verifyNative(nativePath, expected, abort);
+  const info = await go(["version", "-m", "-json", path]),
+    nativeInfo = await go(["version", "-m", "-json", nativePath]),
+    env = await go(["env", "-json", "GOROOT", "GOPATH", "GOVERSION"]);
+  checkBuild(info, "keyd", env.GOVERSION);
+  checkBuild(nativeInfo, "keyd-native", env.GOVERSION);
+  // keyd's notices cover the package only if keyd-native links nothing keyd does not.
+  const linked = new Set((info.Deps ?? []).map((dep) => `${dep.Path} ${dep.Version} ${dep.Sum}`));
+  if ((nativeInfo.Deps ?? []).some((dep) => !linked.has(`${dep.Path} ${dep.Version} ${dep.Sum}`)))
     throw failure();
   const sums = new Set(
     (await readFile(join(workspace, "keyd/go.sum"), "utf8")).trim().split(/\r?\n/),
@@ -86,7 +110,7 @@ export async function buildKeydPackage({ output, binary, version }, verify = ver
     bytes: await boundedFile(goLicense),
   });
   const seen = new Set();
-  for (const dep of info.Deps) {
+  for (const dep of info.Deps ?? []) {
     if (
       dep.Replace ||
       !/^[a-z0-9.-]+\/[a-z0-9/_-]+$/.test(dep.Path) ||
@@ -121,6 +145,9 @@ export async function buildKeydPackage({ output, binary, version }, verify = ver
   await copyFile(path, join(out, "bin/keyd"));
   await chmod(join(out, "bin/keyd"), 0o700);
   await verify(join(out, "bin/keyd"), expected, abort);
+  await copyFile(nativePath, join(out, "bin/keyd-native"));
+  await chmod(join(out, "bin/keyd-native"), 0o700);
+  await verifyNative(join(out, "bin/keyd-native"), expected, abort);
   await writeFile(join(out, "LICENSE"), ownLicense, { flag: "wx", mode: 0o600 });
   for (const notice of notices)
     await writeFile(join(out, notice.path), notice.bytes, { flag: "wx", mode: 0o600 });
@@ -135,7 +162,7 @@ export async function buildKeydPackage({ output, binary, version }, verify = ver
   await writeFile(join(out, "THIRD-PARTY.md"), lines.join("\n"), { flag: "wx", mode: 0o600 });
   await writeFile(
     join(out, "package.json"),
-    `${JSON.stringify({ name: KEYD_PACKAGE, version, description: "Signed native credential helper for localDot", license: "MIT", os: ["darwin"], cpu: ["arm64"], files: ["bin/keyd", "LICENSE", "THIRD-PARTY.md", "licenses"], repository: { type: "git", url: "https://github.com/Shadowhusky/localdot" } }, null, 2)}\n`,
+    `${JSON.stringify({ name: KEYD_PACKAGE, version, description: "Signed native credential helper for localDot", license: "MIT", os: ["darwin"], cpu: ["arm64"], files: ["bin/keyd", "bin/keyd-native", "LICENSE", "THIRD-PARTY.md", "licenses"], repository: { type: "git", url: "https://github.com/Shadowhusky/localdot" } }, null, 2)}\n`,
     { flag: "wx", mode: 0o600 },
   );
   return {
@@ -152,7 +179,7 @@ export async function buildKeydPackage({ output, binary, version }, verify = ver
  * replacement signature policy; the injectable builder exists only for offline tooling tests.
  */
 export async function buildKeydPackageReceipt(
-  { output, binary, version, receipt },
+  { output, binary, native, version, receipt },
   build = buildKeydPackage,
 ) {
   const out = resolve(output),
@@ -164,7 +191,12 @@ export async function buildKeydPackageReceipt(
     (await realpath(dirname(evidence))) !== dirname(evidence)
   )
     throw failure();
-  const built = await build({ output: out, binary: resolve(binary), version });
+  const built = await build({
+    output: out,
+    binary: resolve(binary),
+    native: resolve(native),
+    version,
+  });
   const result = {
     ...built,
     // A signed executable and matching Go metadata do not bind this working tree to a release.
@@ -178,15 +210,15 @@ export async function buildKeydPackageReceipt(
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [binary, version, output, receipt, ...extra] = process.argv.slice(2);
-  if (!binary || !version || !output || !receipt || extra.length) {
+  const [binary, native, version, output, receipt, ...extra] = process.argv.slice(2);
+  if (!binary || !native || !version || !output || !receipt || extra.length) {
     console.error(
-      "Usage: build-keyd-package.mjs <signed-keyd> <version> <new-package-directory> <receipt.json>",
+      "Usage: build-keyd-package.mjs <signed-keyd> <signed-keyd-native> <version> <new-package-directory> <receipt.json>",
     );
     process.exitCode = 2;
   } else {
     try {
-      const built = await buildKeydPackageReceipt({ output, binary, version, receipt });
+      const built = await buildKeydPackageReceipt({ output, binary, native, version, receipt });
       console.log(
         JSON.stringify({
           output: built.result.output,

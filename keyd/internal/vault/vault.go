@@ -111,6 +111,30 @@ type Vault struct {
 	cache   map[string][]byte
 	reads   map[string]*read
 	failed  map[string]failure
+	// attention holds the records whose stored values cannot be used as they are stored, and why.
+	attention map[string]Attention
+}
+
+// Attention says why a record's stored value cannot be used until the user acts.
+type Attention string
+
+const (
+	// Reenter: the stored value is gone or can never be read as stored; the user enters it again.
+	Reenter Attention = "reenter"
+	// Rebound: the value was stored for another destination than the record names, so the record
+	// was changed outside keyd; the user removes the key and adds it again.
+	Rebound Attention = "rebound"
+)
+
+// attentionOf is the attention a store's Get error calls for, if any.
+func attentionOf(err error) Attention {
+	switch {
+	case errors.Is(err, ErrRebound):
+		return Rebound
+	case needsReentry(err):
+		return Reenter
+	}
+	return ""
 }
 
 // read is a store read that every caller of Value for the secret waits on.
@@ -136,6 +160,7 @@ func Open(store Store, path string) (*Vault, error) {
 	v := &Vault{
 		store: store, path: path, now: time.Now, write: writeFileAtomic,
 		records: map[string]Record{}, cache: map[string][]byte{}, reads: map[string]*read{}, failed: map[string]failure{},
+		attention: map[string]Attention{},
 	}
 	if path == "" {
 		return v, nil
@@ -242,6 +267,9 @@ func (v *Vault) restore(id string, old Record, prev []byte) {
 	if prev == nil && deleted != nil && !errors.Is(deleted, ErrNotFound) {
 		delete(v.records, id)
 	}
+	if _, kept := v.records[id]; kept && prev == nil {
+		v.attention[id] = Reenter
+	}
 }
 
 // settleLocked records what the store holds for id after a change: value, or nil for the next
@@ -249,6 +277,7 @@ func (v *Vault) restore(id string, old Record, prev []byte) {
 func (v *Vault) settleLocked(id string, value []byte) {
 	delete(v.reads, id)
 	delete(v.failed, id)
+	delete(v.attention, id)
 	if value == nil {
 		delete(v.cache, id)
 	} else {
@@ -317,14 +346,30 @@ func (v *Vault) Value(id string) ([]byte, error) {
 	}
 	v.mu.Unlock()
 	if !reading {
-		r.value, r.err = v.store.Get(id, bindingOf(rec))
+		value, err := v.store.Get(id, bindingOf(rec))
+		attention := attentionOf(err)
 		v.mu.Lock()
+		// A value the migration found stored for another destination stays that, though the store
+		// reads its unbound item as one to enter again.
+		if attention == Reenter && v.attention[id] == Rebound {
+			attention = Rebound
+		}
+		r.value, r.err = value, err
+		switch attention {
+		case Rebound:
+			r.err = &ReboundError{ID: id}
+		case Reenter:
+			r.err = &ReentryError{ID: id, err: err}
+		}
 		if v.reads[id] == r {
 			delete(v.reads, id)
 			if r.err == nil {
 				v.cache[id] = r.value
 			} else {
 				v.failed[id] = failure{err: r.err, until: v.now().Add(failureHold)}
+				if attention != "" {
+					v.attention[id] = attention
+				}
 			}
 		}
 		v.mu.Unlock()
@@ -335,6 +380,38 @@ func (v *Vault) Value(id string) ([]byte, error) {
 		return nil, r.err
 	}
 	return slices.Clone(r.value), nil
+}
+
+// MigrateBindings runs the store's binding migration, if it has one, over every record, and keeps
+// which records need the user. keyd runs it once at start, before serving.
+func (v *Vault) MigrateBindings() Migration {
+	store, ok := v.store.(interface {
+		MigrateBindings(records []Record) Migration
+	})
+	if !ok {
+		return Migration{Done: true}
+	}
+	v.change.Lock()
+	defer v.change.Unlock()
+	m := store.MigrateBindings(v.Records())
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for attention, ids := range map[Attention][]string{Reenter: m.Reenter, Rebound: m.Rebound} {
+		for _, id := range ids {
+			if _, ok := v.records[id]; ok {
+				v.attention[id] = attention
+			}
+		}
+	}
+	return m
+}
+
+// Attention reports why id's stored value is known to be unusable as it is stored, until a Put
+// stores it again or a Delete removes it; empty when nothing is known to be wrong.
+func (v *Vault) Attention(id string) Attention {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.attention[id]
 }
 
 func (v *Vault) saveLocked() error {

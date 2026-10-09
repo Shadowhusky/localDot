@@ -58,7 +58,7 @@ func openVaultBackend(mode, dir string, host vaultHost) (vaultBackend, error) {
 		}
 		store, err := host.keychain()
 		if err != nil {
-			return vaultBackend{}, errors.New("keyd: the Keychain vault requires a signed native keyd build")
+			return vaultBackend{}, err
 		}
 		return vaultBackend{store: store, index: index, state: ready("keychain")}, nil
 	case "secret-service":
@@ -138,7 +138,13 @@ func systemVaultHost(goos string) vaultHost {
 		goos: goos,
 		keychain: func() (vault.Store, error) {
 			k := vault.NewKeychain(keychainService)
-			return k, k.Check()
+			if err := k.Check(); err != nil {
+				return nil, errors.New("keyd: the Keychain vault requires a signed native keyd build")
+			}
+			if err := k.Claim(); err != nil {
+				return nil, errors.New("keyd: another keyd is using the Keychain, or the helper refused this one")
+			}
+			return k, nil
 		},
 		keyring: func() (vault.Store, error) {
 			s := vault.NewSecretService(keychainService, os.Getenv)

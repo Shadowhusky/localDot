@@ -10,6 +10,10 @@ export interface KeydHealth {
   // Whether keyd knows the public address it denies (hairpin NAT); a keyd that does not say is
   // reported as unknown, never as active.
   hairpin?: HairpinGuard;
+  // How many keys need entering again (their stored values are gone or unreadable as stored).
+  reenter?: number;
+  // How many keys were changed outside localDot after their values were stored.
+  rebound?: number;
   // Off macOS: where saved keys live, and whether they wait for localdot unlock.
   vault?: KeydVault;
   error?: string;
@@ -59,6 +63,8 @@ export class KeydMonitor {
         sealKey: s.sealKey,
         audit: s.audit,
         hairpin: s.hairpin ?? { state: "unknown", addresses: 0 },
+        reenter: s.reenter ?? 0,
+        rebound: s.rebound ?? 0,
         ...(s.vault ? { vault: s.vault } : {}),
       };
     } catch (err) {

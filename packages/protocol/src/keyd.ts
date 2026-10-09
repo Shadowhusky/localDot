@@ -8,6 +8,12 @@ import { ServiceProcessIdentity } from "./install-services.ts";
 export const SECRET_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // "webpush-vapid" is keyd's own phone-notification key (keyd/internal/vault PushKeyID).
 export const RESERVED_SECRET_IDS: readonly string[] = ["lmstudio", "ollama", "webpush-vapid"];
+// keyd's refusal (X-Keyd-Reason) of a request that needs a key whose stored value is gone or can
+// never be read as stored; X-Keyd-Secret names the key to enter again.
+export const KEYD_REENTER = "secret-reenter";
+// keyd's refusal of a request that needs a key whose destination was changed outside localDot after
+// its value was stored; X-Keyd-Secret names the key, which the user removes and adds again.
+export const KEYD_REBOUND = "secret-rebound";
 export const SURROGATE_PATTERN = /^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}$/;
 export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 export const LLM_PROVIDERS = [
@@ -86,6 +92,11 @@ export const KeydRecord = z.object({
   paths: z.array(z.string()).nullish(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  // The stored value is gone or can never be read as stored: the user enters it again.
+  reenter: z.boolean().optional(),
+  // Its destination was changed outside localDot after the value was stored: keyd won't send it
+  // there, and the user removes the key and adds it again.
+  rebound: z.boolean().optional(),
 });
 export type KeydRecord = z.infer<typeof KeydRecord>;
 
@@ -124,6 +135,10 @@ export const KeydStatus = z.object({
   sealKey: base64url(87, 87),
   cells: z.number().int().nonnegative(),
   secrets: z.number().int().nonnegative(),
+  // How many keys need entering again; a keyd that does not say has none it knows of.
+  reenter: z.number().int().nonnegative().optional(),
+  // How many keys were changed outside localDot.
+  rebound: z.number().int().nonnegative().optional(),
   limits: z.object({ perTaskUSD: z.number(), perDayUSD: z.number() }),
   day: z.object({ date: z.string(), spentUSD: z.number() }),
   audit: z.object({ ok: z.boolean(), error: z.string().optional() }),

@@ -24,6 +24,8 @@ export interface KeyListProps {
   // A key just saved, scrolled to and lit once; `at` tells one save from the next.
   fresh?: { id: string; at: number } | null;
   remove(id: string): Promise<void>;
+  // Opens the form that stores a key's value again under its name.
+  reenter?(key: KeyRecord): void;
 }
 
 interface Row {
@@ -55,6 +57,7 @@ export function KeyList({
   uses,
   fresh,
   remove,
+  reenter,
 }: KeyListProps) {
   const [armed, setArmed] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -132,9 +135,12 @@ export function KeyList({
             const count = uses?.[k.id] ?? 0;
             const facts = [
               ...(k.kind === "http" ? [(k.hosts ?? []).join(", ")] : describeKey(k).split(" · ")),
-              added(k.createdAt),
+              k.reenter || k.rebound ? undefined : added(k.createdAt),
               count > 0 ? `Used ${count}× this task` : undefined,
             ].filter((fact): fact is string => Boolean(fact));
+            const stale = k.reenter && !leaving;
+            // Changed outside localDot: removing and adding the key again is the only fix.
+            const changed = k.rebound && !leaving;
             const lit = fresh?.id === k.id && !leaving;
             return (
               <li
@@ -144,6 +150,8 @@ export function KeyList({
                 data-armed={armed === k.id ? "" : undefined}
                 data-leaving={leaving ? "" : undefined}
                 data-fresh={lit ? "" : undefined}
+                data-reenter={stale ? "" : undefined}
+                data-rebound={changed ? "" : undefined}
                 inert={leaving}
               >
                 <GroupRow
@@ -153,9 +161,15 @@ export function KeyList({
                   detail={
                     // Each fact wraps whole, so no line starts or ends with a separator.
                     <span className="keys-row-meta">
+                      {(stale || changed) && (
+                        <span className="keys-row-reenter">
+                          <span className="keys-row-point" aria-hidden="true" />
+                          {changed ? "Changed elsewhere" : "Needs re-entering"}
+                        </span>
+                      )}
                       {facts.map((fact, at) => (
                         <span key={fact}>
-                          {at > 0 && <VisuallyHidden>, </VisuallyHidden>}
+                          {(at > 0 || stale || changed) && <VisuallyHidden>, </VisuallyHidden>}
                           {fact}
                         </span>
                       ))}
@@ -203,6 +217,29 @@ export function KeyList({
                     </Button>
                   }
                 >
+                  {changed && (
+                    <p className="keys-row-fix keys-row-why">
+                      Where this key is sent was changed outside localDot. Remove it, then add it
+                      again.
+                    </p>
+                  )}
+                  {stale && !changed && reenter && (
+                    <div className="keys-row-fix">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon="key-round"
+                        disabledReason={
+                          unavailable ??
+                          (busy ? "Wait for the other key change to finish" : undefined)
+                        }
+                        aria-label={`Re-enter ${k.id}`}
+                        onClick={() => reenter(k)}
+                      >
+                        Re-enter
+                      </Button>
+                    </div>
+                  )}
                   {lit && <span key={fresh.at} className="keys-row-glow" aria-hidden="true" />}
                   {armed === k.id && <span className="keys-row-drain" aria-hidden="true" />}
                 </GroupRow>

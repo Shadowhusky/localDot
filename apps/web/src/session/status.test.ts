@@ -356,6 +356,14 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("agent.state", 5000, { state: "paused", reason: "keyd unavailable" }),
     ];
     expect(replay(recovery, 6000)).toMatchObject({ label: "Keys are offline", phase: "waiting" });
+    const reentry = [
+      ...cut.slice(0, 8),
+      ev("agent.state", 5000, { state: "paused", reason: "key needs re-entering", detail: "x" }),
+    ];
+    expect(replay(reentry, 6000)).toMatchObject({
+      label: "A key needs re-entering",
+      phase: "waiting",
+    });
     const afterPause = [
       ...typed(),
       ev("safety.pause", 1100, pause("pausing")),

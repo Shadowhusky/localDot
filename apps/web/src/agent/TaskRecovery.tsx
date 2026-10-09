@@ -44,6 +44,16 @@ function knownReason(
       title: "The model turned down my request",
       text: `Try again, or ${ANOTHER_MODEL}`,
     };
+  if (reason === STALL.keyReenter)
+    return {
+      title: "A key needs re-entering",
+      text: "I can't use this key as it's stored. Enter it again in Keys, then continue. Its name and everything that uses it stay the same.",
+    };
+  if (reason === STALL.keyRebound)
+    return {
+      title: "A key was changed outside localDot",
+      text: "Where this key is sent was changed outside localDot, so I won't use it. Remove it in Keys and add it again, then continue.",
+    };
   if (reason === STALL.actionLimit)
     return {
       title: "I reached your action limit",
@@ -134,12 +144,15 @@ export function TaskRecovery({
   agent,
   controls,
   onSettings,
+  onReenterKey,
   onContinue,
   onCarryOn,
 }: {
   agent: AgentSessionView;
   controls: TaskControls;
-  onSettings(trigger: HTMLButtonElement, section?: "models"): void;
+  onSettings(trigger: HTMLButtonElement, section?: "models" | "keys"): void;
+  // Opens Keys at the form that stores this key's value again.
+  onReenterKey?(trigger: HTMLButtonElement, id: string): void;
   // Sends a follow-up that carries on a task the user's action limit stopped.
   onContinue?(): Promise<boolean>;
   // Starts the conversation's next task to carry on one that was interrupted; left out while the
@@ -238,6 +251,9 @@ export function TaskRecovery({
       )
     : null;
   const retry = RETRY.has(reason);
+  // The key to enter again, or to remove and add again, when keyd named one.
+  const reentry = !hold && reason === STALL.keyReenter ? (state.detail ?? "") : undefined;
+  const changed = !hold && reason === STALL.keyRebound ? (state.detail ?? "") : undefined;
   const resume = limited ? (
     <Button
       variant="primary"
@@ -249,7 +265,7 @@ export function TaskRecovery({
     </Button>
   ) : (
     <Button
-      variant={raising ? "secondary" : "primary"}
+      variant={raising || reentry !== undefined || changed !== undefined ? "secondary" : "primary"}
       disabledReason={controls.canResumeTask ? undefined : "The task can't continue right now."}
       onClick={() => void controls.resume()}
     >
@@ -259,8 +275,12 @@ export function TaskRecovery({
   return (
     <section className="thread-recovery" aria-label="Task recovery">
       <h3 className="thread-recovery-title">
-        {known?.title ??
-          (hold || state.state === "paused" ? "Task paused" : "The task needs attention")}
+        {reentry
+          ? `Re-enter your ${reentry} key`
+          : changed
+            ? `Your ${changed} key was changed outside localDot`
+            : (known?.title ??
+              (hold || state.state === "paused" ? "Task paused" : "The task needs attention"))}
       </h3>
       <p className="thread-recovery-text">
         {dayLimit
@@ -350,6 +370,28 @@ export function TaskRecovery({
       ) : (
         !hold && (
           <div className="thread-recovery-actions">
+            {reentry !== undefined && (
+              <Button
+                variant="primary"
+                icon="key-round"
+                onClick={(event) =>
+                  reentry && onReenterKey
+                    ? onReenterKey(event.currentTarget, reentry)
+                    : onSettings(event.currentTarget, "keys")
+                }
+              >
+                Re-enter key
+              </Button>
+            )}
+            {changed !== undefined && (
+              <Button
+                variant="primary"
+                icon="key-round"
+                onClick={(event) => onSettings(event.currentTarget, "keys")}
+              >
+                Open Keys
+              </Button>
+            )}
             {resume}
             {retry && reason !== STALL.modelBusy && (
               <Button

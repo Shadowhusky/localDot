@@ -75,6 +75,7 @@ function makeArchive(extra = {}) {
         ),
       },
       { name: "package/bin/keyd", body: bytes, mode: 0o755 },
+      { name: "package/bin/keyd-native", body: Buffer.from("fixture launcher"), mode: 0o755 },
       { name: "package/LICENSE", body: Buffer.from("fixture license") },
       { name: "package/THIRD-PARTY.md", body: Buffer.from("fixture notice") },
     ]),

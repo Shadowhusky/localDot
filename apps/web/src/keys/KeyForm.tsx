@@ -21,7 +21,10 @@ import { TextField } from "../ui/TextField.tsx";
 import {
   baseURLHint,
   bindingOf,
+  bindingOfRecord,
+  type DraftCheck,
   type DraftField,
+  destinationOf,
   EMPTY_DRAFT,
   FORMAT_NAMES,
   type HttpFormat,
@@ -34,7 +37,7 @@ import {
   valueHint,
   valueProblem,
 } from "./binding.ts";
-import { lockedVaultError, problemText } from "./keys-api.ts";
+import { type KeyRecord, lockedVaultError, problemText } from "./keys-api.ts";
 
 export interface KeyFormProps {
   active: boolean;
@@ -52,6 +55,9 @@ export interface KeyFormProps {
   onHolding?(holding: boolean): void;
   // Offers Cancel, which clears the form, then calls this.
   onCancel?(): void;
+  // A saved key whose value is stored again, under the same name and destination: only the key
+  // itself is asked for.
+  reenter?: KeyRecord;
 }
 export type KeyFormPreset =
   | { readonly requestId: number; readonly provider: Provider; readonly baseURL?: string }
@@ -108,6 +114,7 @@ export function KeyForm({
   preset,
   onHolding,
   onCancel,
+  reenter,
 }: KeyFormProps) {
   const statusId = useId();
   // Side by side, Header and Sent as each keep a line for an error, so the pair stays level.
@@ -254,8 +261,19 @@ export function KeyForm({
     };
   }, []);
   const label = draft.id.trim() || suggestedId(draft, taken);
-  const check = bindingOf({ ...draft, id: label });
-  const hint = valueHint(draft);
+  const again = reenter && bindingOfRecord(reenter);
+  const check: DraftCheck = !reenter
+    ? bindingOf({ ...draft, id: label })
+    : again
+      ? { ok: true, binding: again }
+      : {
+          ok: false,
+          field: "value",
+          message: "This key can't be entered again here. Remove it, then add it again.",
+        };
+  const hint = reenter
+    ? valueHint({ ...draft, kind: reenter.kind, provider: reenter.provider as Provider })
+    : valueHint(draft);
   const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
@@ -385,100 +403,112 @@ export function KeyForm({
       className="keys-form"
       onSubmit={submit}
       noValidate
-      aria-label="Add a key"
+      aria-label={reenter ? `Re-enter ${reenter.id}` : "Add a key"}
       aria-busy={saving}
       autoComplete="off"
     >
-      <SegmentedControl
-        aria-label="Kind of key"
-        items={KINDS}
-        value={draft.kind}
-        onValueChange={(kind) => set({ kind: kind as KeyDraft["kind"] })}
-      />
-      {draft.kind === "llm" ? (
-        <>
-          <Field label="Provider">
-            <Combobox
-              value={draft.provider}
-              groups={PROVIDER_PICKS}
-              searchPlaceholder="Search providers"
-              onValueChange={(provider) => set({ provider: provider as Provider })}
-            />
-          </Field>
-          {needsBaseURL(draft.provider) && (
-            <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
-              <TextField
-                {...PLAIN}
-                value={draft.baseURL}
-                readOnly={readOnly}
-                inputMode="url"
-                enterKeyHint="next"
-                placeholder={
-                  draft.provider === "anthropic-compatible"
-                    ? "e.g. https://api.example.com/anthropic"
-                    : "e.g. https://api.example.com/v1"
-                }
-                onChange={(e) => set({ baseURL: e.target.value })}
-              />
-            </Field>
-          )}
-        </>
+      {reenter ? (
+        <p className="keys-reenter-note">
+          <Icon name="lock" size={14} />
+          <span>
+            Sent only to <span className="keys-reenter-to">{destinationOf(reenter)}</span>, as
+            before. Its name and everything that uses it stay the same.
+          </span>
+        </p>
       ) : (
         <>
+          <SegmentedControl
+            aria-label="Kind of key"
+            items={KINDS}
+            value={draft.kind}
+            onValueChange={(kind) => set({ kind: kind as KeyDraft["kind"] })}
+          />
+          {draft.kind === "llm" ? (
+            <>
+              <Field label="Provider">
+                <Combobox
+                  value={draft.provider}
+                  groups={PROVIDER_PICKS}
+                  searchPlaceholder="Search providers"
+                  onValueChange={(provider) => set({ provider: provider as Provider })}
+                />
+              </Field>
+              {needsBaseURL(draft.provider) && (
+                <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
+                  <TextField
+                    {...PLAIN}
+                    value={draft.baseURL}
+                    readOnly={readOnly}
+                    inputMode="url"
+                    enterKeyHint="next"
+                    placeholder={
+                      draft.provider === "anthropic-compatible"
+                        ? "e.g. https://api.example.com/anthropic"
+                        : "e.g. https://api.example.com/v1"
+                    }
+                    onChange={(e) => set({ baseURL: e.target.value })}
+                  />
+                </Field>
+              )}
+            </>
+          ) : (
+            <>
+              <Field
+                label="Hosts"
+                description="The key goes to these hosts only. Separate several with commas."
+                error={errorFor("hosts")}
+              >
+                <TextField
+                  {...PLAIN}
+                  value={draft.hosts}
+                  readOnly={readOnly}
+                  inputMode="url"
+                  enterKeyHint="next"
+                  placeholder="e.g. api.example.com"
+                  onChange={(e) => set({ hosts: e.target.value })}
+                />
+              </Field>
+              <div className="keys-pair">
+                <Field label="Header" error={errorFor("header")} validates={paired}>
+                  <TextField
+                    {...PLAIN}
+                    value={draft.header}
+                    readOnly={readOnly}
+                    enterKeyHint="next"
+                    placeholder="e.g. Authorization"
+                    onChange={(e) => set({ header: e.target.value })}
+                  />
+                </Field>
+                <Field label="Sent as" validates={paired}>
+                  <Select
+                    value={draft.format}
+                    items={FORMAT_PICKS}
+                    onValueChange={(format) => set({ format: format as HttpFormat })}
+                  />
+                </Field>
+              </div>
+            </>
+          )}
           <Field
-            label="Hosts"
-            description="The key goes to these hosts only. Separate several with commas."
-            error={errorFor("hosts")}
+            label="Label (optional)"
+            description={
+              typed && taken.includes(typed)
+                ? "Saving replaces the key with this label."
+                : "Shown in your keys and in Settings."
+            }
+            error={errorFor("id")}
           >
             <TextField
               {...PLAIN}
-              value={draft.hosts}
+              value={draft.id}
               readOnly={readOnly}
-              inputMode="url"
               enterKeyHint="next"
-              placeholder="e.g. api.example.com"
-              onChange={(e) => set({ hosts: e.target.value })}
+              placeholder={label}
+              onChange={(e) => set({ id: e.target.value })}
             />
           </Field>
-          <div className="keys-pair">
-            <Field label="Header" error={errorFor("header")} validates={paired}>
-              <TextField
-                {...PLAIN}
-                value={draft.header}
-                readOnly={readOnly}
-                enterKeyHint="next"
-                placeholder="e.g. Authorization"
-                onChange={(e) => set({ header: e.target.value })}
-              />
-            </Field>
-            <Field label="Sent as" validates={paired}>
-              <Select
-                value={draft.format}
-                items={FORMAT_PICKS}
-                onValueChange={(format) => set({ format: format as HttpFormat })}
-              />
-            </Field>
-          </div>
         </>
       )}
-      <Field
-        label="Label (optional)"
-        description={
-          typed && taken.includes(typed)
-            ? "Saving replaces the key with this label."
-            : "Shown in your keys and in Settings."
-        }
-        error={errorFor("id")}
-      >
-        <TextField
-          {...PLAIN}
-          value={draft.id}
-          readOnly={readOnly}
-          enterKeyHint="next"
-          placeholder={label}
-          onChange={(e) => set({ id: e.target.value })}
-        />
-      </Field>
       <Field
         label="Key"
         description={

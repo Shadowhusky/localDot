@@ -66,7 +66,7 @@ func TestSecretServiceStoresBoundValues(t *testing.T) {
 		t.Fatalf("Get = %d bytes, %v", len(got), err)
 	}
 	other := bindingOf(Record{ID: "weather", Kind: KindHTTP, Hosts: []string{"evil.example.test"}, Header: "X-Api-Key", Format: "raw"})
-	if _, err := s.Get("weather", other); !errors.Is(err, errRebound) {
+	if _, err := s.Get("weather", other); !errors.Is(err, ErrRebound) {
 		t.Fatalf("a value was served for another binding: %v", err)
 	}
 	argv, _ := os.ReadFile(filepath.Join(dir, "argv.log"))
@@ -187,7 +187,7 @@ func TestRealSecretService(t *testing.T) {
 	if err != nil || !bytes.Equal(got, value) {
 		t.Fatalf("Get = %d bytes, %v", len(got), err)
 	}
-	if _, err := s.Get("it-weather", bindingOf(httpRecord("other"))); !errors.Is(err, errRebound) {
+	if _, err := s.Get("it-weather", bindingOf(httpRecord("other"))); !errors.Is(err, ErrRebound) {
 		t.Fatalf("rebound read = %v", err)
 	}
 	if _, err := s.Get("it-missing", testBinding); !errors.Is(err, ErrNotFound) {

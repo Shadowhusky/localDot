@@ -96,6 +96,10 @@ export const STALL = {
   modelUnavailable: "model unavailable",
   modelRefused: "model refused",
   actionLimit: "action limit",
+  // The detail names the key whose value the user enters again.
+  keyReenter: "key needs re-entering",
+  // The detail names the key changed outside localDot, which the user removes and adds again.
+  keyRebound: "key changed outside localDot",
 } as const;
 export const Heartbeat = event(
   "heartbeat",

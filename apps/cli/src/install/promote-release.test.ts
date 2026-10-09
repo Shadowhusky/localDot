@@ -60,7 +60,7 @@ vi.mock("./private-record.ts", async (original) => {
 const roots: string[] = [];
 it("verifies the offline lock helper even when app and native payloads are damaged", async () => {
   const f = await fixture();
-  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature);
+  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature);
   await rm(join(f.destination, "app"), { recursive: true });
   await rm(join(f.destination, "node_modules"), { recursive: true });
   f.signature.mockClear();
@@ -81,14 +81,25 @@ it("verifies the offline lock helper even when app and native payloads are damag
     expect.any(AbortSignal),
   );
   await expect(
-    installedReleaseVerifier(f.state, f.signature)(f.destination, f.candidate.identity, signal()),
+    installedReleaseVerifier(f.state, f.signature, f.signature)(
+      f.destination,
+      f.candidate.identity,
+      signal(),
+    ),
   ).rejects.toThrow();
 });
 it.each(["anchor", "receipt", "identity", "linked-bin", "signature"])(
   "refuses offline helper recovery after %s corruption",
   async (kind) => {
     const f = await fixture();
-    await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature);
+    await promotePreparedRelease(
+      f.state,
+      f.candidate,
+      f.native,
+      signal(),
+      f.signature,
+      f.signature,
+    );
     f.signature.mockClear();
     const anchor = join(
       f.state,
@@ -141,11 +152,18 @@ async function fixture() {
   const f = nativeFixture(),
     pkg = encode(f.pkg),
     lock = encode(f.lock),
-    binary = Buffer.from("fixture helper never executed");
+    binary = Buffer.from("fixture helper never executed"),
+    launcher = Buffer.from("fixture launcher never executed");
+  const sample = sampleManifest().keyd;
   const manifest = ReleaseManifest.parse({
     ...sampleManifest(),
     files: { "npm-shrinkwrap.json": hash(lock) },
-    keyd: { ...sampleManifest().keyd, sha256: hash(binary), teamId: "87FD3FSZBG" },
+    keyd: {
+      ...sample,
+      sha256: hash(binary),
+      teamId: "87FD3FSZBG",
+      native: { ...sample.native, sha256: hash(launcher) },
+    },
   });
   const release = encode(manifest);
   const appFiles = {
@@ -155,6 +173,7 @@ async function fixture() {
   };
   const keydFiles = {
     "bin/keyd": await file(helper, "bin/keyd", binary, 0o700),
+    "bin/keyd-native": await file(helper, "bin/keyd-native", launcher, 0o700),
     "package.json": await file(
       helper,
       "package.json",
@@ -249,9 +268,13 @@ it("promotes a verified copy, reopens through its private anchor, and selects se
     f.native,
     signal(),
     f.signature,
+    f.signature,
   );
   expect(result).toMatchObject({ directory: f.destination, recovered: false });
-  const layout = releaseLayout(f.state, installedReleaseVerifier(f.state, f.signature));
+  const layout = releaseLayout(
+    f.state,
+    installedReleaseVerifier(f.state, f.signature, f.signature),
+  );
   expect(await layout.current()).toBeNull();
   expect(await readdir(f.destination)).toEqual([
     "app",
@@ -281,6 +304,7 @@ it("recovers a durably recorded incomplete copy before promoting a fresh verifie
     f.native,
     signal(),
     f.signature,
+    f.signature,
   );
   expect(result.directory).toBe(f.destination);
   await expect(lstat(abandoned.directory)).rejects.toMatchObject({ code: "ENOENT" });
@@ -294,7 +318,7 @@ it.each(["before", "after"] as const)(
     const f = await fixture();
     hooks.failScratch = when;
     await expect(
-      promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature),
+      promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature),
     ).rejects.toThrow("scratch publication");
     const releases = join(f.state, "releases");
     const copies = (await readdir(releases)).filter((name) => name.startsWith(".promote-"));
@@ -304,7 +328,14 @@ it.each(["before", "after"] as const)(
     await expect(lstat(f.destination)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readFile(f.candidate.keyd, "utf8")).toContain("never executed");
     hooks.failScratch = null;
-    await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature);
+    await promotePreparedRelease(
+      f.state,
+      f.candidate,
+      f.native,
+      signal(),
+      f.signature,
+      f.signature,
+    );
     if (when === "after") await expect(lstat(abandoned)).rejects.toMatchObject({ code: "ENOENT" });
     else expect(await readdir(abandoned)).toEqual([]); // No durable claim: preserve it.
   },
@@ -336,20 +367,23 @@ it.each([
   }
   if (kind === "native-mode") await chmod(join(dir, "node_modules/sharp/package.json"), 0o644);
   await expect(
-    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature),
+    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature),
   ).rejects.toThrow();
   expect(await readdir(f.state)).toEqual(["user-data"]);
 });
 it("does not accept changed native bytes even when the local inventory is rewritten to match", async () => {
   const f = await fixture();
-  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature);
+  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature);
   const path = join(f.destination, "node_modules/sharp/package.json"),
     bytes = Buffer.from("changed");
   await writeFile(path, bytes);
   const receipt = JSON.parse(await readFile(join(f.destination, "native.json"), "utf8"));
   receipt.files["sharp/package.json"] = { sha256: hash(bytes), bytes: bytes.length, mode: 0o600 };
   await writeFile(join(f.destination, "native.json"), encode(receipt));
-  const layout = releaseLayout(f.state, installedReleaseVerifier(f.state, f.signature));
+  const layout = releaseLayout(
+    f.state,
+    installedReleaseVerifier(f.state, f.signature, f.signature),
+  );
   await expect(layout.select(f.candidate.identity, signal())).rejects.toThrow();
   expect(await layout.current()).toBeNull();
 });
@@ -357,10 +391,13 @@ it("keeps the renamed payload unselectable if trust publication is interrupted, 
   const f = await fixture();
   hooks.failAnchor = true;
   await expect(
-    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature),
+    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature),
   ).rejects.toThrow("interrupted");
   const before = await lstat(f.destination);
-  const layout = releaseLayout(f.state, installedReleaseVerifier(f.state, f.signature));
+  const layout = releaseLayout(
+    f.state,
+    installedReleaseVerifier(f.state, f.signature, f.signature),
+  );
   await expect(layout.select(f.candidate.identity, signal())).rejects.toThrow();
   expect(await layout.current()).toBeNull();
   hooks.failAnchor = false;
@@ -369,6 +406,7 @@ it("keeps the renamed payload unselectable if trust publication is interrupted, 
     f.candidate,
     f.native,
     signal(),
+    f.signature,
     f.signature,
   );
   expect(result.recovered).toBe(true);
@@ -381,11 +419,11 @@ it("does not repair an unknown existing destination or overwrite a conflicting a
   await mkdir(f.destination, { recursive: true, mode: 0o700 });
   await writeFile(join(f.destination, "keep"), "unknown");
   await expect(
-    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature),
+    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature),
   ).rejects.toThrow();
   expect(await readFile(join(f.destination, "keep"), "utf8")).toBe("unknown");
   await rm(f.destination, { recursive: true });
-  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature);
+  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature);
   const anchor = join(
     f.state,
     "release-records",
@@ -395,7 +433,7 @@ it("does not repair an unknown existing destination or overwrite a conflicting a
   const conflict = { ...f.expected, nativeSha256: "0".repeat(64) };
   await writeFile(anchor, encode(conflict));
   await expect(
-    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature),
+    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature),
   ).rejects.toThrow();
   expect(JSON.parse(await readFile(anchor, "utf8"))).toEqual(conflict);
 });
@@ -408,7 +446,14 @@ it("cleans only the newly copied temporary tree on cancellation and preserves th
     return { path, sha256: "a".repeat(64), teamId: "87FD3FSZBG", identifier: "dev.localdot.keyd" };
   });
   await expect(
-    promotePreparedRelease(f.state, f.candidate, f.native, controller.signal, f.signature),
+    promotePreparedRelease(
+      f.state,
+      f.candidate,
+      f.native,
+      controller.signal,
+      f.signature,
+      f.signature,
+    ),
   ).rejects.toBe(reason);
   expect(await readdir(join(f.state, "releases"))).toEqual(["promotion-scratch.json"]);
   expect(await readFile(join(f.state, "user-data"), "utf8")).toBe("preserve");
@@ -418,12 +463,16 @@ it("requires the signature gate and the installer-owned anchor on reopen", async
   const f = await fixture();
   f.signature.mockRejectedValueOnce(new Error("invalid Apple signature"));
   await expect(
-    verifyInstalledPayload(f.candidate.directory, f.expected, signal(), f.signature),
+    verifyInstalledPayload(f.candidate.directory, f.expected, signal(), f.signature, f.signature),
   ).rejects.toThrow("Apple signature");
-  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature);
+  await promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature);
   await rm(join(f.state, "release-records"), { recursive: true });
   await expect(
-    installedReleaseVerifier(f.state, f.signature)(f.destination, f.candidate.identity, signal()),
+    installedReleaseVerifier(f.state, f.signature, f.signature)(
+      f.destination,
+      f.candidate.identity,
+      signal(),
+    ),
   ).rejects.toThrow();
   expect(await readdir(f.state)).toEqual(["releases", "user-data"]);
 });
@@ -441,7 +490,7 @@ it("preserves replacement temporary directories and reports cleanup failure alon
     return { path, sha256: "a".repeat(64), teamId: "87FD3FSZBG", identifier: "dev.localdot.keyd" };
   });
   await expect(
-    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature),
+    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, f.signature),
   ).rejects.toBeInstanceOf(AggregateError);
   expect(await readFile(join(replacement, "keep"), "utf8")).toBe("foreign replacement");
   expect(
@@ -474,8 +523,34 @@ it.each(["helper-version", "helper-scripts", "native-packages"])(
       f.expected.assemblySha256 = hash(body);
     }
     await expect(
-      verifyInstalledPayload(directory, f.expected, signal(), f.signature),
+      verifyInstalledPayload(directory, f.expected, signal(), f.signature, f.signature),
     ).rejects.toThrow();
     expect(f.signature).not.toHaveBeenCalled();
   },
 );
+
+// A packaged daemon starts its tasks through keyd-native, so an install verifies it against its
+// own pin, never keyd's.
+it("verifies keyd-native against its own pin before an install is trusted", async () => {
+  const f = await fixture();
+  const launcher = vi.fn(async () => {
+    throw new Error("not the pinned keyd-native");
+  });
+  await expect(
+    verifyInstalledPayload(f.candidate.directory, f.expected, signal(), f.signature, launcher),
+  ).rejects.toThrow();
+  expect(launcher).toHaveBeenCalledExactlyOnceWith(
+    join(f.candidate.directory, "keyd/bin/keyd-native"),
+    expect.objectContaining({
+      native: expect.objectContaining({
+        path: "bin/keyd-native",
+        sha256: f.candidate.manifest.keyd.native.sha256,
+        identifier: "dev.localdot.keyd.native",
+      }),
+    }),
+    expect.any(AbortSignal),
+  );
+  await expect(
+    promotePreparedRelease(f.state, f.candidate, f.native, signal(), f.signature, launcher),
+  ).rejects.toThrow();
+});

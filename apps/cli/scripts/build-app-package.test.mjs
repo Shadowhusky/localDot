@@ -69,12 +69,15 @@ async function fixture() {
     const bytes = await readFile(join(source, path));
     files.push({ path, size: bytes.length, sha256: hash(bytes) });
   }
-  const keydBinary = join(root, "fake-keyd");
+  const keydBinary = join(root, "fake-keyd"),
+    keydNativeBinary = join(root, "fake-keyd-native");
   await writeFile(keydBinary, "fake signed-helper seam", { mode: 0o700 });
+  await writeFile(keydNativeBinary, "fake signed-launcher seam", { mode: 0o700 });
   const input = {
     output: join(root, "app"),
     runtimeDirectory: source,
     keydBinary,
+    keydNativeBinary,
     runtimeReceipt: {
       output: source,
       version: "1.0.0",
@@ -84,7 +87,13 @@ async function fixture() {
     commit: "a".repeat(40),
     images: sampleManifest().images,
   };
-  return { root, source, input, verify: vi.fn(async () => {}) };
+  return {
+    root,
+    source,
+    input,
+    verify: vi.fn(async () => {}),
+    verifyNative: vi.fn(async () => {}),
+  };
 }
 
 async function archiveFixture() {
@@ -96,6 +105,7 @@ async function archiveFixture() {
     runtimeDirectory: "runtime",
     runtimeReceipt: "runtime.json",
     keydBinary: "fake-keyd",
+    keydNativeBinary: "fake-keyd-native",
     commit: f.input.commit,
     images: f.input.images,
   };
@@ -109,7 +119,9 @@ it("the archive command packs actual bytes with isolated npm configuration and a
   vi.stubEnv("NODE_OPTIONS", "--require=/nonexistent-localdot-test-injection.cjs");
   vi.stubEnv("npm_config_dry_run", "true");
   vi.stubEnv("npm_config_userconfig", "/nonexistent-localdot-user-config");
-  const { result, receipt } = await packAppRelease(f, (input) => buildAppPackage(input, f.verify));
+  const { result, receipt } = await packAppRelease(f, (input) =>
+    buildAppPackage(input, f.verify, f.verifyNative),
+  );
   expect(f.verify).toHaveBeenCalledTimes(2);
   expect(await readdir(f.output)).toEqual(["app", "artifacts", "receipt.json"]);
   expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(result);
@@ -129,7 +141,7 @@ it.each(["changed", "omitted"])(
     const f = await archiveFixture();
     await expect(
       packAppRelease(f, async (input) => {
-        const result = await buildAppPackage(input, f.verify);
+        const result = await buildAppPackage(input, f.verify, f.verifyNative);
         const path = join(result.output, "dist/cli.mjs");
         if (kind === "changed") await writeFile(path, "export const changed = true;\n");
         else await rm(path);
@@ -215,8 +227,20 @@ it("the actual command rejects extra arguments and redacts invalid input details
 
 it("produces a complete hashed app package accepted by the installer and actual offline npm archive audit", async () => {
   const f = await fixture(),
-    result = await buildAppPackage(f.input, f.verify);
+    result = await buildAppPackage(f.input, f.verify, f.verifyNative);
   expect(f.verify).toHaveBeenCalledTimes(2);
+  expect(f.verifyNative).toHaveBeenCalledTimes(2);
+  expect(f.verifyNative).toHaveBeenCalledWith(
+    f.input.keydNativeBinary,
+    expect.objectContaining({
+      native: {
+        path: "bin/keyd-native",
+        sha256: hash(await readFile(f.input.keydNativeBinary)),
+        identifier: "dev.localdot.keyd.native",
+      },
+    }),
+    expect.any(AbortSignal),
+  );
   expect(result).toMatchObject({
     appMetadataBuilt: true,
     signatureVerified: true,
@@ -304,7 +328,7 @@ it.each([
   }
   if (kind === "oversized-receipt") f.input.runtimeReceipt.files[0].size = 17 * 1024 * 1024;
   if (kind === "unsafe-mode") await chmod(path, 0o666);
-  await expect(buildAppPackage(f.input, f.verify)).rejects.toThrow();
+  await expect(buildAppPackage(f.input, f.verify, f.verifyNative)).rejects.toThrow();
   expect(f.verify).not.toHaveBeenCalled();
   expect(await readdir(f.root)).not.toContain("app");
 });
@@ -317,6 +341,7 @@ it.each([
   "role-swap",
   "lock-mismatch",
   "signature",
+  "launcher-signature",
 ])("refuses %s build metadata", async (kind) => {
   const f = await fixture();
   if (kind === "unverified-upstream")
@@ -326,6 +351,8 @@ it.each([
   if (kind === "tagged-image") f.input.images.browser.digest = "latest";
   if (kind === "role-swap") f.input.images.browser.repository = f.input.images.desktop.repository;
   if (kind === "signature") f.verify.mockRejectedValue(new Error("signature rejected"));
+  if (kind === "launcher-signature")
+    f.verifyNative.mockRejectedValue(new Error("signature rejected"));
   if (kind === "lock-mismatch") {
     const path = "npm-shrinkwrap.json",
       bytes = Buffer.from('{"lockfileVersion":3,"packages":{}}');
@@ -335,7 +362,7 @@ it.each([
       { size: bytes.length, sha256: hash(bytes) },
     );
   }
-  await expect(buildAppPackage(f.input, f.verify)).rejects.toThrow();
+  await expect(buildAppPackage(f.input, f.verify, f.verifyNative)).rejects.toThrow();
   expect(await readdir(f.root)).not.toContain("app");
 });
 
@@ -343,7 +370,7 @@ it("does not alter an existing destination", async () => {
   const f = await fixture();
   await mkdir(f.input.output);
   await writeFile(join(f.input.output, "keep"), "user file");
-  await expect(buildAppPackage(f.input, f.verify)).rejects.toThrow();
+  await expect(buildAppPackage(f.input, f.verify, f.verifyNative)).rejects.toThrow();
   expect(await readdir(f.input.output)).toEqual(["keep"]);
   expect(await readFile(join(f.input.output, "keep"), "utf8")).toBe("user file");
 });
@@ -351,7 +378,9 @@ it("does not alter an existing destination", async () => {
 it("rechecks the signed helper after assembly and refuses a changed helper", async () => {
   const f = await fixture();
   f.verify.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("changed helper"));
-  await expect(buildAppPackage(f.input, f.verify)).rejects.toThrow("changed helper");
+  await expect(buildAppPackage(f.input, f.verify, f.verifyNative)).rejects.toThrow(
+    "changed helper",
+  );
 });
 
 it("the default verifier refuses a fake helper instead of accepting an injected receipt", async () => {

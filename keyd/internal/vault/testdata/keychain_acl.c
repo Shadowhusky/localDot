@@ -5,7 +5,7 @@ static const char *pinned =
   "identifier \"dev.localdot.keyd\" and anchor apple generic and "
   "certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
   "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and "
-  "certificate leaf[subject.OU] = \"87FD3FSZBG\"";
+  "certificate leaf[subject.OU] = \"87FD3FSZBG\" and info [KeydGeneration] >= \"2\"";
 static CSSM_LIST_ELEMENT word(unsigned value) {
   CSSM_LIST_ELEMENT e = {0}; e.ElementType = CSSM_LIST_ELEMENT_WORDID; e.WordID = value; return e;
 }
@@ -26,85 +26,18 @@ static CFDataRef requirement(const char *value) {
   if (SecRequirementCreateWithString(text, 0, &ref) == 0) SecRequirementCopyData(ref, 0, &bytes);
   if (ref) CFRelease(ref); CFRelease(text); return bytes;
 }
-static int migration(void) {
-  // Use a real system executable's designated requirement to exercise Security.framework's
-  // trusted-application encoding without signing this fixture or opening a Keychain.
-  CFURLRef url = CFURLCreateWithFileSystemPath(NULL, CFSTR("/usr/bin/true"), kCFURLPOSIXPathStyle, false);
-  SecStaticCodeRef code = NULL;
-  SecRequirementRef requirement = NULL;
-  CFStringRef text = NULL;
-  SecTrustedApplicationRef target = NULL, extra = NULL;
-  char rule[4096];
-  if (!url || SecStaticCodeCreateWithPath(url, 0, &code) ||
-      SecCodeCopyDesignatedRequirement(code, 0, &requirement) ||
-      SecRequirementCopyString(requirement, 0, &text) ||
-      !CFStringGetCString(text, rule, sizeof(rule), kCFStringEncodingUTF8) ||
-      SecTrustedApplicationCreateFromPath("/usr/bin/true", &target) ||
-      SecTrustedApplicationCreateFromPath("/usr/bin/false", &extra)) return 1;
-  const void *one[] = {target}, *two[] = {target, extra};
-  CFArrayRef trusted = CFArrayCreate(NULL, one, 1, &kCFTypeArrayCallBacks);
-  CFArrayRef broad = CFArrayCreate(NULL, two, 2, &kCFTypeArrayCallBacks);
-  const char *cases[] = {"extra app", "wildcard", "ANY", "empty authorizations",
-    "multiple read grants", "explicit password policy refusal", "unknown prompt refusal", "no read grant refusal"};
-  for (unsigned test = 0; test < sizeof(cases)/sizeof(cases[0]); test++) {
-    SecAccessRef access = NULL; SecACLRef read = NULL, other = NULL, second = NULL;
-    // Start with an explicit owner and add only the grants under test. Removed ACL objects
-    // retain deletion markers for persistence and are unsuitable for this in-memory fixture.
-    char ownerTitle[] = "synthetic owner";
-    CSSM_ACL_KEYCHAIN_PROMPT_SELECTOR ownerSelector = {CSSM_ACL_KEYCHAIN_PROMPT_CURRENT_VERSION, 0};
-    CSSM_LIST_ELEMENT ownerPrompt[] = {word(CSSM_ACL_SUBJECT_TYPE_KEYCHAIN_PROMPT),
-      datum(&ownerSelector, sizeof(ownerSelector)), datum(ownerTitle, sizeof(ownerTitle))};
-    CSSM_ACL_OWNER_PROTOTYPE owner = {list(ownerPrompt, 3), 0};
-    CSSM_ACL_ENTRY_INFO unused = {0};
-    if (SecAccessCreateFromOwnerAndACL(&owner, 0, &unused, &access)) return 1;
-    CSSM_ACL_AUTHORIZATION_TAG tag = CSSM_ACL_AUTHORIZATION_DECRYPT;
-    CSSM_ACL_KEYCHAIN_PROMPT_SELECTOR selector = {CSSM_ACL_KEYCHAIN_PROMPT_CURRENT_VERSION, 0};
-    if (test == 5) selector.flags = CSSM_ACL_KEYCHAIN_PROMPT_REQUIRE_PASSPHRASE;
-    if (test == 6) selector.flags = 0x8000;
-    if (test == 2) tag = CSSM_ACL_AUTHORIZATION_ANY;
-    if (test == 7) tag = CSSM_ACL_AUTHORIZATION_SIGN;
-    if (SecACLCreateFromSimpleContents(access, test == 1 ? NULL : broad, CFSTR("synthetic read"), &selector, &read) ||
-        SecACLSetAuthorizations(read, &tag, test == 3 ? 0 : 1)) return 1;
-    if (test == 4) {
-      if (SecACLCreateWithSimpleContents(access, NULL, CFSTR("second read"), 0, &second) ||
-          SecACLSetAuthorizations(second, &tag, 1)) return 1;
-    }
-    tag = CSSM_ACL_AUTHORIZATION_ENCRYPT;
-    if (SecACLCreateWithSimpleContents(access, NULL, CFSTR("unrelated encrypt"), 0, &other) ||
-        SecACLSetAuthorizations(other, &tag, 1)) return 1;
-    if (keyd_acl_policy(access, rule) == 0) return 1;
-    OSStatus result = keyd_acl_restrict(access, trusted, rule);
-    if ((result == 0) != (test < 5) || (test < 5 && keyd_acl_policy(access, rule))) {
-      fprintf(stderr, "unexpected migration result: %s status=%d\n", cases[test], (int)result); return 1;
-    }
-    CFArrayRef apps = NULL; CFStringRef description = NULL; SecKeychainPromptSelector flags = 0;
-    if (SecACLCopyContents(other, &apps, &description, &flags) || apps ||
-        !description || !CFEqual(description, CFSTR("unrelated encrypt"))) return 1;
-    CFRelease(description);
-    if (second) CFRelease(second);
-    CFRelease(read); CFRelease(other); CFRelease(access);
-    printf("PASS migration %s\n", cases[test]);
-  }
-  SecAccessRef access = NULL;
-  if (SecAccessCreate(CFSTR("synthetic policy"), broad, &access) ||
-      keyd_acl_restrict(access, NULL, rule) != errSecParam ||
-      keyd_acl_restrict(access, broad, rule) != errSecParam) return 1;
-  printf("PASS migration null trusted list refusal\n");
-  printf("PASS migration extra trusted target refusal\n");
-  CFRelease(access); CFRelease(trusted); CFRelease(broad); CFRelease(target); CFRelease(extra);
-  CFRelease(text); CFRelease(requirement); CFRelease(code); CFRelease(url);
-  return 0;
-}
 int main(void) {
 	setbuf(stdout, NULL);
   CFDataRef expected = requirement(pinned), broad = requirement("always");
   if (!expected || !broad) return 1;
   CFMutableDataRef changed = CFDataCreateMutableCopy(NULL, 0, expected);
   if (!changed) return 1;
-  CFDataRef generated = requirement("identifier \"dev.localdot.keyd\" and (anchor apple generic and (certificate 1[field.1.2.840.113635.100.6.2.6] exists and (certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"87FD3FSZBG\")))");
-  CFDataRef weakened = requirement("identifier \"dev.localdot.keyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and (certificate leaf[field.1.2.840.113635.100.6.1.13] exists or certificate leaf[subject.OU] = \"87FD3FSZBG\")");
-  CFDataRef wrongTeam = requirement("identifier \"dev.localdot.keyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"OTHERTEAM1\"");
-  if (!generated || !weakened || !wrongTeam || CFEqual(generated,expected)) return 1;
+  CFDataRef generated = requirement("identifier \"dev.localdot.keyd\" and (anchor apple generic and (certificate 1[field.1.2.840.113635.100.6.2.6] exists and (certificate leaf[field.1.2.840.113635.100.6.1.13] exists and (certificate leaf[subject.OU] = \"87FD3FSZBG\" and info [KeydGeneration] >= \"2\"))))");
+  CFDataRef weakened = requirement("identifier \"dev.localdot.keyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and (certificate leaf[field.1.2.840.113635.100.6.1.13] exists or certificate leaf[subject.OU] = \"87FD3FSZBG\") and info [KeydGeneration] >= \"2\"");
+  CFDataRef wrongTeam = requirement("identifier \"dev.localdot.keyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"OTHERTEAM1\" and info [KeydGeneration] >= \"2\"");
+  CFDataRef earlier = requirement("identifier \"dev.localdot.keyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"87FD3FSZBG\"");
+  CFDataRef anyGeneration = requirement("identifier \"dev.localdot.keyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"87FD3FSZBG\" and info [KeydGeneration] >= \"1\"");
+  if (!generated || !weakened || !wrongTeam || !earlier || !anyGeneration || CFEqual(generated,expected)) return 1;
   unsigned char hash[20] = {0}; char path[] = "/old/release/keyd", title[] = "fake policy";
   CSSM_ACL_KEYCHAIN_PROMPT_SELECTOR selector = {CSSM_ACL_KEYCHAIN_PROMPT_CURRENT_VERSION, 0};
   const char *cases[] = {"pinned", "moved path", "different legacy hash", "wide requirement",
@@ -112,7 +45,8 @@ int main(void) {
     "ANY grant", "wrong signature kind", "unknown prompt", "unknown prompt flags",
     "extra outer element", "cyclic subject", "short legacy hash", "wrong data type",
     "same-size lower requirement bytes", "same-size higher requirement bytes",
-    "codesign generated AND grouping", "OR widens certificate requirement", "different team"};
+    "codesign generated AND grouping", "OR widens certificate requirement", "different team",
+    "the earlier keyd's requirement", "an earlier generation"};
   for (unsigned test = 0; test < sizeof(cases)/sizeof(cases[0]); test++) {
     selector.flags = 0;
     CSSM_LIST_ELEMENT code[6] = {word(CSSM_ACL_SUBJECT_TYPE_CODE_SIGNATURE),
@@ -146,6 +80,8 @@ int main(void) {
       case 18: code[4]=datum((void *)CFDataGetBytePtr(generated),CFDataGetLength(generated)); break;
       case 19: code[4]=datum((void *)CFDataGetBytePtr(weakened),CFDataGetLength(weakened)); break;
       case 20: code[4]=datum((void *)CFDataGetBytePtr(wrongTeam),CFDataGetLength(wrongTeam)); break;
+      case 21: code[4]=datum((void *)CFDataGetBytePtr(earlier),CFDataGetLength(earlier)); break;
+      case 22: code[4]=datum((void *)CFDataGetBytePtr(anyGeneration),CFDataGetLength(anyGeneration)); break;
     }
     int accepted=keyd_acl_subject(&subject,expected);
     if (accepted != (test<3 || test==18)) { fprintf(stderr,"unexpected policy result: %s\n",cases[test]); return 1; }
@@ -173,5 +109,5 @@ int main(void) {
   if (SecAccessCreateFromOwnerAndACL(&owner,1,&entry,&access) || keyd_acl_policy(access,pinned)==0) return 1;
   CFRelease(access); printf("PASS framework delegated grant refusal\n");
   CFRelease(expected);CFRelease(broad);CFRelease(changed);
-  CFRelease(generated);CFRelease(weakened);CFRelease(wrongTeam);return migration();
+  CFRelease(generated);CFRelease(weakened);CFRelease(wrongTeam);CFRelease(earlier);CFRelease(anyGeneration);return 0;
 }

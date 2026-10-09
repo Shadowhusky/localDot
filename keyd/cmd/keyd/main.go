@@ -1,6 +1,8 @@
 // Command keyd is localDot's key layer: the only process that holds real secrets. It runs as a
 // LaunchAgent on macOS or a systemd user service on Linux, keeps its state in <home>/keyd, and
-// answers the daemon on <home>/keyd/admin.sock.
+// answers the daemon on <home>/keyd/admin.sock. Its signature owns the Keychain items, so it has no
+// subcommand that starts a program a caller names: the daemon's task launcher is the separately
+// signed keyd-native.
 package main
 
 import (
@@ -31,6 +33,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/egress"
 	"github.com/shadowhusky/localdot/keyd/internal/events"
 	"github.com/shadowhusky/localdot/keyd/internal/installlock"
+	_ "github.com/shadowhusky/localdot/keyd/internal/keydinfo"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
 	"github.com/shadowhusky/localdot/keyd/internal/nativewatch"
@@ -72,9 +75,6 @@ func run(args []string, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "native-lock" {
 		return nativewatch.RunResourceLock(args[1:], os.NewFile(3, "native-resource-lease"), os.Stdout)
 	}
-	if len(args) > 0 && args[0] == "native-run" {
-		return nativewatch.Run(args[1:], os.NewFile(3, "native-control"), os.NewFile(4, "native-events"), os.Stdin, os.Stdout, os.Stderr, 5)
-	}
 	if len(args) > 0 && args[0] == "canary-run" {
 		return runCanary(args[1:], os.Stdin, os.Stdout)
 	}
@@ -95,6 +95,13 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "verify-audit" {
 		return verifyAudit(args[1:], stderr)
+	}
+	if len(args) > 0 && args[0] == "self-test" {
+		return selfTest(args[1:], stderr)
+	}
+	if len(args) == 1 && args[0] == "requirement" {
+		fmt.Println(vault.DesignatedRequirement())
+		return 0
 	}
 	fs := flag.NewFlagSet("keyd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -205,6 +212,17 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	if keychain, ok := store.(adopter); ok {
+		if err := d.adopt(keychain); err != nil {
+			return err
+		}
+	}
+	if m := v.MigrateBindings(); len(m.Bound)+len(m.Reenter)+len(m.Rebound) > 0 || !m.Done {
+		detail := fmt.Sprintf("%d bound, %d to re-enter, %d changed outside keyd, done %v", len(m.Bound), len(m.Reenter), len(m.Rebound), m.Done)
+		if _, err := d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "bindings", Detail: detail}); err != nil {
+			return err
+		}
+	}
 	opener, err := vault.NewOpener()
 	if err != nil {
 		return err
@@ -274,6 +292,31 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	go d.server.Serve(ln)
 	_, err = d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "start", Detail: "boot " + d.BootID + ", version " + version})
 	return err
+}
+
+// adopter moves the items an earlier keyd stored to keyd's own access list.
+type adopter interface {
+	Adopt() (moved, failed int, err error)
+}
+
+// adopt moves the items an earlier keyd stored to this keyd's access list. An item it cannot move
+// stays where it is, refused for now, and the next start tries it again.
+func (d *Daemon) adopt(keychain adopter) error {
+	moved, failed, err := keychain.Adopt()
+	if err == nil && moved == 0 && failed == 0 {
+		return nil
+	}
+	line := audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "adopt", Detail: fmt.Sprintf("%d items moved from an earlier keyd", moved)}
+	switch {
+	case err != nil:
+		line.Decision, line.Detail = audit.Deny, "items from an earlier keyd were not all moved"
+		log.Printf("keyd: %v", err)
+	case failed > 0:
+		line.Decision = audit.Deny
+		line.Detail = fmt.Sprintf("%d items moved from an earlier keyd, %d could not be moved", moved, failed)
+	}
+	_, werr := d.log.Write(line)
+	return werr
 }
 
 // newPusher keeps the VAPID key in keyd's own store, gives way to a user secret of the same name and

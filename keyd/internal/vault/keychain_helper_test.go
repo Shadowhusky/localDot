@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -30,44 +34,128 @@ func TestItemHelperRejectsInputBeforeNativeAccess(t *testing.T) {
 		{[]string{"delete", "localdot-keyd", "weather"}, "secret"},
 		{[]string{"check", "localdot-keyd", "status"}, "secret"},
 		{[]string{"store", "localdot-keyd", "weather"}, strings.Repeat("x", helperItemLimit+1)},
+		{[]string{"read", "localdot-keyd", "_session"}, ""},
+		{[]string{"store", "localdot-keyd", "_session"}, "keyd-session:1:1:1.000000:0"},
+		{[]string{"claim", "localdot-keyd", "weather"}, ""},
+		{[]string{"claim", "localdot-keyd", "_bindings"}, ""},
+		{[]string{"adopt", "localdot-keyd", "weather"}, ""},
+		{[]string{"adopt", "localdot-keyd", "_all"}, "secret"},
+		{[]string{"read", "localdot-keyd", "_all"}, ""},
+		{[]string{"list", "localdot-keyd", "weather"}, ""},
+		{[]string{"list", "localdot-keyd", "_all"}, "secret"},
 	} {
 		var out bytes.Buffer
-		status := runKeychainItem(test.args, strings.NewReader(test.input), &out,
-			func(string, string, string, []byte) ([]byte, int) {
+		status := runKeychainItem(test.args, session(), strings.NewReader(test.input), &out,
+			allow(func(string, string, string, []byte, []byte) ([]byte, adoption, int) {
 				t.Fatal("native effect for invalid request")
-				return nil, 0
-			})
+				return nil, adoption{}, 0
+			}))
 		if status != helperUnchanged || out.Len() != 0 {
 			t.Fatal("invalid input was accepted or disclosed")
 		}
 	}
 }
 
+// allow is a gate that lets the parent drive operate.
+func allow(operate keychainItemOperation) keychainItemGate {
+	return func(string) keychainItemOperation { return operate }
+}
+
+type untouched struct{ t *testing.T }
+
+func (u untouched) Read([]byte) (int, error) {
+	u.t.Error("the helper read a refused parent's input")
+	return 0, io.EOF
+}
+
+func TestItemHelperChecksTheParentBeforeReadingAnything(t *testing.T) {
+	for _, args := range [][]string{{"check", "status"}, {"store", "weather"}, {"claim", sessionAccount}, {"list", serviceAccount}} {
+		var out bytes.Buffer
+		var asked string
+		status := runKeychainItem([]string{args[0], "localdot-keyd", args[1]}, untouched{t}, untouched{t}, &out,
+			func(operation string) keychainItemOperation { asked = operation; return nil })
+		if status != helperUnchanged || asked != args[0] || out.Len() != 0 {
+			t.Fatalf("%s: a refused parent got exit %d (gate asked for %q)", args[0], status, asked)
+		}
+	}
+}
+
+// The helper checks its parent before it reads anything the parent sends, so a parent it refuses,
+// such as a launcher whose caller holds the helper's input open, is refused at once.
+func TestItemHelperRefusesAParentWithoutWaitingOnItsInput(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"check", "probe"}, {"store", "probe"}, {"read", "probe"}, {"delete", "probe"},
+		{"claim", sessionAccount}, {"adopt", serviceAccount}, {"list", serviceAccount},
+	} {
+		inR, inW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessionR, sessionW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(self, "keychain-item", args[0], "localdot-keyd-test", args[1])
+		cmd.Env = []string{"PATH=/usr/bin:/bin"}
+		cmd.Stdin, cmd.ExtraFiles = inR, []*os.File{sessionR}
+		err = cmd.Start()
+		inR.Close()
+		sessionR.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case err := <-done:
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != helperUnchanged {
+				t.Errorf("%s: the helper ended with %v, want exit %d", args[0], err, helperUnchanged)
+			}
+		case <-time.After(5 * time.Second):
+			cmd.Process.Kill()
+			<-done
+			t.Errorf("%s: the helper waited on the input of a parent it refuses", args[0])
+		}
+		inW.Close()
+		sessionW.Close()
+	}
+}
+
+// session is a parent's per-start secret as the helper reads it from descriptor 3.
+func session() io.Reader { return bytes.NewReader(testSession) }
+
+var testSession = bytes.Repeat([]byte{7}, sessionBytes)
+
 func TestItemHelperSeparatesAbsenceFailureAndSecretOutput(t *testing.T) {
 	for _, op := range []string{"store", "read", "delete", "check"} {
-		for _, status := range []int{0, 1, helperNotFound, helperUnchanged} {
+		for _, status := range []int{0, 1, helperNotFound, helperUnchanged, helperNotOurs} {
 			var out bytes.Buffer
 			input := ""
 			if op == "store" {
 				input = "fake-value"
 			}
-			result := runKeychainItem([]string{op, "localdot-keyd", "weather"}, strings.NewReader(input), &out,
-				func(o, s, a string, data []byte) ([]byte, int) {
-					if o != op || s != "localdot-keyd" || a != "weather" || string(data) != input {
+			result := runKeychainItem([]string{op, "localdot-keyd", "weather"}, session(), strings.NewReader(input), &out,
+				allow(func(o, s, a string, data, secret []byte) ([]byte, adoption, int) {
+					if o != op || s != "localdot-keyd" || a != "weather" || string(data) != input || !bytes.Equal(secret, testSession) {
 						t.Fatal("request changed")
 					}
 					if op == "read" {
-						return []byte("fake-result"), status
+						return []byte("fake-result"), adoption{}, status
 					}
-					return nil, status
-				})
+					return nil, adoption{}, status
+				}))
 			want := 1
 			if status == 0 {
 				want = 0
 			} else if status == helperNotFound && op != "store" {
 				want = helperNotFound
-			} else if status == helperUnchanged {
-				want = helperUnchanged
+			} else if status == helperUnchanged || status == helperNotOurs {
+				want = status
 			}
 			if result != want {
 				t.Fatalf("%s status %d => %d, want %d", op, status, result, want)
@@ -91,15 +179,96 @@ func TestItemHelperBoundsAndClearsReadBytes(t *testing.T) {
 	for _, size := range []int{0, 1, helperItemLimit + 1} {
 		data := bytes.Repeat([]byte("x"), size)
 		var out bytes.Buffer
-		status := runKeychainItem([]string{"read", "localdot-keyd", "weather"}, strings.NewReader(""), &out,
-			func(string, string, string, []byte) ([]byte, int) { return data, 0 })
+		status := runKeychainItem([]string{"read", "localdot-keyd", "weather"}, session(), strings.NewReader(""), &out,
+			allow(func(string, string, string, []byte, []byte) ([]byte, adoption, int) { return data, adoption{}, 0 }))
 		if (size == 1) != (status == 0) || bytes.Count(data, []byte{0}) != size {
 			t.Fatal("unbounded read or uncleared buffer")
 		}
 	}
-	if runKeychainItem([]string{"read", "localdot-keyd", "weather"}, strings.NewReader(""), shortOutput{},
-		func(string, string, string, []byte) ([]byte, int) { return []byte("fake"), 0 }) == 0 {
+	if runKeychainItem([]string{"read", "localdot-keyd", "weather"}, session(), strings.NewReader(""), shortOutput{},
+		allow(func(string, string, string, []byte, []byte) ([]byte, adoption, int) {
+			return []byte("fake"), adoption{}, 0
+		})) == 0 {
 		t.Fatal("short output accepted")
+	}
+}
+
+// The helper takes the parent's secret only whole: exactly its size, then the end of the channel.
+func TestItemHelperReadsTheSessionWhole(t *testing.T) {
+	for name, channel := range map[string]io.Reader{
+		"whole":      session(),
+		"none":       strings.NewReader(""),
+		"short":      bytes.NewReader(testSession[1:]),
+		"long":       bytes.NewReader(append(bytes.Clone(testSession), 7)),
+		"closed fd":  descriptor(1 << 20),
+		"unreadable": iotest.ErrReader(errors.New("no channel")),
+	} {
+		var got []byte
+		runKeychainItem([]string{"check", "localdot-keyd", "status"}, channel, strings.NewReader(""), io.Discard,
+			allow(func(_, _, _ string, _, secret []byte) ([]byte, adoption, int) {
+				got = bytes.Clone(secret)
+				return nil, adoption{}, 0
+			}))
+		if (name == "whole") != bytes.Equal(got, testSession) || (name != "whole" && got != nil) {
+			t.Fatalf("%s: the helper took %x", name, got)
+		}
+	}
+}
+
+// adopt reports how many items it moved and how many it could not; its other output is never echoed.
+func TestItemHelperReportsWhatAdoptMoved(t *testing.T) {
+	var out bytes.Buffer
+	status := runKeychainItem([]string{"adopt", "localdot-keyd", "_all"}, session(), strings.NewReader(""), &out,
+		allow(func(op, _, account string, _, _ []byte) ([]byte, adoption, int) {
+			if op != "adopt" || account != "_all" {
+				t.Fatal("request changed")
+			}
+			return []byte("fake-result"), adoption{moved: 3, failed: 2}, 0
+		}))
+	if status != 0 || out.String() != "3 2" {
+		t.Fatalf("adopt exited %d with %q", status, out.String())
+	}
+}
+
+// list names the service's items, an empty list included, and nothing past its bound.
+func TestItemHelperListsTheServicesItems(t *testing.T) {
+	for _, names := range [][]byte{[]byte("deepseek\nweather\n"), {}, bytes.Repeat([]byte("x"), helperListLimit+1)} {
+		var out bytes.Buffer
+		status := runKeychainItem([]string{"list", "localdot-keyd", "_all"}, session(), strings.NewReader(""), &out,
+			allow(func(op, _, account string, _, _ []byte) ([]byte, adoption, int) {
+				if op != "list" || account != "_all" {
+					t.Fatal("request changed")
+				}
+				return bytes.Clone(names), adoption{}, 0
+			}))
+		if fits := len(names) <= helperListLimit; (status == 0) != fits || (fits && !bytes.Equal(out.Bytes(), names)) || (!fits && out.Len() != 0) {
+			t.Fatalf("a list of %d bytes exited %d with %d bytes", len(names), status, out.Len())
+		}
+	}
+}
+
+// Each helper the keyd runs gets its per-start secret on descriptor 3, never on its command line.
+func TestKeychainHandsEachHelperItsSessionOnDescriptor3(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	k.session = bytes.Repeat([]byte{0xab}, sessionBytes)
+	script := "#!/bin/sh\nod -v -An -tx1 <&3 | tr -d ' \\n' >> \"$FAKE_DIR/session.log\"\necho >> \"$FAKE_DIR/session.log\"\nexit 44\n"
+	if err := os.WriteFile(k.Path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Get("weather", testBinding); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	if err := k.Claim(); err == nil {
+		t.Fatal("a refused claim succeeded")
+	}
+	log, err := os.ReadFile(filepath.Join(dir, "session.log"))
+	want := strings.Repeat(strings.Repeat("ab", sessionBytes)+"\n", 2)
+	if err != nil || string(log) != want {
+		t.Fatalf("the helpers read %q", log)
+	}
+	argv, _ := os.ReadFile(filepath.Join(dir, "argv.log"))
+	if strings.Contains(string(argv), "abab") {
+		t.Fatal("the session reached a command line")
 	}
 }
 
@@ -144,8 +313,8 @@ func TestInvalidReadAndDeleteDoNotRunHelper(t *testing.T) {
 }
 
 func TestSignedKeychainIdentityCheckOnly(t *testing.T) {
-	if os.Getenv("KEYD_SIGNED_IDENTITY_TEST") != "1" {
-		t.Skip("requires an explicitly signed fixture; no Keychain item access")
+	if os.Getenv("KEYD_SIGNED_VAULT") != "1" {
+		t.Skip("needs this test executable signed as keyd; set KEYD_SIGNED_VAULT=1")
 	}
 	if err := NewKeychain("localdot-keyd-test").Check(); err != nil {
 		t.Fatal(err)
@@ -171,6 +340,24 @@ func TestCleanupNativeFixture(t *testing.T) {
 	for _, account := range append([]string{id}, id+".0", id+".1", id+".2", id+".3", id+".4", id+".5") {
 		if _, err := k.find(context.Background(), account); !errors.Is(err, ErrNotFound) {
 			t.Fatal("synthetic item remains: " + account)
+		}
+	}
+}
+
+// Adopt takes the helper's two counts, moved and left behind, and nothing else.
+func TestKeychainAdoptReadsWhatWasMovedAndWhatWasNot(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	script := strings.Replace(fakeSecurity, `run "$@"`, `[ "$2" = adopt ] && { cat "$FAKE_DIR/adopt"; exit 0; }; run "$@"`, 1)
+	if err := os.WriteFile(k.Path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for report, want := range map[string][2]int{"3 2": {3, 2}, "0 0": {0, 0}, "3": {-1}, "3 2 1": {-1}, "-1 0": {-1}, "x 0": {-1}, "": {-1}} {
+		if err := os.WriteFile(filepath.Join(dir, "adopt"), []byte(report), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		moved, failed, err := k.Adopt()
+		if (want[0] < 0) != (err != nil) || (err == nil && (moved != want[0] || failed != want[1])) {
+			t.Fatalf("a report of %q: %d moved, %d failed, %v", report, moved, failed, err)
 		}
 	}
 }

@@ -8,9 +8,10 @@ import {
   NativeReceipt,
 } from "../../../../packages/protocol/src/install-receipts.ts";
 import { privateDirectory } from "./copy-inventory.ts";
-import { verifyReleaseKeyd } from "./keyd-verification.ts";
+import { verifyReleaseKeyd, verifyReleaseKeydNative } from "./keyd-verification.ts";
 import { verifyNativeInventory } from "./native-inventory.ts";
 import { nativeDependencyPlan } from "./native-plan.ts";
+import { KEYD_EXECUTABLES } from "./stage-keyd.ts";
 import { verifyStagedRelease } from "./staged-release.ts";
 
 const fail = () => new Error("Installed release failed verification.");
@@ -70,6 +71,7 @@ export async function verifyInstalledPayload(
   expected: InstalledReleaseRecord,
   signal: AbortSignal,
   verifyKeyd = verifyReleaseKeyd,
+  verifyNative = verifyReleaseKeydNative,
 ) {
   signal.throwIfAborted();
   const record = InstalledReleaseRecord.parse(expected);
@@ -102,18 +104,19 @@ export async function verifyInstalledPayload(
   if (
     manifest.version !== record.identity.version ||
     manifest.commit !== assembly.commit ||
-    assembly.keydFiles[manifest.keyd.path]?.sha256 !== manifest.keyd.sha256
+    assembly.keydFiles[manifest.keyd.path]?.sha256 !== manifest.keyd.sha256 ||
+    assembly.keydFiles[manifest.keyd.native.path]?.sha256 !== manifest.keyd.native.sha256
   )
     throw fail();
   await verifyNativeInventory(app, assembly.appFiles, signal);
   await verifyNativeInventory(keyd, assembly.keydFiles, signal);
-  const helperRequired = ["package.json", "bin/keyd", "LICENSE", "THIRD-PARTY.md"];
+  const helperRequired = ["package.json", ...KEYD_EXECUTABLES, "LICENSE", "THIRD-PARTY.md"];
   if (
     helperRequired.some((name) => !assembly.keydFiles[name]?.bytes) ||
     Object.entries(assembly.keydFiles).some(
       ([name, file]) =>
         (!helperRequired.includes(name) && !/^licenses\/[A-Za-z0-9_-]+\.txt$/.test(name)) ||
-        (name !== "bin/keyd" && (file.bytes > 1024 * 1024 || file.mode !== 0o600)),
+        (!KEYD_EXECUTABLES.includes(name) && (file.bytes > 1024 * 1024 || file.mode !== 0o600)),
     )
   )
     throw fail();
@@ -182,6 +185,7 @@ export async function verifyInstalledPayload(
   for (const pkg of plan) if (!native.files[`${pkg.name}/package.json`]) throw fail();
   await verifyNativeInventory(modules, native.files, signal);
   await verifyKeyd(join(keyd, manifest.keyd.path), manifest.keyd, signal);
+  await verifyNative(join(keyd, manifest.keyd.native.path), manifest.keyd, signal);
   signal.throwIfAborted();
   const after = await privateDirectory(directory);
   if (

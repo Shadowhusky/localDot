@@ -3,15 +3,16 @@ import { fileURLToPath } from "node:url";
 
 declare const __LOCALDOT_PACKAGED__: boolean | undefined;
 
-/** The installer authenticates the entire release before service startup. Its helper is a
- * fixed sibling of app/dist/daemon.mjs; never search PATH or accept an environment override.
+/** The installer authenticates the entire release before service startup. Its launcher is
+ * keyd-native, a fixed sibling of app/dist/daemon.mjs, signed apart from keyd so nothing it starts
+ * can drive keyd's Keychain helper; never search PATH or accept an environment override.
  * Development fixtures keep their existing process backend until a helper is packaged.
  * A packaged app MUST refuse a missing/changed layout rather than fall back to an unowned task.
  */
 export function resolveNativeSupervisor(moduleUrl: string, packaged: boolean): string | undefined {
   if (!packaged) return undefined;
   try {
-    const path = fileURLToPath(new URL("../../keyd/bin/keyd", moduleUrl));
+    const path = fileURLToPath(new URL("../../keyd/bin/keyd-native", moduleUrl));
     const st = lstatSync(path);
     if (
       !st.isFile() ||

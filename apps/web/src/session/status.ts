@@ -218,6 +218,16 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
     caption: "The model turned down my request. Try again, or change the model.",
   },
   [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
+  [STALL.keyReenter]: {
+    row: "recovery",
+    label: "A key needs re-entering",
+    caption: "A key needs entering again. The chat says which one.",
+  },
+  [STALL.keyRebound]: {
+    row: "recovery",
+    label: "Key changed elsewhere",
+    caption: "A key was changed outside localDot. The chat says which one.",
+  },
 };
 
 // A wait for the user counts from dot's request, so the island shows how long dot has waited.

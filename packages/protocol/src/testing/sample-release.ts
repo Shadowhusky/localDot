@@ -12,7 +12,14 @@ export interface SampleManifest {
   version: string;
   commit: string;
   files: Record<string, string>;
-  keyd: { package: string; path: string; sha256: string; identifier: string; teamId: string };
+  keyd: {
+    package: string;
+    path: string;
+    sha256: string;
+    identifier: string;
+    teamId: string;
+    native: { path: string; sha256: string; identifier: string };
+  };
   images: Record<"desktop" | "gate" | "brain" | "browser", SampleImage>;
 }
 
@@ -35,6 +42,7 @@ export const sampleManifest = (): SampleManifest => ({
     sha256: hex("d"),
     identifier: "dev.localdot.keyd",
     teamId: "TESTTEAM01",
+    native: { path: "bin/keyd-native", sha256: hex("e"), identifier: "dev.localdot.keyd.native" },
   },
   images: {
     desktop: pin("desktop"),

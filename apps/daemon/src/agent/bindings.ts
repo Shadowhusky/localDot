@@ -112,6 +112,13 @@ export function resolveRole(
       throw new BindingError(role, `${provider.name} needs a key: add one under Keys`);
     if (key.kind !== "llm" || key.provider !== provider.keyd)
       throw new BindingError(role, `key ${key.id} is not a ${provider.name} key`);
+    if (key.reenter)
+      throw new BindingError(role, `key ${key.id} needs re-entering: enter it again under Keys`);
+    if (key.rebound)
+      throw new BindingError(
+        role,
+        `key ${key.id} was changed outside localDot: remove it under Keys and add it again`,
+      );
     if (provider.baseURL) {
       let matches = false;
       try {

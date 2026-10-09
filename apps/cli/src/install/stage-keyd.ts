@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { KEYD_PACKAGE, ReleaseManifest } from "../../../../packages/protocol/src/release.ts";
 import { type ExtractedRelease, withExtractedRelease } from "./extract-release.ts";
-import { verifyReleaseKeyd } from "./keyd-verification.ts";
+import { verifyReleaseKeyd, verifyReleaseKeydNative } from "./keyd-verification.ts";
 import { withVerifiedDownload } from "./verified-download.ts";
 
 export interface StagedKeyd extends ExtractedRelease {
@@ -10,7 +10,8 @@ export interface StagedKeyd extends ExtractedRelease {
   packageSha256: string;
 }
 const fail = () => new Error("The helper package does not match this release.");
-const REQUIRED = ["package.json", "bin/keyd", "LICENSE", "THIRD-PARTY.md"];
+export const KEYD_EXECUTABLES = ["bin/keyd", "bin/keyd-native"];
+const REQUIRED = ["package.json", ...KEYD_EXECUTABLES, "LICENSE", "THIRD-PARTY.md"];
 
 /** expected is the app's already authenticated manifest. Only the compiled Apple identity and
  * release publisher may authorize the helper; package metadata cannot select either identity.
@@ -45,10 +46,14 @@ export function withStagedKeyd<T>(
         )
           throw fail();
         for (const [name, file] of Object.entries(extracted.files)) {
-          if (name !== "bin/keyd" && (file.bytes > 1024 * 1024 || file.mode !== 0o600))
+          if (!KEYD_EXECUTABLES.includes(name) && (file.bytes > 1024 * 1024 || file.mode !== 0o600))
             throw fail();
         }
-        if (extracted.files["bin/keyd"]?.sha256 !== expected.keyd.sha256) throw fail();
+        if (
+          extracted.files["bin/keyd"]?.sha256 !== expected.keyd.sha256 ||
+          extracted.files["bin/keyd-native"]?.sha256 !== expected.keyd.native.sha256
+        )
+          throw fail();
         const json = await readFile(join(extracted.root, "package.json"));
         const pkg: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(json));
         if (
@@ -79,6 +84,11 @@ export function withStagedKeyd<T>(
         abort.throwIfAborted();
         const executable = join(extracted.root, "bin/keyd");
         await verifyReleaseKeyd(executable, expected.keyd, abort);
+        await verifyReleaseKeydNative(
+          join(extracted.root, "bin/keyd-native"),
+          expected.keyd,
+          abort,
+        );
         abort.throwIfAborted();
         return work(
           Object.freeze({ ...extracted, executable, packageSha256: release.sha256 }),

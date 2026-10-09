@@ -93,7 +93,7 @@ func TestFileVaultBindsEachValueToItsIdAndBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := bindingOf(httpRecord("elsewhere"))
-	if _, err := f.Get("weather", other); !errors.Is(err, errRebound) {
+	if _, err := f.Get("weather", other); !errors.Is(err, ErrRebound) {
 		t.Fatalf("read for another binding = %v", err)
 	}
 	var file vaultFile

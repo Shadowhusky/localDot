@@ -8,7 +8,7 @@ import {
   PRINTABLE_ASCII,
   RESERVED_SECRET_IDS,
   SECRET_ID_PATTERN,
-  type SecretBinding,
+  SecretBinding,
 } from "@localdot/protocol";
 
 export type Provider = (typeof LLM_PROVIDERS)[number];
@@ -246,4 +246,56 @@ export function describeKey(k: {
     }
   }
   return `${(k.hosts ?? []).join(", ")} · ${k.header ?? ""}`;
+}
+
+// The binding a key had, to store its value again under it: the same name, the same destination,
+// so every model and task that uses the key keeps using it.
+export function bindingOfRecord(k: {
+  id: string;
+  kind: "llm" | "http";
+  provider?: string;
+  baseURL?: string;
+  hosts?: string[] | null;
+  header?: string;
+  format?: string;
+  methods?: string[] | null;
+  paths?: string[] | null;
+}): SecretBinding | undefined {
+  const parsed = SecretBinding.safeParse(
+    k.kind === "llm"
+      ? {
+          id: k.id,
+          kind: "llm",
+          provider: k.provider,
+          ...(k.baseURL ? { baseURL: k.baseURL } : {}),
+        }
+      : {
+          id: k.id,
+          kind: "http",
+          hosts: k.hosts ?? [],
+          header: k.header,
+          format: k.format,
+          ...(k.methods?.length ? { methods: k.methods } : {}),
+          ...(k.paths?.length ? { paths: k.paths } : {}),
+        },
+  );
+  return parsed.success ? parsed.data : undefined;
+}
+
+// Where a stored key is sent, in a few words.
+export function destinationOf(k: {
+  kind: "llm" | "http";
+  provider?: string;
+  baseURL?: string;
+  hosts?: string[] | null;
+}): string {
+  if (k.kind === "http") return (k.hosts ?? []).join(", ");
+  try {
+    if (k.baseURL) return new URL(k.baseURL).host;
+  } catch {
+    /* A malformed address reads as its provider. */
+  }
+  return k.provider && Object.hasOwn(PROVIDER_NAMES, k.provider)
+    ? PROVIDER_NAMES[k.provider as Provider]
+    : (k.provider ?? "its provider");
 }

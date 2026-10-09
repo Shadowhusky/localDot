@@ -452,6 +452,7 @@ function Theatre({ api }: { api: ApiClient }) {
     request: 0,
   });
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
+  const [keyReentry, setKeyReentry] = useState<{ requestId: number; id: string } | undefined>();
   const keyRequest = useRef(0);
   const keyCapture = useRef<{
     request: number;
@@ -471,6 +472,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const showKeys = (trigger: HTMLElement | null) => {
     keyCapture.current = null;
     setKeyPreset(undefined);
+    goToSettings(trigger, "keys");
+  };
+  const reenterKey = (trigger: HTMLElement, id: string) => {
+    keyCapture.current = null;
+    setKeyPreset(undefined);
+    setKeyReentry({ requestId: ++keyRequest.current, id });
     goToSettings(trigger, "keys");
   };
   const receiveKey = useCallback<KeyIntake["receive"]>(
@@ -1022,6 +1029,7 @@ function Theatre({ api }: { api: ApiClient }) {
     keys,
     intakeRef: keysIntake,
     preset: keyPreset,
+    reenter: keyReentry,
     uses,
     onSaved: (key: KeyRecord, request: number) => {
       const context = keyCapture.current;
@@ -1804,6 +1812,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     agent={agent}
                     controls={controls}
                     onSettings={showSettings}
+                    onReenterKey={reenterKey}
                     onContinue={continueTask}
                     onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
                   />

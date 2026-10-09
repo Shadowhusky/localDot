@@ -52,12 +52,19 @@ export async function packAppRelease({ inputFile, output }, build = buildAppPack
   const inputPath = resolve(inputFile);
   const inputBytes = await boundedBytes(inputPath, 64 * 1024);
   const config = json(inputBytes);
-  const fields = ["commit", "images", "keydBinary", "runtimeDirectory", "runtimeReceipt"];
+  const fields = [
+    "commit",
+    "images",
+    "keydBinary",
+    "keydNativeBinary",
+    "runtimeDirectory",
+    "runtimeReceipt",
+  ];
   if (
     !config ||
     typeof config !== "object" ||
     JSON.stringify(Object.keys(config).sort()) !== JSON.stringify(fields) ||
-    ["keydBinary", "runtimeDirectory", "runtimeReceipt"].some(
+    ["keydBinary", "keydNativeBinary", "runtimeDirectory", "runtimeReceipt"].some(
       (key) => typeof config[key] !== "string" || !config[key] || config[key].includes("\0"),
     )
   )
@@ -78,6 +85,7 @@ export async function packAppRelease({ inputFile, output }, build = buildAppPack
       runtimeDirectory: sourcePath(config.runtimeDirectory),
       runtimeReceipt,
       keydBinary: sourcePath(config.keydBinary),
+      keydNativeBinary: sourcePath(config.keydNativeBinary),
       commit: config.commit,
       images: config.images,
     });

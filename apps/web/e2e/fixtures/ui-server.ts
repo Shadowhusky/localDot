@@ -1677,6 +1677,8 @@ routes.get("/api/keyd", (c) =>
           keydMode === "guard"
             ? { state: "unknown", addresses: 0 }
             : { state: "active", source: "router", addresses: 1 },
+        reenter: keys.filter((k) => k.reenter).length,
+        rebound: keys.filter((k) => k.rebound).length,
         ...(keydMode === "locked"
           ? { vault: { backend: "file", state: "locked", key: "passphrase" } }
           : {}),
@@ -2434,6 +2436,13 @@ function stall(kind: string): string | undefined {
       reason: "model refused",
       detail: "400: image input is not supported by this model",
     });
+  } else if (kind === "key-reenter" || kind === "key-rebound") {
+    session.setStatus("paused");
+    session.append("agent.state", {
+      state: "paused",
+      reason: kind === "key-rebound" ? "key changed outside localDot" : "key needs re-entering",
+      detail: "anthropic-main",
+    });
   } else if (kind === "action-limit") {
     endLiveStep();
     session.setStatus("idle");
@@ -2561,6 +2570,20 @@ routes.post("/__qa/takeover", (c) =>
 );
 routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/stall/:kind", (c) => reply(stall(c.req.param("kind"))));
+// keyd lists a key whose stored value has to be entered again (?id=, the main model's by default).
+routes.post("/__qa/reenter", (c) => {
+  const id = c.req.query("id") ?? "anthropic-main";
+  if (!keys.some((k) => k.id === id)) return c.text(`no key named ${id}`, 404);
+  keys = keys.map((k) => (k.id === id ? { ...k, reenter: true } : k));
+  return c.body(null, 204);
+});
+// keyd lists a key whose destination was changed outside localDot (?id=, as above).
+routes.post("/__qa/rebound", (c) => {
+  const id = c.req.query("id") ?? "anthropic-main";
+  if (!keys.some((k) => k.id === id)) return c.text(`no key named ${id}`, 404);
+  keys = keys.map((k) => (k.id === id ? { ...k, rebound: true } : k));
+  return c.body(null, 204);
+});
 routes.post("/__qa/spend", () => reply(spend()));
 // ?steps=pause leaves the computer off; pause,stop leaves the Stop unconfirmed; keyd-once pauses
 // it with a cleanup note.

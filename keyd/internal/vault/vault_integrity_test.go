@@ -452,8 +452,8 @@ func TestAFailedRenameKeepsTheOldValue(t *testing.T) {
 }
 
 // A same-user process can rewrite the index, or start another keyd over an index of its own, but it
-// cannot write the store's copy of the binding. A value must never be read for a binding it was not
-// stored with.
+// cannot write the store's copy of the binding: only the keyd daemon that holds the Keychain claim
+// may drive the item helper. A value must never be read for a binding it was not stored with.
 func TestARewrittenIndexCannotRebindAStoredValue(t *testing.T) {
 	weather := httpRecord("weather")
 	fixedBase := Record{ID: "model", Kind: KindLLM, Provider: "openai"}

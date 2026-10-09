@@ -22,7 +22,7 @@ function fixture() {
   roots.push(root);
   const dir = join(root, "keyd", "bin");
   mkdirSync(dir, { recursive: true });
-  const path = join(dir, "keyd");
+  const path = join(dir, "keyd-native");
   writeFileSync(path, "inert helper", { mode: 0o700 });
   const url = pathToFileURL(join(root, "app", "dist", "daemon.mjs")).href;
   return { root, path, url };

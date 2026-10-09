@@ -211,6 +211,58 @@
   content: "·";
 }
 
+/* A key to enter again: an amber point beside the words, first on its row's detail line. */
+.keys-row-reenter {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+  white-space: nowrap;
+}
+
+.keys-row-point {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-attention);
+}
+
+/* Its fix sits under the row, in line with the row's name. */
+.keys-row-fix {
+  display: flex;
+  padding: calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);
+}
+
+/* A key changed outside localDot says why under its row; Remove, beside it, is the fix. */
+.keys-row-why {
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+/* Entering a key again names where it goes, which the key form would otherwise ask. */
+.keys-reenter-note {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+  margin: 0;
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.keys-reenter-note > .ui-icon {
+  flex: none;
+  margin-top: calc(var(--spacing) * 0.75);
+  color: var(--color-fg-3);
+}
+
+.keys-reenter-to {
+  color: var(--color-fg-1);
+  font-weight: var(--font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
 /* Adding a key: a raised card under its heading. */
 .keys-form {
   display: grid;

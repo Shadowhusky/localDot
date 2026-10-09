@@ -6,11 +6,15 @@ import {
   InstalledReleaseRecord,
 } from "../../../../packages/protocol/src/install-receipts.ts";
 import { ReleaseIdentity } from "../../../../packages/protocol/src/install-update.ts";
-import { KEYD_IDENTIFIER, KEYD_PACKAGE } from "../../../../packages/protocol/src/release.ts";
+import {
+  KEYD_IDENTIFIER,
+  KEYD_NATIVE_IDENTIFIER,
+  KEYD_PACKAGE,
+} from "../../../../packages/protocol/src/release.ts";
 import type { AssembledRelease } from "./assemble-release.ts";
 import { copyDependencyInventory, copyInventory, privateDirectory } from "./copy-inventory.ts";
 import { hashedFile, verifyInstalledPayload } from "./installed-release.ts";
-import { verifyReleaseKeyd } from "./keyd-verification.ts";
+import { verifyReleaseKeyd, verifyReleaseKeydNative } from "./keyd-verification.ts";
 import { privateRecordStore } from "./private-record.ts";
 import { createPromotionScratch, recoverPromotionScratch } from "./promotion-scratch.ts";
 import { type InstalledReleaseVerifier, releaseDirectoryName } from "./release-layout.ts";
@@ -83,6 +87,7 @@ export async function readInstalledRelease(
   input: ReleaseIdentity,
   signal: AbortSignal,
   verifyKeyd = verifyReleaseKeyd,
+  verifyNative = verifyReleaseKeydNative,
 ) {
   signal.throwIfAborted();
   const identity = ReleaseIdentity.parse(input);
@@ -90,7 +95,10 @@ export async function readInstalledRelease(
   await privateDirectory(join(state, "releases"));
   const record = await (await anchorStore(state, identity, false)).read();
   if (!record || JSON.stringify(record.identity) !== JSON.stringify(identity)) throw fail();
-  return { directory, ...(await verifyInstalledPayload(directory, record, signal, verifyKeyd)) };
+  return {
+    directory,
+    ...(await verifyInstalledPayload(directory, record, signal, verifyKeyd, verifyNative)),
+  };
 }
 
 /** Offline recovery verifies the helper against the independent private trust anchor. Damage to
@@ -126,8 +134,9 @@ export async function readInstalledLockHelper(
     assembly.metadataDigests.releaseJson !== identity.manifestSha256
   )
     throw fail();
-  const binary = assembly.keydFiles["bin/keyd"];
-  if (binary?.mode !== 0o700 || !binary.bytes) throw fail();
+  const binary = assembly.keydFiles["bin/keyd"],
+    launcher = assembly.keydFiles["bin/keyd-native"];
+  if (binary?.mode !== 0o700 || !binary.bytes || !launcher) throw fail();
   await privateDirectory(join(directory, "keyd"));
   await privateDirectory(join(directory, "keyd", "bin"));
   const path = join(directory, "keyd", "bin", "keyd");
@@ -139,6 +148,11 @@ export async function readInstalledLockHelper(
       sha256: binary.sha256,
       identifier: KEYD_IDENTIFIER,
       teamId: KEYD_RELEASE_TEAM_ID,
+      native: {
+        path: "bin/keyd-native",
+        sha256: launcher.sha256,
+        identifier: KEYD_NATIVE_IDENTIFIER,
+      },
     },
     signal,
   );
@@ -149,12 +163,13 @@ export async function readInstalledLockHelper(
 export function installedReleaseVerifier(
   state: string,
   verifyKeyd = verifyReleaseKeyd,
+  verifyNative = verifyReleaseKeydNative,
 ): InstalledReleaseVerifier {
   return async (directory, input, signal) => {
     signal.throwIfAborted();
     const identity = ReleaseIdentity.parse(input);
     if (directory !== join(state, "releases", releaseDirectoryName(identity))) throw fail();
-    await readInstalledRelease(state, identity, signal, verifyKeyd);
+    await readInstalledRelease(state, identity, signal, verifyKeyd, verifyNative);
   };
 }
 
@@ -169,6 +184,7 @@ export async function promotePreparedRelease(
   native: Readonly<{ receiptSha256: string }>,
   signal: AbortSignal,
   verifyKeyd = verifyReleaseKeyd,
+  verifyNative = verifyReleaseKeydNative,
 ) {
   signal.throwIfAborted();
   const source = candidate.directory;
@@ -178,7 +194,7 @@ export async function promotePreparedRelease(
     assemblySha256: candidate.assemblySha256,
     nativeSha256: native.receiptSha256,
   });
-  const verified = await verifyInstalledPayload(source, expected, signal, verifyKeyd);
+  const verified = await verifyInstalledPayload(source, expected, signal, verifyKeyd, verifyNative);
   await privateDirectory(state);
   const releases = join(state, "releases");
   await ensureDirectory(releases);
@@ -188,7 +204,7 @@ export async function promotePreparedRelease(
   const previous = await store.read();
   if (previous && !same(previous, expected)) throw fail();
   if (await exists(destination)) {
-    await verifyInstalledPayload(destination, expected, signal, verifyKeyd);
+    await verifyInstalledPayload(destination, expected, signal, verifyKeyd, verifyNative);
     signal.throwIfAborted();
     // Also makes a prior rename durable when recovering its lost acknowledgement.
     await syncDirectory(releases);
@@ -240,7 +256,7 @@ export async function promotePreparedRelease(
         await handle.close();
       }
     }
-    await verifyInstalledPayload(temporary, expected, signal, verifyKeyd);
+    await verifyInstalledPayload(temporary, expected, signal, verifyKeyd, verifyNative);
     await syncTree(temporary);
     signal.throwIfAborted();
     if (await exists(destination)) throw fail();

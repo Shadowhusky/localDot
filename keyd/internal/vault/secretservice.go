@@ -132,7 +132,7 @@ func (s *SecretService) get(ctx context.Context, id, binding string) ([]byte, er
 	case !ok:
 		return nil, fmt.Errorf("secret service: item %s is not keyd's", id)
 	case bound != binding:
-		return nil, fmt.Errorf("secret service: item %s: %w", id, errRebound)
+		return nil, fmt.Errorf("secret service: item %s: %w", id, ErrRebound)
 	}
 	var encoded strings.Builder
 	for i := range n {

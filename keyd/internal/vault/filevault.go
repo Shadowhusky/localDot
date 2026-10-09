@@ -282,7 +282,7 @@ func (f *FileVault) Get(id, binding string) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 	if item.Binding != binding {
-		return nil, fmt.Errorf("key vault: item %s: %w", id, errRebound)
+		return nil, fmt.Errorf("key vault: item %s: %w", id, ErrRebound)
 	}
 	nonce, err1 := b64.DecodeString(item.Nonce)
 	ct, err2 := b64.DecodeString(item.CT)

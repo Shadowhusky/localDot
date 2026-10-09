@@ -10,6 +10,8 @@ export const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 export const IMAGE_ROLES = ["desktop", "gate", "brain", "browser"] as const;
 export const KEYD_PACKAGE = "@localdot/keyd-darwin-arm64";
 export const KEYD_IDENTIFIER = "dev.localdot.keyd";
+// keyd-native, the daemon's task launcher, ships in the keyd package, signed apart from keyd.
+export const KEYD_NATIVE_IDENTIFIER = "dev.localdot.keyd.native";
 
 // A path inside the package: relative, forward slashes, no empty, "." or ".." segment.
 export const PackagePath = z
@@ -59,6 +61,11 @@ export const ReleaseManifest = z
       sha256: z.string().regex(SHA256_HEX),
       identifier: z.literal(KEYD_IDENTIFIER),
       teamId: z.string().regex(/^[A-Z0-9]{10}$/),
+      native: z.strictObject({
+        path: z.literal("bin/keyd-native"),
+        sha256: z.string().regex(SHA256_HEX),
+        identifier: z.literal(KEYD_NATIVE_IDENTIFIER),
+      }),
     }),
     images: z.strictObject({
       desktop: ImagePin,

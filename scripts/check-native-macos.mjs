@@ -49,8 +49,8 @@ const temp = realpathSync(mkdtempSync(join(tmpdir(), "localdot-native-check-")))
 try {
   run("go", ["vet", "./..."], keyd);
   run("go", ["test", "-race", "-count=1", "-timeout=120s", "./..."], keyd);
-  const binary = join(temp, "keyd");
-  run("go", ["build", "-trimpath", "-o", binary, "./cmd/keyd"], keyd);
+  const binary = join(temp, "keyd-native");
+  run("go", ["build", "-trimpath", "-o", binary, "./cmd/keyd-native"], keyd);
   env.LOCALDOT_NATIVE_SUPERVISOR_TEST_BIN = binary;
   const report = join(temp, "vitest.json");
   run(process.execPath, [
