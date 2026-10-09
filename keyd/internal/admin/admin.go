@@ -96,6 +96,9 @@ func Listen(path string) (net.Listener, error) {
 		ln.Close()
 		return nil, err
 	}
+	// keyd removes its socket itself while it still holds the home lock. A listener closed late,
+	// after a new keyd has made its own socket at this path, must not unlink that one.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	return ln, nil
 }
 
