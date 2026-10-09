@@ -1,0 +1,8 @@
+*
+!cells/browser/root/etc/localdot/browser-nginx.conf
+!cells/browser/browserd/dist/browserd.mjs
+!cells/browser/browserd/dist/forwarder.mjs
+!cells/browser/browserd/x/browser-helper.py
+!cells/browser/browserd/x/browser_surface.py
+!cells/browser/browserd/x/browser-capture.py
+!cells/desktop/desktopd/x/xhelper.py
