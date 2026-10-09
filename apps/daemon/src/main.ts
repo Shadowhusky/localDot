@@ -16,6 +16,7 @@ import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery } from "./cells/browser-recovery.ts";
+import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
 import { CellOrchestrator } from "./cells/orchestrator.ts";
@@ -50,6 +51,7 @@ import { KeydClient, keydSocketPath } from "./keyd/client.ts";
 import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
+import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
 import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
@@ -122,7 +124,10 @@ let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
 const stream = streamOptions(process.env);
+const images = imagesFromEnv();
+const updates = new ComputerUpdates({ home, docker, images, stream });
 const orchestrator = new CellOrchestrator({
+  updates,
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
   externalKeydPorts: () => [
     ...(agent?.reservedPorts() ?? []),
@@ -147,17 +152,18 @@ const orchestrator = new CellOrchestrator({
   docker,
   keyd: keydWiring,
   store,
-  images: imagesFromEnv(),
+  images,
   streamFullcolor: stream.fullcolor,
   probeDesktopd,
   probeStream,
 });
 // Restore reset candidate holds before browser/agent recovery or ordinary cell reconciliation.
 // The reset controller will release a candidate only after durable and freshly verified Ready.
+// A candidate published in an earlier run carries a release receipt and is not held again.
 const holdResetComputers = (binding: { oldCellId: string; newCellId: string }) => {
   tickets.revoke(binding.oldCellId);
   tickets.revoke(binding.newCellId);
-  orchestrator.holdReplacement(binding.newCellId);
+  if (resetHolds.candidateHeld(binding.newCellId)) orchestrator.holdReplacement(binding.newCellId);
   orchestrator.updateStream(binding.oldCellId, {
     connection: "none",
     viewers: 0,
@@ -320,32 +326,38 @@ const reset = createComputerResetController({
   available: () => resetAvailable && !shuttingDown,
   stopping: () => shuttingDown,
 });
-const startup = async () => {
-  await runtimeAdmission.restorePrepared({
-    images: runtimeImages,
-    readCell: (id) => store.get(id),
-    verify: async (record) => {
-      if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
-      await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+const startup = () =>
+  runDaemonStartup({
+    stopping: () => shuttingDown,
+    restorePrepared: () =>
+      runtimeAdmission.restorePrepared({
+        images: runtimeImages,
+        readCell: (id) => store.get(id),
+        verify: async (record) => {
+          if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
+          await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+        },
+        canPublish: () => !shuttingDown,
+        retired: (id) =>
+          !!fences.record(id) || resetHolds.records().some((row) => row.oldCellId === id),
+      }),
+    recoverBrowsers: () => browserRecovery.recover(),
+    containFenced: () => orchestrator.containFenced(),
+    startAgent: () => agent.start(),
+    recoverReplacements: () => replacement.owner.start(),
+    reconcile: () => orchestrator.reconcile({ strict: serviceIdentity !== null }),
+    restoreResets: () => reset.restoreReady(),
+    openResets: () => {
+      resetAvailable = true;
     },
-    canPublish: () => !shuttingDown,
-    retired: (id) =>
-      !!fences.record(id) || resetHolds.records().some((row) => row.oldCellId === id),
   });
-  await browserRecovery.recover();
-  await orchestrator.containFenced();
-  await agent.start();
-  try {
-    await replacement.owner.start();
-  } finally {
-    await orchestrator.reconcile({ strict: serviceIdentity !== null });
-  }
-  await reset.restoreReady();
-  resetAvailable = true;
-};
-void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup()).catch(() =>
-  console.error("startup cleanup, replacement recovery or cell reconcile failed"),
-);
+void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
+  .catch((error) => console.error(describeStartupError(error)))
+  .finally(() => {
+    if (shuttingDown) return;
+    const records = () => orchestrator.list().flatMap((cell) => orchestrator.record(cell.id) ?? []);
+    shutdown.unshift(updates.watch(records, (id) => orchestrator.notify(id)));
+  });
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
@@ -382,7 +394,14 @@ const app = createApp({
     thumbs: new Thumbnails(home, frames),
     live,
   },
-  cells: { cells: orchestrator, tickets, replacement, reset },
+  cells: {
+    cells: orchestrator,
+    tickets,
+    replacement,
+    reset,
+    update: (id, signal) =>
+      updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
+  },
   desktop,
   browser: browserViewer,
   accounts: { cells: orchestrator, browser },

@@ -106,6 +106,7 @@ function draftOf(progress: WizardProgress, saved: AgentSettingsDocument | null):
   };
 }
 
+const KEYD_OFF = "Key protection is off. To turn it back on, run this in Terminal:";
 const sameAddress = (a: string | undefined, b: string) => {
   try {
     return !!a && new URL(a).href.replace(/\/+$/, "") === new URL(b).href.replace(/\/+$/, "");
@@ -408,7 +409,7 @@ export function Onboarding(props: OnboardingProps) {
               onAddress={(address) => change({ address })}
               secret={secret}
               saved={keySaved ?? (typed ? null : (chosenKey?.id ?? null))}
-              unavailable={keydOff ? "Key protection is off right now" : undefined}
+              unavailable={keydOff ? KEYD_OFF : undefined}
               onTyped={(now) => {
                 setTyped(now);
                 if (now) setKeySaved(null);
@@ -422,7 +423,7 @@ export function Onboarding(props: OnboardingProps) {
               secret={secret}
               saved={keySaved ?? (typed ? null : (chosenKey?.id ?? null))}
               busy={busy}
-              unavailable={keydOff ? "Key protection is off right now" : undefined}
+              unavailable={keydOff ? KEYD_OFF : undefined}
               models={models}
               onTyped={(now) => {
                 setTyped(now);

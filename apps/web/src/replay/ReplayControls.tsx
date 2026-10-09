@@ -85,6 +85,7 @@ export function ReplayControls({
       </output>
       {replay.sessionId && <Scrubber api={api} sessionId={replay.sessionId} replay={replay} />}
       <span className="replay-length num">{timeLabel(replay.map?.endMs ?? 0)}</span>
+      {compact && exportControl}
       {!compact && (
         <span className="replay-transport-side">
           {screens}

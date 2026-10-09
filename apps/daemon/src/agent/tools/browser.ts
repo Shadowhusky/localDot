@@ -3,6 +3,7 @@ import {
   type BrowserNavigateInput,
   type BrowserNavigateResult,
   type BrowserReadInput,
+  type PageElement,
   type ToolResult,
   webUrl,
 } from "@localdot/protocol";
@@ -17,6 +18,7 @@ import {
   type ToolDeps,
   text,
 } from "./deps.ts";
+import { ELEMENTS_HEADER, elementLine, pageElement } from "./elements.ts";
 
 const LOCAL_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.arpa"];
 
@@ -46,6 +48,15 @@ function selectedBrowser(ctx: ToolCallContext) {
   if (!screens) throw new Error("The browser is unavailable.");
   return screens.browserAccess(ctx.screen);
 }
+
+// Where a page read belongs: the selected screen's cell and, on the web browser, its tab.
+export function pageScreen(ctx: ToolCallContext): { cellId: string; tabId?: string } {
+  const browser = selectedBrowser(ctx);
+  return {
+    cellId: ctx.nativeScreen?.cellId ?? ctx.session.cellId,
+    ...(browser ? { tabId: browser.tabId } : {}),
+  };
+}
 export async function browserReadTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -71,9 +82,20 @@ export async function browserReadTool(
   append(ctx, "tool.start", { tool: "browser_read", title: "Reading page" });
   const page = await load();
   ctx.check();
+  const elements = page.elements ?? (desktop ? await desktopElements(deps, ctx, page.url) : []);
+  ctx.check();
   ctx.session.tainted = true;
+  ctx.session.pageRefs = {
+    cellId: ctx.nativeScreen?.cellId ?? ctx.session.cellId,
+    ...(browser ? { tabId: browser.tabId } : {}),
+    url: page.url,
+    elements: new Map(elements.map((e) => [e.ref, e])),
+  };
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
+  const listed = elements.length
+    ? `\n\n${ELEMENTS_HEADER}\n${elements.map(elementLine).join("\n")}`
+    : "";
   return {
     ok: true,
     content: [
@@ -81,12 +103,30 @@ export async function browserReadTool(
         untrusted(
           `web page ${ctx.redact(page.url)}`,
           ctx.redact(
-            `Title: ${page.title}\nURL: ${page.url}\n\n${page.text}${page.truncated ? "\n(page text cut)" : ""}\n\nOutline:\n${page.outline}`,
+            `Title: ${page.title}\nURL: ${page.url}\n\n${page.text}${page.truncated ? "\n(page text cut)" : ""}\n\nOutline:\n${page.outline}${listed}`,
           ),
         ),
       ),
     ],
   };
+}
+
+// The desktop Chromium page's elements, when they belong to the page just read; none from an
+// older desktop.
+async function desktopElements(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  url: string,
+): Promise<PageElement[]> {
+  const desktop = deps.desktop(ctx.session.cellId);
+  if (!desktop?.elements) return [];
+  const found = await desktop
+    .elements({ page: true, limit: 150 }, ctx.signal)
+    .catch(() => undefined);
+  ctx.check();
+  if (!found || found.url !== url) return [];
+  const scale = ctx.nativeScreen?.scale ?? deps.scaleOf(ctx.session.cellId) ?? 1;
+  return found.elements.flatMap((wire) => pageElement(wire, scale) ?? []);
 }
 export async function browserNavigateTool(
   deps: ToolDeps,
@@ -102,6 +142,8 @@ export async function browserNavigateTool(
   const url = webUrl(input.url);
   if (!browser && !desktop) return fail("The computer is not running.");
   if (!url) return fail("Only http and https pages can be opened.");
+  // Another page's nodes may reuse the old ones' numbers.
+  session.pageRefs = undefined;
   append(ctx, "step.start", { kind: "browser" });
   append(ctx, "tool.start", {
     tool: "browser_navigate",

@@ -41,6 +41,25 @@ export function sameTarget(a: Target | null, b: Target | null): boolean {
   );
 }
 
+// What a hit test at a found element's point names: the element itself, or a part of it (its text
+// or icon, whose box lies within the element's), in the same window. Anything else there, such as
+// a dialog or a banner that opened since the element was listed, would take the input.
+export function partOf(element: Omit<NativeActionIdentity, "point">, hit: NativeActionIdentity) {
+  const outer = element.target?.bbox;
+  const inner = hit.target?.bbox;
+  if (!element.target || !hit.target || element.window !== hit.window) return false;
+  if (hit.target.role === element.target.role && hit.target.name === element.target.name)
+    return true;
+  return (
+    !!outer &&
+    !!inner &&
+    inner.x >= outer.x - SLACK_PX &&
+    inner.y >= outer.y - SLACK_PX &&
+    inner.x + inner.w <= outer.x + outer.w + SLACK_PX &&
+    inner.y + inner.h <= outer.y + outer.h + SLACK_PX
+  );
+}
+
 // `approved` is the read an approval (or a freshness basis) was made on, `fresh` a later read of
 // the same action. Window and frame always bind. An approval made on a read that ran out of time,
 // or on keyboard focus that was on no element yet, knew only the window, so that is all it binds

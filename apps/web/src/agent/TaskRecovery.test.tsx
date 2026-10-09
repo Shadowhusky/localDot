@@ -208,3 +208,40 @@ describe("never silent: a line from dot and the one action that fixes it", () =>
     expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
   });
 });
+
+it("offers to carry on a task localDot went away under, and says when that can't happen yet", async () => {
+  const interrupted: AgentSessionView = {
+    ...agentWith("user"),
+    interrupted: true,
+    model: { ...emptyAgentModel(), state: { state: "acting" }, ended: { reason: "stopped" } },
+    snapshot: { sessionId, cellId: "01JXYZ0000000000000000CE11", status: "ended", toolCalls: 0 },
+  };
+  const view = render(
+    <TaskRecovery agent={interrupted} controls={controls} onSettings={vi.fn()} />,
+  );
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect(region.querySelector("h3")?.textContent).toBe("I was cut off before I finished");
+  expect(screen.getByRole("button", { name: "Continue" }).getAttribute("aria-disabled")).toBe(
+    "true",
+  );
+  const carryOn = vi.fn(async () => true);
+  view.rerender(
+    <TaskRecovery
+      agent={interrupted}
+      controls={controls}
+      onSettings={vi.fn()}
+      onCarryOn={carryOn}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(carryOn).toHaveBeenCalledOnce();
+  view.rerender(
+    <TaskRecovery
+      agent={{ ...interrupted, interrupted: false }}
+      controls={controls}
+      onSettings={vi.fn()}
+      onCarryOn={carryOn}
+    />,
+  );
+  expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
+});

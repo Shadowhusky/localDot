@@ -85,7 +85,7 @@ async function fitsTheWidth(page: Page, size: Size) {
     page.getByRole("button", { name: /^(Back to Watch|Jump to live)$/ }),
     page.getByRole("button", { name: "Play replay" }),
     page.getByRole("combobox", { name: "Playback speed" }),
-    page.getByRole("button", { name: "Export MP4" }),
+    page.getByRole("button", { name: "Export video" }),
   ]) {
     await expect(control).toBeVisible();
     const box = await control.boundingBox();
@@ -242,12 +242,12 @@ for (const [label, engine, size] of [
 
     test("Export opens its choices above the transport, with or without a save picker", async () => {
       const { context, page, press } = await open(browser, size, `/?replay=${earlier}`);
-      const trigger = page.getByRole("button", { name: "Export MP4" });
+      const trigger = page.getByRole("button", { name: "Export video" });
       await expect(replayTime(page)).toHaveText("0:00 / 1:00");
       await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
       const stage = await page.locator(".replay-stage").boundingBox();
       await press(trigger);
-      const panel = page.getByRole("dialog", { name: "Export MP4" });
+      const panel = page.getByRole("dialog", { name: "Export video" });
       await expect(panel).toBeVisible();
       await expect(trigger).toHaveAttribute("aria-expanded", "true");
       await expect(panel.locator("select, input[type=radio], input[type=file]")).toHaveCount(0);
@@ -269,13 +269,13 @@ for (const [label, engine, size] of [
       });
       const page = await context.newPage();
       await page.goto(`${fixture.origin}/?replay=${earlier}#token=${TOKEN}`);
-      const trigger = page.getByRole("button", { name: "Export MP4" });
+      const trigger = page.getByRole("button", { name: "Export video" });
       await expect(replayTime(page)).toHaveText("0:00 / 1:00");
       await expect(trigger).toHaveAttribute("aria-disabled", "true");
       await expect(trigger).toHaveAccessibleDescription(EXPORT_REASON);
       await (size.hasTouch ? trigger.tap({ force: true }) : trigger.click({ force: true }));
       await expect(page.locator(".ui-tooltip")).toContainText(EXPORT_REASON);
-      await expect(page.getByRole("dialog", { name: "Export MP4" })).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "Export video" })).toHaveCount(0);
       await context.close();
     });
   });

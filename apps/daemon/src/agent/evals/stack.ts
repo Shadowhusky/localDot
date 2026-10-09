@@ -78,6 +78,8 @@ export interface AgentRun {
   wallMs: number;
   events: RecordedEvent[];
   calls: CallRecord[];
+  // The model's turns, from the brain's own transcript.
+  turns: number;
   assisted: { approvals: number; denied: ActionClass[]; handoffs: number; answers: number };
 }
 
@@ -156,6 +158,12 @@ export function callsOf(transcript: readonly TranscriptMessage[]): CallRecord[] 
             };
           }),
   );
+}
+
+// Every answer the model gave. The event log can miss the last one: the brain's usage event for
+// the turn that called done can arrive after the task closed.
+export function turnsOf(transcript: readonly TranscriptMessage[]): number {
+  return transcript.filter((message) => message.role === "assistant").length;
 }
 
 // One task on one desktop through the product's own path: the brain loop (in process, with the
@@ -378,7 +386,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   const events = eventLog.read(sessionId) as unknown as RecordedEvent[];
-  const calls = callsOf(transcripts.read(sessionId));
+  const transcript = transcripts.read(sessionId);
   eventLog.close();
   return {
     sessionId,
@@ -386,7 +394,8 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
     ...(error ? { error } : {}),
     wallMs,
     events,
-    calls,
+    calls: callsOf(transcript),
+    turns: turnsOf(transcript),
     assisted,
   };
 }

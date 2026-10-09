@@ -298,3 +298,27 @@ describe("live replay ownership", () => {
     expect(onGoLive).not.toHaveBeenCalled();
   });
 });
+
+describe("a recording that fails to load", () => {
+  afterEach(cleanup);
+  it("loads again from the start when asked to try again", async () => {
+    const fixture = liveFixture();
+    let failing = true;
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: (async (input, init) => {
+        if (failing && String(input).includes("/recording"))
+          return new Response("boom", { status: 500 });
+        return fixture.api.fetch(input, init);
+      }) as typeof fetch,
+    });
+    const hook = renderHook(() =>
+      useReplay(api, fixture.sessionId, fixture.stage, { onGoLive: vi.fn() }),
+    );
+    await vi.waitFor(() => expect(hook.result.current.status).toBe("error"));
+    failing = false;
+    act(() => hook.result.current.retry());
+    await vi.waitFor(() => expect(fixture.replay.open).toHaveBeenCalledOnce());
+    expect(hook.result.current.status).not.toBe("error");
+  });
+});

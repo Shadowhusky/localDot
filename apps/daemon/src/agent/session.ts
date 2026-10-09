@@ -3,6 +3,7 @@ import type {
   AskFieldRecord,
   AskFieldValue,
   AskRequestField,
+  PageElement,
   PauseSnapshot,
   RuleChange,
 } from "@localdot/protocol";
@@ -186,6 +187,10 @@ export class AgentSession {
   boot: BootConfig | undefined;
   toolToken: string | undefined;
   lastFrameId: string | undefined;
+  // The elements the last browser_read listed, by ref, with the screen, tab and page it read.
+  pageRefs:
+    | { cellId: string; tabId?: string; url: string; elements: ReadonlyMap<string, PageElement> }
+    | undefined;
   tainted = false;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
@@ -624,6 +629,7 @@ export class AgentSession {
     );
     lease.check();
     this.lastFrameId = undefined;
+    this.pageRefs = undefined;
     return result;
   }
   async screensSettled(): Promise<void> {
@@ -1391,6 +1397,8 @@ export class AgentSession {
       record.step,
     );
     this.#control = undefined;
+    // Whatever the user did on the computer, a page read before it is no longer one to act on.
+    this.pageRefs = undefined;
     const user = record.user;
     if (!user) this.tainted = false;
     this.status = this.safetyPause ? "paused" : user?.from === "idle" ? "idle" : "running";

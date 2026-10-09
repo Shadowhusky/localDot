@@ -1,6 +1,7 @@
 import type {
   AskUserInput,
   BootConfig,
+  BrowserActInput,
   ComputerAction,
   InboxItem,
   ModelBinding,
@@ -17,7 +18,13 @@ import {
 } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
-import { askInModelSpace, toComputerActions } from "./computer.ts";
+import {
+  actInModelSpace,
+  askInModelSpace,
+  elementsOnGrid,
+  pointsAtScreen,
+  toComputerActions,
+} from "./computer.ts";
 import {
   compactionEntry,
   compactionMessage,
@@ -37,6 +44,26 @@ import type { ToolClient } from "./tool-client.ts";
 import { toolSet } from "./tools.ts";
 
 export type RunOutcome = "done" | "gave_up" | "stopped";
+
+// Tools that act on the screen: one that failed skips the turn's later ones.
+const ACTS_ON_SCREEN = new Set(["computer", "browser_act"]);
+// Tools whose screenshot shows the screen after them.
+const SHOWS_SCREEN = new Set(["computer", "browser_act", "browser_navigate"]);
+const LEFT_OUT = "(Screenshot left out: a later action in this turn returned a newer one.)";
+
+const fullFrames = (result: ToolResult) =>
+  result.content.filter((c) => c.type === "image" && !c.region).length;
+
+function withoutFrames(result: ToolResult): ToolResult {
+  if (!fullFrames(result)) return result;
+  return {
+    ...result,
+    content: [
+      ...result.content.filter((c) => c.type === "text" || c.region),
+      { type: "text", text: LEFT_OUT },
+    ],
+  };
+}
 
 // pi-agent-core's event contract and hooks (spec "Loop"): what a host can watch and veto.
 export type AgentEvent =
@@ -593,11 +620,11 @@ export class Agent {
     }
   }
 
-  // The turn's calls, in order: a failed computer action stops the rest of the batch (spec "Tools").
+  // The turn's calls, in order: a failed screen action stops the rest of the batch (spec "Tools").
+  // Only the turn's newest screen goes back to the model: an earlier action's is already old.
   async #runCalls(step: ModelStep, signal: AbortSignal): Promise<RunOutcome | undefined> {
     const { calls, binding, basedOn } = step;
-    const parts: ReturnType<typeof resultParts>["part"][] = [];
-    const images: ReturnType<typeof resultParts>["images"] = [];
+    const done: { call: Call; result: ToolResult }[] = [];
     let batchFailed = false;
     let batchPaused = false;
     let final: RunOutcome | undefined;
@@ -627,7 +654,7 @@ export class Agent {
           ok: false,
           content: [{ type: "text", text: "Skipped: the task already ended." }],
         };
-      } else if (batchFailed && call.toolName === "computer") {
+      } else if (batchFailed && ACTS_ON_SCREEN.has(call.toolName)) {
         skipped = true;
         result = {
           ok: false,
@@ -647,19 +674,26 @@ export class Agent {
       signal.throwIfAborted();
       if (!result.ok && result.pause !== true && !skipped) {
         this.#failed += 1;
-        if (call.toolName === "computer") batchFailed = true;
+        if (ACTS_ON_SCREEN.has(call.toolName)) batchFailed = true;
       } else if (result.ok) this.#failed = 0;
       if (result.pause === true) batchPaused = true;
       if (result.final) final = result.ok && call.toolName === "done" ? "done" : "stopped";
-      const r = resultParts(call.toolCallId, call.toolName, result, imagesInToolResults(binding));
-      parts.push(r.part);
-      images.push(...r.images);
+      done.push({ call, result });
       this.#o.onEvent?.({
         type: "tool_execution_end",
         callId: info.callId,
         name: info.name,
         ok: result.ok,
       });
+    }
+    const newest = done.findLastIndex(({ result }) => fullFrames(result) > 0);
+    const parts: ReturnType<typeof resultParts>["part"][] = [];
+    const images: ReturnType<typeof resultParts>["images"] = [];
+    for (const [i, { call, result }] of done.entries()) {
+      const shown = i < newest && SHOWS_SCREEN.has(call.toolName) ? withoutFrames(result) : result;
+      const r = resultParts(call.toolCallId, call.toolName, shown, imagesInToolResults(binding));
+      parts.push(r.part);
+      images.push(...r.images);
     }
     this.#history.push({ role: "tool", content: parts });
     if (images.length)
@@ -695,7 +729,7 @@ export class Agent {
     if (call.toolName === "computer") {
       const actions = toComputerActions(call.input as never, binding.coords, basedOn);
       if (typeof actions === "string") return fail(actions);
-      if (!basedOn && actions.some((a) => a.action === "click" || a.action === "scroll"))
+      if (!basedOn && actions.some(pointsAtScreen))
         return fail("Take a full screenshot before choosing a point on the desktop.");
       result = await this.#computer(call.toolCallId, actions, signal);
       if (actions[0]?.action === "cursor_position" && binding.coords === "per1000")
@@ -704,9 +738,21 @@ export class Agent {
       const input =
         call.toolName === "ask_user"
           ? askInModelSpace(call.input as AskUserInput, binding.coords)
-          : call.input;
+          : call.toolName === "browser_act"
+            ? actInModelSpace(call.input as BrowserActInput, binding.coords, basedOn)
+            : call.input;
       if (typeof input === "string") return fail(input);
       result = await this.#o.api.tool(call.toolName, call.toolCallId, input, signal);
+      if (
+        (call.toolName === "browser_read" || call.toolName === "find") &&
+        binding.coords === "per1000"
+      )
+        result = {
+          ...result,
+          content: result.content.map((c) =>
+            c.type === "text" ? { ...c, text: elementsOnGrid(c.text) } : c,
+          ),
+        };
     }
     signal.throwIfAborted();
     if (call.toolName === "update_plan" && result.ok)

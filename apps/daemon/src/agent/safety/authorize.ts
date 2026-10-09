@@ -94,6 +94,35 @@ export function approvalDraft(
     ...(upload ? { title: "Upload files", upload } : {}),
   });
 }
+// Known daemon credentials remain human-owned, even under a permissive editable class.
+function holdsCredentials(
+  ctx: ToolCallContext,
+  prepared: Pick<PreparedEffect, "tool" | "input" | "target" | "facts" | "upload">,
+): boolean {
+  const shows = (value: unknown) => ctx.redact(JSON.stringify(value)) !== JSON.stringify(value);
+  return (
+    (!(prepared.tool === "done" && prepared.facts.operation === "files_read") &&
+      shows(prepared.input)) ||
+    shows(prepared.target) ||
+    (prepared.upload !== undefined && shows(prepared.upload))
+  );
+}
+
+// Whether authorizePrepared would let this effect run with no card and no hand-off.
+export function runsUnasked(
+  ctx: ToolCallContext,
+  prepared: Pick<PreparedEffect, "tool" | "input" | "target" | "facts" | "upload">,
+): boolean {
+  return (
+    decideAutonomy(ctx, prepared.facts).mode === "act" &&
+    !holdsCredentials(ctx, {
+      ...prepared,
+      input: freezeExecutionInput(prepared.input),
+      target: freezeExecutionInput(prepared.target),
+    })
+  );
+}
+
 export async function authorizePrepared(
   ctx: ToolCallContext,
   prepared: PreparedEffect,
@@ -109,13 +138,10 @@ export async function authorizePrepared(
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
   if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
     throw new Error("Upload approval does not match this action.");
-  // Known daemon credentials remain human-owned, even under a permissive editable class.
-  const protectedInput =
-    !(prepared.tool === "done" && prepared.facts.operation === "files_read") &&
-    ctx.redact(JSON.stringify(input)) !== JSON.stringify(input);
-  const protectedTarget = ctx.redact(JSON.stringify(target)) !== JSON.stringify(target);
-  const protectedPreview = upload && ctx.redact(JSON.stringify(upload)) !== JSON.stringify(upload);
-  if (decision.mode === "handoff" || protectedInput || protectedTarget || protectedPreview) {
+  if (
+    decision.mode === "handoff" ||
+    holdsCredentials(ctx, { ...prepared, input, target, upload })
+  ) {
     // No native effect has begun. Release this initiating tool's physical screen lease
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
@@ -201,6 +227,8 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
       };
     case "browser_read":
       return { operation: "files_read" };
+    case "find":
+      return { operation: "observe" };
     case "browser_navigate":
       return { operation: "navigate", destination: String(input.url) };
     case "remember":

@@ -79,7 +79,7 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
 interface ThreadContext {
   announce(text: string): void;
   downloads: ResultDownloads;
-  ended?: "done" | "stopped" | "error";
+  ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk: string | null;
   // The fields of the question dot is waiting on, drawn under it.
   ask?: ReactNode;
@@ -307,7 +307,7 @@ export interface ConversationProps {
   ownerKey?: string;
   // The latest turn's work while its task has not ended.
   live?: LiveWork | null;
-  ended?: "done" | "stopped" | "error";
+  ended?: "done" | "stopped" | "interrupted" | "error";
   pendingAsk?: string | null;
   api?: ApiClient | null;
   sessionId?: string | null;
@@ -331,6 +331,8 @@ export interface ConversationProps {
   // Opens an earlier task of the conversation in Replay.
   onReplayTask?: (sessionId: string) => void;
   computerReady?: boolean;
+  // The computer is moving onto a new version and is back in about a minute.
+  computerUpdating?: boolean;
   // In place of the empty thread's suggestions, such as the steps setup has left.
   start?: ReactNode;
 }
@@ -360,6 +362,7 @@ export function Conversation({
   onReplay,
   onReplayTask,
   computerReady = false,
+  computerUpdating = false,
   start,
 }: ConversationProps) {
   // While its task is live, the latest turn's work line sits in the foot, always in view; once the
@@ -725,7 +728,9 @@ export function Conversation({
                 <p>
                   {computerReady
                     ? "dot works on its own computer. Watch, step in or stop it at any time."
-                    : "Turn on your computer, then ask dot to do something."}
+                    : computerUpdating
+                      ? "Your computer is updating. Ask dot once it's back, in about a minute."
+                      : "Turn on your computer, then ask dot to do something."}
                 </p>
                 <div className="thread-suggestions">
                   {SUGGESTIONS.map((text) => (

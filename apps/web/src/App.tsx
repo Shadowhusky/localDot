@@ -13,6 +13,7 @@ import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
+import { taskStalled } from "./agent/heartbeat.ts";
 import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -31,6 +32,8 @@ import { deliverText } from "./agent/write-api.ts";
 import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
+import { useFreshStart } from "./cells/useFreshStart.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
@@ -139,6 +142,7 @@ const replayAddress = (selected: string | null) =>
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const CONFIRMING_LINE = "Checking that your last input reached the computer…";
+const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -339,6 +343,8 @@ function Theatre({ api }: { api: ApiClient }) {
     retry,
     selectReady,
   } = useCell(api);
+  const computerUpdate = useComputerUpdate(api, cell);
+  const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
   const rules = useRules(api, settings.open);
@@ -481,6 +487,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
   const island = useRef<HTMLDivElement>(null);
+  const toastAnchor = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
@@ -661,6 +668,22 @@ function Theatre({ api }: { api: ApiClient }) {
       return false;
     }
   };
+  // An interrupted task carries on as the conversation's next one.
+  const carryOn = async () => {
+    if (!cell) return false;
+    try {
+      await deliverText(api, {
+        cellId: cell.id,
+        sessionId: null,
+        mode: "new",
+        text: "Continue where you left off.",
+      });
+      session.check();
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const stageCell =
     physicalStageCell && controls.stopStatus.phase === "paused"
       ? { ...physicalStageCell, paused: true as const }
@@ -708,6 +731,14 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
+  // The daemon refuses an Update in these cases too; the button says so before it is pressed.
+  const updateWait =
+    agent.snapshot?.holder === true || yours
+      ? "Hand back the computer first"
+      : task && task.phase !== "finished"
+        ? "Wait for dot to finish"
+        : undefined;
+  useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -1022,9 +1053,16 @@ function Theatre({ api }: { api: ApiClient }) {
         ? CONFIRMING_LINE
         : yours && phone
           ? PHONE_CONTROL_LINE
-          : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-            ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
-            : "";
+          : !replayId && taskStalled(agent, performance.now())
+            ? SLOW_LINE
+            : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+              ? narrationLine(
+                  appStatus.row,
+                  appStatus.caption.text,
+                  // Out of touch, dot's last words are old news; the caption says what is going on.
+                  linkLost ? null : agent.model.said,
+                )
+              : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const asked = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
@@ -1086,7 +1124,10 @@ function Theatre({ api }: { api: ApiClient }) {
             : replayId
               ? (shownRecording?.title ?? RECORDED_TASK)
               : (session.model.title ??
-                (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                ((curtain.up && !agent.sessionId && conversation.sessions.length === 0) ||
+                // Until the shown task's history is in, its title is unknown, not new.
+                threadPending ||
+                (!!session.sessionId && agent.history !== true)
                   ? undefined
                   : "New conversation"))
         }
@@ -1145,6 +1186,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     phase={curtain.phase}
                     first={!cell && listed.length === 0}
                     waking={pending === "start" || pending === "create"}
+                    updating={!!cell?.updating}
                     caption={computer.caption}
                     notice={error ?? stoppedOff(controls.stopStatus)}
                     action={computerAction}
@@ -1166,6 +1208,7 @@ function Theatre({ api }: { api: ApiClient }) {
                           }
                         : undefined
                     }
+                    freshStart={freshStart.curtain}
                     showDot={showDot.value}
                   />
                 </Presence>
@@ -1192,17 +1235,17 @@ function Theatre({ api }: { api: ApiClient }) {
                     onExitFull={fullScreen.exit}
                     onRowWidth={setIslandWidth}
                     fields={askFields}
+                    noticesRef={toastAnchor}
                     notices={
                       <SafetyNotes
                         safety={safety}
                         agent={agent}
                         cell={cell}
                         visible={sheetsClosed}
-                        replaying={!!replayId}
                       />
                     }
                   />
-                  <Toaster anchor={island} />
+                  <Toaster anchor={toastAnchor} />
                 </>
               }
               band={
@@ -1318,6 +1361,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               computerReady={cell?.state === "ready" && !cell.paused}
+              computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
                 agent.sessionId && (agent.model.ended || task?.phase === "finished")
@@ -1426,6 +1470,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   controls={controls}
                   onSettings={showSettings}
                   onContinue={continueTask}
+                  onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
                 />
               }
               ask={askThread}
@@ -1488,6 +1533,8 @@ function Theatre({ api }: { api: ApiClient }) {
           stopNote={stopNote}
           stream={streamChoice}
           stop={sheetStopControl}
+          update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
+          freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
           open={settings.open}
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}

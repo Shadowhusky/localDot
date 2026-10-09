@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   clipText,
+  type FindRequest,
   type Input,
   type InputResult,
   microsToMs,
@@ -28,7 +29,7 @@ import type { DesktopdRegistry, NativeDevice } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
-import { type NativeActionIdentity, sameNativeIdentity } from "./identity.ts";
+import { type NativeActionIdentity, partOf, sameNativeIdentity } from "./identity.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
 import {
@@ -61,13 +62,16 @@ const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
 export const CHANGED_WHILE_DECIDING =
   "The screen changed while the user was deciding. Look again before acting.";
+// A page element found by its node is no longer the one listed: gone, covered, off screen or
+// renamed.
+export const ELEMENT_GONE = "that element is no longer on the page as it was read";
 
 export type GuiAction =
   | {
       verb: "click";
       label?: string;
       point?: Point;
-      find?: { name: string; role?: string; app?: string };
+      find?: FindRequest;
       button?: "left" | "right" | "middle";
       count?: 1 | 2 | 3;
       // Modifier keys held down through the click.
@@ -89,6 +93,7 @@ export type GuiAction =
       verb: "scroll";
       label?: string;
       point?: Point;
+      find?: FindRequest;
       dx: number;
       dy: number;
       mods?: string[];
@@ -451,6 +456,26 @@ export class ActionGateway {
     throw new Cancelled("preflight", `the ${held.button} button is no longer down`);
   }
 
+  // A page element by its node where it is now, without acting on it: for a decision that rests
+  // on its current state, such as whether a box is already ticked. Null when it is not there as
+  // listed.
+  async find(ctx: ActionContext, request: FindRequest): Promise<Target | null> {
+    ctx = this.#owner(ctx);
+    const d = await this.#ready(ctx);
+    const found = await this.#locate(d, request);
+    this.#check(ctx);
+    return found.target;
+  }
+
+  // An element by name, or by its node only on the page it was listed on.
+  async #locate(d: NativeDevice, request: FindRequest): Promise<Lookup> {
+    const found = await d.client.find(request);
+    const { url } = request;
+    return found.target && url !== undefined && found.target.url !== url
+      ? { ...found, target: null }
+      : found;
+  }
+
   // A fresh frame for the brain (M4) and for the step thumbnails; also where the cursor starts.
   async observe(ctx: ActionContext): Promise<{ frameId: string; pointer: Point }> {
     ctx = this.#owner(ctx);
@@ -583,10 +608,15 @@ export class ActionGateway {
     const cursor = this.#cursor.get(ctx.cellId) ?? centre;
     let found: Lookup | undefined;
     let point: Point;
-    if (action.verb === "click" && action.find) {
-      found = await d.client.find(action.find);
+    if ((action.verb === "click" || action.verb === "scroll") && action.find) {
+      found = await this.#locate(d, action.find);
       if (!found.target)
-        throw new Cancelled("preflight", `no element named ${JSON.stringify(action.find.name)}`);
+        throw new Cancelled(
+          "preflight",
+          action.find.node === undefined
+            ? `no element named ${JSON.stringify(action.find.name)}`
+            : ELEMENT_GONE,
+        );
       point = found.target.point;
     } else if (action.point) {
       point = toDevice(action.point, { ...MODEL_SCREEN, scale });
@@ -616,6 +646,8 @@ export class ActionGateway {
           : { ...(await this.#lookup(ctx, d, point)), point },
       );
     const identity = ctx.source === "agent" ? await readIdentity() : undefined;
+    if (found && identity && !dragging && !identity.unknown && !partOf(found, identity))
+      throw new Cancelled("preflight", ELEMENT_GONE);
     const permit = identity
       ? await this.#authorize(ctx, authorized, identity, readIdentity)
       : undefined;
@@ -1379,7 +1411,7 @@ export class ActionGateway {
 
   #desktopd(cellId: string): NativeDevice {
     const d = this.deps.registry.for(cellId);
-    if (!d) throw new Cancelled("preflight", `cell ${cellId} has no desktopd endpoint`);
+    if (!d) throw new Cancelled("preflight", "the computer is not connected");
     return d;
   }
 
@@ -1394,7 +1426,8 @@ export class ActionGateway {
   }
 
   #pressT(ctx: ActionContext, d: NativeDevice, pressMono: number): number {
-    if (!d.clocks.sample) throw new Cancelled("preflight", "desktopd clock not synced");
+    if (!d.clocks.sample)
+      throw new Cancelled("preflight", "the computer's clock is not in step yet");
     // The press happened before this call returned; a mapping error of a millisecond must not put
     // it after the event that records it.
     return Math.min(
@@ -1474,7 +1507,7 @@ export class ActionGateway {
     }
     const cell = this.deps.cells.get(ctx.screen?.parentCellId ?? ctx.cellId);
     if (cell?.state !== "ready")
-      throw new Cancelled("preflight", `cell is ${cell?.state ?? "missing"}`);
+      throw new Cancelled("preflight", `the computer is ${cell?.state ?? "gone"}`);
     if (cell.fenced || cell.replacementPending)
       throw new Cancelled(
         "preflight",

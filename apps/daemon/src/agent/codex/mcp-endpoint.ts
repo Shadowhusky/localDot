@@ -9,7 +9,13 @@ import {
   type OwnedCodexRoots,
   removeOwnedCodexDirectory,
 } from "@localdot/codex-harness";
-import { type PauseSnapshot, type ToolResult, ULID_PATTERN, ulid } from "@localdot/protocol";
+import {
+  MAX_BATCH_STEPS,
+  type PauseSnapshot,
+  type ToolResult,
+  ULID_PATTERN,
+  ulid,
+} from "@localdot/protocol";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
@@ -382,10 +388,21 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
               pause: true,
               content: [{ type: "text", text: "Task paused before this call started." }],
             });
+          const steps = (args as { steps?: unknown } | null)?.steps;
+          if (name === "computer" && Array.isArray(steps) && steps.length > MAX_BATCH_STEPS)
+            return toCallToolResult({
+              ok: false,
+              content: [
+                {
+                  type: "text",
+                  text: `A batch takes at most ${MAX_BATCH_STEPS} steps; split it in two.`,
+                },
+              ],
+            });
           if (record) record.dispatched = true;
           let toolInput = args;
           if (
-            name === "computer" &&
+            (name === "computer" || name === "browser_act") &&
             typeof args === "object" &&
             args !== null &&
             !Array.isArray(args)

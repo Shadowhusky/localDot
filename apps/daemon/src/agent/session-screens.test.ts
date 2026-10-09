@@ -1280,6 +1280,60 @@ describe("session-owned screen authority", () => {
     expect(f.session.lastFrameId).toBeUndefined();
   });
 
+  it("forgets the page's refs on a screen switch and refuses an act by one of them", async () => {
+    const f = fixture();
+    const generation = await f.browser();
+    const h = tools(f);
+    const next = {
+      ref: "e42",
+      role: "button",
+      name: "Next",
+      box: { x: 560, y: 285, w: 80, h: 30 },
+    };
+    f.client.read.mockImplementation((async () => ({
+      url: "https://example.test/",
+      title: "Owned browser page",
+      text: "Public page text",
+      outline: "button Next",
+      truncated: false,
+      elements: [next],
+    })) as never);
+    expect((await h.callTool("browser_read", {})).result.ok).toBe(true);
+    expect(f.session.pageRefs?.elements.has("e42")).toBe(true);
+    const lease = f.session.admit(generation);
+    await f.session.switchScreen("desktop", lease);
+    await f.session.switchScreen("browser", lease);
+    lease.finish();
+    expect(f.session.pageRefs).toBeUndefined();
+    // Back on the same tab, the button is still there to be found and clicked.
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 1200, y: 600 },
+        bbox: { x: 1120, y: 570, w: 160, h: 60 },
+        source: "dom",
+        role: "button",
+        name: "Next",
+        url: "https://example.test/",
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    f.client.input.mockImplementation((async () => ({
+      pressMono: 1,
+      presses: [1],
+      injector: "xtest",
+      armedMono: 0,
+    })) as never);
+    const act = await h.callTool("browser_act", { action: "click", ref: "e42" });
+    expect(act.result.ok).toBe(false);
+    expect(act.result.content).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("e42 is not in this screen's last page read"),
+      }),
+    );
+    expect(f.client.input).not.toHaveBeenCalled();
+  });
+
   it("keeps tool admission closed until the initial recording attachment is confirmed", async () => {
     const f = fixture(),
       barrier = Promise.withResolvers<void>();

@@ -70,6 +70,7 @@ function state(patch: {
     setSpeed: vi.fn(),
     setSkipIdle: vi.fn(),
     selectStep: vi.fn(),
+    retry: vi.fn(),
     ...patch,
   };
 }

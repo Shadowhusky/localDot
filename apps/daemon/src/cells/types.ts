@@ -19,6 +19,11 @@ export interface CellSummary {
   replacementPending?: true;
   // Stop freezes every desktop process until the user resumes or restarts it.
   paused?: true;
+  // Its images have newer builds under the same tags; Update moves it onto them.
+  updateAvailable?: true;
+  updating?: true;
+  // Its update can't be finished; a fresh start is the way back.
+  needsFreshStart?: true;
   id: string;
   state: CellState;
   scale: Scale;

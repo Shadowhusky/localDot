@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  ElementsRequest,
   FindRequest,
   HeldResult,
   HitTestRequest,
@@ -30,7 +31,14 @@ import {
   typeText,
   UnsupportedInputError,
 } from "./input.ts";
-import { findTarget, focusedTarget, hitTest, type PerceptionDeps } from "./perception/hit-test.ts";
+import {
+  findElements,
+  findTarget,
+  focusedTarget,
+  hitTest,
+  type PerceptionDeps,
+  pageElements,
+} from "./perception/hit-test.ts";
 import { observe } from "./perception/observe.ts";
 import { settle } from "./settle.ts";
 import { addToolRoutes, type ToolRouteDeps } from "./tools/routes.ts";
@@ -334,7 +342,18 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withPerception(async (p) => {
       const parsed = FindRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
+      if (parsed.data.name === undefined && parsed.data.node === undefined)
+        return c.text("find needs a name or a node", 400);
       return c.json(await findTarget(p, parsed.data));
+    })(),
+  );
+  app.post("/elements", (c) =>
+    withPerception(async (p) => {
+      const parsed = ElementsRequest.safeParse(await c.req.json().catch(() => ({})));
+      if (!parsed.success) return c.text(parsed.error.message, 400);
+      if (parsed.data.page) return c.json(await pageElements(p, parsed.data));
+      if (parsed.data.text === undefined) return c.text("elements needs text or page", 400);
+      return c.json(await findElements(p, parsed.data));
     })(),
   );
   return app;
