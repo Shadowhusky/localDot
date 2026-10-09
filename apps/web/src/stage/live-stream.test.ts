@@ -3,7 +3,15 @@ import { qualityMessage } from "@localdot/protocol";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { fakeChromium, playInClient } from "../testing/fake-chromium.ts";
-import { closeStreams, holdStream, KEEP_MS, STALE_MS } from "./live-stream.ts";
+import type { FrameSource } from "./frame-source.ts";
+import {
+  closeStreams,
+  holdStream,
+  KEEP_MS,
+  STALE_MS,
+  TAP_STALL_MS,
+  TRACK_PROOF_MS,
+} from "./live-stream.ts";
 
 const CELL = "01JXYZ0000000000000000ABCD";
 const ticket = (n: number) => `/cells/${CELL}/desktop/${String(n).padStart(22, "T")}/`;
@@ -118,6 +126,83 @@ it("tells its relay each second what this viewer can take, from the round trip t
     expect(send.mock.calls).toEqual([[qualityMessage({ visible: false })]]);
   } finally {
     Reflect.deleteProperty(document, "visibilityState");
+    restore();
+  }
+});
+
+// Safari: no MediaStreamTrackProcessor on the page. Its client counts decoded frames itself, as
+// WebKit's video counts none of a track a worker writes.
+async function safariClient(frames: boolean) {
+  const restore = fakeChromium();
+  vi.stubGlobal("MediaStreamTrackProcessor", undefined);
+  const { api } = daemon(() => Response.json({ path: ticket(1) }));
+  const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+  const sources: FrameSource[] = [];
+  stream.connect((source) => sources.push(source));
+  await vi.advanceTimersByTimeAsync(250);
+  const [frame] = clients();
+  const view = frame?.contentWindow as (Window & { videoChunksReceived: number }) | null;
+  if (!frame || !view) throw new Error("no client");
+  playInClient(frame, "track-1");
+  if (frames)
+    Object.defineProperty(
+      frame.contentDocument?.getElementById("videoStream"),
+      "requestVideoFrameCallback",
+      {
+        value: () => 1,
+      },
+    );
+  const send = vi.fn();
+  Object.assign(view, { selkiesTransport: { readyState: 1, send }, videoChunksReceived: 0 });
+  const keyframes = () => send.mock.calls.filter(([text]) => text === "REQUEST_KEYFRAME").length;
+  return { stream, sources, view, keyframes, restore };
+}
+
+it("asks for a key frame at once for a tap without the video's frame, as a still screen sends none", async () => {
+  const { sources, keyframes, restore } = await safariClient(false);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.track).toBeDefined();
+    expect(sources[0]?.first).toBeUndefined();
+    expect(keyframes()).toBe(1);
+  } finally {
+    restore();
+  }
+});
+
+it("copies the video's frames once the worker's read of the track twice showed nothing while the decoder ran", async () => {
+  const { sources, view, restore } = await safariClient(true);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sources.map((source) => !!source.track)).toEqual([true]);
+    view.videoChunksReceived = 30;
+    await vi.advanceTimersByTimeAsync(TRACK_PROOF_MS);
+    expect(sources.map((source) => !!source.track)).toEqual([true, true]);
+    view.videoChunksReceived = 60;
+    await vi.advanceTimersByTimeAsync(TRACK_PROOF_MS);
+    expect(sources.map((source) => !!source.track)).toEqual([true, true, false]);
+    expect(sources[2]?.frames).toBeTypeOf("function");
+  } finally {
+    restore();
+  }
+});
+
+it("keeps handing the worker the track once it showed a frame", async () => {
+  const { stream, sources, view, restore } = await safariClient(true);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    stream.presented(1);
+    view.videoChunksReceived = 30;
+    await vi.advanceTimersByTimeAsync(TRACK_PROOF_MS);
+    expect(sources).toHaveLength(1);
+    // The stall that follows takes the tap again, still with a track.
+    for (let ms = 0; ms <= TAP_STALL_MS; ms += 250) {
+      view.videoChunksReceived += 8;
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    expect(sources.map((source) => !!source.track)).toEqual([true, true]);
+  } finally {
     restore();
   }
 });

@@ -1,6 +1,6 @@
 import type { LocalDotEvent, Point } from "@localdot/protocol";
 import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
-import type { FrameSource } from "./frame-source.ts";
+import { type FrameSource, framePath } from "./frame-source.ts";
 import { KEEP_MS } from "./live-stream.ts";
 import { manualPoint } from "./manual-point.ts";
 import type { Flip, ProbeRect } from "./probe.ts";
@@ -65,6 +65,10 @@ export class StageEngine implements StageCanvasHandle {
   #themeStale = false;
   #source: FrameSource | null = null;
   #sourceId = 0;
+  // The source whose frames the worker was last told how to take.
+  #fed = 0;
+  // Whether the worker reads a track handed to it; null until it says.
+  #workerTracks: boolean | null = null;
   #viewport = { w: 1, h: 1 };
   #pendingOracle = new Map<number, Pending>();
   #oracleSeq = 0;
@@ -207,7 +211,10 @@ export class StageEngine implements StageCanvasHandle {
   }
 
   #receive(m: WorkerOut): void {
-    if (m.type === "stats") {
+    if (m.type === "caps") {
+      this.#workerTracks = m.tracks;
+      if (this.#source && this.#fed !== this.#sourceId) this.#feed(this.#sourceId, this.#source);
+    } else if (m.type === "stats") {
       if (!this.#source || m.sourceId !== this.#sourceId) return;
       this.#mark(m.stats);
       for (const listener of this.#statsListeners) listener(m.stats);
@@ -265,14 +272,24 @@ export class StageEngine implements StageCanvasHandle {
     const id = ++this.#sourceId;
     this.#source?.stop();
     this.#source = source;
-    const worker = this.#worker;
-    if (!worker) {
+    if (!this.#worker) {
       source.stop();
       this.#source = null;
       return;
     }
+    // A track waits for the worker to say whether it reads tracks, which it does as it starts.
+    if (!source.readable && source.track && this.#workerTracks === null) return;
+    this.#feed(id, source);
+  }
+
+  #feed(id: number, source: FrameSource): void {
+    const worker = this.#worker;
+    if (!worker) return;
+    this.#fed = id;
+    const path = framePath(source, this.#workerTracks);
+    if (path) this.canvas.dataset.path = path;
     // S8's seed frame travels with the readable; both are transferred.
-    if (source.readable) {
+    if (path === "stream" && source.readable) {
       const transfer: Transferable[] = source.first
         ? [source.readable, source.first]
         : [source.readable];
@@ -289,6 +306,20 @@ export class StageEngine implements StageCanvasHandle {
       }
       return;
     }
+    if (path === "track" && source.track) {
+      const track = source.track;
+      try {
+        worker.postMessage({ type: "frames", sourceId: id, track } satisfies WorkerIn, [track]);
+        source.track = undefined;
+        return;
+      } catch {
+        // This browser cannot hand a track over: its frames are copied on the page instead.
+        this.#workerTracks = false;
+        this.canvas.dataset.path = "presented";
+      }
+    }
+    source.track?.stop();
+    source.track = undefined;
     if (!source.frames) {
       source.stop();
       this.#source = null;

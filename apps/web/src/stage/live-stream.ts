@@ -28,6 +28,10 @@ const KEYFRAME_EVERY_MS = 1_000;
 const KEYFRAME_TRIES = 3;
 // The decoder runs ahead of a tap that presents nothing: the tap is taken again, then the client.
 export const TAP_STALL_MS = 3_000;
+// A track handed to the worker that shows nothing this long while the decoder runs is taken again;
+// one that fails twice running is not tried again, and the video's frames are copied instead.
+export const TRACK_PROOF_MS = 1_500;
+const TRACK_TRIES = 2;
 const MINT_RETRY_MS = { min: 1_000, max: 15_000 };
 // The stream's quality is judged this often, and a viewer's wish repeated this often for a relay
 // that may have restarted under the same client.
@@ -52,6 +56,13 @@ interface Client {
 }
 
 // Selkies' objects live in the client's realm, so they are read by shape.
+interface ClientView {
+  selkiesTransport?: Transport | null;
+  stream_stats?: ClientStats | null;
+  // Frames that reached its decoder so far. WebKit's video counts none of a track a worker writes.
+  videoChunksReceived?: unknown;
+}
+
 interface ClientVideo {
   tagName?: string;
   srcObject: unknown;
@@ -73,23 +84,19 @@ interface ClientStats {
 
 function look(client: Client | null) {
   let doc: Document | null = null;
-  let transport: Transport | null | undefined;
-  let stats: ClientStats | null | undefined;
+  let view: ClientView | null = null;
   try {
     doc = client?.frame.contentDocument ?? null;
-    const view = client?.frame.contentWindow as {
-      selkiesTransport?: Transport | null;
-      stream_stats?: ClientStats | null;
-    } | null;
-    transport = view?.selkiesTransport;
-    stats = view?.stream_stats;
+    view = client?.frame.contentWindow as ClientView | null;
   } catch {}
   const element = doc?.getElementById("videoStream") as ClientVideo | null | undefined;
   const video = element?.tagName === "VIDEO" ? element : null;
   const stream = video?.srcObject as { getVideoTracks?: () => { id: string }[] } | null | undefined;
   const track =
     typeof stream?.getVideoTracks === "function" ? stream.getVideoTracks()[0] : undefined;
-  return { video, track, transport, stats };
+  const chunks = typeof view?.videoChunksReceived === "number" ? view.videoChunksReceived : 0;
+  const decoded = Math.max(video?.getVideoPlaybackQuality?.().totalVideoFrames ?? 0, chunks);
+  return { video, track, decoded, transport: view?.selkiesTransport, stats: view?.stream_stats };
 }
 
 let host: HTMLElement | null = null;
@@ -124,6 +131,12 @@ export class LiveStream {
   #retapped = false;
   #awaiting = false;
   #tappedAt = 0;
+  // The current tap handed the worker a track, and the decoder's count when it was taken.
+  #trackTap = false;
+  #tapDecoded = 0;
+  // Whether the worker's own read of a track shows frames here: unknown, proven or given up on.
+  #tracks: boolean | null = null;
+  #trackFailures = 0;
   #keyframeAt = 0;
   #keyframes = 0;
   #hadPicture = false;
@@ -175,6 +188,7 @@ export class LiveStream {
     this.#presentedAt = Date.now();
     this.#awaiting = false;
     this.#retapped = false;
+    if (this.#trackTap) this.#tracks = true;
     this.#troubleSince = null;
     this.#show("live");
   }
@@ -270,7 +284,7 @@ export class LiveStream {
     const client = this.#current;
     const retry = Math.min(MINT_RETRY_MS.max, MINT_RETRY_MS.min * 2 ** this.#mintFailures);
     if (!client && !this.#next && now - this.#mintAt >= retry) this.replace();
-    const { video, track, transport } = look(client);
+    const { video, track, decoded, transport } = look(client);
     let delivering = false;
     if (client && !video) {
       // An error page, or a client that never loaded; one that keeps failing is given longer.
@@ -282,15 +296,23 @@ export class LiveStream {
     } else if (client && video) {
       client.seenAt = now;
       this.#patience = STALE_MS;
-      const decoded = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
       if (decoded > client.decoded) client.advancedAt = now;
       client.decoded = decoded;
       // The decoder has run on well past the last frame the stage presented.
       const stalled = client.advancedAt - this.#presentedAt >= TAP_STALL_MS;
-      if (track && track.id !== client.tapped) this.#tap(client, video, now);
-      else if (track && stalled && !this.#retapped) {
+      const unproven =
+        this.#trackTap &&
+        this.#awaiting &&
+        this.#tracks === null &&
+        decoded > this.#tapDecoded &&
+        now - this.#tappedAt >= TRACK_PROOF_MS;
+      if (track && track.id !== client.tapped) this.#tap(client, video, transport, now);
+      else if (track && unproven) {
+        if (++this.#trackFailures >= TRACK_TRIES) this.#tracks = false;
+        this.#tap(client, video, transport, now);
+      } else if (track && stalled && !this.#retapped) {
         this.#retapped = true;
-        this.#tap(client, video, now);
+        this.#tap(client, video, transport, now);
       } else if (track && stalled && now - this.#presentedAt >= STALE_MS) {
         this.#presentedAt = now;
         this.replace();
@@ -326,8 +348,13 @@ export class LiveStream {
     }
   }
 
-  #tap(client: Client, video: ClientVideo, now: number): void {
-    const source = tapVideoTrack(video);
+  #tap(
+    client: Client,
+    video: ClientVideo,
+    transport: Transport | null | undefined,
+    now: number,
+  ): void {
+    const source = tapVideoTrack(video, { tracks: this.#tracks !== false });
     if (!source) return;
     this.#source = source;
     // The stage's count starts again with the new tap.
@@ -336,7 +363,12 @@ export class LiveStream {
     this.#presentedAt = now;
     this.#tappedAt = now;
     this.#awaiting = true;
+    this.#trackTap = !!source.track;
+    this.#tapDecoded = client.decoded;
     this.#keyframes = 0;
+    // Without the video's current frame, the stage waits for the next one: a still screen sends
+    // none, so a key frame is asked for at once.
+    if (!source.first) this.#keyframe(transport, now);
     if (this.#sink) this.#sink(source);
     else source.stop();
   }
