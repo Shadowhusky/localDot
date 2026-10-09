@@ -357,6 +357,11 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
 }
 
+// The thread's foot follows dot's own work. While the user has the computer it says nothing: the
+// turn's line stays in the thread as it was, with the change of hands after it.
+export const footWork = (task: TaskHud | null): TaskHud | null =>
+  task?.row === "control" ? null : task;
+
 export type StatusRow = TaskRow | "computer" | "stopping";
 
 export interface HudAction {

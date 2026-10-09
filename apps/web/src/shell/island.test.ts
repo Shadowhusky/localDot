@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import { statusFor, type TaskHud } from "../session/status.ts";
-import { islandAttention, islandDecision, islandShape, pauseSlot, takeSlot } from "./island.ts";
+import {
+  islandAttention,
+  islandDecision,
+  islandShape,
+  pauseSlot,
+  takeReason,
+  takeSlot,
+} from "./island.ts";
 
 const cell: CellSummary = {
   id: "01JXYZ0000000000000000ABCD",
@@ -168,5 +175,25 @@ describe("islandDecision", () => {
     for (const shape of ["hidden", "ready", "computer"] as const)
       expect(islandDecision({ ...base, shape, approval: true, chatShown: false })).toBeNull();
     expect(islandDecision(base)).toBeNull();
+  });
+});
+
+describe("takeReason", () => {
+  it("lets the user take the computer with no task at work, once it is ready", () => {
+    expect(takeReason({ task: false, ready: true, pause: undefined })).toBeUndefined();
+    expect(takeReason({ task: false, ready: false, pause: undefined })).toBe(
+      "Wait for the computer to be ready",
+    );
+  });
+
+  it("says Stop for a Pause that can't be confirmed, which never settles by itself", () => {
+    expect(takeReason({ task: true, ready: false, pause: "uncertain" })).toBe(
+      "Stop the task to take over",
+    );
+    expect(takeReason({ task: true, ready: false, pause: "pausing" })).toBe(
+      "Wait for the pause to settle",
+    );
+    expect(takeReason({ task: true, ready: false, pause: "paused" })).toBe("Wait a moment");
+    expect(takeReason({ task: true, ready: true, pause: "paused" })).toBeUndefined();
   });
 });

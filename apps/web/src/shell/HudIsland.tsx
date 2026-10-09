@@ -44,6 +44,10 @@ export interface HudIslandProps {
   decision?: ReactNode;
   // Short notes that drop from the island, under it or under the decision it grew into.
   notices?: ReactNode;
+  // While the user has the computer the island rises into the top bar, where the bar has room.
+  rise?: boolean;
+  // The width of the island's row, as it changes.
+  onRowWidth?(width: number): void;
   // Toasts hang from the island, or from the decision it grew into.
   ref?: RefObject<HTMLDivElement | null>;
 }
@@ -66,6 +70,8 @@ export function HudIsland({
   onComputer,
   decision,
   notices,
+  rise = false,
+  onRowWidth,
   ref,
 }: HudIslandProps) {
   const phone = useMediaQuery(HANDHELD);
@@ -74,6 +80,8 @@ export function HudIsland({
   const row = useRef<HTMLDivElement>(null);
   const plate = useRef<HTMLSpanElement>(null);
   const card = useRef<HTMLDivElement>(null);
+  const rowWidth = useRef(onRowWidth);
+  rowWidth.current = onRowWidth;
   const open = !!decision && shape === "task";
   // The card keeps what it last showed while it fades back into the island.
   const shown = useRef<ReactNode>(null);
@@ -91,6 +99,7 @@ export function HudIsland({
     const root = anchor.current;
     if (!content || !glass || !root) return;
     const fit = () => {
+      rowWidth.current?.(content.offsetWidth);
       const grown = open ? card.current : null;
       if (!grown) {
         glass.style.width = `${content.offsetWidth}px`;
@@ -123,7 +132,7 @@ export function HudIsland({
   // A phone keeps Hand back in its toolbar, so its island ends at Stop.
   const handSlot = !(yours && phone);
   return (
-    <div className="island-anchor" ref={anchor} data-risen={yours || undefined}>
+    <div className="island-anchor" ref={anchor} data-risen={(yours && rise) || undefined}>
       <div
         className="island"
         data-shape={shape}

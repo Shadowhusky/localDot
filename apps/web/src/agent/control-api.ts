@@ -4,6 +4,7 @@ import {
   keyLikePresent,
   QuestionAnswerRequest,
   StopOutcome,
+  TakeComputerReply,
   TakeControlReply,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -203,6 +204,13 @@ export function takeControl(api: ApiClient, sessionId: string, signal: AbortSign
     202,
     signal,
     (text) => TakeControlReply.parse(JSON.parse(text)).requestId,
+  );
+}
+// With no task live on the computer, the user's own hold starts; the reply names its session.
+export function takeComputer(api: ApiClient, cellId: string, signal: AbortSignal) {
+  if (!ULID_PATTERN.test(cellId)) throw new ControlFailure(false);
+  return controlRequest(api, `/api/cells/${cellId}/takeover`, undefined, 202, signal, (text) =>
+    TakeComputerReply.parse(JSON.parse(text)),
   );
 }
 export function returnControl(

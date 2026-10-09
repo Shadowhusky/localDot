@@ -1,4 +1,4 @@
-import { useLayoutEffect, useSyncExternalStore } from "react";
+import { type RefObject, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { useMediaQuery } from "../ui/media.ts";
 
 // Wide: the stage beside both rails. Laptop: the stage beside one rail that switches between Chat
@@ -63,4 +63,40 @@ export function useKeyboardFit(page: { current: HTMLElement | null }, up: boolea
       element.style.removeProperty("--_visible-top");
     };
   }, [page, up]);
+}
+
+// The top bar's centre once its title gives way: the island centres on the bar, so the right group
+// and a gap bound both sides.
+export function centreRoom(bar: { content: number; right: number; gap: number }): number {
+  return Math.max(0, bar.content - 2 * (bar.right + bar.gap));
+}
+
+// How wide an island the top bar's centre can take, as the bar's width changes. A phone has no bar.
+export function useCentreRoom(bar: RefObject<HTMLElement | null>): number {
+  const [room, setRoom] = useState(0);
+  useLayoutEffect(() => {
+    const element = bar.current;
+    const right = element?.lastElementChild;
+    if (!element || !(right instanceof HTMLElement) || typeof ResizeObserver === "undefined")
+      return;
+    const measure = () => {
+      const style = getComputedStyle(element);
+      setRoom(
+        centreRoom({
+          content:
+            element.clientWidth -
+            Number.parseFloat(style.paddingLeft) -
+            Number.parseFloat(style.paddingRight),
+          right: right.offsetWidth,
+          gap: Number.parseFloat(style.columnGap) || 0,
+        }),
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    observer.observe(right);
+    return () => observer.disconnect();
+  }, [bar]);
+  return room;
 }

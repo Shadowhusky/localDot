@@ -82,6 +82,7 @@ function fixture(fetchImpl: typeof fetch, takeover = false) {
     suspended: false,
     manualVisible: true,
     refreshCell: vi.fn(),
+    lookLive: undefined as (() => void) | undefined,
   };
   const view = renderHook((p) => useTaskControls(p), { initialProps: props });
   return {
@@ -798,4 +799,32 @@ it("takes the computer dot handed over through the same request", async () => {
     expect(await f.result.current.take()).toBe(true);
   });
   expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/\/takeover$/);
+});
+
+it("takes the computer with no task live through the computer's own route, then finds the hold", async () => {
+  const COMPUTER = "01JXYZ0000000000000000C0MP",
+    HOLD = "01JXYZ0000000000000000HAND";
+  const fetchImpl = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ sessionId: HOLD, requestId: ID }), { status: 202 }),
+    ),
+    f = fixture(fetchImpl);
+  const lookLive = vi.fn();
+  f.update({ lookLive, cell: { ...ready, id: COMPUTER } });
+  expect(f.result.current.canTakeComputer).toBe(true);
+  let work: Promise<boolean> | undefined;
+  act(() => {
+    work = f.result.current.takeComputer();
+    void f.result.current.takeComputer();
+  });
+  expect(await work).toBe(true);
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+    `https://owned.invalid/api/cells/${COMPUTER}/takeover`,
+  );
+  expect(lookLive).toHaveBeenCalledOnce();
+  expect(f.result.current.taking).toBe(true);
+  f.update({ agent: { ...f.props.agent, sessionId: HOLD } });
+  await waitFor(() => expect(f.result.current.taking).toBe(false));
+  f.update({ cell: { ...ready, id: COMPUTER, paused: true } });
+  expect(f.result.current.canTakeComputer).toBe(false);
 });

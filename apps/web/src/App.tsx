@@ -54,7 +54,7 @@ import { STEP_DOT } from "./onboarding/wizard.ts";
 import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
+import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
@@ -77,9 +77,10 @@ import {
   islandDecision,
   islandShape,
   pauseSlot,
+  takeReason,
   takeSlot,
 } from "./shell/island.ts";
-import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { useCentreRoom, useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { RailPanel } from "./shell/RailPanel.tsx";
@@ -422,6 +423,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
   const island = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
     cell,
@@ -431,6 +433,7 @@ function Theatre({ api }: { api: ApiClient }) {
     suspended: settings.open,
     manualVisible: true,
     refreshCell: retry,
+    lookLive: session.check,
   });
   const safety = useSafety({
     api,
@@ -572,12 +575,18 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => clearTimeout(timer);
   }, [opened]);
   const facts = taskFacts(agent.model);
+  // The user's own time on the computer, with no task: the island shows it only while they hold it.
+  const ownHold =
+    agent.snapshot?.holder === true ||
+    (session.ended && agent.history === true && agent.model.messages.size === 0);
+  const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {
-    if (!session.sessionId) return false;
+    if (!shownTask) return false;
     const hud = taskHud(session.model, t, facts);
     return hud.phase === "running" || hud.elapsedS !== null;
   });
-  const task = session.sessionId && !opening ? taskHud(session.model, now, facts) : null;
+  const task = shownTask ? taskHud(session.model, now, facts) : null;
+  const foot = footWork(task);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -757,6 +766,11 @@ function Theatre({ api }: { api: ApiClient }) {
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
+  // While the user has the computer the island rises into the top bar's centre, where it fits.
+  const [islandWidth, setIslandWidth] = useState(0);
+  const centreRoom = useCentreRoom(bar);
+  const centre =
+    shape === "control" && islandWidth > 0 && islandWidth <= centreRoom ? islandWidth : undefined;
   const sheetsClosed = !settings.open;
   const decision = replayId
     ? null
@@ -794,6 +808,9 @@ function Theatre({ api }: { api: ApiClient }) {
               />
             </QuestionDecision>
           );
+  // A task live on the computer gives the user its own control; with none, the user's own hold
+  // starts.
+  const liveTask = !!agent.sessionId && !session.ended && !ownHold;
   // Take control works whatever dot is doing: it does an approval's step instead of dot, takes the
   // computer dot handed over, or takes it from dot at work, at rest or paused.
   const take = () => {
@@ -807,15 +824,14 @@ function Theatre({ api }: { api: ApiClient }) {
       });
       return;
     }
-    void controls.take();
+    if (liveTask) void controls.take();
+    else void controls.takeComputer();
   };
-  const takeBlocked = !agent.sessionId
-    ? "Ask dot something first, then take over whenever you like"
-    : controls.canTake
-      ? undefined
-      : safety.pause && safety.pause.phase !== "paused"
-        ? "Wait for the pause to settle"
-        : "Wait a moment";
+  const takeBlocked = takeReason({
+    task: liveTask,
+    ready: liveTask ? controls.canTake : controls.canTakeComputer,
+    pause: safety.pause?.phase,
+  });
   const takeState = takeSlot(appStatus, {
     decision,
     blocked: takeBlocked,
@@ -889,6 +905,8 @@ function Theatre({ api }: { api: ApiClient }) {
         settingsOpen={settings.open}
         onSettings={showSettings}
         settingsRef={settingsButton}
+        centre={centre}
+        ref={bar}
       />
       <div className="watch" hidden={!!replayId} inert={!!replayId}>
         <main className="stage-col" aria-label="Computer">
@@ -945,6 +963,8 @@ function Theatre({ api }: { api: ApiClient }) {
                     onHandBack={() => void handBack.run()}
                     onComputer={onComputer}
                     decision={grown}
+                    rise={centre !== undefined}
+                    onRowWidth={setIslandWidth}
                     notices={
                       <>
                         <StopControl controls={controls} inIsland />
@@ -1043,7 +1063,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               computerReady={cell?.state === "ready" && !cell.paused}
-              live={task && !session.ended ? { ...task, nowMs: now } : null}
+              live={foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
                 agent.sessionId && (agent.model.ended || task?.phase === "finished")
                   ? () => selectReplay(agent.sessionId)

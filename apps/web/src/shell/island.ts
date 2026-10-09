@@ -109,6 +109,23 @@ export interface TakeInput {
   taking?: boolean;
 }
 
+export interface TakeReasonInput {
+  // A task is live on the computer, so the user takes its control; otherwise a hold of their own.
+  task: boolean;
+  ready: boolean;
+  pause: PauseSnapshot["phase"] | undefined;
+}
+
+// Why the user can't take the computer just now, or nothing when they can. A Pause that can't be
+// confirmed never settles by itself: only Stop ends it.
+export function takeReason({ task, ready, pause }: TakeReasonInput): string | undefined {
+  if (ready) return undefined;
+  if (!task) return "Wait for the computer to be ready";
+  if (pause === "uncertain") return "Stop the task to take over";
+  if (pause && pause !== "paused") return "Wait for the pause to settle";
+  return "Wait a moment";
+}
+
 // Take control works whatever dot is doing. dot handing the computer over makes it the porcelain
 // action; while dot waits on an approval it answers that approval: the user does the step
 // themselves.

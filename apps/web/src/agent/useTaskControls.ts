@@ -15,6 +15,7 @@ import {
   resumeTask,
   returnControl,
   stopTask,
+  takeComputer as takeComputerRequest,
   takeControl,
   undoMemory,
 } from "./control-api.ts";
@@ -41,6 +42,8 @@ interface Props {
   suspended: boolean;
   manualVisible: boolean;
   refreshCell(): void;
+  // Asks the computer which task it runs now.
+  lookLive?(): void;
 }
 interface Operation {
   api: ApiClient;
@@ -95,7 +98,7 @@ export function useTaskControls(props: Props) {
       ? (!current.current.cell || current.current.cell.id === record.cellId) &&
         (!current.current.agent.sessionId || current.current.agent.sessionId === record.sessionId)
       : current.current.cell?.id === record.cellId &&
-        current.current.agent.sessionId === record.sessionId);
+        (current.current.agent.sessionId ?? "") === record.sessionId);
   const authoritative = useCallback((now = current.current, allowEnded = false) => {
     const feed = now.feed.read();
     return (
@@ -228,8 +231,8 @@ export function useTaskControls(props: Props) {
     kind: ControlStatus["kind"],
     target: string,
     request: (record: Operation) => Promise<void | string>,
+    record = begin(kind, target),
   ) => {
-    const record = begin(kind, target);
     if (!record) return false;
     setStatus({
       kind,
@@ -306,6 +309,41 @@ export function useTaskControls(props: Props) {
     return perform("take", "", async (record) => {
       await takeControl(record.api, record.sessionId, record.abort.signal);
     });
+  };
+  // With no task live on the computer, the user's own hold starts, and the page then finds it there.
+  const computerReady = (now = current.current) =>
+    !fence.current &&
+    !operation.current &&
+    !now.suspended &&
+    !document.hidden &&
+    navigator.onLine &&
+    now.cellPending === null &&
+    now.cell?.state === "ready" &&
+    !now.cell.paused &&
+    !now.cell.fenced &&
+    !now.cell.replacementPending;
+  const takeComputer = (): Promise<boolean> => {
+    const now = current.current;
+    if (!computerReady(now) || !now.cell) return Promise.resolve(false);
+    const record: Operation = {
+      api: now.api,
+      cellId: now.cell.id,
+      sessionId: now.agent.sessionId ?? "",
+      kind: "take",
+      target: "",
+      abort: new AbortController(),
+      settled: false,
+    };
+    operation.current = record;
+    return perform(
+      "take",
+      "",
+      async (record) => {
+        await takeComputerRequest(record.api, record.cellId, record.abort.signal);
+        current.current.lookLive?.();
+      },
+      record,
+    );
   };
   const handback = (requestId: string, note?: string): Promise<boolean> => {
     const now = current.current;
@@ -464,6 +502,8 @@ export function useTaskControls(props: Props) {
         : false,
     canAnswer: available(props) && !operation.current && !props.agent.model.pendingTakeover,
     canTake: takeReady(props),
+    canTakeComputer: computerReady(props),
+    takeComputer,
     taking: operation.current?.kind === "take",
     canInput:
       available(props) &&

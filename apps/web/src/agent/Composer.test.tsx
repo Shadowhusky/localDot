@@ -726,6 +726,30 @@ describe("the composer's controls", () => {
       },
     ]);
   });
+  it("waits for the hand-back while the user holds the computer with no task, then starts one", async () => {
+    const f = setup(() => Response.json({ sessionId }, { status: 202 }), {
+      configured: true,
+      agent: {
+        ...agent,
+        snapshot: { ...snapshot, status: "idle", holder: true, pendingTakeover: otherSession },
+      },
+    });
+    f.input("Now fill in the form");
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Hand back the computer, then message dot. Your message stays here.",
+    );
+    expect(f.requests).toEqual([]);
+    f.update({
+      configured: true,
+      agent: { ...agent, snapshot: { ...snapshot, status: "idle", holder: true } },
+    });
+    f.submit();
+    await act(async () => {});
+    expect(f.requests).toEqual([
+      { path: `/api/cells/${cellId}/agent`, body: { task: "Now fill in the form" } },
+    ]);
+  });
   it("does nothing on Return with nothing written, and says why Send waits", () => {
     const f = setup();
     fireEvent.keyDown(f.field, { key: "Enter" });
