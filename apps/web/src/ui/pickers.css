@@ -70,6 +70,12 @@
     }
   }
 
+  .ui-select-trigger[data-appearance="inline"][data-size="sm"] {
+    --_lh: var(--text-callout--line-height);
+    font-size: var(--text-callout);
+    font-weight: var(--font-weight-medium);
+  }
+
   .ui-select-trigger[data-appearance="inline"] .ui-select-chevron {
     color: var(--color-fg-3);
   }

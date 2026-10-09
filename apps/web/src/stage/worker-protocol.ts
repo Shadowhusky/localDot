@@ -19,6 +19,8 @@ export interface StageViewPatch {
   zoom?: number;
   freeze?: boolean;
   reducedMotion?: boolean;
+  // A decision is open over the picture.
+  dim?: boolean;
 }
 
 export interface ReplaySource {

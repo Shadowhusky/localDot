@@ -122,17 +122,17 @@ for (const engine of ["chrome", "webkit"] as const satisfies Engine[])
     }
   });
 
-test("Replay keeps the late-heartbeat warning and points to Watch", async ({ page }) => {
+test("Replay keeps the late-task warning and points to Watch", async ({ page }) => {
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
   await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
   await expect(page.getByRole("main", { name: "Replay" })).toBeVisible();
   await page.request.post(`${fixture.origin}/__qa/heartbeat`);
   await expect(
-    page.getByText("The live task's heartbeat is late. Switch to Watch if you want to stop it."),
+    page.getByText("The live task is taking longer than usual. Switch to Watch to stop it."),
   ).toBeVisible();
   await modes(page).getByRole("button", { name: "Watch", exact: true }).click();
   await expect(
-    page.getByText("The task heartbeat is late. You can use Stop if you want to contain it."),
+    page.getByText("dot is taking longer than usual. Use Stop if it seems stuck."),
   ).toBeVisible();
 });
 

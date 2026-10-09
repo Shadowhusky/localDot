@@ -140,6 +140,8 @@
   --color-glass-hover: rgba(255, 255, 255, 0.1);
   --color-glass-pressed: rgba(255, 255, 255, 0.16);
   --color-thick-glass: rgba(24, 25, 29, 0.97);
+  /* A quiet panel inside a card, such as a decision's reason. */
+  --color-inset: rgba(255, 255, 255, 0.04);
   --blur-glass: 24px;
   --blur-thick-glass: 30px;
 
@@ -289,6 +291,15 @@
   --text-tag--letter-spacing: 0.02em;
   --text-tile: 0.5625rem;
   --text-tile--line-height: 0.625rem;
+  /* A decision's reason; on a phone its sheet's title and facts. */
+  --text-note: 0.75rem;
+  --text-note--line-height: 1.0625rem;
+  --text-sheet-title: 1.25rem;
+  --text-sheet-title--line-height: 1.5625rem;
+  --text-sheet-title--letter-spacing: -0.023em;
+  --text-sheet-fact: 0.9375rem;
+  --text-sheet-fact--line-height: 1.25rem;
+  --text-sheet-fact--letter-spacing: -0.015em;
 
   --spacing: 4px;
 
@@ -308,6 +319,8 @@
   --radius-button-xl: 13px;
   --radius-tag: 5px;
   --radius-island: 20px;
+  /* The island grown into a decision. */
+  --radius-decision: 22px;
   --radius-track-28: 9px;
   --radius-thumb-24: 6px;
 

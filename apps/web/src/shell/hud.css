@@ -1,10 +1,20 @@
 /* The HUD island (design-v2 §10.15): glass hung on the stage's top edge, half over the house and
    half over the computer's menu bar. */
-.island {
+/* A point at the middle of the stage's top edge: the island hangs from it, and what the island
+   grows into and drops follows the island's own size. */
+.island-anchor {
   position: absolute;
   top: calc(var(--island-h) / -2);
   left: 50%;
   z-index: var(--layer-island);
+  width: 0;
+  height: var(--island-h);
+}
+
+.island {
+  position: absolute;
+  top: 0;
+  left: 0;
   height: var(--island-h);
   translate: -50% 0;
   color: var(--color-fg-1);
@@ -26,8 +36,8 @@
 .island-plate {
   position: absolute;
   top: 0;
-  bottom: 0;
   left: 50%;
+  height: 100%;
   translate: -50% 0;
   border-radius: var(--radius-island);
   background-color: var(--color-glass);
@@ -37,7 +47,116 @@
 }
 
 .island-plate[data-settled] {
-  transition: width var(--dur-default) var(--ease-spring);
+  transition:
+    width var(--dur-default) var(--ease-spring),
+    height var(--dur-default) var(--ease-spring),
+    top var(--dur-default) var(--ease-spring),
+    border-radius var(--dur-default) var(--ease-spring),
+    background-color var(--dur-default) var(--ease-standard),
+    box-shadow var(--dur-default) var(--ease-standard);
+}
+
+/* Grown into a decision: thick glass, nearly opaque, since a decision is read. Its header is the
+   island's own row, so Stop and Take control never move. */
+.island[data-open] .island-plate {
+  top: -2px;
+  border-radius: var(--radius-decision);
+  background-color: var(--color-thick-glass);
+  -webkit-backdrop-filter: blur(var(--blur-thick-glass)) saturate(160%);
+  backdrop-filter: blur(var(--blur-thick-glass)) saturate(160%);
+  box-shadow: var(--shadow-thick-glass);
+}
+
+.island-card {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: var(--_card-w, 480px);
+  max-height: calc(100dvh - var(--stage-top) - 40px);
+  translate: -50% 0;
+  animation: island-card-in var(--dur-fade) var(--ease-standard) 90ms both;
+}
+
+@keyframes island-card-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Notes drop from the island: under it, or under the decision it grew into. */
+.island-notices {
+  position: absolute;
+  top: calc(var(--_drop, var(--island-h)) + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  width: max-content;
+  max-width: min(480px, 100vw - 32px);
+  translate: -50% 0;
+  transition: top var(--dur-default) var(--ease-spring);
+}
+
+.island-note,
+.island-notices .control-status {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2.5);
+  max-width: 100%;
+  min-height: 40px;
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1) calc(var(--spacing) * 1)
+    calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-island);
+  background-color: var(--color-glass-solid);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  animation: island-note-in var(--dur-default) var(--ease-spring) both;
+}
+
+.island-notices .control-status {
+  flex-wrap: wrap;
+  margin: 0;
+  border: 0;
+  overflow-wrap: anywhere;
+}
+
+.island-note:not(:has(.ui-button)),
+.island-notices .control-status:not(:has(.ui-button)) {
+  padding-right: calc(var(--spacing) * 3.5);
+}
+
+.island-note p,
+.island-notices .control-status p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.island-notices ul {
+  margin: 0;
+  padding-left: calc(var(--spacing) * 4);
+  color: var(--color-fg-2);
+  font-weight: var(--font-weight-normal);
+}
+
+.island-note.leaving {
+  opacity: 0;
+  transition: opacity var(--dur-exit) var(--ease-exit);
+}
+
+@keyframes island-note-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+  }
 }
 
 .island-row {
@@ -144,6 +263,28 @@
   .island-elapsed {
     width: 50px;
     padding-left: calc(var(--spacing) * 1.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-plate[data-settled] {
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      background-color var(--dur-fade) var(--ease-standard);
+  }
+
+  .island-notices {
+    transition: none;
+  }
+
+  .island-note {
+    animation-name: island-note-fade;
+  }
+
+  @keyframes island-note-fade {
+    from {
+      opacity: 0;
+    }
   }
 }
 
