@@ -125,8 +125,6 @@ export function ActivityRail({
   // The Files list and usage sit under the steps, so a new step is followed in the frame it lands
   // in: a glide would first push them down a row and then pull them back.
   const follow = useFollowScroll(`${owner}:${filter}`, !replay && started, { glide: false });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: new rows and files are the trigger.
-  useLayoutEffect(follow.hold, [page.rows, model.changes, model.results]);
   const timeline = useRef<HTMLElement>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");

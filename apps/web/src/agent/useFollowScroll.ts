@@ -6,6 +6,7 @@ const PIN_SLACK = 32;
 interface Tracking {
   element: HTMLElement | null;
   observer: ResizeObserver | null;
+  mutations: MutationObserver | null;
   pinned: boolean;
   anchor: HTMLElement | null;
   anchorTop: number;
@@ -51,6 +52,7 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
   const tracking = useRef<Tracking>({
     element: null,
     observer: null,
+    mutations: null,
     pinned: follow,
     anchor: null,
     anchorTop: 0,
@@ -130,11 +132,18 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       const t = tracking.current;
       t.observer?.disconnect();
       t.observer = null;
+      t.mutations?.disconnect();
+      t.mutations = null;
       t.element = element;
       if (!element || typeof ResizeObserver === "undefined") return;
       t.observer = new ResizeObserver(settle);
       t.observer.observe(element);
       if (element.firstElementChild) t.observer.observe(element.firstElementChild);
+      // Rows and words are held in the task that adds them, before the frame that draws them; a
+      // resize is only observed after that frame has been laid out, a frame late.
+      if (typeof MutationObserver === "undefined") return;
+      t.mutations = new MutationObserver(settle);
+      t.mutations.observe(element, { childList: true, subtree: true, characterData: true });
     },
     [settle],
   );
@@ -178,9 +187,6 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     ref,
     pinned,
     onScroll,
-    // Holds the end now, from a layout effect in the commit that adds rows, so they land in the frame
-    // they are drawn in rather than a frame later, when their resize is observed.
-    hold: settle,
     anchorTo(element: HTMLElement) {
       const t = tracking.current;
       if (!t.element) return;
