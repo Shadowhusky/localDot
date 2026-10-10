@@ -105,15 +105,16 @@ appears only when there is a choice of when to send. Use **Panels** in the top b
 restore Chat and Activity; the Activity close button hides its Steps, Files, and Sources view.
 Panel sizes, visibility, and selected tabs are remembered in this browser across visits.
 
-Background commands and file changes appear in a read-only **Activity** window inside dot's
-computer, visible through the same live screen. It uses existing redacted output, without extra
-model calls or command execution. It opens as a compact corner window with selectable output,
-a draggable header, and controls to collapse or dismiss it. Background steps share one transcript;
-brief operations do not flash it open. It clears before browser or desktop interaction, or handing control to you.
+Background commands and file changes appear in a floating, read-only **command window** over
+the app's screen. It uses the existing redacted activity feed, with no extra model calls or
+command execution. Drag its header to move it or minimize it to a small pill; your layout is
+remembered. On phones it starts minimized. It collapses when dot returns to screen interaction,
+unless you explicitly keep it open. The window is app chrome, so it never enters the computer's
+stream, agent screenshots or recordings.
 Model usage and cost, including clearly marked estimates, live in the turn metadata. Steps and Files
 follow the selected conversation and remain available when its computer reconnects.
 
-<a href="docs/readme/work.png"><img src="docs/readme/work.png" alt="The native Activity window inside the computer shows command output and file changes; pictured with sample test output"></a>
+<a href="docs/readme/work.png"><img src="docs/readme/work.png" alt="The floating command window over the app shows command output; pictured with sample test output"></a>
 
 <a href="docs/readme/panels.png"><img src="docs/readme/panels.png" alt="The Panels menu offers Hide chat and Hide activity; Files is selected in the resizable Activity panel"></a>
 

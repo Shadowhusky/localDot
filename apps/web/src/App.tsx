@@ -148,6 +148,7 @@ import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
+import { WorkOverlay } from "./shell/WorkOverlay.tsx";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -1728,6 +1729,20 @@ function Theatre({ api }: { api: ApiClient }) {
         <main className="stage-col" aria-label="Computer">
           <ErrorBoundary>
             <StageFrame
+              overlay={
+                !replayId &&
+                !curtain.up &&
+                !viewedConversation &&
+                !switching &&
+                stageHud.live &&
+                session.sessionId ? (
+                  <WorkOverlay
+                    key={session.sessionId}
+                    model={agent.model}
+                    working={!!appStatus.control && !yours && !agent.model.ended}
+                  />
+                ) : undefined
+              }
               boxRef={stageBox}
               onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
               light={appStatus.control ? "dot" : yours ? "you" : "none"}

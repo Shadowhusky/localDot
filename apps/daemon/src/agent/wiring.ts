@@ -98,7 +98,6 @@ import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
 import { WebCell } from "./web/cell.ts";
-import { WorkWindowFeed } from "./work-window.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
   home: string;
@@ -382,7 +381,6 @@ export function createAgent(d: AgentWiringDeps) {
   const dispatch: DispatchDeps = {
     ...(d.policy ? { policy: d.policy } : {}),
     tools: {
-      hideWork: (id) => workWindow.hide(id),
       saveExperience: (id, lesson) => experience.save(id, lesson),
       recallExperience: (query, id) => memory.recallMemory(query, id),
       uploads: { desktop, transfers },
@@ -450,8 +448,6 @@ export function createAgent(d: AgentWiringDeps) {
       const observationSignal = screen
         ? AbortSignal.any([lease.signal, screen.signal])
         : lease.signal;
-      check();
-      await workWindow.hide(session.id);
       check();
       const frame = await d.gateway.observe({
         sessionId: session.id,
@@ -914,27 +910,7 @@ export function createAgent(d: AgentWiringDeps) {
     }
     return { tools, signal: access.signal, check: access.check, release: access.release };
   };
-  const workWindow = new WorkWindowFeed({
-    target: (id) => {
-      const session = runner.get(id);
-      if (
-        closing ||
-        !session ||
-        session.stopped ||
-        session.controlHeld ||
-        session.pendingAsk ||
-        session.status === "paused" ||
-        session.status === "waiting_user" ||
-        session.status === "idle"
-      )
-        return undefined;
-      return session.screens?.selection.screen === "browser"
-        ? d.sessionScreens?.workEndpoint?.(session)
-        : d.cells.endpoints(session.cellId)?.desktopd;
-    },
-  });
-  const stopWorkFeed = d.eventLog.subscribe((id, event) => {
-    workWindow.event(id, event);
+  const stopExperienceFeed = d.eventLog.subscribe((id, event) => {
     experience.event(id, event);
   });
   let server: ReturnType<typeof serve> | undefined,
@@ -1011,8 +987,7 @@ export function createAgent(d: AgentWiringDeps) {
       closing = true;
       ready = false;
       unsubscribe();
-      stopWorkFeed();
-      workWindow.close();
+      stopExperienceFeed();
       transfers.close();
       installer?.cancel();
       claudeSetup?.close();

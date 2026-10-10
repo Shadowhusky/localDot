@@ -11,6 +11,8 @@ export interface StageFrameProps {
   frozen: boolean;
   // The HUD island, in the strip over the stage's top edge.
   island?: ReactNode;
+  // App-only floating chrome, excluded from the computer stream and recordings.
+  overlay?: ReactNode;
   // Covers the stage, or the stage and the band on a phone, while there is no picture to show.
   curtain?: ReactNode;
   // Under the stage: dot's place and its line.
@@ -32,6 +34,7 @@ export function StageFrame({
   live,
   frozen,
   island,
+  overlay,
   curtain,
   band,
   side,
@@ -69,6 +72,7 @@ export function StageFrame({
           <i data-light="you" />
         </div>
         {island}
+        {overlay}
       </div>
       <div className="stage-band">{band}</div>
       {side && <div className="stage-side">{side}</div>}
