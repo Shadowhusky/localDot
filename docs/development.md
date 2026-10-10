@@ -42,6 +42,12 @@ another home). One daemon runs per home. The install token is in `<home>/daemon-
 cookie-free: HTTP requests send `Authorization: Bearer <token>`, and WebSocket clients offer the
 subprotocols `localdot.v1, localdot.token.<token>`.
 
+When updating a source checkout, restart its daemon after rebuilding the UI. The daemon serves
+`apps/web/dist` from disk, so a browser refresh can load new controls while the process still
+runs old API handlers. A UI build alone does not activate backend changes. Stop active tasks
+before restarting; then verify the updated controls against the running daemon, not only a test
+fixture. For a LaunchAgent, send `SIGTERM` to its loaded service and let its supervisor restart it.
+
 ## Images and the live desktop
 
 - `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`

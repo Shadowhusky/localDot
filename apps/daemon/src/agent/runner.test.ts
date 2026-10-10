@@ -219,6 +219,43 @@ describe("the user's own hold on the computer", () => {
     expect(next.id).not.toBe(session.id);
     expect(await f.runner.stopRun(session.id)).toBe(true);
   });
+  it.each(["working task", "user-only hold"] as const)(
+    "Stop ends a %s while the user holds control, without handing back or resuming work",
+    async (kind) => {
+      const f = setup();
+      if (kind === "working task") {
+        f.run.mockImplementationOnce(async (session) => {
+          session.setStatus("running");
+          await abortable(new Promise<never>(() => {}), session.abort.signal);
+          return 0;
+        });
+        await f.runner.start(f.cellId, "Work until stopped");
+        await until(() => f.run.mock.calls.length === 1);
+      }
+      const { sessionId, requestId } = await f.runner.hold(f.cellId);
+      const session = f.runner.get(sessionId);
+      if (!session) throw new Error("fixture missing held task");
+      await until(() => session.manualControl === "ready");
+      expect(session.controlHeld).toBe(true);
+      const calls = f.run.mock.calls.length;
+
+      expect(await f.runner.stopRun(sessionId)).toBe(true);
+      expect(session.controlHeld).toBe(false);
+      expect(f.run).toHaveBeenCalledTimes(calls);
+      expect(f.live.get(f.cellId)).toBeUndefined();
+      expect(
+        f.log.read(sessionId).find((event) => event.type === "takeover.end")?.data,
+      ).toMatchObject({
+        requestId,
+        by: "stop",
+      });
+      expect(f.log.read(sessionId).at(-1)?.data).toEqual({ reason: "stopped" });
+      expect(f.containment).not.toHaveBeenCalled();
+      await f.runner.release();
+      const next = await f.runner.start(f.cellId, "New conversation task");
+      expect(next.id).not.toBe(sessionId);
+    },
+  );
   it("retires a plan-limited task and starts the conversation on the newly selected model", async () => {
     const f = setup();
     const conversations = new Conversations(f.home, f.log);

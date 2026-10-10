@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "62c809e309297e81bdb5092d33200ac6e4860fe0d3a42d70ef5c6785892ffedb",
+  "inputSha256": "488edb3e3693f742f4cf6cbece1baccac407b80ceb2b2d863535bafb48d219d2",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/autonomy-replay.test.ts": "e9c7540227ee016f4fc15e3b7a492a83e0ddb4bcca9419d55701e2ba85596c31",
@@ -125,7 +125,7 @@
     "apps/daemon/src/agent/runner-boundaries.test.ts": "84c28d753592b3c9abcbb3781964bd96cf82291cb660910ce7024e202fcb4744",
     "apps/daemon/src/agent/runner-independent.test.ts": "89c643e9474bf8fa7a9024b7cb201455b2d94c6718320008384babf766d19137",
     "apps/daemon/src/agent/runner-review.test.ts": "6b76067b25bf76ca563a38e93a16ce4e54e99782d80b9d00316fe263c261220c",
-    "apps/daemon/src/agent/runner.test.ts": "4d3a6803e18341936a96504b3c463e15312e8c0afd7600190b47fddf89e6fa43",
+    "apps/daemon/src/agent/runner.test.ts": "b105a562eaab496e10209eb6ac078cc3e8df63524a610763c0215ba3ce989414",
     "apps/daemon/src/agent/runner.ts": "017611d4aa3098e7fef2dfcc65f03f198a896ca36831ede1c334882add287887",
     "apps/daemon/src/agent/safety/acceptance.docker.test.ts": "a0079b4e64e3ba11daf5fa1bff8d66f7f2874b027562ede0d0de2660caa83082",
     "apps/daemon/src/agent/safety/always-allow.test.ts": "31c58c2bde57cd04030836ce082df73534a4b673e740622754d185e39eb35f83",
@@ -979,7 +979,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "b8e2bb13f5ea31627c0f0397cfe30a2281b6fe1baed52380d37652e3262d40f5",
+  "reportSha256": "80c586bd662753e618863ae6d35765a18e2bedc9bc95a2a96457e9f4c792151c",
   "exit": {
     "code": 0,
     "signal": null

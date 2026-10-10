@@ -199,3 +199,30 @@ test("Send queues, Steer now promotes once, and Stop frees New conversation", as
   } else await page.getByRole("button", { name: "New conversation" }).click();
   await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
 });
+
+test("Stop releases user control and allows New conversation without Hand back", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("running");
+  await ui.step("takeover");
+  await expect(page.getByTestId("hud-status")).toHaveText("You're in control");
+  const form = page.getByRole("form", { name: "Message dot" });
+  const response = page.waitForResponse(
+    (reply) =>
+      reply.request().method() === "POST" &&
+      /\/api\/agent\/sessions\/[^/]+\/stop$/.test(reply.url()),
+  );
+  if (isPhone(page)) await page.getByTestId("hud-stop-session").click();
+  else await form.getByRole("button", { name: "Stop task", exact: true }).click();
+  expect((await response).status()).toBe(204);
+  await expect(form.getByRole("button", { name: "Stop task", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Couldn't confirm Stop. Check the task and try again.")).toHaveCount(
+    0,
+  );
+  if (isPhone(page)) {
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New conversation" }).click();
+  } else await page.getByRole("button", { name: "New conversation" }).click();
+  await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
+});
