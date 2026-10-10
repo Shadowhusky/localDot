@@ -2896,6 +2896,28 @@ routes.post("/__qa/step-end", (c) => {
   if (pause?.phase === "pausing") session.confirmSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
+// Work-view fixture: each press emits one real event chunk, without running a command.
+routes.post("/__qa/work/:phase", (c) => {
+  if (!session) return c.text("no task", 409);
+  const phase = c.req.param("phase");
+  if (phase === "start") {
+    endLiveStep();
+    liveStep = ulid();
+    session.append("step.start", { kind: "shell", intent: "Running the app checks" }, liveStep);
+    session.append("tool.start", { tool: "shell", title: "pnpm test" }, liveStep);
+  } else if (phase === "output" && liveStep) {
+    session.append(
+      "tool.output",
+      { stream: "stdout", chunk: "✓ Application checks passed\n" },
+      liveStep,
+    );
+  } else if (phase === "finish" && liveStep) {
+    session.append("tool.end", { ok: true, exitCode: 0 }, liveStep);
+    session.append("step.end", { status: "ok" }, liveStep);
+    liveStep = undefined;
+  } else return c.text("unknown phase", 400);
+  return c.json({ ok: true });
+});
 // Finishes the open step and starts the next, after a model call, as a live task does.
 function nextStep(owned: AgentSession, planItem: string) {
   if (liveStep) {

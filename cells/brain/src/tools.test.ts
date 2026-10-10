@@ -201,7 +201,7 @@ describe("the model's advertised tools and instructions", () => {
   it("keeps every sign-in in the web browser", () => {
     const tools = toolSet(binding());
     expect(tools.switch_screen?.description).toContain(
-      "Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields.",
+      "Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details.",
     );
     expect(tools.request_takeover?.description).toContain(
       "Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",

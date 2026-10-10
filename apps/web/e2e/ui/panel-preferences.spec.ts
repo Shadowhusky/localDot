@@ -8,6 +8,11 @@ test("panel sizes, visibility and Files survive reload and smaller screens", asy
 }) => {
   await page.setViewportSize({ width: 2000, height: 1000 });
   await ui.open("done");
+  // This test inspects the computer picture; Auto can now show the last file changes.
+  await page
+    .getByRole("radiogroup", { name: "Screen view" })
+    .getByRole("radio", { name: "Computer" })
+    .click();
   const activity = page.locator(".rail-activity");
   const chat = page.locator(".rail-chat");
   await expect(activity).toBeVisible();

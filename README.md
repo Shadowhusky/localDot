@@ -67,6 +67,14 @@ appears only when there is a choice of when to send. Use **Panels** in the top b
 restore Chat and Activity; the Activity close button hides its Steps, Files, and Sources view.
 Panel sizes, visibility, and selected tabs are remembered in this browser across visits.
 
+The screen's **Auto / Computer / Work** control shows command output and file changes while dot
+works in the background, then returns to the computer for visual actions or human input.
+Choose **Computer** or **Work** to keep a view; the choice is remembered. Work uses the existing
+activity stream, with no extra model calls, command execution, or file polling. You can scroll
+back through the most recent eight background steps without the output pulling you away.
+
+<img src="docs/readme/work.png" alt="The Work view shows file diffs and command output, with Auto, Computer and Work controls at the bottom of the screen">
+
 <img src="docs/readme/panels.png" alt="The Panels menu offers Hide chat and Hide activity; Files is selected in the resizable Activity panel">
 
 With an empty message box, the main button is **Stop**. Stopping ends the current run and releases
@@ -161,8 +169,11 @@ When dot needs a sign-in, the form shows up in the chat (or as a sheet on your p
 the account and password once. localDot saves supported browser logins in its protected local
 vault, fills the verified sign-in form and submits it. Later tasks can reuse the saved login
 for the same HTTPS site without asking again. The password stays out of model input and
-conversation logs. Verification codes, security challenges and unsupported forms may still need
-you; a handoff tells you why. See [browser sign-ins](docs/browser-workspace.md#sign-in-once).
+conversation logs. Saved accounts are also reused on username-first pages; missing or rejected
+fields are requested separately. Authenticator, email, SMS, and recovery codes use private inputs
+and are never saved as passwords. Device approval, passkeys, security challenges, and unsupported
+forms may still need you; a handoff tells you why. Connected-app access and website sign-ins are
+separate: dot uses the access already available for the kind of work requested. See [browser sign-ins](docs/browser-workspace.md#sign-in-once).
 
 ### Take over any time
 

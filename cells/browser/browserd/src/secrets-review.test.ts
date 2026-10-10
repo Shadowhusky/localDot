@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserControl } from "./control.ts";
 import type { BrowserNative } from "./native.ts";
-import { BrowserSecrets, secretMetadata } from "./secrets.ts";
+import { BrowserSecrets, secretMetadata, verificationField } from "./secrets.ts";
 import type { BrowserDocument } from "./targets.ts";
 
 function snapshot(tag: string, attributes: Record<string, string>, value: string) {
@@ -133,4 +133,24 @@ describe("independent secret projection and handback", () => {
       await f.control.close();
     }
   });
+});
+
+describe("shared private verification-field detection", () => {
+  it.each([
+    "sms_otp",
+    "email-verification-code",
+    "totp",
+    "recovery_code",
+    "backup-code",
+    "security_code",
+    "account_pin",
+  ])("masks and privately delivers %s", (name) => {
+    expect(verificationField(new Map([["name", name]]))).toBe(true);
+  });
+  it.each(["zip_code", "coupon_code", "shipping", "spinning", "account_email"])(
+    "does not treat %s as an authentication secret",
+    (name) => {
+      expect(verificationField(new Map([["name", name]]))).toBe(false);
+    },
+  );
 });

@@ -21,6 +21,7 @@ import { loginForm } from "./login-form.ts";
 import type { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
 import type { BrowserSecrets } from "./secrets.ts";
+import { verificationField } from "./secrets.ts";
 import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
 export const BROWSER_INPUT_TIMEOUT_MS = 120_000;
@@ -922,11 +923,7 @@ export class BrowserInput {
             attrs.set((node.attributes[i] ?? "").toLowerCase(), node.attributes[i + 1] ?? "");
           // Only password fields or explicitly identified verification-code fields.
           // Code values use the private channel and are never saved as a login.
-          oneTimeCode =
-            /(?:^|\s)one-time-code(?:\s|$)/iu.test(attrs.get("autocomplete") ?? "") ||
-            /(?:^|[^a-z])(?:otp|totp|2fa|mfa)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|auth)[-_ ]?code/iu.test(
-              [attrs.get("name"), attrs.get("id"), attrs.get("aria-label")].join(" "),
-            );
+          oneTimeCode = verificationField(attrs);
           const inputType = (attrs.get("type") ?? "text").toLowerCase();
           if (
             node.nodeName !== "INPUT" ||

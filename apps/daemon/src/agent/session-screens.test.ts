@@ -275,6 +275,102 @@ function fixture(
 }
 
 describe("session-owned screen authority", () => {
+  it("reuses only the account name on a username-first sign-in page", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 400, y: 300 },
+        source: "dom",
+        role: "textbox",
+        name: "Email address",
+        url: "https://identity.example.net/start",
+        editable: true,
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    h.tools.logins = {
+      login: vi.fn(async () => ({
+        username: "fixture@example.net",
+        password: "private-staged-canary",
+      })),
+      saveLogin: vi.fn(),
+    };
+    const reply = await h.callTool("ask_user", {
+      purpose: "sign_in",
+      question: "Account?",
+      fields: [{ id: "account", kind: "email", label: "Email" }],
+    });
+    expect(reply.result.ok).toBe(true);
+    expect(JSON.stringify(reply)).toContain("fixture@example.net");
+    expect(JSON.stringify([reply, f.log.read(f.id)])).not.toContain("private-staged-canary");
+    expect(h.tools.logins.login).toHaveBeenCalledWith("https://identity.example.net");
+    expect(f.session.pendingAsk).toBeUndefined();
+    expect(f.client.secret).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing-account", "unavailable-store", "saved-login"] as const)(
+    "uses generic saved credential handling: %s",
+    async (mode) => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation((async () => ({
+        target: {
+          point: { x: 400, y: 300 },
+          source: "dom",
+          role: "textbox",
+          name: "Password",
+          url: "https://identity.example.org/signin",
+          secret: true,
+        },
+        window: 0,
+        ms: 1,
+      })) as never);
+      h.tools.logins = {
+        login: vi.fn(async () => {
+          if (mode === "unavailable-store") throw new Error("private-store-error");
+          return {
+            username: mode === "missing-account" ? "" : "fixture-user",
+            password: "saved-private-canary",
+          };
+        }),
+        saveLogin: vi.fn(async () => {}),
+      };
+      const pending = h.callTool("ask_user", {
+        question: "Sign in",
+        fields: [
+          { id: "username", kind: "text", label: "Account" },
+          { id: "password", kind: "secret", label: "Password", target: [400, 300] },
+        ],
+      });
+      if (mode === "missing-account") {
+        await until(() => !!f.session.pendingAsk);
+        const ask = f.log.read(f.id).findLast((e) => e.type === "ask.request");
+        expect(ask?.type === "ask.request" && ask.data.fields?.map((field) => field.kind)).toEqual([
+          "text",
+        ]);
+        f.session.answerFields(
+          f.session.pendingAsk ?? "",
+          { username: "fixture-user" },
+          (text) => text,
+        );
+      }
+      const reply = await pending;
+      expect(reply.result.ok).toBe(mode !== "unavailable-store");
+      const asks = f.log.read(f.id).filter((e) => e.type === "ask.request");
+      expect(asks).toHaveLength(mode === "missing-account" ? 1 : 0);
+      expect(JSON.stringify([reply, f.log.read(f.id)])).not.toMatch(
+        /saved-private-canary|private-store-error/,
+      );
+      if (mode === "unavailable-store")
+        expect(JSON.stringify(reply)).toContain("temporarily unavailable");
+      else expect(JSON.stringify(reply)).toContain("Submission was not confirmed");
+    },
+  );
+
   it.each([false, true])(
     "cancels the task without shutting down its computer (user control: %s)",
     async (held) => {
@@ -1117,7 +1213,7 @@ describe("session-owned screen authority", () => {
       await until(() => f.session.pendingAsk !== undefined);
       f.session.answerFields(
         f.session.pendingAsk ?? "",
-        { username: "fixture-user", password: "replacement-password" },
+        { password: "replacement-password" },
         (text) => text,
       );
       expect((await replacement).result.ok).toBe(true);
@@ -1137,7 +1233,7 @@ describe("session-owned screen authority", () => {
       await until(() => f.session.pendingAsk !== undefined);
       f.session.answerFields(
         f.session.pendingAsk ?? "",
-        { username: "fixture-user", password: "third-password" },
+        { password: "third-password" },
         (text) => text,
       );
       await again;

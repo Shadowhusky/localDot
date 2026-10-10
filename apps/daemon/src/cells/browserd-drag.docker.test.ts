@@ -48,6 +48,23 @@ volume.addEventListener("input", show);
 show();
 </script></body></html>`;
 
+const JS_PAGE = PAGE.replace(
+  '<form id="login" method="post" action="/session">',
+  '<div id="login">',
+)
+  .replace("<button>Sign in</button></form>", '<button type="button">Continue</button></div>')
+  .replace(
+    "</body>",
+    `<script>
+    document.querySelector('#login button').addEventListener('click', async () => {
+      const body = new URLSearchParams();
+      for (const input of document.querySelectorAll('#login input')) body.set(input.name, input.value);
+      const response = await fetch('/session', { method: 'POST', body });
+      const html = await response.text(); document.open(); document.write(html); document.close();
+    });
+  </script></body>`,
+  );
+
 const gateScript = (cert: string, key: string) => `
 import http.server, ssl, urllib.parse
 open("/tmp/test-cert.pem", "w").write(${JSON.stringify(cert)})
@@ -55,6 +72,7 @@ open("/tmp/test-key.pem", "w").write(${JSON.stringify(key)})
 tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 tls.load_cert_chain("/tmp/test-cert.pem", "/tmp/test-key.pem")
 page = ${JSON.stringify(PAGE)}.encode()
+js_page = ${JSON.stringify(JS_PAGE)}.encode()
 class Gate(http.server.BaseHTTPRequestHandler):
     def do_CONNECT(self):
         self.send_response(200)
@@ -66,19 +84,22 @@ class Gate(http.server.BaseHTTPRequestHandler):
         self.close_connection = False
         self.handle_one_request()
     def do_GET(self):
+        content = js_page if self.path == "/javascript" else page
         self.send_response(200)
         self.send_header("content-type", "text/html; charset=utf-8")
-        self.send_header("content-length", str(len(page)))
+        self.send_header("content-length", str(len(content)))
         self.end_headers()
-        self.wfile.write(page)
+        self.wfile.write(content)
     def do_POST(self):
         fields = urllib.parse.parse_qs(self.rfile.read(int(self.headers.get("content-length", "0"))).decode())
         ok = fields.get("username") == ["fixture-account"] and fields.get("password") == ["fixture-Private-密碼"]
-        if fields.get("username") in (["fixture-mfa"], ["fixture-mfa-auto"]) and fields.get("password") == ["fixture-Private-密碼"]:
+        if fields.get("username") in (["fixture-mfa"], ["fixture-mfa-auto"], ["fixture-backup"]) and fields.get("password") == ["fixture-Private-密碼"]:
             result = b'<html><head><title>verification required</title></head><body><p>Enter the authentication code from your authenticator app.</p><form method="post" action="/verify"><input autofocus name="otp" autocomplete="one-time-code" aria-label="Authentication code"><button>Verify</button></form></body></html>'
+            if fields.get("username") == ["fixture-backup"]:
+                result = result.replace(b'name="otp" autocomplete="one-time-code"', b'name="backup_code"').replace(b'authenticator app', b'saved recovery codes')
             if fields.get("username") == ["fixture-mfa-auto"]:
                 result = result.replace(b'</body>', b'<script>document.querySelector("input").addEventListener("input", e => { if(e.target.value.length === 6) e.target.form.requestSubmit(); });</script></body>')
-        elif ok or fields.get("otp") == ["123456"]:
+        elif ok or fields.get("otp") == ["123456"] or fields.get("backup_code") == ["A1B2C3"]:
             result = b"<html><head><title>signed in</title></head><body>Signed in</body></html>"
         else:
             result = page.replace(b'<form id="login"', b'<p role="alert">Incorrect username or password.</p><form id="login"').replace(b'<button>Sign in</button>', b'<button disabled>Sign in</button>').replace(b'show();\\n</script>', b'show(); document.title = "wrong password"; document.querySelector("[name=password]").addEventListener("input", () => { document.querySelector("#login button").disabled = false; });\\n</script>')
@@ -366,27 +387,30 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     await sleep(800);
     expect(await title()).toMatch(/ order BGA$/);
   });
-  it("fills a protected password over the private channel and submits sign-in without handing control to the user", async () => {
-    await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
-    for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
-    const password = await element({ name: "Protected field" });
-    const request = {
-      origin: "https://drag.localdot.test",
-      at: password.at,
-      username: "fixture-account",
-    };
-    expect(await client.secret(permit, tabId, request, owner())).toEqual({
-      filled: false,
-      rememberable: true,
-    });
-    expect(
-      await client.secret(permit, tabId, { ...request, text: "fixture-Private-密碼" }, owner()),
-    ).toEqual({ filled: true, rememberable: true, submitted: true });
-    for (let i = 0; i < 40 && (await title()) !== "signed in"; i++) await sleep(250);
-    const observed = await client.observe(permit, tabId, owner());
-    expect(JSON.stringify(observed)).not.toContain("fixture-Private-密碼");
-    expect(await title()).toBe("signed in");
-  });
+  it.each(["/", "/javascript"])(
+    "fills and submits a protected sign-in at %s without takeover",
+    async (path) => {
+      await client.navigate(permit, tabId, `https://drag.localdot.test${path}`, owner());
+      for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
+      const password = await element({ name: "Protected field" });
+      const request = {
+        origin: "https://drag.localdot.test",
+        at: password.at,
+        username: "fixture-account",
+      };
+      expect(await client.secret(permit, tabId, request, owner())).toEqual({
+        filled: false,
+        rememberable: true,
+      });
+      expect(
+        await client.secret(permit, tabId, { ...request, text: "fixture-Private-密碼" }, owner()),
+      ).toEqual({ filled: true, rememberable: true, submitted: true });
+      for (let i = 0; i < 40 && (await title()) !== "signed in"; i++) await sleep(250);
+      const observed = await client.observe(permit, tabId, owner());
+      expect(JSON.stringify(observed)).not.toContain("fixture-Private-密碼");
+      expect(await title()).toBe("signed in");
+    },
+  );
   it("retries a rejected password on a new document without takeover", async () => {
     await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
     for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
@@ -414,9 +438,9 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       /fixture-wrong-password|fixture-Private/,
     );
   });
-  it.each([false, true])(
-    "reads an autofocused verification page and submits its code once (automatic: %s)",
-    async (automatic) => {
+  it.each(["manual", "automatic", "backup"])(
+    "reads an autofocused verification page and submits its code once (%s)",
+    async (mode) => {
       await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
       for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
       await client.secret(
@@ -424,7 +448,12 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
         tabId,
         {
           origin: "https://drag.localdot.test",
-          username: automatic ? "fixture-mfa-auto" : "fixture-mfa",
+          username:
+            mode === "backup"
+              ? "fixture-backup"
+              : mode === "automatic"
+                ? "fixture-mfa-auto"
+                : "fixture-mfa",
           at: (await element({ name: "Protected field" })).at,
           text: "fixture-Private-密碼",
         },
@@ -432,7 +461,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       );
       for (let i = 0; i < 40 && (await title()) !== "verification required"; i++) await sleep(250);
       const page = await client.read(permit, tabId, { maxChars: 2000 }, owner());
-      expect(page.text).toContain("authenticator app");
+      expect(page.text).toContain(mode === "backup" ? "saved recovery codes" : "authenticator app");
       expect(await client.observe(permit, tabId, owner())).toHaveProperty("frame");
       const field = await client.lookup(permit, tabId, { kind: "focused" }, owner());
       expect(field.target?.secret).toBe(true);
@@ -443,7 +472,12 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
         rememberable: false,
       });
       expect(
-        await client.secret(permit, tabId, { ...request, text: "123456" }, owner()),
+        await client.secret(
+          permit,
+          tabId,
+          { ...request, text: mode === "backup" ? "A1B2C3" : "123456" },
+          owner(),
+        ),
       ).toMatchObject({
         filled: true,
         rememberable: false,

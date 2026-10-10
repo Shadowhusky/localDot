@@ -923,6 +923,21 @@ describe("private browser password delivery", () => {
       "secret",
     );
   });
+  it.each(["https://accounts.example.net", "https://login.example.org"])(
+    "delivers a private code on %s",
+    async (origin) => {
+      const f = await setup();
+      f.state.origin = `${origin}/verify`;
+      f.state.secret = true;
+      f.state.protectedNode = true;
+      f.state.passwordType = "text";
+      f.state.autocomplete = "one-time-code";
+      expect(
+        await f.input.secret(permit, "tab", { ...request, origin, text: "A4B9C2" }, f.abort.signal),
+      ).toMatchObject({ filled: true, rememberable: false, submitted: true });
+    },
+  );
+
   it("privately fills and submits a text verification code without remembering it", async () => {
     const f = await setup();
     f.state.passwordType = "text";

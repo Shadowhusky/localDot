@@ -39,7 +39,9 @@ uses the protected sign-in flow below, only in the web browser.
 
 When dot asks for an account and password in chat, the daemon delivers them through a private
 browser input channel. For a supported HTTPS sign-in, it verifies the password field, fills the
-account and password, and submits the same-origin POST form in one operation. Ordinary model
+account and password, and submits a same-origin POST form or a recognized JavaScript sign-in
+button in one operation. Staged password pages can use Next or Continue; recognition is based on
+form structure and field metadata, not a particular website. Ordinary model
 clicks and typing still cannot enter a password field. The model sees the result, never the
 password, and credentials are excluded from conversation events.
 
@@ -135,3 +137,17 @@ Connected apps and saved browser accounts are used before requesting another sig
 An empty, focused password or verification field no longer hides the page from dot. Filled secrets remain excluded from page reads and screenshots. One-time codes use the private answer channel, are submitted to the identified verification field once, and are never saved as passwords or included in the conversation. Dot keeps the verification page open and explains whether the code comes from an authenticator, email or SMS.
 
 App testing should open the app's preview on the streamed computer and exercise its visible flows. Command-line tests supplement that view. What dot knows refreshes while Settings is open; lasting user-provided facts are saved separately from recent task history, without credentials or transient task details.
+
+The same structured input flow handles missing account details, rejected passwords, verification
+codes, choices, confirmations, dates, numbers, files, and device handoffs. On supported
+username-first pages, `ask_user` with `purpose: "sign_in"` can resolve the saved account after
+the account field is focused. A saved password is not requested again just because the account
+name is missing. If the local vault cannot be reached, the tool reports that problem instead
+of treating it as an empty vault. Recovery/backup codes and PIN fields use the same masking and
+private-delivery classification as other verification codes. These are not reusable passwords.
+
+Stored cookies do not prove that a website is still signed in, and connector credentials do not
+create a website login. Check the existing page or connected tool first. CAPTCHA, physical security
+keys, device approval, and forms outside the verified private-input path still need an explicit
+handoff. The agent should explain the step, keep the page open, and inspect the result after
+control returns instead of restarting the browser or repeating the same failed submission.

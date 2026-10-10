@@ -104,7 +104,9 @@ export function AccountsSection({
   return (
     <div className="settings-accounts">
       <p className="settings-lede">
-        Sign-ins are kept in localDot's web browser, not in the computer's own browser.
+        localDot keeps website sign-ins between tasks. A listed site has stored browser data; its
+        sign-in may have expired. Passwords supplied through a private sign-in form are saved
+        separately. App connections in Connect provide API access and do not sign in the website.
       </p>
       {signIn && <SignInToSite signIn={signIn} off={phase === "off"} />}
       {phase === "off" ? (

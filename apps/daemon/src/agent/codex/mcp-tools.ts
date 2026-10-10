@@ -16,6 +16,7 @@ import {
   WEB_FETCH_TOOL_DESCRIPTION,
   WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@localdot/protocol";
+import { HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
 import { z } from "zod";
 
 // The tools Codex sees: exactly the v1 table (spec "Tools"), the same schemas the daemon checks.
@@ -77,7 +78,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Find the desktop's controls whose names contain text (role optional, such as push button, menu item or " +
     "check box), in every window top first. Returns each one's role, name, window and the point to click.",
   switch_screen:
-    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields. Request a fresh screenshot after switching; shell and files remain on the desktop.",
+    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details. Request a fresh screenshot after switching; shell and files remain on the desktop.",
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:
@@ -92,13 +93,14 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "file and you get its path) or qr (shows value as a QR code for the user's other device). Name the buttons " +
     'with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the ' +
     "password box at target ([x, y] in screen pixels), or into the password box that has keyboard focus when " +
-    "there is no target; you only learn that it was provided. For browser sign-in, include the username/email " +
-    "and password in one question. localDot securely saves and reuses the login, fills both fields and submits " +
+    "there is no target; you only learn that it was provided. For a combined sign-in page, use username/email " +
+    "and secret fields; for a staged sign-in ask only for the current step. localDot securely saves and reuses the login, fills both fields and submits " +
     "the verified sign-in form. Check the tool result before acting; do not submit again when it already did. " +
     "A code answer is delivered privately to the verification box at target and submitted once, never saved. " +
     "Read the current page and ask for a replacement password or a verification code as it requires; keep it open while waiting. " +
     "Answers come back by field id. If the user declines, carry on " +
-    "without it.",
+    "without it. " +
+    HUMAN_INPUT_GUIDANCE,
   request_takeover:
     "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
     "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +

@@ -72,12 +72,20 @@ export function loginForm(
     }
     return -1;
   };
-  const passwordIndex = nodes.backendNodeId.indexOf(password),
-    form = parentForm(passwordIndex);
-  if (passwordIndex < 0 || form < 0) throw new Error("No sign-in form");
-  const formAttrs = attrs(form);
+  const passwordIndex = nodes.backendNodeId.indexOf(password);
+  if (passwordIndex < 0) throw new Error("No password field");
+  const currentPassword = /(?:^|\s)current-password(?:\s|$)/iu.test(
+    attrs(passwordIndex).get("autocomplete") ?? "",
+  );
+  const form = parentForm(passwordIndex);
+  // JavaScript sign-ins can have no FORM. Require the standard current-password marker,
+  // one password on the document, and a clearly named sign-in/continue button below.
+  if (form < 0 && !currentPassword) throw new Error("No sign-in form");
+  const formAttrs = form < 0 ? new Map<string, string>() : attrs(form);
+  const method = formAttrs.get("method")?.toLowerCase();
   if (
-    formAttrs.get("method")?.toLowerCase() !== "post" ||
+    (method !== undefined && method !== "post") ||
+    (method === undefined && !currentPassword) ||
     new URL(formAttrs.get("action") || "/", origin).origin !== origin ||
     (formAttrs.has("target") && formAttrs.get("target") !== "_self")
   )
@@ -87,25 +95,41 @@ export function loginForm(
   );
   const usernames: number[] = [],
     submits: number[] = [];
+  let passwords = 0;
   for (let i = form + 1; i < length; i++) {
     if (!["INPUT", "BUTTON"].includes(tag(i)) || parentForm(i) !== form) continue;
     const a = attrs(i),
       id = nodes.backendNodeId[i];
-    if (id === undefined || a.has("readonly") || a.has("hidden") || a.has("form")) continue;
+    if (id === undefined || a.has("hidden") || a.has("form")) continue;
+    if (a.get("type")?.toLowerCase() === "password") passwords++;
+    if (a.has("readonly")) continue;
     const type = (a.get("type") || (tag(i) === "BUTTON" ? "submit" : "text")).toLowerCase();
     if (
       ["text", "email"].includes(type) &&
       !a.has("disabled") &&
-      /user|email|login|account/iu.test(
-        [a.get("autocomplete"), a.get("id"), a.get("name"), a.get("aria-label")].join(" "),
-      )
+      (type === "email" ||
+        /user|email|login|account/iu.test(
+          [a.get("autocomplete"), a.get("id"), a.get("name"), a.get("aria-label")].join(" "),
+        ))
     )
       usernames.push(id);
-    const label = a.get("value") || labels.get(id) || "";
+    const label = (a.get("value") || labels.get(id) || "").trim();
+    if (/delete|remove|purchase|pay|reset|change password|删除|付款|重置/iu.test(label))
+      throw new Error("Not a sign-in action");
+    const signIn =
+      /^(?:sign\s*in|log\s*in|login|log\s*on|se connecter|connexion|anmelden|iniciar sesi[oó]n|登录|登入)$/iu.test(
+        label,
+      );
+    const next =
+      currentPassword &&
+      /^(?:next|continue|下一步|继续|繼續|suivant|continuer|weiter|continuar)$/iu.test(label);
     if (
-      type === "submit" &&
+      (type === "submit" || (tag(i) === "BUTTON" && type === "button")) &&
+      // A form with the default GET method must use an explicit JS button, so the
+      // private password can never be put into the address bar by native submission.
+      (method === "post" || (tag(i) === "BUTTON" && type === "button")) &&
       (allowDisabledSubmit || !a.has("disabled")) &&
-      /^(?:sign\s*in|log\s*in)$/iu.test(label.trim()) &&
+      (signIn || next) &&
       !a.has("formaction") &&
       !a.has("formmethod") &&
       !a.has("formtarget")
@@ -113,8 +137,14 @@ export function loginForm(
       submits.push(id);
   }
   const submit = submits[0],
-    formId = nodes.backendNodeId[form];
-  if (submits.length !== 1 || usernames.length > 1 || submit === undefined || formId === undefined)
+    formId = form < 0 ? nodes.backendNodeId[0] : nodes.backendNodeId[form];
+  if (
+    passwords !== 1 ||
+    submits.length !== 1 ||
+    usernames.length > 1 ||
+    submit === undefined ||
+    formId === undefined
+  )
     throw new Error("Ambiguous sign-in form");
   return {
     ...(usernames[0] === undefined ? {} : { username: usernames[0] }),

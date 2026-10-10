@@ -62,6 +62,17 @@ export interface BrowserSecretMetadata {
   readonly nodeIds: readonly number[];
 }
 
+export function verificationField(attributes: ReadonlyMap<string, string>): boolean {
+  return (
+    /(?:^|\s)one-time-code(?:\s|$)/iu.test(attributes.get("autocomplete") ?? "") ||
+    ["name", "id", "aria-label"].some((key) =>
+      /(?:passcode|(?:^|[^a-z])(?:otp|totp|2fa|mfa|pin)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|auth|recovery|backup)[-_ ]?code)/iu.test(
+        attributes.get(key) ?? "",
+      ),
+    )
+  );
+}
+
 function sensitive(tag: string, attributes: ReadonlyMap<string, string>): boolean {
   if (
     tag === "INPUT" &&
@@ -92,10 +103,9 @@ function sensitive(tag: string, attributes: ReadonlyMap<string, string>): boolea
       .some((token) => ["current-password", "new-password", "one-time-code"].includes(token))
   )
     return true;
-  return ["name", "id", "aria-label"].some((key) =>
-    /(?:password|passcode|(?:^|[^a-z])(?:otp|totp|2fa|mfa)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|auth)[-_ ]?code)/iu.test(
-      attributes.get(key) ?? "",
-    ),
+  return (
+    verificationField(attributes) ||
+    ["name", "id", "aria-label"].some((key) => /password/iu.test(attributes.get(key) ?? ""))
   );
 }
 

@@ -12,7 +12,13 @@ const STREAMS = {
 // A command that succeeded still writes warnings and notes to its error stream.
 const NOTES = { ...STREAMS.stderr, name: "Messages", copy: "Copy messages" };
 
-export function TerminalViewer({ step }: { step: AgentStep }) {
+export function TerminalViewer({
+  step,
+  emptyText = "No output.",
+}: {
+  step: AgentStep;
+  emptyText?: string;
+}) {
   const display = useMemo(() => {
     const terminal = step.terminal ?? emptyTerminal();
     return {
@@ -49,7 +55,7 @@ export function TerminalViewer({ step }: { step: AgentStep }) {
             </section>
           </section>
         ))}
-        {!streams.length && <p className="terminal-empty">No output.</p>}
+        {!streams.length && <p className="terminal-empty">{emptyText}</p>}
       </div>
       <div className="terminal-foot">
         {exit !== undefined && (

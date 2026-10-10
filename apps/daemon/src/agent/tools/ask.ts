@@ -7,7 +7,7 @@ import type {
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, AskAnswer } from "../session.ts";
 import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
-import { findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
+import { accountOrigin, findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
 
 const reusedLogins = new WeakMap<AgentSession, Set<string>>();
 
@@ -97,6 +97,38 @@ async function askFields(
   input: AskUserInput,
   fields: NonNullable<AskUserInput["fields"]>,
 ): Promise<ToolResult> {
+  if (
+    input.purpose === "sign_in" &&
+    fields.length === 1 &&
+    deps.logins &&
+    (fields[0]?.kind === "text" || fields[0]?.kind === "email")
+  ) {
+    const origin = await accountOrigin(deps, ctx);
+    if (origin) {
+      let saved: Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>;
+      try {
+        saved = await deps.logins.login(origin);
+      } catch {
+        ctx.check();
+        return fail(
+          "The saved sign-in store is temporarily unavailable. Do not request credentials again; explain the access problem.",
+        );
+      }
+      ctx.check();
+      if (saved) {
+        saved.password = "";
+        if (saved.username)
+          return {
+            ok: true,
+            content: [
+              text(
+                `Saved account for ${origin}: ${JSON.stringify({ [fields[0].id]: ctx.redact(saved.username) })}. Fill the current account field, continue, and inspect the next step. The password remains private.`,
+              ),
+            ],
+          };
+      }
+    }
+  }
   const secrets = new Map<string, SecretField>();
   for (const field of fields) {
     if (field.kind !== "secret" && field.kind !== "code") continue;
@@ -111,6 +143,7 @@ async function askFields(
   const loginFields = fields.filter((field) => field.kind !== "secret" && field.kind !== "code");
   const canReuse =
     secrets.size === 1 &&
+    loginFields.length <= 1 &&
     loginFields.every(
       (field) =>
         (field.kind === "text" || field.kind === "email") &&
@@ -121,21 +154,52 @@ async function askFields(
     const [id, field] = secretEntry;
     const origin = secretEntry[1].loginOrigin;
     if (!used.has(origin)) {
-      const saved = await deps.logins.login(origin).catch(() => undefined);
+      let saved: Awaited<ReturnType<NonNullable<ToolDeps["logins"]>["login"]>>;
+      try {
+        saved = await deps.logins.login(origin);
+      } catch {
+        ctx.check();
+        return fail(
+          "The saved sign-in store is temporarily unavailable. Do not ask the user to enter credentials again or treat this as a rejected password. Explain that saved credentials could not be checked and retry after access is restored.",
+        );
+      }
       ctx.check();
-      if (
-        saved &&
-        (saved.username || loginFields.length === 0) &&
-        loginFields.every((field) => !field.value || field.value === saved.username)
-      ) {
-        used.add(origin);
+      if (saved && loginFields.every((field) => !field.value || field.value === saved.username)) {
+        let delivering = false;
         try {
+          if (!saved.username && loginFields.length) {
+            const missing = await ctx.session.askFields(
+              {
+                question: `A password is saved for ${new URL(origin).host}. Which account should it use?`,
+                fields: loginFields.map((field) => ({
+                  id: field.id,
+                  kind: field.kind,
+                  label: ctx.redact(field.label),
+                })),
+                submit: input.submit ?? "Continue",
+                decline: input.decline ?? "Not now",
+              },
+              askTimeoutMs(deps, ctx),
+              ctx.step,
+              ctx.generation,
+              ctx.signal,
+            );
+            ctx.check();
+            const early = unanswered(missing, askTimeoutMs(deps, ctx));
+            if (early) return early;
+            const account = loginFields[0] && missing.fields?.[loginFields[0].id];
+            if (typeof account !== "string") return fail("The account name was not provided.");
+            saved.username = account;
+            await deps.logins.saveLogin(origin, saved.username, saved.password);
+          }
+          delivering = true;
           const landed = await typeSecret(deps, ctx, field, saved.password, saved.username);
           ctx.check();
-          if (!landed)
+          if (!landed.filled)
             return fail(
               "The saved sign-in could not reach the password field. Check the current page and locate its password field again.",
             );
+          used.add(origin);
           ctx.session.taskAutonomy.signIn(field.screen.name);
           const answers = Object.fromEntries(
             loginFields.map((field) => [field.id, ctx.redact(saved.username)]),
@@ -144,11 +208,12 @@ async function askFields(
             ok: true,
             content: [
               text(
-                `Used the saved sign-in for ${origin}. The password was filled privately. Account fields: ${JSON.stringify(answers)}. ${id}: provided. The account and password were filled and the sign-in form was submitted. Check the resulting page for success, an error, or two-factor authentication; do not submit again. If the site rejects these credentials, ask again so the user can update them.`,
+                `Used the saved sign-in for ${origin}. The password was filled privately. Account fields: ${JSON.stringify(answers)}. ${id}: provided. ${landed.submitted ? "The sign-in form was submitted. Do not submit again." : "Submission was not confirmed. Inspect the current page before any further action."} Check the resulting page for success, an error, or another authentication step. If the site rejects these credentials, ask again so the user can update them.`,
               ),
             ],
           };
         } catch {
+          if (delivering) used.add(origin);
           ctx.check();
           return fail(
             "Secure delivery of the saved sign-in could not be confirmed. Inspect the page before retrying; do not claim the field moved.",
@@ -160,6 +225,27 @@ async function askFields(
     }
   }
   ctx.check();
+  let knownAccount: string | undefined;
+  if (
+    canReuse &&
+    secretEntry?.[1].loginOrigin &&
+    deps.logins &&
+    used.has(secretEntry[1].loginOrigin)
+  ) {
+    try {
+      const prior = await deps.logins.login(secretEntry[1].loginOrigin);
+      knownAccount = loginFields.every((field) => !field.value || field.value === prior?.username)
+        ? prior?.username || undefined
+        : undefined;
+      if (prior) prior.password = "";
+    } catch {
+      // A replacement can still be supplied; failure to save it is reported below.
+    }
+    ctx.check();
+  }
+  const promptedFields = knownAccount
+    ? fields.filter((field) => !loginFields.includes(field))
+    : fields;
   const shown = (field: (typeof fields)[number]): AskRequestField => {
     const where = secrets.get(field.id);
     const target = where?.found.target;
@@ -194,7 +280,7 @@ async function askFields(
   const answer = await ctx.session.askFields(
     {
       question: ctx.redact(input.question),
-      fields: fields.map(shown),
+      fields: promptedFields.map(shown),
       ...(input.submit ? { submit: ctx.redact(input.submit) } : {}),
       ...(input.decline ? { decline: ctx.redact(input.decline) } : {}),
     },
@@ -208,12 +294,18 @@ async function askFields(
     ctx.check();
     const early = unanswered(answer, timeoutMs);
     if (early) return early;
-    const answers: Record<string, unknown> = { ...answer.fields };
+    const answers: Record<string, unknown> = {
+      ...(knownAccount
+        ? Object.fromEntries(loginFields.map((field) => [field.id, ctx.redact(knownAccount)]))
+        : {}),
+      ...answer.fields,
+    };
     const moved: string[] = [];
+    const deliveries: string[] = [];
     let saveFailed = false;
     for (const [id, field] of secrets) {
       const value = typed?.take(id);
-      let landed = false;
+      let landed = { filled: false, submitted: false };
       let username: string | undefined;
       if (value !== undefined && field.loginOrigin && deps.logins) {
         const accountFields = loginFields.filter(
@@ -223,7 +315,7 @@ async function askFields(
         );
         const account =
           accountFields.length === 1 && accountFields[0]
-            ? answer.fields?.[accountFields[0].id]
+            ? (knownAccount ?? answer.fields?.[accountFields[0].id])
             : undefined;
         // A password-only retry retains the account saved with the original answer.
         const prior =
@@ -251,7 +343,10 @@ async function askFields(
         );
       }
       // Credentials went into this screen, as after the user's own sign-in.
-      if (landed) {
+      if (landed.filled) {
+        deliveries.push(
+          `${id}: entered privately; ${landed.submitted ? "submitted once, do not submit again" : "submission not confirmed, inspect the page before acting"}.`,
+        );
         ctx.session.taskAutonomy.signIn(field.screen.name);
         // Asking again after a delivered login means the site rejected it. Do not replay
         // the just-saved password; collect a replacement on the private channel.
@@ -278,7 +373,7 @@ async function askFields(
         text(
           `The user answered: ${given}${
             secrets.size
-              ? "\nSecret answers were entered privately. Browser verification codes are entered privately and never saved. The page may submit as the last digit lands; inspect the current page before any further action, and never replay the code after it advances. For a saved browser sign-in, the account and password were filled and its sign-in form was submitted. Check the resulting page for success, an error, or two-factor authentication; do not submit it again."
+              ? `\n${deliveries.join("\n")} Verification codes are never saved. The page may advance after the last character; inspect it and never replay a code after it advances. A rejected password needs a replacement; a different verification step needs the matching input form.`
               : ""
           }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : ""}`,
         ),

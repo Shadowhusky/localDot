@@ -96,6 +96,29 @@ async function look(screen: Screen, at?: Point): Promise<NativeActionIdentity> {
   };
 }
 
+// Username-first flows can reuse the saved identifier without returning the password.
+// Require the currently focused account field on the exact HTTPS origin.
+export async function accountOrigin(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+): Promise<string | undefined> {
+  return onScreen(deps, ctx, async (screen) => {
+    if (screen.name !== "browser") return undefined;
+    const found = await look(screen);
+    const target = found.target;
+    if (
+      found.unknown ||
+      !target?.url ||
+      target.secret ||
+      target.editable === false ||
+      !/user|email|account|login|用户名|帳號|邮箱/iu.test(target.name ?? "")
+    )
+      return undefined;
+    const url = new URL(target.url);
+    return url.protocol === "https:" ? url.origin : undefined;
+  });
+}
+
 // The field as it is now, when dot asks; a message for dot when there is none to type into. Only a
 // field that hides what is typed takes a secret: anywhere else it would show on screen and in the
 // recording, run as a command, or be read back.
@@ -152,7 +175,7 @@ export async function typeSecret(
   field: SecretField,
   value: string,
   username?: string,
-): Promise<boolean> {
+): Promise<{ filled: boolean; submitted: boolean }> {
   let typing = false;
   try {
     return await deliver(
@@ -168,7 +191,7 @@ export async function typeSecret(
   } catch (error) {
     if (typing) throw error;
     ctx.check();
-    return false;
+    return { filled: false, submitted: false };
   }
 }
 
@@ -179,16 +202,17 @@ function deliver(
   value: string,
   startTyping: () => void,
   username?: string,
-): Promise<boolean> {
+): Promise<{ filled: boolean; submitted: boolean }> {
   return onScreen(deps, ctx, async (screen) => {
     if (
       screen.name !== field.screen.name ||
       screen.cellId !== field.screen.cellId ||
       screen.revision !== field.screen.revision
     )
-      return false;
+      return { filled: false, submitted: false };
     const window = field.found.window ?? undefined;
-    if (!sameNativeIdentity(field.found, await look(screen, field.at))) return false;
+    if (!sameNativeIdentity(field.found, await look(screen, field.at)))
+      return { filled: false, submitted: false };
     if (screen.name === "browser") {
       if (!screen.device.secret || !field.found.target?.url)
         throw new Error("Secure browser input is unavailable.");
@@ -208,7 +232,7 @@ function deliver(
         );
       const result = await (screen.privateInput ? screen.privateInput(deliver) : deliver());
       screen.check();
-      return result.filled;
+      return { filled: result.filled, submitted: result.submitted === true };
     }
     if (field.at) {
       await screen.device.client.input(
@@ -231,7 +255,7 @@ function deliver(
         focus.window !== field.found.window ||
         !sameTarget({ ...was, point: focus.target.point }, focus.target)
       )
-        return false;
+        return { filled: false, submitted: false };
     }
     // Whatever the field already holds, such as an earlier try, is replaced rather than added to.
     await screen.device.client.input(
@@ -259,6 +283,6 @@ function deliver(
     screen.check();
     if (typed.count !== [...value].length)
       throw new Error("Typing the answer could not be confirmed.");
-    return true;
+    return { filled: true, submitted: false };
   });
 }

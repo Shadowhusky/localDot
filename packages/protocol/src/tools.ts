@@ -287,6 +287,8 @@ const FIELD_ONLY = {
 export const AskUserInput = z
   .object({
     question: z.string().min(1).max(1000),
+    // Explicitly marks account collection, including username-first sign-in pages.
+    purpose: z.enum(["sign_in", "verification"]).optional(),
     options: z.array(z.string().min(1).max(200)).max(6).optional(),
     allow_text: z.boolean().optional(),
     fields: z.array(AskField).min(1).max(MAX_ASK_FIELDS).optional(),
