@@ -2876,15 +2876,17 @@ routes.post("/__qa/pause-uncertain", (c) => {
 });
 let screenRevision = 0;
 // dot selects the desktop again, as a new task, a screen switch and a hand-back each do.
-routes.post("/__qa/screen", (c) => {
+routes.post("/__qa/screen", async (c) => {
   if (!session) return c.text("no session", 409);
+  const retired = c.req.query("retired");
   session.append("screen.switch", {
-    screen: "desktop",
-    cellId,
+    screen: retired === "browser" ? "browser" : "desktop",
+    cellId: retired ? ulid() : cellId,
     geometry: { w: 2560, h: 1600, scale: 2 },
     by: "daemon",
     revision: ++screenRevision,
   });
+  if (retired) await endLive("done");
   return c.json({ ok: true });
 });
 routes.post("/__qa/step-end", (c) => {

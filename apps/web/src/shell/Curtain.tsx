@@ -229,6 +229,15 @@ function curtainCopy(
       button: turnOn,
     };
   }
+  if (phase === "connecting")
+    return {
+      title: "Connecting your screen",
+      sub: "Your computer is ready. Waiting for its picture…",
+      clock: true,
+      progress: true,
+      kind: first ? "first-start" : "start",
+      button: turnOn,
+    };
   if (waking || STARTING.has(phase))
     return {
       title: "Starting your computer",

@@ -226,3 +226,24 @@ test("Stop releases user control and allows New conversation without Hand back",
   } else await page.getByRole("button", { name: "New conversation" }).click();
   await expect(page.getByRole("heading", { name: "What should we do?" })).toBeVisible();
 });
+
+for (const screen of ["desktop", "browser"] as const) {
+  test(`restored history from a retired ${screen} still connects the current computer`, async ({
+    page,
+    ui,
+  }) => {
+    const fixture = await ui.open("running");
+    await expect(page.getByRole("form", { name: "Message dot" })).toBeVisible();
+    await ui.picture();
+    const retired = await page.request.post(`${fixture.origin}/__qa/screen?retired=${screen}`);
+    expect(retired.status()).toBe(200);
+    // WebKit reports requests interrupted by reload as page errors.
+    await page.waitForLoadState("networkidle");
+    await page.reload();
+    await expect(page.getByRole("article", { name: "You", exact: true })).not.toHaveCount(0);
+    const frame = page.locator("iframe.desktop-frame");
+    await expect(frame).toHaveCount(1);
+    await expect(frame).toHaveAttribute("src", /\/desktop\//);
+    await ui.picture();
+  });
+}

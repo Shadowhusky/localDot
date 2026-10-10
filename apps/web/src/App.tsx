@@ -631,7 +631,12 @@ function Theatre({ api }: { api: ApiClient }) {
     },
     [startNew, continueFrom],
   );
-  const selectedScreen = agent.model.screen ?? agent.snapshot?.screen;
+  // Restored conversation history can refer to a retired desktop or browser. Only a live
+  // task selects the current computer's screen; history must never prevent its stream opening.
+  const selectedScreen =
+    session.resting || agent.model.ended || agent.interrupted
+      ? undefined
+      : (agent.model.screen ?? agent.snapshot?.screen);
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
   const hud = hudFor({
