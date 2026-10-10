@@ -35,8 +35,10 @@ export function useConversation(api: ApiClient): Conversation {
   const [choice, setChoice] = useState(0);
   const [revision, setRevision] = useState(0);
   const latest = useRef(0);
+  const mutation = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new revision reads it again.
   useEffect(() => {
+    if (mutation.current) return;
     const ask = ++latest.current;
     const controller = new AbortController();
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -67,6 +69,8 @@ export function useConversation(api: ApiClient): Conversation {
   }, [api, revision]);
   const act = useCallback(
     async (path: string, body?: unknown) => {
+      if (mutation.current) return false;
+      mutation.current = true;
       const ask = ++latest.current;
       setBusy(true);
       try {
@@ -84,6 +88,7 @@ export function useConversation(api: ApiClient): Conversation {
         );
         return false;
       } finally {
+        mutation.current = false;
         setBusy(false);
       }
     },

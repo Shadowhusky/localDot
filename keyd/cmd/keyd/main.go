@@ -263,7 +263,7 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	api := &admin.Server{Manager: d.manager, Vault: v, Registry: registry, Opener: opener, Settings: settings,
+	api := &admin.Server{Manager: d.manager, Vault: v, Logins: vault.NewLogins(store), Registry: registry, Opener: opener, Settings: settings,
 		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public,
 		VaultState: backend.state, Unlock: backend.unlock}
 	if cfg.Service != nil {

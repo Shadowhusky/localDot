@@ -578,6 +578,19 @@ it("subscription tasks expose explicit Resume without a USD raise even if an unr
   );
   expect(fetchImpl.mock.calls[0]?.[1]?.body).toBeUndefined();
 });
+it("allows another attempt after an acknowledged resume immediately pauses again", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const f = fixture(fetchImpl);
+  pauseFixture(f, true);
+  await act(async () => {
+    await f.result.current.resume();
+  });
+  expect(f.result.current.status?.phase).toBe("checking");
+  f.update({ agent: { ...f.props.agent, snapshot: { ...snapshotOf(f) } } });
+  await waitFor(() => expect(f.result.current.canResumeTask).toBe(true));
+  expect(f.result.current.status).toBeNull();
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});
 it("budget/resume cannot run during takeover or lost feed, and a replacement session ignores an old reply", async () => {
   const late = Promise.withResolvers<Response>();
   const fetchImpl = vi.fn<typeof fetch>(async () => late.promise);

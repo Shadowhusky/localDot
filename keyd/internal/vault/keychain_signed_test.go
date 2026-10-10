@@ -109,7 +109,7 @@ func (k signedKeychain) head(t *testing.T, id string) string {
 // the marker item records the migration as done.
 func TestSignedMigrationBindsAProvenItem(t *testing.T) {
 	k := newSignedKeychain(t)
-	short, long := []byte("sk-legacy-deepseek-value"), longValue(3000)
+	short, long := []byte("sk-legacy-deepseek"), longValue(3000)
 	k.storeEarlier(t, "deepseek", short)
 	k.storeEarlier(t, "weather", long)
 	v := k.open(t, writeIndex(t, beforeUpgrade, legacyRecords...))
@@ -137,7 +137,7 @@ func TestSignedMigrationRefusesAPlantedItem(t *testing.T) {
 	if m := k.open(t, index).MigrateBindings(); !m.Done {
 		t.Fatalf("first migration = %+v", m)
 	}
-	k.storeEarlier(t, "deepseek", []byte("sk-planted-value-of-a-key"))
+	k.storeEarlier(t, "deepseek", []byte("sk-planted-test"))
 	planted := k.head(t, "deepseek")
 	v := k.open(t, index)
 	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) {
@@ -151,7 +151,7 @@ func TestSignedMigrationRefusesAPlantedItem(t *testing.T) {
 // A finished migration changes nothing on a later start.
 func TestSignedMigrationRunsOnce(t *testing.T) {
 	k := newSignedKeychain(t)
-	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 	index := writeIndex(t, beforeUpgrade, deepseekRecord)
 	if m := k.open(t, index).MigrateBindings(); !m.Done || len(m.Bound) != 1 {
 		t.Fatalf("first migration = %+v", m)
@@ -164,7 +164,7 @@ func TestSignedMigrationRunsOnce(t *testing.T) {
 	if now := []string{k.head(t, "deepseek"), k.head(t, "deepseek.0"), k.head(t, markerAccount)}; !slices.Equal(now, heads) {
 		t.Fatalf("the second start changed %v to %v", heads, now)
 	}
-	if got, err := v.Value("deepseek"); err != nil || string(got) != "sk-legacy-deepseek-value" {
+	if got, err := v.Value("deepseek"); err != nil || string(got) != "sk-legacy-deepseek" {
 		t.Fatalf("Value = %q, %v", got, err)
 	}
 }
@@ -172,7 +172,7 @@ func TestSignedMigrationRunsOnce(t *testing.T) {
 // A migration cut short after it bound one item resumes with the records it began with.
 func TestSignedMigrationCutShortResumes(t *testing.T) {
 	k := newSignedKeychain(t)
-	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 	k.storeEarlier(t, "weather", longValue(40))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -199,7 +199,7 @@ func TestSignedMigrationCutShortResumes(t *testing.T) {
 // ends.
 func TestSignedMigrationTellsARecordChangedOutsideKeydApart(t *testing.T) {
 	k := newSignedKeychain(t)
-	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := k.add(ctx, markerAccount, running(legacyRecords...)); err != nil {
@@ -226,7 +226,7 @@ func TestSignedMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
 	if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
 		t.Fatal(err)
 	}
-	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+	k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 	v := k.open(t, writeIndex(t, beforeUpgrade, movedDeepseek))
 	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
 		t.Fatalf("migration = %+v", m)
@@ -243,7 +243,7 @@ func TestSignedMigrationClosedWithoutBindingRetiresTheUnboundHeads(t *testing.T)
 	for _, closing := range []string{"index too large", "an item already bound"} {
 		t.Run(closing, func(t *testing.T) {
 			k := newSignedKeychain(t)
-			k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+			k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 			records := tooLargeToRecord()
 			if closing == "an item already bound" {
 				records = legacyRecords
@@ -304,7 +304,7 @@ func TestUnreadableSignedMigrationWaitsForAHeadItCannotRead(t *testing.T) {
 	}
 	t.Run("before it begins", func(t *testing.T) {
 		k := newSignedKeychain(t)
-		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 		planted := k.head(t, "deepseek")
 		k.addUnreadable(t, "aaa-unreadable", itemHead(strings.Repeat("ab", 8), 1, bindingOf(weatherRecord)))
 		v := k.open(t, writeIndex(t, beforeUpgrade, movedDeepseek))
@@ -320,7 +320,7 @@ func TestUnreadableSignedMigrationWaitsForAHeadItCannotRead(t *testing.T) {
 	})
 	t.Run("before it ends", func(t *testing.T) {
 		k := newSignedKeychain(t)
-		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := k.add(ctx, markerAccount, running(deepseekRecord)); err != nil {
@@ -350,7 +350,7 @@ func TestSignedAdoptPutsBackStagedCopiesAndMovesEarlierItems(t *testing.T) {
 	tempkeychain.Security(t, "add-generic-password", "-s", k.Service+".moving", "-a", "staged.0", "-w", "9999:6162", "-T", self, k.path)
 	moves := 0
 	if earlier := os.Getenv("KEYD_EARLIER_BIN"); earlier != "" {
-		moves = k.addEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
+		moves = k.addEarlier(t, "deepseek", []byte("sk-legacy-deepseek"))
 	}
 	moved, failed, err := k.Adopt()
 	if err != nil || moved != moves || failed != 0 {

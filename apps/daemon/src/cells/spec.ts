@@ -113,8 +113,9 @@ export function gateSpec(
       ...(capture ? { CapAdd: CAPTURE_CAPS } : {}),
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],
-      Memory: 64 * 1024 ** 2,
-      PidsLimit: 64,
+      // Bounded relays use up to 96 children; leave room for ldgate runtime threads.
+      Memory: 128 * 1024 ** 2,
+      PidsLimit: 256,
       LogConfig: LOG_CONFIG,
     },
     NetworkingConfig: {

@@ -52,7 +52,8 @@ it("puts the user in control the moment dot hands over, without a press", async 
   expect(f.take).toHaveBeenCalledOnce();
   await f.update({ fresh: true });
   expect(f.take).toHaveBeenCalledOnce();
-  expect(f.late).not.toHaveBeenCalled();
+  expect(f.late).toHaveBeenCalledOnce();
+  expect(f.late).toHaveBeenCalledWith(handed);
 });
 
 it("waits while the page is out of sight, then takes the computer and says dot handed it over", async () => {

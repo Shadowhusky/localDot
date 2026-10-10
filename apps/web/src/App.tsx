@@ -13,11 +13,13 @@ import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
+import { endTaskRun } from "./agent/control-api.ts";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
 import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
+import { PermissionChip } from "./agent/PermissionChip.tsx";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -149,6 +151,7 @@ import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer, announce } from "./ui/Announcer.tsx";
+import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
@@ -573,6 +576,14 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  // Browsing history never changes who owns the physical computer.
+  const [viewedConversation, setViewedConversation] = useState<{
+    id: string;
+    sessions: readonly string[];
+  } | null>(null);
+  const historyStage = useRef<StageHandle | null>(null);
+  const historySession = useLiveSession(api, null, historyStage, viewedConversation?.id ?? null);
+  const historyAgent = useAgentSession(api, null, historySession);
   // Talking to dot: its listening pose and line, Settings → Voice, and replies read aloud.
   const hearing = useListening();
   const voicePrefs = useVoicePrefs();
@@ -607,6 +618,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const { startNew, continueFrom } = conversation;
   const choose = useCallback(
     async (to: string | null) => {
+      setViewedConversation(null);
       const request = ++choices.current;
       setSwitching({ to });
       setReveal((value) => value + 1);
@@ -733,7 +745,6 @@ function Theatre({ api }: { api: ApiClient }) {
     visible: !settings.open,
     selectReady,
   });
-  useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
   useControlToast(controls.status, controls.recheck);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
   const [typing, setTyping] = useState(false);
@@ -884,9 +895,28 @@ function Theatre({ api }: { api: ApiClient }) {
   const guardComputerStop = () => {
     if (!controls.stopping && !controls.busy) stop();
   };
+  const [stoppingRun, setStoppingRun] = useState<string | null>(null);
+  const stoppingRunRef = useRef<string | null>(null);
   const taskStop = () => {
-    void controls.stop();
+    const id = agent.sessionId;
+    if (!id || stoppingRunRef.current) return;
+    stoppingRunRef.current = id;
+    setStoppingRun(id);
+    void endTaskRun(api, id, new AbortController().signal)
+      .catch(() => {
+        showToast({
+          title: "Couldn't confirm Stop. Check the task and try again.",
+          tone: "danger",
+        });
+      })
+      .finally(() => {
+        stoppingRunRef.current = null;
+        setStoppingRun(null);
+        agent.reconcile();
+        session.check();
+      });
   };
+  useStopHotkey(taskStop, controls.canStop && !controls.stopping && !stoppingRun);
   // Carries on a task the user's action limit stopped: their message starts the count again.
   const continueTask = async () => {
     if (!cell || !agent.sessionId) return false;
@@ -1000,8 +1030,19 @@ function Theatre({ api }: { api: ApiClient }) {
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
-  const conversationReason =
-    !session.ended && taskStatus && taskStatus !== "idle" && taskStatus !== "ended"
+  const recoveryWait =
+    taskStatus === "paused" &&
+    !agent.snapshot?.pause &&
+    !agent.model.pendingAsk &&
+    !agent.model.pendingTakeover &&
+    !agent.snapshot?.approval;
+  const conversationReason = stoppingRun
+    ? "Stopping the current task…"
+    : !session.ended &&
+        taskStatus &&
+        taskStatus !== "idle" &&
+        taskStatus !== "ended" &&
+        !recoveryWait
       ? FINISH_FIRST
       : conversation.busy
         ? "Just a moment…"
@@ -1033,13 +1074,14 @@ function Theatre({ api }: { api: ApiClient }) {
       controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
         ? null
         : task,
-    stop: controls.stopping
-      ? "stopping"
-      : controls.stopStatus.phase === "unconfirmed"
-        ? "unconfirmed"
-        : controls.stopStatus.phase === "paused"
-          ? "stopped"
-          : null,
+    stop:
+      controls.stopping || stoppingRun
+        ? "stopping"
+        : controls.stopStatus.phase === "unconfirmed"
+          ? "unconfirmed"
+          : controls.stopStatus.phase === "paused"
+            ? "stopped"
+            : null,
     canStop: controls.canStop,
     link: linkLost ? "lost" : null,
     mayControl:
@@ -1078,6 +1120,11 @@ function Theatre({ api }: { api: ApiClient }) {
   const rows = useMemo(
     () => (session.sessionId ? timelineRows(stepRows(session.model), session.model.keyUses) : []),
     [session.sessionId, session.model, session.version],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: history is folded in place too
+  const historyRows = useMemo(
+    () => timelineRows(stepRows(historySession.model), historySession.model.keyUses),
+    [historySession.model, historySession.version],
   );
   const keyUses = session.model.keyUses;
   const uses = useMemo(() => {
@@ -1196,7 +1243,8 @@ function Theatre({ api }: { api: ApiClient }) {
         )
       : taskModels.kind !== mainChoice.provider || taskModels.model !== mainChoice.model);
   // A task at work keeps its model; one chosen meanwhile starts with the next task.
-  const taskWorking = !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle";
+  const taskWorking =
+    !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle" && !recoveryWait;
   const modelNext = modelChanged && taskWorking;
   const modelLabel =
     modelSaving?.name ?? (mainChoice ? names.name(mainChoice.provider, mainChoice.model) : "");
@@ -1371,15 +1419,20 @@ function Theatre({ api }: { api: ApiClient }) {
     [session.sessionId, session.ended, taskStatus, needsYou],
   );
   const currentTask = conversation.sessions.at(-1) ?? null;
-  const pickConversation = (id: string) => {
+  const pickConversation = (id: string, sessions?: readonly string[]) => {
     setRailView("chat");
+    if (yours) {
+      setViewedConversation(id === currentTask ? null : { id, sessions: sessions ?? [id] });
+      return;
+    }
+    setViewedConversation(null);
     if (id !== currentTask) void choose(id);
   };
   const conversationList = {
     api,
-    current: currentTask,
+    current: viewedConversation?.id ?? currentTask,
     facts: liveFacts,
-    reason: conversationReason,
+    reason: yours ? undefined : conversationReason,
     onPick: pickConversation,
     onReplay: () => selectReplay(LIBRARY),
   };
@@ -1662,7 +1715,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     take={takeState}
                     handBack={handBack.slot}
                     decline={handBack.declinable ? handBack.declineSlot : undefined}
-                    onPause={() => void safety.requestPause()}
+                    onPause={taskStop}
                     onContinue={() => void safety.resume()}
                     onStopTask={taskStop}
                     onTake={take}
@@ -1716,7 +1769,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     pause={shape === "task" ? pause : null}
                     stop={appStatus.actions.find((action) => action.kind === "stop-task")}
                     onTake={take}
-                    onPause={() => void safety.requestPause()}
+                    onPause={taskStop}
                     onContinue={() => void safety.resume()}
                     onStop={taskStop}
                     onLeave={() => {
@@ -1828,24 +1881,40 @@ function Theatre({ api }: { api: ApiClient }) {
           <ErrorBoundary>
             <ChatThread
               visible={shownView === "chat"}
-              agent={switching ? undefined : agent}
-              words={switching ? undefined : session.agentFeed}
+              agent={switching ? undefined : viewedConversation ? historyAgent : agent}
+              words={
+                switching
+                  ? undefined
+                  : viewedConversation
+                    ? historySession.agentFeed
+                    : session.agentFeed
+              }
               api={api}
-              rows={rows}
+              rows={viewedConversation ? historyRows : rows}
               reveal={reveal}
               names={names}
               computerReady={cell?.state === "ready" && !cell.paused}
               computerUpdating={!!cell?.updating}
-              live={foot && !session.ended ? { ...foot, nowMs: now } : null}
+              live={!viewedConversation && foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
-                agent.sessionId && (agent.model.ended || task?.phase === "finished")
-                  ? () => selectReplay(agent.sessionId)
-                  : undefined
+                viewedConversation
+                  ? () => selectReplay(viewedConversation.id)
+                  : agent.sessionId && (agent.model.ended || task?.phase === "finished")
+                    ? () => selectReplay(agent.sessionId)
+                    : undefined
               }
               onReplayTask={selectReplay}
-              sessions={switching ? NO_SESSIONS : conversation.sessions}
+              sessions={
+                switching ? NO_SESSIONS : (viewedConversation?.sessions ?? conversation.sessions)
+              }
               more={!switching && conversation.more}
-              pending={switching ? switching.to !== null : threadPending}
+              pending={
+                switching
+                  ? switching.to !== null
+                  : viewedConversation
+                    ? !historyAgent.history
+                    : threadPending
+              }
               pinned={phone}
               lead={
                 phone && (
@@ -1978,54 +2047,105 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               }
               recovery={
-                !switching && (
-                  <TaskRecovery
-                    agent={agent}
-                    controls={controls}
-                    onSettings={showSettings}
-                    onReenterKey={reenterKey}
-                    onContinue={continueTask}
-                    onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
-                  />
+                !switching &&
+                !viewedConversation && (
+                  <>
+                    {takeover && takeover.by !== "user" && (
+                      <div className="thread-handoff" role="status">
+                        <strong>{yours ? "Your turn" : "dot needs your help"}</strong>
+                        <p>
+                          {takeover.note ||
+                            "Complete the step on the computer, then choose Hand back."}
+                        </p>
+                      </div>
+                    )}
+                    <TaskRecovery
+                      agent={agent}
+                      controls={controls}
+                      onSettings={showSettings}
+                      onReenterKey={reenterKey}
+                      onContinue={continueTask}
+                      onCarryOn={cell?.state === "ready" && !cell.paused ? carryOn : undefined}
+                      onResumeSelected={modelChanged && recoveryWait ? carryOn : undefined}
+                      resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
+                    />
+                  </>
                 )
               }
-              ask={switching ? undefined : askThread}
+              ask={switching || viewedConversation ? undefined : askThread}
               composer={
-                <Composer
-                  api={api}
-                  cell={cell}
-                  onSending={(on) => setSendingSince(on ? Date.now() : null)}
-                  known={status === "known"}
-                  pending={pending !== null}
-                  controlBlocked={
-                    controls.fenced ||
-                    controls.stopping ||
-                    !!cell?.fenced ||
-                    !!cell?.replacementPending ||
-                    !!safety.approval
-                  }
-                  agent={agent}
-                  keysOpen={settings.open}
-                  receiveKey={receiveKey}
-                  configured={setupDone}
-                  onSettings={(trigger) => showSettings(trigger, "models")}
-                  onTaskStarted={session.check}
-                  layout={phone ? "pill" : "card"}
-                  reply={askDraft ? replyAsk : undefined}
-                  modelChanged={modelChanged}
-                  model={
-                    mainChoice && (
-                      <ModelChip
-                        {...modelMenu}
-                        name={modelLabel}
-                        next={modelNext}
-                        disabledReason={modelSaving ? "Saving…" : undefined}
-                        onPeek={settings.browseAccounts}
-                        onManage={(trigger) => showSettings(trigger, "models")}
+                viewedConversation ? (
+                  <div className="thread-recovery-actions">
+                    <Button variant="quiet" onClick={() => setViewedConversation(null)}>
+                      Back to current conversation
+                    </Button>
+                    {!yours && (
+                      <Button onClick={() => void choose(viewedConversation.id)}>
+                        Continue this conversation
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <Composer
+                    api={api}
+                    cell={cell}
+                    onSending={(on) => setSendingSince(on ? Date.now() : null)}
+                    known={status === "known"}
+                    pending={pending !== null}
+                    controlBlocked={
+                      controls.fenced ||
+                      controls.stopping ||
+                      !!cell?.fenced ||
+                      !!cell?.replacementPending ||
+                      !!safety.approval
+                    }
+                    agent={agent}
+                    keysOpen={settings.open}
+                    receiveKey={receiveKey}
+                    configured={setupDone}
+                    onSettings={(trigger) => showSettings(trigger, "models")}
+                    onTaskStarted={session.check}
+                    layout={phone ? "pill" : "card"}
+                    reply={askDraft ? replyAsk : undefined}
+                    modelChanged={modelChanged}
+                    permissions={
+                      <PermissionChip
+                        value={settings.saved?.permissionMode ?? "custom"}
+                        busy={settings.busy}
+                        onChoose={(mode) => {
+                          void settings.choosePermissions(mode).then((saved) => {
+                            if (!saved)
+                              showToast({ title: "Couldn't save permissions", tone: "danger" });
+                          });
+                        }}
                       />
-                    )
-                  }
-                />
+                    }
+                    taskAction={
+                      agent.sessionId &&
+                      !agent.model.ended &&
+                      agent.snapshot?.status !== "idle" &&
+                      agent.snapshot?.status !== "ended"
+                        ? {
+                            kind: "stop",
+                            run: taskStop,
+                            disabledReason: stoppingRun ? "Stopping…" : undefined,
+                          }
+                        : undefined
+                    }
+                    model={
+                      mainChoice && (
+                        <ModelChip
+                          {...modelMenu}
+                          name={modelLabel}
+                          next={modelNext}
+                          disabledReason={modelSaving ? "Saving…" : undefined}
+                          onPeek={settings.browseAccounts}
+                          onManage={(trigger) => showSettings(trigger, "models")}
+                        />
+                      )
+                    }
+                  />
+                )
               }
             />
             {phone && (
@@ -2280,9 +2400,9 @@ function Theatre({ api }: { api: ApiClient }) {
           <ConversationList
             {...conversationList}
             open={conversationsOpen}
-            onPick={(id) => {
+            onPick={(id, sessions) => {
               setConversationsOpen(false);
-              conversationList.onPick(id);
+              conversationList.onPick(id, sessions);
             }}
             onReplay={() => {
               setConversationsOpen(false);

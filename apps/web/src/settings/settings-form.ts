@@ -44,6 +44,7 @@ export interface ResearchDraft {
   minutes: string;
 }
 export interface SettingsDraft {
+  models?: RoleChoice[];
   choices: Partial<Record<ModelRole, RoleChoice>>;
   prices: Partial<Record<ModelRole, PriceDraft>>;
   spending: SpendingDraft;
@@ -71,6 +72,7 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
   }
   const amount = (usd: number | undefined) => (usd === undefined ? "" : String(usd));
   return {
+    ...(settings.models ? { models: settings.models } : {}),
     choices,
     prices,
     autonomy: settings.autonomy ?? DEFAULT_AUTONOMY,
@@ -143,6 +145,7 @@ export function validateForm(
   const problems: string[] = [];
   if (!draft.choices.main) problems.push("Choose a main provider and model.");
   const document: AgentSettingsDocument = { ...saved };
+  if (draft.models?.length) document.models = draft.models;
   const subscription = onSubscription(draft.choices.main?.provider);
   const accounting = new Map<string, string>();
   for (const role of roles) {

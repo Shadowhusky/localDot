@@ -65,6 +65,10 @@ function fixture(
   let holder: "user" | "agent" = "user",
     revision = 0;
   const client = {
+    secret: vi.fn(async (_p: unknown, _t: string, request: { text?: string }) => ({
+      filled: request.text !== undefined,
+      rememberable: true,
+    })),
     uploadChooser: vi.fn(
       async (
         _permit: unknown,
@@ -970,13 +974,14 @@ describe("session-owned screen authority", () => {
     });
     f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
     expect((await asking).result.ok).toBe(true);
-    expect(f.client.input.mock.calls.slice(-2).map((call) => call.at(2))).toMatchObject([
-      { input: { kind: "click", at: { x: 400, y: 300 } } },
-      { input: { kind: "key", combo: ["ctrl", "a"] } },
-    ]);
-    expect(f.client.type.mock.calls.at(-1)?.at(2)).toMatchObject({ text: secret, masked: true });
+    expect(f.client.secret.mock.calls.at(-1)?.at(2)).toMatchObject({
+      origin: "https://mail.example.test",
+      at: { x: 400, y: 300 },
+      text: secret,
+    });
+    expect(f.client.type).not.toHaveBeenCalled();
 
-    f.client.type.mockClear();
+    f.client.secret.mockClear();
     bindDesktop(h);
     const again = h.callTool("ask_user", login);
     await until(() => f.session.pendingAsk !== undefined);
@@ -988,10 +993,80 @@ describe("session-owned screen authority", () => {
     f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
     const moved = await again;
     expect(moved.result.content).toContainEqual(
-      expect.objectContaining({ text: expect.stringContaining("The field moved; ask again.") }),
+      expect.objectContaining({
+        text: expect.stringContaining("The secure answer was not delivered."),
+      }),
     );
     expect(f.client.type).not.toHaveBeenCalled();
     expect(JSON.stringify(f.log.read(f.id))).not.toContain(secret);
+  });
+
+  it("saves the account and password privately, then reuses them without another prompt", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 400, y: 300 },
+        source: "dom",
+        role: "textbox",
+        name: "Password",
+        url: "https://github.com/login",
+        secret: true,
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    let saved: { username: string; password: string } | undefined;
+    h.tools.logins = {
+      login: vi.fn(async () => saved && { ...saved }),
+      saveLogin: vi.fn(async (_origin, username, password) => {
+        saved = { username, password };
+      }),
+    };
+    const input = {
+      question: "Sign in",
+      fields: [
+        { id: "username", kind: "text", label: "Username" },
+        { id: "password", kind: "secret", label: "Password", target: [400, 300] },
+      ],
+    };
+    const first = h.callTool("ask_user", input);
+    await until(() => f.session.pendingAsk !== undefined);
+    f.session.answerFields(
+      f.session.pendingAsk ?? "",
+      { username: "fixture-user", password: "private-password-canary" },
+      (text) => text,
+    );
+    const result = await first;
+    expect(result.result.ok).toBe(true);
+    expect(h.tools.logins.saveLogin).toHaveBeenCalledWith(
+      "https://github.com",
+      "fixture-user",
+      "private-password-canary",
+    );
+    const asks = f.log.read(f.id).filter((e) => e.type === "ask.request").length;
+    const reused = await h.callTool("ask_user", input);
+    expect(reused.result.ok).toBe(true);
+    expect(JSON.stringify(reused.result)).toContain("Used the saved sign-in");
+    expect(f.log.read(f.id).filter((e) => e.type === "ask.request")).toHaveLength(asks);
+    expect(f.client.secret.mock.calls.at(-1)?.at(2)).toMatchObject({
+      origin: "https://github.com",
+      text: "private-password-canary",
+    });
+    expect(JSON.stringify([result, reused, f.log.read(f.id)])).not.toContain(
+      "private-password-canary",
+    );
+    // A rejected saved login lets the user replace it instead of retrying forever.
+    const replacement = h.callTool("ask_user", input);
+    await until(() => f.session.pendingAsk !== undefined);
+    f.session.answerFields(
+      f.session.pendingAsk ?? "",
+      { username: "fixture-user", password: "replacement-password" },
+      (text) => text,
+    );
+    expect((await replacement).result.ok).toBe(true);
+    expect(saved?.password).toBe("replacement-password");
   });
 
   it("opens a public page in the web browser from the desktop by switching the screen first", async () => {

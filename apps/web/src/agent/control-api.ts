@@ -259,3 +259,32 @@ export function stopTask(
     StopOutcome.parse(JSON.parse(text)),
   );
 }
+
+export function endTaskRun(api: ApiClient, sessionId: string, signal: AbortSignal): Promise<void> {
+  if (!ULID_PATTERN.test(sessionId)) return Promise.reject(new ControlFailure(false));
+  return controlRequest(
+    api,
+    `/api/agent/sessions/${sessionId}/stop`,
+    undefined,
+    204,
+    signal,
+    () => {},
+  );
+}
+export function steerQueuedMessage(
+  api: ApiClient,
+  sessionId: string,
+  messageId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(messageId))
+    return Promise.reject(new ControlFailure(false));
+  return controlRequest(
+    api,
+    `/api/agent/sessions/${sessionId}/messages/${messageId}/steer`,
+    undefined,
+    204,
+    signal,
+    () => {},
+  );
+}

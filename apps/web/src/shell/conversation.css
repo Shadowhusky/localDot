@@ -1471,6 +1471,8 @@
 
 .composer-bar {
   display: flex;
+  flex-wrap: nowrap;
+  min-width: 0;
   align-items: center;
   gap: var(--spacing);
   min-height: calc(var(--spacing) * 8);
@@ -1482,6 +1484,15 @@
   flex: 1;
   align-items: center;
   min-width: 0;
+}
+
+.composer {
+  container-type: inline-size;
+}
+
+.composer-send,
+.composer-permissions {
+  flex-shrink: 0;
 }
 
 .composer-note,
@@ -1755,6 +1766,7 @@
    typing a pasted text, and Hand back at the trailing end. */
 .control-tools {
   display: flex;
+  flex-wrap: wrap;
   flex: 1;
   align-items: center;
   gap: calc(var(--spacing) * 1.5);
@@ -1819,6 +1831,10 @@
 
 .composer-card[data-layout="pill"] > .composer-bar {
   display: contents;
+}
+
+.composer-card[data-layout="pill"] .composer-permissions {
+  order: 1;
 }
 
 .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button:first-child {
@@ -1955,7 +1971,9 @@
 
 /* Wide enough for every label it takes, so the waveform keeps its width when one changes. */
 .voice-tail {
-  min-width: 8em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-align: start;
   color: var(--color-fg-3);
   font-weight: var(--font-weight-medium);
@@ -2132,4 +2150,57 @@
     background-image: none;
     color: CanvasText;
   }
+}
+
+.permission-menu {
+  width: min(288px, calc(100vw - 24px));
+  background-color: var(--color-overlay);
+}
+
+.permission-menu-heading {
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.permission-menu-name,
+.permission-menu-detail {
+  display: block;
+}
+
+.permission-menu-name {
+  font-weight: var(--font-weight-medium);
+}
+
+.permission-menu-detail {
+  margin-top: calc(var(--spacing) / 2);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  white-space: normal;
+  text-wrap: pretty;
+}
+
+.thread-handoff {
+  margin-block: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 3);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.thread-handoff p {
+  margin-top: var(--spacing);
+  color: var(--color-fg-2);
+}
+
+.thread-queue {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  max-width: 100%;
 }

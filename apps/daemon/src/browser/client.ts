@@ -34,6 +34,10 @@ import {
   BrowserDownloadOffer,
 } from "../../../../packages/protocol/src/browser-downloads.ts";
 import {
+  BrowserSecretReply,
+  BrowserSecretRequest,
+} from "../../../../packages/protocol/src/browser-secret.ts";
+import {
   BrowserUploadOffer,
   BrowserUploadReceipt,
   BrowserUploadRequest,
@@ -766,6 +770,24 @@ export class BrowserClient {
     this.#checkScope(scope);
     this.#identity(reply);
     this.close();
+  }
+
+  secret(
+    permit: BrowserActionPermit,
+    tabId: string,
+    raw: BrowserSecretRequest,
+    scope: BrowserScope,
+  ): Promise<BrowserSecretReply> {
+    const request = parse(BrowserSecretRequest, raw);
+    return this.#json(
+      "POST",
+      "/secret",
+      { ...this.#action(permit, tabId), request },
+      scope,
+      120000,
+      BrowserSecretReply,
+      4096,
+    );
   }
 
   type(

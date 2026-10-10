@@ -147,6 +147,8 @@ export function TaskRecovery({
   onReenterKey,
   onContinue,
   onCarryOn,
+  onResumeSelected,
+  resumeBlocked,
 }: {
   agent: AgentSessionView;
   controls: TaskControls;
@@ -158,6 +160,8 @@ export function TaskRecovery({
   // Starts the conversation's next task to carry on one that was interrupted; left out while the
   // computer can't take a task.
   onCarryOn?(): Promise<boolean>;
+  onResumeSelected?(): Promise<boolean>;
+  resumeBlocked?: string;
 }) {
   const budget = agent.model.budget;
   const need = budget?.data.needUSD;
@@ -266,8 +270,11 @@ export function TaskRecovery({
   ) : (
     <Button
       variant={raising || reentry !== undefined || changed !== undefined ? "secondary" : "primary"}
-      disabledReason={controls.canResumeTask ? undefined : "The task can't continue right now."}
-      onClick={() => void controls.resume()}
+      disabledReason={
+        resumeBlocked ?? (controls.canResumeTask ? undefined : "The task can't continue right now.")
+      }
+      busy={continuing}
+      onClick={() => send(onResumeSelected ?? controls.resume)}
     >
       {raising ? "Continue without raising" : retry ? "Retry now" : "Continue"}
     </Button>
@@ -404,7 +411,7 @@ export function TaskRecovery({
           </div>
         )
       )}
-      {limited && problem && (
+      {problem && !raising && (
         <p className="thread-recovery-reason" role="alert">
           {problem}
         </p>
@@ -422,7 +429,11 @@ export function TaskRecovery({
             Check task state
           </Button>
         </div>
-        <p className="thread-note">Continuing keeps this task's model and its spending limit.</p>
+        <p className="thread-note">
+          {onResumeSelected
+            ? "Continue starts the next task with your selected model and the conversation so far."
+            : "Continuing keeps this task's model and its spending limit."}
+        </p>
       </Disclosure>
     </section>
   );

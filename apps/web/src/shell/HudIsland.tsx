@@ -215,7 +215,7 @@ export function HudIsland({
             <span className="island-divider" aria-hidden="true" />
             {task && (
               <>
-                {handSlot && (
+                {handSlot && pause.kind === "continue" && (
                   <PauseButton
                     slot={pause}
                     size={control}

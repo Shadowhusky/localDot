@@ -29,10 +29,11 @@ import { afterMotion } from "../ui/finished.ts";
 import { focusWithoutScroll } from "../ui/focus.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
-import { Menu, MenuItem } from "../ui/Menu.tsx";
+import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
+import "../ui/composer-layout.css";
 import { useVoice } from "../voice/useVoice.ts";
 import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
@@ -86,6 +87,8 @@ export interface ComposerProps {
   layout?: "card" | "pill";
   // The model chip, in a card's row.
   model?: ReactNode;
+  taskAction?: { kind: "stop" | "continue"; run(): void; disabledReason?: string };
+  permissions?: ReactNode;
   // The main model saved since this task started: a message at rest starts a task on it.
   modelChanged?: boolean;
 }
@@ -122,6 +125,14 @@ const readyCell = (props: ComposerProps) =>
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
 function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageMode {
+  if (
+    props.agent.snapshot?.status === "paused" &&
+    !props.agent.snapshot.pause &&
+    !props.agent.model.pendingAsk &&
+    !props.agent.model.pendingTakeover &&
+    !props.agent.snapshot.approval
+  )
+    return "new";
   if (!props.agent.sessionId || props.agent.model.ended || props.agent.snapshot?.holder)
     return "new";
   return props.agent.snapshot?.status === "idle" ? "followup" : selected;
@@ -372,7 +383,7 @@ export function Composer(props: ComposerProps) {
     return () => document.removeEventListener("keydown", key);
   }, []);
 
-  const mode = modeFor(props, "steer");
+  const mode = modeFor(props, "followup");
   const permitted =
     readyCell(props) && online && !props.keysOpen && (mode === "new" || props.agent.fresh);
   const uncertain = delivery?.phase === "uncertain";
@@ -575,7 +586,7 @@ export function Composer(props: ComposerProps) {
       if (pending.current === record) pending.current = null;
     }
   };
-  const submit = (later = false) => {
+  const submit = (later = true) => {
     const input = field();
     if (!input || pending.current || composing.current || replying.current || talking) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
@@ -585,7 +596,7 @@ export function Composer(props: ComposerProps) {
     }
     const now = current.current;
     // Research starts a task of its own; at rest, a conversation's next task continues it.
-    const resting = now.agent.snapshot?.status === "idle" && !later;
+    const resting = now.agent.snapshot?.status === "idle";
     const asked = modeFor(now, later ? "followup" : "steer");
     const chosen =
       (researchNow.current || now.modelChanged) && asked === "followup" && resting ? "new" : asked;
@@ -745,7 +756,7 @@ export function Composer(props: ComposerProps) {
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
   // A phone's field has room for its text and Send only; there a message is read after the step.
   const pill = props.layout === "pill";
-  if ((!choosing || pill) && menu) setMenu(false);
+  if (pill && menu) setMenu(false);
   const typing = useRef({ submit, touch, choosing });
   useLayoutEffect(() => {
     typing.current = { submit, touch, choosing };
@@ -797,11 +808,12 @@ export function Composer(props: ComposerProps) {
         event.preventDefault();
         // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
         if (event.altKey && !choosing) return;
-        if (event.currentTarget.value.trim()) submit(event.altKey);
+        if (event.currentTarget.value.trim()) submit();
       },
     }),
     [measure, weigh],
   );
+  const taskAction = text.blank ? props.taskAction : undefined;
   const connect = mode === "new" && props.configured === false;
   const near = text.length > NEAR && text.length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
@@ -845,7 +857,9 @@ export function Composer(props: ComposerProps) {
       : mode === "new" || switching
         ? "Send"
         : mode === "followup"
-          ? "Send follow-up"
+          ? choosing
+            ? "Queue message"
+            : "Send follow-up"
           : "Send now";
   const note =
     mode === "new" || takeover
@@ -955,6 +969,9 @@ export function Composer(props: ComposerProps) {
             />
           </Collapse>
         )}
+        {near && (
+          <p className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</p>
+        )}
         <ComposerField
           label={newConversation ? "New task" : "Message"}
           placeholder={
@@ -990,57 +1007,73 @@ export function Composer(props: ComposerProps) {
             />
           )}
           {!pill && props.model}
+          {props.permissions}
           <div className="composer-hint">
             <VoiceStrip voice={voice}>
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
-          <Pop shown={near}>
-            {near && (
-              <span className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</span>
-            )}
-          </Pop>
-          <Pop shown={choosing && !pill}>
-            {choosing && !pill && (
-              <IconButton
-                ref={more}
-                className="composer-more"
-                icon="chevron-up"
-                size={24}
-                label="Choose when to send"
-                {...triggerProps("menu", menu)}
-                disabledReason={sendReason}
-                onClick={() => setMenu(true)}
-              />
-            )}
-          </Pop>
+          {!pill && (
+            <IconButton
+              ref={more}
+              className="composer-more"
+              icon="more-horizontal"
+              size={24}
+              label="Message options"
+              {...triggerProps("menu", menu)}
+              onClick={() => setMenu(true)}
+            />
+          )}
           <Menu
             open={menu}
             onClose={() => setMenu(false)}
             anchor={more}
             side="top"
             align="end"
-            label="Choose when to send"
+            label="Message options"
           >
-            <MenuItem kbd={touch ? undefined : ["Enter"]} onSelect={() => send(false)}>
-              Send now
+            <MenuItem
+              checked={research}
+              disabledReason={researchReason}
+              onSelect={() => setResearch((on) => !on)}
+            >
+              Research
             </MenuItem>
-            <MenuItem kbd={touch ? undefined : ["Alt", "Enter"]} onSelect={() => send(true)}>
-              Send after this task
-            </MenuItem>
+            {choosing && <MenuSeparator />}
+            {choosing && (
+              <MenuItem
+                disabledReason={sendReason}
+                kbd={touch ? undefined : ["Enter"]}
+                onSelect={() => send(false)}
+              >
+                Send now
+              </MenuItem>
+            )}
+            {choosing && (
+              <MenuItem
+                disabledReason={sendReason}
+                kbd={touch ? undefined : ["Alt", "Enter"]}
+                onSelect={() => send(true)}
+              >
+                Send after this task
+              </MenuItem>
+            )}
           </Menu>
           <Pop shown={!pill || text.blank || talking || !!voice.notice}>
             <VoiceButton voice={voice} size={pill ? 36 : 28} />
           </Pop>
           <IconButton
-            type="submit"
+            type={taskAction ? "button" : "submit"}
+            onClick={taskAction?.run}
             className="composer-send"
             variant="primary"
             size={32}
-            icon="arrow-up"
-            label={sendLabel}
-            kbd={touch ? undefined : ["Enter"]}
-            disabledReason={sendReason}
+            icon={taskAction?.kind === "stop" ? "stop" : "arrow-up"}
+            label={
+              taskAction?.kind === "stop" ? "Stop task" : taskAction ? "Continue task" : sendLabel
+            }
+            kbd={touch || taskAction ? undefined : ["Enter"]}
+            disabledReason={taskAction ? taskAction.disabledReason : sendReason}
             aria-describedby={guard.notice ? keyNotice : undefined}
           />
         </div>

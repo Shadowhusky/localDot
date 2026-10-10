@@ -52,10 +52,10 @@ it("counts down to a model retry in the elapsed slot", () => {
   expect(screen.getByTestId("hud-elapsed").textContent).toBe("in 20 s");
 });
 
-it("keeps Pause, Stop and Take control in place as dot thinks, acts and checks the screen", () => {
+it("keeps Stop and Take control in place as dot thinks, acts and checks the screen", () => {
   const view = render(<HudIsland {...props({ status: status("thinking", "Thinking") })} />);
   const controls = () =>
-    ["Pause", "Stop", "Take control"].map((name) => screen.getByRole("button", { name }));
+    ["Stop", "Take control"].map((name) => screen.getByRole("button", { name }));
   const first = controls();
   for (const [row, label] of [
     ["acting", "Selecting February's net total"],
@@ -65,7 +65,7 @@ it("keeps Pause, Stop and Take control in place as dot thinks, acts and checks t
     view.rerender(<HudIsland {...props({ status: status(row, label) })} />);
     expect(controls(), row).toEqual(first);
     expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("task");
-    expect(screen.getByRole("button", { name: "Pause" }).getAttribute("aria-disabled")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
   }
 });
 
@@ -189,7 +189,8 @@ it("shrinks to the full screen shape, with Take control as an icon and a way out
   const take = screen.getByRole("button", { name: "Take control" });
   expect(take.classList.contains("ui-icon-button")).toBe(true);
   expect(take.textContent).toBe("");
-  for (const name of ["Pause", "Stop"]) expect(screen.getByRole("button", { name })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
   screen.getByRole("button", { name: "Exit full screen" }).click();
   expect(onExitFull).toHaveBeenCalledOnce();
 

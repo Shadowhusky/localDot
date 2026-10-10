@@ -107,6 +107,25 @@ function setup(over: Partial<ConnectionApprovalsDeps> = {}, home?: string) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it("full access permits a connection without a card", async () => {
+  const f = setup();
+  if (!f.session) throw new Error("Missing fixture session");
+  f.session.permissionMode = () => "full";
+  await f.approvals.ask(CELL, held("example.com", 8443));
+  expect(f.answers[0]?.decision).toBe("allow");
+  expect(f.cards()).toEqual([]);
+});
+it("auto checks a connection with Jev before allowing it", async () => {
+  const f = setup();
+  if (!f.session) throw new Error("Missing fixture session");
+  f.session.permissionMode = () => "auto";
+  f.session.autoPermit = vi.fn(async () => true);
+  await f.approvals.ask(CELL, held("example.com", 8443));
+  expect(f.session.autoPermit).toHaveBeenCalledTimes(1);
+  expect(f.answers[0]?.decision).toBe("allow");
+  expect(f.cards()).toEqual([]);
+});
+
 describe("ConnectionCards", () => {
   const make = () => {
     let now = 1_000_000;

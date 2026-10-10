@@ -28,6 +28,7 @@ export interface Voice {
   readonly route: VoiceRoute;
   level(): number;
   send(event: VoiceEvent): void;
+  dismiss(): void;
 }
 
 export const browserLanguages = () =>
@@ -42,6 +43,7 @@ export function useVoice(opts: VoiceOptions): Voice {
   const route = voiceRoute(support, prefs.online, language);
   const [state, setState] = useState<VoiceState>(IDLE);
   const [notice, setNotice] = useState<string | null>(null);
+  const [downloadDismissed, setDownloadDismissed] = useState(false);
   const latest = useRef({ opts, route, language, download });
   useLayoutEffect(() => {
     latest.current = { opts, route, language, download };
@@ -81,12 +83,14 @@ export function useVoice(opts: VoiceOptions): Voice {
   }, [opts.enabled, turns]);
   // Escape, or leaving the page, drops what was said.
   useEffect(() => {
-    if (!active) return;
+    if (!active && !notice && (!downloading || downloadDismissed)) return;
     const key = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
       turns.send({ type: "cancel" });
+      setNotice(null);
+      setDownloadDismissed(true);
     };
     const hidden = () => {
       if (document.hidden) turns.send({ type: "cancel" });
@@ -97,15 +101,23 @@ export function useVoice(opts: VoiceOptions): Voice {
       document.removeEventListener("keydown", key, true);
       document.removeEventListener("visibilitychange", hidden);
     };
-  }, [active, turns]);
+  }, [active, turns, notice, downloading, downloadDismissed]);
   useHoldShortcut(turns, opts.enabled, opts.field);
   return {
     enabled: opts.enabled,
     state,
-    notice: downloading ? "Getting speech ready on this device…" : notice,
+    notice: downloading && !downloadDismissed ? "Getting speech ready on this device…" : notice,
     route,
     level: () => turns.level(),
-    send: (event) => turns.send(event),
+    send: (event) => {
+      if (event.type === "press") setDownloadDismissed(false);
+      turns.send(event);
+    },
+    dismiss: () => {
+      turns.send({ type: "cancel" });
+      setNotice(null);
+      setDownloadDismissed(true);
+    },
   };
 }
 

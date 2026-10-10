@@ -1,0 +1,72 @@
+/* Composer layout must follow the kit layer: legacy screen CSS cannot override
+   a kit button's display, padding, or its intrinsic label size. */
+@layer utilities {
+  .composer-model {
+    flex: 1 1 0;
+    min-width: 28px;
+    padding-inline: var(--spacing);
+  }
+
+  .composer-model > .ui-button-content {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    gap: calc(var(--spacing) / 2);
+  }
+
+  .composer-model .ui-middle {
+    overflow: hidden;
+  }
+
+  .composer-model .ui-middle > :nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* The button owns its hit area; an expanded target must not cover its neighbors. */
+  .composer-model::after {
+    inset: 0;
+  }
+
+  .composer-bar > .composer-hint:empty {
+    display: none;
+  }
+
+  .composer-bar > .composer-pop {
+    flex-shrink: 0;
+  }
+
+  .composer-count {
+    min-width: 0;
+    text-align: end;
+  }
+
+  .composer-card[data-layout="pill"] > .composer-count {
+    flex-basis: 100%;
+  }
+
+  @container (max-width: 400px) {
+    .composer-research-label {
+      display: none;
+    }
+
+    .composer-research.ui-chip {
+      padding-inline: calc(var(--spacing) * 1.5);
+      margin-inline-start: 0;
+    }
+  }
+
+  @media (pointer: coarse) {
+    .composer-model {
+      min-width: 44px;
+    }
+  }
+
+  /* Secondary choices remain in Message options when the panel gets narrow. */
+  @container (max-width: 340px) {
+    .composer-research.ui-chip {
+      display: none;
+    }
+  }
+}

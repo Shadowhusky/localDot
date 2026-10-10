@@ -174,6 +174,9 @@ describe("independent key safeguard at all four daemon text ingresses", () => {
       expect(
         (await f.send(f.endpoint("messages"), { kind, text: `${kind}: ${task}` })).status,
       ).toBe(202);
+    // Follow-ups are accepted now but reach the model only after the current task finishes.
+    expect(f.session.inboxSequence).toBe(1);
+    f.session.setStatus("idle");
     const inbox = await f.persistInbox();
     expect(inbox.map((item) => item.text)).toEqual([`steer: ${task}`, `followup: ${task}`]);
     expect(f.transcript.state(f.id).inboxAfter).toBe(2);

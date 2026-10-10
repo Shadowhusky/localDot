@@ -40,14 +40,21 @@ done
 host_target() {
   if [ -n "$1" ]; then echo "UNIX-CONNECT:$1"; else echo "TCP4:host.docker.internal:$2"; fi
 }
+# Bound each listener separately: outbound connection bursts must leave room for
+# control and video. max-children queues excess connections instead of exhausting
+# the cgroup and killing the listening relay. Desktop gates reserve 256 PIDs for
+# these 96 children, listener processes, and ldgate's runtime threads; brain and
+# connector gates keep their smaller 64-PID budget.
+keyd_children=16
+if [ "$LD_ROLE" = desktop ]; then keyd_children=64; fi
 keyd_to=$(host_target "${LD_KEYD_SOCKET:-}" "$LD_KEYD_PORT")
-socat "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "$keyd_to" &
+socat "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,max-children=$keyd_children,reuseaddr" "$keyd_to" &
 keyd=$!
 case "$LD_ROLE" in
   brain)
     : "${LD_TOOL_PORT:?}"
     tool_to=$(host_target "${LD_TOOL_SOCKET:-}" "$LD_TOOL_PORT")
-    socat "TCP4-LISTEN:4751,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "$tool_to" &
+    socat "TCP4-LISTEN:4751,bind=$LD_INTERNAL_ADDR,fork,max-children=16,reuseaddr" "$tool_to" &
     tool=$!
     echo "gate (brain): keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to; tool API $LD_INTERNAL_ADDR:4751 -> $tool_to"
     relays="$keyd $tool"
@@ -58,9 +65,9 @@ case "$LD_ROLE" in
     ;;
   desktop)
     : "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}"
-    socat "TCP4-LISTEN:8081,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:7700" &
+    socat "TCP4-LISTEN:8081,bind=$LD_EGRESS_ADDR,fork,max-children=16,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:7700" &
     desktopd=$!
-    socat "TCP4-LISTEN:8082,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:3000" &
+    socat "TCP4-LISTEN:8082,bind=$LD_EGRESS_ADDR,fork,max-children=16,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:3000" &
     stream=$!
     echo "gate: keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to; inbound $LD_EGRESS_ADDR:8081 -> $LD_DESKTOP_ADDR:7700, $LD_EGRESS_ADDR:8082 -> $LD_DESKTOP_ADDR:3000"
     relays="$keyd $desktopd $stream"

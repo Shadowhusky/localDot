@@ -296,6 +296,11 @@ export interface ConnectionTask {
   readonly connections: Pick<ConnectionCards, "request">;
   readonly taint: Pick<TaskTaint, "kinds">;
   readonly purpose?: Pick<PurposeGate, "fitsConnection"> | undefined;
+  permissionMode?(): "custom" | "auto" | "full";
+  autoPermit?(
+    action: { tool: string; operation: string; actionClass: string; input: unknown },
+    signal: AbortSignal,
+  ): Promise<boolean>;
 }
 export interface ConnectionApprovalsDeps {
   keyd: {
@@ -362,6 +367,22 @@ export class ConnectionApprovals {
     const once = `${cellId}\0${app ?? ""}\0${destination}`;
     if (this.#once.has(once)) return true;
     if (!task) return false;
+    if (task.permissionMode?.() === "full") return true;
+    if (task.permissionMode?.() === "auto" && task.autoPermit) {
+      const allowed = await task
+        .autoPermit(
+          {
+            tool: "network",
+            operation: "connect",
+            actionClass: "network",
+            input: { host: held.host, port: held.port, app },
+          },
+          AbortSignal.timeout(JUDGE_WAIT_MS),
+        )
+        .catch(() => false);
+      if (this.deps.task(cellId)?.id !== task.id) return false;
+      if (allowed && task.permissionMode?.() === "auto") return true;
+    }
     const decision = await task.connections.request({
       ...(app ? { app } : {}),
       host: held.host,

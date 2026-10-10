@@ -31,6 +31,7 @@ var routeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 type Server struct {
 	Manager  *egress.Manager
 	Vault    *vault.Vault
+	Logins   *vault.Logins
 	Registry *keys.Registry
 	Opener   *vault.Opener
 	Settings *llm.Settings
@@ -51,6 +52,9 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", s.status)
+	mux.HandleFunc("POST /v1/logins", s.login)
+	mux.HandleFunc("PUT /v1/logins", s.login)
+	mux.HandleFunc("DELETE /v1/logins", s.login)
 	mux.HandleFunc("GET /v1/secrets", s.listSecrets)
 	mux.HandleFunc("PUT /v1/secrets/{id}", s.putSecret)
 	mux.HandleFunc("DELETE /v1/secrets/{id}", s.deleteSecret)

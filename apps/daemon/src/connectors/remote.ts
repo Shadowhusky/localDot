@@ -4,6 +4,7 @@ import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 import type { KeydClient } from "../keyd/client.ts";
 import { connectorCellId } from "./cell.ts";
+import { openConnectorListener } from "./open-listener.ts";
 import { ConnectorProblem } from "./problem.ts";
 
 export interface RemoteLinksDeps {
@@ -47,7 +48,7 @@ export class RemoteLinks {
     let opened: KeydOpened;
     try {
       opened = KeydOpened.parse(
-        await this.deps.keyd.openCell({ cellId, role: "connector", port, secrets }),
+        await openConnectorListener(this.deps.keyd, { cellId, role: "connector", port, secrets }),
       );
       if (opened.cellId !== cellId || opened.port !== port)
         throw new Error("keyd opened a different listener");

@@ -65,6 +65,28 @@ async function opened(f: ReturnType<typeof server>) {
   return view;
 }
 describe("explicit configuration save ownership", () => {
+  it("keeps configured choices while switching providers in one settings visit", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "ollama", model: "my-local-model" }));
+    act(() =>
+      result.current.change("main", {
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        key: "anthropic",
+      }),
+    );
+    act(() => result.current.change("main", { provider: "ollama", model: "" }));
+    expect(result.current.draft?.choices.main?.model).toBe("my-local-model");
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(f.state.puts.at(-1)?.models).toContainEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      key: "anthropic",
+    });
+  });
   it("refreshes on open, cancels ordinary edits and never autosaves", async () => {
     const f = server(),
       { result } = await opened(f);
@@ -98,7 +120,9 @@ describe("explicit configuration save ownership", () => {
       held.resolve(f.state.index);
       await Promise.all([first, second]);
     });
-    expect(f.state.puts).toEqual([{ ...initial(), main: { provider: "ollama", model: "edited" } }]);
+    expect(f.state.puts).toEqual([
+      { ...initial(), main: { provider: "ollama", model: "edited" }, models: [initial().main] },
+    ]);
     expect(result.current.saved).toEqual(f.state.puts[0]);
     expect(result.current.dirty).toBe(false);
   });
@@ -253,7 +277,9 @@ describe("explicit configuration save ownership", () => {
     await act(async () => {
       await result.current.save();
     });
-    expect(f.state.puts).toEqual([{ ...initial(), main: { provider: "ollama", model: "edited" } }]);
+    expect(f.state.puts).toEqual([
+      { ...initial(), main: { provider: "ollama", model: "edited" }, models: [initial().main] },
+    ]);
   });
   it("restores readiness after a background while Settings is closed", async () => {
     const f = server(),
@@ -359,7 +385,9 @@ describe("explicit configuration save ownership", () => {
     await act(async () => {
       await result.current.keySaved(context, { ...key, id: "another" });
     });
-    expect(result.current.draft?.choices.main?.key).toBeUndefined();
+    // Returning to the provider restores its configured binding. An ambiguous
+    // newly added key must not replace that choice.
+    expect(result.current.draft?.choices.main?.key).toBe("new-key");
   });
   it("binds a key saved after switching apps to copy it", async () => {
     const f = server({ main: { provider: "anthropic", model: "claude-sonnet-5-5" } }),

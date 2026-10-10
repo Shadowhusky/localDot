@@ -254,7 +254,9 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "message.user": {
       const seen = model.messages.get(e.data.messageId);
       const queued =
-        seen?.queued ?? (e.data.kind === "followup" && WORKING.has(model.state?.state ?? "idle"));
+        e.data.queued ??
+        seen?.queued ??
+        (e.data.kind === "followup" && WORKING.has(model.state?.state ?? "idle"));
       next = {
         ...next,
         messages: put(
@@ -267,6 +269,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             text: e.data.text,
             final: true,
             kind: e.data.kind,
+            ...(e.data.sessionId ? { sessionId: e.data.sessionId } : {}),
             ...(queued ? { queued } : {}),
             ...(e.data.files ? { files: [...e.data.files] } : {}),
           },
@@ -276,6 +279,25 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           next.historyTruncated ||
           (!model.messages.has(e.data.messageId) && model.messages.size >= L.messages),
       };
+      break;
+    }
+    case "message.delivery": {
+      const message = model.messages.get(e.data.messageId);
+      if (message)
+        next = {
+          ...next,
+          messages: put(
+            model.messages,
+            message.id,
+            {
+              ...message,
+              queued: false,
+              delivery: e.data.state,
+              ...(e.data.state === "steering" ? { kind: "steer" as const } : {}),
+            },
+            L.messages,
+          ),
+        };
       break;
     }
     case "message.delta": {

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useContext, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApi } from "../lib/api.ts";
 import { Conversation } from "./Conversation.tsx";
 import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
@@ -475,4 +477,36 @@ it("holds a phone's toolbar at the foot however short the column is, its control
   expect(
     [...controls].map((element) => element.getAttribute("aria-label") ?? element.textContent),
   ).toEqual(["Activity", "Message", "More"]);
+});
+
+it("steers the existing queued message by ID without posting its text again", async () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  const fetch = vi.fn(
+    async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }),
+  );
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: fetch });
+  const queued = {
+    ...message(messageId, "Use the latest numbers"),
+    queued: true,
+    sessionId,
+    kind: "followup" as const,
+  };
+  const view = render(
+    <Conversation items={items([queued])} truncated={false} api={api} sessionId={sessionId} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Steer now" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  expect(String(fetch.mock.calls[0]?.[0])).toContain(`/messages/${messageId}/steer`);
+  expect(fetch.mock.calls[0]?.[1]?.body).toBeUndefined();
+  view.rerender(
+    <Conversation
+      items={items([{ ...queued, queued: false, kind: "steer", delivery: "steering" }])}
+      truncated={false}
+      api={api}
+      sessionId={sessionId}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Steer now" })).toBeNull();
+  expect(screen.getAllByText("Use the latest numbers")).toHaveLength(1);
 });

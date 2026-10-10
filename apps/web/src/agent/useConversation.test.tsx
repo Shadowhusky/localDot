@@ -29,6 +29,30 @@ function setup(reply: (method: string, path: string, body: unknown) => Promise<R
 }
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
 
+it("does not let a background reload invalidate a pending new conversation", async () => {
+  let finish!: (reply: Response) => void;
+  const f = setup(async (method) =>
+    method === "GET"
+      ? Response.json({ sessions: [OLD], more: false })
+      : new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+  );
+  await settle();
+  let choosing!: Promise<boolean>;
+  act(() => {
+    choosing = f.view.result.current.startNew();
+  });
+  act(() => f.view.result.current.reload());
+  await settle();
+  await act(async () => {
+    finish(Response.json({ sessions: [], more: false }));
+    expect(await choosing).toBe(true);
+  });
+  expect(f.view.result.current.sessions).toEqual([]);
+  expect(f.view.result.current.choice).toBe(1);
+});
+
 it("reads which conversation is current, and the choice of a new or an older one", async () => {
   const f = setup(async (method, path, body) => {
     if (method === "GET") return Response.json({ sessions: [OLD, LATEST], more: false });

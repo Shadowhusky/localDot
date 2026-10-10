@@ -127,3 +127,42 @@ it("reports a plain hand-back as running, and keeps a held Pause paused with no 
   expect(session.safetyPause?.phase).toBe("paused");
   expect(session.status).toBe("paused");
 });
+
+it("holds queued messages outside the inbox, promotes exactly once, and releases the rest at task completion", async () => {
+  const { session, events } = setup();
+  session.setStatus("running");
+  session.enqueue("First queued");
+  session.enqueue("Second queued");
+  const messages = events.filter((e) => e.type === "message.user");
+  expect((await session.inbox(0, 0)).items).toEqual([]);
+  expect(session.requests).not.toContain("First queued");
+  const first = String(messages[0]?.data.messageId),
+    second = String(messages[1]?.data.messageId);
+  expect(session.steerQueued(first)).toBe(true);
+  expect(session.steerQueued(first)).toBe(true);
+  expect(
+    (await session.inbox(0, 0)).items.map((item) => [item.messageId, item.kind, item.text]),
+  ).toEqual([[first, "steer", "First queued"]]);
+  session.setStatus("idle");
+  expect(
+    (await session.inbox(0, 0)).items.map((item) => [item.messageId, item.kind, item.text]),
+  ).toEqual([
+    [first, "steer", "First queued"],
+    [second, "followup", "Second queued"],
+  ]);
+  expect(events.filter((e) => e.type === "message.user")).toHaveLength(2);
+  expect(events.filter((e) => e.type === "message.delivery").map((e) => e.data.state)).toEqual([
+    "steering",
+    "sent",
+  ]);
+  session.stop();
+});
+it("Stop cancels queued follow-ups instead of launching them after the task", () => {
+  const { session, events } = setup();
+  session.setStatus("running");
+  session.enqueue("Do this later");
+  session.stop();
+  expect(events.filter((e) => e.type === "message.delivery").map((e) => e.data.state)).toEqual([
+    "cancelled",
+  ]);
+});

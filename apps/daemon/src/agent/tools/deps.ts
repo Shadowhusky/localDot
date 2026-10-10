@@ -72,6 +72,10 @@ export interface ToolDeps {
   ): Promise<void>;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
+  logins?: {
+    login(origin: string): Promise<{ username: string; password: string } | undefined>;
+    saveLogin(origin: string, username: string, password: string): Promise<void>;
+  };
   routines?: import("./routine.ts").RoutineToolPort;
   connectors?: Pick<ConnectorHub, "access" | "check" | "call">;
   // The web tools' own way out, through keyd, without the screen or the user's sign-ins.

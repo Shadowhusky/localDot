@@ -5,9 +5,11 @@ import type {
   ToolResult,
 } from "@localdot/protocol";
 import { PausedStepError } from "../safety/step-barrier.ts";
-import type { AskAnswer } from "../session.ts";
+import type { AgentSession, AskAnswer } from "../session.ts";
 import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { findSecretField, type SecretField, typeSecret } from "./secret-field.ts";
+
+const reusedLogins = new WeakMap<AgentSession, Set<string>>();
 
 const ASK_TIMEOUT_MS = 30 * 60_000;
 const DECLINED =
@@ -102,6 +104,61 @@ async function askFields(
     if (typeof found === "string") return fail(found);
     secrets.set(field.id, found);
   }
+  // Saved credentials stay on the trusted input channel. Reuse once per task/site;
+  // another request after a rejected login lets the user replace the saved password.
+  const used = reusedLogins.get(ctx.session) ?? new Set<string>();
+  reusedLogins.set(ctx.session, used);
+  const loginFields = fields.filter((field) => field.kind !== "secret");
+  const canReuse =
+    secrets.size === 1 &&
+    loginFields.every(
+      (field) =>
+        (field.kind === "text" || field.kind === "email") &&
+        /user|email|account|login/iu.test(`${field.id} ${field.label}`),
+    );
+  const [secretEntry] = secrets;
+  if (canReuse && secretEntry?.[1].loginOrigin && deps.logins) {
+    const [id, field] = secretEntry;
+    const origin = secretEntry[1].loginOrigin;
+    if (!used.has(origin)) {
+      const saved = await deps.logins.login(origin).catch(() => undefined);
+      ctx.check();
+      if (
+        saved &&
+        (saved.username || loginFields.length === 0) &&
+        loginFields.every((field) => !field.value || field.value === saved.username)
+      ) {
+        used.add(origin);
+        try {
+          const landed = await typeSecret(deps, ctx, field, saved.password, saved.username);
+          ctx.check();
+          if (!landed)
+            return fail(
+              "The saved sign-in could not reach the password field. Check the current page and locate its password field again.",
+            );
+          ctx.session.taskAutonomy.signIn(field.screen.name);
+          const answers = Object.fromEntries(
+            loginFields.map((field) => [field.id, ctx.redact(saved.username)]),
+          );
+          return {
+            ok: true,
+            content: [
+              text(
+                `Used the saved sign-in for ${origin}. The password was filled privately. Account fields: ${JSON.stringify(answers)}. ${id}: provided. The account and password were filled and the sign-in form was submitted. Check the resulting page for success, an error, or two-factor authentication; do not submit again. If the site rejects these credentials, ask again so the user can update them.`,
+              ),
+            ],
+          };
+        } catch {
+          ctx.check();
+          return fail(
+            "Secure delivery of the saved sign-in could not be confirmed. Inspect the page before retrying; do not claim the field moved.",
+          );
+        } finally {
+          saved.password = "";
+        }
+      }
+    }
+  }
   ctx.check();
   const shown = (field: (typeof fields)[number]): AskRequestField => {
     const where = secrets.get(field.id);
@@ -111,7 +168,13 @@ async function askFields(
       id: field.id,
       kind: field.kind,
       label: ctx.redact(field.label),
-      ...(field.hint ? { hint: ctx.redact(field.hint) } : {}),
+      ...(where?.loginOrigin && deps.logins
+        ? {
+            hint: `Saved securely for ${new URL(where.loginOrigin).host} and reused for future sign-ins.`,
+          }
+        : field.hint
+          ? { hint: ctx.redact(field.hint) }
+          : {}),
       ...(field.options ? { options: field.options.map(ctx.redact) } : {}),
       ...(field.length ? { length: field.length } : {}),
       ...(field.value ? { value: ctx.redact(field.value) } : {}),
@@ -147,11 +210,38 @@ async function askFields(
     if (early) return early;
     const answers: Record<string, unknown> = { ...answer.fields };
     const moved: string[] = [];
+    let saveFailed = false;
     for (const [id, field] of secrets) {
       const value = typed?.take(id);
       let landed = false;
+      let username: string | undefined;
+      if (value !== undefined && field.loginOrigin && deps.logins) {
+        const accountFields = loginFields.filter(
+          (field) =>
+            (field.kind === "text" || field.kind === "email") &&
+            /user|email|account|login/iu.test(`${field.id} ${field.label}`),
+        );
+        const account =
+          accountFields.length === 1 && accountFields[0]
+            ? answer.fields?.[accountFields[0].id]
+            : undefined;
+        // A password-only retry retains the account saved with the original answer.
+        const prior =
+          typeof account === "string"
+            ? undefined
+            : await deps.logins.login(field.loginOrigin).catch(() => undefined);
+        ctx.check();
+        username = typeof account === "string" ? account : (prior?.username ?? "");
+        if (prior) prior.password = "";
+        try {
+          await deps.logins.saveLogin(field.loginOrigin, username ?? "", value);
+        } catch {
+          saveFailed = true;
+        }
+        ctx.check();
+      }
       try {
-        if (value !== undefined) landed = await typeSecret(deps, ctx, field, value);
+        if (value !== undefined) landed = await typeSecret(deps, ctx, field, value, username);
       } catch {
         ctx.session.taskAutonomy.signIn(field.screen.name);
         ctx.check();
@@ -174,7 +264,7 @@ async function askFields(
         ok: false,
         content: [
           text(
-            `The field moved; ask again. Nothing was typed for ${moved.join(", ")}. The user's other answers: ${given}`,
+            `The secure answer was not delivered. Check the page and locate the password field again; saved credentials can be reused without asking for the password again. Nothing was typed for ${moved.join(", ")}. The user's other answers: ${given}`,
           ),
         ],
       };
@@ -184,9 +274,9 @@ async function askFields(
         text(
           `The user answered: ${given}${
             secrets.size
-              ? "\nSecret answers were typed into the fields you named; you never see them. Take a screenshot before you continue."
+              ? "\nSecret answers were entered privately. For a saved browser sign-in, the account and password were filled and its sign-in form was submitted. Check the resulting page for success, an error, or two-factor authentication; do not submit it again."
               : ""
-          }`,
+          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : ""}`,
         ),
       ],
     };

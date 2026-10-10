@@ -16,6 +16,7 @@ import {
   connectorNetworkSpecs,
   connectorSpec,
 } from "./cell-spec.ts";
+import { openConnectorListener } from "./open-listener.ts";
 
 export interface ConnectorCellsDeps {
   docker: Pick<DockerClient, "request" | "socketPath">;
@@ -144,7 +145,7 @@ export class ConnectorCells {
       signal.throwIfAborted();
       keydOpened = true;
       const opened = KeydOpened.parse(
-        await this.deps.keyd.openCell({ cellId, role: "connector", port, secrets }),
+        await openConnectorListener(this.deps.keyd, { cellId, role: "connector", port, secrets }),
       );
       if (opened.cellId !== cellId || opened.port !== port)
         throw new Error("keyd opened a different listener");

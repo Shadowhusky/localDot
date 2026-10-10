@@ -1,6 +1,6 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Point, ulid } from "@localdot/protocol";
@@ -23,7 +23,10 @@ body { margin: 0; font: 20px sans-serif; }
 #volume { position: absolute; left: 100px; top: 100px; width: 600px; height: 40px; margin: 0; }
 ul { position: absolute; left: 100px; top: 250px; width: 300px; list-style: none; margin: 0; padding: 0; }
 li { height: 60px; line-height: 60px; margin: 0 0 10px; padding-left: 16px; background: #ddd; }
+#login { position: absolute; left: 800px; top: 100px; width: 250px; }
+#login input, #login button { display: block; margin: 10px; height: 35px; width: 220px; }
 </style></head><body>
+<form id="login" method="post"><input aria-label="Account" autocomplete="username"><input aria-label="Password" type="password" autocomplete="current-password"><button>Sign in</button></form>
 <input id="volume" aria-label="Volume" type="range" min="0" max="100" value="0">
 <ul id="list"><li draggable="true">Alpha</li><li draggable="true">Beta</li><li draggable="true">Gamma</li></ul>
 <script>
@@ -41,14 +44,33 @@ list.addEventListener("drop", (e) => {
   if (onto && dragged && onto !== dragged) list.insertBefore(dragged, onto.nextSibling);
   show();
 });
+document.getElementById("login").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const inputs = e.target.querySelectorAll("input");
+  document.title = inputs[0].value === "fixture-account" && inputs[1].value === "fixture-Private-密碼" ? "signed in" : "wrong password";
+  inputs[1].value = "";
+});
 volume.addEventListener("input", show);
 show();
 </script></body></html>`;
 
-const GATE = `
-import http.server
+const gateScript = (cert: string, key: string) => `
+import http.server, ssl
+open("/tmp/test-cert.pem", "w").write(${JSON.stringify(cert)})
+open("/tmp/test-key.pem", "w").write(${JSON.stringify(key)})
+tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+tls.load_cert_chain("/tmp/test-cert.pem", "/tmp/test-key.pem")
 page = ${JSON.stringify(PAGE)}.encode()
 class Gate(http.server.BaseHTTPRequestHandler):
+    def do_CONNECT(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.flush()
+        self.connection = tls.wrap_socket(self.connection, server_side=True)
+        self.rfile = self.connection.makefile("rb")
+        self.wfile = self.connection.makefile("wb")
+        self.close_connection = False
+        self.handle_one_request()
     def do_GET(self):
         self.send_response(200)
         self.send_header("content-type", "text/html; charset=utf-8")
@@ -63,7 +85,7 @@ http.server.ThreadingHTTPServer(("0.0.0.0", 3128), Gate).serve_forever()
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const token = () => randomBytes(32).toString("base64url");
 
-function caCertificate(): string {
+function caCertificate(): { cert: string; key: string } {
   const dir = mkdtempSync(join(tmpdir(), "localdot-browser-ca-"));
   execFileSync("openssl", [
     "req",
@@ -81,8 +103,15 @@ function caCertificate(): string {
     join(dir, "ca.pem"),
     "-addext",
     "basicConstraints=critical,CA:TRUE",
+    "-addext",
+    "subjectAltName=DNS:drag.localdot.test",
   ]);
-  return readFileSync(join(dir, "ca.pem"), "utf8");
+  const result = {
+    cert: readFileSync(join(dir, "ca.pem"), "utf8"),
+    key: readFileSync(join(dir, "key.pem"), "utf8"),
+  };
+  rmSync(dir, { recursive: true, force: true });
+  return result;
 }
 
 describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
@@ -111,6 +140,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
   beforeAll(async () => {
     if (!scope || !names) return;
     removeAll();
+    const ca = caCertificate();
     docker(
       "network",
       "create",
@@ -135,7 +165,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       "/usr/bin/python3",
       DESKTOP_IMAGE,
       "-c",
-      GATE,
+      gateScript(ca.cert, ca.key),
     );
     const browserCellId = ulid();
     const parentCellId = ulid();
@@ -203,7 +233,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
         browserCellId,
         parentCellId,
         proxyToken: token(),
-        caCertPem: caCertificate(),
+        caCertPem: ca.cert,
       }),
     );
     const port = await (async () => {
@@ -315,5 +345,25 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     await drag(alpha, gamma, 900);
     await sleep(800);
     expect(await title()).toMatch(/ order BGA$/);
+  });
+  it("fills a protected password over the private channel and submits sign-in without handing control to the user", async () => {
+    await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
+    for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
+    const password = await element({ name: "Protected field" });
+    const request = {
+      origin: "https://drag.localdot.test",
+      at: password.at,
+      username: "fixture-account",
+    };
+    expect(await client.secret(permit, tabId, request, owner())).toEqual({
+      filled: false,
+      rememberable: true,
+    });
+    expect(
+      await client.secret(permit, tabId, { ...request, text: "fixture-Private-密碼" }, owner()),
+    ).toEqual({ filled: true, rememberable: true, submitted: true });
+    const observed = await client.observe(permit, tabId, owner());
+    expect(JSON.stringify(observed)).not.toContain("fixture-Private-密碼");
+    expect(await title()).toBe("signed in");
   });
 });

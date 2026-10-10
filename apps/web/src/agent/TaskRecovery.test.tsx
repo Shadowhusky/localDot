@@ -23,6 +23,22 @@ const agentWith = (reason: string, detail?: string): AgentSessionView => ({
 });
 afterEach(() => cleanup());
 
+it("continues with the selected replacement model instead of resuming the limited model", async () => {
+  const resume = vi.fn(async () => true);
+  const replacement = vi.fn(async () => true);
+  render(
+    <TaskRecovery
+      agent={agentWith("chatgpt plan limit reached")}
+      controls={{ ...controls, canResumeTask: true, resume }}
+      onSettings={vi.fn()}
+      onResumeSelected={replacement}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(replacement).toHaveBeenCalledTimes(1);
+  expect(resume).not.toHaveBeenCalled();
+});
+
 it("offers recovery for a budget pause but not for a Pause, question or approval that has settled", () => {
   for (const reason of [
     "user",

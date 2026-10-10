@@ -28,6 +28,7 @@ import { SentFiles } from "./Attachments.tsx";
 import { answerSummary } from "./ask-form.ts";
 import { fileName, splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
+import { steerQueuedMessage } from "./control-api.ts";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
@@ -85,7 +86,12 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
   return count(kinds.length, one, many);
 }
 
+interface QueueActions {
+  api: ApiClient;
+  sessionId: string;
+}
 interface ThreadContext {
+  queue?: QueueActions;
   announce(text: string): void;
   words?: AgentWords;
   downloads: ResultDownloads;
@@ -124,7 +130,9 @@ const MessageCard = memo(function MessageCard({
   message: shown,
   words,
   announce,
+  queue,
 }: {
+  queue?: QueueActions;
   message: AgentMessage;
   words?: AgentWords;
   announce(text: string): void;
@@ -143,11 +151,13 @@ const MessageCard = memo(function MessageCard({
     </span>
   );
   const tag =
-    message.kind === "steer"
-      ? "Sent while working"
-      : message.queued
-        ? "After this task"
-        : undefined;
+    message.delivery === "cancelled"
+      ? "Not sent — task stopped"
+      : message.kind === "steer"
+        ? "Sent while working"
+        : message.queued
+          ? "After this task"
+          : undefined;
   return (
     <article
       className="thread-message"
@@ -162,7 +172,14 @@ const MessageCard = memo(function MessageCard({
             <p className="thread-bubble">{body}</p>
           </div>
           {files.length > 0 && <SentFiles names={files.map(fileName)} />}
-          {tag && <p className="thread-tag">{tag}</p>}
+          {tag && (
+            <div className="thread-queue">
+              <p className="thread-tag">{tag}</p>
+              {message.queued && queue && message.sessionId === queue.sessionId && (
+                <SteerMessage messageId={message.id} queue={queue} announce={announce} />
+              )}
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -199,15 +216,72 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
   );
 }
 
+function SteerMessage({
+  messageId,
+  queue,
+  announce,
+}: {
+  messageId: string;
+  queue: QueueActions;
+  announce(text: string): void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  const pending = useRef(false);
+  const lifetime = useRef<AbortController | null>(null);
+  useEffect(() => () => lifetime.current?.abort(), []);
+  return (
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        busy={busy}
+        onClick={() => {
+          if (pending.current) return;
+          pending.current = true;
+          setBusy(true);
+          setError(false);
+          const abort = new AbortController();
+          lifetime.current = abort;
+          void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+            .then(() => {
+              if (!abort.signal.aborted) announce("Message sent to steer dot.");
+            })
+            .catch(() => {
+              if (!abort.signal.aborted) setError(true);
+            })
+            .finally(() => {
+              pending.current = false;
+              if (!abort.signal.aborted) setBusy(false);
+            });
+        }}
+      >
+        Steer now
+      </Button>
+      {error && (
+        <span className="thread-note" role="alert">
+          Couldn't confirm steering. Try again.
+        </span>
+      )}
+    </>
+  );
+}
+
 const CARDS: { [K in ThreadKind]: CardKind<K> } = {
   message: {
     draw: ({ item, thread }) => (
-      <MessageCard message={item.message} words={thread.words} announce={thread.announce} />
+      <MessageCard
+        message={item.message}
+        words={thread.words}
+        announce={thread.announce}
+        queue={thread.queue}
+      />
     ),
     same: (was, now, then, thread) =>
       was.message === now.message &&
       then.announce === thread.announce &&
-      then.words === thread.words,
+      then.words === thread.words &&
+      then.queue === thread.queue,
   },
   question: {
     draw: ({ item, thread }) => (
@@ -747,7 +821,12 @@ export function Conversation({
   // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
   const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen);
 
+  const queue = useMemo(
+    () => (api && sessionId && !ended ? { api, sessionId } : undefined),
+    [api, sessionId, ended],
+  );
   const thread: ThreadContext = {
+    queue,
     announce,
     words,
     downloads,
@@ -934,8 +1013,8 @@ export function Conversation({
             <div className="thread-composer" hidden={!!tools}>
               {composer}
             </div>
-            {!tools && trail}
             {tools}
+            {trail}
           </div>
         </Outbox.Provider>,
         dockHost,

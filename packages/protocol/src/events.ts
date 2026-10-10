@@ -327,8 +327,14 @@ export const MessageUser = event(
     messageId: MessageId,
     text: z.string().min(1).max(8000),
     kind: z.enum(["task", "steer", "followup"]),
+    queued: z.boolean().optional(),
+    sessionId: z.string().regex(ULID_PATTERN).optional(),
     files: z.array(z.string().max(255)).max(16).optional(),
   }),
+);
+export const MessageDelivery = event(
+  "message.delivery",
+  z.object({ messageId: MessageId, state: z.enum(["sent", "steering", "cancelled"]) }),
 );
 export const MessageDelta = event(
   "message.delta",
@@ -535,6 +541,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   BudgetExceeded,
   CameraHint,
   MessageUser,
+  MessageDelivery,
   MessageDelta,
   MessageAssistant,
   AskRequest,

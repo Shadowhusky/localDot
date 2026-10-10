@@ -90,24 +90,24 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
       <p className="voice-notice" role="status">
         <Icon name="circle-alert" size={12} />
         <span>{notice}</span>
+        <IconButton label="Dismiss voice notice" icon="x" size={24} onClick={voice.dismiss} />
       </p>
     ) : (
       children
     );
   const away = (state.phase === "starting" || state.phase === "listening") && state.away;
-  const latched = (state.phase === "starting" || state.phase === "listening") && !state.held;
   return (
     <div className="voice-strip" data-phase={state.phase} data-away={away || undefined}>
-      {latched && (
+      {
         <IconButton
           className="voice-cancel"
           label="Cancel"
           icon="x"
           size={24}
           kbd={["Escape"]}
-          onClick={() => voice.send({ type: "cancel" })}
+          onClick={voice.dismiss}
         />
-      )}
+      }
       <Waveform voice={voice} since={state.phase === "listening" ? state.since : null} />
       <span className="voice-tail">{away ? "Let go to cancel" : routeLabel(route)}</span>
     </div>

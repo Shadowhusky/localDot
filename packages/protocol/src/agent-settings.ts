@@ -57,6 +57,9 @@ export const AgentSettingsDocument = z.strictObject({
   main: AgentRoleChoice.optional(),
   fast: AgentRoleChoice.optional(),
   local: AgentRoleChoice.optional(),
+  // Previously configured models remain available when the active provider changes.
+  models: z.array(AgentRoleChoice).max(100).optional(),
+  permissionMode: z.enum(["custom", "auto", "full"]).optional(),
   codexDenyRead: z.array(AgentDenyFolder).max(32).optional(),
   // Spending limits are the user's to set; without one dot never stops for cost.
   taskBudgetUSD: BudgetUSD.optional(),

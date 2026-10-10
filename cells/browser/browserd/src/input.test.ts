@@ -30,6 +30,10 @@ async function setup(scale: 1 | 2 = 2) {
     focus: "page" as "page" | "chrome" | "unknown",
     secret: false,
     protectedNode: false,
+    origin: "https://github.com/login",
+    passwordType: "password",
+    focusedNode: 10,
+    autocomplete: "current-password",
     stale: false,
     hit: 10,
     frame: "root",
@@ -118,6 +122,7 @@ async function setup(scale: 1 | 2 = 2) {
       return { notches: count };
     }
     if (name === "keys" || name === "userKeys") {
+      if (JSON.stringify(args.combo) === '["Tab"]') state.secret = false;
       emit("key", 30);
       return { keycodes: [30] };
     }
@@ -129,9 +134,46 @@ async function setup(scale: 1 | 2 = 2) {
   });
   const command = vi.fn(async (_document: BrowserDocument, method: string, _params: unknown) => {
     await checkpoint(method);
-    if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "root" } } };
+    if (method === "Page.getFrameTree")
+      return { frameTree: { frame: { id: "root", url: state.origin } } };
     if (method === "DOM.getNodeForLocation")
-      return { backendNodeId: state.hit, frameId: state.frame };
+      return {
+        backendNodeId: (_params as { x: number }).x === 550 ? 20 : state.hit,
+        frameId: state.frame,
+      };
+    if (method === "DOMSnapshot.captureSnapshot")
+      return {
+        strings: ["#document", "FORM", "INPUT", "BUTTON", "method", "post", "type", "password"],
+        documents: [
+          {
+            nodes: {
+              nodeName: [0, 1, 2, 3],
+              backendNodeId: [1, 2, 10, 20],
+              parentIndex: [-1, 0, 1, 1],
+              attributes: [[], [4, 5], [6, 7], []],
+            },
+          },
+        ],
+      };
+    if (method === "DOM.getBoxModel")
+      return { model: { content: [500, 100, 600, 100, 600, 140, 500, 140] } };
+    if (method === "DOM.describeNode")
+      return {
+        node: {
+          nodeName: "INPUT",
+          attributes: ["type", state.passwordType, "autocomplete", state.autocomplete],
+        },
+      };
+    if (method === "Accessibility.getFullAXTree")
+      return {
+        nodes: [
+          { backendDOMNodeId: 20, name: { value: "Sign in" } },
+          {
+            backendDOMNodeId: state.focusedNode,
+            properties: [{ name: "focused", value: { value: true } }],
+          },
+        ],
+      };
     throw new Error("unexpected CDP command");
   });
   const onFatal = vi.fn();
@@ -833,5 +875,71 @@ describe("guarded browser input", () => {
       "closed",
     );
     await peer.control.close();
+  });
+});
+
+describe("private browser password delivery", () => {
+  const request = {
+    origin: "https://github.com",
+    at: { x: 100, y: 150 },
+    text: "fixture-Pass-密碼",
+  };
+  it("fills a password through native input, without enabling ordinary agent typing", async () => {
+    const f = await setup();
+    f.state.secret = true;
+    f.state.protectedNode = true;
+    expect(await f.input.secret(permit, "tab", request, f.abort.signal)).toEqual({
+      filled: true,
+      rememberable: true,
+      submitted: true,
+    });
+    expect(
+      f.commands
+        .filter((c) => c.name === "char")
+        .map((c) => c.args.ch)
+        .join(""),
+    ).toBe(request.text);
+    f.state.secret = true;
+    await expect(f.input.type(permit, "tab", typing, f.abort.signal, f.progress)).rejects.toThrow(
+      "secret",
+    );
+  });
+  it.each(["origin", "passwordType", "focusedNode"] as const)(
+    "refuses a changed %s before sending a secret",
+    async (field) => {
+      const f = await setup();
+      if (field === "origin") f.state.origin = "https://github.com.evil.test/login";
+      if (field === "passwordType") f.state.passwordType = "text";
+      if (field === "focusedNode") f.state.focusedNode = 99;
+      await expect(f.input.secret(permit, "tab", request, f.abort.signal)).rejects.toThrow();
+      expect(f.commands.filter((c) => c.name === "char")).toHaveLength(0);
+    },
+  );
+  it("stops if focus or origin changes mid-password", async () => {
+    const f = await setup();
+    f.hooks.set("native.char:1", () => {
+      f.state.origin = "https://other.example/login";
+    });
+    await expect(f.input.secret(permit, "tab", request, f.abort.signal)).rejects.toThrow();
+    expect(f.commands.filter((c) => c.name === "char")).toHaveLength(1);
+  });
+  it.each(["new-password", "one-time-code"])("does not save %s fields", async (autocomplete) => {
+    const f = await setup();
+    f.state.autocomplete = autocomplete;
+    expect(
+      await f.input.secret(
+        permit,
+        "tab",
+        { origin: request.origin, at: request.at },
+        f.abort.signal,
+      ),
+    ).toEqual({ filled: false, rememberable: false });
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("refuses input after the user takes control", async () => {
+    const f = await setup();
+    await f.control.set({ ...identity, requestId: permit.requestId, revision: 2, holder: "user" });
+    await expect(f.input.secret(permit, "tab", request, f.abort.signal)).rejects.toThrow();
+    expect(f.effects()).toHaveLength(0);
   });
 });

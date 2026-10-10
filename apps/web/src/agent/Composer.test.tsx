@@ -133,6 +133,28 @@ function setup(
   };
 }
 describe("composer delivery ownership and draft handling", () => {
+  it("switches the same button from Stop to queue Send while there is a draft", async () => {
+    const stop = vi.fn();
+    const f = setup(undefined, { taskAction: { kind: "stop", run: stop } });
+    fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    expect(stop).toHaveBeenCalledOnce();
+    f.input("Keep this follow-up");
+    expect(screen.queryByRole("button", { name: "Stop task" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
+    await waitFor(() => expect(f.field.value).toBe(""));
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Keep this follow-up" });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Stop task" })).toBeTruthy();
+  });
+  it("can still steer immediately through the explicit Send now menu action", async () => {
+    const f = setup();
+    f.input("Change direction now");
+    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send now" }));
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "Change direction now" });
+  });
+
   it("offers Move to Keys before a computer exists, without delivering a task", () => {
     const receiveKey = vi.fn(() => true);
     const f = setup(undefined, {
@@ -172,7 +194,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "steer", text: "请继续 monthly report" },
+        body: { kind: "followup", text: "请继续 monthly report" },
       },
     ]);
     expect(f.field.value).toBe("请继续 monthly report");
@@ -232,7 +254,7 @@ describe("composer delivery ownership and draft handling", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(f.requests).toHaveLength(2);
-    expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "captured ordinary message" });
+    expect(f.requests[1]?.body).toEqual({ kind: "followup", text: "captured ordinary message" });
     expect(f.field.value).toBe("new unsent draft");
   });
   it("does not interpret Shift/modified Enter or IME composition as submit", () => {
@@ -251,7 +273,7 @@ describe("composer delivery ownership and draft handling", () => {
     fireEvent.compositionEnd(f.field);
     fireEvent.keyDown(f.field, { key: "Enter" });
     expect(f.requests).toHaveLength(1);
-    expect(f.requests[0]?.body).toEqual({ kind: "steer", text: "多行\ntext" });
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "多行\ntext" });
   });
   it("fences two synchronous duplicate-risk retry clicks", async () => {
     const pending = Promise.withResolvers<Response>();
@@ -384,7 +406,7 @@ describe("composer delivery ownership and draft handling", () => {
   it("sends after this task from the menu or Option-Return, and labels paused/takeover messages honestly", async () => {
     const f = setup();
     f.input("afterwards");
-    fireEvent.click(screen.getByRole("button", { name: "Choose when to send" }));
+    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Send after this task" }));
     expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "afterwards" });
     expect(document.activeElement).toBe(f.field);
@@ -394,14 +416,17 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests[1]?.body).toEqual({ kind: "followup", text: "later again" });
     await act(async () => {});
     f.update({ agent: { ...agent, snapshot: { ...snapshot, status: "paused" } } });
-    expect(screen.getByText("Sending won't resume the task")).toBeTruthy();
+    expect(screen.queryByText("Sending won't resume the task")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Send$/ })).toBeTruthy();
     f.update({ agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } } });
     // While the user has the computer, the composer stays quiet about it: the island says so.
     expect(screen.queryByText("Sending won't resume the task")).toBeNull();
   });
   it("offers no choice of when to send once the task is idle, so Option-Return does nothing", async () => {
     const f = setup(undefined, { agent: { ...agent, snapshot: { ...snapshot, status: "idle" } } });
-    expect(screen.queryByRole("button", { name: "Choose when to send" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
+    expect(screen.queryByRole("menuitem", { name: "Send after this task" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     f.input("next");
     expect(fireEvent.keyDown(f.field, { key: "Enter", altKey: true })).toBe(false);
     expect(f.field.value).toBe("next");
@@ -452,7 +477,7 @@ describe("composer delivery ownership and draft handling", () => {
     const f = setup();
     const key = `sk-ant-api03-${"x".repeat(40)}`;
     f.input(`token ${key} please`);
-    const send = screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement;
+    const send = screen.getByRole("button", { name: "Queue message" }) as HTMLButtonElement;
     const blocked = () => send.getAttribute("aria-disabled") === "true";
     expect(blocked()).toBe(true);
     const described = (send.getAttribute("aria-describedby") ?? "")
@@ -477,7 +502,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "steer", text: "token  please continue" },
+        body: { kind: "followup", text: "token  please continue" },
       },
     ]);
     expect(JSON.stringify(f.requests)).not.toContain("sk-ant-api03");
@@ -584,10 +609,10 @@ describe("explicit composer attachments", () => {
     );
     await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
     expect(calls.map((c) => c.body)).toEqual([one, two]);
-    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
     await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(JSON.parse(String(calls[2]?.body))).toEqual({
-      kind: "steer",
+      kind: "followup",
       text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
     });
     expect(f.field.value).toBe("");
@@ -688,14 +713,14 @@ describe("the composer's controls", () => {
     f.input("Also add a chart");
     expect(fireEvent.keyDown(f.field, { key: "Enter" })).toBe(true);
     expect(f.requests).toEqual([]);
-    const send = screen.getByRole("button", { name: "Send now" });
+    const send = screen.getByRole("button", { name: "Queue message" });
     expect(send.hasAttribute("aria-keyshortcuts")).toBe(false);
     fireEvent.click(send);
     expect(f.requests).toHaveLength(1);
     await act(async () => {});
     // Sent from the menu, the message goes without bringing up the keyboard.
     f.input("Then the totals");
-    fireEvent.click(screen.getByRole("button", { name: "Choose when to send" }));
+    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
     const later = screen.getByRole("menuitem", { name: "Send after this task" });
     expect(later.hasAttribute("aria-keyshortcuts")).toBe(false);
     fireEvent.click(later);
@@ -705,9 +730,9 @@ describe("the composer's controls", () => {
   });
   it("names Return as Send's shortcut where Return sends", () => {
     setup();
-    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-keyshortcuts")).toBe(
-      "Enter",
-    );
+    expect(
+      screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-keyshortcuts"),
+    ).toBe("Enter");
   });
   it("sends during a takeover with no files, and says when files can be added", async () => {
     const f = setup(undefined, {
@@ -723,7 +748,7 @@ describe("the composer's controls", () => {
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "steer", text: "Use the second sheet" },
+        body: { kind: "followup", text: "Use the second sheet" },
       },
     ]);
   });
@@ -756,7 +781,7 @@ describe("the composer's controls", () => {
     fireEvent.keyDown(f.field, { key: "Enter" });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(f.requests).toEqual([]);
-    expect(reasonOf(screen.getByRole("button", { name: "Send now" }))).toContain(
+    expect(reasonOf(screen.getByRole("button", { name: "Queue message" }))).toContain(
       "Write a message first.",
     );
   });
@@ -877,7 +902,7 @@ describe("a message on its way", () => {
     const waiting = outbox.querySelector<HTMLElement>(".thread-pending");
     expect(waiting?.dataset.phase).toBe("sending");
     expect(waiting?.querySelector(".thread-bubble")?.textContent).toBe("Add a chart");
-    expect(waiting?.querySelector(".thread-tag")?.textContent).toBe("Sent while working");
+    expect(waiting?.querySelector(".thread-tag")?.textContent).toBe("After this task");
     expect(field.value).toBe("Add a chart");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(outbox.querySelector<HTMLElement>(".thread-pending")?.dataset.phase).toBe("accepted");
@@ -945,7 +970,7 @@ describe("a message on its way", () => {
     f.input("Also add a chart");
     f.submit();
     await screen.findByText(/Not sure dot got that/);
-    expect(f.requests[0]?.body).toEqual({ kind: "steer", text });
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text });
     f.update({ agent: { ...agent, model: model(earlier) } });
     expect(screen.getByText(/Not sure dot got that/)).toBeTruthy();
     f.update({
@@ -961,8 +986,8 @@ describe("a message on its way", () => {
     f.submit();
     await act(async () => {});
     expect(f.requests.map((request) => request.body)).toEqual([
-      { kind: "steer", text },
-      { kind: "steer", text: "Then the totals" },
+      { kind: "followup", text },
+      { kind: "followup", text: "Then the totals" },
     ]);
   });
   it("keeps what you wrote since when a lost reply settles", async () => {
@@ -1076,7 +1101,7 @@ describe("typing", () => {
       </Profiler>,
     );
     const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
-    const send = screen.getByRole("button", { name: "Send now" });
+    const send = screen.getByRole("button", { name: "Queue message" });
     type(field, "A");
     expect(send.getAttribute("aria-disabled")).toBeNull();
     commits.mockClear();
@@ -1103,9 +1128,9 @@ describe("typing", () => {
     await waitFor(() => expect(f.field.value).toBe("token "));
     expect(counts.scans).toBe(1);
     expect(screen.getByRole("region", { name: "Key safeguard" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-disabled"),
+    ).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
 
     type(f.field, key);
@@ -1139,7 +1164,7 @@ describe("answering dot from the composer", () => {
     await waitFor(() => expect(f.requests).toHaveLength(1));
     expect(f.requests[0]).toEqual({
       path: `/api/agent/sessions/${sessionId}/messages`,
-      body: { kind: "steer", text: "use my work account" },
+      body: { kind: "followup", text: "use my work account" },
     });
     reply.mockResolvedValueOnce({ hold: "Type it in dot's question above." });
     f.input("hunter2");
@@ -1174,7 +1199,7 @@ describe("answering dot from the composer", () => {
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(reply).toHaveBeenCalledExactlyOnceWith("Use this plan instead", true);
     expect(JSON.parse(String(calls[1]?.body))).toEqual({
-      kind: "steer",
+      kind: "followup",
       text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
     });
   });

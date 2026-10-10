@@ -249,8 +249,9 @@ describe("agent user routes", () => {
       const next = { ...initial, main: { ...choice, price } };
       const response = await f.send("PUT", "/api/agent/settings", next);
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual(next);
-      expect(f.settings.get()).toEqual(next);
+      expect(await response.json()).toMatchObject(next);
+      expect(f.settings.get()).toMatchObject(next);
+      expect(f.settings.get().models).toContainEqual(initial.main);
     }
     const before = f.settings.get();
     (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
@@ -1338,4 +1339,44 @@ it("safety Pause and Resume require the exact DTO owner and refuse a missing con
     204,
   );
   expect(f.session.safetyPause).toBeUndefined();
+});
+
+it("queues user follow-ups and promotes the original message without duplication", async () => {
+  const f = await setup();
+  expect(
+    (
+      await f.send("POST", `/api/agent/sessions/${SESSION}/messages`, {
+        kind: "followup",
+        text: "Later task",
+      })
+    ).status,
+  ).toBe(202);
+  expect((await f.session.inbox(0, 0)).items).toEqual([]);
+  const message = f.events.find((event) => event.type === "message.user")?.data as {
+    messageId: string;
+    queued: boolean;
+  };
+  expect(message.queued).toBe(true);
+  const path = `/api/agent/sessions/${SESSION}/messages/${message.messageId}/steer`;
+  expect((await f.send("POST", path)).status).toBe(204);
+  expect((await f.send("POST", path)).status).toBe(204);
+  expect((await f.session.inbox(0, 0)).items).toHaveLength(1);
+  expect(f.events.filter((event) => event.type === "message.user")).toHaveLength(1);
+});
+it("acknowledges normal task Stop only after the runner has released it", async () => {
+  const f = await setup();
+  const release = deferred<boolean>();
+  f.deps.runner.stopRun = vi.fn(() => release.promise);
+  let done = false;
+  const request = Promise.resolve(f.send("POST", `/api/agent/sessions/${SESSION}/stop`)).then(
+    (response) => {
+      done = true;
+      return response;
+    },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(done).toBe(false);
+  release.resolve(true);
+  expect((await request).status).toBe(204);
+  expect(f.deps.runner.stopRun).toHaveBeenCalledWith(SESSION);
 });

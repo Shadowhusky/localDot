@@ -246,6 +246,9 @@ export function useTaskControls(props: Props) {
       const acknowledgement = await request(record);
       if (!owned(record)) return false;
       record.settled = true;
+      // A resumed provider may immediately hit the same limit. A fresh authoritative
+      // snapshot must release the button even when the task is still paused.
+      if (kind === "resume") record.recheck = current.current.agent.snapshot;
       if (kind === "memory" && typeof acknowledgement === "string") {
         if (kind === "memory") {
           confirmedUndos.current.add(target);

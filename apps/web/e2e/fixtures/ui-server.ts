@@ -1446,6 +1446,11 @@ const agent: AgentRoutesDeps = {
     !cells.get(cellId)?.paused &&
     !killSwitch.isBusy(cellId),
   runner: {
+    stopRun: async (id) => {
+      if (!session || session.id !== id) return false;
+      await endLive();
+      return true;
+    },
     get: (key) => (session && key === session.id ? session : undefined),
     get sessions() {
       return new Map(session ? [[session.id, session]] : []);

@@ -248,10 +248,45 @@ export function useSettings(
     const choices = { ...d.choices },
       prices = { ...d.prices };
     const old = choices[role];
+    let models = d.models;
+    if (old && value && (old.provider !== value.provider || old.model !== value.model)) {
+      const checked = validateForm(
+        d,
+        current.current.saved ?? {},
+        current.current.index,
+        subscriptionModels,
+      );
+      const previous = checked.ok ? checked.document[role] : undefined;
+      if (previous) {
+        models = [
+          ...(models ?? []).filter(
+            (model) =>
+              model.provider !== previous.provider ||
+              model.model !== previous.model ||
+              model.key !== previous.key,
+          ),
+          previous,
+        ].slice(-100);
+      }
+    }
+    if (value && old?.provider !== value.provider) {
+      delete prices[role];
+      const provider = value.provider;
+      const remembered = [
+        ...(current.current.saved?.models ?? []),
+        current.current.saved?.[role],
+        ...(models ?? []),
+      ].findLast((item) => item?.provider === provider);
+      if (remembered) {
+        value = remembered;
+        const price = formOf({ [role]: remembered }).prices[role];
+        if (price) prices[role] = price;
+      }
+    }
     if (!value) delete choices[role];
     else choices[role] = value;
-    if (old?.provider !== value?.provider || old?.model !== value?.model) delete prices[role];
-    edit({ ...d, choices, prices });
+    if (old?.provider === value?.provider && old?.model !== value?.model) delete prices[role];
+    edit({ ...d, choices, prices, ...(models ? { models } : {}) });
   };
   const changePrice = (role: ModelRole, price: PriceDraft) => {
     const d = current.current.draft;
@@ -465,6 +500,31 @@ export function useSettings(
       void read(true, true);
     }
   };
+  const choosePermissions = async (permissionMode: "custom" | "auto" | "full") => {
+    const owner = current.current;
+    if (!owner.saved || owner.open || mutating.current || unresolved.current || blocked.current)
+      return false;
+    const abort = new AbortController();
+    mutating.current = abort;
+    writing.current = true;
+    setBusy(true);
+    try {
+      const next = await saveSettings(api, { ...owner.saved, permissionMode }, abort.signal);
+      if (!mounted.current || owner.api !== api) return false;
+      owner.saved = next;
+      setSaved(next);
+      return true;
+    } catch {
+      if (mounted.current) void read(false, true);
+      return false;
+    } finally {
+      if (mutating.current === abort) {
+        mutating.current = null;
+        writing.current = false;
+        if (mounted.current) setBusy(false);
+      }
+    }
+  };
   // Switching apps to copy a key bumps generation but not session, so the key still binds.
   const captureKey = (role: ModelRole, provider: string) => ({
     api,
@@ -546,6 +606,7 @@ export function useSettings(
     refresh,
     reload,
     chooseMain,
+    choosePermissions,
     browseAccounts: () => setBrowsing(true),
     captureKey,
     keySaved,

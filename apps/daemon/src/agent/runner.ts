@@ -57,7 +57,7 @@ import { ResearchLog } from "./research.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
 import { gatewayCompletion } from "./safety/judge-model.ts";
-import { jevJudge, modelJudge } from "./safety/judges.ts";
+import { jevApprovalRequest, jevFits, jevJudge, modelJudge } from "./safety/judges.ts";
 import { judgeChoice, PurposeGate, type PurposeJudge, unreadableJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
@@ -75,6 +75,17 @@ const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
 export const CLAUDE_CODE_OFF = "Claude Code isn't available on this computer.";
+// Recovery waits own no user decision or desktop control. They can be retired
+// cleanly when the user sends a new task or chooses another conversation.
+function recoverable(session: AgentSession): boolean {
+  return (
+    session.status === "paused" &&
+    !session.controlHeld &&
+    !session.pendingAsk &&
+    !session.pendingApproval &&
+    !session.safetyPause
+  );
+}
 // What Replay calls the user's own time on the computer.
 const HOLD_TITLE = "You used the computer";
 // How long a sign-in waits for the web browser to start before saying to try again.
@@ -343,7 +354,7 @@ export class AgentRunner {
       const current = this.deps.live.get(cellId);
       if (current) {
         const old = this.sessions.get(current);
-        if (old?.status !== "idle" || old.controlHeld)
+        if (!old || (old.status !== "idle" && !recoverable(old)) || old.controlHeld)
           throw new AgentError(409, "a task is already running on this computer");
         // A hold the user handed back ends by itself. A finished task ends as it would after its
         // idle time: Stop would also stop the computer the next task is about to use.
@@ -454,6 +465,24 @@ export class AgentRunner {
         },
       );
       session.earlier = earlier;
+      session.permissionMode = () => {
+        try {
+          return this.deps.settings().permissionMode ?? "custom";
+        } catch {
+          return "custom";
+        }
+      };
+      session.autoPermit = async (action, signal) => {
+        const keys = await this.deps.keyd.secrets();
+        const choice = judgeChoice("auto", keys, false);
+        if (choice?.kind !== "jev" || !this.deps.jev) return false;
+        const reply = await this.deps.jev(
+          choice.secretId,
+          jevApprovalRequest(session.currentPurpose, action),
+          AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+        );
+        return jevFits(reply) >= 0.9;
+      };
       if (options.research)
         session.research = new ResearchLog(
           settings.research ?? DEFAULT_RESEARCH_BUDGET,
@@ -552,6 +581,14 @@ export class AgentRunner {
     session.stop();
     return true;
   }
+  async stopRun(id: string): Promise<boolean> {
+    const session = this.sessions.get(id);
+    if (!session) return this.#terminal.has(id);
+    if (!session.stopped) session.stop();
+    // Do not acknowledge Stop until the old run has retired and released ownership.
+    await this.deps.live.settled(id);
+    return true;
+  }
   // Ends a finished task that waits for a follow-up, so the next message starts a new task in
   // whichever conversation is current. A task still at work is left alone and refused.
   async release(signal?: AbortSignal): Promise<void> {
@@ -561,12 +598,17 @@ export class AgentRunner {
       throw new AgentError(409, "Hand back the computer first.");
     const waiting = live.filter((rt) => rt.selection.kind !== "none");
     if (
-      waiting.some((rt) => rt.session.status !== "idle" || rt.session.controlHeld || !rt.idleWait)
+      waiting.some(
+        (rt) =>
+          !recoverable(rt.session) &&
+          (rt.session.status !== "idle" || rt.session.controlHeld || !rt.idleWait),
+      )
     )
       throw new AgentError(409, "Finish or stop the current task first.");
     for (const rt of waiting) {
       rt.released = true;
-      rt.idleWait?.abort();
+      if (rt.idleWait) rt.idleWait.abort();
+      else rt.session.stop();
     }
     const settled = Promise.all(waiting.map((rt) => this.deps.live.settled(rt.session.id)));
     await (signal ? abortable(settled, signal) : settled);

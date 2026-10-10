@@ -1,3 +1,7 @@
+import type {
+  BrowserSecretReply,
+  BrowserSecretRequest,
+} from "../../../../packages/protocol/src/browser-secret.ts";
 import type { CellApi } from "../cells/orchestrator.ts";
 import type { Clock } from "../clock.ts";
 import { DesktopdClient } from "./client.ts";
@@ -9,6 +13,7 @@ export interface NativeDevice {
     "clock" | "input" | "settle" | "observe" | "focused" | "hitTest" | "find" | "type"
   > &
     Partial<Pick<DesktopdClient, "zoom" | "release" | "held">>;
+  secret?(request: BrowserSecretRequest, signal: AbortSignal): Promise<BrowserSecretReply>;
   clocks: ClockMap;
   // How long this device's element lookups may take, when not desktopd's: it ends them by then.
   lookupMs?: number;

@@ -552,32 +552,36 @@ describe("authenticated browser HTTP transport", () => {
     expect(peer.inject).not.toHaveBeenCalled();
   });
 
-  it("a stalled body owns no effect slot and cannot delay takeover", async () => {
-    const peer = await setup();
-    const socket = await peer.raw(
-      `POST /input HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${serviceToken}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{`,
-    );
-    let output = "";
-    socket.on("data", (chunk) => {
-      output += chunk.toString();
-    });
-    const reply = await peer.send("PUT", "/control", {
-      ...identity,
-      revision: 2,
-      requestId: ulid(),
-      holder: "user",
-    });
-    expect(reply.status).toBe(200);
-    expect(peer.control.holder).toBe("user");
-    await Promise.race([
-      once(socket, "close"),
-      sleep(BROWSER_HTTP_BODY_MS + 1500).then(() => {
-        throw new Error("body deadline absent");
-      }),
-    ]);
-    expect(output).toContain("408");
-    expect(peer.inject).not.toHaveBeenCalled();
-  });
+  it(
+    "a stalled body owns no effect slot and cannot delay takeover",
+    async () => {
+      const peer = await setup();
+      const socket = await peer.raw(
+        `POST /input HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${serviceToken}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{`,
+      );
+      let output = "";
+      socket.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      const reply = await peer.send("PUT", "/control", {
+        ...identity,
+        revision: 2,
+        requestId: ulid(),
+        holder: "user",
+      });
+      expect(reply.status).toBe(200);
+      expect(peer.control.holder).toBe("user");
+      await Promise.race([
+        once(socket, "close"),
+        sleep(BROWSER_HTTP_BODY_MS + 1500).then(() => {
+          throw new Error("body deadline absent");
+        }),
+      ]);
+      expect(output).toContain("408");
+      expect(peer.inject).not.toHaveBeenCalled();
+    },
+    BROWSER_HTTP_BODY_MS + 2500,
+  );
 
   it("valid actions go through their owners and type progress drops private chunks", async () => {
     const peer = await setup();

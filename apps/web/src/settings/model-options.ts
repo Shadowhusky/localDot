@@ -42,7 +42,7 @@ export function modelGroups(
       index,
       plans[choice.provider as keyof typeof plans]?.models ?? [],
     ).ok;
-  const chosen = [current, saved.fast, saved.local].filter(
+  const chosen = [current, saved.fast, saved.local, ...(saved.models ?? [])].filter(
     (choice): choice is RoleChoice => !!choice && !(choice.provider in plans),
   );
   const offered = Object.entries(plans).flatMap(([provider, account]) => {

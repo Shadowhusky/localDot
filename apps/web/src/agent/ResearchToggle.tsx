@@ -29,7 +29,7 @@ export function ResearchToggle({ on, suggested, disabledReason, onToggle }: Rese
       data-suggested={hint || undefined}
       onClick={onToggle}
     >
-      Research
+      <span className="composer-research-label">Research</span>
       <span className="composer-research-hint" aria-hidden="true" />
     </Chip>
   );

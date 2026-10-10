@@ -40,7 +40,7 @@ export interface ConversationListProps {
   facts: LiveFacts;
   // Why another conversation can't be taken up now.
   reason?: string;
-  onPick(sessionId: string): void;
+  onPick(sessionId: string, sessions?: readonly string[]): void;
   onReplay(): void;
 }
 
@@ -86,7 +86,7 @@ export function ConversationList({
   }, [activeKey]);
   const pick = (row: ConversationRow) => {
     if (reason && row.entry.sessionId !== current) return;
-    onPick(row.entry.sessionId);
+    onPick(row.entry.sessionId, row.entry.sessions);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -252,9 +252,9 @@ export function ConversationsButton(props: Omit<ConversationListProps, "open">) 
         <ConversationList
           {...props}
           open={open}
-          onPick={(id) => {
+          onPick={(id, sessions) => {
             setOpen(false);
-            props.onPick(id);
+            props.onPick(id, sessions);
           }}
           onReplay={() => {
             setOpen(false);

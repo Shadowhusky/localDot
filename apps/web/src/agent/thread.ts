@@ -209,7 +209,10 @@ export function workSteps(
 
 // A turn starts at each task or follow-up the user sends; steering a running task stays in its turn.
 const startsTurn = (item: ThreadItem) =>
-  item.kind === "message" && item.message.role === "user" && item.message.kind !== "steer";
+  item.kind === "message" &&
+  item.message.role === "user" &&
+  item.message.kind !== "steer" &&
+  !item.message.queued;
 
 const startOf = (item: ThreadItem) =>
   item.kind === "message" && item.message.at !== undefined ? microsToMs(item.message.at) : null;

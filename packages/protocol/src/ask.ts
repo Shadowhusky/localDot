@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 // The kinds of answer field dot can ask for (HITL.md §3). A `secret` answer is typed into the
-// computer by the daemon and never reaches the model or any store.
+// computer by the daemon and never reaches the model or conversation stores. Verified browser
+// sign-ins may be retained in keyd's protected credential store for reuse on the same origin.
 export const ASK_FIELD_KINDS = [
   "text",
   "longtext",

@@ -188,6 +188,13 @@ export interface AgentSessionOptions {
 // Daemon-owned state outlives any brain or HTTP request. In particular, retirement cancels the
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
+  // Read when an action is admitted, so the chat's permission switch applies to
+  // subsequent actions without changing a decision already on screen.
+  permissionMode: () => "custom" | "auto" | "full" = () => "custom";
+  autoPermit?: (
+    action: { tool: string; operation: string; actionClass: string; input: unknown },
+    signal: AbortSignal,
+  ) => Promise<boolean>;
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly taskAutonomy: TaskAutonomy;
   // What private data the task has read, and the check on where it may go; the runner installs
@@ -239,6 +246,7 @@ export class AgentSession {
   #trustedPlan: readonly string[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
+  readonly #queued = new Map<string, string>();
   // Notes to dot that are not the user's words: they never wake a task waiting for them.
   readonly #notes = new Set<number>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
@@ -945,11 +953,18 @@ export class AgentSession {
     } as unknown as EventDraft);
   }
   post(kind: InboxItem["kind"], text: string): InboxItem {
+    return this.#deliverInbox(kind, text, ulid(), true);
+  }
+  #deliverInbox(
+    kind: InboxItem["kind"],
+    text: string,
+    messageId: string,
+    announce: boolean,
+  ): InboxItem {
     if (this.stopped) throw new SessionStoppedError();
-    const item = Object.freeze(
-      InboxItem.parse({ seq: this.#seq + 1, messageId: ulid(), kind, text }),
-    );
-    if (kind !== "resume") this.append("message.user", { messageId: item.messageId, text, kind });
+    const item = Object.freeze(InboxItem.parse({ seq: this.#seq + 1, messageId, kind, text }));
+    if (announce && kind !== "resume")
+      this.append("message.user", { messageId: item.messageId, text, kind });
     this.#seq = item.seq;
     this.#inbox.push(item);
     if (kind !== "resume") {
@@ -962,6 +977,40 @@ export class AgentSession {
     if (kind === "followup" && this.research?.stopped) this.research.more();
     this.#wake();
     return { ...item };
+  }
+  // Hold follow-ups outside the model inbox until its current task finishes. A queued
+  // message can therefore be promoted without racing the model's inbox cursor.
+  enqueue(text: string): void {
+    if (this.stopped) throw new SessionStoppedError();
+    if (this.status === "idle") {
+      this.post("followup", text);
+      return;
+    }
+    const item = InboxItem.parse({ seq: 1, messageId: ulid(), kind: "followup", text });
+    this.append("message.user", {
+      messageId: item.messageId,
+      text,
+      kind: "followup",
+      queued: true,
+      sessionId: this.id,
+    });
+    this.#queued.set(item.messageId, text);
+  }
+  steerQueued(messageId: string): boolean {
+    if (this.stopped) throw new SessionStoppedError();
+    const text = this.#queued.get(messageId);
+    if (text === undefined) return this.#inbox.some((item) => item.messageId === messageId);
+    this.append("message.delivery", { messageId, state: "steering" });
+    this.#deliverInbox("steer", text, messageId, false);
+    this.#queued.delete(messageId);
+    return true;
+  }
+  #flushQueued(): void {
+    for (const [messageId, text] of this.#queued) {
+      this.append("message.delivery", { messageId, state: "sent" });
+      this.#deliverInbox("followup", text, messageId, false);
+      this.#queued.delete(messageId);
+    }
   }
   // Reaches the model with the next fetch of the inbox, as a steer it did not hear from the user:
   // nothing journals it as the user's message.
@@ -1569,6 +1618,7 @@ export class AgentSession {
       return;
     }
     this.status = status;
+    if (status === "idle") this.#flushQueued();
   }
   async finish(): Promise<boolean> {
     // Retirement may install a final user-owned download collector. Drain it before
@@ -1611,6 +1661,14 @@ export class AgentSession {
     this.#steps.stop();
     if (this.stopped) return;
     this.#stopping = true;
+    for (const messageId of this.#queued.keys()) {
+      try {
+        this.append("message.delivery", { messageId, state: "cancelled" });
+      } catch {
+        /* Stopping must still retire all input. */
+      }
+    }
+    this.#queued.clear();
     this.status = "ended";
     this.#approvals.cancel(this.id);
     this.connections.cancel("The task ended, so the connection stays closed.");

@@ -149,7 +149,9 @@ function event(seq: number, type: string, data: unknown) {
 }
 const START = { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: "Draw a dog" };
 // The conversation's latest task (`resting`) and the computer change between renders.
-function conversing(initial: { resting?: string | null; cell?: CellSummary | null } = {}) {
+function conversing(
+  initial: { resting?: string | null; cell?: CellSummary | null; choice?: number } = {},
+) {
   let live: string | null = null;
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     const path = new URL(String(input)).pathname;
@@ -160,8 +162,15 @@ function conversing(initial: { resting?: string | null; cell?: CellSummary | nul
   const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
   const stage = { current: null };
   const view = renderHook(
-    ({ cell, resting }: { cell: CellSummary | null; resting?: string | null }) =>
-      useLiveSession(api, cell, stage, resting),
+    ({
+      cell,
+      resting,
+      choice,
+    }: {
+      cell: CellSummary | null;
+      resting?: string | null;
+      choice?: number;
+    }) => useLiveSession(api, cell, stage, resting, choice),
     { initialProps: { cell: initial.cell === undefined ? ready : initial.cell, ...initial } },
   );
   const socketFor = (id: string) =>
@@ -244,6 +253,19 @@ it("shows an older conversation chosen to continue in place of the one at rest",
   await wait(100);
   expect(f.view.result.current).toMatchObject({ sessionId: EARLIER, resting: true });
   expect(f.socketFor(EARLIER)).toBeDefined();
+});
+
+it("keeps an explicit new conversation selected despite repeated polls for the previous live task", async () => {
+  const f = conversing({ resting: SESSION, choice: 0 });
+  f.run(SESSION);
+  await wait(1_000);
+  expect(f.view.result.current.sessionId).toBe(SESSION);
+  f.view.rerender({ cell: ready, resting: null, choice: 1 });
+  await wait(10_000);
+  expect(f.view.result.current.sessionId).toBeNull();
+  f.run(NEXT);
+  await wait(5_000);
+  expect(f.view.result.current.sessionId).toBe(NEXT);
 });
 
 it("pays no heed to an answer about the computer's task asked before a new conversation was chosen", async () => {

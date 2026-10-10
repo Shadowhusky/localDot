@@ -85,6 +85,50 @@ async function replay(policy: AutonomyPolicy | undefined) {
   return perRow;
 }
 
+describe("chat permission modes", () => {
+  const effect = (operation: "files_delete" | "files_write") => ({
+    tool: "files" as const,
+    input: { op: operation === "files_delete" ? "delete" : "write", path: "/home/user/note.txt" },
+    target: null,
+    facts: { operation },
+    revalidate: async () => true,
+  });
+  it("full access permits work and still asks before deletion", async () => {
+    const h = harness(CAREFUL_AUTONOMY);
+    h.ctx.session.permissionMode = () => "full";
+    expect(await authorizePrepared(h.ctx, effect("files_write"))).toBeDefined();
+    expect(h.asks).not.toHaveBeenCalled();
+    await authorizePrepared(h.ctx, effect("files_delete"));
+    expect(h.asks).toHaveBeenCalledTimes(1);
+  });
+  it("auto permits only a Jev approval and asks when unavailable or unsure", async () => {
+    const h = harness(CAREFUL_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    const judge = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockRejectedValueOnce(new Error("offline"));
+    h.ctx.session.autoPermit = judge;
+    await authorizePrepared(h.ctx, effect("files_write"));
+    expect(h.asks).not.toHaveBeenCalled();
+    await authorizePrepared(h.ctx, effect("files_write"));
+    await authorizePrepared(h.ctx, effect("files_write"));
+    expect(h.asks).toHaveBeenCalledTimes(2);
+    await authorizePrepared(h.ctx, effect("files_delete"));
+    expect(judge).toHaveBeenCalledTimes(3);
+    expect(h.asks).toHaveBeenCalledTimes(3);
+  });
+  it("does not execute an auto-approved target that changed during the check", async () => {
+    const h = harness(CAREFUL_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.autoPermit = async () => true;
+    expect(
+      await authorizePrepared(h.ctx, { ...effect("files_write"), revalidate: async () => false }),
+    ).toBeUndefined();
+  });
+});
+
 describe("the manual drawing task under the autonomy presets", () => {
   it("replays all 37 recorded cards and hand-offs", () => {
     expect(MANUAL_DRAWING_TASK).toHaveLength(37);

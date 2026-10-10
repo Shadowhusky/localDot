@@ -66,7 +66,7 @@ describe("gateSpec", () => {
       CapDrop: ["ALL"],
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges"],
-      PidsLimit: 64,
+      PidsLimit: 256,
       PortBindings: {
         "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
         "8082/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],

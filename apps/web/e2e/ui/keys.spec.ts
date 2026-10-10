@@ -122,7 +122,7 @@ test("arming Remove, and its running out, move nothing in the list", async ({ pa
 test("a saved key folds into the list and a removed one folds away", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await addKey(sheet).click();
-  await sheet.getByLabel("Key", { exact: true }).fill("sk-ant-api03-fixture-value-for-ui");
+  await sheet.getByLabel("Key", { exact: true }).fill("sk-ant-api03-ui-test");
   await sheet.getByRole("button", { name: "Save key" }).click();
   await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
     "Saved anthropic.",
@@ -137,7 +137,7 @@ test("a saved key folds into the list and a removed one folds away", async ({ pa
 });
 
 test("the first key folds its form into the list and says it was saved", async ({ page, ui }) => {
-  const value = "sk-ant-api03-fixture-first-key";
+  const value = "sk-ant-api03-first";
   const sheet = await keys(page, ui);
   for (const id of ["anthropic-main", "openai-fast", "weather"]) {
     await sheet.getByRole("button", { name: `Remove ${id}`, exact: true }).click();

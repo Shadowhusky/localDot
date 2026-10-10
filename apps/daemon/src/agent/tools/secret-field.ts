@@ -23,6 +23,7 @@ export interface SecretField {
   readonly screen: Pick<Screen, "name" | "cellId" | "revision">;
   readonly at?: Point;
   readonly found: NativeActionIdentity;
+  readonly loginOrigin?: string;
 }
 
 const UNKNOWN: NativeActionIdentity = { target: null, window: null, point: null, unknown: true };
@@ -119,7 +120,20 @@ export function findSecretField(
       return at
         ? "The field at that target shows what is typed, so a secret can't go there. Point at the password box, or hand the computer to the user."
         : "The field with keyboard focus shows what is typed, so a secret can't go there. Give the password box's point as target, or hand the computer to the user.";
+    let loginOrigin: string | undefined;
+    if (screen.name === "browser" && screen.device.secret && found.target.url) {
+      const url = new URL(found.target.url);
+      if (url.protocol === "https:") {
+        const info = await screen.device.secret(
+          { origin: url.origin, at: at ?? found.target.point },
+          screen.signal,
+        );
+        screen.check();
+        if (info.rememberable) loginOrigin = url.origin;
+      }
+    }
     return {
+      ...(loginOrigin ? { loginOrigin } : {}),
       screen: { name: screen.name, cellId: screen.cellId, revision: screen.revision },
       ...(at ? { at } : {}),
       found,
@@ -135,12 +149,20 @@ export async function typeSecret(
   ctx: ToolCallContext,
   field: SecretField,
   value: string,
+  username?: string,
 ): Promise<boolean> {
   let typing = false;
   try {
-    return await deliver(deps, ctx, field, value, () => {
-      typing = true;
-    });
+    return await deliver(
+      deps,
+      ctx,
+      field,
+      value,
+      () => {
+        typing = true;
+      },
+      username,
+    );
   } catch (error) {
     if (typing) throw error;
     ctx.check();
@@ -154,6 +176,7 @@ function deliver(
   field: SecretField,
   value: string,
   startTyping: () => void,
+  username?: string,
 ): Promise<boolean> {
   return onScreen(deps, ctx, async (screen) => {
     if (
@@ -164,6 +187,23 @@ function deliver(
       return false;
     const window = field.found.window ?? undefined;
     if (!sameNativeIdentity(field.found, await look(screen, field.at))) return false;
+    if (screen.name === "browser") {
+      if (!screen.device.secret || !field.found.target?.url)
+        throw new Error("Secure browser input is unavailable.");
+      const origin = new URL(field.found.target.url).origin;
+      startTyping();
+      const result = await screen.device.secret(
+        {
+          origin,
+          at: field.at ?? field.found.target.point,
+          text: value,
+          ...(username ? { username } : {}),
+        },
+        screen.signal,
+      );
+      screen.check();
+      return result.filled;
+    }
     if (field.at) {
       await screen.device.client.input(
         {

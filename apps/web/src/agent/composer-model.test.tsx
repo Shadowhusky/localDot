@@ -79,13 +79,13 @@ describe("a model chosen since the task started", () => {
     expect(f.requests[0]?.path).toBe(`/api/agent/sessions/${sessionId}/messages`);
   });
 
-  it("leaves a task at work alone: a message still steers it", async () => {
+  it("queues a message while the current model is still working", async () => {
     const f = setup(task("running"), { modelChanged: true });
     await f.send("Use the blue theme");
     expect(f.requests).toEqual([
       {
         path: `/api/agent/sessions/${sessionId}/messages`,
-        body: { kind: "steer", text: "Use the blue theme" },
+        body: { kind: "followup", text: "Use the blue theme" },
       },
     ]);
   });

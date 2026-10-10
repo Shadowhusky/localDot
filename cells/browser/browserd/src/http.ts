@@ -63,6 +63,7 @@ const routes = new Set([
   "PUT /control",
   "POST /input",
   "POST /type",
+  "POST /secret",
   "POST /manual",
   "POST /observe",
   "POST /navigate",
@@ -87,7 +88,7 @@ export interface BrowserHttpOptions {
   readonly control: Pick<BrowserControl, "holder" | "set">;
   readonly targets: Pick<BrowserTargets, "tabs">;
   readonly input: Pick<BrowserInput, "inject" | "type"> &
-    Partial<Pick<BrowserInput, "timing" | "manual">>;
+    Partial<Pick<BrowserInput, "timing" | "manual" | "secret">>;
   readonly observation: Pick<BrowserObservation, "observe"> &
     Partial<Pick<BrowserObservation, "lookup" | "read">>;
   readonly navigation?: Pick<BrowserNavigation, "navigate">;
@@ -533,6 +534,9 @@ export class BrowserHttp {
         } else if (route === "POST /timing") {
           if (!this.#options.input.timing) throw new HttpRefusal(503, "unavailable");
           result = await this.#options.input.timing(permit, tabId, action.request, signal);
+        } else if (route === "POST /secret") {
+          if (!this.#options.input.secret) throw new HttpRefusal(503, "unavailable");
+          result = await this.#options.input.secret(permit, tabId, action.request, signal);
         } else if (route === "POST /input")
           result = await this.#options.input.inject(permit, tabId, action.request, signal);
         else

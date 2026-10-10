@@ -39,6 +39,8 @@ export interface AgentMessage {
   readonly kind?: EventOf<"message.user">["data"]["kind"];
   // A follow-up sent while dot was still working, so it waits for the task to finish.
   readonly queued?: boolean;
+  readonly sessionId?: string;
+  readonly delivery?: "sent" | "steering" | "cancelled";
   readonly files?: readonly string[];
   readonly truncated?: boolean;
 }

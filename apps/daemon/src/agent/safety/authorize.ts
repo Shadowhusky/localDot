@@ -174,6 +174,7 @@ export async function authorizePrepared(
   const digest = actionDigest({ tool: prepared.tool, input, target });
   const permit = new OncePermit(digest);
   const decision = decideAutonomy(ctx, prepared.facts);
+  const permission = ctx.session.permissionMode();
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
   if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
     throw new Error("Upload approval does not match this action.");
@@ -193,7 +194,34 @@ export async function authorizePrepared(
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;
   }
-  const purpose = decision.mode === "act" ? await purposeCheck(ctx, prepared, input) : undefined;
+  if (
+    permission === "auto" &&
+    decision.mode === "ask" &&
+    decision.actionClass !== "delete" &&
+    ctx.session.autoPermit
+  ) {
+    const allowed = await ctx.session
+      .autoPermit(
+        {
+          tool: prepared.tool,
+          operation: prepared.facts.operation,
+          actionClass: decision.actionClass,
+          input,
+        },
+        ctx.signal,
+      )
+      .catch(() => false);
+    ctx.check();
+    if (allowed) {
+      if (!(await prepared.revalidate())) return undefined;
+      ctx.check();
+      decision.mode = "act";
+    }
+  }
+  const purpose =
+    decision.mode === "act" && permission !== "full"
+      ? await purposeCheck(ctx, prepared, input)
+      : undefined;
   if (decision.mode === "ask" || purpose) {
     const draft = approvalDraft(prepared.tool, input, prepared.facts, decision, ctx.redact, upload);
     const acting = actingFacts(ctx, prepared.facts);

@@ -119,9 +119,9 @@ it("moves through the rows with the arrows and takes up the one chosen with Retu
   expect(active()?.textContent).toContain("Third");
   fireEvent.keyDown(search, { key: "ArrowUp" });
   fireEvent.keyDown(search, { key: "Enter" });
-  expect(onPick).toHaveBeenCalledWith(b.sessionId);
+  expect(onPick).toHaveBeenCalledWith(b.sessionId, b.sessions);
   fireEvent.click(rows()[0] as HTMLElement);
-  expect(onPick).toHaveBeenLastCalledWith(a.sessionId);
+  expect(onPick).toHaveBeenLastCalledWith(a.sessionId, a.sessions);
 });
 
 it("filters by title and what was said, and says when nothing matches", async () => {
@@ -169,7 +169,7 @@ it("keeps other conversations out of reach while the current task is at work", a
   fireEvent.click(blocked);
   expect(onPick).not.toHaveBeenCalled();
   fireEvent.keyDown(search, { key: "Enter" });
-  expect(onPick).toHaveBeenCalledWith(current.sessionId);
+  expect(onPick).toHaveBeenCalledWith(current.sessionId, current.sessions);
 });
 
 it("shows dot while reading, an empty state when there are none, and the way to Replay", async () => {

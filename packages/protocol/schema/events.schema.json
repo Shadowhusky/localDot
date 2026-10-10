@@ -787,7 +787,8 @@
                 "file",
                 "browser",
                 "ask",
-                "think"
+                "think",
+                "app"
               ]
             },
             "planItem": {
@@ -2576,6 +2577,10 @@
                     "type": "string",
                     "maxLength": 262,
                     "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\\[[0-9a-f:.]+\\]):(?:[1-9]\\d{0,4})$"
+                  },
+                  "tool": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]{1,15}__[A-Za-z0-9_-]{1,30}$"
                   }
                 },
                 "required": [
@@ -2917,6 +2922,10 @@
               "maxLength": 262,
               "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\\[[0-9a-f:.]+\\]):(?:[1-9]\\d{0,4})$"
             },
+            "tool": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]{1,15}__[A-Za-z0-9_-]{1,30}$"
+            },
             "actionClass": {
               "type": "string",
               "enum": [
@@ -3022,6 +3031,10 @@
               "type": "string",
               "maxLength": 262,
               "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\\[[0-9a-f:.]+\\]):(?:[1-9]\\d{0,4})$"
+            },
+            "tool": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]{1,15}__[A-Za-z0-9_-]{1,30}$"
             },
             "actionClass": {
               "type": "string",
@@ -3585,6 +3598,13 @@
                 "followup"
               ]
             },
+            "queued": {
+              "type": "boolean"
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
             "files": {
               "maxItems": 16,
               "type": "array",
@@ -3598,6 +3618,73 @@
             "messageId",
             "text",
             "kind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "message.delivery"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "messageId": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "sent",
+                "steering",
+                "cancelled"
+              ]
+            }
+          },
+          "required": [
+            "messageId",
+            "state"
           ],
           "additionalProperties": false
         }
@@ -4250,7 +4337,8 @@
                 "screen",
                 "memory",
                 "files",
-                "recall"
+                "recall",
+                "app"
               ]
             },
             "origin": {

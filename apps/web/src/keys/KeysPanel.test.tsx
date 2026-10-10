@@ -147,7 +147,7 @@ describe("a key to enter again", () => {
     expect(within(form).queryByLabelText(LABEL)).toBeNull();
     expect(within(form).queryByLabelText("Hosts")).toBeNull();
     expect(within(form).queryByRole("radio", { name: "Web API" })).toBeNull();
-    type("Key", " sk-forecast-entered-again ");
+    type("Key", " sk-forecast-again ");
     fireEvent.click(saveButton());
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save).toHaveBeenCalledWith(
@@ -160,7 +160,7 @@ describe("a key to enter again", () => {
         methods: ["GET"],
         paths: ["/v1/forecast"],
       },
-      "sk-forecast-entered-again",
+      "sk-forecast-again",
     );
     await waitFor(() =>
       expect(screen.queryByRole("form", { name: "Re-enter forecast" })).toBeNull(),
@@ -413,13 +413,13 @@ describe("Keys", () => {
     const save = vi.fn(async () => ({ restart: false }));
     const { rerender } = render(<KeyForm active save={save} taken={["anthropic"]} />);
     expect(field(LABEL).placeholder).toBe("anthropic-2");
-    type("Key", "sk-ant-api03-fixture-value");
+    type("Key", "sk-ant-api03-test");
     await act(async () => {
       fireEvent.submit(screen.getByRole("form"));
     });
     expect(save).toHaveBeenLastCalledWith(
       { id: "anthropic-2", kind: "llm", provider: "anthropic" },
-      "sk-ant-api03-fixture-value",
+      "sk-ant-api03-test",
     );
     rerender(<KeyForm active save={save} taken={[]} />);
     fireEvent.click(screen.getByRole("radio", { name: "Web API" }));
@@ -699,7 +699,7 @@ describe("Keys", () => {
   });
 
   it("says the first key was saved once its form folds into the list, never showing the key", async () => {
-    const VALUE = "sk-ant-api03-first-key-value";
+    const VALUE = "sk-ant-api03-first";
     function FirstKey() {
       const [listed, setListed] = useState<KeyRecord[]>([]);
       const save = async () => {

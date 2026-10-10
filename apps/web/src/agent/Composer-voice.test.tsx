@@ -133,9 +133,9 @@ describe("talking to dot from the composer", () => {
     expect(f.container.querySelector(".voice-tail")?.textContent).toBe("On this device");
     act(() => engine.events?.partial("book a table"));
     expect(f.field.value).toBe("Please book a table");
-    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-disabled"),
+    ).toBe("true");
     clock += 1800;
     fireEvent.pointerUp(f.mic, { pointerId: 1 });
     await waitFor(() => expect(engine.finish).toBeDefined());
@@ -145,7 +145,7 @@ describe("talking to dot from the composer", () => {
     expect(document.activeElement).toBe(f.field);
     expect(isListening()).toBe(false);
     expect(
-      screen.getByRole("button", { name: "Send now" }).getAttribute("aria-disabled"),
+      screen.getByRole("button", { name: "Queue message" }).getAttribute("aria-disabled"),
     ).toBeNull();
   });
 
@@ -201,6 +201,19 @@ describe("talking to dot from the composer", () => {
     await act(async () => engine.finish?.(""));
     expect(screen.getByRole("status").textContent).toBe("Didn't catch that. Try again.");
     expect(f.field.value).toBe("");
+  });
+
+  it("dismisses microphone errors immediately, including with Escape", async () => {
+    engine.refuse = new VoiceError("denied");
+    const f = await setup();
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 5 });
+    await f.opened();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss voice notice" }));
+    expect(screen.queryByText("Allow the microphone to talk to dot.")).toBeNull();
+    fireEvent.pointerDown(f.mic, { button: 0, pointerId: 6 });
+    await f.opened();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByText("Allow the microphone to talk to dot.")).toBeNull();
   });
 
   it("talks while Control-Shift-Space is held, off a Mac", async () => {

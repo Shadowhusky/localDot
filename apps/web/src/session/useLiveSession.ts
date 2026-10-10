@@ -145,8 +145,18 @@ export function useLiveSession(
     if (chosen.current === choice) return;
     chosen.current = choice;
     choices.current++;
+    // A successful choice retired the previous task on the daemon. Its final poll
+    // or delayed end event cannot reclaim the newly selected conversation.
+    if (resting !== undefined) {
+      applied.current = resting;
+      setKnown(true);
+      setShown((now) => {
+        if (now?.live && now.sessionId !== resting) over.current.add(now.sessionId);
+        return resting ? { sessionId: resting, cellId: null, live: false } : null;
+      });
+    }
     lookNow.current();
-  }, [choice]);
+  }, [choice, resting]);
 
   // Asks the computer for its task: often while it may be starting one, every five seconds
   // otherwise. A task the computer no longer runs stays on show, at rest.

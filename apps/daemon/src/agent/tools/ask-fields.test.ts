@@ -213,7 +213,7 @@ describe("ask_user with fields", () => {
     h.session.answerFields(askId, { email: "ada@example.test", password: SECRET }, (t) => t);
     const { result } = await asking;
     expect(result.ok).toBe(false);
-    expect(textOf(result)).toContain("The field moved; ask again.");
+    expect(textOf(result)).toContain("The secure answer was not delivered.");
     expect(textOf(result)).toContain('{"email":"ada@example.test"}');
     expect(h.state.calls).toEqual(["hit 800,600", "hit 800,600"]);
     expect(h.state.typed).toEqual([]);
@@ -235,7 +235,7 @@ describe("ask_user with fields", () => {
       change(h.state);
       h.session.answerFields(askId, { email: "ada@example.test", password: SECRET }, (t) => t);
       const { result } = await asking;
-      expect(textOf(result)).toContain("The field moved; ask again.");
+      expect(textOf(result)).toContain("The secure answer was not delivered.");
       expect(h.state.typed).toEqual([]);
     }
   });

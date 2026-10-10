@@ -221,13 +221,16 @@ export async function runDoctorNetworkProbe(
     await engine(active.signal);
     active.signal.throwIfAborted();
     attempted = true;
-    const created = await exchange("POST", "/networks/create", active.signal, {
+    // Docker can finish a create after its client disconnects. Let this write settle
+    // under transport's ten-second deadline before checking interruption and cleaning up.
+    const created = await exchange("POST", "/networks/create", new AbortController().signal, {
       ...isolatedNetworkSpec(name),
       CheckDuplicate: true,
       Labels: { [LABEL]: nonce },
     });
     if (!object(created) || !fullId(created.Id)) throw failure();
     acknowledged = created.Id;
+    active.signal.throwIfAborted();
     const first = owned(await inspect(acknowledged, active.signal), acknowledged);
     verdict = isolation(first);
     await engine(active.signal);

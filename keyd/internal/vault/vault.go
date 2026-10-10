@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -68,7 +69,7 @@ const PushKeyID = "webpush-vapid"
 
 // Writable reports whether a user secret may be stored under id.
 func Writable(id string) bool {
-	return ValidID(id) && id != PushKeyID
+	return ValidID(id) && id != PushKeyID && !strings.HasPrefix(id, "login-")
 }
 
 // ValidID reports whether id can name a secret.

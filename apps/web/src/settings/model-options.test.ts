@@ -24,6 +24,17 @@ const shape = (groups: ReturnType<typeof modelGroups>) =>
   groups.map((group) => [group.label, group.options.map((option) => option.name)]);
 
 describe("the models the composer can switch to", () => {
+  it("keeps configured models grouped after another provider becomes main", () => {
+    if (!saved.main) throw new Error("Missing fixture model");
+    const groups = modelGroups(
+      { main: saved.fast, models: [saved.main] },
+      index,
+      { chatgpt: signedOut, claudeCode: signedOut },
+      names,
+    );
+    expect(groups.map((g) => g.label)).toEqual(["OpenAI", "Anthropic"]);
+    expect(groups[1]?.options[0]?.choice).toEqual(saved.main);
+  });
   it("lists the models chosen for each role, then each signed-in plan's, by provider", () => {
     const groups = modelGroups(saved, index, { chatgpt, claudeCode: claude }, names);
     expect(shape(groups)).toEqual([

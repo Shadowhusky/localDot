@@ -190,6 +190,70 @@ function setup(idleMs = 60_000) {
 }
 
 describe("the user's own hold on the computer", () => {
+  it("Stop ends a running task, waits for retirement, and frees the computer for a new task", async () => {
+    const f = setup();
+    const retirement = deferred<void>();
+    f.run.mockImplementationOnce(async (session) => {
+      try {
+        await abortable(new Promise<never>(() => {}), session.abort.signal);
+      } finally {
+        await retirement.promise;
+      }
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Work until stopped");
+    await until(() => f.run.mock.calls.length === 1);
+    let ended = false;
+    const stopping = f.runner.stopRun(session.id).then((value) => {
+      ended = value;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(ended).toBe(false);
+    expect(session.stopped).toBe(true);
+    retirement.resolve();
+    await stopping;
+    expect(ended).toBe(true);
+    expect(f.containment).not.toHaveBeenCalled();
+    expect(f.log.read(session.id).at(-1)?.type).toBe("session.end");
+    const next = await f.runner.start(f.cellId, "New conversation task");
+    expect(next.id).not.toBe(session.id);
+    expect(await f.runner.stopRun(session.id)).toBe(true);
+  });
+  it("retires a plan-limited task and starts the conversation on the newly selected model", async () => {
+    const f = setup();
+    const conversations = new Conversations(f.home, f.log);
+    f.deps.conversations = conversations;
+    f.run.mockImplementationOnce(async (session) => {
+      session.setStatus("paused");
+      session.append("agent.state", { state: "paused", reason: "chatgpt plan limit reached" });
+      await abortable(new Promise<never>(() => {}), session.abort.signal);
+      return 0;
+    });
+    const first = await f.runner.start(f.cellId, "Help with my task");
+    await until(() => first.status === "paused");
+    f.setSettings({ main: { provider: "chatgpt", model: "gpt-6-sol" } });
+    const next = await f.runner.start(f.cellId, "Continue where you left off.");
+    await until(() => next.status === "idle");
+    expect(first.stopped).toBe(true);
+    expect(f.run.mock.calls.at(-1)?.[1].model).toBe("gpt-6-sol");
+    expect(f.log.read(next.id).find((e) => e.type === "session.start")?.data).toMatchObject({
+      continues: first.id,
+    });
+    expect(f.containment).not.toHaveBeenCalled();
+  });
+  it("releases a plan-limited task for a new conversation without freezing the computer", async () => {
+    const f = setup();
+    f.run.mockImplementationOnce(async (session) => {
+      session.setStatus("paused");
+      await abortable(new Promise<never>(() => {}), session.abort.signal);
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Task");
+    await until(() => session.status === "paused");
+    await f.runner.release();
+    expect(f.live.get(f.cellId)).toBeUndefined();
+    expect(f.state.paused).toBe(false);
+  });
   it("holds the computer for the user with no task, in the conversation, until they hand back", async () => {
     const f = setup();
     const conversations = new Conversations(f.home, f.log);

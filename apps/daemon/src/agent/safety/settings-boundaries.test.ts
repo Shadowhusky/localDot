@@ -6,6 +6,27 @@ import { AgentSession } from "../session.ts";
 import { SettingsStore } from "../settings.ts";
 
 const homes: string[] = [];
+it("retains each configured model, including custom accounting, across saves and restart", () => {
+  const home = mkdtempSync("/private/tmp/localdot-test-models-");
+  homes.push(home);
+  const store = new SettingsStore(home);
+  const first = {
+    provider: "custom",
+    model: "my-model",
+    key: "custom",
+    plan: true as const,
+    contextTokens: 65536,
+  };
+  const second = { provider: "chatgpt", model: "gpt-6-astra" };
+  store.put({ main: first });
+  store.put({ main: second });
+  const restored = new SettingsStore(home).get();
+  expect(restored.main).toEqual(second);
+  expect(restored.models).toContainEqual(first);
+  store.put({ ...restored, main: first });
+  expect(store.get().main).toEqual(first);
+  expect(store.get().models).toEqual([second]);
+});
 afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });

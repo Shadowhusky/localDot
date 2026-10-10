@@ -110,7 +110,7 @@ describe("research in the composer", () => {
     await act(async () => f.submit());
     expect(f.requests[0]?.body).toEqual({ task: "Book a table for two" });
   });
-  it("keeps its place but waits while dot works, and a message then steers as usual", async () => {
+  it("keeps its place but waits while dot works, and queues the next message", async () => {
     const f = setup(running);
     expect(f.toggle().getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(f.toggle());
@@ -119,7 +119,7 @@ describe("research in the composer", () => {
     await act(async () => f.submit());
     expect(f.requests[0]).toEqual({
       path: `/api/agent/sessions/${sessionId}/messages`,
-      body: { kind: "steer", text: "Focus on prices" },
+      body: { kind: "followup", text: "Focus on prices" },
     });
   });
   it("lets dot suggest research once typing pauses, without a word in the layout", () => {

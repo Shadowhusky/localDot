@@ -6,7 +6,7 @@ import {
   type ScreenName,
 } from "@localdot/protocol";
 import type { ToolCallContext } from "../tools/deps.ts";
-import { classify } from "./classify.ts";
+import { classify, commandLines } from "./classify.ts";
 import type { RiskDecision, RiskFacts } from "./risk.ts";
 import { ALWAYS_SCOPES, type Place } from "./rules.ts";
 
@@ -110,8 +110,46 @@ export function actingFacts(ctx: ToolCallContext, facts: RiskFacts): RiskFacts {
 
 export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDecision {
   const acting = actingFacts(ctx, facts);
+  const permission = ctx.session.permissionMode();
+  if (permission !== "custom") {
+    const classes = classify(acting);
+    if (classes.includes("credentials"))
+      return { actionClass: "credentials", mode: "handoff", risk: "high" };
+    if (classes.includes("delete") || destructive(acting))
+      return { actionClass: "delete", mode: "ask", risk: "high" };
+    const actionClass =
+      classes.find((c) => !["reading", "browsing", "computer"].includes(c)) ??
+      classes[0] ??
+      "unknown";
+    return {
+      actionClass,
+      mode: permission === "full" || classes.every((c) => c === "reading") ? "act" : "ask",
+      risk: risk(actionClass),
+    };
+  }
   const place = placeOf(acting);
   return decide(acting, ctx.session.autonomy, (actionClass) =>
     ctx.session.taskAutonomy.relaxes(actionClass, place),
   );
+}
+
+// The default policy distinguishes local files from online deletion. Full access
+// still confirms destructive operations in the isolated computer as well.
+function destructive(facts: RiskFacts): boolean {
+  if (facts.operation === "files_delete") return true;
+  if (facts.operation !== "shell" || !facts.command) return false;
+  return commandLines(facts.command).some(({ text, runs }) => {
+    if (/\.(?:rmtree|unlink|remove|rmdir)\s*\(/.test(text)) return true;
+    return runs.some((words) => {
+      const command = [words[0]?.replace(/^.*\//, ""), ...words.slice(1)].join(" ");
+      return (
+        /\b(?:rm|rmdir|unlink|shred|mkfs(?:\.[a-z0-9]+)?|wipefs|diskutil erase\w*|dd)\b/i.test(
+          command,
+        ) ||
+        /\bgit\s+(?:clean|reset\s+--hard)\b|\b(?:drop\s+(?:table|database)|truncate\s+table)\b/i.test(
+          command,
+        )
+      );
+    });
+  });
 }

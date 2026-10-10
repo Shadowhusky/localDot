@@ -48,14 +48,16 @@ export function FocusControls({
               disabledReason={take.reason}
               onClick={onTake}
             />
-            <PauseButton
-              slot={pause ?? { kind: "pause", reason: IDLE }}
-              size={44}
-              variant="filled"
-              round
-              onPause={onPause}
-              onContinue={onContinue}
-            />
+            {pause?.kind === "continue" && (
+              <PauseButton
+                slot={pause ?? { kind: "pause", reason: IDLE }}
+                size={44}
+                variant="filled"
+                round
+                onPause={onPause}
+                onContinue={onContinue}
+              />
+            )}
             <IconButton
               variant="filled"
               round

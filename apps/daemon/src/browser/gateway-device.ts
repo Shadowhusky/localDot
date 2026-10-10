@@ -6,7 +6,8 @@ import type { NativeDevice } from "../desktopd/registry.ts";
 import { type BrowserClient, BrowserClientError, type BrowserScope } from "./client.ts";
 import type { ScreenLease } from "./screen-controller.ts";
 
-type Client = Pick<BrowserClient, "clock" | "settle" | "lookup" | "observe" | "input" | "type">;
+type Client = Pick<BrowserClient, "clock" | "settle" | "lookup" | "observe" | "input" | "type"> &
+  Partial<Pick<BrowserClient, "secret">>;
 
 // A page refuses reads while it settles (frames come and go, its address changes), and a heavy one
 // answers each in seconds: the element under a point may take as long as browserd gives a read,
@@ -26,6 +27,7 @@ export function browserGatewayDevice(options: {
   lookupMs?: number;
 }): NativeDevice {
   const { client, tabId, lease, now } = options;
+  const secret = client.secret?.bind(client);
   const permit = BrowserActionPermit.parse(options.permit);
   Object.freeze(permit.owner);
   Object.freeze(permit);
@@ -163,6 +165,12 @@ export function browserGatewayDevice(options: {
   // No background timer may retain an expired action lease or race input on browserd's native pipe.
   return {
     client: device,
+    ...(secret
+      ? {
+          secret: (request, signal) =>
+            secret(permit, tabId, { ...request, at: toModel(request.at) }, scope(signal)),
+        }
+      : {}),
     clocks: new ClockMap(async () => (await device.clock()).mono, now),
     lookupMs,
   };

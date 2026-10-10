@@ -46,7 +46,14 @@ export function PendingMessage({
         </div>
         {delivery.files.length > 0 && <SentFiles names={delivery.files} />}
         {delivery.tag && (phase === "sending" || phase === "accepted") && (
-          <p className="thread-tag">{delivery.tag}</p>
+          <div className="thread-queue">
+            <p className="thread-tag">{delivery.tag}</p>
+            {delivery.request.mode === "followup" && (
+              <Button size="sm" variant="quiet" disabledReason="Waiting for the message to arrive.">
+                Steer now
+              </Button>
+            )}
+          </div>
         )}
         {phase === "refused" ? (
           <div className="thread-pending-status">

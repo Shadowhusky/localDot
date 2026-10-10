@@ -97,6 +97,7 @@ export interface AgentRoutesDeps {
         | "selectionOf"
         | "terminalOf"
         | "pauseTask"
+        | "stopRun"
         | "resumeSafety"
         | "budgetHoldOf"
         | "sessions"
@@ -639,8 +640,30 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (s.stopped) throw new RouteError(409, "task has stopped");
       if (deps.runner.holds?.(s.id))
         throw new RouteError(409, "hand back the computer, then message dot");
-      s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
+      const text = redact(parsed.text, s.id, s.cellId);
+      if (parsed.kind === "followup") s.enqueue(text);
+      else s.post(parsed.kind, text);
       return c.body(null, 202);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/stop",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid task id");
+      if (!deps.runner.stopRun || !(await deps.runner.stopRun(id)))
+        throw new RouteError(404, "task not found");
+      return c.body(null, 204);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/messages/:messageId/steer",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const messageId = c.req.param("messageId") ?? "";
+      if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
+      if (!s.steerQueued(messageId)) throw new RouteError(404, "queued message not found");
+      return c.body(null, 204);
     }),
   );
   // The user's word on a research task's budget: wrap up now, or keep going for longer.

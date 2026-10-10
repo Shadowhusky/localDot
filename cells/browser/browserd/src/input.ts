@@ -11,8 +11,13 @@ import { keyName } from "@localdot/protocol/keys";
 import { type MotionSample, motionSamples } from "@localdot/protocol/motion";
 import { z as schema } from "zod";
 import type { BrowserManualReply } from "../../../../packages/protocol/src/browser-control.ts";
+import {
+  type BrowserSecretReply,
+  BrowserSecretRequest,
+} from "../../../../packages/protocol/src/browser-secret.ts";
 import type { BrowserActionLease, BrowserControl } from "./control.ts";
 import type { BrowserGeometry, BrowserGeometrySnapshot, BrowserPoint } from "./geometry.ts";
+import { loginForm } from "./login-form.ts";
 import type { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
 import type { BrowserSecrets } from "./secrets.ts";
@@ -109,7 +114,8 @@ export class BrowserInputError extends Error {
 
 export interface BrowserInputOptions {
   readonly control: Pick<BrowserControl, "admit"> & Partial<Pick<BrowserControl, "admitManual">>;
-  readonly targets: Pick<BrowserTargets, "check" | "command">;
+  readonly targets: Pick<BrowserTargets, "check" | "command"> &
+    Partial<Pick<BrowserTargets, "rememberNodes">>;
   readonly geometry: Pick<BrowserGeometry, "read" | "point">;
   readonly secrets: Pick<BrowserSecrets, "inspect" | "secretFocused">;
   readonly native: Pick<BrowserNative, "command" | "onEvent">;
@@ -834,6 +840,290 @@ export class BrowserInput {
       // nothing takes the pointer back with the button down, which would draw the way back.
       if (held) await this.#options.native.command("cancel", {}).catch(() => undefined);
     }
+  }
+
+  // A user-provided or saved secret has its own narrow input path. Ordinary agent typing
+  // still refuses secrets. Every character is bound to the same protected DOM node and origin.
+  secret(
+    permit: unknown,
+    tabId: string,
+    raw: unknown,
+    signal: AbortSignal,
+  ): Promise<BrowserSecretReply> {
+    return this.#run(
+      permit,
+      tabId,
+      raw,
+      signal,
+      (value) => BrowserSecretRequest.parse(value),
+      async (request, scope) => {
+        const first = await this.#geometry(tabId, scope);
+        const point = this.#options.geometry.point(
+          first,
+          (request.at.x * this.#options.scale - first.content[0]) / first.factor,
+          (request.at.y * this.#options.scale - first.content[1]) / first.factor,
+          scope.signal,
+        );
+        const checkOrigin = async () => {
+          const raw = await this.#options.targets.command(
+            first.document,
+            "Page.getFrameTree",
+            {},
+            scope.signal,
+          );
+          scope.check(first.document);
+          const frame = schema
+            .object({
+              frameTree: schema.object({
+                frame: schema.object({ id: schema.string(), url: schema.string() }),
+              }),
+            })
+            .parse(raw).frameTree.frame;
+          if (new URL(frame.url).origin !== request.origin) throw new BrowserInputError("target");
+          return frame;
+        };
+        const frame = await checkOrigin();
+        const hit = hitSchema.parse(
+          await this.#options.targets.command(
+            first.document,
+            "DOM.getNodeForLocation",
+            { ...point.document, includeUserAgentShadowDOM: false, ignorePointerEventsNone: false },
+            scope.signal,
+          ),
+        );
+        scope.check(first.document);
+        if (hit.frameId !== frame.id) throw new BrowserInputError("target");
+        this.#options.targets.rememberNodes?.(first.document, [hit.backendNodeId]);
+        const inspect = async (focused: boolean) => {
+          await checkOrigin();
+          const geometry = await this.#geometry(tabId, scope);
+          if (!sameGeometry({ ...first, focus: geometry.focus }, geometry))
+            throw new BrowserInputError("target");
+          const node = schema
+            .object({
+              node: schema.object({
+                nodeName: schema.string(),
+                attributes: schema.array(schema.string()).max(256),
+              }),
+            })
+            .parse(
+              await this.#options.targets.command(
+                first.document,
+                "DOM.describeNode",
+                { backendNodeId: hit.backendNodeId, depth: 0, pierce: false },
+                scope.signal,
+              ),
+            ).node;
+          scope.check(first.document);
+          const attrs = new Map<string, string>();
+          for (let i = 0; i < node.attributes.length; i += 2)
+            attrs.set((node.attributes[i] ?? "").toLowerCase(), node.attributes[i + 1] ?? "");
+          // Hidden/masked password inputs only: never put a secret into a visible OTP/text box.
+          if (
+            node.nodeName !== "INPUT" ||
+            attrs.get("type")?.toLowerCase() !== "password" ||
+            attrs.has("disabled") ||
+            attrs.has("readonly")
+          )
+            throw new BrowserInputError("secret");
+          if (focused) {
+            if (geometry.focus !== "page") throw new BrowserInputError("focus");
+            const tree = schema
+              .object({
+                nodes: schema.array(
+                  schema.object({
+                    backendDOMNodeId: schema.number().optional(),
+                    role: schema.object({ value: schema.string() }).optional(),
+                    properties: schema
+                      .array(
+                        schema.object({
+                          name: schema.string(),
+                          value: schema.object({ value: schema.unknown().optional() }),
+                        }),
+                      )
+                      .optional(),
+                  }),
+                ),
+              })
+              .parse(
+                await this.#options.targets.command(
+                  first.document,
+                  "Accessibility.getFullAXTree",
+                  {},
+                  scope.signal,
+                ),
+              );
+            scope.check(first.document);
+            const focus = tree.nodes.filter((node) =>
+              node.properties?.some((p) => p.name === "focused" && p.value.value === true),
+            );
+            if (
+              !focus.some((node) => node.backendDOMNodeId === hit.backendNodeId) ||
+              focus.some(
+                (node) =>
+                  node.backendDOMNodeId !== hit.backendNodeId &&
+                  node.backendDOMNodeId !== undefined &&
+                  node.role?.value !== "RootWebArea",
+              )
+            )
+              throw new BrowserInputError("focus");
+          }
+          return (
+            !/(?:new-password|one-time-code)/iu.test(attrs.get("autocomplete") ?? "") &&
+            !/(?:otp|totp|2fa|mfa|passcode|verification|security.code)/iu.test(
+              [attrs.get("name"), attrs.get("id"), attrs.get("aria-label")].join(" "),
+            )
+          );
+        };
+        const rememberable = await inspect(false);
+        const form = async () => {
+          await checkOrigin();
+          const snapshot = await this.#options.targets.command(
+            first.document,
+            "DOMSnapshot.captureSnapshot",
+            { computedStyles: [] },
+            scope.signal,
+          );
+          const tree = await this.#options.targets.command(
+            first.document,
+            "Accessibility.getFullAXTree",
+            {},
+            scope.signal,
+          );
+          scope.check(first.document);
+          return loginForm(snapshot, tree, hit.backendNodeId, request.origin);
+        };
+        const login = rememberable ? await form() : undefined;
+        const nodePoint = async (node: number) => {
+          this.#options.targets.rememberNodes?.(first.document, [node]);
+          const geometry = await this.#geometry(tabId, scope);
+          const box = schema
+            .object({
+              model: schema.object({ content: schema.array(schema.number().finite()).length(8) }),
+            })
+            .parse(
+              await this.#options.targets.command(
+                first.document,
+                "DOM.getBoxModel",
+                { backendNodeId: node },
+                scope.signal,
+              ),
+            ).model.content;
+          const point = this.#options.geometry.point(
+            geometry,
+            ((box[0] ?? 0) + (box[4] ?? 0)) / 2,
+            ((box[1] ?? 0) + (box[5] ?? 0)) / 2,
+            scope.signal,
+          );
+          const hit = hitSchema.parse(
+            await this.#options.targets.command(
+              first.document,
+              "DOM.getNodeForLocation",
+              {
+                ...point.document,
+                includeUserAgentShadowDOM: false,
+                ignorePointerEventsNone: false,
+              },
+              scope.signal,
+            ),
+          );
+          scope.check(first.document);
+          if (hit.backendNodeId !== node || hit.frameId !== frame.id)
+            throw new BrowserInputError("target");
+          return point;
+        };
+        if (request.text === undefined) return { filled: false, rememberable };
+        if ([...request.text].some((ch) => !nativeRequest("char", { ch }, this.#options.scale)))
+          throw new BrowserInputError("request");
+        const { mono: armedMono } = await this.#options.native.command("arm", {}, scope.signal);
+        scope.check(first.document);
+        if (login?.username !== undefined && request.username) {
+          const accountPoint = await nodePoint(login.username);
+          await this.#press(
+            scope,
+            armedMono,
+            () =>
+              this.#options.native.command(
+                "click",
+                { ...accountPoint.native, button: 1, count: 1, holdMs: 0, mods: [] },
+                scope.signal,
+              ),
+            (event) => event.kind === "button" && event.detail === 1,
+            1,
+          );
+          await this.#keyboard(tabId, scope);
+          await this.#press(
+            scope,
+            armedMono,
+            () => this.#options.native.command("keys", { combo: ["Control_L", "a"] }, scope.signal),
+            (event, reply) => event.kind === "key" && event.detail === reply.keycodes.at(-1),
+            1,
+          );
+          for (const ch of request.username) {
+            await checkOrigin();
+            await this.#keyboard(tabId, scope);
+            await this.#press(
+              scope,
+              armedMono,
+              () => this.#options.native.command("char", { ch }, scope.signal),
+              (event, reply) => event.kind === "key" && event.detail === reply.keycode,
+              1,
+            );
+          }
+        }
+        await this.#press(
+          scope,
+          armedMono,
+          () =>
+            this.#options.native.command(
+              "click",
+              { ...point.native, button: 1, count: 1, holdMs: 0, mods: [] },
+              scope.signal,
+            ),
+          (event) => event.kind === "button" && event.detail === 1,
+          1,
+        );
+        await inspect(true);
+        await this.#press(
+          scope,
+          armedMono,
+          () => this.#options.native.command("keys", { combo: ["Control_L", "a"] }, scope.signal),
+          (event, reply) => event.kind === "key" && event.detail === reply.keycodes.at(-1),
+          1,
+        );
+        for (const ch of request.text) {
+          await inspect(true);
+          await this.#press(
+            scope,
+            armedMono,
+            () => this.#options.native.command("char", { ch }, scope.signal),
+            (event, reply) => event.kind === "key" && event.detail === reply.keycode,
+            1,
+          );
+        }
+        await inspect(true);
+        if (login) {
+          const current = await form();
+          if (JSON.stringify(current) !== JSON.stringify(login))
+            throw new BrowserInputError("target");
+          const submit = await nodePoint(login.submit);
+          await this.#press(
+            scope,
+            armedMono,
+            () =>
+              this.#options.native.command(
+                "click",
+                { ...submit.native, button: 1, count: 1, holdMs: 0, mods: [] },
+                scope.signal,
+              ),
+            (event) => event.kind === "button" && event.detail === 1,
+            1,
+          );
+          return { filled: true, rememberable, submitted: true };
+        }
+        return { filled: true, rememberable, submitted: false };
+      },
+    );
   }
 
   type(

@@ -26,6 +26,7 @@ import {
   type SecretBinding,
   type TaskPricing,
 } from "@localdot/protocol";
+import { z } from "zod";
 
 export function keydSocketPath(home: string): string {
   return join(home, "keyd", "admin.sock");
@@ -106,6 +107,33 @@ export class KeydClient {
 
   status(): Promise<KeydStatus> {
     return this.#json("GET", "/v1/status", undefined, KeydStatus);
+  }
+
+  async login(origin: string): Promise<{ username: string; password: string } | undefined> {
+    try {
+      return await this.#json(
+        "POST",
+        "/v1/logins",
+        { origin },
+        z.strictObject({ username: z.string().max(2000), password: z.string().min(1).max(1000) }),
+      );
+    } catch (error) {
+      if (error instanceof KeydError && error.status === 404) return undefined;
+      throw new Error("Saved sign-in is unavailable.");
+    }
+  }
+
+  async saveLogin(origin: string, username: string, password: string): Promise<void> {
+    try {
+      await this.#json(
+        "PUT",
+        "/v1/logins",
+        { origin, username, password },
+        z.strictObject({ ok: z.literal(true) }),
+      );
+    } catch {
+      throw new Error("The sign-in could not be saved.");
+    }
   }
 
   // The passphrase arrives sealed to keyd, so this daemon never reads it. A new vault takes the

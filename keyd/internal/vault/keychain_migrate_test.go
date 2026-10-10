@@ -159,7 +159,7 @@ func lockable(t *testing.T, k *Keychain, dir string, locked bool) {
 // began, is bound to that record by rewriting its head alone; the migration is then recorded as done.
 func TestMigrationBindsAValueKeydStoredBeforeBindings(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	short, long := []byte("sk-legacy-deepseek-value"), longValue(3000)
+	short, long := []byte("sk-legacy-deepseek"), longValue(3000)
 	storeLegacy(t, k, "deepseek", short)
 	storeLegacy(t, k, "weather", long)
 	chunks := map[string]string{}
@@ -197,7 +197,7 @@ func TestMigrationBindsAValueKeydStoredBeforeBindings(t *testing.T) {
 // digest of its id and of its id and binding, and nothing else.
 func TestMigrationRecordsTheIndexItBeganWith(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 	lockable(t, k, dir, true)
 	if m := openAt(t, k, writeIndex(t, beforeUpgrade, legacyRecords...), beforeUpgrade).MigrateBindings(); m.Done {
 		t.Fatalf("migration = %+v", m)
@@ -220,7 +220,7 @@ func TestMigrationRecordsTheIndexItBeganWith(t *testing.T) {
 // the migration began, one under a marker that is not keyd's, and every item laid out other than as
 // keyd lays one.
 func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
-	value := []byte("sk-planted-value-of-a-key")
+	value := []byte("sk-planted-test")
 	hexOf := func(s string) string { return hex.EncodeToString([]byte(s)) }
 	gen := strings.Repeat("ab", 8)
 	full := strings.Repeat("A", chunkBytes)
@@ -230,7 +230,7 @@ func TestMigrationRefusesAnUnboundItemItCannotProve(t *testing.T) {
 		"short write id":       {"deepseek": "keyd:abcd:1", "deepseek.0": "abcd:" + hexOf(string(value))},
 		"padded count":         {"deepseek": "keyd:" + gen + ":01", "deepseek.0": gen + ":" + hexOf(string(value))},
 		"too many chunks":      {"deepseek": "keyd:" + gen + ":7", "deepseek.0": gen + ":" + hexOf(string(value))},
-		"short first chunk":    {"deepseek": "keyd:" + gen + ":2", "deepseek.0": gen + ":" + hexOf("sk-planted"), "deepseek.1": gen + ":" + hexOf("-value-of-a-key")},
+		"short first chunk":    {"deepseek": "keyd:" + gen + ":2", "deepseek.0": gen + ":" + hexOf("sk-planted"), "deepseek.1": gen + ":" + hexOf("-test")},
 		"missing chunk":        {"deepseek": "keyd:" + gen + ":2", "deepseek.0": gen + ":" + hexOf(full)},
 		"empty last chunk":     {"deepseek": "keyd:" + gen + ":2", "deepseek.0": gen + ":" + hexOf(full), "deepseek.1": gen + ":"},
 		"unprintable value":    {"deepseek": "keyd:" + gen + ":1", "deepseek.0": gen + ":" + hexOf("sk-planted\x01value")},
@@ -369,7 +369,7 @@ func assertRebound(t *testing.T, v *Vault) {
 // is done, and at the value's first use. The index is the user's to write, so its timestamps prove
 // nothing.
 func TestMigrationTellsALegacyRecordChangedOutsideKeydApart(t *testing.T) {
-	value := []byte("sk-legacy-deepseek-value")
+	value := []byte("sk-legacy-deepseek")
 	t.Run("changed while the migration runs", func(t *testing.T) {
 		k, dir := fakeKeychain(t)
 		storeLegacy(t, k, "deepseek", value)
@@ -414,7 +414,7 @@ func TestMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
 	if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
 		t.Fatal(err)
 	}
-	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 	planted := map[string]string{"deepseek": readItem(t, dir, "deepseek"), "deepseek.0": readItem(t, dir, "deepseek.0")}
 	v := openAt(t, k, writeIndex(t, beforeUpgrade, movedDeepseek), beforeUpgrade.Add(time.Hour))
 	if m := v.MigrateBindings(); len(m.Bound) != 0 || !slices.Equal(m.Reenter, []string{"deepseek"}) || !m.Done {
@@ -432,7 +432,7 @@ func TestMigrationBeginsOnlyOverAKeychainWithNoBoundItem(t *testing.T) {
 func TestMigrationRetiresTheUnboundHeadsItLeaves(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	storeLegacy(t, k, "weather", longValue(40))
-	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 	chunk := readItem(t, dir, "deepseek.0")
 	index := writeIndex(t, beforeUpgrade, weatherRecord)
 	if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); !m.Done || !slices.Equal(m.Bound, []string{"weather"}) {
@@ -472,7 +472,7 @@ func TestMigrationClosedWithoutBindingRetiresTheUnboundHeads(t *testing.T) {
 	for _, closing := range []string{"index too large", "an item already bound"} {
 		t.Run(closing, func(t *testing.T) {
 			k, dir := fakeKeychain(t)
-			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 			chunk := readItem(t, dir, "deepseek.0")
 			records := tooLargeToRecord()
 			if closing == "an item already bound" {
@@ -526,7 +526,7 @@ func TestMigrationBeginsOnlyOnceItReadsEveryHead(t *testing.T) {
 			if err := k.Put("weather", longValue(40), bindingOf(weatherRecord)); err != nil {
 				t.Fatal(err)
 			}
-			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 			planted := map[string]string{"deepseek": readItem(t, dir, "deepseek"), "deepseek.0": readItem(t, dir, "deepseek.0")}
 			index := writeIndex(t, beforeUpgrade, movedDeepseek)
 			unreadable(t, k, "weather", status)
@@ -558,7 +558,7 @@ func TestMigrationEndsOnlyOnceItReadsEveryHead(t *testing.T) {
 	for _, status := range []int{1, helperUnchanged} {
 		t.Run(fmt.Sprintf("exit %d", status), func(t *testing.T) {
 			k, dir := fakeKeychain(t)
-			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 			storeLegacy(t, k, "weather", longValue(40))
 			legacy := readItem(t, dir, "weather")
 			writeItem(t, dir, markerAccount, running(deepseekRecord))
@@ -584,7 +584,7 @@ func TestMigrationEndsOnlyOnceItReadsEveryHead(t *testing.T) {
 // A finished migration never runs again: a later start writes nothing, and its values still read.
 func TestMigrationRunsOnce(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 	storeLegacy(t, k, "weather", longValue(2000))
 	index := writeIndex(t, beforeUpgrade, legacyRecords...)
 	if m := openAt(t, k, index, beforeUpgrade.Add(time.Hour)).MigrateBindings(); !m.Done || len(m.Bound) != 2 {
@@ -634,7 +634,7 @@ func TestMigrationCutShortResumes(t *testing.T) {
 		}
 		return k, dir
 	}
-	values := map[string][]byte{"deepseek": []byte("sk-legacy-deepseek-value"), "weather": longValue(5000)}
+	values := map[string][]byte{"deepseek": []byte("sk-legacy-deepseek"), "weather": longValue(5000)}
 	for _, cut := range []string{"before:weather", "after:weather", "before:deepseek", "after:" + markerAccount} {
 		t.Run(cut, func(t *testing.T) {
 			k, dir := lateFail(t)
@@ -669,7 +669,7 @@ func TestMigrationCutShortResumes(t *testing.T) {
 // re-entry: a locked Keychain is not a lost value.
 func TestMigrationWaitsOutAnUnreadableKeychain(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+	storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 	locked := strings.Replace(fakeSecurity, `run "$@"`, `[ "$FAKE_FAIL" = locked ] && exit 1; run "$@"`, 1)
 	if err := os.WriteFile(k.Path, []byte(locked), 0o700); err != nil {
 		t.Fatal(err)
@@ -695,7 +695,7 @@ func TestMigrationListsAnItemThatIsNotKeydsForReentry(t *testing.T) {
 	for _, account := range []string{"deepseek", "deepseek.0"} {
 		t.Run(account, func(t *testing.T) {
 			k, _ := fakeKeychain(t)
-			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek-value"))
+			storeLegacy(t, k, "deepseek", []byte("sk-legacy-deepseek"))
 			storeLegacy(t, k, "weather", longValue(40))
 			t.Setenv("FAKE_FOREIGN", account)
 			v := openAt(t, k, writeIndex(t, beforeUpgrade, legacyRecords...), beforeUpgrade.Add(time.Hour))

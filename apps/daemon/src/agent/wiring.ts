@@ -361,6 +361,7 @@ export function createAgent(d: AgentWiringDeps) {
       uploads: { desktop, transfers },
       gateway: d.gateway,
       bindScreen: d.sessionScreens?.bind.bind(d.sessionScreens),
+      logins: d.keyd,
       scaleOf: (id) => d.cells.get(id)?.scale,
       desktop,
       launcher: (id) => d.registry.for(id)?.client,
