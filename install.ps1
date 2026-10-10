@@ -26,11 +26,26 @@ $InstallUrl = "https://raw.githubusercontent.com/Shadowhusky/localdot/main/insta
 $TaskName = "localDot"
 $KeepRunning = Join-Path $env:LOCALAPPDATA "localDot\keep-running.vbs"
 
-# wsl.exe writes UTF-16 text unless WSL_UTF8 is set; older versions ignore it, hence the NULs.
+# Windows PowerShell 5.1 turns redirected native stderr into ErrorRecords. WSL's expected
+# "not installed" response must reach the exit-code check, rather than abort the installer.
 function Invoke-Wsl {
-  $env:WSL_UTF8 = "1"
-  $output = & wsl.exe @args 2>&1
-  [pscustomobject]@{ Code = $LASTEXITCODE; Text = (($output | Out-String) -replace "`0", "").Trim() }
+  $ErrorActionPreference = "Continue"
+  $PSNativeCommandUseErrorActionPreference = $false
+  $previousUtf8 = $env:WSL_UTF8
+  $previousEncoding = [Console]::OutputEncoding
+  try {
+    $env:WSL_UTF8 = "1"
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $output = & wsl.exe @args 2>&1
+    $code = $LASTEXITCODE
+    # ToString keeps stderr text without PowerShell's CategoryInfo/error-location formatting.
+    # Older inbox WSL ignores WSL_UTF8; strip NULs so its ASCII distro list remains readable.
+    $text = (($output | ForEach-Object { $_.ToString() }) -join "`n") -replace "`0", ""
+    [pscustomobject]@{ Code = $code; Text = $text.Trim() }
+  } finally {
+    [Console]::OutputEncoding = $previousEncoding
+    $env:WSL_UTF8 = $previousUtf8
+  }
 }
 
 function Get-WslDistros {
@@ -57,14 +72,18 @@ function Enable-Wsl {
   }
   if ((Invoke-Wsl --status).Code -ne 0) {
     Write-Host "Turning on WSL 2. Windows asks for permission first."
-    Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--no-distribution" -Verb RunAs -Wait
+    $install = Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--no-distribution" -Verb RunAs -Wait -PassThru
+    if ($install.ExitCode -notin @(0, 3010)) {
+      throw "WSL setup didn't finish (exit $($install.ExitCode)). Open PowerShell as administrator, run 'wsl --install --no-distribution', restart Windows, then run this installer again."
+    }
     Write-Host "Restart Windows to finish turning on WSL, then run this installer again."
     return $false
   }
   # systemd needs the WSL from the Microsoft Store; the one built into older Windows lacks --version.
   if ((Invoke-Wsl --version).Code -ne 0) {
     Write-Host "Updating WSL."
-    & wsl.exe --update | Out-Host
+    $update = Invoke-Wsl --update
+    if ($update.Code -ne 0) { throw "Couldn't update WSL. Run 'wsl --update' in PowerShell as administrator, then run this installer again." }
   }
   return $true
 }

@@ -1,6 +1,16 @@
 name: ci
 on: [push, pull_request]
 jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell 5.1 installer regression checks
+        shell: powershell
+        run: ./scripts/install/install-ps1.test.ps1
+      - name: PowerShell 7 installer regression checks
+        shell: pwsh
+        run: ./scripts/install/install-ps1.test.ps1
   check:
     runs-on: ubuntu-latest
     steps:

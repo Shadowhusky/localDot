@@ -55,6 +55,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 
 | Message or problem | What to do |
 | --- | --- |
+| PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
 | A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
 | `localdot: command not found` | Open a new terminal. On Windows, use Ubuntu/WSL. If needed, run `~/.local/bin/localdot open`. |
@@ -200,7 +201,7 @@ serving.
 
 ### Optional domain relay
 
-The built-in relay is implemented but **not publicly deployed yet**. It is not needed for local,
+The built-in relay is implemented but **public access is awaiting DNS setup and verification**. It is not needed for local,
 SSH or Tailscale access. Once a service is configured, enable **Settings → Your computer →
 Remote access**, then choose **Copy sign-in link** and open it on your other device within a minute.
 

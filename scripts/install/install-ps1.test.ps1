@@ -1,5 +1,5 @@
-# Checks install.ps1 against a pretend wsl.exe and Task Scheduler. Runs on any PowerShell 7,
-# Windows or not: pwsh -NoProfile -File scripts/install/install-ps1.test.ps1
+# Checks install.ps1 against a pretend wsl.exe and Task Scheduler, including Windows PowerShell
+# 5.1's native stderr behavior. Also runs on PowerShell 7 on other platforms.
 $ErrorActionPreference = "Stop"
 $installer = Join-Path $PSScriptRoot "../../install.ps1"
 $script:failures = 0
@@ -14,7 +14,7 @@ $env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) ("localdot-ps1-" + [gui
 function Reset-Machine([hashtable]$machine) {
   $script:machine = @{
     Status = 0; Version = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
-    InstallAdds = $null; TaskExists = $false
+    InstallAdds = $null; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
   }
   foreach ($key in $machine.Keys) { $script:machine[$key] = $machine[$key] }
   $script:calls = [System.Collections.Generic.List[string]]::new()
@@ -26,7 +26,11 @@ function wsl.exe {
   $code = 0
   $out = ""
   switch -Regex ($line) {
-    "^--status$" { $code = $script:machine.Status }
+    "^--status$" {
+      $code = $script:machine.Status
+      if ($script:machine.Stderr) { Write-Error "WSL is not installed. Run wsl --install." }
+    }
+    "^--update$" { $code = $script:machine.Update }
     "^--version$" { $code = $script:machine.Version }
     "^--list --verbose$" {
       # Older wsl.exe writes UTF-16, which arrives with NULs between characters.
@@ -43,7 +47,11 @@ function wsl.exe {
   $global:LASTEXITCODE = $code
   if ($out) { $out }
 }
-function Start-Process { param($FilePath, $ArgumentList, $Verb, [switch]$Wait) $script:calls.Add("Start-Process $FilePath $($ArgumentList -join ' ') $Verb") }
+function Start-Process {
+  param($FilePath, $ArgumentList, $Verb, [switch]$Wait, [switch]$PassThru)
+  $script:calls.Add("Start-Process $FilePath $($ArgumentList -join ' ') $Verb")
+  if ($PassThru) { [pscustomobject]@{ ExitCode = $script:machine.ElevatedExit } }
+}
 function Get-WindowsBuild { 22631 }
 function Get-ScheduledTask { if ($script:machine.TaskExists) { "task" } }
 function New-ScheduledTaskAction { param($Execute, $Argument) "$Execute $Argument" }
@@ -59,10 +67,29 @@ function Get-CimInstance { }
 # Dot-sourcing replaced the build check; put the pretend one back.
 function Get-WindowsBuild { 22631 }
 
-Reset-Machine @{ Status = 1 }
+Reset-Machine @{ Status = 1; Stderr = $true }
+$savedEncoding = [Console]::OutputEncoding
+$savedUtf8 = $env:WSL_UTF8
+$probe = Invoke-Wsl --status
+Check ($probe.Code -eq 1 -and $probe.Text -like "*WSL is not installed*") "captures a failing WSL probe without terminating on stderr"
+Check ($ErrorActionPreference -eq "Stop") "preserves the caller's error handling"
+Check ([Console]::OutputEncoding.CodePage -eq $savedEncoding.CodePage -and $env:WSL_UTF8 -eq $savedUtf8) "restores console encoding and WSL environment"
 $ready = Enable-Wsl
 Check (-not $ready) "asks Windows to turn on WSL when it is off, and stops for a restart"
 Check ($script:calls -match "Start-Process wsl.exe --install --no-distribution RunAs").Count "turns WSL on elevated, without a distribution"
+
+Reset-Machine @{ Status = 1; ElevatedExit = 1 }
+$message = ""
+try { Enable-Wsl | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like "*WSL setup didn't finish*") "reports failed elevated setup instead of claiming a restart will fix it"
+
+Reset-Machine @{ Status = 1; ElevatedExit = 3010 }
+Check (-not (Enable-Wsl)) "accepts Windows' reboot-required success code"
+
+Reset-Machine @{ Version = 1; Update = 1 }
+$message = ""
+try { Enable-Wsl | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like "*Couldn't update WSL*") "does not continue after a failed WSL update"
 
 Reset-Machine @{ Version = 1 }
 Enable-Wsl | Out-Null
@@ -120,7 +147,8 @@ Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec bash .localdot-insta
 Check ($script:calls -contains "Unregister-ScheduledTask localDot") "removes the keep-alive task"
 
 Check (-not $EnableSystemd.Contains('"')) "passes the systemd edit without double quotes"
-if (Get-Command sh -CommandType Application -ErrorAction SilentlyContinue) {
+# The systemd edit runs inside Linux and intentionally uses GNU sed, not macOS BSD sed.
+if ((Test-Path /proc/sys/kernel/ostype) -and (Get-Command sh -CommandType Application -ErrorAction SilentlyContinue)) {
   $conf = Join-Path $env:LOCALAPPDATA "wsl.conf"
   $edit = $EnableSystemd.Replace("/etc/wsl.conf", $conf)
   foreach ($case in @(
@@ -139,8 +167,39 @@ if (Get-Command sh -CommandType Application -ErrorAction SilentlyContinue) {
 # shows it ran.
 Reset-Machine @{}
 $message = ""
-try { Get-Content $installer -Raw | Invoke-Expression } catch { $message = $_.Exception.Message }
+# Force an unsupported build even on Windows: never invoke real setup from this entry-point test.
+try { ((Get-Content $installer -Raw) -replace '\[Environment\]::OSVersion.Version.Build', '0') | Invoke-Expression } catch { $message = $_.Exception.Message }
 Check ($message -like "*Windows 10 version 2004*") "runs when piped into Invoke-Expression"
+
+# Exercise a real native stderr stream, not just a PowerShell function mock. The outer 2>&1
+# reproduces the screenshot's NativeCommandError on Windows PowerShell 5.1 before this fix.
+if ($env:OS -eq "Windows_NT") {
+  function wsl.exe { & $env:ComSpec /d /c "echo WSL is not installed. 1>&2 & exit /b 1" }
+  $probe = Invoke-Wsl --status
+  Check ($probe.Code -eq 1 -and $probe.Text -like "*WSL is not installed*") "real native stderr reaches the exit-code check on Windows"
+  # Compile a native .NET executable on 5.1 to exercise both streams with Chinese text. ASCII
+  # source escapes also keep this test readable by Windows PowerShell's legacy script decoder.
+  if ($PSVersionTable.PSVersion.Major -eq 5) {
+    $script:nativeProbe = Join-Path $env:LOCALAPPDATA "wsl-probe.exe"
+    Add-Type -OutputAssembly $script:nativeProbe -OutputType ConsoleApplication -TypeDefinition @'
+using System;
+using System.Text;
+public class Probe {
+  public static int Main() {
+    Console.OutputEncoding = new UTF8Encoding(false);
+    Console.Out.WriteLine("\u4f60\u597d stdout");
+    Console.Error.WriteLine("\u4f60\u597d stderr");
+    return 1;
+  }
+}
+'@
+    function wsl.exe { & $script:nativeProbe }
+    $probe = Invoke-Wsl --status
+    $hello = [string][char]0x4f60 + [char]0x597d
+    Check ($probe.Code -eq 1 -and $probe.Text.Contains("$hello stdout") -and $probe.Text.Contains("$hello stderr")) "decodes UTF-8 stdout and native stderr without garbling localized text"
+    Check ([Console]::OutputEncoding.CodePage -eq $savedEncoding.CodePage -and $env:WSL_UTF8 -eq $savedUtf8) "restores encoding after real native stderr"
+  }
+}
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:LOCALAPPDATA
 if ($script:failures -gt 0) { Write-Host "$script:failures failed"; exit 1 }
