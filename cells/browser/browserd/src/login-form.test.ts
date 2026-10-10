@@ -42,6 +42,29 @@ describe("protected sign-in submission", () => {
       submit: 20,
     });
   });
+  it("accepts Chromium's empty-value sentinel on a rejected form's autofocus field", () => {
+    const f = fixture();
+    f.raw.strings.push("autofocus");
+    const document = f.raw.documents[0];
+    if (!document) throw new Error("Missing fixture document");
+    document.nodes.attributes[2] = [10, 11, 12, -1];
+    expect(loginForm(f.raw, f.ax, 10, "https://github.com")).toEqual({
+      form: 2,
+      username: 9,
+      submit: 20,
+    });
+  });
+  it("recognizes a retry form with disabled submit but refuses submission until enabled", () => {
+    const f = fixture();
+    f.raw.strings.push("disabled", "");
+    const document = f.raw.documents[0];
+    if (!document) throw new Error("Missing fixture document");
+    document.nodes.attributes[4] = [12, -1];
+    expect(() => loginForm(f.raw, f.ax, 10, "https://github.com")).toThrow();
+    expect(loginForm(f.raw, f.ax, 10, "https://github.com", true).submit).toBe(20);
+    document.nodes.attributes[4] = [];
+    expect(loginForm(f.raw, f.ax, 10, "https://github.com").submit).toBe(20);
+  });
   it.each([
     ["https://evil.example/session", "post", "Sign in"],
     ["/session", "get", "Sign in"],

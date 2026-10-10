@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserActionPermit } from "../../../../packages/protocol/src/browser-control.ts";
 import { BrowserControl } from "./control.ts";
 import { BROWSER_HTTP_BODY_BYTES, BROWSER_HTTP_BODY_MS, BrowserHttp } from "./http.ts";
+import { BrowserInputError } from "./input.ts";
 import { BrowserNavigation } from "./navigation-owner.ts";
 
 const browserCellId = "01K6NZAGJT44QM01BDMEMSHP25";
@@ -179,7 +180,16 @@ async function setup(enableNavigation = true) {
         { id: tabId, ready: true, title: "private-title-canary", url: "private-url-canary" },
       ],
     },
-    input: { inject, type, timing, manual },
+    input: {
+      inject,
+      type,
+      timing,
+      manual,
+      secret: async (_permit, _tab, _request, signal) => {
+        await work(signal);
+        return { filled: false, rememberable: true };
+      },
+    },
     observation: { observe, lookup, read },
     navigation: enableNavigation ? navigation : undefined,
     ready: () => ready,
@@ -287,6 +297,27 @@ afterEach(async () => {
 });
 
 describe("authenticated browser HTTP transport", () => {
+  it("returns a bounded sign-in refusal without exposing device error text", async () => {
+    const peer = await setup();
+    peer.setWork(async () => {
+      throw new BrowserInputError("login-form");
+    });
+    const body = {
+      permit,
+      tabId,
+      request: { origin: "https://github.com", at: { x: 400, y: 300 } },
+    };
+    const reply = await peer.send("POST", "/secret", body);
+    expect(reply.status).toBe(422);
+    expect(JSON.parse(reply.text)).toEqual({ error: "login-form" });
+    peer.setWork(async () => {
+      throw new Error("private-password-canary");
+    });
+    const unknown = await peer.send("POST", "/secret", body);
+    expect(unknown.status).toBe(409);
+    expect(unknown.text).not.toContain("private-password-canary");
+  });
+
   it("separates authenticated manual grants from agent permits and drops plaintext", async () => {
     const peer = await setup();
     const { owner: _, ...user } = { ...permit, revision: 2 };

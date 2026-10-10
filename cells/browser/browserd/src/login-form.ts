@@ -35,6 +35,7 @@ export function loginForm(
   ax: unknown,
   password: number,
   origin: string,
+  allowDisabledSubmit = false,
 ): { username?: number; submit: number; form: number } {
   const data = snapshot.parse(raw),
     nodes = data.documents[0]?.nodes;
@@ -47,6 +48,8 @@ export function loginForm(
   )
     throw new Error("Invalid sign-in form");
   const string = (i: number | undefined) => {
+    // DOMSnapshot uses -1 for an empty attribute value (autofocus, disabled, etc.).
+    if (i === -1) return "";
     if (i === undefined || i < 0 || data.strings[i] === undefined)
       throw new Error("Invalid sign-in form");
     return data.strings[i];
@@ -88,17 +91,11 @@ export function loginForm(
     if (!["INPUT", "BUTTON"].includes(tag(i)) || parentForm(i) !== form) continue;
     const a = attrs(i),
       id = nodes.backendNodeId[i];
-    if (
-      id === undefined ||
-      a.has("disabled") ||
-      a.has("readonly") ||
-      a.has("hidden") ||
-      a.has("form")
-    )
-      continue;
+    if (id === undefined || a.has("readonly") || a.has("hidden") || a.has("form")) continue;
     const type = (a.get("type") || (tag(i) === "BUTTON" ? "submit" : "text")).toLowerCase();
     if (
       ["text", "email"].includes(type) &&
+      !a.has("disabled") &&
       /user|email|login|account/iu.test(
         [a.get("autocomplete"), a.get("id"), a.get("name"), a.get("aria-label")].join(" "),
       )
@@ -107,6 +104,7 @@ export function loginForm(
     const label = a.get("value") || labels.get(id) || "";
     if (
       type === "submit" &&
+      (allowDisabledSubmit || !a.has("disabled")) &&
       /^(?:sign\s*in|log\s*in)$/iu.test(label.trim()) &&
       !a.has("formaction") &&
       !a.has("formmethod") &&

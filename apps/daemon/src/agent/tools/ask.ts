@@ -251,8 +251,12 @@ async function askFields(
         );
       }
       // Credentials went into this screen, as after the user's own sign-in.
-      if (landed) ctx.session.taskAutonomy.signIn(field.screen.name);
-      else {
+      if (landed) {
+        ctx.session.taskAutonomy.signIn(field.screen.name);
+        // Asking again after a delivered login means the site rejected it. Do not replay
+        // the just-saved password; collect a replacement on the private channel.
+        if (field.loginOrigin) used.add(field.loginOrigin);
+      } else {
         moved.push(id);
         delete answers[id];
       }

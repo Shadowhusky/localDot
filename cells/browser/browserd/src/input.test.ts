@@ -37,6 +37,7 @@ async function setup(scale: 1 | 2 = 2) {
     stale: false,
     hit: 10,
     frame: "root",
+    submitDisabled: false,
     rawEvents: true,
     contentX: 20 * scale,
     revision: 1,
@@ -143,20 +144,38 @@ async function setup(scale: 1 | 2 = 2) {
       };
     if (method === "DOMSnapshot.captureSnapshot")
       return {
-        strings: ["#document", "FORM", "INPUT", "BUTTON", "method", "post", "type", "password"],
+        strings: [
+          "#document",
+          "FORM",
+          "INPUT",
+          "BUTTON",
+          "method",
+          "post",
+          "type",
+          "password",
+          "disabled",
+          "",
+        ],
         documents: [
           {
             nodes: {
               nodeName: [0, 1, 2, 3],
               backendNodeId: [1, 2, 10, 20],
               parentIndex: [-1, 0, 1, 1],
-              attributes: [[], [4, 5], [6, 7], []],
+              attributes: [[], [4, 5], [6, 7], state.submitDisabled ? [8, 9] : []],
             },
           },
         ],
       };
     if (method === "DOM.getBoxModel")
-      return { model: { content: [500, 100, 600, 100, 600, 140, 500, 140] } };
+      return {
+        model: {
+          content:
+            (_params as { backendNodeId: number }).backendNodeId === 20
+              ? [500, 100, 600, 100, 600, 140, 500, 140]
+              : [50, 100, 150, 100, 150, 140, 50, 140],
+        },
+      };
     if (method === "DOM.describeNode")
       return {
         node: {
@@ -903,6 +922,37 @@ describe("private browser password delivery", () => {
     await expect(f.input.type(permit, "tab", typing, f.abort.signal, f.progress)).rejects.toThrow(
       "secret",
     );
+  });
+  it("waits for the password click's focus update before delivering any characters", async () => {
+    const f = await setup();
+    f.hooks.set("Accessibility.getFullAXTree:2", () => {
+      f.state.focusedNode = 99;
+    });
+    f.hooks.set("Accessibility.getFullAXTree:3", () => {
+      expect(f.commands.filter((c) => c.name === "char")).toHaveLength(0);
+      f.state.focusedNode = 10;
+    });
+    await expect(f.input.secret(permit, "tab", request, f.abort.signal)).resolves.toMatchObject({
+      filled: true,
+      submitted: true,
+    });
+  });
+  it("fills a retry password but never clicks a submit button that remains disabled", async () => {
+    const f = await setup();
+    f.state.submitDisabled = true;
+    expect(
+      await f.input.secret(
+        permit,
+        "tab",
+        { origin: request.origin, at: request.at },
+        f.abort.signal,
+      ),
+    ).toEqual({ filled: false, rememberable: true });
+    await expect(f.input.secret(permit, "tab", request, f.abort.signal)).rejects.toThrow(
+      "login-form",
+    );
+    expect(f.commands.filter((c) => c.name === "click")).toHaveLength(1);
+    expect(f.onFatal).not.toHaveBeenCalled();
   });
   it.each(["origin", "passwordType", "focusedNode"] as const)(
     "refuses a changed %s before sending a secret",

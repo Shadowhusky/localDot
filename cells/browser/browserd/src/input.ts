@@ -104,6 +104,7 @@ export class BrowserInputError extends Error {
       | "aborted"
       | "focus"
       | "secret"
+      | "login-form"
       | "target"
       | "delivery"
       | "unavailable",
@@ -976,7 +977,7 @@ export class BrowserInput {
           );
         };
         const rememberable = await inspect(false);
-        const form = async () => {
+        const form = async (allowDisabledSubmit = false) => {
           await checkOrigin();
           const snapshot = await this.#options.targets.command(
             first.document,
@@ -991,9 +992,21 @@ export class BrowserInput {
             scope.signal,
           );
           scope.check(first.document);
-          return loginForm(snapshot, tree, hit.backendNodeId, request.origin);
+          try {
+            return loginForm(
+              snapshot,
+              tree,
+              hit.backendNodeId,
+              request.origin,
+              allowDisabledSubmit,
+            );
+          } catch {
+            throw new BrowserInputError("login-form");
+          }
         };
-        const login = rememberable ? await form() : undefined;
+        // Rejected sign-ins may disable submit until a replacement password is entered.
+        // Recognize that form now, but require an enabled submit before clicking it.
+        const login = rememberable ? await form(true) : undefined;
         const nodePoint = async (node: number) => {
           this.#options.targets.rememberNodes?.(first.document, [node]);
           const geometry = await this.#geometry(tabId, scope);
@@ -1070,20 +1083,46 @@ export class BrowserInput {
               1,
             );
           }
+          // Account-history suggestions can cover the password box. Dismiss the popup,
+          // then resolve and hit-test the same protected node again before clicking.
+          await this.#press(
+            scope,
+            armedMono,
+            () => this.#options.native.command("keys", { combo: ["Escape"] }, scope.signal),
+            (event, reply) => event.kind === "key" && event.detail === reply.keycodes.at(-1),
+            1,
+          );
         }
+        const passwordPoint = await nodePoint(hit.backendNodeId);
         await this.#press(
           scope,
           armedMono,
           () =>
             this.#options.native.command(
               "click",
-              { ...point.native, button: 1, count: 1, holdMs: 0, mods: [] },
+              { ...passwordPoint.native, button: 1, count: 1, holdMs: 0, mods: [] },
               scope.signal,
             ),
           (event) => event.kind === "button" && event.detail === 1,
           1,
         );
-        await inspect(true);
+        // Native click evidence arrives before Chromium's accessibility focus update.
+        // Wait only for this same protected field, before delivering any characters.
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await inspect(true);
+            break;
+          } catch (error) {
+            if (
+              !(error instanceof BrowserInputError) ||
+              error.reason !== "focus" ||
+              attempt >= KEYBOARD_ATTEMPTS
+            )
+              throw error;
+          }
+          await sleep(KEYBOARD_RETRY_MS, undefined, { signal: scope.signal });
+          scope.check(first.document);
+        }
         await this.#press(
           scope,
           armedMono,

@@ -25,7 +25,7 @@ import { DOWNLOAD_BYTES } from "../../../../packages/protocol/src/quarantine.ts"
 import { type BrowserAccounts, isSiteName } from "./accounts.ts";
 import type { BrowserControl } from "./control.ts";
 import type { BrowserDownloadService } from "./download-service.ts";
-import type { BrowserInput } from "./input.ts";
+import { type BrowserInput, BrowserInputError } from "./input.ts";
 import type { BrowserNavigation } from "./navigation-owner.ts";
 import type { BrowserObservation } from "./observation.ts";
 import type { BrowserRuntimeConfig } from "./runtime-config.ts";
@@ -104,7 +104,7 @@ export interface BrowserHttpOptions {
 class HttpRefusal extends Error {
   constructor(
     readonly status: number,
-    readonly code: "authentication" | "request" | "busy" | "unavailable" | "refused",
+    readonly code: "authentication" | "request" | "busy" | "unavailable" | "refused" | "login-form",
   ) {
     super("Browser service request refused");
   }
@@ -327,11 +327,11 @@ export class BrowserHttp {
     response.setHeader("connection", "close");
     let ownsSlot = false;
     let downloadStream = false;
+    const route = `${request.method} ${request.url}`;
     try {
       const supplied = Buffer.from(header(request, "authorization") ?? "");
       if (supplied.length !== this.#token.length || !timingSafeEqual(supplied, this.#token))
         throw new HttpRefusal(401, "authentication");
-      const route = `${request.method} ${request.url}`;
       if (!routes.has(route)) throw new HttpRefusal(404, "request");
       if (header(request, "origin") !== undefined) throw new HttpRefusal(400, "request");
       if (route.startsWith("GET ")) {
@@ -560,7 +560,14 @@ export class BrowserHttp {
         response.destroy();
         return;
       }
-      const refusal = error instanceof HttpRefusal ? error : new HttpRefusal(409, "refused");
+      const refusal =
+        error instanceof HttpRefusal
+          ? error
+          : route === "POST /secret" &&
+              error instanceof BrowserInputError &&
+              error.reason === "login-form"
+            ? new HttpRefusal(422, "login-form")
+            : new HttpRefusal(409, "refused");
       if (response.headersSent) {
         if (downloadStream) {
           response.destroy();

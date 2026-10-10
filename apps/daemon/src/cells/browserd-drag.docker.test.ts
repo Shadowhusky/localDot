@@ -26,7 +26,7 @@ li { height: 60px; line-height: 60px; margin: 0 0 10px; padding-left: 16px; back
 #login { position: absolute; left: 800px; top: 100px; width: 250px; }
 #login input, #login button { display: block; margin: 10px; height: 35px; width: 220px; }
 </style></head><body>
-<form id="login" method="post"><input aria-label="Account" autocomplete="username"><input aria-label="Password" type="password" autocomplete="current-password"><button>Sign in</button></form>
+<form id="login" method="post" action="/session"><input name="username" aria-label="Account" autocomplete="username"><input name="password" aria-label="Password" type="password" autocomplete="current-password"><button>Sign in</button></form>
 <input id="volume" aria-label="Volume" type="range" min="0" max="100" value="0">
 <ul id="list"><li draggable="true">Alpha</li><li draggable="true">Beta</li><li draggable="true">Gamma</li></ul>
 <script>
@@ -44,18 +44,12 @@ list.addEventListener("drop", (e) => {
   if (onto && dragged && onto !== dragged) list.insertBefore(dragged, onto.nextSibling);
   show();
 });
-document.getElementById("login").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const inputs = e.target.querySelectorAll("input");
-  document.title = inputs[0].value === "fixture-account" && inputs[1].value === "fixture-Private-密碼" ? "signed in" : "wrong password";
-  inputs[1].value = "";
-});
 volume.addEventListener("input", show);
 show();
 </script></body></html>`;
 
 const gateScript = (cert: string, key: string) => `
-import http.server, ssl
+import http.server, ssl, urllib.parse
 open("/tmp/test-cert.pem", "w").write(${JSON.stringify(cert)})
 open("/tmp/test-key.pem", "w").write(${JSON.stringify(key)})
 tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -77,6 +71,18 @@ class Gate(http.server.BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(page)))
         self.end_headers()
         self.wfile.write(page)
+    def do_POST(self):
+        fields = urllib.parse.parse_qs(self.rfile.read(int(self.headers.get("content-length", "0"))).decode())
+        ok = fields.get("username") == ["fixture-account"] and fields.get("password") == ["fixture-Private-密碼"]
+        if ok:
+            result = b"<html><head><title>signed in</title></head><body>Signed in</body></html>"
+        else:
+            result = page.replace(b'<form id="login"', b'<p role="alert">Incorrect username or password.</p><form id="login"').replace(b'<button>Sign in</button>', b'<button disabled>Sign in</button>').replace(b'show();\\n</script>', b'show(); document.title = "wrong password"; document.querySelector("[name=password]").addEventListener("input", () => { document.querySelector("#login button").disabled = false; });\\n</script>')
+        self.send_response(200)
+        self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("content-length", str(len(result)))
+        self.end_headers()
+        self.wfile.write(result)
     def log_message(self, *args):
         pass
 http.server.ThreadingHTTPServer(("0.0.0.0", 3128), Gate).serve_forever()
@@ -129,7 +135,17 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     signal,
     check: () => signal.throwIfAborted(),
   });
-  const title = async () => (await client.read(permit, tabId, { maxChars: 500 }, owner())).title;
+  // Navigation and cancelled input can briefly invalidate page reads. Wait for a fresh document.
+  const title = async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return (await client.read(permit, tabId, { maxChars: 500 }, owner())).title;
+      } catch (error) {
+        if (attempt >= 20) throw error;
+        await sleep(250);
+      }
+    }
+  };
   const removeAll = () => {
     if (!scope || !names) return;
     for (const name of [names.browser, names.gate])
@@ -362,8 +378,36 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
     expect(
       await client.secret(permit, tabId, { ...request, text: "fixture-Private-密碼" }, owner()),
     ).toEqual({ filled: true, rememberable: true, submitted: true });
+    for (let i = 0; i < 40 && (await title()) !== "signed in"; i++) await sleep(250);
     const observed = await client.observe(permit, tabId, owner());
     expect(JSON.stringify(observed)).not.toContain("fixture-Private-密碼");
     expect(await title()).toBe("signed in");
+  });
+  it("retries a rejected password on a new document without takeover", async () => {
+    await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
+    for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
+    const request = {
+      origin: "https://drag.localdot.test",
+      username: "fixture-account",
+      at: (await element({ name: "Protected field" })).at,
+    };
+    expect(
+      await client.secret(permit, tabId, { ...request, text: "fixture-wrong-password" }, owner()),
+    ).toMatchObject({ submitted: true });
+    for (let i = 0; i < 40 && (await title()) !== "wrong password"; i++) await sleep(250);
+    expect(await title()).toBe("wrong password");
+    const retry = { ...request, at: (await element({ name: "Protected field" })).at };
+    expect(await client.secret(permit, tabId, retry, owner())).toEqual({
+      filled: false,
+      rememberable: true,
+    });
+    expect(
+      await client.secret(permit, tabId, { ...retry, text: "fixture-Private-密碼" }, owner()),
+    ).toMatchObject({ submitted: true });
+    for (let i = 0; i < 40 && (await title()) !== "signed in"; i++) await sleep(250);
+    expect(await title()).toBe("signed in");
+    expect(JSON.stringify(await client.observe(permit, tabId, owner()))).not.toMatch(
+      /fixture-wrong-password|fixture-Private/,
+    );
   });
 });

@@ -46,7 +46,14 @@ password, and credentials are excluded from conversation events.
 Supported logins are saved in keyd's protected store (Keychain, keyring or encrypted file,
 depending on the installation), bound to the exact HTTPS origin. One account is saved per origin;
 a later answer replaces it. A future task can reuse it once before asking for updated credentials
-if the site rejects it. Two-factor authentication, security challenges and forms the protected
+if the site rejects it. A rejected password opens another private answer prompt: dot keeps control,
+asks for the corrected account/password, and replaces the saved login. It never silently replays
+a password already delivered in that task. Retry forms may keep their submit button disabled until
+a new password is entered; dot verifies it is enabled before submitting. The browser’s separate
+password-save popup is disabled because keyd handles saving. Account suggestions are dismissed
+before dot checks and focuses the password field again.
+
+Two-factor authentication, security challenges and forms the protected
 path cannot verify may require your input or a clearly explained takeover.
 
 Saved passwords and browser cookies are separate. **Sign out** clears browser sign-in state;

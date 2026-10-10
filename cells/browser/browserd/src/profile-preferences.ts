@@ -63,7 +63,7 @@ export async function releaseProfileLocks(profilePath: string, signal: AbortSign
   }
 }
 
-/** Before Chromium starts, preserve its profile while disabling the automatic download popup.
+/** Before Chromium starts, preserve its profile while disabling automatic download and password-save popups.
  * All child access is relative to retained directory descriptors; profile bytes stay local.
  */
 export async function prepareProfilePreferences(
@@ -143,7 +143,16 @@ export async function prepareProfilePreferences(
     await current();
     const bubble = values.download_bubble;
     if (bubble !== undefined && !object(bubble)) refuse();
-    if (object(bubble) && bubble.partial_view_enabled === false) return;
+    if (
+      object(bubble) &&
+      bubble.partial_view_enabled === false &&
+      values.credentials_enable_service === false
+    )
+      return;
+    // keyd owns saved logins. Chromium's separate save bubble steals page focus after a
+    // submitted form, leaving protected reads unable to inspect success or rejection.
+    // Chromium: components/password_manager/core/common/password_manager_pref_names.h
+    values.credentials_enable_service = false;
     values.download_bubble = { ...(object(bubble) ? bubble : {}), partial_view_enabled: false };
     const encoded = Buffer.from(JSON.stringify(values));
     if (encoded.length > MAX_PREFERENCES_BYTES) refuse();

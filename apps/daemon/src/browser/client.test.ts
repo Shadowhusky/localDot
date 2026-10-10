@@ -208,6 +208,27 @@ describe("daemon browser client", () => {
     expect(f.seen).toEqual([]);
   });
 
+  it.each([
+    [409, "secret_refused"],
+    [422, "login_form"],
+  ])(
+    "reports password refusal %s without claiming the browser is offline",
+    async (status, code) => {
+      const f = await fixture((_request, response) => {
+        response.writeHead(Number(status), { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "private-password-canary" }));
+      });
+      await expect(
+        f.client.secret(
+          f.permit,
+          f.tab,
+          { origin: "https://github.com", at: { x: 400, y: 300 } },
+          f.scope,
+        ),
+      ).rejects.toThrow(expect.objectContaining({ code }));
+    },
+  );
+
   it("never follows a service redirect or reflects its private error text", async () => {
     const f = await fixture((_request, response) => {
       response.writeHead(302, { location: "http://127.0.0.1:1/stolen" });

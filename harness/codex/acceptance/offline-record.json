@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "488edb3e3693f742f4cf6cbece1baccac407b80ceb2b2d863535bafb48d219d2",
+  "inputSha256": "8f47c19a921685af625737551ee52dbc8c1b54b3290544c960e9c939eda8f4d8",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/autonomy-replay.test.ts": "e9c7540227ee016f4fc15e3b7a492a83e0ddb4bcca9419d55701e2ba85596c31",
@@ -190,7 +190,7 @@
     "apps/daemon/src/agent/secret-answers.ts": "f2870ce6403dbe09673326d6f84dbf91a426f668316661b46dbce0a52dad44aa",
     "apps/daemon/src/agent/session-boundaries.test.ts": "bc07b08bd16a55f251034ab3c0ad95674e43896b3a51e5a37e1762ed66817de8",
     "apps/daemon/src/agent/session-cancellation.test.ts": "c8e856baff37d62031c10dc13556129ea8d2ca1e0a68061dad93d3cb9715adc8",
-    "apps/daemon/src/agent/session-screens.test.ts": "d75ce848ddea7dca5c0672d8b016aadb3ec765c203292b3ffe446bb97e496473",
+    "apps/daemon/src/agent/session-screens.test.ts": "5bc6335bf0468f1bf177ac5d5b3f77c115ad952207015f09f50a08f9cb2ef610",
     "apps/daemon/src/agent/session-state.test.ts": "46d18a6ebbb0925b2962f8b93e14a93106fb5a6f01997c0e1f60ccef3bbe3da1",
     "apps/daemon/src/agent/session-unattended.test.ts": "ff533f5e6cb84488927786d27811435ce34844b73a57387e7be36b0725ce4d6c",
     "apps/daemon/src/agent/session.ts": "36d7b626d2c29359e63e3fdc47aa989f3bb325e6bb3ea8c3d0e08c04c15930a0",
@@ -217,7 +217,7 @@
     "apps/daemon/src/agent/tool-api.test.ts": "d331857a8b0984c2fed17168cd2324352446f806c2939a97c784add01a3c15ef",
     "apps/daemon/src/agent/tool-api.ts": "0818c557b5e6387814a535297b618eeeb4c8c527cc98fe985cc31c311d7fc867",
     "apps/daemon/src/agent/tools/ask-fields.test.ts": "947b3a6c74c3817bc032cd1b838cb10e14f1d802e2547756303a3b59d4679d7f",
-    "apps/daemon/src/agent/tools/ask.ts": "edd5c3c945065c703061ffd1dc9e579eb59e674b78dd41e9054ca6e9f8615f62",
+    "apps/daemon/src/agent/tools/ask.ts": "09d923f92a5eef8b78e24be3f9fac410556a873b9a44e2cf63989e5f1bb1fdf4",
     "apps/daemon/src/agent/tools/browser-act.ts": "85765a3b5050189719370dc4dc8277301cd8f514f910bada2cc927c883ff98e1",
     "apps/daemon/src/agent/tools/browser-upload.ts": "b7e3fafc27f5fb62ca20b27a61ecdfdd2ba66b900b686ce53a7e663ec252dcab",
     "apps/daemon/src/agent/tools/browser.ts": "7e12b771f938b808e747ab1d3a382a7e968c1586513e74156f0467cf6767286e",
@@ -281,8 +281,8 @@
     "apps/daemon/src/app.ts": "d4348575a0cbf51b5853f1c465d11855ff4dd9f8c374f5f073231a704f114f37",
     "apps/daemon/src/browser/accounts.test.ts": "00953e7a8d742c8f91da819e58b140c32f52dfa82f068e976aa19be964b4c4d1",
     "apps/daemon/src/browser/accounts.ts": "2fcb30d3bb6fb69803f9e2f4fbdd5c56048b2e56644bac64e2b858cbf59c7e79",
-    "apps/daemon/src/browser/client.test.ts": "da3dcbf9db7eddcbec0a762f66b93488bd688f69707cbae3fef5ffb74730e0eb",
-    "apps/daemon/src/browser/client.ts": "25516ff5de44d47a99bc77ad9554598547026c01673a8d9d1f58b94a8d9b1e77",
+    "apps/daemon/src/browser/client.test.ts": "a60c57340b6e1323caec4a6749310d6db5bb5a4898d61e1df11ab1806e365612",
+    "apps/daemon/src/browser/client.ts": "8d3af751bd2748fcd22a50d6fa8231bfca87ba2bbd00854a5e0b770a2eca2f74",
     "apps/daemon/src/browser/download-client.test.ts": "43ddf754f691858182d439ecd58de2ee3646b24f7fdce84cf3682f55021e2cdf",
     "apps/daemon/src/browser/download-collector.test.ts": "7720156e91d439f1f6dafe93b37871e4c6e313a2c35f8eff1b46c06e3581f64a",
     "apps/daemon/src/browser/download-collector.ts": "6ff7973387b2e29cd573bb704622b282b6d7e82f164311fb1ef67b3308c58187",
@@ -328,7 +328,7 @@
     "apps/daemon/src/cells/browser-seccomp.json": "3bee7b156387cf83fe901afa5e01b9e4475adbe39490d4d6651ea0432e4a6f02",
     "apps/daemon/src/cells/browser-spec.test.ts": "157fbc7e6675eff03686b693e41ba9574df312cea81fcd7aa945601f53a952d7",
     "apps/daemon/src/cells/browser-spec.ts": "02e73c5eb2fb888a69b9f4d17aa28010c1d2327264ce624925bc23dee8438804",
-    "apps/daemon/src/cells/browserd-drag.docker.test.ts": "fdc0e7464af87bdadfe5e65ed4ede7d45406cae674e73262478764332078ce4c",
+    "apps/daemon/src/cells/browserd-drag.docker.test.ts": "773975c92aebb3a49a444c7df8ff66821b31943a53dda6195651c955e76445f2",
     "apps/daemon/src/cells/capture.docker.test.ts": "316a310a6e9fed9025ac5a520398affd051c0c6cddde408f7b27d66b3121807f",
     "apps/daemon/src/cells/computer-update.docker.test.ts": "1526afe19909a11eac4c44e22e895f337d4362199d7132d333a1336fc8e4af94",
     "apps/daemon/src/cells/computer-update.test.ts": "7184349512d5e3227d0c67fef0b53f4161cb7466755a695facb057bdee2e1f9e",
@@ -979,7 +979,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "80c586bd662753e618863ae6d35765a18e2bedc9bc95a2a96457e9f4c792151c",
+  "reportSha256": "0b9b8e8a555ade0a5ee602becc48cbdf5ed71c38c2840022b033972eefd3021f",
   "exit": {
     "code": 0,
     "signal": null

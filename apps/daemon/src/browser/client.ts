@@ -144,6 +144,10 @@ export type BrowserLookup =
 // Both the model and the task timeline show these messages.
 const REFUSALS = {
   request: "The request to the web browser was not valid.",
+  login_form:
+    "The password field was found, but its sign-in form could not be verified. Open the site's sign-in page again, read its current fields, then retry ask_user with a secret field. Do not click or type into the password field through ordinary tools or hand control over for a rejected password.",
+  secret_refused:
+    "Secure password entry was refused because the page, field, or control changed. Read the current page and retry ask_user with its password target; do not repeat unchanged calls or click the password box through ordinary tools.",
   stale: "The web browser or the selected screen changed during the request.",
   aborted: "The web browser did not answer in time, or the request was cancelled.",
   unavailable: "The web browser is not responding.",
@@ -1002,6 +1006,10 @@ export class BrowserClient {
         pending.end(payload);
       });
       check();
+      if (path === "/secret" && response.statusCode === 422)
+        throw new BrowserClientError("login_form");
+      if (path === "/secret" && response.statusCode === 409)
+        throw new BrowserClientError("secret_refused");
       if (response.statusCode !== 200 || response.headers["content-encoding"] !== undefined)
         throw new BrowserClientError("unavailable");
       return { response, signal, check, close };
