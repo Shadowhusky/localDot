@@ -317,6 +317,20 @@ describe("App Replay mode", () => {
     expect(screen.getByRole("radio", { name: "Watch" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
   });
+  it("opens a shared recording on first run, and starts setup once the live app opens", async () => {
+    const fixture = historyDaemon();
+    window.history.replaceState(null, "", `/?replay=${fixture.sessionId}`);
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    await waitFor(() => expect(document.querySelector(".app[data-entering]")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Get started" })).toBeNull();
+    expect(document.querySelector(".app[data-setup]")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await screen.findByRole("textbox", { name: "Search recordings" });
+    expect(screen.queryByRole("button", { name: "Get started" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Watch" }));
+    expect(await screen.findByRole("button", { name: "Get started" })).toBeTruthy();
+  });
   it("goes back from a playing recording to the library when Replay is pressed again", async () => {
     const fixture = historyDaemon();
     window.history.replaceState(null, "", `/?replay=${fixture.sessionId}`);
