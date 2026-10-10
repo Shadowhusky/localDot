@@ -21,7 +21,7 @@ import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
-import { riseIn } from "../ui/motion.ts";
+import { fadeIn } from "../ui/motion.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { SentFiles } from "./Attachments.tsx";
@@ -809,14 +809,15 @@ export function Conversation({
     observer.observe(history.current);
     return () => observer.disconnect();
   }, [seeEnd]);
-  // A conversation chosen anew, and a history that has finished arriving, come in rising; what
-  // arrives in a thread already on show eases in row by row instead.
+  // Reveal a chosen conversation or loaded history in place. Translating the whole thread
+  // enlarges scrollable overflow, making scroll-follow compensate and then snap back.
+  // Messages arriving in an already visible thread still ease in row by row.
   const revealed = useRef({ reveal, loading });
   useLayoutEffect(() => {
     const was = revealed.current;
     revealed.current = { reveal, loading };
     if (history.current && (was.reveal !== reveal || (was.loading && !loading)))
-      riseIn(history.current);
+      fadeIn(history.current);
   }, [reveal, loading]);
   // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
   const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen);

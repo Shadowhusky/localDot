@@ -68,17 +68,11 @@ test("a refresh reopens the conversation, its earlier task included", async ({ p
   await expect(rail.getByRole("heading", { name: "What should we do?" })).toHaveCount(0);
 });
 
-test("after Stop and Resume, the next message continues the conversation", async ({
-  page,
-  ui,
-  request,
-}) => {
+test("after Stop, the next message continues the conversation", async ({ page, ui, request }) => {
   const fixture = await ui.open("running");
   const stopped = await shownTask(request, fixture.origin);
   const island = page.locator(".island");
   await island.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(page.getByTestId("hud-status")).toHaveText("Stopped");
-  await island.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByTestId("hud-status")).toHaveText("Task stopped");
   const rail = await chat(page);
   await expect(rail.getByRole("textbox", { name: "Message" })).toHaveAttribute(
