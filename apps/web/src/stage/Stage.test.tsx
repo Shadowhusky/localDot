@@ -625,6 +625,49 @@ describe("Stage in a Chromium browser", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("resumes capture on focus and replaces a silent open stream after a bounded wait", async () => {
+    fakeTimers();
+    const { api, calls } = daemon();
+    await streaming(api);
+    const before = client() as HTMLIFrameElement;
+    const send = vi.fn();
+    Object.assign(before.contentWindow as Window, { selkiesTransport: { readyState: 1, send } });
+    fireEvent(window, new Event("focus"));
+    fireEvent(window, new Event("pageshow"));
+    expect(send.mock.calls.flat()).toContain("START_VIDEO");
+    expect(send.mock.calls.flat()).toContain("REQUEST_KEYFRAME");
+    expect(framesSent()).toHaveLength(2);
+    // Repainting the old frame is not proof that capture has resumed.
+    present();
+    await act(async () => vi.advanceTimersByTime(TAP_STALL_MS + 250));
+    expect(clients()).toHaveLength(2);
+    expect(clients()[0]).toBe(before);
+    expect(calls).toHaveLength(2);
+    const fresh = clients()[1] as HTMLIFrameElement;
+    playInClient(fresh, "resumed");
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(client()).toBe(fresh);
+    expect(clients()).toHaveLength(1);
+  });
+
+  it("keeps a healthy foreground stream once a new frame arrives", async () => {
+    fakeTimers();
+    const { api, calls } = daemon();
+    await streaming(api);
+    const before = client() as HTMLIFrameElement;
+    const view = before.contentWindow as Window;
+    Object.assign(view, {
+      videoChunksReceived: 10,
+      selkiesTransport: { readyState: 1, send: vi.fn() },
+    });
+    fireEvent(window, new Event("pageshow"));
+    Object.assign(view, { videoChunksReceived: 11 });
+    present();
+    await act(async () => vi.advanceTimersByTime(TAP_STALL_MS + 250));
+    expect(client()).toBe(before);
+    expect(calls).toHaveLength(1);
+  });
+
   it("keeps a thawed page's client showing until its fresh replacement shows a frame", async () => {
     const { api, calls } = daemon();
     await streaming(api);

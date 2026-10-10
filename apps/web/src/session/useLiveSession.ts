@@ -5,6 +5,7 @@ import type { AgentFeed, AgentWords } from "../agent/model.ts";
 import { createAgentFeed } from "../agent/reducer.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { onForeground } from "../lib/foreground.ts";
 import { openSocket, type SocketHandle } from "../lib/socket.ts";
 import { readTaskHistory } from "../replay/useReplay.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
@@ -208,7 +209,9 @@ export function useLiveSession(
       void poll();
     };
     void poll();
+    const stopForeground = onForeground(() => lookNow.current());
     return () => {
+      stopForeground();
       cancelled = true;
       clearTimeout(timer);
       lookNow.current = () => {};
@@ -274,10 +277,12 @@ export function useLiveSession(
     const reading = new AbortController();
     const live = () => {
       if (disposed) return;
-      const through = agentFeed.read().model.lastSeq;
-      const from = through > 0 ? `?fromSeq=${through}` : "";
       socket = openSocket({
-        url: api.socketUrl(`/api/sessions/${sessionId}/stream${from}`),
+        url: () => {
+          const through = agentFeed.read().model.lastSeq;
+          const from = through > 0 ? `?fromSeq=${through}` : "";
+          return api.socketUrl(`/api/sessions/${sessionId}/stream${from}`);
+        },
         protocols: api.socketProtocols(),
         handlers: {
           onOpen: () => {

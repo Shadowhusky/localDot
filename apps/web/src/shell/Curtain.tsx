@@ -95,7 +95,7 @@ export function Curtain({
           title: "Your computer needs a fresh start",
           sub:
             replace.note ??
-            "An earlier step couldn't be confirmed. A fresh computer starts clean; its old Downloads are kept.",
+            "An earlier step couldn't be confirmed. A fresh computer starts clean; your previous home folder is kept separately.",
           progress: false,
           button: { label: "Replace computer" },
         }

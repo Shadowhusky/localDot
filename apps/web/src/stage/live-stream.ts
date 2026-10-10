@@ -155,6 +155,7 @@ export class LiveStream {
   #reported: { client: Client; text: string; at: number } | null = null;
   // The last poll found the page hidden: the gap before the next is the page's, not a suspension.
   #away = false;
+  #foreground: { client: Client; decoded: number; at: number } | null = null;
   #leaving: ReturnType<typeof setTimeout> | undefined;
 
   constructor(target: StreamTarget) {
@@ -213,19 +214,28 @@ export class LiveStream {
     });
   }
 
-  // The page is visible again: its frames are taken afresh. Its client paused its feed while hidden
-  // (Selkies' STOP_VIDEO), so it holds no backlog; only a client whose socket died is replaced.
+  // Resume capture explicitly: the iframe's own visibility event may never have arrived.
+  // A fresh decoded frame must prove recovery, even if its socket still claims to be OPEN.
   refresh(): void {
     this.#polledAt = Date.now();
     if (this.#current) this.#current.tapped = null;
-    const { transport } = look(this.#current);
-    if (transport && (transport.readyState ?? OPEN) > OPEN) this.replace();
+    const { transport, decoded } = look(this.#current);
+    if (this.#current && !this.#foreground)
+      this.#foreground = { client: this.#current, decoded, at: Date.now() };
+    if (transport?.readyState === OPEN) {
+      try {
+        transport.send?.("START_VIDEO");
+      } catch {}
+      this.#keyframes = 0;
+      this.#keyframeAt = Number.NEGATIVE_INFINITY;
+      this.#keyframe(transport, Date.now());
+    } else if (transport && (transport.readyState ?? OPEN) > OPEN) this.replace();
     this.#poll();
   }
 
   // A thawed page can hold an obsolete backlog: a fresh client takes over once it streams.
   replace(): void {
-    if (this.#replacing) return;
+    if (this.#closed || this.#replacing || this.#next) return;
     this.#replacing = true;
     void this.#mint().then((path) => {
       this.#replacing = false;
@@ -306,6 +316,14 @@ export class LiveStream {
     const retry = Math.min(MINT_RETRY_MS.max, MINT_RETRY_MS.min * 2 ** this.#mintFailures);
     if (!client && !this.#next && now - this.#mintAt >= retry) this.replace();
     const { video, track, decoded, transport } = look(client);
+    const foreground = this.#foreground;
+    if (foreground) {
+      if (foreground.client !== client || decoded > foreground.decoded) this.#foreground = null;
+      else if (now - foreground.at >= TAP_STALL_MS) {
+        foreground.at = now;
+        this.replace();
+      }
+    }
     let delivering = false;
     if (client && !video) {
       // An error page, or a client that never loaded; one that keeps failing is given longer.

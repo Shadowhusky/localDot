@@ -1,3 +1,5 @@
+import { onForeground } from "./foreground.ts";
+
 export interface SocketHandlers {
   onMessage(data: string): void;
   onOpen?(): void;
@@ -9,7 +11,7 @@ export interface SocketHandlers {
 }
 
 export interface SocketOptions {
-  url: string;
+  url: string | (() => string);
   protocols: string[];
   handlers: SocketHandlers;
   WebSocketImpl?: typeof WebSocket;
@@ -36,17 +38,21 @@ export function openSocket(opts: SocketOptions): SocketHandle {
   const connect = () => {
     if (closed) return;
     let opened = false;
-    const socket = new Impl(opts.url, opts.protocols);
+    const socket = new Impl(typeof opts.url === "function" ? opts.url() : opts.url, opts.protocols);
     ws = socket;
     ws.onopen = () => {
+      if (closed || ws !== socket) return;
       opened = true;
       live = socket;
       delay = backoff.min;
       opts.handlers.onOpen?.();
     };
-    ws.onmessage = (e) => opts.handlers.onMessage(String(e.data));
+    ws.onmessage = (e) => {
+      if (!closed && ws === socket) opts.handlers.onMessage(String(e.data));
+    };
     ws.onerror = () => {};
     ws.onclose = () => {
+      if (ws !== socket) return;
       ws = null;
       live = null;
       opts.handlers.onClose?.();
@@ -58,10 +64,23 @@ export function openSocket(opts: SocketOptions): SocketHandle {
     };
   };
   connect();
+  // A suspended mobile socket can look OPEN indefinitely. Reconnect to obtain the server's
+  // current snapshot/replay, invalidating the old connection before accepting anything new.
+  const stopForeground = onForeground(() => {
+    if (closed) return;
+    clearTimeout(timer);
+    const previous = ws;
+    ws = live = null;
+    previous?.close();
+    opts.handlers.onClose?.();
+    delay = backoff.min;
+    connect();
+  });
 
   return {
     close() {
       closed = true;
+      stopForeground();
       clearTimeout(timer);
       ws?.close();
     },

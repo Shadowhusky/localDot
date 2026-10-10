@@ -90,3 +90,37 @@ describe("openSocket", () => {
     handle.close();
   });
 });
+
+it("refreshes a silent OPEN socket on app return and rejects its late events", () => {
+  FakeWebSocket.instances = [];
+  let seq = 4;
+  const message = vi.fn();
+  const close = vi.fn();
+  const handle = openSocket({
+    url: () => `ws://localhost/stream?fromSeq=${seq}`,
+    protocols: [],
+    handlers: { onMessage: message, onClose: close },
+    WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+  });
+  const old = FakeWebSocket.instances[0];
+  old?.open();
+  seq = 12;
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("pageshow"));
+  expect(FakeWebSocket.instances).toHaveLength(2);
+  expect(old?.closed).toBe(true);
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(FakeWebSocket.instances[1]?.url).toContain("fromSeq=12");
+  old?.onmessage?.({ data: "stale" });
+  old?.onclose?.();
+  const fresh = FakeWebSocket.instances[1];
+  fresh?.open();
+  fresh?.onmessage?.({ data: "current" });
+  expect(message.mock.calls).toEqual([["current"]]);
+  expect(handle.send("live")).toBe(true);
+  expect(fresh?.sent).toEqual(["live"]);
+  handle.close();
+  window.dispatchEvent(new Event("online"));
+  expect(FakeWebSocket.instances).toHaveLength(2);
+});

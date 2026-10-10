@@ -12,6 +12,7 @@ import {
 } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { onForeground } from "../lib/foreground.ts";
 import type { ProbeApi } from "./debug-hooks.ts";
 import { frameTapSupport } from "./frame-source.ts";
 import {
@@ -215,22 +216,12 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }, []);
   useEffect(() => {
     if (!stream) return;
-    // A view update also restarts the worker's animation after a suspension.
-    const resume = () => {
+    // Wake the renderer as well as its source; a browser may have suspended either one.
+    return onForeground((reason) => {
       canvas.current?.setView({ freeze: paused });
-      stream.replace();
-    };
-    const visible = () => {
-      if (document.visibilityState !== "visible") return;
-      canvas.current?.setView({ freeze: paused });
-      stream.refresh();
-    };
-    document.addEventListener("resume", resume);
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      document.removeEventListener("resume", resume);
-      document.removeEventListener("visibilitychange", visible);
-    };
+      if (reason === "resume") stream.replace();
+      else stream.refresh();
+    });
   }, [stream, paused]);
   const onFlip = useCallback((flip: Flip) => {
     flips.current.push(flip);
