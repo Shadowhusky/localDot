@@ -33,6 +33,7 @@ import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
+import { resizeTextArea } from "../ui/textarea-size.ts";
 import "../ui/composer-layout.css";
 import { useVoice } from "../voice/useVoice.ts";
 import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
@@ -407,6 +408,7 @@ export function Composer(props: ComposerProps) {
   }, [delivery, messages]);
 
   const measure = useCallback((input: HTMLTextAreaElement) => {
+    resizeTextArea(input);
     const next = shapeOf(input);
     if (next.blank === shown.current.blank && next.length === shown.current.length) return;
     shown.current = next;

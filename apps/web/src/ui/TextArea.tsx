@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { type ComponentProps, type CSSProperties, useLayoutEffect, useRef } from "react";
 import { useFieldControl } from "./Field.tsx";
+import { observeTextAreaSize, resizeTextArea } from "./textarea-size.ts";
 
 const sizesItself = () =>
   typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content") === true;
@@ -24,18 +25,14 @@ export function TextArea({
   const unavailable = Boolean(control.disabledReason);
   const own = useRef<HTMLTextAreaElement>(null);
 
-  // Where the browser cannot size a field to its content, measure it after each change.
   useLayoutEffect(() => {
     const area = own.current;
     if (!area || sizesItself()) return;
-    const fit = () => {
-      area.style.height = "auto";
-      const edges = area.offsetHeight - area.clientHeight;
-      area.style.height = `${area.scrollHeight + edges}px`;
-    };
-    fit();
-    area.addEventListener("input", fit);
-    return () => area.removeEventListener("input", fit);
+    return observeTextAreaSize(area);
+  }, []);
+  // Controlled values and visual props can change without a native input event.
+  useLayoutEffect(() => {
+    if (own.current) resizeTextArea(own.current);
   });
 
   return (
