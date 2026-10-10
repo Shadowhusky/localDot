@@ -70,3 +70,14 @@ export function workTranscript(model: Pick<AgentModel, "steps" | "changes">) {
     .reverse();
   return { entries, background: !!all.at(-1) && backgroundStep(all.at(-1) as AgentStep) };
 }
+
+const showListeners = new Set<() => void>();
+export function requestShowCommands() {
+  for (const listener of showListeners) listener();
+}
+export function onShowCommands(listener: () => void) {
+  showListeners.add(listener);
+  return () => {
+    showListeners.delete(listener);
+  };
+}

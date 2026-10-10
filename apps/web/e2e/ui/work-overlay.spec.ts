@@ -77,7 +77,13 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
   await page.reload();
   await ui.picture();
   await expect(overlay).toBeHidden();
-  await page.getByRole("button", { name: "Show commands" }).click();
+  if ((page.viewportSize()?.width ?? 0) < 700) {
+    await expect(page.getByRole("button", { name: "Show commands" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Show commands", exact: true }).click();
+  } else {
+    await page.getByRole("button", { name: "Show commands" }).click();
+  }
   await assertFits();
   await page.getByRole("button", { name: "Minimize command window" }).click();
   const saved = await page.evaluate(() => localStorage.getItem("localdot.work-overlay.v1"));

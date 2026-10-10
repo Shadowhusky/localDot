@@ -4,13 +4,22 @@ import { Glyph } from "../dot/Glyph.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import {
+  onShowCommands,
   readWorkLayout,
   WORK_LAYOUT_KEY,
   type WorkLayout,
   workTranscript,
 } from "./work-overlay.ts";
 
-export function WorkOverlay({ model, working }: { model: AgentModel; working: boolean }) {
+export function WorkOverlay({
+  model,
+  working,
+  restoreInMenu = false,
+}: {
+  model: AgentModel;
+  working: boolean;
+  restoreInMenu?: boolean;
+}) {
   const { steps, changes } = model;
   const transcript = useMemo(() => workTranscript({ steps, changes }), [steps, changes]);
   const hasEntries = transcript.entries.length > 0;
@@ -35,6 +44,19 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
       localStorage.setItem(WORK_LAYOUT_KEY, JSON.stringify(value));
     } catch {}
   };
+  useLayoutEffect(
+    () =>
+      onShowCommands(() => {
+        setPeek(true);
+        const value = { ...latest.current, hidden: false, minimized: false };
+        latest.current = value;
+        setLayout(value);
+        try {
+          localStorage.setItem(WORK_LAYOUT_KEY, JSON.stringify(value));
+        } catch {}
+      }),
+    [],
+  );
   useLayoutEffect(() => {
     if (layout.hidden || !hasEntries || !layer.current || !panel.current) return;
     const measure = () =>
@@ -72,20 +94,22 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
   return (
     <div className="work-overlay-layer" ref={layer}>
       {layout.hidden ? (
-        <Button
-          variant="glass"
-          size="sm"
-          round
-          className="work-overlay-show"
-          aria-label="Show commands"
-          title="Show commands"
-          onClick={() => {
-            setPeek(true);
-            save({ ...layout, hidden: false, minimized: false });
-          }}
-        >
-          <Icon name="terminal" size={18} />
-        </Button>
+        !restoreInMenu && (
+          <Button
+            variant="glass"
+            size="sm"
+            round
+            className="work-overlay-show"
+            aria-label="Show commands"
+            title="Show commands"
+            onClick={() => {
+              setPeek(true);
+              save({ ...layout, hidden: false, minimized: false });
+            }}
+          >
+            <Icon name="terminal" size={18} />
+          </Button>
+        )
       ) : (
         <section
           className="work-overlay"

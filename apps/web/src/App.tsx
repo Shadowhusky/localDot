@@ -149,6 +149,7 @@ import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { WorkOverlay } from "./shell/WorkOverlay.tsx";
+import { backgroundStep, requestShowCommands } from "./shell/work-overlay.ts";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -1739,6 +1740,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   <WorkOverlay
                     key={session.sessionId}
                     model={agent.model}
+                    restoreInMenu={phone}
                     working={!!appStatus.control && !yours && !agent.model.ended}
                   />
                 ) : undefined
@@ -2061,6 +2063,21 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: (trigger) => showSettings(trigger),
                       },
                       { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                      {
+                        label: "Show commands",
+                        icon: "terminal",
+                        disabledReason:
+                          curtain.up ||
+                          replayId ||
+                          viewedConversation ||
+                          switching ||
+                          !stageHud.live ||
+                          !session.sessionId ||
+                          ![...agent.model.steps.values()].some(backgroundStep)
+                            ? "No commands available for this computer yet"
+                            : undefined,
+                        run: requestShowCommands,
+                      },
                       {
                         label: "Full screen",
                         icon: "expand",
