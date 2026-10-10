@@ -903,14 +903,15 @@
   border-radius: var(--radius-full);
 }
 .work-overlay-header {
+  padding: var(--spacing);
+  gap: calc(var(--spacing) * 0.5);
   display: flex;
   align-items: center;
   flex: none;
   height: 36px;
   min-width: 0;
 }
-.work-overlay .work-overlay-handle,
-.work-overlay .work-overlay-toggle {
+.work-overlay .work-overlay-handle {
   min-height: 0;
   padding: 0;
   border-radius: 0;
@@ -925,8 +926,9 @@
   gap: calc(var(--spacing) * 1.5);
   flex: 1;
   min-width: 0;
-  height: 36px;
-  padding: 0 0 0 calc(var(--spacing) * 2.5);
+  height: 28px;
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-group);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -955,16 +957,14 @@
   font-size: var(--text-footnote);
 }
 .work-overlay .work-overlay-toggle {
-  display: grid;
-  place-items: center;
-  flex: 0 0 36px;
-  height: 36px;
-  cursor: pointer;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-group);
 }
-.work-overlay-toggle:active {
-  background: var(--color-raised-2);
-}
-.work-overlay :is(.ui-button, [tabindex]):focus-visible {
+/* Adjacent toolbar buttons own their exact target; expanded kit targets must not overlap. */
+.work-overlay-toggle.ui-icon-button::after { inset: 0; }
+.work-overlay :is(.ui-button, .ui-icon-button, [tabindex]):focus-visible {
   outline: 2px solid var(--color-xenon);
   outline-offset: -3px;
   border-radius: var(--radius-group);
@@ -1020,14 +1020,9 @@
 
 /* Keep touch controls generous without making the collapsed pill wide. */
 @media (pointer: coarse) {
-  .work-overlay-header,
-  .work-overlay .work-overlay-handle,
-  .work-overlay .work-overlay-toggle {
-    height: 44px;
-  }
-  .work-overlay .work-overlay-toggle {
-    flex-basis: 44px;
-  }
+  .work-overlay-header { height: 44px; padding-block: 0; }
+  .work-overlay .work-overlay-handle { height: 44px; }
+  .work-overlay .work-overlay-toggle { width: 44px; height: 44px; }
 }
 .work-overlay-result {
   flex: none;

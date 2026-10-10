@@ -4,7 +4,7 @@ import { DEFAULT_NOTIFY_SETTINGS } from "@localdot/protocol";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import type { DeviceEnv } from "../notify/this-device.ts";
+import { type DeviceEnv, deviceIdOf } from "../notify/this-device.ts";
 import { notifyDaemonFixture } from "./testing.ts";
 import { useNotifications } from "./useNotifications.ts";
 
@@ -107,4 +107,72 @@ describe("useNotifications", () => {
     await waitFor(() => expect(result.current.settings).toEqual(DEFAULT_NOTIFY_SETTINGS));
     expect(result.current.failed).toBe(false);
   });
+});
+
+it("tests the Windows device instead of claiming a host Mac notification reached it", async () => {
+  const endpoint = "https://wns.notify.windows.com/test";
+  const id = await deviceIdOf(endpoint, thisMac.subtle);
+  let subscribed = false;
+  let sent = false;
+  let tests = 0;
+  const env: DeviceEnv = {
+    ...thisMac,
+    hostname: "host.ts.net",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0)",
+    notification: { permission: () => "granted", request: async () => "granted" },
+    serviceWorker: {
+      getRegistration: async () => ({
+        pushManager: { getSubscription: async () => (subscribed ? { endpoint } : null) },
+      }),
+    } as unknown as DeviceEnv["serviceWorker"],
+  };
+  const base = notifyDaemonFixture();
+  const api = {
+    ...base.api,
+    get: async <T,>(path: string): Promise<T> =>
+      path === "/api/notify/subscriptions"
+        ? ({
+            devices: subscribed
+              ? [
+                  {
+                    id,
+                    label: "Windows PC",
+                    service: "Microsoft",
+                    createdAt: "2026-10-08T09:00:00Z",
+                    lastSentAt: null,
+                    lastResult: null,
+                  },
+                ]
+              : [],
+          } as T)
+        : base.api.get<T>(path),
+    post: async <T,>(path: string): Promise<T> => {
+      if (path === "/api/notify/test") {
+        tests++;
+        return {
+          mac: "shown",
+          phones: sent ? [{ id, label: "Windows PC", result: "sent" }] : [],
+        } as T;
+      }
+      return base.api.post<T>(path);
+    },
+  };
+  const { result } = renderHook(() => useNotifications(api, true, { env }));
+  await waitFor(() => expect(result.current.device?.kind).toBe("off"));
+  expect(result.current.name).toBe("This Windows PC");
+  act(() => result.current.test());
+  await waitFor(() => expect(result.current.result?.line).toContain("Turn on notifications"));
+  expect(tests).toBe(0);
+  subscribed = true;
+  act(() => result.current.retry());
+  await waitFor(() => expect(result.current.device?.kind).toBe("on"));
+  act(() => result.current.test());
+  await waitFor(() => expect(result.current.result?.line).toContain("couldn't reach this device"));
+  expect(result.current.result?.failed).toBe(true);
+  sent = true;
+  act(() => result.current.test());
+  await waitFor(() =>
+    expect(result.current.result?.line).toContain("Test sent to this Windows PC"),
+  );
+  expect(result.current.result?.failed).toBe(false);
 });

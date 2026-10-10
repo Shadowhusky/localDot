@@ -71,11 +71,27 @@ export function workTranscript(model: Pick<AgentModel, "steps" | "changes">) {
   return { entries, background: !!all.at(-1) && backgroundStep(all.at(-1) as AgentStep) };
 }
 
-const showListeners = new Set<() => void>();
-export function requestShowCommands() {
-  for (const listener of showListeners) listener();
+const showListeners = new Set<(hidden: boolean) => void>();
+const visibilityListeners = new Set<() => void>();
+export function onCommandsVisibility(listener: () => void) {
+  visibilityListeners.add(listener);
+  return () => {
+    visibilityListeners.delete(listener);
+  };
 }
-export function onShowCommands(listener: () => void) {
+export function commandsHidden() {
+  return readWorkLayout().hidden;
+}
+export function notifyCommandsVisibility() {
+  for (const listener of visibilityListeners) listener();
+}
+export function requestHideCommands() {
+  for (const listener of showListeners) listener(true);
+}
+export function requestShowCommands() {
+  for (const listener of showListeners) listener(false);
+}
+export function onShowCommands(listener: (hidden: boolean) => void) {
   showListeners.add(listener);
   return () => {
     showListeners.delete(listener);

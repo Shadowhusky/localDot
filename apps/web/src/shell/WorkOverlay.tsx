@@ -3,7 +3,9 @@ import type { AgentModel } from "../agent/model.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import {
+  notifyCommandsVisibility,
   onShowCommands,
   readWorkLayout,
   WORK_LAYOUT_KEY,
@@ -42,17 +44,19 @@ export function WorkOverlay({
     setLayout(value);
     try {
       localStorage.setItem(WORK_LAYOUT_KEY, JSON.stringify(value));
+      notifyCommandsVisibility();
     } catch {}
   };
   useLayoutEffect(
     () =>
-      onShowCommands(() => {
+      onShowCommands((hidden) => {
         setPeek(true);
-        const value = { ...latest.current, hidden: false, minimized: false };
+        const value = { ...latest.current, hidden, minimized: false };
         latest.current = value;
         setLayout(value);
         try {
           localStorage.setItem(WORK_LAYOUT_KEY, JSON.stringify(value));
+          notifyCommandsVisibility();
         } catch {}
       }),
     [],
@@ -207,29 +211,24 @@ export function WorkOverlay({
                 {working && transcript.background ? "Live" : "Recent"}
               </span>
             </Button>
-            <Button
-              variant="quiet"
-              size="sm"
+            <IconButton
+              size={28}
               className="work-overlay-toggle"
-              aria-label={compact ? "Expand command window" : "Minimize command window"}
+              label={compact ? "Expand command window" : "Minimize command window"}
+              icon={compact ? "chevron-up" : "minus"}
               aria-expanded={!compact}
               onClick={() => {
                 setPeek(compact);
                 save({ ...layout, minimized: !compact });
               }}
-            >
-              <Icon name={compact ? "chevron-up" : "minus"} size={18} />
-            </Button>
-            <Button
-              variant="quiet"
-              size="sm"
+            />
+            <IconButton
+              size={28}
               className="work-overlay-toggle"
-              aria-label="Hide commands"
-              title="Hide commands"
+              label="Hide commands"
+              icon="x"
               onClick={() => save({ ...layout, hidden: true })}
-            >
-              <Icon name="x" size={16} />
-            </Button>
+            />
           </div>
           {!compact && (
             <section

@@ -1709,6 +1709,16 @@ function Theatre({ api }: { api: ApiClient }) {
           !replayId && (
             <PanelMenu
               buttonRef={panelsButton}
+              commandsUnavailable={
+                curtain.up ||
+                viewedConversation ||
+                switching ||
+                !stageHud.live ||
+                !session.sessionId ||
+                ![...agent.model.steps.values()].some(backgroundStep)
+                  ? "No commands available for this computer yet"
+                  : undefined
+              }
               chat={chatVisible}
               activity={activityVisible || (chatVisible && shownView === "activity")}
               onChat={() =>

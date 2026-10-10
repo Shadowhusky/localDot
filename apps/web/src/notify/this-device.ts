@@ -97,7 +97,8 @@ function base64urlBytes(value: string): Uint8Array<ArrayBuffer> {
 }
 
 function precheck(env: DeviceEnv): DeviceState | null {
-  if (LOOPBACK.has(env.hostname)) return { kind: "this-mac" };
+  if (LOOPBACK.has(env.hostname) && deviceLabel(env.userAgent, env.maxTouchPoints) === "Mac")
+    return { kind: "this-mac" };
   if (!env.isSecureContext) return { kind: "needs-https" };
   if (isAppleTouch(env) && !env.standalone) return { kind: "needs-home-screen" };
   if (!env.serviceWorker || !env.pushSupported || !env.notification) return { kind: "unsupported" };

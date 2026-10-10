@@ -1,7 +1,14 @@
-import { type RefObject, useRef, useState } from "react";
+import { type RefObject, useRef, useState, useSyncExternalStore } from "react";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
+
+import {
+  commandsHidden,
+  onCommandsVisibility,
+  requestHideCommands,
+  requestShowCommands,
+} from "./work-overlay.ts";
 
 export function PanelMenu({
   buttonRef,
@@ -9,13 +16,16 @@ export function PanelMenu({
   activity,
   onChat,
   onActivity,
+  commandsUnavailable,
 }: {
   buttonRef?: RefObject<HTMLButtonElement | null>;
+  commandsUnavailable?: string;
   chat: boolean;
   activity: boolean;
   onChat(): void;
   onActivity(): void;
 }) {
+  const hidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
   const [open, setOpen] = useState(false);
   const ownAnchor = useRef<HTMLButtonElement>(null);
   const anchor = buttonRef ?? ownAnchor;
@@ -35,6 +45,13 @@ export function PanelMenu({
         </MenuItem>
         <MenuItem icon={activity ? "eye-off" : "eye"} onSelect={onActivity}>
           {activity ? "Hide activity" : "Show activity"}
+        </MenuItem>
+        <MenuItem
+          icon="terminal"
+          disabledReason={commandsUnavailable}
+          onSelect={hidden ? requestShowCommands : requestHideCommands}
+        >
+          {hidden ? "Show commands" : "Hide commands"}
         </MenuItem>
       </Menu>
     </>

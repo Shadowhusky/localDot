@@ -82,7 +82,14 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
     await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "Show commands", exact: true }).click();
   } else {
-    await page.getByRole("button", { name: "Show commands" }).click();
+    await page.getByRole("button", { name: "Panels", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Show commands", exact: true }).click();
+    await expect(overlay).toBeVisible();
+    await page.getByRole("button", { name: "Panels", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Hide commands", exact: true }).click();
+    await expect(overlay).toBeHidden();
+    await page.getByRole("button", { name: "Panels", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Show commands", exact: true }).click();
   }
   await assertFits();
   await page.getByRole("button", { name: "Minimize command window" }).click();

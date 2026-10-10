@@ -92,7 +92,12 @@ function api(): NotifyApi & { added: unknown[] } {
 
 describe("this device", () => {
   it("explains what each browser needs before it can turn on", async () => {
-    expect(await deviceState([], env({ hostname: "127.0.0.1" }))).toEqual({ kind: "this-mac" });
+    expect(
+      await deviceState(
+        [],
+        env({ hostname: "127.0.0.1", userAgent: "Mozilla/5.0 (Macintosh)", maxTouchPoints: 0 }),
+      ),
+    ).toEqual({ kind: "this-mac" });
     expect(await deviceState([], env({ isSecureContext: false }))).toEqual({ kind: "needs-https" });
     expect(await deviceState([], env({ standalone: false }))).toEqual({
       kind: "needs-home-screen",
@@ -100,6 +105,16 @@ describe("this device", () => {
     expect(await deviceState([], env({ pushSupported: false }))).toEqual({ kind: "unsupported" });
     expect(await deviceState([], env({}, "denied"))).toEqual({ kind: "blocked" });
     expect(await deviceState([], env())).toEqual({ kind: "off" });
+    expect(
+      await deviceState(
+        [],
+        env({
+          hostname: "localhost",
+          userAgent: "Mozilla/5.0 (Windows NT 10.0)",
+          maxTouchPoints: 0,
+        }),
+      ),
+    ).toEqual({ kind: "off" });
   });
 
   it("asks permission first, subscribes with the Mac's key and registers the device", async () => {

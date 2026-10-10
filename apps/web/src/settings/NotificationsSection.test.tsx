@@ -116,7 +116,7 @@ describe("Settings › Notifications", () => {
   it("calls a Linux desktop this computer and leaves out the Mac's hint", async () => {
     setup(thisMac, undefined, "desktop");
     expect(await screen.findByRole("switch", { name: "Done on this computer" })).toBeTruthy();
-    expect(screen.getByText("This computer")).toBeTruthy();
+    expect(screen.getByText("This Mac")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("Sent to this computer.")).toBeTruthy();
   });
@@ -130,4 +130,24 @@ describe("Settings › Notifications", () => {
     setup(thisMac, undefined, "none");
     expect(await screen.findByText("Notifications show here while this tab is open.")).toBeTruthy();
   });
+});
+
+it("names the Windows client and explains why a test cannot send while notifications are off", async () => {
+  const d = setup({
+    ...thisMac,
+    userAgent: "Mozilla/5.0 (Windows NT 10.0)",
+    hostname: "localhost",
+    notification: { permission: () => "default", request: async () => "granted" },
+    serviceWorker: {
+      getRegistration: async () => undefined,
+    } as unknown as DeviceEnv["serviceWorker"],
+  });
+  expect(await screen.findByText("This Windows PC")).toBeTruthy();
+  expect(screen.getByText("Check notifications on this Windows PC.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(await screen.findByRole("status")).toHaveProperty(
+    "textContent",
+    "Turn on notifications for this device above, then send a test.",
+  );
+  expect(d.calls.some((call) => String(call).includes("/api/notify/test"))).toBe(false);
 });

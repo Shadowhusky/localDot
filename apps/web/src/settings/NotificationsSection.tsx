@@ -116,16 +116,19 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
           leading={<IconTile icon="check-circle" />}
           label="Send a test"
           detail={
-            view.result ? (
+            view.busy === "test" ? (
+              "Sending a test…"
+            ) : view.result ? (
               <span
                 className="settings-notify-result"
+                role="status"
                 data-failed={view.result.failed || undefined}
               >
                 {view.result.failed && <Icon name="circle-alert" size={12} />}
                 {view.result.line}
               </span>
             ) : (
-              "Check that notifications reach you."
+              `Check notifications on ${view.name.replace(/^This /, "this ")}.`
             )
           }
           trailing={

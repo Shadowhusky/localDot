@@ -19,7 +19,7 @@ import {
 import { announce } from "../ui/Announcer.tsx";
 import { showToast } from "../ui/Toast.tsx";
 import type { ToastOptions } from "../ui/toasts.ts";
-import { errorLine, testResultLine } from "./notifications-copy.ts";
+import { deviceCopy, errorLine, testResultLine } from "./notifications-copy.ts";
 
 export interface NotificationsView {
   settings: NotifySettings | null;
@@ -56,7 +56,6 @@ export interface NotificationsOptions {
   toast?(options: ToastOptions): void;
 }
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const ANNOUNCE = "notifications";
 
 // Settings › Notifications, read afresh each time Settings opens. Every change saves at once; a
@@ -147,13 +146,7 @@ export function useNotifications(
     failed,
     devices,
     device,
-    name: LOOPBACK.has(env().hostname)
-      ? banner === "mac"
-        ? "This Mac"
-        : "This computer"
-      : label === "This device"
-        ? label
-        : `This ${label}`,
+    name: label === "This device" ? "This computer" : `This ${label}`,
     tab,
     busy,
     removing,
@@ -198,9 +191,34 @@ export function useNotifications(
       run("test", async () => {
         setResult(null);
         try {
-          const line = testResultLine(await notify.test(), banner);
-          setResult({ line, failed: false });
+          const local = device?.kind === "this-mac";
+          if (!local && device?.kind !== "on") {
+            const line =
+              device?.kind === "off"
+                ? "Turn on notifications for this device above, then send a test."
+                : device
+                  ? deviceCopy(device, banner).line
+                  : "Wait for this device to finish loading, then try again.";
+            setResult({ line, failed: true });
+            announce(ANNOUNCE, line);
+            return;
+          }
+          const reply = await notify.test();
+          const delivered =
+            device?.kind === "on"
+              ? reply.phones.find((entry) => entry.id === device.id)
+              : undefined;
+          const failed = local ? reply.mac !== "shown" : delivered?.result !== "sent";
+          const line = local
+            ? testResultLine(reply, banner)
+            : delivered?.result === "sent"
+              ? `Test sent to this ${label === "This device" ? "device" : label}. If no banner appears, check browser notifications and Do Not Disturb on this device.`
+              : delivered?.result === "gone"
+                ? "This device's notification registration expired. Turn notifications on again, then retry."
+                : "The test couldn't reach this device. Check its connection and turn notifications on again.";
+          setResult({ line, failed });
           announce(ANNOUNCE, line);
+          if (delivered?.result === "gone") await refresh();
         } catch (failure) {
           const line = errorLine(failure);
           setResult({ line, failed: true });
