@@ -49,10 +49,14 @@ function holdExports(page: Page, finish: boolean) {
   }, finish);
 }
 
+// Replay plays on a stage of its own; Watch's stays mounted under it.
+const replayStage = (page: Page) => page.getByRole("main", { name: "Replay" }).locator(".stage");
+
 async function openExport(page: Page, ui: Harness) {
   await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}&t=16000`);
-  await expect(page.getByRole("status", { name: "Replay time" })).toHaveText("0:16 / 3:00");
-  await ui.picture(page.locator(".replay-stage"));
+  await expect(page.getByRole("status", { name: "Replay time" })).toHaveText("0:16");
+  await expect(page.locator(".replay-length")).toHaveText("3:00");
+  await ui.picture(replayStage(page));
   await page.getByRole("button", { name: "Export video" }).click();
   const panel = page.getByRole("dialog", { name: "Export video" });
   await expect(panel).toBeVisible();
@@ -110,7 +114,7 @@ test("export, saved", async ({ page, ui }) => {
 test("export, unsupported", async ({ page, ui }) => {
   await page.addInitScript(() => Object.assign(window, { VideoEncoder: undefined }));
   await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}&t=16000`);
-  await ui.picture(page.locator(".replay-stage"));
+  await ui.picture(replayStage(page));
   const trigger = page.getByRole("button", { name: "Export video" });
   const reason = "Export needs Chrome, Edge or Safari 17 or later";
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
@@ -128,7 +132,7 @@ test.describe("in WebKit", () => {
 
   test("Export saves through a download, or says why it cannot", async ({ page, ui }) => {
     await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}&t=16000`);
-    await ui.picture(page.locator(".replay-stage"));
+    await ui.picture(replayStage(page));
     const trigger = page.getByRole("button", { name: "Export video" });
     if ((await trigger.getAttribute("aria-disabled")) === "true") {
       await expect(trigger).toHaveAccessibleDescription(/\S/);

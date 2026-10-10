@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
-import { choose, nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { choose, nestedKeys, openSettings, roleCard, search } from "./settings-ui.ts";
 import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
@@ -68,8 +68,7 @@ for (const run of runs) {
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
       await skipSetup(page);
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-      await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = settingsSheet(page);
+      const sheet = await openSettings(page, press, "Models");
       await expect(
         roleCard(sheet, "main").getByRole("combobox", { name: "Provider", exact: true }),
       ).toBeEnabled();
@@ -124,32 +123,35 @@ for (const run of runs) {
       await keys.getByLabel("Key", { exact: true }).fill("fixture-token-plan-value");
       await press(keys.getByRole("button", { name: "Save key" }));
       await expect(keys.getByText("Saved token-plan.")).toBeVisible();
-      await press(keys.getByRole("button", { name: "Settings", exact: true }));
-      await expect(keys).toHaveCount(0);
+      // Keys is a section of Settings: on a phone a page pushed over Models, which Back returns to.
+      if (run.phone) {
+        await press(sheet.getByRole("button", { name: "Models", exact: true }));
+        await expect(keys).toHaveCount(0);
+      }
       await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(
         "token-plan",
       );
 
       // A plan uses its own limits: no per-token price, and no dollar limit.
-      await expect(main.getByText("Uses your plan's limits.", { exact: true })).toBeVisible();
+      // The role's notes sit under its rows as one paragraph.
+      await expect(main.getByText("Uses your plan's limits.")).toBeVisible();
       await expect(
         main.getByText("Use a key from this plan, not a pay-as-you-go key."),
       ).toBeVisible();
+      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
+      // Settings saves itself once the model is complete.
+      await expect
+        .poll(async () => (await savedSettings()).main)
+        .toEqual({ provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" });
+      if (run.phone) {
+        await press(sheet.getByRole("button", { name: "Settings", exact: true }));
+        await press(sheet.getByRole("button", { name: /^Spending/ }));
+      }
       await expect(
         sheet
           .getByRole("region", { name: "Spending" })
           .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
-      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
-      const save = sheet.getByRole("button", { name: "Save", exact: true });
-      await expect(save).toBeEnabled();
-      await press(save);
-      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
-      expect((await savedSettings()).main).toEqual({
-        provider: "minimax-coding-plan",
-        model: "MiniMax-M3",
-        key: "token-plan",
-      });
     });
 
     test("says why the GLM Coding Plan is not available, and never saves it", async () => {
@@ -175,7 +177,7 @@ for (const run of runs) {
       );
       await press(refused.first());
       await expect(provider).toHaveText("GLM Coding Plan");
-      const reason = sheet.getByText(GLM_PLAN, { exact: true });
+      const reason = sheet.getByText(GLM_PLAN);
       await expect(reason).toBeVisible();
       await expect(provider).toHaveAttribute(
         "aria-describedby",
@@ -184,10 +186,11 @@ for (const run of runs) {
       await expect(main.getByRole("combobox", { name: "Model" })).toHaveCount(0);
       await expect(main.getByRole("combobox", { name: "Key" })).toHaveCount(0);
       await expect(main.getByRole("button", { name: "Add key" })).toHaveCount(0);
-      await expect(sheet.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
       await expect(sheet.locator(".settings-problems")).toContainText(
         "Main: choose a provider that is available here.",
       );
+      // Well past the half second a change waits before it saves itself, nothing was sent.
+      await page.waitForTimeout(1000);
       expect(puts).toEqual([]);
 
       const forced = await fetch(`${fixture.origin}/api/agent/settings`, {

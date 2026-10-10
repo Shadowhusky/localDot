@@ -5,6 +5,7 @@ import { expect, type Page, test } from "@playwright/test";
 import type { ExportProbeOptions, ExportProbeResult } from "../src/export/export-probe.ts";
 import type { RunningDaemon } from "./daemon.ts";
 import { type SeededHome, seedHome, startReplayDaemon } from "./seed.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 const MARKER = `p7-privacy-marker-${Date.now().toString(36)}`;
 // These check the page's own exporter, so the daemon is given no browser to make videos with.
@@ -68,6 +69,8 @@ async function fileScan(page: Page, needles: string[]) {
   }, needles);
 }
 
+// The real daemon starts with no model; what is under first-run setup is what these check.
+test.beforeEach(({ page }) => skipSetup(page));
 test("export smoke produces a playable MP4", async ({ page }) => {
   await openForExport(page, privacy.seed.sessionId);
   const result = await runExport(page, {

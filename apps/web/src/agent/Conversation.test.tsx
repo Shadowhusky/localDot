@@ -284,6 +284,32 @@ describe("the conversation thread", () => {
     scrolled(400, 1000, 200, 650);
     expect(jump().hasAttribute("data-shown")).toBe(true);
   });
+
+  it("keeps the room a sent message left while you press in the thread", () => {
+    function Sent() {
+      const outbox = useContext(Outbox);
+      return (
+        <button type="button" onClick={() => outbox?.keep()}>
+          Sent
+        </button>
+      );
+    }
+    // A pinned toolbar keeps the composer in the foot whatever the column's height.
+    render(
+      <Conversation items={items([message("one")])} truncated={false} composer={<Sent />} pinned />,
+    );
+    const foot = document.querySelector(".thread-foot") as HTMLElement;
+    Object.defineProperty(foot, "offsetHeight", { configurable: true, value: 145 });
+    fireEvent.click(screen.getByRole("button", { name: "Sent" }));
+    expect(foot.style.minHeight).toBe("145px");
+    // Giving it back here would drop the rows under the finger, and a tap would miss its target.
+    const scroller = history().closest(".thread-scroll") as HTMLElement;
+    fireEvent.pointerDown(scroller);
+    fireEvent.touchStart(scroller);
+    fireEvent.wheel(scroller);
+    fireEvent.keyDown(scroller);
+    expect(foot.style.minHeight).toBe("145px");
+  });
 });
 
 it("mounts a bounded window of 10,000 messages and keeps the reader's rows through a live addition", () => {

@@ -75,3 +75,19 @@ it("names a recording with no video once its card has gone", () => {
   rerender(<ReplayControls api={api} replay={replay()} noVideo />);
   expect(screen.getByText("No video")).toBeTruthy();
 });
+
+it("keeps the no-video chip's room while the card says so, so the bar never moves", () => {
+  const { rerender } = render(<ReplayControls api={api} replay={replay()} noVideo cardShown />);
+  const chip = screen.getByText("No video").closest(".replay-no-video");
+  expect(chip?.hasAttribute("data-held")).toBe(true);
+  rerender(<ReplayControls api={api} replay={replay()} noVideo />);
+  expect(screen.getByText("No video").closest(".replay-no-video")).toBe(chip);
+  expect(chip?.hasAttribute("data-held")).toBe(false);
+});
+
+it("names a recording with no video on a phone too", () => {
+  render(<ReplayControls api={api} replay={replay()} compact noVideo />);
+  expect(screen.getByRole("group", { name: "Playback controls" }).textContent).toContain(
+    "No video",
+  );
+});

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { LocalDotEvent } from "@localdot/protocol";
 import { expect, type Page, test } from "@playwright/test";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { fits, isPhone } from "./layout.ts";
 
 // Layout acceptance uses the built production page and its unchanged CSP. Only the API/stream
 // data are samples; no daemon, desktop, provider, keyd, account or shared browser is started.
@@ -159,7 +160,8 @@ async function load(page: Page, activeComposer = false) {
     if (url.pathname === `/api/cells/${CELL}/status`) ws.send(JSON.stringify(shownCell));
     else if (url.pathname === `/api/sessions/${SESSION}/stream`)
       for (const sample of samples) ws.send(sample);
-    else throw new Error("unexpected layout socket");
+    // The app-wide events socket (routines, attention) stays open and quiet.
+    else if (url.pathname !== "/api/events") throw new Error("unexpected layout socket");
   });
   await page.addInitScript(() => {
     localStorage.setItem("localdot.token", "a".repeat(43));
@@ -188,34 +190,33 @@ async function load(page: Page, activeComposer = false) {
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("sample sales table");
-  await expect(page.locator(".plan-strip-count").first()).toHaveText("3 of 3");
-  // The visible sample title also prevents these screenshots implying real application execution.
-  await expect(page.locator(".title")).toHaveText("Sample · monthly report");
+  // A phone has no top bar and keeps the plan in its Activity sheet; elsewhere the visible sample
+  // title also prevents these screenshots implying real application execution.
+  if (!isPhone(page)) {
+    await expect(page.locator(".plan-strip-count").first()).toHaveText("3 of 3");
+    await expect(page.locator(".bar-title")).toHaveText("Sample · monthly report");
+  }
   return { errors, external, sockets };
 }
-async function fits(page: Page) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const box = await page.locator(".app").boundingBox();
-  expect(box?.height).toBe(await page.evaluate(() => innerHeight));
-  const stop = page.getByRole("button", { name: "Stop computer", exact: true });
-  await expect(stop).toBeVisible();
-  const touch = await stop.boundingBox();
-  expect(touch?.height).toBeGreaterThanOrEqual(44);
-  expect(touch?.width).toBeGreaterThanOrEqual(44);
-  expect((touch?.y ?? Infinity) + (touch?.height ?? Infinity)).toBeLessThanOrEqual(
-    await page.evaluate(() => innerHeight),
-  );
-}
-test("desktop, phone, tablet, keyboard and 200 percent zoom retain mounted pane owners", async ({
+// Whether the thread is out of reach behind another view of the rail.
+const threadInert = (page: Page) =>
+  page
+    .getByRole("region", { name: "Conversation history", includeHidden: true })
+    .evaluate((element) => element.closest("[inert]") !== null);
+test("desktop, tablet, phone, keyboard and 200 percent zoom keep the stage, rail and stream mounted", async ({
   page,
 }, info) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   const proof = await load(page);
   await fits(page);
-  for (const pane of ["Conversation", "Computer", "Activity"])
-    await expect(page.getByRole("tabpanel", { name: pane })).toBeVisible();
-  await expect(page.getByRole("tablist")).toBeHidden();
+  const stage = page.getByRole("main", { name: "Computer" });
+  const rail = page.getByRole("complementary", { name: "Conversation" });
+  const thread = rail.getByRole("region", { name: "Conversation history" });
+  const views = rail.getByRole("radiogroup", { name: "Show" });
+  await expect(stage).toBeVisible();
+  await expect(thread).toBeVisible();
+  await expect(page.getByRole("tablist")).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("desktop-sample.png") });
   const workers = await page.evaluate(
     () => (window as unknown as { layoutWorkers: unknown }).layoutWorkers,
@@ -224,32 +225,45 @@ test("desktop, phone, tablet, keyboard and 200 percent zoom retain mounted pane 
   const sockets = [...proof.sockets];
   for (const width of [768, 390, 320]) {
     await page.setViewportSize({ width, height: 844 });
-    await expect(page.getByRole("tablist")).toBeVisible();
-    for (const pane of ["Conversation", "Activity", "Computer"]) {
-      await page.getByRole("tab", { name: pane, exact: true }).click();
-      await expect(page.getByRole("tabpanel", { name: pane })).toBeVisible();
+    await expect(stage).toBeVisible();
+    await expect(thread).toBeVisible();
+    await fits(page);
+    if (width >= 700) {
+      // The rail switches its views over the one thread, which is out of reach while covered.
+      for (const view of ["Activity", "Chat"]) {
+        const radio = views.getByRole("radio", { name: view, exact: true });
+        await radio.click();
+        await expect(radio).toHaveAttribute("aria-checked", "true");
+        await fits(page);
+        expect(await threadInert(page)).toBe(view !== "Chat");
+      }
+      await expect(page.getByRole("complementary", { name: "Plan and steps" })).toBeAttached();
+    } else {
+      // A phone has no views to switch: Activity is a sheet over the thread.
+      await expect(views).toHaveCount(0);
+      await page.getByRole("button", { name: "Activity", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: "Activity" });
+      await sheet.getByRole("button", { name: /^Plan/ }).click();
+      await expect(sheet.getByRole("list", { name: "Task plan" })).toContainText(
+        "Calculate monthly totals",
+      );
+      await sheet.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(sheet).toBeHidden();
       await fits(page);
-      expect(
-        await page
-          .locator(".pane:not([data-selected='true'])")
-          .evaluateAll((panes) => panes.every((pane) => pane.hasAttribute("inert"))),
-      ).toBe(true);
     }
-    if (width === 390) {
-      await page.getByRole("tab", { name: "Conversation", exact: true }).click();
-      await page.screenshot({ path: info.outputPath("phone-sample.png") });
-    }
+    if (width === 390) await page.screenshot({ path: info.outputPath("phone-sample.png") });
   }
-  const tab = page.getByRole("tab", { name: "Computer", exact: true });
-  await tab.focus();
-  await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("tab", { name: "Activity" })).toBeFocused();
-  await page.keyboard.press("Home");
-  await expect(page.getByRole("tab", { name: "Conversation" })).toBeFocused();
-  await page.getByRole("region", { name: "Conversation history" }).focus();
   await page.setViewportSize({ width: 1280, height: 800 });
+  const chat = views.getByRole("radio", { name: "Chat", exact: true });
+  await chat.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(views.getByRole("radio", { name: "Activity", exact: true })).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(chat).toBeFocused();
+  await expect(chat).toHaveAttribute("aria-checked", "true");
+  await thread.focus();
   await page.setViewportSize({ width: 390, height: 316 });
-  await expect(page.getByRole("tabpanel", { name: "Conversation" })).toBeVisible();
+  await expect(thread).toBeVisible();
   await fits(page);
   // Emulate 200% zoom with half the CSS viewport and a doubled view scale.
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -261,7 +275,7 @@ test("desktop, phone, tablet, keyboard and 200 percent zoom retain mounted pane 
     mobile: false,
     scale: 2,
   });
-  await expect(page.getByRole("tablist")).toBeVisible();
+  await expect(thread).toBeVisible();
   await fits(page);
   await cdp.send("Emulation.clearDeviceMetricsOverride");
   expect(
@@ -274,7 +288,7 @@ test("desktop, phone, tablet, keyboard and 200 percent zoom retain mounted pane 
     await page.evaluate(() => (window as unknown as { layoutCsp: unknown }).layoutCsp),
   ).toEqual([]);
 });
-test("Keys keeps keyboard focus, an accessible Stop and reduced-preference rendering", async ({
+test("Keys keeps keyboard focus, an accessible Shut down and reduced-preference rendering", async ({
   page,
 }, info) => {
   test.setTimeout(60_000);
@@ -293,30 +307,32 @@ test("Keys keeps keyboard focus, an accessible Stop and reduced-preference rende
       .evaluate((element) => getComputedStyle(element).transitionDuration),
   ).toBe("0s");
   expect(
-    await page.locator(".hud").evaluate((element) => getComputedStyle(element).backdropFilter),
+    await page
+      .locator(".island-plate")
+      .evaluate((element) => getComputedStyle(element).backdropFilter),
   ).toBe("none");
-  const keys = page.getByTestId("keys-button");
-  await keys.click();
-  const dialog = page.getByRole("dialog", { name: "Keys" });
-  await expect(dialog).toBeVisible();
+  // A phone has no top bar: Keys is in More, and opens Settings at its Keys page.
+  const more = page.getByRole("button", { name: "More", exact: true });
+  await more.click();
+  await page.getByRole("menuitem", { name: "Keys", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Keys", exact: true });
+  await expect(dialog.locator("#settings-sheet-body[data-page='keys']")).toBeVisible();
   await expect(dialog).toHaveAttribute("aria-modal", "true");
-  await page.getByTestId("keys-button").evaluate((element) => element.focus());
+  await more.evaluate((element) => element.focus());
   expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
-  // A kit button: 32 px under a mouse, with a hit area 6 px past each edge; 44 px under touch.
-  const stop = dialog.getByRole("button", { name: "Stop computer", exact: true });
-  expect((await stop.boundingBox())?.height).toBeGreaterThanOrEqual(32);
   for (let index = 0; index < 20; index++) {
     await page.keyboard.press("Tab");
     expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   }
-  const before = requests.length;
-  await stop.click();
-  await expect.poll(() => requests.length).toBe(before + 1);
-  expect(requests.at(-1)).toBe(`/api/cells/${CELL}/stop`);
   await page.screenshot({ path: info.outputPath("keys-phone-sample.png") });
   await page.keyboard.press("Escape");
-  await expect(keys).toBeFocused();
   await expect(dialog).toBeHidden();
+  await expect(more).toBeFocused();
+  await fits(page);
+  const before = requests.length;
+  await page.locator(".island").getByRole("button", { name: "Shut down", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(before + 1);
+  expect(requests.at(-1)).toBe(`/api/cells/${CELL}/stop`);
   expect(proof.external).toEqual([]);
   expect(proof.errors).toEqual([]);
   expect(
@@ -336,7 +352,6 @@ test("composer submits once and moves a recognised key without a task request", 
     await accepted.promise;
     await route.fulfill({ status: 202, body: "" });
   });
-  await page.getByRole("tab", { name: "Conversation" }).click();
   const draft = page.getByLabel("Message", { exact: true });
   await draft.fill("请继续 the sample report");
   await expect(page.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
@@ -359,20 +374,25 @@ test("composer submits once and moves a recognised key without a task request", 
   await expect(draft).toHaveValue("before  after");
   await expect(page.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
   await page.getByRole("button", { name: "Move to Keys" }).click();
-  const keys = page.getByRole("dialog", { name: "Keys" });
+  const keys = page.getByRole("dialog", { name: "Keys", exact: true });
   await expect(keys).toBeVisible();
   await expect(keys.getByLabel("Key", { exact: true })).toHaveValue(key);
   await expect(keys.getByRole("combobox", { name: "Provider", exact: true })).toHaveText("OpenAI");
   await page.keyboard.press("Escape");
   await keys.getByRole("button", { name: "Discard" }).click();
   await expect(draft).toHaveValue("before  after");
-  await page.getByTestId("keys-button").click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Keys", exact: true }).click();
   await expect(keys.getByLabel("Key", { exact: true })).toHaveValue("");
   await page.keyboard.press("Escape");
   expect(bodies).toHaveLength(1);
   expect(JSON.stringify(bodies)).not.toContain(key);
   expect(await page.evaluate(() => document.body.innerHTML)).not.toContain(key);
-  expect(proof.sockets).toEqual([`/api/cells/${CELL}/status`, `/api/sessions/${SESSION}/stream`]);
+  expect(proof.sockets).toEqual([
+    "/api/events",
+    `/api/cells/${CELL}/status`,
+    `/api/sessions/${SESSION}/stream`,
+  ]);
   expect(
     await page.evaluate(() => (window as unknown as { layoutWorkers: unknown }).layoutWorkers),
   ).toEqual({ created: 1, retired: 0 });

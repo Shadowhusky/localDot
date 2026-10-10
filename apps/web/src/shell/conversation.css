@@ -1253,9 +1253,13 @@
 
 /* Under the thread: the live work line and the composer. */
 /* The scroller's bar keeps a gutter; the foot keeps the same, so their right edges line up. */
+/* Room kept above the dock (see Conversation's keep) sits between the thread and the dock. */
 .thread-foot {
   --thread-gutter: 0px;
+  display: flex;
   flex: none;
+  flex-direction: column;
+  justify-content: flex-end;
   min-width: 0;
   padding-right: var(--thread-gutter);
 }

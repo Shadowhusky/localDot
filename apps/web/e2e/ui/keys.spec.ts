@@ -1,19 +1,27 @@
 import type { Locator, Page } from "@playwright/test";
+import { nestedKeys } from "../settings-ui.ts";
 import { expect, type Harness, runAt, test } from "./harness.ts";
 
-// The Keys sheet beside the page at 1440, and as a sheet over it on a phone.
+// Keys, a section of Settings: in the inspector at 1440, and a page of its sheet on a phone.
 runAt("c14", "w39");
 
-// Opens Keys from the top bar; `then` gets the fixture's origin once the sheet shows.
+// Opens Keys from the top bar, or from More on a phone; `then` gets the fixture's origin once the
+// section shows.
 async function keys(page: Page, ui: Harness, then?: (origin: string) => Promise<void>) {
   const fixture = await ui.open("ready");
   await ui.picture();
-  await page.getByTestId("keys-button").click();
-  const sheet = page.getByRole("dialog", { name: "Keys", exact: true });
+  if ((page.viewportSize()?.width ?? 0) < 700) {
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Keys", exact: true }).click();
+  } else await page.getByTestId("keys-button").click();
+  const sheet = nestedKeys(page);
   await expect(sheet.getByText("Key isolation", { exact: true })).toBeVisible();
   await then?.(fixture.origin);
   return sheet;
 }
+
+// The form for a new key opens from its button once there are keys to list.
+const addKey = (sheet: Locator) => sheet.getByRole("button", { name: /^Add (a )?key$/ });
 
 const rows = (sheet: Locator) =>
   sheet.locator(".keys-row").evaluateAll((items) =>
@@ -46,14 +54,12 @@ test("keys, held while the audit log fails", async ({ page, ui }) => {
   await expect(sheet.getByText("Paused — keys held", { exact: true })).toBeVisible({
     timeout: 8000,
   });
-  await expect(sheet.getByRole("button", { name: "Save key" })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  await expect(addKey(sheet)).toHaveAttribute("aria-disabled", "true");
 });
 
 test("keys, a problem shown as the key field takes focus", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
+  await addKey(sheet).click();
   await sheet.getByRole("radio", { name: "Web API" }).click();
   await sheet.getByLabel("Hosts", { exact: true }).fill("https://api.weather.example/v1");
   const key = sheet.getByLabel("Key", { exact: true });
@@ -68,6 +74,7 @@ test("the Web API fields pair up when wide and stack with even gaps on a phone",
   ui,
 }) => {
   const sheet = await keys(page, ui);
+  await addKey(sheet).click();
   await sheet.getByRole("radio", { name: "Web API" }).click();
   // Each field from its label's top to the bottom of what it shows: an empty message line counts
   // as space between fields, which is what must stay even.
@@ -114,6 +121,7 @@ test("arming Remove, and its running out, move nothing in the list", async ({ pa
 
 test("a saved key folds into the list and a removed one folds away", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
+  await addKey(sheet).click();
   await sheet.getByLabel("Key", { exact: true }).fill("sk-ant-api03-fixture-value-for-ui");
   await sheet.getByRole("button", { name: "Save key" }).click();
   await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(

@@ -39,8 +39,7 @@ async function takeControl(page: Page) {
   });
   await page.goto(`${origin}/#token=${TOKEN}`);
   await page.request.post(`${origin}/__qa/takeover`);
-  // dot hands the computer over; it is the user's once they take it.
-  await page.getByRole("button", { name: "Take control" }).click();
+  // dot hands the computer over, and a page that shows it takes it at once.
   await expect(page.getByRole("button", { name: "Hand back" })).toBeEnabled();
   const keys = page.getByLabel("Type on the computer");
   await expect(keys).toBeEnabled();

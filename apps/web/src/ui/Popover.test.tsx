@@ -48,6 +48,38 @@ function open(): HTMLElement {
 }
 
 describe("Popover", () => {
+  it("stays beside its trigger when the page moves the trigger", async () => {
+    vi.useRealTimers();
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Share" });
+    let top = 300;
+    trigger.getBoundingClientRect = () =>
+      ({
+        top,
+        bottom: top + 40,
+        left: 20,
+        right: 120,
+        width: 100,
+        height: 40,
+        x: 20,
+        y: top,
+      }) as DOMRect;
+    const panel = open();
+    const frames = () =>
+      act(
+        () =>
+          new Promise<void>((done) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => done())),
+          ),
+      );
+    await frames();
+    const before = Number.parseFloat(panel.style.top);
+    // Moved up by the page settling around it, its size the same.
+    top = 260;
+    await frames();
+    expect(Number.parseFloat(panel.style.top)).toBe(before - 40);
+  });
+
   it("is named by its title and moves focus to its first control", () => {
     render(<Harness />);
     open();

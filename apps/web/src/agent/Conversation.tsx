@@ -600,10 +600,6 @@ export function Conversation({
     reachChoice.current = reach;
     setChoiceWaits(!!reach);
   }, []);
-  const outbox = useMemo(
-    () => outboxSlot && { slot: outboxSlot, show: showEnd, needs },
-    [outboxSlot, showEnd, needs],
-  );
   const foot = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const jump = useRef<HTMLSpanElement>(null);
@@ -612,6 +608,19 @@ export function Conversation({
     host.className = "thread-dock";
     return host;
   });
+  // A sent message gives back the lines the composer grew by. While the reader follows the end, the
+  // foot keeps that room until the thread grows again, so the message just sent never drops.
+  const following = useRef(follow.pinned);
+  following.current = follow.pinned;
+  const keep = useCallback(() => {
+    const element = foot.current;
+    if (element && following.current && dockHost.parentElement === element)
+      element.style.minHeight = `${element.offsetHeight}px`;
+  }, [dockHost]);
+  const outbox = useMemo(
+    () => outboxSlot && { slot: outboxSlot, show: showEnd, needs, keep },
+    [outboxSlot, showEnd, needs, keep],
+  );
   const footShown = useCallback(() => {
     const column = body.current;
     if (!column || !jump.current) return;
@@ -634,6 +643,7 @@ export function Conversation({
     // Moving an element takes the focus out of it, so the foot moves once the focus has left it.
     if (dockHost.parentElement !== target && !dockHost.contains(document.activeElement))
       target.append(dockHost);
+    if (dockHost.parentElement !== foot.current) foot.current.style.removeProperty("min-height");
     if (scroller.current)
       foot.current.style.setProperty(
         "--thread-gutter",
@@ -674,6 +684,33 @@ export function Conversation({
     if (view && thread)
       setEndSeen(thread.getBoundingClientRect().bottom <= view.getBoundingClientRect().bottom + 1);
   }, []);
+
+  // The room kept for a sent message goes once the thread has grown, a frame after, so the end the
+  // thread follows takes the room back with its new rows.
+  useLayoutEffect(() => {
+    const element = foot.current,
+      thread = history.current;
+    if (!element || !thread || typeof ResizeObserver === "undefined") return;
+    let height = thread.offsetHeight;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      const now = thread.offsetHeight;
+      if (now > height + 1 && element.style.minHeight) {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => element.style.removeProperty("min-height"));
+      }
+      height = now;
+    });
+    observer.observe(thread);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another conversation is the trigger.
+  useLayoutEffect(() => {
+    foot.current?.style.removeProperty("min-height");
+  }, [ownerKey]);
 
   // A recovery card that arrives while the reader follows the end is brought into view whole, title
   // first, even when the composer below it fills the rest of the view.

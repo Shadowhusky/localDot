@@ -1,5 +1,6 @@
 import { type BrowserContextOptions, expect, type Page, test } from "@playwright/test";
 import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixture.ts";
+import { showActivity } from "./layout.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
 // The Activity rail against the fixture daemon's long hand-drawing task: one scroller, the live
@@ -32,40 +33,52 @@ async function open(engine: keyof typeof ENGINES, options: BrowserContextOptions
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1100)
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
-  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  const rail = await showActivity(page);
   await expect(rail.locator("[data-current]")).toHaveCount(1);
   return { browser, page, rail };
 }
 
 const qa = (path: string) => fetch(`${fixture?.origin}/__qa/${path}`, { method: "POST" });
 
-function scrollers(page: Page) {
-  return page.evaluate(() =>
-    [...document.querySelectorAll(".pane-activity *")]
-      .filter((element) => {
-        const { overflowY } = getComputedStyle(element);
-        return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
-      })
-      .map((element) => element.className),
+// Activity's one scroller: its own beside the stage; on a phone the sheet it opens in, whose body
+// scrolls it whole.
+const SCROLLER = {
+  desktop: "ui-scroll-area activity-scroll",
+  phone: "ui-sheet-body",
+} as const;
+const pane = (size: keyof typeof SCROLLER) =>
+  size === "phone" ? "[role=dialog]:has(.activity-sheet)" : "[aria-label='Plan and steps']";
+
+function scrollers(page: Page, size: keyof typeof SCROLLER = "desktop") {
+  return page.evaluate(
+    (scope) =>
+      [...document.querySelectorAll(`${scope} *`)]
+        .filter((element) => {
+          const { overflowY } = getComputedStyle(element);
+          return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
+        })
+        .map((element) => element.className),
+    pane(size),
   );
 }
 
-function inView(page: Page, selector: string) {
-  return page.evaluate((query) => {
-    const row = document.querySelector(query)?.getBoundingClientRect();
-    const pane = document.querySelector(".activity-scroll")?.getBoundingClientRect();
-    return !!row && !!pane && row.top >= pane.top - 1 && row.bottom <= pane.bottom + 1;
-  }, selector);
+function inView(page: Page, selector: string, size: keyof typeof SCROLLER = "desktop") {
+  return page.evaluate(
+    ([query, scroller]) => {
+      const row = document.querySelector(query)?.getBoundingClientRect();
+      const view = document.querySelector(scroller)?.getBoundingClientRect();
+      return !!row && !!view && row.top >= view.top - 1 && row.bottom <= view.bottom + 1;
+    },
+    [selector, `.${SCROLLER[size].split(" ").at(-1)}`] as const,
+  );
 }
 
 for (const [engine, size, options] of MATRIX) {
   test(`a long task opens on its live step, in one scroller, as flat rows (${engine} ${size})`, async () => {
     const { browser, page, rail } = await open(engine, options);
-    await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
+    await expect.poll(() => inView(page, ".activity-row[data-current]", size)).toBe(true);
     await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
-    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
     await expect(rail.locator(".activity-group, .activity-timeline .ui-disclosure")).toHaveCount(0);
     // The plan stays pinned over the steps as one strip: its progress, the item dot is on and the next.
     await expect(rail.locator(".plan-strip-count")).toHaveText("3 of 6");
@@ -99,7 +112,7 @@ for (const [engine, size, options] of MATRIX) {
         const box = await target.boundingBox();
         if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
       }
-    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
     await browser.close();
   });
 }
@@ -222,17 +235,20 @@ for (const [engine, size, options] of [
       });
     });
     await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-    if (size === "phone") await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const rail = page.getByRole("complementary", { name: "Plan and steps" });
-    await expect(rail.getByTestId("download-row")).toHaveCount(10);
+    const rail = await showActivity(page);
     await expect(rail.getByText("Plan and steps appear here once dot starts.")).toBeVisible();
-    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
-    expect(await page.locator(".activity-scroll").evaluate((element) => element.scrollTop)).toBe(0);
+    // Downloads are files: they sit under the Files tab.
+    await rail.getByRole("tab", { name: /^Files/ }).click();
+    await expect(rail.getByTestId("download-row")).toHaveCount(10);
+    await expect(rail.getByTestId("download-row").first()).toBeVisible();
+    await expect.poll(() => scrollers(page, size)).toEqual([SCROLLER[size]]);
+    const scroller = page.locator(`.${SCROLLER[size].split(" ").at(-1)}`);
+    expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
     const refresh = rail.getByRole("button", { name: "Refresh downloads" });
     await refresh.scrollIntoViewIfNeeded();
-    await expect.poll(() => inView(page, ".download-actions")).toBe(true);
+    await expect.poll(() => inView(page, ".download-actions", size)).toBe(true);
     await expect
-      .poll(() => inView(page, ".download-row:nth-last-child(1 of .download-row)"))
+      .poll(() => inView(page, ".download-row:nth-last-child(1 of .download-row)", size))
       .toBe(true);
     await refresh.click();
     await browser.close();
@@ -248,7 +264,11 @@ test("steps arriving while the reader follows shift nothing in the rail (chrome)
         value: number;
         sources: { node?: Node }[];
       })[])
-        if (entry.sources.some((source) => source.node?.parentElement?.closest(".pane-activity")))
+        if (
+          entry.sources.some((source) =>
+            source.node?.parentElement?.closest("[aria-label='Plan and steps']"),
+          )
+        )
           shifts.push(entry.value);
     }).observe({ type: "layout-shift" });
   });
@@ -269,7 +289,10 @@ test("a replay's steps are plain rows, not boxed buttons (chrome)", async () => 
   const browser = await ENGINES.chrome();
   const page = await (await browser.newContext(DESKTOP)).newPage();
   await page.goto(`${fixture.origin}/?replay=${fixture.seeded[0]}#token=${TOKEN}`);
-  const head = page.locator(".replay-house .activity-row-head").first();
+  const head = page
+    .getByRole("complementary", { name: "Recording" })
+    .locator(".activity-row-head")
+    .first();
   await expect(head).toBeVisible();
   expect(
     await head.evaluate((element) => {

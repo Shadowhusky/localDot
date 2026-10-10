@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { type RunningDaemon, startDaemon } from "./daemon.ts";
-import { search } from "./settings-ui.ts";
+import { nestedKeys, search, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 declare global {
   interface Window {
@@ -21,6 +22,7 @@ const VALUE = `e2e-${Math.random().toString(36).slice(2)}-key-value`;
 let daemon: RunningDaemon;
 
 test.beforeEach(async ({ page }) => {
+  await skipSetup(page);
   await page.addInitScript(() => {
     const target = window;
     target.keyCspErrors = [];
@@ -59,15 +61,16 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
       posted.push(r.postData() ?? "");
   });
   await page.goto(`${daemon.origin}/#token=${daemon.token}`);
-  await expect(page.getByTestId("keys-button")).toHaveText("Keys");
+  await expect(page.getByTestId("keys-button")).toHaveAccessibleName(/^Keys/);
   await page.getByTestId("keys-button").click();
-  const sheet = page.getByRole("dialog", { name: "Keys" });
+  // Keys is a section of Settings, which the top bar's key opens at it.
+  const sheet = nestedKeys(page);
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("No keys yet")).toBeVisible();
 
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await page.keyboard.press("Escape");
-  await sheet.getByRole("button", { name: "Discard" }).click();
+  await settingsSheet(page).getByRole("button", { name: "Discard" }).click();
   await expect(page.getByTestId("keys-button")).toBeFocused();
   await page.getByTestId("keys-button").click();
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
@@ -96,13 +99,11 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   } finally {
     release.resolve();
   }
-  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
-    "Saved weather.",
-  );
-  await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
-  await expect(sheet.locator(".keys-row[data-id='weather']")).toContainText(
-    "api.weather.example, Added",
-  );
+  // The first key folds the form into the list, where its row lights up.
+  const weather = sheet.locator(".keys-row[data-id='weather']");
+  await expect(weather).toContainText("api.weather.example, Added");
+  await expect(weather).toHaveAttribute("data-fresh", "");
+  await expect(sheet.getByRole("form", { name: "Add a key" })).toHaveCount(0);
   await page.unroute("**/api/keys");
   await expect(sheet).toHaveCSS("opacity", "1");
   await page.screenshot({ path: "e2e/out/keys-sheet.png" });
@@ -125,6 +126,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
 
   // A base URL with non-ASCII text goes as the URL parser writes it, so the binding Chrome seals
   // is byte for byte the one keyd rebuilds.
+  await sheet.getByRole("button", { name: /^Add (a )?key$/ }).click();
   await sheet.getByRole("radio", { name: "Model provider" }).click();
   await search(page, sheet.getByRole("combobox", { name: "Provider" }), "openai-compatible");
   await sheet.getByLabel("Label (optional)", { exact: true }).fill("books");
@@ -160,7 +162,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   ).toBe(false);
 
   await page.keyboard.press("Escape");
-  await expect(sheet).toBeHidden();
+  await expect(settingsSheet(page)).toBeHidden();
   await expect(page.getByTestId("keys-button")).toBeFocused();
 });
 
@@ -170,15 +172,15 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   await page.setViewportSize({ width: 375, height: 760 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(`${daemon.origin}/#token=${daemon.token}`);
-  await page.getByTestId("keys-button").click();
-  const sheet = page.getByRole("dialog", { name: "Keys" });
+  // A phone has no top bar: Keys is in More, as a page of Settings' sheet.
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Keys", exact: true }).click();
+  const sheet = settingsSheet(page);
   const id = "a".repeat(64);
   await sheet.getByLabel("Label (optional)", { exact: true }).fill(id);
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
-    `Saved ${id}.`,
-  );
+  await expect(sheet.locator(`.keys-row[data-id='${id}']`)).toHaveAttribute("data-fresh", "");
   const bounds = await sheet.boundingBox();
   expect(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 375).toBe(true);
   expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -194,15 +196,14 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
 });
 
 test("say key protection is off when keyd stops", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 760 });
   await page.goto(`${daemon.origin}/#token=${daemon.token}`);
-  await expect(page.getByTestId("keys-button")).toHaveText("Keys");
+  await expect(page.getByTestId("keys-button")).toHaveAccessibleName(/^Keys/);
   await daemon.keyd.stop();
-  await expect(page.getByTestId("keys-button")).toHaveText("Key protection off", {
+  await expect(page.getByTestId("keys-button")).toHaveAccessibleName("Key protection off", {
     timeout: 15_000,
   });
   await page.getByTestId("keys-button").click();
-  const sheet = page.getByRole("dialog", { name: "Keys" });
+  const sheet = nestedKeys(page);
   await expect(sheet.getByText("Keys can't be saved or used until it's back on.")).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Save key" })).toHaveAttribute(
     "aria-disabled",

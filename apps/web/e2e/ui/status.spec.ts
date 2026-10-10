@@ -1,17 +1,25 @@
 import { UI_SCENARIOS, type UiScenarioName } from "../fixtures/ui-scenarios.ts";
-import { expect, test } from "./harness.ts";
+import { expect, isPhone, test } from "./harness.ts";
 
 // The status model's verdict for each scenario, read where people see it: the island's shape, its
 // first control and its label, the stage's light and the tab title. The control comes first: a
 // task's controls show its feed has arrived, so a label the task could still replace is final. Under
-// the first-run curtain the island is hidden and offers nothing.
+// a curtain the island is hidden and offers nothing; the curtain holds the one thing to do. While
+// the computer is yours, a phone keeps Hand back and Pause in its toolbar, so Stop leads its island.
 const STATUS: Record<
   UiScenarioName,
-  { shape: string; control?: RegExp; label: string; light?: "dot" }
+  {
+    shape: string;
+    control?: RegExp;
+    phoneControl?: RegExp;
+    label: string;
+    light?: "dot" | "you";
+    curtain?: string;
+  }
 > = {
-  "first-run": { shape: "hidden", label: "No computer" },
-  "model-ready": { shape: "hidden", label: "No computer" },
-  starting: { shape: "computer", control: /^Shut down$/, label: "Starting…" },
+  "first-run": { shape: "hidden", label: "No computer", curtain: "Turn on" },
+  "model-ready": { shape: "hidden", label: "No computer", curtain: "Turn on" },
+  starting: { shape: "hidden", label: "Starting…" },
   ready: { shape: "ready", control: /^Take control$/, label: "Ready" },
   "slow-keys": { shape: "ready", control: /^Take control$/, label: "Ready" },
   conversations: { shape: "ready", control: /^Take control$/, label: "Done" },
@@ -20,22 +28,25 @@ const STATUS: Record<
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
   approval: { shape: "task", control: /^Pause$/, label: "Needs your OK", light: "dot" },
   ask: { shape: "task", control: /^Pause$/, label: "Needs your answer", light: "dot" },
-  takeover: { shape: "task", control: /^Pause$/, label: "Your turn" },
+  // dot's hand-off puts the computer in your hands at once.
+  takeover: {
+    shape: "control",
+    control: /^Pause$/,
+    phoneControl: /^Stop$/,
+    label: "You're in control",
+    light: "you",
+  },
   budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Spending limit reached" },
   done: { shape: "ready", control: /^Take control$/, label: "Done" },
   continued: { shape: "ready", control: /^Take control$/, label: "Done" },
-  reconnecting: {
-    shape: "task",
-    control: /^Pause$/,
-    label: "Select the Net total cell",
-    light: "dot",
-  },
-  paused: { shape: "computer", control: /^Continue$/, label: "Paused" },
-  failed: { shape: "computer", control: /^Turn on$/, label: "Failed" },
-  // A computer that can't carry the task outranks it; the task keeps only its controls.
-  fenced: { shape: "task", control: /^Pause$/, label: "Unavailable" },
-  "fresh-start": { shape: "computer", control: /^Turn on$/, label: "Failed" },
-  off: { shape: "computer", control: /^Turn on$/, label: "Stopped" },
+  // The last picture holds still and the island says why.
+  reconnecting: { shape: "task", control: /^Pause$/, label: "Reconnecting…", light: "dot" },
+  paused: { shape: "computer", control: /^Resume$/, label: "Paused" },
+  failed: { shape: "hidden", label: "Failed", curtain: "Start again" },
+  // A computer that can't carry the task outranks it.
+  fenced: { shape: "hidden", label: "Unavailable", curtain: "Replace computer" },
+  "fresh-start": { shape: "hidden", label: "Failed", curtain: "Start fresh" },
+  off: { shape: "hidden", label: "Stopped", curtain: "Turn on" },
 };
 
 test.beforeEach(() => {
@@ -44,12 +55,17 @@ test.beforeEach(() => {
 
 for (const scenario of Object.keys(UI_SCENARIOS) as UiScenarioName[])
   test(`status ${scenario}`, async ({ page, ui }) => {
-    const { shape, control, label, light } = STATUS[scenario];
+    const { shape, control, phoneControl, label, light, curtain } = STATUS[scenario];
     await ui.open(scenario);
     const island = page.locator(".island");
     await expect(island).toHaveAttribute("data-shape", shape);
-    if (control) await expect(island.getByRole("button").first()).toHaveAccessibleName(control);
+    const first = (isPhone(page) && phoneControl) || control;
+    if (first) await expect(island.getByRole("button").first()).toHaveAccessibleName(first);
     else await expect(island.getByRole("button")).toHaveCount(0);
+    if (curtain)
+      await expect(
+        page.locator(".curtain").getByRole("button", { name: curtain, exact: true }),
+      ).toBeVisible();
     await expect(page.getByTestId("hud-status")).toHaveText(label);
     await expect(page.locator(".stage-frame")).toHaveAttribute("data-light", light ?? "none");
     await expect(page).toHaveTitle(`localDot — ${label}`);

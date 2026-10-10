@@ -74,6 +74,11 @@ beforeEach(() => {
     "webkitSpeechRecognition",
     Object.assign(class {}, { available: async () => "available" }),
   );
+  // Chrome, which hears on the device.
+  Object.defineProperty(navigator, "userAgentData", {
+    configurable: true,
+    value: { brands: [{ brand: "Google Chrome", version: "154" }] },
+  });
   changeVoicePrefs({ language: "en-US", online: false });
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -85,6 +90,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, "userAgentData");
 });
 
 async function setup(over: Partial<ComposerProps> = {}) {

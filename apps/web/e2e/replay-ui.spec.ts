@@ -5,6 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import type { RunningDaemon } from "./daemon.ts";
 import { type SeededHome, seedHome, startReplayDaemon } from "./seed.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 let daemon: RunningDaemon | undefined;
 let directory: string | undefined;
@@ -59,9 +60,19 @@ async function bounds(locator: Locator) {
 async function screenshot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `e2e/out/replay-${name}.png` });
 }
+async function largestDifference(one: Buffer, other: Buffer): Promise<number> {
+  const [a, b] = await Promise.all([one, other].map((png) => sharp(png).raw().toBuffer()));
+  if (!a || !b || a.length !== b.length) return Number.POSITIVE_INFINITY;
+  let largest = 0;
+  for (let at = 0; at < a.length; at++)
+    largest = Math.max(largest, Math.abs((a[at] ?? 0) - (b[at] ?? 0)));
+  return largest;
+}
 const position = async (page: Page) =>
   Number(await page.getByRole("slider", { name: "Replay timeline" }).getAttribute("aria-valuenow"));
 
+// The real daemon starts with no model; what is under first-run setup is what these check.
+test.beforeEach(({ page }) => skipSetup(page));
 test("plays, scrubs and steps through a seeded session", async ({ page }) => {
   await openReplay(page);
   await page.getByRole("combobox", { name: "Playback speed" }).click();
@@ -71,7 +82,8 @@ test("plays, scrubs and steps through a seeded session", async ({ page }) => {
   await page.getByRole("button", { name: "Pause replay" }).click();
   expect(await position(page)).toBeGreaterThanOrEqual(8000);
   await seek(page, 10_100);
-  await expect(page.locator(".replay-now-label")).toContainText("Typing a sample");
+  // The island names the step on show.
+  await expect(page.locator(".replay-main .island-label-text")).toContainText("Typing a sample");
   const track = await bounds(page.getByRole("slider", { name: "Replay timeline" }));
   const before = await position(page);
   await page.mouse.move(track.x + track.width * 0.7, track.y + track.height / 2);
@@ -101,13 +113,14 @@ test("plays, scrubs and steps through a seeded session", async ({ page }) => {
 
 test("skips idle by default and says so", async ({ page }) => {
   await openReplay(page);
-  const skip = page.getByRole("switch", { name: "Skip idle" });
-  await expect(skip).toBeChecked();
+  const skip = page.getByRole("button", { name: "Skip idle" });
+  await expect(skip).toHaveAttribute("aria-pressed", "true");
   await seek(page, 4000);
   await expect(page.locator(".replay-speed-label")).toHaveText("Idle skipped");
   const track = page.getByRole("slider", { name: "Replay timeline" });
   const compressed = Number(await track.getAttribute("data-duration-ms"));
-  await skip.uncheck();
+  await skip.click();
+  await expect(skip).toHaveAttribute("aria-pressed", "false");
   await expect
     .poll(async () => Number(await track.getAttribute("data-duration-ms")))
     .toBeGreaterThan(compressed);
@@ -118,7 +131,7 @@ test("skips idle by default and says so", async ({ page }) => {
 test("shows a takeover gap card and the backdrop over it", async ({ page }) => {
   await openReplay(page);
   await seek(page, 29_000);
-  const stage = await bounds(page.locator(".replay-stage canvas"));
+  const stage = await bounds(page.locator(".replay-main .stage canvas"));
   const clip = {
     x: stage.x + stage.width * 0.15,
     y: stage.y + stage.height * 0.25,
@@ -131,7 +144,8 @@ test("shows a takeover gap card and the backdrop over it", async ({ page }) => {
   await seek(page, 35000);
   await expect(page.getByText("You had control here", { exact: true })).toBeVisible();
   await expect(page.getByText("Nothing was recorded while you were in control.")).toBeVisible();
-  expect(await page.screenshot({ clip })).toEqual(before);
+  // The last picture stays behind the card: the same pixels, give or take a rounding step.
+  expect(await largestDifference(await page.screenshot({ clip }), before)).toBeLessThanOrEqual(2);
   await screenshot(page, "takeover");
 });
 

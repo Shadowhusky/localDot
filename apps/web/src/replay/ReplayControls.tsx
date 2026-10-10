@@ -18,20 +18,24 @@ export const LOADING = "The recording is still loading";
 const SKIP_MS = 10_000;
 
 // The transport (design-v2 §10.23): a glass bar hung over the foot of the recording, with the
-// scrubber between the time played and the whole length. A phone keeps play and the scrubber.
+// scrubber between the time played and the whole length. A phone keeps play, the scrubber and the
+// no-video chip.
 export function ReplayControls({
   api,
   replay,
   compact = false,
   noVideo = false,
+  cardShown = false,
   screens,
   exportControl,
 }: {
   api: ApiClient;
   replay: ReplayState;
   compact?: boolean;
-  // The recording has no video; the card that said so has gone.
+  // The recording has no video. Its chip keeps its room from the start and shows once the card
+  // that said so (`cardShown`) has gone, so nothing in the bar moves when it does.
   noVideo?: boolean;
+  cardShown?: boolean;
   // Desktop | Browser, when the task recorded both.
   screens?: ReactNode;
   exportControl?: ReactNode;
@@ -85,6 +89,7 @@ export function ReplayControls({
       </output>
       {replay.sessionId && <Scrubber api={api} sessionId={replay.sessionId} replay={replay} />}
       <span className="replay-length num">{timeLabel(replay.map?.endMs ?? 0)}</span>
+      {compact && noVideo && <NoVideo held={cardShown} />}
       {compact && exportControl}
       {!compact && (
         <span className="replay-transport-side">
@@ -119,7 +124,7 @@ export function ReplayControls({
           >
             <span className="replay-toggle-label">Compare</span>
           </Button>
-          {noVideo && <Badge className="replay-no-video">No video</Badge>}
+          {noVideo && <NoVideo held={cardShown} />}
           {exportControl}
         </span>
       )}
@@ -127,5 +132,13 @@ export function ReplayControls({
         {speedLabel(replay.speed, replay.idleNow)}
       </VisuallyHidden>
     </div>
+  );
+}
+
+function NoVideo({ held }: { held: boolean }) {
+  return (
+    <span className="replay-no-video" data-held={held || undefined}>
+      <Badge>No video</Badge>
+    </span>
   );
 }

@@ -204,19 +204,20 @@ test("the production build orders the layers with the legacy styles in component
     logLevel: "warn",
     build: { outDir: out, emptyOutDir: true, sourcemap: false },
   });
+  // The build splits its CSS (a shared theme sheet, the page's, lazy viewers'), so every sheet
+  // states the same order and the first to load sets it.
   const sheets = readdirSync(join(out, "assets")).filter((name) => name.endsWith(".css"));
-  expect(sheets).toHaveLength(1);
+  expect(sheets.length).toBeGreaterThan(0);
+  for (const sheet of sheets) {
+    const order = [
+      ...readFileSync(join(out, "assets", sheet), "utf8").matchAll(/@layer ([a-z, ]+?) ?[;{]/g),
+    ].flatMap((match) => (match[1] as string).split(/, ?/));
+    expect(
+      [...new Set(order)].filter((name) => name !== "properties"),
+      sheet,
+    ).toEqual(["theme", "base", "components", "kit", "utilities"]);
+  }
   const { css, js } = bundle(out);
-  const order = [...css.matchAll(/@layer ([a-z, ]+?) ?[;{]/g)].flatMap((match) =>
-    (match[1] as string).split(/, ?/),
-  );
-  expect([...new Set(order)].filter((name) => name !== "properties")).toEqual([
-    "theme",
-    "base",
-    "components",
-    "kit",
-    "utilities",
-  ]);
   expect(layerRules(css, "components")).toContain(".app{");
   expect(layerRules(css, "kit")).toContain(".ui-button{");
   expect(css).not.toContain("--rails-collapse");

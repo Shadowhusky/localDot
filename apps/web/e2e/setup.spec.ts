@@ -34,12 +34,15 @@ test("installer progress hands off once to first-run setup", async ({ page }, in
     const link = f.issue();
     f.channel.finish("ready", link);
     await expect(page.getByRole("heading", { name: "Hi, I'm dot." })).toBeVisible();
-    await page.getByRole("button", { name: "Finish later" }).click();
+    // A phone's setup says Later in its head; a wider screen says Finish later in its bar.
+    const phone = (page.viewportSize()?.width ?? 0) < 700;
+    const later = page.getByRole("button", { name: phone ? "Later" : "Finish later", exact: true });
+    await later.click();
     await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
     await expect(page).toHaveURL(`${f.origin}/`);
     const curtainBounds = await page.locator(".curtain").boundingBox();
     // Over the stage on a wide screen; over the stage and the band under it on a phone.
-    const host = (page.viewportSize()?.width ?? 0) < 700 ? ".stage-frame" : ".stage";
+    const host = phone ? ".stage-frame" : ".stage";
     expect(curtainBounds).toEqual(await page.locator(host).first().boundingBox());
     await page.screenshot({ path: info.outputPath("first-run-setup.png") });
     expect(f.requests.filter((r) => r.path === "/auth/exchange-code")).toHaveLength(1);
@@ -52,7 +55,7 @@ test("installer progress hands off once to first-run setup", async ({ page }, in
       .getByRole("button", { name: "Continue setup" });
     await review.click();
     await expect(page.getByRole("heading", { name: "How should dot think?" })).toBeVisible();
-    await page.getByRole("button", { name: "Finish later" }).click();
+    await later.click();
     await expect(review).toBeVisible();
     const start = page.locator(".curtain").getByRole("button", { name: "Turn on" });
     await start.scrollIntoViewIfNeeded();

@@ -7,6 +7,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { type SeedResult, seedSession } from "../../daemon/src/recorder/testing/seed-session.ts";
 import type { RunningDaemon } from "./daemon.ts";
 import { startReplayDaemon } from "./seed.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 let directory: string, home: string, desktop: SeedResult, browser: SeedResult;
 let daemon: RunningDaemon | undefined;
@@ -79,6 +80,8 @@ async function seek(page: Page, time: number) {
   }, time);
 }
 
+// The real daemon starts with no model; what is under first-run setup is what these check.
+test.beforeEach(({ page }) => skipSetup(page));
 test("switches actual decoded recordings at the same time and retains private gaps", async ({
   page,
 }) => {

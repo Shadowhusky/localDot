@@ -4,8 +4,15 @@ import type { ApiClient } from "../lib/api.ts";
 import { browserSpeech, macSpeech, voiceRoute } from "./support.ts";
 import { routeBlocked, routeLabel } from "./words.ts";
 
+const brands = (...names: string[]) =>
+  Object.defineProperty(navigator, "userAgentData", {
+    configurable: true,
+    value: { brands: names.map((brand) => ({ brand, version: "154" })) },
+  });
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, "userAgentData");
 });
 
 describe("where speech becomes text", () => {
@@ -45,6 +52,7 @@ describe("where speech becomes text", () => {
   });
 
   it("asks the browser for speech on this device only", async () => {
+    brands("Chromium", "Google Chrome");
     expect(await browserSpeech("en-US")).toBe("none");
     vi.stubGlobal("webkitSpeechRecognition", class {});
     expect(await browserSpeech("en-US")).toBe("online");
@@ -56,6 +64,14 @@ describe("where speech becomes text", () => {
     expect(await browserSpeech("ja-JP")).toBe("local");
     available.mockResolvedValue("unavailable");
     expect(await browserSpeech("ja-JP")).toBe("online");
+  });
+
+  it("never asks a Chromium build that is not Chrome, which closes the tab that asks", async () => {
+    const available = vi.fn(async () => "available");
+    vi.stubGlobal("SpeechRecognition", Object.assign(class {}, { available }));
+    brands("Chromium");
+    expect(await browserSpeech("en-US")).toBe("online");
+    expect(available).not.toHaveBeenCalled();
   });
 
   it("asks the computer for its speech model", async () => {

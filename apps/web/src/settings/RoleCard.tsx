@@ -80,6 +80,7 @@ export function RoleCard({
   onPrice,
 }: RoleCardProps) {
   const titleId = useId();
+  const notesId = useId();
   const { title, description } = ROLE[role];
   const provider = value && providerById(value.provider);
   const tier = providers
@@ -111,6 +112,7 @@ export function RoleCard({
         value={value ?? { provider: "", model: "" }}
         providers={providers}
         subscriptionModels={subscriptionModels}
+        describedBy={notes.length ? notesId : undefined}
         onChange={onChange}
       />
       {value && provider && !provider.notOffered && (
@@ -158,7 +160,7 @@ export function RoleCard({
           <Collapse open={on && !inactive}>{rows}</Collapse>
         </Group>
       )}
-      {notes.length > 0 && <GroupNote>{notes.map(sentence).join(" ")}</GroupNote>}
+      {notes.length > 0 && <GroupNote id={notesId}>{notes.map(sentence).join(" ")}</GroupNote>}
     </section>
   );
 }

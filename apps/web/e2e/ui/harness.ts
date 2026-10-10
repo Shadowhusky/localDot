@@ -144,11 +144,18 @@ async function settle(page: Page) {
   });
 }
 
-// The composer, on a phone once its Conversation tab is chosen.
+// Whether the page has a phone's layout: no top bar, and a rail that is only the chat.
+export const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 700;
+
+// The rail on its chat, which it opens on; a phone's rail is only the chat, under the stage.
+export async function chatRail(page: Page) {
+  if (!isPhone(page))
+    await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
+  return page.getByRole("complementary", { name: "Conversation" });
+}
+
 export async function composer(page: Page) {
-  // The rail opens on the chat; on a phone it sits under the stage.
-  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
-  return page.getByRole("form", { name: "Message dot" });
+  return (await chatRail(page)).getByRole("form", { name: "Message dot" });
 }
 
 // A spec's flows run at these projects of the matrix only.

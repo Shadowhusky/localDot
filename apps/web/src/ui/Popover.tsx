@@ -123,8 +123,21 @@ function AnchoredLayer({
     if (anchor.current) observer?.observe(anchor.current);
     window.addEventListener("scroll", soon, { capture: true, passive: true });
     window.addEventListener("resize", soon);
+    // The page can move the anchor without resizing it, which no observer reports: checked each
+    // frame while open, so the popup never sits off its anchor until the next render.
+    let watch = 0;
+    let at = "";
+    const follow = () => {
+      const box = anchor.current?.getBoundingClientRect();
+      const now = box ? `${box.left} ${box.top}` : "";
+      if (at && now !== at) update();
+      at = now;
+      watch = requestAnimationFrame(follow);
+    };
+    watch = requestAnimationFrame(follow);
     return () => {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(watch);
       observer?.disconnect();
       window.removeEventListener("scroll", soon, { capture: true });
       window.removeEventListener("resize", soon);

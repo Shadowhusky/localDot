@@ -26,6 +26,9 @@ import { EventLog } from "../../daemon/src/event-log.ts";
 import { KillSwitch } from "../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../daemon/src/gateway/live.ts";
 import { attachUpgradeRouter } from "../../daemon/src/upgrade-router.ts";
+import { isPhone } from "./layout.ts";
+import { closeSettings, settingsSheet } from "./settings-ui.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 // Actual production page/CSP, authenticated daemon routes, journal, manual lease and kill
 // switch. Docker/keyd/native desktop are isolated stand-ins; no account or model is used.
@@ -312,6 +315,7 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
     external: string[] = [],
     csp: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await skipSetup(page);
   await page.route("**/*", (route) => {
     if (new URL(route.request().url()).origin === f.origin) return route.fallback();
     external.push("Unexpected external request");
@@ -333,7 +337,7 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
           if (id === f.id) ws.send(JSON.stringify(event));
         });
         ws.onClose(unsubscribe);
-      } else throw new Error("Unexpected owned socket");
+      } else if (url.pathname !== "/api/events") throw new Error("Unexpected owned socket");
     },
   );
   await page.addInitScript(() => {
@@ -351,7 +355,12 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
   const response = await page.goto(f.origin);
   expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
   expect(response?.headers()["content-security-policy"]).not.toContain("unsafe-");
-  await expect(page.locator(".title")).toHaveText("Sample · questions and manual control");
+  // A phone has no top bar; its thread shows instead.
+  if (isPhone(page))
+    await expect(
+      page.getByRole("region", { name: "Conversation history" }).locator(".thread-row").first(),
+    ).toBeVisible();
+  else await expect(page.locator(".bar-title")).toHaveText("Sample · questions and manual control");
   return { errors, external, csp };
 }
 async function proof(page: Page, errors: string[], external: string[]) {
@@ -372,17 +381,19 @@ for (const width of [1280, 390])
       const answer = f.session.ask("Which report format?", ["Markdown", "Plain text"], true, 0);
       await page.setViewportSize({ width, height: 900 });
       const p = await load(page, f);
-      if (width < 1100) await page.getByRole("tab", { name: /^Conversation/ }).click();
       const askId = f.session.pendingAsk;
-      await expect(page.getByRole("form", { name: "Answer dot" })).toBeVisible();
-      await page.getByRole("radio", { name: "Markdown", exact: true }).check();
-      await expect(page.getByRole("button", { name: "Send answer" })).toBeEnabled();
-      await page.getByRole("radio", { name: "Something else…", exact: true }).check();
-      await page.getByLabel("Your answer").fill("中文 and English, please");
+      // In the thread beside a wide screen, in a sheet on a phone.
+      const form = page.getByRole("form", {
+        name: isPhone(page) ? "Which report format?" : "Answer dot",
+      });
+      await expect(form).toBeVisible();
+      await form.getByRole("radio", { name: "Markdown", exact: true }).check();
+      await expect(form.getByRole("button", { name: "Send answer" })).toBeEnabled();
+      await form.getByRole("textbox", { name: "Something else" }).fill("中文 and English, please");
       await page.screenshot({ path: info.outputPath(`question-${width}.png`), fullPage: true });
-      await page.getByRole("button", { name: "Send answer" }).click();
+      await form.getByRole("button", { name: "Send answer" }).click();
       expect(await answer).toMatchObject({ by: "user", text: "中文 and English, please" });
-      await expect(page.getByRole("form", { name: "Answer dot" })).toHaveCount(0);
+      await expect(form).toHaveCount(0);
       expect(f.log.read(f.id).filter((event) => event.type === "ask.answer")).toHaveLength(1);
       expect(f.log.read(f.id).find((event) => event.type === "ask.answer")?.data).toMatchObject({
         askId,
@@ -391,9 +402,7 @@ for (const width of [1280, 390])
         .takeover("login", "Sign in on the sample computer, then return control.")
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
-      if (width < 1100) await page.getByRole("tab", { name: /^Computer/ }).click();
-      // dot hands the computer over from the island; it is the user's once they take it.
-      await page.getByRole("button", { name: "Take control", exact: true }).click();
+      // dot hands the computer over, and a page that shows it takes it at once.
       const handBack = page.getByRole("button", { name: "Hand back", exact: true });
       await expect(handBack).toBeEnabled();
       const keyboard = page.getByLabel("Type on the computer", { exact: true });
@@ -481,12 +490,13 @@ for (const width of [1280, 390])
       await f.close();
     }
   });
+// The island's Stop reaches over an open sheet on a wide screen, and is a phone's while in control.
 for (const [edge, sheet] of [
   ["paused", "Settings"],
   ["fallback", "Keys"],
   ["unknown", null],
 ] as const)
-  test(`Stop ${edge} from ${sheet ?? "phone task bar"} preserves containment facts`, async ({
+  test(`Stop ${edge} over ${sheet ?? "a phone's control"} preserves containment facts`, async ({
     page,
   }, info) => {
     const f = await fixture(edge);
@@ -495,9 +505,12 @@ for (const [edge, sheet] of [
         .takeover("2fa", "Complete sample verification.")
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
-      await page.setViewportSize({ width: 390, height: 850 });
+      // At 1440 the inspector leaves the island clear, which then rises over the sheet's scrim.
+      await page.setViewportSize(
+        sheet ? { width: 1440, height: 900 } : { width: 390, height: 850 },
+      );
       const p = await load(page, f);
-      await page.getByRole("button", { name: "Take control", exact: true }).click();
+      // dot hands the computer over, and a page that shows it takes it at once.
       await expect(page.getByLabel("Type on the computer", { exact: true })).toBeEnabled();
       await page
         .getByRole("toolbar", { name: "Computer controls", exact: true })
@@ -506,15 +519,24 @@ for (const [edge, sheet] of [
       await page
         .getByLabel("Text to type on the computer", { exact: true })
         .fill("unsent-synthetic-password");
+      // The typing popover is put away unsent before a sheet opens over the page.
+      if (sheet) await page.keyboard.press("Escape");
       if (sheet === "Keys") await page.getByTestId("keys-button").click();
       else if (sheet) await page.getByRole("button", { name: sheet, exact: true }).click();
-      const root = sheet ? page.getByRole("dialog") : page.locator(".task-bar");
-      await root.getByRole("button", { name: "Stop", exact: true }).click();
+      if (sheet) await expect(settingsSheet(page)).toBeVisible();
+      await page.getByTestId("hud-stop-session").click();
       await held;
-      const status = sheet ? root : page.getByRole("region", { name: "Notifications" });
+      // The island's notices, not Settings' own Notifications section; a computer that went off
+      // says so on its curtain instead.
+      const status =
+        edge === "fallback"
+          ? page.locator(".curtain")
+          : page.getByRole("main", { name: "Computer" }).getByRole("region", {
+              name: "Notifications",
+            });
       if (edge === "unknown") {
         await expect(status).toContainText("Couldn't confirm that dot stopped");
-        if (!sheet) await status.getByRole("button", { name: "Check again" }).click();
+        await status.getByRole("button", { name: "Check again" }).click();
         await page.getByTestId("hud-stop-session").click(); // Actual 404 after live ownership ended.
         await expect(status).toContainText("Couldn't confirm that dot stopped");
         expect(f.cells.get(f.cellId)?.paused).toBeUndefined();
@@ -524,7 +546,7 @@ for (const [edge, sheet] of [
           edge === "paused" ? "Your computer is paused" : "Your computer is off",
         );
       await page.screenshot({ path: info.outputPath(`stop-${edge}-390.png`), fullPage: true });
-      if (sheet) await root.getByRole("button", { name: /^Close / }).click();
+      if (sheet) await closeSettings(page);
       await expect(page.getByRole("button", { name: "Hand back", exact: true })).toHaveCount(0);
       await expect(page.getByLabel("Message", { exact: true })).toBeDisabled();
       expect(f.native.calls).toEqual([]);
@@ -533,7 +555,7 @@ for (const [edge, sheet] of [
         edge === "paused" ? ["revoke", "pause"] : ["revoke", "pause", "close", "stop"],
       );
       if (edge === "paused") {
-        await page.getByRole("button", { name: "Resume computer", exact: true }).click();
+        await page.locator(".island").getByRole("button", { name: "Resume", exact: true }).click();
         await expect.poll(() => f.cells.get(f.cellId)?.paused).toBeUndefined();
         expect(f.effects.slice(-3)).toEqual(["revoke", "refresh", "unpause"]);
         await expect(page.getByLabel("Message", { exact: true })).toBeEnabled();

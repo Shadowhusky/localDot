@@ -8,7 +8,12 @@ const KEY = `sk-ant-api03-${"z".repeat(40)}`;
 test("composer, at rest", async ({ page, ui }) => {
   await ui.open("running");
   const card = await composer(page);
-  await expect(card.getByRole("button", { name: "Stop task" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Send now" })).toBeVisible();
+  // The task's Stop lives in the island, not beside Send.
+  await expect(card.getByRole("button", { name: /^Stop/ })).toHaveCount(0);
+  await expect(
+    page.locator(".island").getByRole("button", { name: "Stop", exact: true }),
+  ).toBeVisible();
   if (test.info().project.name === "c14")
     expect((await card.boundingBox())?.height).toBeLessThanOrEqual(140);
   await ui.settle();

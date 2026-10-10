@@ -2,21 +2,18 @@ import { expect, type Locator, type Page } from "@playwright/test";
 
 const ROLE_TITLES = { main: "Main model", fast: "Fast model", local: "Local model" } as const;
 
+// Found by its body: on a phone its title is the section shown.
 export function settingsSheet(page: Page): Locator {
-  return page.getByRole("dialog", { name: "Settings", exact: true });
+  return page.getByRole("dialog").filter({ has: page.locator("#settings-sheet-body") });
 }
 
 // Keys: on a phone its own page slid over Settings, at desktop width a section of Settings' one page.
 export function nestedKeys(page: Page): Locator {
-  return page
-    .getByRole("dialog", { name: "Keys", exact: true })
-    .locator("[data-page='keys']")
-    .or(settingsSheet(page).getByRole("region", { name: "Keys", exact: true }));
+  return settingsSheet(page).getByRole("region", { name: "Keys", exact: true });
 }
 
 // Settings opens from the top bar's gear, or from More on a phone, which has no top bar and lists
-// the sections, so it goes into `section` there. The sheet is found by its body: on a phone its
-// title is the section shown.
+// the sections, so it goes into `section` there.
 export async function openSettings(
   page: Page,
   press: (target: Locator) => Promise<void> = (target) => target.click(),
@@ -25,7 +22,7 @@ export async function openSettings(
   const gear = page.getByRole("button", { name: "Settings", exact: true });
   const more = page.getByRole("button", { name: "More", exact: true });
   await expect(gear.or(more).first()).toBeVisible();
-  const sheet = page.getByRole("dialog").filter({ has: page.locator("#settings-sheet-body") });
+  const sheet = settingsSheet(page);
   if (await gear.isVisible()) {
     await press(gear);
     return sheet;
@@ -34,6 +31,20 @@ export async function openSettings(
   await press(page.getByRole("menuitem", { name: "Settings", exact: true }));
   if (section) await press(sheet.getByRole("button", { name: new RegExp(`^${section}`) }));
   return sheet;
+}
+
+// Closes Settings: its close button beside a wide screen, Done on the phone page in view (the pages
+// under it stay mounted, inert).
+export async function closeSettings(page: Page): Promise<void> {
+  const sheet = settingsSheet(page);
+  const close = sheet.getByRole("button", { name: "Close settings", exact: true });
+  if (await close.isVisible()) await close.click();
+  else
+    await sheet
+      .locator(".ui-sheet-page:not([inert])")
+      .getByRole("button", { name: "Done", exact: true })
+      .click();
+  await expect(sheet).toBeHidden();
 }
 
 export function roleCard(scope: Page | Locator, role: keyof typeof ROLE_TITLES): Locator {

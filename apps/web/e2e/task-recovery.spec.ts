@@ -1,7 +1,21 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, load, proof } from "./fixtures/recovery-server.ts";
+import { showActivity, showChat } from "./layout.ts";
+import { closeSettings, openSettings } from "./settings-ui.ts";
 
 test.setTimeout(60_000);
+
+// What dot knows opens on the facts about you; dot's own notes are MEMORY.md, shown as the file.
+async function showMemoryFile(knows: Locator) {
+  await knows.getByRole("radio", { name: "Notes", exact: true }).click();
+  await knows.getByRole("button", { name: /^Show the file/ }).click();
+}
+// A memory update is a change dot made, listed under Activity's Files tab.
+async function memoryChange(page: Page) {
+  const rail = await showActivity(page);
+  await rail.getByRole("tab", { name: /^Files/ }).click();
+  return rail.getByTestId("change-row").first();
+}
 test.use({ hasTouch: true });
 
 for (const width of [1280, 390])
@@ -17,20 +31,18 @@ for (const width of [1280, 390])
     const f = await fixture();
     try {
       const p = await load(page, f);
-      if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
+      await showActivity(page);
       await page.getByRole("button", { name: /^Usage:/ }).click();
       const usage = page.getByRole("region", { name: "Task usage" });
       await expect(usage).toContainText("Mainsample-main");
       await expect(usage).toContainText("30 in · 7 out");
       await expect(usage).toContainText("(some calls didn't say)");
       await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+      await showChat(page);
+      const settings = await openSettings(page, undefined, "What dot knows");
       const knows = settings.getByRole("region", { name: "What dot knows" });
       await expect(knows.getByRole("list", { name: "Skills" })).toContainText("sample-tables");
-      await settings.getByRole("button", { name: "Close settings" }).click();
-      await expect(settings).toHaveCount(0);
-      if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+      await closeSettings(page);
       const recovery = page.getByRole("region", { name: "Task recovery" });
       await expect(recovery).toContainText("$4 of $5 spent");
       await page.screenshot({
@@ -51,9 +63,8 @@ for (const width of [1280, 390])
       await expect(recovery).toHaveCount(0);
       f.session.stop();
       f.session.append("session.end", { reason: "done" });
-      if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-      const card = page.getByTestId("change-row").first();
-      await card.getByRole("button", { name: /Updated memory/ }).click();
+      const card = await memoryChange(page);
+      await card.getByRole("button", { name: /Memory updated/ }).click();
       await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
         "aria-disabled",
       );
@@ -63,8 +74,9 @@ for (const width of [1280, 390])
       expect(f.log.read(f.id).findLast((e) => e.type === "memory.change")?.data).toMatchObject({
         undoes: f.remembered.changeId,
       });
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await knows.getByRole("button", { name: "Show memory" }).click();
+      await showChat(page);
+      await openSettings(page, undefined, "What dot knows");
+      await showMemoryFile(knows);
       await expect(knows).toContainText("# Things worth remembering");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
@@ -83,7 +95,7 @@ test("plan windows remain unknown when absent and explicit Resume never raises U
   try {
     await page.setViewportSize({ width: 390, height: 850 });
     const p = await load(page, f);
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await showActivity(page);
     await page.getByRole("button", { name: /^Usage:/ }).click();
     const usage = page.getByRole("region", { name: "Task usage" });
     await expect(usage).toContainText("owned-plan-model");
@@ -94,7 +106,7 @@ test("plan windows remain unknown when absent and explicit Resume never raises U
     await expect(usage).toContainText("Almost at limit · 98% used");
     await expect(usage.getByRole("meter")).toHaveCount(1);
     await page.keyboard.press("Escape");
-    await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+    await showChat(page);
     const recovery = page.getByRole("region", { name: "Task recovery" });
     await expect(recovery.getByRole("radio", { name: "Other" })).toHaveCount(0);
     await expect(recovery.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
@@ -122,8 +134,8 @@ test("memory conflict preserves the newer durable file and offers an explicit re
   try {
     const p = await load(page, f);
     f.memory.apply(f.id, "MEMORY.md", "append", "Newer fact must remain.");
-    const card = page.getByTestId("change-row").first();
-    await card.getByRole("button", { name: /Updated memory/ }).click();
+    const card = await memoryChange(page);
+    await card.getByRole("button", { name: /Memory updated/ }).click();
     await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
       "aria-disabled",
     );
@@ -135,6 +147,7 @@ test("memory conflict preserves the newer durable file and offers an explicit re
       .getByRole("dialog", { name: "Settings", exact: true })
       .getByRole("region", { name: "What dot knows" });
     await expect(knows.getByRole("heading", { name: "What dot knows" })).toBeFocused();
+    await showMemoryFile(knows);
     await expect(knows).toContainText("Newer fact must remain.");
     await proof(page, p.errors, p.external);
   } finally {
@@ -157,9 +170,8 @@ for (const width of [1280, 390])
     try {
       const p = await load(page, f);
       await f.finish();
-      if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-      const card = page.getByTestId("change-row").first();
-      await card.getByRole("button", { name: /Updated memory/ }).click();
+      const card = await memoryChange(page);
+      await card.getByRole("button", { name: /Memory updated/ }).click();
       await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
         "aria-disabled",
       );
@@ -171,7 +183,7 @@ for (const width of [1280, 390])
         undoes: f.remembered.changeId,
       });
       expect(f.realRunner?.get(f.id)).toBeUndefined();
-      if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+      await showChat(page);
       await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveCount(1);
       await expect(page.getByRole("region", { name: "Task recovery" })).toHaveCount(0);
       await proof(page, p.errors, p.external);

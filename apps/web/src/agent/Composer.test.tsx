@@ -865,7 +865,7 @@ describe("a message on its way", () => {
       keysOpen: false,
       receiveKey: vi.fn(() => false),
     };
-    const end = { slot: outbox, show: vi.fn(), needs: vi.fn() };
+    const end = { slot: outbox, show: vi.fn(), needs: vi.fn(), keep: vi.fn() };
     const view = render(
       <Outbox.Provider value={end}>
         <Composer {...props} />
@@ -1018,7 +1018,7 @@ describe("a message on its way", () => {
   it("brings the thread's end into view as it is sent, and leads a lost one's choice there", async () => {
     const outbox = document.createElement("div");
     document.body.append(outbox);
-    const end = { slot: outbox, show: vi.fn(), needs: vi.fn() };
+    const end = { slot: outbox, show: vi.fn(), needs: vi.fn(), keep: vi.fn() };
     render(
       <Outbox.Provider value={end}>
         <Composer

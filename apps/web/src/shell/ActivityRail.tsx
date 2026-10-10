@@ -1,6 +1,6 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState, PlanItemState } from "@localdot/stage";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
 import { ActivityRow } from "../agent/ActivityRow.tsx";
 import {
@@ -181,6 +181,16 @@ export function ActivityRail({
           return last && viewOf(last).state === "doing" ? last.key : undefined;
         })();
   const openKey = opened?.owner === owner ? opened.key : null;
+  // A phone's sheet scrolls Activity whole, out of the rail's own following, so it brings the live
+  // step into view itself once there is one.
+  const placed = useRef(false);
+  useLayoutEffect(() => {
+    const pane = timeline.current?.closest<HTMLElement>(".activity-scroll");
+    if (placed.current || !currentKey || !pane) return;
+    placed.current = true;
+    if (pane.scrollHeight > pane.clientHeight + 1) return;
+    timeline.current?.querySelector("[data-current]")?.scrollIntoView?.({ block: "nearest" });
+  }, [currentKey]);
   useEffect(() => {
     const pane = timeline.current;
     const preserveSelection = () => {

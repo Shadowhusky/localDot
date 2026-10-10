@@ -1,5 +1,5 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
-import { nestedKeys, roleCard, settingsSheet } from "./settings-ui.ts";
+import { closeSettings, nestedKeys, openSettings, roleCard, settingsSheet } from "./settings-ui.ts";
 import { skipSetup } from "./skip-setup.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
@@ -59,13 +59,7 @@ for (const run of runs) {
       const setup = page.getByRole("region", { name: "Finish setting up" });
       const model = setup.locator(".setup-row").filter({ hasText: "Model" });
       await expect(model.locator(".setup-detail")).toHaveText("Needed to start");
-      // Once the model is ready, setup has nothing left and Settings opens from its own button.
-      const reopen = async () => {
-        const gear = page.getByRole("button", { name: "Settings", exact: true });
-        if (await gear.isVisible()) return press(gear);
-        await press(page.getByRole("button", { name: "More" }));
-        await press(page.getByRole("menuitem", { name: "Settings" }));
-      };
+      const saved = async () => (await (await api("/api/agent/settings")).json()).main;
 
       await press(model.getByRole("button", { name: "Choose…" }));
       const sheet = settingsSheet(page);
@@ -111,8 +105,11 @@ for (const run of runs) {
           baseURL: "https://api.z.ai/api/anthropic/v1",
         }),
       ]);
-      await press(keys.getByRole("button", { name: "Settings", exact: true }));
-      await expect(keys).toHaveCount(0);
+      // Keys is a section of Settings: on a phone a page pushed over Models, which Back returns to.
+      if (run.phone) {
+        await press(sheet.getByRole("button", { name: "Models", exact: true }));
+        await expect(keys).toHaveCount(0);
+      }
       await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(MODEL.key);
 
       await main.getByRole("textbox", { name: "Model ID", exact: true }).fill(MODEL.model);
@@ -125,38 +122,35 @@ for (const run of runs) {
       await expect(contextWindow).toHaveValue("128000");
       await main.getByRole("textbox", { name: "Input price" }).fill("0.6");
       await main.getByRole("textbox", { name: "Output price" }).fill("2.2");
-      const save = sheet.getByRole("button", { name: "Save", exact: true });
-      await expect(save).toBeEnabled();
-      await press(save);
-      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
-      expect((await (await api("/api/agent/settings")).json()).main).toEqual({
+      // Settings saves itself once the model is complete.
+      await expect.poll(saved).toEqual({
         ...MODEL,
         vision: false,
         contextTokens: 128_000,
         price: { inputUSDPerMTok: 0.6, outputUSDPerMTok: 2.2 },
       });
-      await press(sheet.getByRole("button", { name: "Close settings" }));
+      await closeSettings(page);
       await expect(setup).toHaveCount(0);
 
-      // On a flat-rate plan: no per-token price, no dollar ceiling, and still ready.
-      await reopen();
+      // On a flat-rate plan: no per-token price, no dollar ceiling, and still ready. Once the
+      // model is ready, setup has nothing left and Settings opens from its own button.
+      await openSettings(page, press, "Models");
       await press(main.getByRole("switch", { name: "Flat-rate plan" }));
       await expect(main.getByText("Uses the plan's limits, not a spending limit.")).toBeVisible();
       await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
+      await expect
+        .poll(saved)
+        .toEqual({ ...MODEL, vision: false, contextTokens: 128_000, plan: true });
+      if (run.phone) {
+        await press(sheet.getByRole("button", { name: "Settings", exact: true }));
+        await press(sheet.getByRole("button", { name: /^Spending/ }));
+      }
       await expect(
         sheet
           .getByRole("region", { name: "Spending" })
           .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
-      await press(save);
-      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
-      expect((await (await api("/api/agent/settings")).json()).main).toEqual({
-        ...MODEL,
-        vision: false,
-        contextTokens: 128_000,
-        plan: true,
-      });
-      await press(sheet.getByRole("button", { name: "Close settings" }));
+      await closeSettings(page);
       await expect(setup).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,

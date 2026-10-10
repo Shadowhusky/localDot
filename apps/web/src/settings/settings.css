@@ -163,9 +163,12 @@
   gap: calc(var(--spacing) * 3);
 }
 
+/* The mode keeps one line; a long label wraps beside it instead. */
 .settings-locked-mode {
+  flex: none;
   color: var(--color-fg-2);
   text-align: end;
+  white-space: nowrap;
 }
 
 .settings-rules-banner {

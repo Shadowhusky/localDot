@@ -33,26 +33,26 @@ async function open(browser: Browser, size: Size, path: string) {
 }
 
 const replayTime = (page: Page) => page.getByRole("status", { name: "Replay time" });
+// The time played and the whole length, either side of the scrubber.
+async function expectTime(page: Page, played: string | RegExp, length: string) {
+  await expect(replayTime(page)).toHaveText(played);
+  await expect(page.locator(".replay-length")).toHaveText(length);
+}
 const replayHeading = (page: Page, name: string) =>
   page.getByRole("main", { name: "Replay" }).getByRole("heading", { name });
+const replayStage = (page: Page) => page.getByRole("main", { name: "Replay" }).locator(".stage");
 const query = (page: Page, name: string) => new URL(page.url()).searchParams.get(name);
+const isPhone = (size: Size) => size.viewport.width < 700;
 
-// The task list: a rail of its own on a wide screen, a sheet from the bar elsewhere.
-async function tasks(page: Page, press: (target: Locator) => Promise<void>) {
-  const rail = page.getByRole("complementary", { name: "Tasks" });
-  if (await rail.count()) return rail;
-  await press(page.getByRole("button", { name: /^All tasks/ }));
-  const sheet = page.getByRole("dialog", { name: "Tasks" });
-  await expect(sheet).toBeVisible();
-  await sheet.evaluate((element) =>
-    Promise.all(
-      element
-        .getAnimations({ subtree: true })
-        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
-        .map((animation) => animation.finished),
-    ),
-  );
-  return sheet;
+// The recordings: the player's rail beside the stage, or the library one screen back on a phone.
+async function tasks(page: Page, size: Size, press: (target: Locator) => Promise<void>) {
+  if (isPhone(size)) {
+    await press(page.getByRole("navigation").getByRole("button", { name: "Replay" }));
+    return page.getByRole("main", { name: "Replay" });
+  }
+  const rail = page.getByRole("complementary", { name: "Recording" });
+  await press(rail.getByRole("radio", { name: "Recordings", exact: true }));
+  return rail;
 }
 
 // How tall a control's reach is where it shows: a kit control may reach past what it draws.
@@ -81,10 +81,15 @@ async function fitsTheWidth(page: Page, size: Size) {
     timeout: 5000,
   });
   const width = size.viewport.width;
+  // The way back to Watch: the top bar's Watch, or a phone's Replay, which leads there. A phone's
+  // transport keeps play, the scrubber and Export.
+  const back = isPhone(size)
+    ? page.getByRole("navigation").getByRole("button", { name: "Replay" })
+    : page.getByRole("radiogroup", { name: "Mode" }).getByRole("radio", { name: "Watch" });
   for (const control of [
-    page.getByRole("button", { name: /^(Back to Watch|Jump to live)$/ }),
+    back,
     page.getByRole("button", { name: "Play replay" }),
-    page.getByRole("combobox", { name: "Playback speed" }),
+    ...(isPhone(size) ? [] : [page.getByRole("combobox", { name: "Playback speed" })]),
     page.getByRole("button", { name: "Export video" }),
   ]) {
     await expect(control).toBeVisible();
@@ -118,7 +123,9 @@ async function fitsTheWidth(page: Page, size: Size) {
   const outside = await page.evaluate(() => {
     const main = document.querySelector(".replay-main") as HTMLElement;
     const room = main.getBoundingClientRect();
+    // The light the stage spills on the floor is drawn past it on purpose.
     const spill = [...main.querySelectorAll("*")].filter((element) => {
+      if (element.closest("[aria-hidden='true']")) return false;
       const box = element.getBoundingClientRect();
       return box.width > 0 && (box.right > room.right + 0.5 || box.bottom > room.bottom + 0.5);
     });
@@ -145,19 +152,19 @@ for (const [label, engine, size] of [
 
     test("another task in the library opens at its start", async () => {
       const { context, page, press } = await open(browser, size, `/?replay=${organize}`);
-      await expect(replayTime(page)).toHaveText("0:00 / 3:00");
+      await expectTime(page, "0:00", "3:00");
       const slider = page.getByRole("slider", { name: "Replay timeline" });
       const track = await slider.boundingBox();
       if (!track) throw new Error("timeline missing");
       await press(slider, { position: { x: track.width * 0.9, y: track.height / 2 } });
-      await expect(replayTime(page)).toHaveText(/^2:\d\d \/ 3:00$/);
+      await expectTime(page, /^2:\d\d$/, "3:00");
       await expect.poll(() => Number(query(page, "t"))).toBeGreaterThan(100_000);
 
-      const stage = await page.locator(".replay-stage").boundingBox();
-      const list = await tasks(page, press);
-      const row = list.getByRole("link", { name: /^Earlier sample task 1/ });
+      const stage = await replayStage(page).boundingBox();
+      const list = await tasks(page, size, press);
+      const row = list.getByRole("button", { name: /^Earlier sample task 1/ });
       await expect(row).toBeInViewport({ ratio: 1 });
-      expect((await row.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expect(await reach(row)).toBeGreaterThanOrEqual(44);
       const misses: string[] = [];
       page.on("response", (response) => {
         if (response.status() === 404 && /\/(thumbs|frames)\//.test(response.url()))
@@ -166,12 +173,11 @@ for (const [label, engine, size] of [
       await press(row);
       await expect(replayHeading(page, "Earlier sample task 1")).toBeAttached();
       expect(query(page, "replay")).toBe(earlier);
-      await expect(replayTime(page)).toHaveText("0:00 / 1:00");
+      await expectTime(page, "0:00", "1:00");
       await expect.poll(() => query(page, "t")).toBe("0");
-      await expect(page.getByRole("dialog", { name: "Tasks" })).toHaveCount(0);
       await page.waitForTimeout(500);
       expect(misses).toEqual([]);
-      expect(await page.locator(".replay-stage").boundingBox()).toEqual(stage);
+      expect(await replayStage(page).boundingBox()).toEqual(stage);
       await context.close();
     });
 
@@ -181,25 +187,28 @@ for (const [label, engine, size] of [
       const screen = page.locator(".replay");
       expect(await screen.locator("select, input[type=radio], input[type=file]").count()).toBe(0);
       if (size.hasTouch) {
-        const list = await tasks(page, press);
-        const more = list.getByRole("button", { name: "More for Earlier sample task 1" });
-        await expect(more).toBeVisible();
-        expect(await reach(more)).toBeGreaterThanOrEqual(44);
+        const list = await tasks(page, size, press);
+        const row = list.getByRole("button", { name: /^Earlier sample task 1/ });
+        await expect(row).toBeVisible();
+        expect(await reach(row)).toBeGreaterThanOrEqual(44);
       }
       await context.close();
     });
 
     test("the picture keeps 16:10 and nothing covers its top edge", async () => {
       const { context, page } = await open(browser, size, `/?replay=${organize}&t=20000`);
-      await expect(replayTime(page)).toHaveText("0:20 / 3:00");
-      const stage = await page.locator(".replay-stage").boundingBox();
+      await expectTime(page, "0:20", "3:00");
+      await expect(page.locator(".replay-opening")).toBeHidden();
+      const stage = await replayStage(page).boundingBox();
       if (!stage) throw new Error("stage missing");
       expect(Math.abs(stage.width / stage.height - 1.6)).toBeLessThan(0.01);
       const covered = await page.evaluate(({ x, y, width }) => {
         const found: string[] = [];
         for (const fraction of [0.1, 0.3, 0.5, 0.7, 0.9]) {
           const hit = document.elementFromPoint(x + width * fraction, y + 12);
-          if (hit && !hit.matches("canvas, iframe, .replay-stage")) found.push(hit.className);
+          // The island hangs on the stage's top edge by design (design-v2 §10.15).
+          if (hit && !hit.matches("canvas, iframe, .stage") && !hit.closest(".island-anchor"))
+            found.push(hit.className);
         }
         return found;
       }, stage);
@@ -215,7 +224,7 @@ for (const [label, engine, size] of [
         const alpha = (colour: string) =>
           colour.startsWith("rgba") ? Number(colour.split(",").at(-1)?.replace(")", "")) : 1;
         const box = element.getBoundingClientRect();
-        const stage = (element.closest(".replay-stage") as HTMLElement).getBoundingClientRect();
+        const stage = (element.closest(".stage") as HTMLElement).getBoundingClientRect();
         const title = element.querySelector(".replay-gap-title") as HTMLElement;
         return {
           background: alpha(getComputedStyle(element).backgroundColor),
@@ -243,19 +252,31 @@ for (const [label, engine, size] of [
     test("Export opens its choices above the transport, with or without a save picker", async () => {
       const { context, page, press } = await open(browser, size, `/?replay=${earlier}`);
       const trigger = page.getByRole("button", { name: "Export video" });
-      await expect(replayTime(page)).toHaveText("0:00 / 1:00");
+      await expectTime(page, "0:00", "1:00");
       await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
-      const stage = await page.locator(".replay-stage").boundingBox();
+      const stage = await replayStage(page).boundingBox();
       await press(trigger);
       const panel = page.getByRole("dialog", { name: "Export video" });
       await expect(panel).toBeVisible();
       await expect(trigger).toHaveAttribute("aria-expanded", "true");
-      await expect(panel.locator("select, input[type=radio], input[type=file]")).toHaveCount(0);
+      // Only the kit's own controls: its choice cards hold their radios inside.
+      await expect(
+        panel.locator("select, input[type=radio]:not(.ui-choice-input), input[type=file]"),
+      ).toHaveCount(0);
       await expect(panel.getByRole("button", { name: /^Save/ })).toBeVisible();
+      // Measured where it comes to rest, not on its way in.
+      await panel.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+            .map((animation) => animation.finished.catch(() => null)),
+        ),
+      );
       const box = await panel.boundingBox();
       expect(box?.x).toBeGreaterThanOrEqual(0);
       expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.viewport.width);
-      expect(await page.locator(".replay-stage").boundingBox()).toEqual(stage);
+      expect(await replayStage(page).boundingBox()).toEqual(stage);
       await page.keyboard.press("Escape");
       await expect(panel).toBeHidden();
       await expect(trigger).toBeFocused();
@@ -270,7 +291,7 @@ for (const [label, engine, size] of [
       const page = await context.newPage();
       await page.goto(`${fixture.origin}/?replay=${earlier}#token=${TOKEN}`);
       const trigger = page.getByRole("button", { name: "Export video" });
-      await expect(replayTime(page)).toHaveText("0:00 / 1:00");
+      await expectTime(page, "0:00", "1:00");
       await expect(trigger).toHaveAttribute("aria-disabled", "true");
       await expect(trigger).toHaveAccessibleDescription(EXPORT_REASON);
       await (size.hasTouch ? trigger.tap({ force: true }) : trigger.click({ force: true }));
@@ -294,7 +315,7 @@ for (const engine of ["chrome", "webkit"] as const)
 test("a deep link opens Replay at its time", async () => {
   const browser = await ENGINES.chrome();
   const { page } = await open(browser, TABLET, `/?replay=${organize}&t=60000`);
-  await expect(replayTime(page)).toHaveText("1:00 / 3:00");
+  await expectTime(page, "1:00", "3:00");
   expect(query(page, "t")).toBe("60000");
   await browser.close();
 });
@@ -304,25 +325,36 @@ test("the top bar names the recording, not the task running live", async () => {
   const { page } = await open(browser, DESKTOP, `/?replay=${earlier}`);
   const bar = page.locator("header.bar");
   await expect(bar.getByText("Earlier sample task 1", { exact: true })).toBeVisible();
-  await expect(bar.getByText(/^Recorded · /)).toBeVisible();
+  await expect(bar.locator(".title-note")).not.toBeEmpty();
+  await expect(bar.getByText("Sample · monthly report")).toHaveCount(0);
   await browser.close();
 });
 
+// A finished recording leads back to Watch: the top bar's Watch, or on a phone back through the
+// library. The task running live offers to be watched live instead.
 for (const width of [390, 759, 760])
   test(`a finished task leads back to Watch at ${width}`, async () => {
     const browser = await ENGINES.chrome();
     const size = width === 390 ? PHONE : { viewport: { width, height: 900 } };
     const { page, press } = await open(browser, size, `/?replay=${earlier}`);
     await expect(replayHeading(page, "Earlier sample task 1")).toBeAttached();
-    await expect(page.getByRole("button", { name: "Jump to live" })).toHaveCount(0);
-    const back = page.getByRole("button", { name: "Back to Watch" });
-    await expect(back).toBeInViewport({ ratio: 1 });
-    await press(back);
+    await expect(page.getByRole("button", { name: "Watch it live" })).toHaveCount(0);
+    if (isPhone(size)) {
+      const up = page.getByRole("navigation").getByRole("button", { name: "Replay" });
+      await expect(up).toBeInViewport({ ratio: 1 });
+      await press(up);
+      await press(page.getByRole("navigation").getByRole("button", { name: "Watch" }));
+    } else {
+      const watch = page.getByRole("radiogroup", { name: "Mode" }).getByRole("radio", {
+        name: "Watch",
+      });
+      await expect(watch).toBeInViewport({ ratio: 1 });
+      await press(watch);
+    }
     await expect(page.getByRole("main", { name: "Replay" })).toHaveCount(0);
     expect(query(page, "replay")).toBeNull();
 
     await page.goto(`${fixture.origin}/?replay=${fixture.sessionId}#token=${TOKEN}`);
-    await expect(page.getByRole("button", { name: "Jump to live" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Back to Watch" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Watch it live" })).toBeVisible();
     await browser.close();
   });

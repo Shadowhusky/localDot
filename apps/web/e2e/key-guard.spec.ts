@@ -32,7 +32,6 @@ for (const engine of ["chrome", "webkit"] as const)
           sent.push(request.postData() ?? "");
       });
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-      await page.getByRole("tab", { name: "Conversation" }).tap();
       const box = page.getByRole("textbox", { name: "Message" });
       await box.fill(`token ${KEY} please`);
       const send = page.getByRole("button", { name: "Send now" });
