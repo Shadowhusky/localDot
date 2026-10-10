@@ -27,9 +27,10 @@
   transition: none;
 }
 
+/* A phone's rail holds the toolbar at the foot of the screen, so it fades in where it stays. */
 @media (--phone) {
   .app[data-entering] .rail-panel {
-    translate: 0 calc(var(--spacing) * 6);
+    translate: none;
   }
 }
 
