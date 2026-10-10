@@ -25,6 +25,7 @@ export function ResearchToggle({ on, suggested, disabledReason, onToggle }: Rese
       className="composer-research"
       hint={hint ? SUGGESTED : WHAT}
       disabledReason={disabledReason}
+      aria-label="Research"
       aria-pressed={on}
       data-suggested={hint || undefined}
       onClick={onToggle}

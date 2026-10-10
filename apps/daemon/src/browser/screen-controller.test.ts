@@ -804,6 +804,40 @@ describe("session screen coordinator", () => {
     lease.finish();
   });
 
+  it("fences recording before private input and keeps it fenced while a secret remains", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    const lease = f.controller.lease(f.scope);
+    const fence = Promise.withResolvers<void>();
+    f.deps.fenceRecording.mockImplementationOnce(() => fence.promise);
+    f.client.read.mockRejectedValueOnce(new Error("protected field still filled"));
+    const attached = f.deps.attachRecording.mock.calls.length;
+    const work = vi.fn(async () => true);
+    const delivery = f.controller.privateInput(lease, work);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(work).not.toHaveBeenCalled();
+    fence.resolve();
+    expect(await delivery).toBe(true);
+    expect(work).toHaveBeenCalledOnce();
+    expect(f.deps.attachRecording).toHaveBeenCalledTimes(attached);
+    lease.finish();
+  });
+
+  it("normal cancellation drains a pending browser start without stopping the computer", async () => {
+    const f = fixture();
+    const opened = Promise.withResolvers<ReadyBrowser>();
+    f.deps.browser.start.mockImplementationOnce(() => opened.promise);
+    const switching = f.controller.switchTo("browser", f.scope).catch((error: unknown) => error);
+    await until(() => f.deps.browser.start.mock.calls.length === 1);
+    const cancelled = f.controller.cancel();
+    opened.resolve(f.endpoint);
+    expect(await switching).toBeInstanceOf(Error);
+    await cancelled;
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    await expect(f.controller.switchTo("desktop", f.scope)).rejects.toThrow();
+  });
+
   it("terminal close contains immediately but waits for a late preparation and final retirement", async () => {
     const f = fixture();
     const opened = Promise.withResolvers<ReadyBrowser>();

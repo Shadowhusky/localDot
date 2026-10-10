@@ -7,6 +7,7 @@ import {
   ULID_PATTERN,
 } from "@localdot/protocol";
 import type { Hono } from "hono";
+import { Conversations } from "../agent/conversation.ts";
 import { type EventLog, UnknownSessionError } from "../event-log.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { Recorder } from "../recorder/recorder.ts";
@@ -271,6 +272,24 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
         "cache-control": "private, max-age=31536000, immutable",
       },
     });
+  });
+  app.delete("/api/conversations/:id", (c) => {
+    const id = c.req.param("id");
+    const conversations = new Conversations(deps.home, deps.eventLog);
+    if (!ULID_PATTERN.test(id) || !conversations.has(id))
+      return c.text("conversation not found", 404);
+    const { sessions } = conversations.chain(id, Number.MAX_SAFE_INTEGER);
+    // Preflight the whole chain before deleting any part of it. No await separates
+    // this check from deletion, so a live run cannot enter between them.
+    if (sessions.some((task) => deps.recorder.isLive(task) || deps.live?.cellOf(task)))
+      return c.text("conversation is live", 409);
+    const current = conversations.current();
+    for (const task of sessions) {
+      deps.eventLog.forget(task);
+      deps.index.invalidate(task);
+    }
+    if (current && sessions.includes(current)) conversations.begin();
+    return c.body(null, 204);
   });
   app.delete("/api/sessions/:id", (c) => {
     const id = c.req.param("id");

@@ -354,15 +354,19 @@ export class AgentRunner {
       const current = this.deps.live.get(cellId);
       if (current) {
         const old = this.sessions.get(current);
+        if (old && this.holds(current) && old.pendingTakeover) {
+          if (!(await old.handback(old.pendingTakeover, undefined, signal)))
+            throw new AgentError(409, "The computer is still changing hands. Try sending again.");
+        }
         if (!old || (old.status !== "idle" && !recoverable(old)) || old.controlHeld)
           throw new AgentError(409, "a task is already running on this computer");
         // A hold the user handed back ends by itself. A finished task ends as it would after its
-        // idle time: Stop would also stop the computer the next task is about to use.
+        // idle time; cancellation leaves the computer ready for the next task.
         const waiting = this.#runtime.get(current);
         if (waiting?.idleWait) {
           waiting.released = true;
           waiting.idleWait.abort();
-        } else if (!this.holds(current)) old.stop();
+        } else if (!this.holds(current)) old.cancel();
         await (signal
           ? abortable(this.deps.live.settled(current), signal)
           : this.deps.live.settled(current));
@@ -578,13 +582,13 @@ export class AgentRunner {
   end(id: string): boolean {
     const session = this.sessions.get(id);
     if (!session || session.stopped) return false;
-    session.stop();
+    session.cancel();
     return true;
   }
   async stopRun(id: string): Promise<boolean> {
     const session = this.sessions.get(id);
     if (!session) return this.#terminal.has(id);
-    if (!session.stopped) session.stop();
+    if (!session.stopped) session.cancel();
     // Do not acknowledge Stop until the old run has retired and released ownership.
     await this.deps.live.settled(id);
     return true;
@@ -608,7 +612,7 @@ export class AgentRunner {
     for (const rt of waiting) {
       rt.released = true;
       if (rt.idleWait) rt.idleWait.abort();
-      else rt.session.stop();
+      else rt.session.cancel();
     }
     const settled = Promise.all(waiting.map((rt) => this.deps.live.settled(rt.session.id)));
     await (signal ? abortable(settled, signal) : settled);
@@ -1112,7 +1116,7 @@ export class AgentRunner {
       this.#closing = true;
       this.#unsubscribe();
       for (const rt of this.#runtime.values()) {
-        rt.session.stop();
+        rt.session.cancel();
         this.deps.live.stop(rt.session.id);
       }
       this.#changed();

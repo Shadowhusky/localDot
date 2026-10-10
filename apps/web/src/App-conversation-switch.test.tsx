@@ -165,8 +165,10 @@ it("takes up a conversation chosen from the list, its thread coming in once it i
   const d = await opened();
   const { thread } = d;
   fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
-  const list = await screen.findByRole("listbox", { name: "Recent conversations" });
-  const row = await within(list).findByRole("option", { name: /Lisbon trip/ });
+  const list = await screen.findByRole("grid", { name: "Recent conversations" });
+  const row = within(await within(list).findByRole("row", { name: /Lisbon trip/ })).getAllByRole(
+    "button",
+  )[0]!;
   fireEvent.click(row);
   expect(d.posts).toEqual([{ path: "/api/conversation/continue", body: { sessionId: d.trip.id } }]);
   expect(thread.textContent).not.toContain(REPLIED);

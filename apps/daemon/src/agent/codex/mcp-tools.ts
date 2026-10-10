@@ -95,6 +95,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "there is no target; you only learn that it was provided. For browser sign-in, include the username/email " +
     "and password in one question. localDot securely saves and reuses the login, fills both fields and submits " +
     "the verified sign-in form. Check the tool result before acting; do not submit again when it already did. " +
+    "A code answer is delivered privately to the verification box at target and submitted once, never saved. " +
+    "Read the current page and ask for a replacement password or a verification code as it requires; keep it open while waiting. " +
     "Answers come back by field id. If the user declines, carry on " +
     "without it.",
   request_takeover:

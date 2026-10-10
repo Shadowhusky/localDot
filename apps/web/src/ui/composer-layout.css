@@ -63,9 +63,10 @@
     }
   }
 
-  /* Secondary choices remain in Message options when the panel gets narrow. */
+  /* Queued messages keep their Steer now action. At narrow widths, preserve
+     the Research toggle and leave out the secondary delivery menu. */
   @container (max-width: 340px) {
-    .composer-research.ui-chip {
+    .composer-more {
       display: none;
     }
   }

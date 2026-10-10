@@ -1293,7 +1293,7 @@ export class AgentSession {
     for (const field of fields) {
       const answer = value(field.id);
       if (answer === undefined) continue;
-      if (field.kind === "secret" && typeof answer === "string") {
+      if ((field.kind === "secret" || field.kind === "code") && typeof answer === "string") {
         secrets.push([field.id, answer]);
         record[field.id] = { provided: true };
       } else record[field.id] = typeof answer === "string" ? redact(answer.trim()) : answer;
@@ -1648,6 +1648,14 @@ export class AgentSession {
       this.#finishing = false;
     }
   }
+  // User Stop ends the run, not the computer. Emergency callers retain stop().
+  cancel(): void {
+    if (this.stopped) return;
+    this.#end(false);
+    this.#screenClosing = this.#screens?.cancel();
+    void this.#screenClosing?.catch(() => {});
+  }
+
   stop(): void {
     if (this.#finishing) {
       this.#finishInterrupted = true;

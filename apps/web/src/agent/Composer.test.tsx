@@ -424,9 +424,8 @@ describe("composer delivery ownership and draft handling", () => {
   });
   it("offers no choice of when to send once the task is idle, so Option-Return does nothing", async () => {
     const f = setup(undefined, { agent: { ...agent, snapshot: { ...snapshot, status: "idle" } } });
-    fireEvent.click(screen.getByRole("button", { name: "Message options" }));
+    expect(screen.queryByRole("button", { name: "Message options" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Send after this task" })).toBeNull();
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     f.input("next");
     expect(fireEvent.keyDown(f.field, { key: "Enter", altKey: true })).toBe(false);
     expect(f.field.value).toBe("next");
@@ -752,7 +751,7 @@ describe("the composer's controls", () => {
       },
     ]);
   });
-  it("waits for the hand-back while the user holds the computer with no task, then starts one", async () => {
+  it("sends a new task while the user holds the computer, allowing the daemon to hand back", async () => {
     const f = setup(() => Response.json({ sessionId }, { status: 202 }), {
       configured: true,
       agent: {
@@ -762,15 +761,6 @@ describe("the composer's controls", () => {
     });
     f.input("Now fill in the form");
     fireEvent.keyDown(f.field, { key: "Enter" });
-    expect(screen.getByRole("alert").textContent).toBe(
-      "Hand back the computer, then message dot. Your message stays here.",
-    );
-    expect(f.requests).toEqual([]);
-    f.update({
-      configured: true,
-      agent: { ...agent, snapshot: { ...snapshot, status: "idle", holder: true } },
-    });
-    f.submit();
     await act(async () => {});
     expect(f.requests).toEqual([
       { path: `/api/cells/${cellId}/agent`, body: { task: "Now fill in the form" } },

@@ -61,7 +61,10 @@ export class AskDraft {
     for (const listener of this.#listeners) listener();
   }
 
-  #secret = (id: string) => this.fields.some((field) => field.id === id && field.kind === "secret");
+  #secret = (id: string) =>
+    this.fields.some(
+      (field) => field.id === id && (field.kind === "secret" || field.kind === "code"),
+    );
 
   // Keys taken out of the fields wait here, never in the draft, until moved to Keys or discarded.
   #taken: string[] = [];
@@ -164,7 +167,7 @@ export class AskDraft {
     const values = { ...this.#state.draft.values };
     let had = false;
     for (const field of this.fields)
-      if (field.kind === "secret" && values[field.id]) {
+      if ((field.kind === "secret" || field.kind === "code") && values[field.id]) {
         values[field.id] = "";
         had = true;
       }

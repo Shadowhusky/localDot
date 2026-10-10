@@ -923,6 +923,25 @@ describe("private browser password delivery", () => {
       "secret",
     );
   });
+  it("privately fills and submits a text verification code without remembering it", async () => {
+    const f = await setup();
+    f.state.passwordType = "text";
+    f.state.autocomplete = "one-time-code";
+    expect(
+      await f.input.secret(permit, "tab", { ...request, text: "123456" }, f.abort.signal),
+    ).toEqual({
+      filled: true,
+      rememberable: false,
+      submitted: true,
+    });
+    expect(
+      f.commands
+        .filter((c) => c.name === "char")
+        .map((c) => c.args.ch)
+        .join(""),
+    ).toBe("123456");
+    expect(f.commands.at(-1)).toMatchObject({ name: "keys", args: { combo: ["Return"] } });
+  });
   it("waits for the password click's focus update before delivering any characters", async () => {
     const f = await setup();
     f.hooks.set("Accessibility.getFullAXTree:2", () => {

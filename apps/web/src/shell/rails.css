@@ -238,14 +238,29 @@
 
 .conversations-row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
-  column-gap: calc(var(--spacing) * 3);
-  height: 40px;
-  padding: 0 calc(var(--spacing) * 2.5);
+  min-height: 44px;
+  padding-inline: calc(var(--spacing) * 1);
   border-radius: var(--radius-row);
-  cursor: default;
   transition: background-color var(--dur-hover) var(--ease-standard);
+}
+.conversations-main {
+  min-width: 0;
+}
+.conversations-pick {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  text-align: start;
+}
+.conversations-pick > .ui-button-content {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  column-gap: calc(var(--spacing) * 3);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
 }
 
 /* The current conversation keeps a quiet light and a heavier title; the row the arrows or the
@@ -258,7 +273,7 @@
   background-color: var(--color-selected);
 }
 
-.conversations-row[aria-disabled] {
+.conversations-pick[aria-disabled] {
   opacity: var(--opacity-disabled);
 }
 

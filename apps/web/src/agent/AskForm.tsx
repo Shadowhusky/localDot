@@ -263,7 +263,7 @@ function AskFieldControl({
     label,
     description: fieldNote(
       hiddenWarning(named),
-      field.kind === "secret" ? (field.site ?? "") : undefined,
+      field.kind === "secret" || field.kind === "code" ? (field.site ?? "") : undefined,
       field.hint,
     ),
     error: problem,

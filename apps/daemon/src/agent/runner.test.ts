@@ -219,6 +219,17 @@ describe("the user's own hold on the computer", () => {
     expect(next.id).not.toBe(session.id);
     expect(await f.runner.stopRun(session.id)).toBe(true);
   });
+  it("starting a task hands back a user-only hold on the same computer", async () => {
+    const f = setup();
+    const hold = await f.runner.hold(f.cellId);
+    const held = f.runner.get(hold.sessionId)!;
+    await until(() => held.manualControl === "ready");
+    const next = await f.runner.start(f.cellId, "Continue from this screen");
+    expect(next.cellId).toBe(f.cellId);
+    expect(next.id).not.toBe(hold.sessionId);
+    expect(held.controlHeld).toBe(false);
+    expect(f.containment).not.toHaveBeenCalled();
+  });
   it.each(["working task", "user-only hold"] as const)(
     "Stop ends a %s while the user holds control, without handing back or resuming work",
     async (kind) => {

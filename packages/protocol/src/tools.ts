@@ -279,7 +279,7 @@ export type AskField = z.infer<typeof AskField>;
 
 const FIELD_ONLY = {
   options: ["choice", "multichoice"],
-  target: ["secret"],
+  target: ["secret", "code"],
   length: ["code"],
   value: ["qr"],
 } as const satisfies Record<string, readonly AskFieldKind[]>;

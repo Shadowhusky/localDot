@@ -29,7 +29,7 @@ import { afterMotion } from "../ui/finished.ts";
 import { focusWithoutScroll } from "../ui/focus.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
-import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
+import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
@@ -113,14 +113,10 @@ export interface Delivery {
   readonly at: number;
   readonly phase: "sending" | "accepted" | "refused" | "uncertain";
 }
-// The user holds the computer with no task: dot hears from them once they hand it back.
-const holding = (props: ComposerProps) =>
-  !!props.agent.snapshot?.holder && !!props.agent.snapshot.pendingTakeover;
 const readyCell = (props: ComposerProps) =>
   props.known &&
   !props.pending &&
   !props.controlBlocked &&
-  !holding(props) &&
   props.cell?.state === "ready" &&
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
@@ -148,7 +144,6 @@ function computerReason(props: ComposerProps): string | undefined {
     return "Turn on your computer first.";
   if (props.cell.paused) return "Resume your computer first.";
   if (props.controlBlocked) return "You can send once the task is ready.";
-  if (holding(props)) return "Hand back the computer, then message dot.";
   return undefined;
 }
 // Why nothing can be sent now, as Send says it.
@@ -756,7 +751,7 @@ export function Composer(props: ComposerProps) {
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
   // A phone's field has room for its text and Send only; there a message is read after the step.
   const pill = props.layout === "pill";
-  if (pill && menu) setMenu(false);
+  if ((pill || !choosing) && menu) setMenu(false);
   const typing = useRef({ submit, touch, choosing });
   useLayoutEffect(() => {
     typing.current = { submit, touch, choosing };
@@ -1013,7 +1008,7 @@ export function Composer(props: ComposerProps) {
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
-          {!pill && (
+          {!pill && choosing && (
             <IconButton
               ref={more}
               className="composer-more"
@@ -1032,14 +1027,6 @@ export function Composer(props: ComposerProps) {
             align="end"
             label="Message options"
           >
-            <MenuItem
-              checked={research}
-              disabledReason={researchReason}
-              onSelect={() => setResearch((on) => !on)}
-            >
-              Research
-            </MenuItem>
-            {choosing && <MenuSeparator />}
             {choosing && (
               <MenuItem
                 disabledReason={sendReason}

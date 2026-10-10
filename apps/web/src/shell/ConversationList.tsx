@@ -21,12 +21,14 @@ import {
   whenLabel,
 } from "../agent/conversation-list.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
-import type { ApiClient } from "../lib/api.ts";
+import { type ApiClient, ApiError } from "../lib/api.ts";
 import { useTaskSearch } from "../replay/search-api.ts";
 import { Button } from "../ui/Button.tsx";
+import { Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import "./rails.css";
@@ -42,6 +44,7 @@ export interface ConversationListProps {
   reason?: string;
   onPick(sessionId: string, sessions?: readonly string[]): void;
   onReplay(): void;
+  onDeleted?(sessions: readonly string[]): void;
 }
 
 // The recent conversations by day, a search over them and the way into Replay for the rest. The
@@ -54,8 +57,33 @@ export function ConversationList({
   reason,
   onPick,
   onReplay,
+  onDeleted,
 }: ConversationListProps) {
   const listId = useId();
+  const actionAnchor = useRef<HTMLButtonElement | null>(null);
+  const [action, setAction] = useState<ConversationRow | null>(null);
+  const [deleting, setDeleting] = useState<ConversationRow | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    if (!deleting || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(`/api/conversations/${deleting.entry.sessionId}`);
+      onDeleted?.(deleting.entry.sessions);
+      setDeleting(null);
+      recent.retry();
+    } catch (failure) {
+      setError(
+        failure instanceof ApiError && failure.status === 409
+          ? "Stop this conversation's task before deleting it."
+          : "The conversation couldn't be deleted. Try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
   const recent = useRecentConversations(api, open);
   const [query, setQuery] = useState("");
   const matches = useTaskSearch(api, query);
@@ -141,14 +169,14 @@ export function ConversationList({
       <div
         ref={list}
         id={listId}
-        role="listbox"
+        role="grid"
         aria-label="Recent conversations"
         className="conversations-list"
       >
         {groups.map((group) => (
           <div
             key={group.label}
-            role="group"
+            role="rowgroup"
             aria-labelledby={`${listId}-${group.label}`}
             className="conversations-group"
           >
@@ -162,7 +190,7 @@ export function ConversationList({
                 <div
                   key={id}
                   id={optionId(row)}
-                  role="option"
+                  role="row"
                   aria-selected={row === activeRow}
                   aria-current={isCurrent || undefined}
                   aria-disabled={(!!reason && !isCurrent) || undefined}
@@ -172,18 +200,38 @@ export function ConversationList({
                   onPointerMove={() => {
                     if (id !== activeKey) setActive(id);
                   }}
-                  onClick={() => pick(row)}
                 >
-                  <span
-                    className="conversations-status"
-                    data-status={row.status}
-                    role="img"
-                    aria-label={STATUS_LABEL[row.status]}
-                  />
-                  <span className="conversations-title">{row.title}</span>
-                  <time className="conversations-when num" dateTime={row.entry.startedAt}>
-                    {whenLabel(row.entry.startedAt, now)}
-                  </time>
+                  <div role="gridcell" className="conversations-main">
+                    <Button
+                      variant="quiet"
+                      className="conversations-pick"
+                      disabledReason={!isCurrent ? reason : undefined}
+                      onClick={() => pick(row)}
+                    >
+                      <span
+                        className="conversations-status"
+                        data-status={row.status}
+                        role="img"
+                        aria-label={STATUS_LABEL[row.status]}
+                      />
+                      <span className="conversations-title">{row.title}</span>
+                      <time className="conversations-when num" dateTime={row.entry.startedAt}>
+                        {whenLabel(row.entry.startedAt, now)}
+                      </time>
+                    </Button>
+                  </div>
+                  <div role="gridcell">
+                    <IconButton
+                      icon="more-horizontal"
+                      size={28}
+                      label={`Actions for ${row.title}`}
+                      {...triggerProps("menu", action?.entry.sessionId === id)}
+                      onClick={(event) => {
+                        actionAnchor.current = event.currentTarget;
+                        setAction(row);
+                      }}
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -203,6 +251,7 @@ export function ConversationList({
         aria-expanded={ordered.length > 0}
         aria-controls={listId}
         aria-autocomplete="list"
+        aria-haspopup="grid"
         aria-activedescendant={activeRow ? optionId(activeRow) : undefined}
         placeholder="Search conversations"
         enterKeyHint="go"
@@ -217,6 +266,63 @@ export function ConversationList({
       />
       {reason && <p className="conversations-note">{reason}</p>}
       <div className="conversations-body">{body}</div>
+      <Menu
+        open={action !== null}
+        onClose={() => setAction(null)}
+        anchor={actionAnchor}
+        label="Conversation actions"
+        align="end"
+      >
+        <MenuItem
+          icon="message-circle"
+          disabledReason={reason && action?.entry.sessionId !== current ? reason : undefined}
+          onSelect={() => {
+            if (action) pick(action);
+          }}
+        >
+          Open conversation
+        </MenuItem>
+        <MenuItem
+          icon="trash"
+          disabledReason={
+            action?.entry.sessions.includes(facts.live ?? "")
+              ? "Stop this task before deleting its conversation."
+              : undefined
+          }
+          onSelect={() => {
+            setError(null);
+            setDeleting(action);
+          }}
+        >
+          Delete conversation
+        </MenuItem>
+      </Menu>
+      <Dialog
+        open={deleting !== null}
+        onClose={() => {
+          if (!busy) setDeleting(null);
+        }}
+        anchor={actionAnchor}
+        title="Delete this conversation?"
+        description={
+          error ? (
+            <span role="alert">{error}</span>
+          ) : (
+            "Its messages, recordings and screenshots will be removed. This can't be undone."
+          )
+        }
+      >
+        <Button
+          variant="quiet"
+          disabledReason={busy ? "Deleting…" : undefined}
+          onClick={() => setDeleting(null)}
+        >
+          Cancel
+        </Button>
+        <Button variant="destructive" busy={busy} onClick={() => void remove()}>
+          Delete
+        </Button>
+      </Dialog>
       <div className="conversations-foot">
         <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
           See all in Replay

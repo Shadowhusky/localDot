@@ -641,7 +641,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (deps.runner.holds?.(s.id))
         throw new RouteError(409, "hand back the computer, then message dot");
       const text = redact(parsed.text, s.id, s.cellId);
-      if (parsed.kind === "followup") s.enqueue(text);
+      if (s.pendingTakeover) {
+        // A deliberate Send hands control back. Publish this instruction before
+        // waking the model, so it cannot resume the old plan ahead of the message.
+        if (!(await s.handback(s.pendingTakeover, text, c.req.raw.signal)))
+          throw new RouteError(409, "The computer is still changing hands. Try sending again.");
+      } else if (parsed.kind === "followup") s.enqueue(text);
       else s.post(parsed.kind, text);
       return c.body(null, 202);
     }),

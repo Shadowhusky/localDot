@@ -83,6 +83,20 @@ export function useWhatDotKnows(api: ApiClient, open: boolean) {
     }
     return () => loading.current?.abort();
   }, [open, load]);
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => {
+      if (document.visibilityState !== "hidden" && !loading.current) void load();
+    };
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [open, load]);
   useEffect(
     () => () => {
       mounted.current = false;

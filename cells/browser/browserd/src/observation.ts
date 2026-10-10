@@ -233,8 +233,8 @@ export class BrowserObservation {
         const geometry = await this.#options.geometry.read(tabId, combined);
         check(geometry.document);
         if (geometry.focus !== "page") throw new BrowserObservationError("unavailable");
-        if (await this.#options.secrets.secretFocused(tabId, combined))
-          throw new BrowserObservationError("secret");
+        // projectBrowser rejects filled secrets and masks protected controls. An
+        // empty autofocus password/code box must not hide the verification page.
         check(geometry.document);
         const rawFrame = await this.#options.targets.command(
           geometry.document,

@@ -99,16 +99,16 @@ async function askFields(
 ): Promise<ToolResult> {
   const secrets = new Map<string, SecretField>();
   for (const field of fields) {
-    if (field.kind !== "secret") continue;
+    if (field.kind !== "secret" && field.kind !== "code") continue;
     const found = await findSecretField(deps, ctx, field.target);
     if (typeof found === "string") return fail(found);
-    secrets.set(field.id, found);
+    secrets.set(field.id, field.kind === "code" ? { ...found, loginOrigin: undefined } : found);
   }
   // Saved credentials stay on the trusted input channel. Reuse once per task/site;
   // another request after a rejected login lets the user replace the saved password.
   const used = reusedLogins.get(ctx.session) ?? new Set<string>();
   reusedLogins.set(ctx.session, used);
-  const loginFields = fields.filter((field) => field.kind !== "secret");
+  const loginFields = fields.filter((field) => field.kind !== "secret" && field.kind !== "code");
   const canReuse =
     secrets.size === 1 &&
     loginFields.every(
@@ -268,7 +268,7 @@ async function askFields(
         ok: false,
         content: [
           text(
-            `The secure answer was not delivered. Check the page and locate the password field again; saved credentials can be reused without asking for the password again. Nothing was typed for ${moved.join(", ")}. The user's other answers: ${given}`,
+            `The secure answer was not delivered. Check the page and locate the password or verification field again; saved credentials can be reused without asking for the password again. Nothing was typed for ${moved.join(", ")}. The user's other answers: ${given}`,
           ),
         ],
       };
@@ -278,7 +278,7 @@ async function askFields(
         text(
           `The user answered: ${given}${
             secrets.size
-              ? "\nSecret answers were entered privately. For a saved browser sign-in, the account and password were filled and its sign-in form was submitted. Check the resulting page for success, an error, or two-factor authentication; do not submit it again."
+              ? "\nSecret answers were entered privately. Browser verification codes are entered privately and never saved. The page may submit as the last digit lands; inspect the current page before any further action, and never replay the code after it advances. For a saved browser sign-in, the account and password were filled and its sign-in form was submitted. Check the resulting page for success, an error, or two-factor authentication; do not submit it again."
               : ""
           }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : ""}`,
         ),

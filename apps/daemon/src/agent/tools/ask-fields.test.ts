@@ -345,8 +345,11 @@ describe("ask_user with fields", () => {
     ).toBe(true);
     const { result } = await asking;
     expect(textOf(result)).toContain(
-      'The user answered: {"format":"Markdown","extras":[],"code":"123456"}',
+      'The user answered: {"format":"Markdown","extras":[],"code":{"provided":true}}',
     );
+    expect(h.state.typed.at(-1)?.text).toBe("123456");
+    expect(textOf(result)).not.toContain("123456");
+    expect(h.stored().join("\n")).not.toContain("123456");
   });
 
   it("keeps a plain question with options working as before", async () => {

@@ -1439,6 +1439,10 @@ function Theatre({ api }: { api: ApiClient }) {
     facts: liveFacts,
     reason: yours ? undefined : conversationReason,
     onPick: pickConversation,
+    onDeleted: (ids: readonly string[]) => {
+      if (viewedConversation && ids.includes(viewedConversation.id)) setViewedConversation(null);
+      conversation.reload();
+    },
     onReplay: () => selectReplay(LIBRARY),
   };
   const askOver = (layout: "island" | "sheet") =>

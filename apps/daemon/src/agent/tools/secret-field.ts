@@ -15,6 +15,7 @@ interface Screen {
   revision?: number;
   signal: AbortSignal;
   check(): void;
+  privateInput?<T>(work: () => Promise<T>): Promise<T>;
 }
 
 // The field a secret answer is typed into, as the screen showed it when dot asked: the element
@@ -55,6 +56,7 @@ async function onScreen<T>(
         cellId: lease.selection.cellId,
         revision: lease.selection.revision,
         signal: AbortSignal.any([ctx.signal, lease.signal]),
+        privateInput: (work) => session.screens!.privateInput(lease, work),
         check: () => {
           ctx.check();
           lease.check();
@@ -191,16 +193,20 @@ function deliver(
       if (!screen.device.secret || !field.found.target?.url)
         throw new Error("Secure browser input is unavailable.");
       const origin = new URL(field.found.target.url).origin;
+      const at = field.at ?? field.found.target.point;
+      const secret = screen.device.secret;
       startTyping();
-      const result = await screen.device.secret(
-        {
-          origin,
-          at: field.at ?? field.found.target.point,
-          text: value,
-          ...(username ? { username } : {}),
-        },
-        screen.signal,
-      );
+      const deliver = () =>
+        secret(
+          {
+            origin,
+            at,
+            text: value,
+            ...(username ? { username } : {}),
+          },
+          screen.signal,
+        );
+      const result = await (screen.privateInput ? screen.privateInput(deliver) : deliver());
       screen.check();
       return result.filled;
     }

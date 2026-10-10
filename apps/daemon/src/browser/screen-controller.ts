@@ -388,6 +388,48 @@ export class ScreenController {
     return this.#shutdown(false);
   }
 
+  // Private answers must never enter the raw video recording, including visible
+  // verification-code boxes. Resume only after a fresh read proves no filled secret remains.
+  async privateInput<T>(lease: ScreenLease, work: () => Promise<T>): Promise<T> {
+    lease.check();
+    const selection = lease.selection;
+    const access = this.browserAccess(lease);
+    await this.deps.fenceRecording();
+    lease.check();
+    const resume = async () => {
+      let clear = false;
+      try {
+        lease.check();
+        await access.client.read(access.permit, access.tabId, { maxChars: 500 }, lease);
+        lease.check();
+        clear = true;
+      } catch {
+        // A filled code, changing document, or Stop keeps recording fenced.
+      }
+      if (clear) {
+        try {
+          await this.deps.attachRecording(selection, lease);
+          lease.check();
+        } catch (error) {
+          if (!lease.signal.aborted) await this.#fail();
+          throw error;
+        }
+      }
+    };
+    try {
+      return await work();
+    } finally {
+      await resume();
+    }
+  }
+
+  // Normal task cancellation fences new input, drains existing leases and revokes
+  // this task's browser grant. The computer and its signed-in browser outlive it.
+  cancel(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    return this.#shutdown(false);
+  }
+
   close(): Promise<void> {
     if (!this.#closing) return this.#shutdown(true);
     if (!this.#finishing) return this.#closing;

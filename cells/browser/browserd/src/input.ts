@@ -895,6 +895,7 @@ export class BrowserInput {
         scope.check(first.document);
         if (hit.frameId !== frame.id) throw new BrowserInputError("target");
         this.#options.targets.rememberNodes?.(first.document, [hit.backendNodeId]);
+        let oneTimeCode = false;
         const inspect = async (focused: boolean) => {
           await checkOrigin();
           const geometry = await this.#geometry(tabId, scope);
@@ -919,10 +920,18 @@ export class BrowserInput {
           const attrs = new Map<string, string>();
           for (let i = 0; i < node.attributes.length; i += 2)
             attrs.set((node.attributes[i] ?? "").toLowerCase(), node.attributes[i + 1] ?? "");
-          // Hidden/masked password inputs only: never put a secret into a visible OTP/text box.
+          // Only password fields or explicitly identified verification-code fields.
+          // Code values use the private channel and are never saved as a login.
+          oneTimeCode =
+            /(?:^|\s)one-time-code(?:\s|$)/iu.test(attrs.get("autocomplete") ?? "") ||
+            /(?:^|[^a-z])(?:otp|totp|2fa|mfa)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|auth)[-_ ]?code/iu.test(
+              [attrs.get("name"), attrs.get("id"), attrs.get("aria-label")].join(" "),
+            );
+          const inputType = (attrs.get("type") ?? "text").toLowerCase();
           if (
             node.nodeName !== "INPUT" ||
-            attrs.get("type")?.toLowerCase() !== "password" ||
+            (inputType !== "password" &&
+              !(oneTimeCode && ["text", "tel", "number"].includes(inputType))) ||
             attrs.has("disabled") ||
             attrs.has("readonly")
           )
@@ -970,6 +979,7 @@ export class BrowserInput {
               throw new BrowserInputError("focus");
           }
           return (
+            !oneTimeCode &&
             !/(?:new-password|one-time-code)/iu.test(attrs.get("autocomplete") ?? "") &&
             !/(?:otp|totp|2fa|mfa|passcode|verification|security.code)/iu.test(
               [attrs.get("name"), attrs.get("id"), attrs.get("aria-label")].join(" "),
@@ -1140,7 +1150,17 @@ export class BrowserInput {
             1,
           );
         }
-        await inspect(true);
+        try {
+          await inspect(true);
+        } catch (error) {
+          // Some verification forms navigate as the final digit lands. All
+          // characters have native receipts; never send Return into the new page.
+          if (!oneTimeCode) throw error;
+          scope.check();
+          // The code was delivered, but we did not send a separate submit. The
+          // caller must inspect the new page instead of replaying the answer.
+          return { filled: true, rememberable: false, submitted: false };
+        }
         if (login) {
           const current = await form();
           if (JSON.stringify(current) !== JSON.stringify(login))
@@ -1159,6 +1179,18 @@ export class BrowserInput {
             1,
           );
           return { filled: true, rememberable, submitted: true };
+        }
+        if (oneTimeCode) {
+          // This same verified input receives Return; no ordinary agent typing or
+          // replay of the code is needed to finish a verification form.
+          await this.#press(
+            scope,
+            armedMono,
+            () => this.#options.native.command("keys", { combo: ["Return"] }, scope.signal),
+            (event, reply) => event.kind === "key" && event.detail === reply.keycodes.at(-1),
+            1,
+          );
+          return { filled: true, rememberable: false, submitted: true };
         }
         return { filled: true, rememberable, submitted: false };
       },

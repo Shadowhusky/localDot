@@ -182,7 +182,7 @@ export function composerReply(
   text: string,
   attached = false,
 ): ComposerReply {
-  if (question.fields?.some((field) => field.kind === "secret"))
+  if (question.fields?.some((field) => field.kind === "secret" || field.kind === "code"))
     return {
       kind: "hold",
       reason: "Type it in dot's question above. Messages aren't kept secret.",

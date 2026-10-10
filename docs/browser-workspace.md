@@ -121,9 +121,17 @@ separate interaction.
 
 **Stop task** cancels the run and its queued messages, withdraws agent control and waits for
 in-flight work to drain before a new conversation can take ownership. It does not leave a paused
-task holding the computer. The CLI emergency Stop and Stop computer remain separate controls. Do not treat an
+task holding the computer, shut down the desktop, or discard its browser. The next conversation reuses that computer. Sending a message during user control hands control back and steers the task immediately. The CLI emergency Stop and Stop computer remain separate controls. Do not treat an
 interrupted upload or release as proof that the receiving side saw no bytes.
 
 Replay records both screens while the agent is working, including when you are not watching.
 Choose a screen in Replay to inspect or export that track. Manual-control gaps stay private.
 See [the Replay guide](replay.md) for retention, export and recovery details.
+
+## Account reuse and verification
+
+Connected apps and saved browser accounts are used before requesting another sign-in. A connector's authentication does not log a separate command-line client in: dot should use the connected tools for supported work and the existing browser account for website work, and explain any missing capability before asking for additional access.
+
+An empty, focused password or verification field no longer hides the page from dot. Filled secrets remain excluded from page reads and screenshots. One-time codes use the private answer channel, are submitted to the identified verification field once, and are never saved as passwords or included in the conversation. Dot keeps the verification page open and explains whether the code comes from an authenticator, email or SMS.
+
+App testing should open the app's preview on the streamed computer and exercise its visible flows. Command-line tests supplement that view. What dot knows refreshes while Settings is open; lasting user-provided facts are saved separately from recent task history, without credentials or transient task details.

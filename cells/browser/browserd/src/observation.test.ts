@@ -764,12 +764,15 @@ describe("leased browser observation", () => {
       expect(f.capture.masked).not.toHaveBeenCalled();
     },
   );
-  it("refuses secret focus and request accessors before returning target data", async () => {
+  it("allows identifying an empty protected field but refuses request accessors", async () => {
     const f = await setup();
     f.state.secretFocused = true;
+    await expect(f.observation.observe(permit, "tab", f.abort.signal)).resolves.toHaveProperty(
+      "frame",
+    );
     await expect(
       f.observation.lookup(permit, "tab", { kind: "focused" }, f.abort.signal),
-    ).rejects.toThrow("secret");
+    ).resolves.toBeDefined();
     const getter = vi.fn();
     await expect(
       f.observation.lookup(
@@ -804,14 +807,12 @@ describe("leased browser observation", () => {
 
   it.each([
     "geometry:1",
-    "focus:1",
     "Page.getFrameTree:1",
     "DOMSnapshot.captureSnapshot:1",
     "Accessibility.getFullAXTree:1",
     "capture:1",
     "pointer:1",
     "geometry:2",
-    "focus:2",
     "Page.getFrameTree:2",
     "DOMSnapshot.captureSnapshot:2",
     "Accessibility.getFullAXTree:2",
@@ -833,7 +834,6 @@ describe("leased browser observation", () => {
     if (
       [
         "geometry:1",
-        "focus:1",
         "Page.getFrameTree:1",
         "DOMSnapshot.captureSnapshot:1",
         "Accessibility.getFullAXTree:1",
@@ -861,14 +861,13 @@ describe("leased browser observation", () => {
     },
   );
 
-  it.each(["secret", "focus", "document"])(
+  it.each(["secret", "document"])(
     "discards captured pixels after a late %s change",
     async (kind) => {
       const fixture = await setup();
       fixture.hooks.set("capture:1", () => {
         if (kind === "secret")
           required(fixture.state.snapshot.documents[0]).nodes.inputValue.value[1] = 12;
-        if (kind === "focus") fixture.state.secretFocused = true;
         if (kind === "document") fixture.state.stale = true;
       });
       await expect(

@@ -62,18 +62,23 @@ The tour below shows them at work.
 
 The picture is dot's computer, live. The island keeps **Stop** and **Take control** within
 reach. dot sits under the picture and tells you what it's doing. The chat is on the right;
-its controls stay on one row as you narrow the panel, with secondary options tucked into the menu.
+its controls stay on one row as you narrow the panel. Research has one toggle; the message menu
+appears only when there is a choice of when to send.
 
 With an empty message box, the main button is **Stop**. Stopping ends the current run and releases
-it so you can start a new conversation. Start typing and that button becomes **Send**: while dot
-works, your message waits until the current task finishes. Choose **Steer now** on a queued
+it so you can start a new conversation on the same running computer. Start typing and that button
+becomes **Send**: while dot works, your message waits until the current task finishes. Choose **Steer now** on a queued
 message to deliver it immediately. Stopping also cancels messages still waiting in the queue.
 
 <img src="docs/readme/queue.png" width="560" alt="A queued message marked After this task, with a Steer now button and Stop in the empty composer">
 
 The timer uses localDot's own clock, including after the tab has been in the background. Earlier
 conversations are searchable and grouped by day. You can read them while you hold computer control,
-and starting a new conversation keeps the previous one out of the new thread.
+and starting a new conversation keeps the previous one out of the new thread. Each conversation
+has an actions menu with Delete. Sending a message while you hold control hands it back to dot
+and delivers your instruction.
+
+<img src="docs/readme/conversations.png" alt="Recent conversations with a separate actions menu offering Open conversation and Delete conversation">
 
 ### Activity
 
@@ -179,7 +184,7 @@ none of your files, and no way out except through keyd.
 
 <img src="docs/readme/phone.png" alt="Three phone screens: watching a task, a sign-in sheet, and Replay with the plan strip and step list">
 
-Same app, laid out for a thumb. The model and Research live in the More menu. Put localDot on
+Same app, laid out for a thumb, with a compact composer and a separate model picker. Put localDot on
 your tailnet and it works from anywhere, and it will nudge your phone when dot needs you.
 
 ### Replay and export

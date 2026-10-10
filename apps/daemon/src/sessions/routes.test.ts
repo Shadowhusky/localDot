@@ -10,6 +10,7 @@ import {
 } from "@localdot/protocol";
 import { SYNTH_CODEC, synthFrame } from "@localdot/stage/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import { Conversations } from "../agent/conversation.ts";
 import { createApp } from "../app.ts";
 import { monotonicClock } from "../clock.ts";
 import { EventLog } from "../event-log.ts";
@@ -98,6 +99,46 @@ afterEach(() => {
 });
 
 describe("replay APIs", () => {
+  it("deletes the full conversation, preflights live tasks and clears the selected conversation", async () => {
+    const f = await setup();
+    const task = (continues?: string) => {
+      const id = f.log.createSession("test conversation");
+      f.log.append(id, {
+        type: "session.start",
+        agent: "main",
+        data: {
+          screen: { w: 1280, h: 800, scale: 1 },
+          os: "linux",
+          title: "test conversation",
+          ...(continues ? { continues } : {}),
+        },
+      });
+      f.log.append(id, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId: ulid(), text: "task", kind: "task" },
+      });
+      return id;
+    };
+    const first = task(),
+      latest = task(first);
+    const conversations = new Conversations(f.home, f.log);
+    conversations.adopt(latest);
+    f.controlledIds.add(first);
+    expect((await f.request(`/api/conversations/${latest}`, { method: "DELETE" })).status).toBe(
+      409,
+    );
+    expect(f.log.hasSession(first)).toBe(true);
+    expect(f.log.hasSession(latest)).toBe(true);
+    f.controlledIds.clear();
+    expect((await f.request(`/api/conversations/${latest}`, { method: "DELETE" })).status).toBe(
+      204,
+    );
+    expect(f.log.hasSession(first)).toBe(false);
+    expect(f.log.hasSession(latest)).toBe(false);
+    expect(conversations.current()).toBeNull();
+    expect(f.log.hasSession(f.seed.sessionId)).toBe(true);
+  });
   it("serves each physical recording's bytes, range and metadata independently", async () => {
     const { home, seed, request } = await setup();
     const sessionId = seed.sessionId;

@@ -275,6 +275,26 @@ function fixture(
 }
 
 describe("session-owned screen authority", () => {
+  it.each([false, true])(
+    "cancels the task without shutting down its computer (user control: %s)",
+    async (held) => {
+      const f = fixture(true);
+      await f.browser();
+      if (held) {
+        f.session.takeControl();
+        await until(() => f.session.status === "waiting_user");
+      }
+      f.session.cancel();
+      expect(f.session.stopped).toBe(true);
+      await f.session.screensSettled();
+      expect(f.holder()).toBe("user");
+      expect(f.physicalStop).not.toHaveBeenCalled();
+      expect(f.deps.browser.stop).not.toHaveBeenCalled();
+      expect(f.deps.contain).not.toHaveBeenCalled();
+      expect(() => f.session.beginBrain()).toThrow();
+    },
+  );
+
   it("finishes after generation retirement without stopping the desktop or admitting stale downloads", async () => {
     const f = fixture(true),
       generation = await f.browser();
@@ -999,6 +1019,41 @@ describe("session-owned screen authority", () => {
     );
     expect(f.client.type).not.toHaveBeenCalled();
     expect(JSON.stringify(f.log.read(f.id))).not.toContain(secret);
+  });
+
+  it("delivers a code privately without reading or updating saved logins", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: {
+        point: { x: 400, y: 300 },
+        source: "dom",
+        role: "textbox",
+        name: "Protected field",
+        url: "https://github.com/sessions/two-factor",
+        secret: true,
+      },
+      window: 0,
+      ms: 1,
+    })) as never);
+    h.tools.logins = { login: vi.fn(), saveLogin: vi.fn() };
+    // Even a mistaken rememberable reply cannot turn a code into a saved password.
+    const asking = h.callTool("ask_user", {
+      question: "Enter your authenticator code",
+      fields: [
+        { id: "code", kind: "code", label: "Authentication code", length: 6, target: [400, 300] },
+      ],
+    });
+    await until(() => f.session.pendingAsk !== undefined);
+    f.session.answerFields(f.session.pendingAsk!, { code: "739125" }, (text) => text);
+    const answer = await asking;
+    expect(answer.result.ok).toBe(true);
+    expect(h.tools.logins.login).not.toHaveBeenCalled();
+    expect(h.tools.logins.saveLogin).not.toHaveBeenCalled();
+    expect(f.deps.fenceRecording).toHaveBeenCalled();
+    expect(JSON.stringify(answer)).not.toContain("739125");
+    expect(JSON.stringify(f.log.read(f.id))).not.toContain("739125");
   });
 
   it.each([false, true])(

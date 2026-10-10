@@ -120,4 +120,17 @@ describe("what dot knows", () => {
       expect(result.current.files["USER.md"][0]?.revision).toBe("1111111111111111"),
     );
   });
+  it("refreshes changes from another task when Settings regains focus", async () => {
+    const { api, calls } = server();
+    const { result, unmount } = renderHook(() => useWhatDotKnows(api, true));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+    const before = calls.length;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(calls.length).toBe(before + 3);
+    unmount();
+    window.dispatchEvent(new Event("focus"));
+    expect(calls.length).toBe(before + 3);
+  });
 });

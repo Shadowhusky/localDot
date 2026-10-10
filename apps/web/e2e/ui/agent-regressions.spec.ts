@@ -53,9 +53,14 @@ test("history opens while desktop control stays with the user", async ({ page, u
     await page.getByRole("button", { name: "More", exact: true }).click();
     await page.getByRole("menuitem", { name: "Conversations", exact: true }).click();
   } else await page.getByRole("button", { name: "Conversations", exact: true }).click();
+  await page.getByRole("button", { name: /^Actions for Compare flights to Lisbon/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Delete conversation" })).toBeVisible();
+  await ui.settle();
+  await page.screenshot({ path: test.info().outputPath("conversation-actions.png") });
+  await page.keyboard.press("Escape");
   const search = page.getByRole("combobox", { name: "Search conversations" });
   await search.fill("lisbon");
-  await expect(page.getByRole("option", { name: /Compare flights to Lisbon/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Compare flights to Lisbon/ })).toBeVisible();
   await search.press("Enter");
   const thread = page.getByRole("region", { name: "Conversation history" });
   await expect(thread).toContainText("Book the 9:40 one");
@@ -136,9 +141,16 @@ for (const state of ["running", "done"] as const) {
     await composer.locator("textarea").fill("Keep going");
     await ui.settle();
     await composer.screenshot({ path: test.info().outputPath("compact-composer.png") });
-    if (!isPhone(page)) {
+    if (!isPhone(page))
+      await expect(composer.getByRole("button", { name: "Research", exact: true })).toBeVisible();
+    if (!isPhone(page) && state === "running") {
+      await composer.evaluate((element) => {
+        element.style.width = "420px";
+      });
+      await ui.settle();
       await composer.getByRole("button", { name: "Message options" }).click();
-      await expect(page.getByRole("menuitemradio", { name: "Research" })).toBeVisible();
+      await expect(page.getByRole("menuitem", { name: "Send now" })).toBeVisible();
+      await expect(page.getByRole("menuitemradio", { name: "Research" })).toHaveCount(0);
     }
   });
 }

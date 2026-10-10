@@ -478,7 +478,7 @@ describe("agent user routes", () => {
     ).toBe(204);
     expect(await plain).toEqual({ declined: true, by: "user" });
   });
-  it("keeps takeover held across messages/resume/stale handback and accepts only the matching user handback", async () => {
+  it("a message hands control back and reaches the model as steering before it resumes", async () => {
     const f = await setup();
     const taking = f.session.takeover("login", "note");
     await Promise.resolve();
@@ -487,15 +487,12 @@ describe("agent user routes", () => {
     expect(
       (await f.send("POST", endpoint("messages"), { kind: "followup", text: "next" })).status,
     ).toBe(202);
-    // A stale paused status cannot authorize Resume while the daemon owns the handover.
-    f.session.status = "paused";
-    expect((await f.send("POST", endpoint("resume"))).status).toBe(409);
-    expect((await f.send("POST", endpoint("takeover/done"), { requestId: SESSION })).status).toBe(
-      409,
-    );
-    expect(f.session.controlHeld).toBe(true);
-    expect((await f.send("POST", endpoint("takeover/done"), { requestId })).status).toBe(204);
-    expect(await taking).toEqual({ by: "user" });
+    expect(f.session.controlHeld).toBe(false);
+    expect(await taking).toEqual({ by: "user", note: "next" });
+    expect(f.events.findLast((event) => event.type === "message.user")?.data).toMatchObject({
+      kind: "steer",
+      text: "next",
+    });
     expect((await f.send("POST", endpoint("takeover/done"), { requestId })).status).toBe(409);
   });
   it("validates answer, budget precision, stopped state and rejects raw schema/dependency error details", async () => {
