@@ -1,8 +1,68 @@
-# Installing localDot
+# Install localDot
 
-localDot runs on macOS, on Linux, and on Windows through WSL 2. Its computers are Linux containers,
-so every platform runs the same ones. The installer builds localDot from source, starts it as your
-own user's services and prints a one-time sign-in link.
+Start Docker, run one command, then open the sign-in link. The installer builds the app and
+starts its local services. Allow **10–30 minutes** for the first computer-image build.
+
+## Install
+
+### 1. Start Docker
+
+- **macOS or Windows:** start Docker Desktop.
+- **Linux:** start Docker Engine 28+ and make sure your user can run `docker info`.
+
+You need git, curl and about **15 GB** of free space. Node.js and Go are installed automatically.
+[Full platform requirements](#what-you-need).
+
+### 2. Run the installer
+
+**macOS or Linux** — open Terminal and run as your normal user, without `sudo`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash
+```
+
+**Windows** — open PowerShell and run:
+
+```powershell
+irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
+```
+
+Follow the WSL 2 and Ubuntu setup prompts. Create a Linux user when asked; if you land at an
+Ubuntu prompt, type `exit` to continue. If Windows asks for a restart, restart and run the same
+installer command again.
+
+In Docker Desktop, enable **Settings → Resources → WSL integration** for Ubuntu (or your chosen
+distro). If the installer stopped because Docker was unavailable, enable integration and rerun it.
+
+### 3. Open localDot
+
+Open the sign-in link printed at the end; the installer also tries to open your browser.
+Choose a model, add your provider key or supported plan sign-in, then turn on dot’s computer
+and send your first task.
+
+Links work once and expire after a minute. To get a new one, or reopen the app later:
+
+```sh
+localdot open
+```
+
+**On Windows, run `localdot` commands inside Ubuntu/WSL, not PowerShell.** Open the resulting
+link in your Windows browser. If your saved keys are locked, run `localdot unlock`.
+
+## If setup stops
+
+Fix the reported issue and rerun the same installer command; it keeps your settings and data.
+
+| Message or problem | What to do |
+| --- | --- |
+| Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
+| A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
+| `localdot: command not found` | Open a new terminal. On Windows, use Ubuntu/WSL. If needed, run `~/.local/bin/localdot open`. |
+| Sign-in link expired | Run `localdot open` for a fresh link. |
+| Saved keys are locked | Run `localdot unlock`. |
+| Something else failed | Run `localdot doctor`; use `localdot logs --follow` for details. |
+
+For your phone or a remote server, see [remote access](#servers-without-a-screen).
 
 ## What you need
 
@@ -11,73 +71,14 @@ own user's services and prints a one-time sign-in link.
   Docker Engine 28 or newer.
 - **Windows 10 version 2004 or newer, or Windows 11**, through WSL 2: either Docker Desktop with
   WSL integration turned on for your distro, or Docker Engine installed inside the distro.
-- git and curl. The installer brings its own Node.js and Go, checked against pinned checksums,
+- git and curl (inside Ubuntu/WSL on Windows). The installer brings its own Node.js and Go,
+  checked against pinned checksums,
   and installs nothing system-wide.
 - About 15 GB of free disk space, most of it for the computer images.
 
 Run the installer as your own user, not as root; it never needs sudo. When something is missing,
 it lists everything at once, with the commands to fix it on your system, before downloading
 anything.
-
-## Install
-
-**macOS, Linux and WSL 2**
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash
-```
-
-Options go after `bash -s --`, for example `| bash -s -- --tailscale`. Run `install.sh --help` to
-see them all.
-
-**Windows**, in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
-```
-
-To pass options, run
-`& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1))) -Tailscale`.
-The Windows installer:
-
-1. Turns on WSL 2 if it is off. Windows asks for permission, then you restart Windows and run
-   the installer again.
-2. Installs Ubuntu if you don't have it (`-Distro` picks another). Create your Linux user when it
-   asks.
-3. Turns on systemd in that distro, then runs `install.sh` inside it.
-4. Adds a hidden task that keeps the distro running after you sign in to Windows, so localDot is
-   there whenever you are.
-
-Open localDot in your Windows browser: `http://127.0.0.1:4750` reaches it inside WSL.
-
-### What the installer does
-
-1. Gets localDot's source into `~/.local/share/localdot/app` (`--ref` picks a branch, tag or
-   commit) and continues with the installer from that version.
-2. Gets Node.js and Go into `~/.local/share/localdot/runtime`, builds the app and the key service.
-3. Builds the computer images. The first build takes 10 to 30 minutes; later ones reuse Docker's
-   cache. `--registry <registry/owner>` pulls images published for the exact version instead, and
-   builds any that are missing. Use only a registry you trust: its images run as published,
-   without a check against the source.
-4. Starts two services that run whenever you are signed in, or always on Linux:
-   - macOS: LaunchAgents `dev.localdot.keyd` and `dev.localdot.daemon`.
-   - Linux and WSL 2: systemd user units `localdot-keyd.service` and `localdot-daemon.service`.
-     The installer turns on lingering, so they also run without a login session.
-5. Runs `localdot doctor` and prints the sign-in link. On a computer with a screen it opens the
-   link in your browser.
-
-Your data lives in `~/.localdot` (`--home` chooses another folder), with the logs in
-`~/.localdot/logs`. The installer refuses to replace services it did not create, such as an
-existing localDot run by hand, and a port something else uses (`--port` chooses another).
-
-### How the computers reach localDot
-
-A computer reaches the internet and your model providers only through localDot's key service. On
-Docker Desktop it gets there through `host.docker.internal`. Docker Engine has no such name, and
-its containers can't reach services that listen on `127.0.0.1`, so there each computer's gate
-gets the key service's socket through a read-only folder, `~/.localdot/keyd/relay`, instead.
-`localdot doctor` checks this with a test computer (`gate-relay`). Docker from the Snap Store
-can't share that hidden folder: install Docker Engine from docs.docker.com instead.
 
 ## Saved keys and logins
 
@@ -168,7 +169,7 @@ that folder to your `PATH`.
 ## Servers without a screen
 
 localDot only listens on `127.0.0.1`; it is never reachable from your network directly. A
-sign-in link works once and expires after a minute. There are two safe ways in.
+sign-in link works once and expires after a minute. Use either of these methods today.
 
 ### SSH tunnel
 
@@ -197,6 +198,16 @@ internet; don't turn on Funnel for this port. On the server, `localdot open --qr
 and draws it as a QR code: scan it with your phone within a minute. `--no-tailscale` stops
 serving.
 
+### Optional domain relay
+
+The built-in relay is implemented but **not publicly deployed yet**. It is not needed for local,
+SSH or Tailscale access. Once a service is configured, enable **Settings → Your computer →
+Remote access**, then choose **Copy sign-in link** and open it on your other device within a minute.
+
+It stays off until you enable it. Traffic passes through localDot’s relay and Cloudflare, which
+can process it; the Settings panel includes privacy details. Turning it off disconnects remote
+devices and revokes access. [Deployment and cost details](remote-access.md).
+
 ### Preparing a fresh server
 
 On a new Ubuntu or Debian server, as an administrator:
@@ -210,3 +221,55 @@ sudo loginctl enable-linger dot
 
 Then sign in as `dot` over SSH (not with `su`, which starts no user session) and run the
 installer.
+
+## Advanced installation
+
+### Installer options
+
+To pass options to the shell installer, use `bash -s --`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash -s -- --tailscale
+```
+
+For an existing installation, use `localdot update --tailscale`. `localdot update --help`
+lists the installer options.
+
+Windows PowerShell accepts `-Distro`, `-Ref`, `-Tailscale` and `-Uninstall`. For example:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1))) -Tailscale
+```
+
+The Windows installer enables systemd in the selected distro and adds a hidden Windows task to
+keep it running after you sign in.
+
+### What the installer does
+
+1. Gets localDot's source into `~/.local/share/localdot/app` (`--ref` picks a branch, tag or
+   commit) and continues with the installer from that version.
+2. Gets Node.js and Go into `~/.local/share/localdot/runtime`, builds the app and the key service.
+3. Builds the computer images. The first build takes 10 to 30 minutes; later ones reuse Docker's
+   cache. `--registry <registry/owner>` pulls images published for the exact version instead, and
+   builds any that are missing. Use only a registry you trust: its images run as published,
+   without a check against the source.
+4. Starts two services:
+   - macOS: LaunchAgents `dev.localdot.keyd` and `dev.localdot.daemon`.
+   - Linux and WSL 2: systemd user units `localdot-keyd.service` and `localdot-daemon.service`.
+     The installer tries to enable lingering so they also run without a login session.
+     If permission is needed, it prints the command to run.
+5. Runs `localdot doctor` and prints the sign-in link. On a computer with a screen it opens the
+   link in your browser.
+
+Your data lives in `~/.localdot` (`--home` chooses another folder), with the logs in
+`~/.localdot/logs`. The installer refuses to replace services it did not create, such as an
+existing localDot run by hand, and a port something else uses (`--port` chooses another).
+
+### How the computers reach localDot
+
+A computer reaches the internet and your model providers only through localDot's key service. On
+Docker Desktop it gets there through `host.docker.internal`. Docker Engine has no such name, and
+its containers can't reach services that listen on `127.0.0.1`, so there each computer's gate
+gets the key service's socket through a read-only folder, `~/.localdot/keyd/relay`, instead.
+`localdot doctor` checks this with a test computer (`gate-relay`). Docker from the Snap Store
+can't share that hidden folder: install Docker Engine from docs.docker.com instead.

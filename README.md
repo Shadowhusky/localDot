@@ -14,9 +14,8 @@
 
 ## Install
 
-**1. Start Docker.** You need Docker Engine 28 or newer, git, curl and about **15 GB** of free
-space. Use Docker Desktop on macOS; on Windows, enable its WSL integration. Linux needs systemd
-and Docker access for your user. [Full requirements](docs/install.md#what-you-need).
+**1. Start Docker.** Use Docker Desktop on macOS or Windows, or Docker Engine 28+ on Linux.
+You also need git, curl and about **15 GB** of free space. [Full requirements](docs/install.md#what-you-need).
 
 **2. Run the installer.**
 
@@ -32,12 +31,15 @@ Windows — in PowerShell:
 irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
 ```
 
-The Windows installer sets up WSL 2 and Ubuntu. If it asks you to restart Windows, run the same
-command again afterward. The first installation builds the computer images and usually takes
-**10–30 minutes**. Node.js and Go are installed for localDot automatically.
+On Windows, follow the WSL/Ubuntu setup prompts and enable Docker Desktop’s WSL integration
+for that distro. If Windows asks for a restart, restart and run the same command again.
+Allow **10–30 minutes** for the first computer-image build. Node.js and Go are installed automatically.
 
-**3. Open the sign-in link** printed by the installer. Choose a model, add your key or supported
-plan sign-in, then turn on dot's computer and send a task. To open the app again, run `localdot open`.
+**3. Open the sign-in link** shown at the end. Choose a model, add your key or supported plan
+sign-in, then turn on dot’s computer and send a task.
+
+To reopen localDot or replace an expired link, run `localdot open`. On Windows, run this and
+other `localdot` commands in **Ubuntu/WSL**, not PowerShell.
 
 [Installation help](docs/install.md) · [Use your phone or a server](docs/install.md#servers-without-a-screen) ·
 [Run from source](docs/development.md#development)
@@ -430,14 +432,15 @@ manual `localdot update` to enable automatic checks. [Update details](docs/insta
 
 For remote access today, use a private Tailscale connection or SSH tunnel.
 [Phone and server setup](docs/install.md#servers-without-a-screen). An optional domain relay is
-implemented but not publicly deployed yet. It stays off until you enable it, and Settings explains
-its privacy tradeoff. [Remote access and deployment](docs/remote-access.md).
+implemented but not publicly deployed yet. Once configured, it is optional and off by default.
+Its Settings panel explains that localDot’s relay and Cloudflare can process your traffic.
+[Remote access and deployment](docs/remote-access.md).
 
 ## FAQ
 
 **Does it touch my real computer?**
 No. dot works on its own computer, in containers. It sees your files only when you attach them,
-and its results open on your Mac only when you click Open.
+and its results open on your computer only when you click Open.
 
 **Could it email my boss without asking?**
 With the default Custom/Balanced settings, sending as you asks first and the card shows what
@@ -446,12 +449,13 @@ a routine confirmation. Choose the permission mode that matches the authority yo
 
 **What does it cost?**
 localDot is free and MIT licensed. Models cost whatever your provider charges, and localDot shows
-what each task spent. Spending limits are there when you want them, and off until you do.
+usage and cost estimates for each task. Spending limits are off until you enable them.
 
 **Where does my data go?**
 Screenshots and the task's text go to the model provider you chose, and dot visits the sites the
 task needs. Web searches go to public search engines, without your sign-ins. Pick a local model
-and the model calls stay on your Mac.
+and the model calls stay on your computer. The optional remote relay, when enabled, also
+handles traffic between your browser and localDot; local access does not need it.
 
 **Why is it called dot?**
 Look at it.
