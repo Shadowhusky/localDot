@@ -135,3 +135,21 @@ test("a saved key folds into the list and a removed one folds away", async ({ pa
   await expect(added).toHaveCount(0);
   await expect(sheet.locator(".keys-row")).toHaveCount(3);
 });
+
+test("the first key folds its form into the list and says it was saved", async ({ page, ui }) => {
+  const value = "sk-ant-api03-fixture-first-key";
+  const sheet = await keys(page, ui);
+  for (const id of ["anthropic-main", "openai-fast", "weather"]) {
+    await sheet.getByRole("button", { name: `Remove ${id}`, exact: true }).click();
+    await sheet.getByRole("button", { name: `Confirm remove ${id}`, exact: true }).click();
+    await expect(sheet.locator(`.keys-row[data-id='${id}']`)).toHaveCount(0);
+  }
+  await sheet.getByLabel("Key", { exact: true }).fill(value);
+  await sheet.getByRole("button", { name: "Save key" }).click();
+  await expect(sheet.locator(".keys-row[data-id='anthropic']")).toBeVisible();
+  await expect(sheet.getByRole("form", { name: "Add a key" })).toHaveCount(0);
+  await expect(sheet.getByRole("status").filter({ hasText: /^Saved/ })).toHaveText(
+    "Saved anthropic.",
+  );
+  expect(await page.content()).not.toContain(value);
+});

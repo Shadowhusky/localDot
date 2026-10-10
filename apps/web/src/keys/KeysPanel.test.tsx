@@ -698,6 +698,27 @@ describe("Keys", () => {
     expect(field(LABEL).value).toBe("");
   });
 
+  it("says the first key was saved once its form folds into the list, never showing the key", async () => {
+    const VALUE = "sk-ant-api03-first-key-value";
+    function FirstKey() {
+      const [listed, setListed] = useState<KeyRecord[]>([]);
+      const save = async () => {
+        setListed([anthropic]);
+        return { restart: true, key: anthropic };
+      };
+      return <KeysSheet open keys={controller({ keys: listed, save })} onClose={() => {}} />;
+    }
+    render(<FirstKey />);
+    type("Key", VALUE);
+    fireEvent.click(saveButton());
+    const note = await screen.findByText("Saved anthropic. Restart your computer to use it there.");
+    expect(note.getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("form")).toBeNull();
+    expect(document.body.innerHTML).not.toContain(VALUE);
+    openForm();
+    expect(screen.queryByText(/^Saved anthropic/)).toBeNull();
+  });
+
   it("names what to fix and saves nothing", () => {
     const save = vi.fn(async () => ({ restart: false }));
     render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);

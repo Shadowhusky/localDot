@@ -22,6 +22,8 @@ export function ExportButton({
   const { phase, done, total } = useExportJob(job);
   const ring = !open && phase !== "options";
   const finished = phase === "ready" || phase === "downloaded" || phase === "saved";
+  // Always drawn, so it can fade; read out only while it shows a video being made.
+  const heard = ring && phase === "exporting";
   return (
     <Button
       ref={ref}
@@ -34,7 +36,7 @@ export function ExportButton({
       disabledReason={phase === "options" ? disabledReason : undefined}
       onClick={onOpen}
     >
-      <span className="replay-export-ring">
+      <span className="replay-export-ring" aria-hidden={heard ? undefined : true}>
         <Progress
           variant="ring"
           size={16}

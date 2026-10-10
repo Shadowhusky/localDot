@@ -13,7 +13,13 @@ import { GroupHead, GroupNote } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Skeleton } from "../ui/Skeleton.tsx";
-import { type KeyField, KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
+import {
+  type KeyField,
+  KeyForm,
+  type KeyFormPreset,
+  type KeyIntake,
+  savedLine,
+} from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { type KeydHealth, type KeyRecord, keyHome, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
@@ -58,6 +64,8 @@ export function KeysPanel({
   const [fresh, setFresh] = useState<{ id: string; at: number } | null>(null);
   const [adding, setAdding] = useState(!!preset);
   const [reentering, setReentering] = useState<string | null>(reenter?.id ?? null);
+  // A save whose form then folds away (the first key, a key entered again) says so under the list.
+  const [saved, setSaved] = useState<{ id: string; line: string } | null>(null);
   const field = useRef<KeyField>(null);
   const saves = useRef(0);
   const owner = useRef({ active, preset, onSaved, generation: 0 });
@@ -102,6 +110,12 @@ export function KeysPanel({
   const again = reentering
     ? keys.keys.find((key) => key.id === reentering && !key.rebound)
     : undefined;
+  const formOpen = formShown || !!again;
+  useLayoutEffect(() => {
+    if (formOpen) setSaved(null);
+  }, [formOpen]);
+  const savedNote =
+    !formOpen && saved && keys.keys.some((key) => key.id === saved.id) ? saved.line : null;
   useLayoutEffect(() => {
     if (!toReveal.current || !form.current) return;
     toReveal.current = false;
@@ -142,6 +156,8 @@ export function KeysPanel({
         request = owner.current.preset?.requestId;
       const result = await keys.save(binding, value);
       setFresh({ id: binding.id, at: ++saves.current });
+      if (owner.current.active && owner.current.generation === generation)
+        setSaved({ id: binding.id, line: savedLine(binding.id, result.restart) });
       if (
         result.key &&
         request !== undefined &&
@@ -221,6 +237,7 @@ export function KeysPanel({
                 />
               </div>
             )}
+            {savedNote && <GroupNote role="status">{savedNote}</GroupNote>}
             {held && <GroupNote>{HELD}.</GroupNote>}
           </>
         )}
@@ -254,7 +271,14 @@ export function KeysPanel({
               taken={keys.keys.map((key) => key.id)}
               preset={preset}
               onHolding={onHolding}
-              onCancel={keys.keys.length ? () => setAdding(false) : undefined}
+              onCancel={
+                keys.keys.length
+                  ? () => {
+                      setAdding(false);
+                      setSaved(null);
+                    }
+                  : undefined
+              }
               save={save}
             />
           </Card>

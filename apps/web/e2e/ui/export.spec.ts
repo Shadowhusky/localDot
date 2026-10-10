@@ -94,6 +94,22 @@ test("export, progress", async ({ page, ui }) => {
   await still(ui);
 });
 
+test("Export's ring is a progress bar only while a video is being made", async ({ page, ui }) => {
+  await holdExports(page, false);
+  const ring = page.getByRole("progressbar", { name: "Exporting" });
+  const panel = await openExport(page, ui);
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(ring).toHaveCount(0);
+  await page.getByRole("button", { name: "Export video" }).click();
+  await save(panel);
+  await expect(panel.getByText("30% · working out the time left")).toBeVisible();
+  await expect(ring).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(ring).toHaveAttribute("aria-valuenow", "12");
+});
+
 test("export, saved", async ({ page, ui }) => {
   await holdExports(page, true);
   const panel = await openExport(page, ui);

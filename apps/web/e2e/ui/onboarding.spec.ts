@@ -25,6 +25,26 @@ test("first run, model ready", async ({ page, ui }) => {
   await ui.still();
 });
 
+test("a shared recording plays before setup, which waits for the live app", async ({
+  page,
+  ui,
+}) => {
+  // Setup left half done, which comes back on every open.
+  await page.addInitScript(() =>
+    localStorage.setItem("localdot.onboarding.v1", JSON.stringify({ step: "thinks" })),
+  );
+  const setup = page.getByRole("heading", { name: "How should dot think?" });
+  await ui.open("done", (fixture) => `/?replay=${fixture.seeded[0]}`);
+  await expect(page.getByRole("slider", { name: "Replay timeline" })).toBeVisible();
+  await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+  await expect(setup).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("textbox", { name: "Search recordings" })).toBeVisible();
+  await expect(setup).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(setup).toBeVisible();
+});
+
 test("first run shows Turn on without scrolling and keeps the stage where the computer appears", async ({
   page,
   ui,

@@ -101,6 +101,9 @@ function clipboardReadable(): boolean {
   return typeof navigator !== "undefined" && typeof navigator.clipboard?.readText === "function";
 }
 
+export const savedLine = (id: string, restart: boolean) =>
+  restart ? `Saved ${id}. Restart your computer to use it there.` : `Saved ${id}.`;
+
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
 export function KeyForm({
@@ -381,7 +384,7 @@ export function KeyForm({
       const id = check.binding.id;
       setDraft((d) => ({ ...d, id: "", baseURL: "", hosts: "" }));
       setTried(false);
-      setSaved(restart ? `Saved ${id}. Restart your computer to use it there.` : `Saved ${id}.`);
+      setSaved(savedLine(id, restart));
     } catch (err) {
       if (!current()) return;
       setProblem({

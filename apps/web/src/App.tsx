@@ -1127,7 +1127,11 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const keyboard = useKeyboardUp();
   const setupKnown = !!settings.saved;
-  const onboarding = useOnboarding({ known: setupKnown, configured: !!settings.saved?.main });
+  const onboarding = useOnboarding({
+    known: setupKnown,
+    configured: !!settings.saved?.main,
+    replaying: !!replayId,
+  });
   const setupStep = onboarding.progress.step;
   const previewRoom = useMediaQuery(PREVIEW_ROOM) && !phone;
   const place = presencePlace({
