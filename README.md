@@ -31,7 +31,8 @@ Windows — in PowerShell:
 irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
 ```
 
-On Windows, follow the WSL/Ubuntu setup prompts and enable Docker Desktop’s WSL integration
+On Windows, keep PowerShell open while you create your user in the Ubuntu setup window;
+installation continues automatically afterward. Enable Docker Desktop’s WSL integration
 for that distro. If Windows asks for a restart, restart and run the same command again.
 Allow **10–30 minutes** for the first computer-image build. Node.js and Go are installed automatically.
 

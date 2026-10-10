@@ -91,9 +91,7 @@ function Enable-Wsl {
 function Initialize-Distro {
   $found = @(Get-WslDistros | Where-Object { $_.Name -eq $Distro })
   if ($found.Count -eq 0) {
-    Write-Host "Installing $Distro. Create your Linux user name and password when it asks. If you then see a Linux prompt, type exit to continue."
-    & wsl.exe --install --distribution $Distro
-    if ($LASTEXITCODE -ne 0) { throw "Installing $Distro didn't finish. Run this installer again." }
+    Install-Distro
     $found = @(Get-WslDistros | Where-Object { $_.Name -eq $Distro })
     if ($found.Count -eq 0) { throw "$Distro isn't set up yet. Open it once from the Start menu to create your user, then run this installer again." }
   }
@@ -102,7 +100,11 @@ function Initialize-Distro {
     & wsl.exe --set-version $Distro 2
     if ($LASTEXITCODE -ne 0) { throw "Moving $Distro to WSL 2 failed." }
   }
-  if ((Invoke-Wsl -d $Distro --exec id -u).Text -eq "0") {
+  $user = Invoke-Wsl -d $Distro --exec id -u
+  if ($user.Code -ne 0 -or $user.Text -notmatch '^\d+$') {
+    throw "Couldn't start $Distro. Run 'wsl -d $Distro' to check its setup, then rerun this installer."
+  }
+  if ($user.Text -eq "0") {
     throw "$Distro signs in as root. Create your own user in it and make that the default; see docs/install.md."
   }
   if ((Invoke-Wsl -d $Distro --exec test -d /run/systemd/system).Code -ne 0) {
@@ -110,6 +112,59 @@ function Initialize-Distro {
     $result = Invoke-Wsl -d $Distro -u root --exec sh -c $EnableSystemd
     if ($result.Code -ne 0) { throw "Couldn't turn on systemd in ${Distro}: $($result.Text)" }
     & wsl.exe --terminate $Distro | Out-Null
+  }
+}
+
+function Install-Distro {
+  # Keep the installer in PowerShell while WSL runs its normal, interactive account setup.
+  # Supplying --exec skips WSL's OOBE, so it cannot replace this first interactive launch.
+  # Distro names become one Windows command-line argument, never shell input.
+  if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid distribution name: $Distro" }
+  Write-Host "Installing $Distro in a setup window. Create your Linux user name and password there."
+  Write-Host "Keep this PowerShell window open. localDot will continue here automatically after account setup."
+  $setup = Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--distribution", $Distro -PassThru
+  $probe = $null
+  $deadline = (Get-Date).AddMinutes(30)
+  try {
+    while ((Get-Date) -lt $deadline) {
+      $setup.Refresh()
+      if ($setup.HasExited -and $setup.ExitCode -ne 0) {
+        throw "Installing $Distro didn't finish (exit $($setup.ExitCode)). Run this installer again."
+      }
+      if (-not $probe -and @(Get-WslDistros | Where-Object { $_.Name -eq $Distro }).Count -gt 0) {
+        # A WSL request can wait for OOBE's lock. Run the read-only probe asynchronously so
+        # cancellation, setup failure and timeout remain responsive while the user types.
+        $probe = Start-Job -ArgumentList $Distro -ScriptBlock {
+          param($Name)
+          $env:WSL_UTF8 = "1"
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          $ErrorActionPreference = "Continue"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $uidText = & wsl.exe -d $Name --exec id -u 2>$null
+          if ($LASTEXITCODE -eq 0) { (($uidText -join "") -replace "`0", "").Trim() }
+        }
+      }
+      if ($probe -and $probe.State -in @("Completed", "Failed", "Stopped")) {
+        $uidText = ((Receive-Job $probe -ErrorAction SilentlyContinue) -join "").Trim()
+        Remove-Job $probe -Force
+        $probe = $null
+        if ($uidText -match '^\d+$' -and $uidText -ne "0") {
+          Write-Host "$Distro account is ready. Continuing localDot installation..."
+          return
+        }
+        if ($setup.HasExited) {
+          throw "$Distro setup closed before a Linux user was ready. Open $Distro from the Start menu to finish account setup, then rerun this installer."
+        }
+      }
+      Start-Sleep -Seconds 1
+    }
+    throw "$Distro account setup hasn't finished. Complete its setup, then run this installer again."
+  } finally {
+    if ($probe) { Stop-Job $probe; Remove-Job $probe -Force }
+    # Close only the setup client we launched. Never terminate the distro or other terminals.
+    $setup.Refresh()
+    if (-not $setup.HasExited) { Stop-Process -Id $setup.Id -ErrorAction SilentlyContinue }
+    $setup.Dispose()
   }
 }
 
@@ -168,7 +223,9 @@ function Install-LocalDot {
   }
   Invoke-Installer $options
   Register-KeepRunning
-  Write-Host "localDot runs inside $Distro. For a fresh sign-in link, run: wsl -d $Distro -- ~/.local/bin/localdot open"
+  Write-Host ""
+  Write-Host "localDot installation finished. Your app link is printed above."
+  Write-Host "For a fresh sign-in link from PowerShell: wsl -d $Distro -- ~/.local/bin/localdot open"
 }
 
 if ($MyInvocation.InvocationName -ne ".") { Install-LocalDot }

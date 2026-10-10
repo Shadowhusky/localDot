@@ -15,6 +15,7 @@ function Reset-Machine([hashtable]$machine) {
   $script:machine = @{
     Status = 0; Version = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
     InstallAdds = $null; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
+    SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false
   }
   foreach ($key in $machine.Keys) { $script:machine[$key] = $machine[$key] }
   $script:calls = [System.Collections.Generic.List[string]]::new()
@@ -50,8 +51,31 @@ function wsl.exe {
 function Start-Process {
   param($FilePath, $ArgumentList, $Verb, [switch]$Wait, [switch]$PassThru)
   $script:calls.Add("Start-Process $FilePath $($ArgumentList -join ' ') $Verb")
-  if ($PassThru) { [pscustomobject]@{ ExitCode = $script:machine.ElevatedExit } }
+  if ($Verb -eq "RunAs") {
+    if ($PassThru) { [pscustomobject]@{ ExitCode = $script:machine.ElevatedExit } }
+    return
+  }
+  if ($script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds }
+  $process = [pscustomobject]@{ Id = 123456; HasExited = $script:machine.SetupExited; ExitCode = $script:machine.SetupExit }
+  $process | Add-Member ScriptMethod Refresh { }
+  $process | Add-Member ScriptMethod Dispose { }
+  $process
 }
+function Start-Job {
+  param($ArgumentList, $ScriptBlock)
+  $script:calls.Add("Start-Job user probe $ArgumentList")
+  [pscustomobject]@{ State = $(if ($script:machine.ProbePending) { "Running" } else { "Completed" }) }
+}
+function Receive-Job {
+  param($Job)
+  $value = $script:machine.ProbeUids[0]
+  $script:machine.ProbeUids = @($script:machine.ProbeUids | Select-Object -Skip 1)
+  $value
+}
+function Remove-Job { param($Job, [switch]$Force) $script:calls.Add("Remove-Job") }
+function Stop-Job { param($Job) $script:calls.Add("Stop-Job") }
+function Start-Sleep { param($Seconds) if ($script:machine.ProbePending) { throw "Cancelled setup" } }
+function Stop-Process { param($Id) $script:calls.Add("Stop-Process $Id") }
 function Get-WindowsBuild { 22631 }
 function Get-ScheduledTask { if ($script:machine.TaskExists) { "task" } }
 function New-ScheduledTaskAction { param($Execute, $Argument) "$Execute $Argument" }
@@ -104,7 +128,10 @@ Reset-Machine @{ Systemd = 1; InstallAdds = @("Ubuntu", "2") }
 $Ref = "v1.2.3"; $Tailscale = [switch]$true
 Install-LocalDot
 $calls = @($script:calls)
-Check ($calls -contains "wsl --install --distribution Ubuntu") "installs Ubuntu when it is missing"
+Check (@($calls | Where-Object { $_ -like "Start-Process wsl.exe --install --distribution Ubuntu*" }).Count -eq 1) "installs Ubuntu in its own setup window"
+Check (-not ($calls -contains "wsl --install --distribution Ubuntu")) "never blocks the installer in Ubuntu's interactive shell"
+Check (@($calls | Where-Object { $_ -eq "Start-Job user probe Ubuntu" }).Count -eq 2) "waits until account setup replaces root with the user's account"
+Check ($calls.IndexOf("Stop-Process 123456") -lt $calls.IndexOf("wsl -d Ubuntu --cd ~ --exec mktemp .localdot-install.XXXXXX")) "closes only the owned setup window before continuing installation"
 Check (@($calls | Where-Object { $_ -like "wsl -d Ubuntu -u root --exec sh -c *systemd=true*" }).Count -eq 1) "turns on systemd as root"
 Check ($calls -contains "wsl --terminate Ubuntu") "restarts the distro so systemd starts"
 Check ($calls -contains "wsl -d Ubuntu --cd ~ --exec mktemp .localdot-install.XXXXXX") "makes a private file for install.sh in the Linux home"
@@ -116,6 +143,23 @@ Check ($calls -contains "Start-ScheduledTask localDot") "starts it now the first
 $vbs = Get-Content (Join-Path $env:LOCALAPPDATA "localDot/keep-running.vbs") -Raw
 Check ($vbs -match '\.Run "wsl\.exe -d Ubuntu --exec sleep infinity", 0, False') "runs the keep-alive hidden"
 $Ref = $null; $Tailscale = [switch]$false
+
+Reset-Machine @{ SetupExited = $true; SetupExit = 1 }
+$message = ""
+try { Install-LocalDot } catch { $message = $_.Exception.Message }
+Check ($message -like "*Installing Ubuntu didn't finish*") "reports setup failure instead of waiting forever"
+Check (-not (@($script:calls) -match "--exec bash")) "never reports an app install after failed Ubuntu setup"
+
+Reset-Machine @{ SetupExited = $true; InstallAdds = @("Ubuntu", "2") }
+$message = ""
+try { Install-LocalDot } catch { $message = $_.Exception.Message }
+Check ($message -like "*setup closed before a Linux user was ready*") "reports a closed setup window without waiting for the timeout"
+
+Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbePending = $true }
+$message = ""
+try { Install-LocalDot } catch { $message = $_.Exception.Message }
+Check ($message -eq "Cancelled setup") "allows cancellation while WSL waits for account setup"
+Check ($script:calls -contains "Stop-Job" -and $script:calls -contains "Stop-Process 123456") "cleans up the pending probe and only its own setup process"
 
 Reset-Machine @{ TaskExists = $true }
 $machine.Distros = @(, @("Ubuntu", "1"))

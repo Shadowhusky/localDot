@@ -27,9 +27,10 @@ curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.s
 irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
 ```
 
-Follow the WSL 2 and Ubuntu setup prompts. Create a Linux user when asked; if you land at an
-Ubuntu prompt, type `exit` to continue. If Windows asks for a restart, restart and run the same
-installer command again.
+Keep PowerShell open. Ubuntu account setup opens in a separate window; create your Linux user
+and password there. The installer closes its setup window when the account is ready and continues
+automatically in PowerShell. You do not need to type `exit`. If Windows asks for a restart, restart
+and run the same installer command again.
 
 In Docker Desktop, enable **Settings → Resources → WSL integration** for Ubuntu (or your chosen
 distro). If the installer stopped because Docker was unavailable, enable integration and rerun it.
@@ -37,6 +38,7 @@ distro). If the installer stopped because Docker was unavailable, enable integra
 ### 3. Open localDot
 
 Open the sign-in link printed at the end; the installer also tries to open your browser.
+On Windows, the installation result and link stay in the original PowerShell window.
 Choose a model, add your provider key or supported plan sign-in, then turn on dot’s computer
 and send your first task.
 

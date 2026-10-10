@@ -866,6 +866,20 @@ local_browser() {
 
 show_link() {
   local browser out link
+  # Always leave a usable link in the terminal, even if the browser opener silently fails.
+  # WSL is local to Windows: missing explorer.exe does not mean this is an SSH-only server.
+  if [ -n "$WSL" ] && ! remote_session; then
+    out=$(cli open) || die "Couldn't make a sign-in link. Run: localdot open"
+    link=${out%%$'\n'*}
+    say "Open localDot (within a minute; this link works once):"
+    say "  $link"
+    if browser=$(local_browser); then
+      "$browser" "$link" >/dev/null 2>&1 || true
+      say "Tried opening your Windows browser. You can also open the link above."
+    fi
+    say "For a fresh link from PowerShell: wsl -d ${WSL_DISTRO_NAME:-Ubuntu} -- ~/.local/bin/localdot open"
+    return
+  fi
   if ! browser=$(local_browser); then
     if [ -n "$PUBLIC_ORIGIN" ]; then
       cli open --qr || die "Couldn't make a sign-in link. Run: localdot open"
@@ -881,9 +895,11 @@ show_link() {
   fi
   out=$(cli open) || die "Couldn't make a sign-in link. Run: localdot open"
   link=${out%%$'\n'*}
+  say "Open localDot (within a minute; this link works once):"
+  say "  $link"
   # explorer.exe reports failure even when it opened the link.
   "$browser" "$link" >/dev/null 2>&1 || true
-  say "Opened localDot in your browser. If it didn't open, run: localdot open"
+  say "Tried opening your browser. If it didn't open, use the link above."
   [ -z "$PUBLIC_ORIGIN" ] || say "For your phone or another computer, run: localdot open --qr"
 }
 

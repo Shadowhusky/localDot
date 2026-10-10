@@ -198,7 +198,7 @@ serve) [ -z "\${STUB_SERVE_ERROR:-}" ] || { echo "$STUB_SERVE_ERROR" >&2; exit 1
 esac`,
   );
   for (const opener of ["open", "xdg-open", "explorer.exe", "apt-get"])
-    script(join(stubs, opener), logged(opener));
+    script(join(stubs, opener), `${logged(opener)}\nexit "\${STUB_OPENER_RC:-0}"`);
 
   script(
     join(nodeBin, "node"),
@@ -646,6 +646,39 @@ describe.concurrent("remote access through Tailscale", { timeout: 60_000 }, () =
   });
 });
 
+describe.concurrent("installation links", { timeout: 60_000 }, () => {
+  it.each(["macos", "wsl", "linux"])(
+    "prints a usable link even when the %s browser opener fails",
+    async (os) => {
+      const host = await makeHost({ os });
+      const result = await host.run([], { DISPLAY: ":0", STUB_OPENER_RC: "1" });
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`http://127.0.0.1:${host.port}/#code=fakecode`);
+      expect(result.stdout).toContain("this link works once");
+      expect(result.stdout).not.toContain("Opened localDot");
+      if (os === "wsl") expect(result.stdout).toContain("For a fresh link from PowerShell:");
+    },
+  );
+
+  it("leaves a Windows link when WSL interop is unavailable", async () => {
+    const host = await makeHost({ os: "wsl" });
+    rmSync(join(host.stubs, "explorer.exe"));
+    const result = await host.run([], { WSL_DISTRO_NAME: "Ubuntu-24.04" });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`http://127.0.0.1:${host.port}/#code=fakecode`);
+    expect(result.stdout).toContain("wsl -d Ubuntu-24.04 -- ~/.local/bin/localdot open");
+    expect(result.stdout).not.toContain("ssh -N");
+  });
+
+  it("keeps remote WSL sessions on the SSH path without opening the host browser", async () => {
+    const host = await makeHost({ os: "wsl" });
+    const result = await host.run([], { SSH_CONNECTION: "test-ssh-session" });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toContain("ssh -N");
+    expect(host.calls().some((line) => line.startsWith("explorer.exe "))).toBe(false);
+  });
+});
+
 describe.concurrent("installing on macOS", { timeout: 60_000 }, () => {
   it("writes LaunchAgents with a passphrase vault and opens the browser", async () => {
     const host = await makeHost({ os: "macos" });
@@ -668,7 +701,8 @@ describe.concurrent("installing on macOS", { timeout: 60_000 }, () => {
     const calls = host.calls();
     expect(calls).toContain(`launchctl bootstrap gui/${uid} ${host.plist("dev.localdot.daemon")}`);
     expect(calls).toContain(`open http://127.0.0.1:${host.port}/#code=fakecode`);
-    expect(result.stdout).toContain("Opened localDot in your browser");
+    expect(result.stdout).toContain("Tried opening your browser");
+    expect(result.stdout).toContain(`http://127.0.0.1:${host.port}/#code=fakecode`);
   });
 
   it("leaves loaded agents alone when nothing changed", async () => {
