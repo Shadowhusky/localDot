@@ -432,7 +432,7 @@ manual `localdot update` to enable automatic checks. [Update details](docs/insta
 
 For remote access today, use a private Tailscale connection or SSH tunnel.
 [Phone and server setup](docs/install.md#servers-without-a-screen). An optional domain relay is
-implemented but not publicly deployed yet. Once configured, it is optional and off by default.
+implemented; public access is awaiting DNS setup and verification. It is optional and off by default.
 Its Settings panel explains that localDot’s relay and Cloudflare can process your traffic.
 [Remote access and deployment](docs/remote-access.md).
 

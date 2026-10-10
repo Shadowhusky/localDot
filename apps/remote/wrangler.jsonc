@@ -1,11 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "localdot-remote",
+  "account_id": "31c17ebe287229213316608e4ef93f80",
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-10",
   "workers_dev": false,
   "preview_urls": false,
-  "vars": { "REMOTE_DOMAIN": "example.com" },
+  "vars": { "REMOTE_DOMAIN": "localdot.dev" },
+  "routes": [{ "pattern": "*--dot.localdot.dev/*", "zone_name": "localdot.dev" }],
   "durable_objects": { "bindings": [{ "name": "DEVICES", "class_name": "DeviceRelay" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceRelay"] }],
   "observability": {

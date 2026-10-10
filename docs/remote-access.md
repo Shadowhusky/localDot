@@ -1,6 +1,7 @@
 # Remote access under the localDot domain
 
-Status: implemented with local runtime tests. No public service is deployed yet.
+Status: Worker deployed on 10 October 2026 for `*--dot.localdot.dev/*`. Wildcard DNS setup
+and public connection verification are still pending; the service is not ready for users yet.
 
 **Optional, off by default.** There is no relay connection until a user enables it. Local access,
 Tailscale, and SSH continue to work independently. We never fall back to the public relay
@@ -89,7 +90,7 @@ Add deployment rate limits on connection/pairing endpoints and billing alerts be
    DNS usage before adding one. The Worker rejects anything outside its exact device hostname
    pattern, and rejects plain HTTP. Enable HTTPS redirects for this hostname space.
 3. Run `pnpm --filter @localdot/remote types`, `build`, and `test`, authenticate Wrangler to the
-   intended account, then deploy with `pnpm --filter @localdot/remote deploy`.
+   intended account, then deploy with `pnpm --filter @localdot/remote run deploy`.
 4. Configure the daemon's service address with `~/.localdot/remote-service.json` containing
    `{"domain":"<your-domain>"}`. This file works with the installed service's clean environment;
    `LOCALDOT_REMOTE_DOMAIN` is also supported for manually started daemons. The service remains
