@@ -38,6 +38,11 @@ describe("the model's advertised tools and instructions", () => {
     expect(tools.computer?.type).toBe("provider");
     expect(toolSet(binding({ computer: "anthropic-legacy" })).computer).toBeDefined();
   });
+  it("asks for a lesson or explicit decline inside the existing completion call", async () => {
+    const schema = await asSchema(toolSet(binding()).done?.inputSchema).jsonSchema;
+    expect(schema).toMatchObject({ required: expect.arrayContaining(["experience", "summary"]) });
+    expect(JSON.stringify(schema)).toContain('"null"');
+  });
   it("offers web search and page reading to every model, sighted or not", () => {
     for (const tools of [toolSet(binding()), toolSet(binding({ vision: false }))]) {
       expect(tools.web_search?.description).toContain('kind "images"');

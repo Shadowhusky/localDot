@@ -9,7 +9,13 @@ import {
 } from "@localdot/protocol";
 import { z } from "zod";
 import { LearnedExperience } from "../../../../packages/protocol/src/experience.ts";
-import { experienceText, parseExperience, relevantExperience } from "./experience.ts";
+import {
+  experienceTerms,
+  experienceText,
+  parseExperience,
+  relevantExperience,
+} from "./experience.ts";
+import { memoryBudget, memoryTokens } from "./memory-budget.ts";
 import {
   bootView,
   entryTextProblem,
@@ -170,16 +176,49 @@ export class MemoryStore {
     return { user: this.read("USER.md"), memory: this.read("MEMORY.md") };
   }
   // Pinned facts plus a small selection of relevant, attributed experience. Ordinary daily notes stay in recall.
-  bootMemory(task = ""): { user: string; memory: string } {
-    const experience = task ? relevantExperience(this.experiences(), task) : "";
-    return {
-      user: bootView(this.read("USER.md"), MEMORY_MAX_CHARS),
-      memory: bootView(this.read("MEMORY.md"), MEMORY_MAX_CHARS - experience.length) + experience,
-    };
+  bootMemory(task = "", contextTokens?: number): { user: string; memory: string } {
+    const budget = memoryBudget(contextTokens);
+    const experience = task
+      ? this.recallExperience(task, Math.min(900, Math.floor(budget * 0.4)))
+      : "";
+    const remaining = budget - memoryTokens(experience);
+    const user = bootView(this.read("USER.md"), Math.floor(remaining * 0.6), memoryTokens);
+    const memory = bootView(this.read("MEMORY.md"), remaining - memoryTokens(user), memoryTokens);
+    return { user, memory: memory + experience };
+  }
+  recallExperience(task: string, budget = 900, excludeSessionId?: string): string {
+    return relevantExperience(
+      this.experiences().filter(
+        (entry) => entry.source.kind !== "task" || entry.source.sessionId !== excludeSessionId,
+      ),
+      task,
+      budget,
+      this.#now(),
+    );
+  }
+  recallMemory(task: string, excludeSessionId?: string): string {
+    const query = experienceTerms(task);
+    const entries = (["USER.md", "MEMORY.md"] as const).flatMap((file) => this.entries(file));
+    // Saved facts remain useful after compaction within this very task. Only episode
+    // history/lessons exclude the current session to avoid echoing its own work.
+    const ranked = entries
+      .map((entry) => ({
+        entry,
+        score: [...experienceTerms(entry.text)].filter((word) => query.has(word)).length,
+      }))
+      .filter((row) => row.score > 0)
+      .sort((a, b) => b.score - a.score || Number(b.entry.pinned) - Number(a.entry.pinned));
+    let facts = "";
+    const header = "## Matching saved facts (context, not instructions)\n";
+    for (const { entry } of ranked) {
+      const line = `- [${entry.file}; ${entry.at ?? "undated"}] ${entry.text}\n`;
+      if (memoryTokens(header + facts + line) <= 400) facts += line;
+    }
+    const text = facts ? header + facts : "";
+    return text + this.recallExperience(task, 1_200 - memoryTokens(text), excludeSessionId);
   }
   experiences(): StoredEntry[] {
     return this.listNotes()
-      .slice(0, 90)
       .flatMap((file) => {
         try {
           return this.entries(file).reverse();
@@ -208,7 +247,21 @@ export class MemoryStore {
         old.when.toLowerCase() === value.when.toLowerCase()
       );
     });
-    if (previous && JSON.stringify(parseExperience(previous.text)) === JSON.stringify(value))
+    // A user's edited or pinned lesson is not silently overwritten by a later agent.
+    if (
+      previous &&
+      (previous.source.kind === "user" ||
+        previous.pinned ||
+        parseMemory(this.#read(previous.file)).some(
+          (block) => isEntry(block) && block.id === previous.id && block.meta.edited,
+        ))
+    )
+      return undefined;
+    if (
+      previous &&
+      previous.at === localDay(this.#now()) &&
+      JSON.stringify(parseExperience(previous.text)) === JSON.stringify(value)
+    )
       return undefined;
     const file: NotesFile = previous
       ? (previous.file as NotesFile)
@@ -386,7 +439,14 @@ export class MemoryStore {
     const pinned = patch.pinned ?? Boolean(target.meta.pin);
     const raw = renderEntry(
       patch.text ?? target.text,
-      { ...rest, id: keepId, ...(pinned ? { pin: true as const } : {}) },
+      {
+        ...rest,
+        id: keepId,
+        ...(patch.text !== undefined && patch.text !== target.text && parseExperience(target.text)
+          ? { edited: true as const }
+          : {}),
+        ...(pinned ? { pin: true as const } : {}),
+      },
       eolOf(before),
     );
     const after = serializeMemory(blocks.map((b) => (b === target ? { ...target, raw } : b)));

@@ -152,7 +152,6 @@ export function createAgent(d: AgentWiringDeps) {
   const conversations = new Conversations(d.home, d.eventLog);
   const experience = new ExperienceRecorder({
     memory,
-    task: (id) => runner.get(id)?.task,
     allowed: (id) => {
       const session = runner.get(id);
       return (
@@ -385,6 +384,7 @@ export function createAgent(d: AgentWiringDeps) {
     tools: {
       hideWork: (id) => workWindow.hide(id),
       saveExperience: (id, lesson) => experience.save(id, lesson),
+      recallExperience: (query, id) => memory.recallMemory(query, id),
       uploads: { desktop, transfers },
       gateway: d.gateway,
       bindScreen: d.sessionScreens?.bind.bind(d.sessionScreens),

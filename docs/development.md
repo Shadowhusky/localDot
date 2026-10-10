@@ -213,7 +213,9 @@ Authorization header and JSON request bodies:
 Memory lives in `<home>/memory/USER.md` and `MEMORY.md` (normally under `~/.localdot`). Skills
 are `SKILL.md` directories under `<home>/skills/` and this repository's `skills/`; task startup
 copies them into the computer's `~/.skills/`. Memory is context, including assistant-written
-notes, rather than a source of new user instructions.
+notes, rather than a source of new user instructions. General session learning, bounded recall,
+its research basis and reproducible retrieval checks are described in
+[experience-memory.md](experience-memory.md).
 
 `pnpm test` covers the model loop, transport fixtures and host Tool API integration without
 paid calls. The separate agent real-cell suites require both `LOCALDOT_DOCKER_TESTS=1` and

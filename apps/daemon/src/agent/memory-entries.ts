@@ -12,6 +12,7 @@ export type EntryMeta = {
   readonly src?: string;
   readonly at?: string;
   readonly pin?: true;
+  readonly edited?: true;
 };
 export interface MemoryEntryBlock {
   readonly kind: "entry";
@@ -46,6 +47,7 @@ export function parseMeta(body: string): EntryMeta {
     ...(id && ULID_PATTERN.test(id) ? { id } : {}),
     ...(src && (src === "user" || ULID_PATTERN.test(src)) ? { src } : {}),
     ...(at && DAY.test(at) ? { at } : {}),
+    ...(fields.get("edited") === "1" ? { edited: true as const } : {}),
     ...(fields.get("pin") === "1" ? { pin: true as const } : {}),
   };
 }
@@ -56,6 +58,7 @@ export function metaComment(meta: EntryMeta): string {
   if (meta.src) parts.push(`src=${meta.src}`);
   if (meta.at) parts.push(`at=${meta.at}`);
   if (meta.pin) parts.push("pin=1");
+  if (meta.edited) parts.push("edited=1");
   return `<!-- ld:${parts.join(" ")} -->`;
 }
 
@@ -200,7 +203,11 @@ export function cutTo(text: string, max: number): string {
 
 // What a task boots with: pinned entries first under their own heading, then the file without
 // metadata, dropping the oldest unpinned entries once the budget is spent.
-export function bootView(text: string, budget: number): string {
+export function bootView(
+  text: string,
+  budget: number,
+  cost: (text: string) => number = (text) => text.length,
+): string {
   const blocks = parseMemory(text);
   const list = blocks.filter(isEntry);
   const position = new Map(list.map((e, i) => [e, i] as const));
@@ -209,8 +216,8 @@ export function bootView(text: string, budget: number): string {
   const pinned = list.filter((e) => e.meta.pin);
   const header = "## Always remember\n";
   let used =
-    (pinned.length ? header.length + 1 : 0) +
-    blocks.reduce((n, b) => n + (b.kind === "raw" ? b.raw.length : 0), 0);
+    (pinned.length ? cost(`${header}\n`) : 0) +
+    blocks.reduce((n, b) => n + (b.kind === "raw" ? cost(b.raw) : 0), 0);
   const ranked = [...list].sort((a, b) => {
     if (Boolean(a.meta.pin) !== Boolean(b.meta.pin)) return a.meta.pin ? -1 : 1;
     if (a.meta.pin) return pos(a) - pos(b);
@@ -220,9 +227,9 @@ export function bootView(text: string, budget: number): string {
   });
   const keep = new Set<MemoryEntryBlock>();
   for (const e of ranked) {
-    const cost = line(e).length;
-    if (used + cost > budget) continue;
-    used += cost;
+    const size = cost(line(e));
+    if (used + size > budget) continue;
+    used += size;
     keep.add(e);
   }
   const top = pinned
@@ -232,5 +239,15 @@ export function bootView(text: string, budget: number): string {
   const body = blocks
     .map((b) => (b.kind === "raw" ? b.raw : !b.meta.pin && keep.has(b) ? line(b) : ""))
     .join("");
-  return cutTo(`${top ? `${header}${top}\n` : ""}${body}`, budget);
+  const result = `${top ? `${header}${top}\n` : ""}${body}`;
+  if (cost(result) <= budget) return result;
+  // Only legacy raw text can exceed the budget; structured entries are kept whole.
+  let low = 0,
+    high = result.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (cost(cutTo(result, mid)) <= budget) low = mid;
+    else high = mid - 1;
+  }
+  return cutTo(result, low);
 }

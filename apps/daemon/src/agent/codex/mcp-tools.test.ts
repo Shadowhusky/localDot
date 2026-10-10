@@ -89,3 +89,9 @@ describe("Codex's web tools", () => {
     });
   });
 });
+
+it("offers the same-call learning choice to subscription agents", () => {
+  expect(codexTools().find((tool) => tool.name === "done")?.inputSchema).toMatchObject({
+    required: expect.arrayContaining(["experience", "summary"]),
+  });
+});

@@ -27,21 +27,24 @@ export async function recallTool(
   ctx.check();
   if (!ctx.permit?.consume(input, null))
     return fail("Execution approval is unavailable or already used. Do not retry automatically.");
-  if (!deps.recall) return fail("Search of earlier tasks is not available.");
+  if (!deps.recall && !deps.recallExperience)
+    return fail("Search of earlier tasks is not available.");
   const query = ctx.redact(input.query);
   append(ctx, "step.start", { kind: "think" });
   append(ctx, "tool.start", {
     tool: "recall",
     title: clipText(`Search earlier tasks: ${query}`, 200),
   });
-  const hits = deps.recall(query, input.limit ?? RECALL_DEFAULT_LIMIT, ctx.session.id);
-  const body = hits.length
+  const hits = deps.recall?.(query, input.limit ?? RECALL_DEFAULT_LIMIT, ctx.session.id) ?? [];
+  const experience = deps.recallExperience?.(query, ctx.session.id) ?? "";
+  const history = hits.length
     ? hits
         .map((h, i) => `${i + 1}. ${h.title} · ${h.day} · ${KIND_WORD[h.kind]}\n   ${h.snippet}`)
         .join("\n")
     : "No earlier tasks match.";
+  const body = experience ? `${experience}\n\n${history}` : history;
   ctx.session.tainted = true;
-  if (hits.length) ctx.session.taint.add("recall", "earlier tasks", body);
+  if (hits.length || experience) ctx.session.taint.add("recall", "earlier tasks", body);
   ctx.check();
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });

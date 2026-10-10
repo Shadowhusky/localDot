@@ -7,6 +7,7 @@ import {
   BrowserUploadInput,
   type ConnectorToolSpec,
   DoneInput,
+  DoneModelInput,
   FilesInput,
   FindInput,
   FOLLOW_UP_TOOL_DESCRIPTION,
@@ -30,7 +31,7 @@ import {
   WebSearchInput,
 } from "@localdot/protocol";
 import { HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
-import { jsonSchema, type ToolSet, tool } from "ai";
+import { asSchema, jsonSchema, type ToolSet, tool } from "ai";
 
 const GENERIC_ACTIONS =
   'Actions: screenshot; left_click, right_click, middle_click, double_click, triple_click (coordinate, or where the cursor is without one; text holds modifier keys down during the click, e.g. "shift" or "ctrl+shift"); left_click_drag (start_coordinate and coordinate, or path: 2 to 64 [x, y] points to follow, such as a stroke when drawing; optional button, text modifiers and duration up to 10 seconds; one approval covers the whole path); mouse_move (coordinate: hovers, or drags while a button is down); left_mouse_down and left_mouse_up (optional coordinate and button; the button stays down until left_mouse_up, at most 60 seconds; a mouse_move, a scroll and the left_mouse_up while it is down drag from where it went down, and a drop on a send, post or delete control on a web page, or a file carried onto a web page, asks first); type (text; optional coordinate to click first, clear to select all and delete first, submit to press Return after); key (text: X key names joined by +, e.g. "ctrl+s", "Return", "Page_Up", "ctrl++"; repeat up to 100 presses); hold_key (text, duration up to 30 seconds); scroll (coordinate or where the cursor is, scroll_direction, scroll_amount, text modifiers); wait (duration in seconds); zoom (region [x0, y0, x1, y1]) to read small text or check details; cursor_position; batch (steps: 1 to 8 of the actions above but screenshot, zoom and cursor_position, each with its own fields, run in order with one screenshot at the end; use it for predictable sequences such as click a field, type, press Tab, type, press Return; it stops at a step that fails, whose target changed since your screenshot, or that needs the user\'s approval, and says which). When the screen did not change, an action says so instead of sending the same screenshot again.';
@@ -155,7 +156,16 @@ export function toolSet(
     done: tool({
       description:
         "Finish the task: a summary for the user, the paths of any files in the computer they should get (a revised file keeps its name), and what you checked about them.",
-      inputSchema: DoneInput,
+      // Advertise the reflection choice, but tolerate older/weak models that omit it.
+      // Failing validation here would prevent the daemon from completing the task.
+      inputSchema: jsonSchema(asSchema(DoneModelInput).jsonSchema, {
+        validate: (value) => {
+          const parsed = DoneInput.safeParse(value);
+          return parsed.success
+            ? { success: true, value: parsed.data }
+            : { success: false, error: parsed.error };
+        },
+      }),
     }),
     routine: tool({ description: ROUTINE_TOOL_DESCRIPTION, inputSchema: RoutineToolInput }),
     follow_up_at: tool({

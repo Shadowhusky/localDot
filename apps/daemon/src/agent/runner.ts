@@ -1417,7 +1417,7 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
-        const memory = this.deps.memory.bootMemory(session.task);
+        const memory = this.deps.memory.bootMemory(session.task, models.main.contextTokens);
         taintMemory(session.taint, memory);
         const boot = BootConfig.parse({
           sessionId: session.id,

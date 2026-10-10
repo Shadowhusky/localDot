@@ -3,6 +3,7 @@ import {
   ComputerAction,
   ComputerStep,
   type ConnectorToolSpec,
+  DoneModelInput,
   FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
@@ -142,7 +143,9 @@ export function codexTools(
         ? CodexComputerInput
         : name === "browser_act"
           ? CodexBrowserActInput
-          : TOOL_INPUTS[name],
+          : name === "done"
+            ? DoneModelInput
+            : TOOL_INPUTS[name],
     ),
   }));
 }

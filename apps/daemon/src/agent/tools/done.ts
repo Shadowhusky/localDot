@@ -67,6 +67,8 @@ export async function doneTool(
       when: ctx.redact(experience.when),
       procedure: ctx.redact(experience.procedure),
       recheck: ctx.redact(experience.recheck),
+      ...(experience.outcome ? { outcome: experience.outcome } : {}),
+      ...(experience.cues ? { cues: experience.cues.map((cue) => ctx.redact(cue)) } : {}),
     });
   }
   append(ctx, "task.result", { summary: cut(ctx.redact(input.summary), 8000), files });

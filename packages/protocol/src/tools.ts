@@ -336,9 +336,11 @@ export const RememberInput = z.object({
 export type RememberInput = z.infer<typeof RememberInput>;
 
 export const DoneInput = z.object({
-  experience: LearnedExperience.optional().describe(
-    "A reusable workflow actually validated in this task: setup, pitfalls and a cheap recheck. Omit trivial or unverified lessons.",
-  ),
+  experience: LearnedExperience.nullable()
+    .optional()
+    .describe(
+      "Reflect on this session: a reusable skill, correction or recovery actually supported by observations, with applicability and a cheap recheck. Use null when nothing durable was learned. Never turn a tool success alone into a claim that the task succeeded.",
+    ),
   summary: z.string().min(1).max(8000),
   files: z.array(z.string().min(1).max(1024)).max(16).optional(),
   checked: z
@@ -349,6 +351,9 @@ export const DoneInput = z.object({
     .optional(),
 });
 export type DoneInput = z.infer<typeof DoneInput>;
+// New models choose a lesson or null in their existing completion call. The host still
+// accepts older clients that omit it; learning must never hold task completion open.
+export const DoneModelInput = DoneInput.required({ experience: true });
 
 // The daemon validates a call's input with these; the brain declares the same schemas (the
 // computer tool's own shape differs per provider and is normalized to ComputerAction first).

@@ -458,9 +458,10 @@ Look at it.
 Yes. Skills are plain `SKILL.md` folders, dot's memory uses editable Markdown files and daily notes, and any MCP server can become one of dot's tools in Settings → Connectors. See
 [docs/development.md](docs/development.md).
 
-Reusable setup experience is saved with its project or workflow scope, conditions, source task,
-and a check to perform before reuse. Relevant experience is loaded into new conversations and
-routine runs. You can inspect, edit, or delete it under **What dot knows → Daily notes**.
+Dot can learn reusable methods from browser, app, research, document and coding sessions,
+including corrections and failed approaches. It saves concise lessons with their scope, observed
+outcome, source task and a check before reuse. New conversations and routines load a small,
+relevant selection; more can be recalled when needed. You can inspect, edit, or delete it under **What dot knows → Daily notes**.
 It remains observed context, never permission to act. [Design and experiments](docs/experience-memory.md).
 
 Text files with unfamiliar extensions open as text when their bytes are readable. Binary or

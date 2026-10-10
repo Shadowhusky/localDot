@@ -24,6 +24,7 @@ export interface RecallHit {
 
 export interface ToolDeps {
   hideWork?(id: string): Promise<void>;
+  recallExperience?(query: string, excludeSessionId: string): string;
   saveExperience?(
     id: string,
     experience: import("../../../../../packages/protocol/src/experience.ts").LearnedExperience,
