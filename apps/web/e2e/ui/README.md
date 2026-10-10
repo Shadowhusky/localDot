@@ -45,5 +45,5 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
   the harness's own output, which Playwright empties on every run.
 
 - **README screenshots:** after building the app, run
-  `node --import tsx e2e/ui/readme-capture.ts` from `apps/web`. This refreshes Watch, Permissions
-  and the message queue in `docs/readme` using a separate fixture daemon and synthetic data.
+  `node --import tsx e2e/ui/readme-capture.ts` from `apps/web`. This refreshes desktop and phone Watch views, Permissions
+  and the message queue at 2× resolution in `docs/readme` using a separate fixture daemon and synthetic data.

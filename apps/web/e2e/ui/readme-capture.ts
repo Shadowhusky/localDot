@@ -15,7 +15,7 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
-    deviceScaleFactor: 1,
+    deviceScaleFactor: 2,
     reducedMotion: "reduce",
     locale: "en-GB",
     timezoneId: "UTC",
@@ -39,6 +39,13 @@ try {
     )
     .toBeGreaterThan(20);
   await page.screenshot({ path: `${out}/watch.png` });
+  // Capture the phone layout instead of shrinking the desktop screenshot on mobile.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(form.getByRole("button", { name: "Stop task", exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${out}/watch-mobile.png` });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.locator(".rail-chat")).toBeVisible();
   await form.getByRole("button", { name: /^Permission mode:/ }).click();
   await expect(page.getByRole("menuitemradio", { name: /^Full access/ })).toBeVisible();
   await page.waitForTimeout(200);

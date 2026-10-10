@@ -357,6 +357,22 @@ Connectors live in `<home>/connectors.json`; their tools, as last listed, in
 
 ## README images
 
+The overview uses a phone-specific Watch capture on narrow screens and focused, 2× screenshots.
+Refresh them with `node --import tsx e2e/ui/readme-capture.ts` from `apps/web` after building the app.
+The capture uses a separate fixture with sample data; it never connects to a user's session.
+
+Build the compact, single-column architecture and performance figures from the repo root:
+
+```sh
+node docs/diagrams/readme-cards.mjs
+```
+
+Their SVGs use native text, with 2× PNG fallbacks. Keep labels readable at a 288 px content width,
+link images to their full-size files, and put essential information in ordinary Markdown too.
+The main README should stay a quick introduction; detailed workflows belong in [the tour](tour.md).
+
+The older illustrations remain available for reference:
+
 The pencil diagrams and charts in `docs/readme/` are drawn by `docs/diagrams/build.mjs` with
 roughjs and the Kalam handwriting font (SIL Open Font License, in `docs/diagrams/fonts/`). The
 lettering is converted to outlines, so the SVGs render anywhere without the font. Each run
