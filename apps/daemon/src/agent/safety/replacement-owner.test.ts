@@ -261,3 +261,43 @@ describe("durable replacement ownership and restart", () => {
     expect(ready).not.toHaveBeenCalled();
   });
 });
+
+it("historical Ready replacement never retires a successor with its own durable fence", async () => {
+  const h = fixture();
+  const record = {
+    requestId: h.requestId,
+    oldCellId: h.oldCellId,
+    revision: 3,
+    phase: "ready" as const,
+    newCellId: h.candidate,
+  };
+  h.store.write(record);
+  h.d.inspectFresh.mockResolvedValue("owned");
+  const onReady = vi.fn();
+  const owner = new ReplacementOwner({
+    store: h.store,
+    onReady,
+    forCell: (id) =>
+      id === h.candidate
+        ? {
+            ...h.d,
+            current: () => ({ cellId: h.candidate, revision: 1, fenced: true, taskEnded: true }),
+          }
+        : h.d,
+  });
+  await owner.start();
+  expect(await owner.status(h.oldCellId, h.requestId)).toEqual(record);
+  expect(h.d.inspectFresh).not.toHaveBeenCalled();
+  expect(h.d.retireFresh).not.toHaveBeenCalled();
+  expect(onReady).not.toHaveBeenCalled();
+  await expect(owner.replace(h.oldCellId, { ...h.body, requestId: ulid() })).rejects.toThrow(
+    "already has a replacement",
+  );
+  const successorRequest = { requestId: ulid(), oldRevision: 1, home: "fresh" as const };
+  h.d.allocateId.mockReturnValue(ulid());
+  expect(await owner.replace(h.candidate, successorRequest)).toMatchObject({
+    phase: "ready",
+    oldCellId: h.candidate,
+  });
+  expect(h.d.retireFresh).not.toHaveBeenCalled();
+});

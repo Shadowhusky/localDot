@@ -147,6 +147,17 @@ export class ReplacementOwner {
         if (!current.fenced || current.revision !== record.revision)
           throw new Error("replacement fence unavailable");
         if (record.newCellId) {
+          // A completed replacement can later need recovery of its own. Its durable
+          // fence belongs to that later lifecycle; it is no longer a partial candidate
+          // whose home this historical request is allowed to purge or publish.
+          const successor = this.deps.forCell(record.newCellId).current();
+          if (
+            record.phase === "ready" &&
+            successor.cellId === record.newCellId &&
+            successor.fenced &&
+            successor.revision > 0
+          )
+            continue;
           const state = await d.inspectFresh(record.newCellId);
           if (state === "foreign") throw new Error("foreign replacement candidate");
           if (record.phase === "ready" && state === "ready" && current.taskEnded) {

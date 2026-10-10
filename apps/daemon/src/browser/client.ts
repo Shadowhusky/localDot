@@ -23,6 +23,7 @@ import {
 import { keyName } from "@localdot/protocol/keys";
 import { z } from "zod";
 import {
+  BROWSER_NAVIGATION_TIMEOUT_MS,
   BrowserActionPermit,
   BrowserControlReply,
   BrowserControlRequest,
@@ -149,8 +150,8 @@ const REFUSALS = {
   secret_refused:
     "Secure password entry was refused because the page, field, or control changed. Read the current page and retry ask_user with its password target; do not repeat unchanged calls or click the password box through ordinary tools.",
   stale: "The web browser or the selected screen changed during the request.",
-  aborted: "The web browser did not answer in time, or the request was cancelled.",
-  unavailable: "The web browser is not responding.",
+  aborted: "The browser request timed out or was cancelled; the page may still have loaded.",
+  unavailable: "The browser control connection is unavailable; the page may still be responsive.",
   reply: "The web browser sent a reply that could not be read.",
 } as const;
 
@@ -763,7 +764,7 @@ export class BrowserClient {
       "/navigate",
       { ...this.#action(permit, tabId), url },
       scope,
-      20000,
+      BROWSER_NAVIGATION_TIMEOUT_MS + 5000,
       done,
       4096,
     );

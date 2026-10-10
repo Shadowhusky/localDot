@@ -127,3 +127,32 @@ it("a newly created computer adopts its authenticated owner before accepting liv
   });
   expect(posts).toEqual(["https://owned.invalid/api/cells"]);
 });
+
+it("refresh selects the newest fenced computer instead of an older failed replacement", async () => {
+  const api = createApi("fixture", {
+    origin: "https://owned.invalid",
+    fetchImpl: vi.fn(async () =>
+      Response.json([
+        summary(OLD, { state: "failed", fenced: { revision: 1 } }),
+        summary(FRESH, { paused: true, fenced: { revision: 1 } }),
+      ]),
+    ),
+  });
+  const h = renderHook(() => useCell(api));
+  await waitFor(() => expect(h.result.current.pending).toBeNull());
+  expect(h.result.current.cell?.id).toBe(FRESH);
+});
+it("a completed historical replacement can select its successor's recovery screen without granting Ready", async () => {
+  const h = await setup(
+    summary(OLD, { fenced: { revision: 4 } }),
+    summary(FRESH, { fenced: { revision: 1 }, paused: true }),
+  );
+  await act(async () => expect(await h.result.current.selectReady(FRESH)).toBe(false));
+  await act(async () => expect(await h.result.current.selectRecovery(FRESH)).toBe(true));
+  expect(h.result.current.cell).toMatchObject({ id: FRESH, fenced: { revision: 1 }, paused: true });
+});
+it("recovery selection refuses an unfenced candidate", async () => {
+  const h = await setup(summary(OLD, { fenced: { revision: 4 } }));
+  await act(async () => expect(await h.result.current.selectRecovery(FRESH)).toBe(false));
+  expect(h.result.current.cell?.id).toBe(OLD);
+});

@@ -30,7 +30,8 @@ export function createReplacementController(d: ReplacementControllerDeps) {
   try {
     store = new ReplacementStore(d.home);
     for (const record of store.list())
-      if (record.newCellId) d.cells.holdReplacement(record.newCellId);
+      if (record.newCellId && !(record.phase === "ready" && d.fences.record(record.newCellId)))
+        d.cells.holdReplacement(record.newCellId);
   } catch {
     d.fences.closeAdmission();
   }
@@ -117,7 +118,12 @@ export function createReplacementController(d: ReplacementControllerDeps) {
     owner,
     fence: (id: string) => {
       const record = d.fences.record(id);
-      return record ? { revision: record.revision } : undefined;
+      return record
+        ? {
+            revision: record.revision,
+            ...(record.replacementRequest ? { replacementRequest: record.replacementRequest } : {}),
+          }
+        : undefined;
     },
   };
 }

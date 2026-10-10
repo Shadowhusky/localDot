@@ -359,5 +359,8 @@ export const ReplacementRecord = z
     "blocked reason required",
   );
 export type ReplacementRecord = z.infer<typeof ReplacementRecord>;
-export const ComputerFence = z.strictObject({ revision: Counter });
+export const ComputerFence = z.strictObject({
+  revision: Counter,
+  replacementRequest: Id.optional(),
+});
 export type ComputerFence = z.infer<typeof ComputerFence>;

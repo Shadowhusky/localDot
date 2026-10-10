@@ -234,7 +234,9 @@ describe("daemon browser client", () => {
       response.writeHead(302, { location: "http://127.0.0.1:1/stolen" });
       response.end("private-token-body");
     });
-    await expect(f.client.health(f.scope)).rejects.toThrow(/^The web browser is not responding\.$/);
+    await expect(f.client.health(f.scope)).rejects.toThrow(
+      /^The browser control connection is unavailable; the page may still be responsive\.$/,
+    );
     expect(f.seen).toHaveLength(1);
   });
 

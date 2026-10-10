@@ -22,6 +22,7 @@ export interface CellController extends CellView {
   resume(): void;
   retry(): void;
   selectReady(id: string): Promise<boolean>;
+  selectRecovery(id: string): Promise<boolean>;
 }
 
 const CELLS = "/api/cells";
@@ -80,7 +81,10 @@ export function useCell(api: ApiClient): CellController {
       const next =
         cells.find((row) => row.id === selectedId.current) ??
         cells.find((row) => !row.fenced && !row.replacementPending && row.state !== "removed") ??
-        cells[0];
+        cells
+          .filter((row) => row.state !== "removed")
+          .sort((a, b) => b.id.localeCompare(a.id))[0] ??
+        cells.at(-1);
       selectedId.current = next?.id ?? null;
       show(next ?? null);
       setListed(cells.map((c) => c.id));
@@ -249,6 +253,26 @@ export function useCell(api: ApiClient): CellController {
     },
     [api, show],
   );
+  // Following a historical replacement may lead to a computer with its own fence.
+  // Select only its recovery screen; this is never a grant of executable readiness.
+  const selectRecovery = useCallback(
+    async (id: string) => {
+      if (!ULID_PATTERN.test(id)) return false;
+      const owner = selectedId.current;
+      try {
+        const next = parseCell(await api.get<unknown>(`${CELLS}/${id}`), id);
+        if (!mounted.current || selectedId.current !== owner || !next.fenced) return false;
+        selectedId.current = id;
+        show(next);
+        setStatus("known");
+        setError(null);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [api, show],
+  );
   return {
     cell,
     status,
@@ -263,5 +287,6 @@ export function useCell(api: ApiClient): CellController {
     resume,
     retry,
     selectReady,
+    selectRecovery,
   };
 }

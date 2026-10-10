@@ -1,8 +1,9 @@
 import { z as schema } from "zod";
+import { BROWSER_NAVIGATION_TIMEOUT_MS } from "../../../../packages/protocol/src/browser-control.ts";
 import type { GuardedCdp } from "./cdp.ts";
 import { navigable } from "./cdp-guard.ts";
 
-export const BROWSER_NAVIGATION_TIMEOUT_MS = 30_000;
+export { BROWSER_NAVIGATION_TIMEOUT_MS };
 export const MAX_NAVIGATION_EVENTS = 256;
 
 const identifier = schema.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
@@ -61,7 +62,7 @@ export async function navigateOwnedDocument(options: OwnedNavigationOptions): Pr
   let navigated: schema.infer<typeof frameSchema> | undefined;
   let withinDocument: string | undefined;
   let eventCount = 0;
-  const loads = new Set<string>();
+  const readyDocuments = new Set<string>();
   const unsubscribe: (() => void)[] = [];
   const refuse = (reason: BrowserNavigationError["reason"]) => {
     refusal ??= new BrowserNavigationError(reason);
@@ -84,7 +85,7 @@ export async function navigateOwnedDocument(options: OwnedNavigationOptions): Pr
     if (acknowledgement.loaderId) {
       if (withinDocument !== undefined) return refuse("stale");
       if (navigated && navigated.loaderId !== acknowledgement.loaderId) return refuse("stale");
-      if (navigated && loads.has(acknowledgement.loaderId)) loaded.resolve();
+      if (navigated && readyDocuments.has(acknowledgement.loaderId)) loaded.resolve();
     } else {
       if (navigated) return refuse("stale");
       if (withinDocument !== undefined) {
@@ -158,9 +159,12 @@ export async function navigateOwnedDocument(options: OwnedNavigationOptions): Pr
           timestamp: schema.number().finite().nonnegative(),
         })
         .parse(params);
-      if (event.frameId !== initial?.id || event.name !== "load") return;
+      // A usable document need not finish every image, tracker or long-lived resource.
+      // Correlate DOM readiness with the acknowledged root loader, never a generic page event.
+      if (event.frameId !== initial?.id || !["DOMContentLoaded", "load"].includes(event.name))
+        return;
       count();
-      loads.add(event.loaderId);
+      readyDocuments.add(event.loaderId);
     });
     check();
     options.preflight();

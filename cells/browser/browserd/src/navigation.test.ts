@@ -97,8 +97,8 @@ async function setup() {
       if (!command) throw new Error("navigation not dispatched");
       return command;
     },
-    load: (loaderId = "new-loader", frameId = "root") =>
-      event("Page.lifecycleEvent", { frameId, loaderId, name: "load", timestamp: 1 }),
+    load: (loaderId = "new-loader", frameId = "root", name = "load") =>
+      event("Page.lifecycleEvent", { frameId, loaderId, name, timestamp: 1 }),
     cross: () => {
       frame = { id: "root", loaderId: "new-loader", url: destination };
       event("Page.frameNavigated", { frame });
@@ -158,6 +158,27 @@ describe("owned root navigation", () => {
     expect(() => oldDocument && fixture.targets.check(oldDocument)).toThrow();
   });
 
+  it.each(["events-first", "ack-first"])(
+    "keeps a DOM-ready sign-in page usable while another resource is pending (%s)",
+    async (order) => {
+      const fixture = await setup();
+      const result = fixture.targets.navigate(fixture.tabId, destination);
+      await settle();
+      if (order === "ack-first")
+        fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+      fixture.cross();
+      fixture.load("new-loader", "root", "DOMContentLoaded");
+      if (order === "events-first")
+        fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
+      // No full-load event: this document must still be available for inspection and sign-in.
+      await expect(result).resolves.toBeUndefined();
+      expect(fixture.fatal).not.toHaveBeenCalled();
+      expect(fixture.targets.closed).toBe(false);
+      expect(fixture.targets.documents(fixture.tabId)).toHaveLength(1);
+      expect(fixture.writes.filter((entry) => entry.method === "Page.navigate")).toHaveLength(1);
+    },
+  );
+
   it.each(["event-first", "ack-first"])("matches same-document fragments (%s)", async (order) => {
     const fixture = await setup();
     const url = `${initialFrame.url}#part`;
@@ -208,6 +229,9 @@ describe("owned root navigation", () => {
     fixture.reply(fixture.navigation(), { frameId: "root", loaderId: "new-loader" });
     fixture.load("old-loader");
     fixture.load("new-loader", "child");
+    fixture.load("old-loader", "root", "DOMContentLoaded");
+    fixture.load("new-loader", "child", "DOMContentLoaded");
+    fixture.load("new-loader", "root", "init");
     fixture.event("Page.loadEventFired", { timestamp: 5 });
     await settle();
     expect(settled).toBe(false);

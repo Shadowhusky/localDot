@@ -416,6 +416,7 @@ function Theatre({ api }: { api: ApiClient }) {
     resume,
     retry,
     selectReady,
+    selectRecovery,
   } = useCell(api);
   const computerUpdate = useComputerUpdate(api, cell);
   const freshStart = useFreshStart(api, cell, selectReady);
@@ -755,6 +756,7 @@ function Theatre({ api }: { api: ApiClient }) {
     replaceBlocked: controls.stopping,
     visible: !settings.open,
     selectReady,
+    selectRecovery,
   });
   useControlToast(controls.status, controls.recheck);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");

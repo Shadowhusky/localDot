@@ -3,6 +3,8 @@ import { InputResult, TypeResult } from "./desktopd.ts";
 import { ULID_PATTERN } from "./ids.ts";
 
 export const BROWSER_CONTROL_TIMEOUT_MS = 5000;
+// Transport deadlines must leave room for navigation to finish or return its own refusal.
+export const BROWSER_NAVIGATION_TIMEOUT_MS = 30_000;
 
 export const BrowserAgentOwner = schema.strictObject({
   sessionId: schema.string().regex(ULID_PATTERN),

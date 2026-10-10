@@ -34,6 +34,7 @@ export interface SafetyProps {
   replaceBlocked?: boolean;
   visible: boolean;
   selectReady(id: string): Promise<boolean>;
+  selectRecovery?(id: string): Promise<boolean>;
 }
 type Operation = {
   api: ApiClient;
@@ -81,6 +82,8 @@ export function useSafety(props: SafetyProps) {
   const [localPause, setLocalPause] = useState<PauseSnapshot | null>(null);
   const [replacement, setReplacement] = useState<ReplacementRecord | null>(null);
   const [replacing, setReplacing] = useState(false);
+  const [replacementRetry, setReplacementRetry] = useState(false);
+  const replacementSending = useRef<object | null>(null);
   const [allowed, setAllowed] = useState<AllowedChoice | null>(null);
   const undoing = useRef<AbortController | null>(null);
   const replacementRequest = useRef<ReplacementRequest | null>(null);
@@ -109,6 +112,8 @@ export function useSafety(props: SafetyProps) {
     if (old.api !== props.api || old.cell !== props.cell?.id) {
       replacementAbort.current?.abort();
       replacementRequest.current = null;
+      replacementSending.current = null;
+      setReplacementRetry(false);
       replacementAttempt.current = null;
       replacingRef.current = false;
       setReplacing(false);
@@ -443,9 +448,13 @@ export function useSafety(props: SafetyProps) {
         )
           return;
         setReplacement(value);
+        setReplacementRetry(false);
         if (value.phase === "ready" && value.newCellId) {
           // Even a successful mutation reply must pass a separate current status read and an unheld Ready cell read.
-          if (await current.current.selectReady(value.newCellId)) {
+          const selected = await current.current.selectReady(value.newCellId);
+          if (disposed || current.current.api !== props.api || current.current.cell?.id !== id)
+            return;
+          if (selected || (await current.current.selectRecovery?.(value.newCellId))) {
             replacementRequest.current = null;
             try {
               sessionStorage.removeItem(storageKey(id));
@@ -464,9 +473,26 @@ export function useSafety(props: SafetyProps) {
           replacingRef.current = false;
           setReplacing(false);
         }
-      } catch {
-        if (!disposed)
-          setError("Replacement status is unconfirmed. The old computer stays unavailable.");
+      } catch (failure) {
+        if (
+          !disposed &&
+          current.current.api === props.api &&
+          current.current.cell?.id === id &&
+          replacementRequest.current === input
+        ) {
+          // A rejected POST has no durable record. Retain its idempotency key, but
+          // let the user retry instead of polling a 404 forever with a disabled button.
+          if (!replacementSending.current) {
+            setReplacementRetry(true);
+            replacingRef.current = false;
+            setReplacing(false);
+          }
+          setError(
+            failure instanceof ControlFailure && failure.status === 404
+              ? "The replacement hasn't started. Try Replace computer again."
+              : "Couldn't check the replacement. You can retry the same request.",
+          );
+        }
       } finally {
         busy = false;
       }
@@ -490,7 +516,7 @@ export function useSafety(props: SafetyProps) {
       !id ||
       !revision ||
       replacingRef.current ||
-      replacementRequest.current ||
+      (replacementRequest.current && !replacementRetry) ||
       document.hidden ||
       !navigator.onLine ||
       !p.visible ||
@@ -499,6 +525,8 @@ export function useSafety(props: SafetyProps) {
       return false;
     const attempt = {};
     replacementAttempt.current = attempt;
+    replacementSending.current = attempt;
+    setReplacementRetry(false);
     replacingRef.current = true;
     setReplacing(true);
     setError(null);
@@ -522,12 +550,41 @@ export function useSafety(props: SafetyProps) {
         fence.revision !== revision
       )
         throw new ControlFailure(false);
-      const input: ReplacementRequest = { requestId: ulid(), oldRevision: revision, home: "fresh" };
+      let input: ReplacementRequest = replacementRequest.current ?? {
+        requestId: ulid(),
+        oldRevision: revision,
+        home: "fresh",
+      };
+      let existing: ReplacementRecord | undefined;
+      if (fence.replacementRequest) {
+        const known: ReplacementRequest = { ...input, requestId: fence.replacementRequest };
+        existing = await loadReplacement(p.api, id, known, abort.signal);
+        if (existing.phase !== "blocked") input = known;
+        else {
+          if (input.requestId === known.requestId) input = { ...input, requestId: ulid() };
+          existing = undefined;
+        }
+      }
+      if (
+        replacementAttempt.current !== attempt ||
+        abort.signal.aborted ||
+        current.current.api !== p.api ||
+        current.current.cell?.id !== id ||
+        current.current.cell.fenced?.revision !== revision ||
+        !mounted.current ||
+        !focused.current ||
+        !document.hasFocus() ||
+        document.hidden ||
+        !navigator.onLine ||
+        !current.current.visible ||
+        (current.current.replaceBlocked ?? current.current.blocked)
+      )
+        throw new ControlFailure(false);
       replacementRequest.current = input;
       try {
         sessionStorage.setItem(storageKey(id), JSON.stringify(input));
       } catch {}
-      const value = await replaceComputer(p.api, id, input, abort.signal);
+      const value = existing ?? (await replaceComputer(p.api, id, input, abort.signal));
       if (
         replacementAttempt.current === attempt &&
         !abort.signal.aborted &&
@@ -550,12 +607,13 @@ export function useSafety(props: SafetyProps) {
         setError(
           "Replacement completion is unconfirmed. Checking the saved request; the old computer stays unavailable.",
         );
-      if (!replacementRequest.current) {
-        replacementAttempt.current = null;
-        replacingRef.current = false;
-        setReplacing(false);
-      }
+      setReplacementRetry(!!replacementRequest.current);
+      replacementAttempt.current = null;
+      replacingRef.current = false;
+      setReplacing(false);
       return false;
+    } finally {
+      if (replacementSending.current === attempt) replacementSending.current = null;
     }
   };
   const checkAgain = () => {
@@ -616,7 +674,7 @@ export function useSafety(props: SafetyProps) {
       !deciding &&
       props.agent.snapshot?.budgetHold !== "task",
     canReplace:
-      (!replacement || replacement.phase === "blocked") &&
+      (replacementRetry || !replacement || replacement.phase === "blocked") &&
       !!props.cell?.fenced &&
       !(props.replaceBlocked ?? props.blocked) &&
       props.visible &&
@@ -626,7 +684,7 @@ export function useSafety(props: SafetyProps) {
       !document.hidden &&
       navigator.onLine &&
       !replacingRef.current &&
-      !replacementRequest.current,
+      (!replacementRequest.current || replacementRetry),
   };
 }
 export type SafetyView = ReturnType<typeof useSafety>;
