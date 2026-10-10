@@ -204,3 +204,5 @@ public class Probe {
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:LOCALAPPDATA
 if ($script:failures -gt 0) { Write-Host "$script:failures failed"; exit 1 }
 Write-Host "all passed"
+# The final native fixture deliberately exits 1. Do not let the CI shell reuse that status.
+exit 0
