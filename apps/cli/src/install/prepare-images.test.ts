@@ -7,10 +7,20 @@ import {
 import { sampleManifest } from "../../../../packages/protocol/src/testing/sample-release.ts";
 import type { InstallImageClient } from "./image-client.ts";
 import { prepareInstalledReleaseImages, prepareReleaseImages } from "./prepare-images.ts";
+import { SetupFailure } from "./setup-failure.ts";
 
 const readInstalled = vi.hoisted(() => vi.fn());
+const delay = vi.hoisted(() =>
+  vi.fn(async (_milliseconds: number, _value: unknown, options: { signal: AbortSignal }) =>
+    options.signal.throwIfAborted(),
+  ),
+);
+vi.mock("node:timers/promises", () => ({ setTimeout: delay }));
 vi.mock("./promote-release.ts", () => ({ readInstalledRelease: readInstalled }));
-afterEach(() => readInstalled.mockReset());
+afterEach(() => {
+  readInstalled.mockReset();
+  delay.mockClear();
+});
 const signal = () => new AbortController().signal;
 function fixture() {
   const manifest = ReleaseManifest.parse(sampleManifest()),
@@ -58,6 +68,29 @@ it("reuses matching local images without a registry pull", async () => {
   await prepareReleaseImages(f.manifest, f.client, signal());
   expect(f.client.pull).not.toHaveBeenCalled();
   expect(f.client.inspect).toHaveBeenCalledTimes(8);
+});
+it("retries transient downloads with bounded backoff and rechecks the engine", async () => {
+  const f = fixture();
+  f.client.pull.mockRejectedValueOnce(new SetupFailure("network-unavailable"));
+  await prepareReleaseImages(f.manifest, f.client, signal());
+  expect(f.client.pull).toHaveBeenCalledTimes(5);
+  expect(delay.mock.calls.map(([ms]) => ms)).toEqual([1000]);
+  expect(f.client.engine).toHaveBeenCalledTimes(3);
+});
+it("stops after three transient attempts, but never retries storage failures", async () => {
+  const f = fixture();
+  f.client.pull.mockRejectedValue(new SetupFailure("network-unavailable"));
+  await expect(prepareReleaseImages(f.manifest, f.client, signal())).rejects.toMatchObject({
+    code: "network-unavailable",
+  });
+  expect(f.client.pull).toHaveBeenCalledTimes(3);
+  expect(delay.mock.calls.map(([ms]) => ms)).toEqual([1000, 3000]);
+  const g = fixture();
+  g.client.pull.mockRejectedValue(new SetupFailure("storage-read-only"));
+  await expect(prepareReleaseImages(g.manifest, g.client, signal())).rejects.toMatchObject({
+    code: "storage-read-only",
+  });
+  expect(g.client.pull).toHaveBeenCalledTimes(1);
 });
 it.each(["wrong-arch", "wrong-digest", "config-id-only", "missing-after-pull"])(
   "refuses %s after a pull",

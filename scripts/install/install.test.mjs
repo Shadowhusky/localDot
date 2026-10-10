@@ -31,6 +31,7 @@ const REAL = [
   "cp",
   "cut",
   "date",
+  "df",
   "dirname",
   "env",
   "find",
@@ -419,6 +420,17 @@ describe.concurrent("prerequisites", { timeout: 60_000 }, () => {
 });
 
 describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
+  it("stops on a full installation disk without starting builds", async () => {
+    const host = await makeHost();
+    script(
+      join(host.stubs, "df"),
+      "printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 100 100 0 100%% /\\n'",
+    );
+    const result = await host.run();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("no free space");
+    expect(host.calls().some((call) => /^(build |pnpm |go )/.test(call))).toBe(false);
+  });
   it("catches unwritable Docker storage before building images and cleans up only its probe", async () => {
     const host = await makeHost();
     const result = await host.run([], {

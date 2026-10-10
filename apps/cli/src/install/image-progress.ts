@@ -1,3 +1,5 @@
+import { classifySetupFailure } from "./setup-failure.ts";
+
 export interface ImagePullProgress {
   phase: "pulling" | "downloading" | "extracting" | "verifying";
   layer?: string;
@@ -27,14 +29,17 @@ export async function readImagePullProgress(
     used = 0;
     if (!text) return;
     const doc: unknown = JSON.parse(text);
-    if (
-      !doc ||
-      typeof doc !== "object" ||
-      Array.isArray(doc) ||
-      "error" in doc ||
-      "errorDetail" in doc
-    )
-      throw fail();
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) throw fail();
+    if ("error" in doc || "errorDetail" in doc) {
+      const detail = "errorDetail" in doc ? doc.errorDetail : undefined;
+      const message =
+        detail && typeof detail === "object" && "message" in detail ? detail.message : undefined;
+      throw (
+        classifySetupFailure("error" in doc ? doc.error : message) ??
+        classifySetupFailure(message) ??
+        fail()
+      );
+    }
     records++;
     const value = doc as Record<string, unknown>;
     const phase: ImagePullProgress["phase"] =

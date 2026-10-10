@@ -397,7 +397,7 @@ prepare_prerequisites() {
 check_prerequisites() {
   local problems="" missing="" tool problem
   git --version >/dev/null 2>&1 || missing="git"
-  for tool in curl tar gzip; do
+  for tool in curl tar gzip df; do
     command -v "$tool" >/dev/null 2>&1 || missing="${missing:+$missing }$tool"
   done
   if [ -n "$missing" ]; then
@@ -798,6 +798,22 @@ check_docker_storage() {
   say "Docker storage is writable now. Downloads can still fail if storage fills later."
 }
 
+check_install_storage() {
+  local available
+  available=$(LC_ALL=C df -Pk "$PREFIX" | awk 'NR == 2 { print $4 }') ||
+    die "Could not measure the installation filesystem. Check its mount and free space before retrying."
+  case "$available" in
+    '' | *[!0-9]*) die "Could not read the installation filesystem's available space." ;;
+  esac
+  [ "$available" -gt 0 ] || die "The installation filesystem has no free space. Free space, then rerun setup."
+  printf 'Installation filesystem available: %s KiB. Source-build peak usage is not yet measured.\n' "$available"
+  if [ -n "$WSL" ]; then
+    say "This is Ubuntu's filesystem space, not Windows physical disk space. Check free space on the Windows drive holding Docker/WSL data too."
+  else
+    say "Docker may store its data on another disk; its free space is a separate requirement."
+  fi
+}
+
 tailscale_cli() {
   if command -v tailscale >/dev/null 2>&1; then
     command -v tailscale
@@ -1163,6 +1179,7 @@ run_install() {
   fi
   unset LOCALDOT_INSTALL_STAGE
   COMMIT=$(git -C "$APP" rev-parse HEAD)
+  check_install_storage
   ensure_node
   rm -f "$RUNTIME/install-failure.txt"
   if [ "$SKIP_IMAGES" = 0 ] && { [ "$COMMIT" != "$BUILT_COMMIT" ] || ! images_present; }; then

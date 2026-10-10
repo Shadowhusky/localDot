@@ -14,6 +14,7 @@ import { hasInstallState, initializeInstallHome } from "./initialize-home.ts";
 import { runInstallPreflight } from "./preflight.ts";
 import { withPreparedRelease } from "./prepare-release.ts";
 import { serviceJournalStore } from "./service-journal.ts";
+import { SetupFailure } from "./setup-failure.ts";
 import { runUp } from "./up.ts";
 import { updateJournalStore } from "./update-journal.ts";
 
@@ -142,12 +143,14 @@ export async function runDefault(input: DefaultContext, io: ConsoleIO): Promise<
         return signal.aborted ? 130 : result;
       },
     );
-  } catch {
+  } catch (error) {
     await browser?.finish(signal.aborted ? "cancelled" : "failed").catch(() => {});
     io.err(
       signal.aborted
         ? "Setup interrupted. Run localdot again to recover."
-        : "Setup could not complete. Check Docker Desktop and the private installation directory, then run localdot again.",
+        : error instanceof SetupFailure
+          ? error.message
+          : "Setup could not complete. Check Docker Desktop and the private installation directory, then run localdot again.",
     );
     return signal.aborted ? 130 : 1;
   } finally {

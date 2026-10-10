@@ -1,7 +1,22 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { readImagePullProgress } from "./image-progress.ts";
+import { SetupFailure } from "./setup-failure.ts";
 
 const signal = () => new AbortController().signal;
+it.each([
+  ["write /private-secret/metadata_v2.db: read-only file system", "storage-read-only"],
+  ["no space left on device token=private-secret", "storage-full"],
+  ["connection reset by peer private-secret", "network-unavailable"],
+])("classifies %s without exposing raw Docker errors", async (message, code) => {
+  const result = readImagePullProgress(
+    stream([Buffer.from(JSON.stringify({ errorDetail: { message } }))]),
+    signal(),
+    vi.fn(),
+  );
+  await expect(result).rejects.toMatchObject({ code });
+  await expect(result).rejects.toBeInstanceOf(SetupFailure);
+  await expect(result).rejects.not.toThrow("private-secret");
+});
 async function* stream(chunks: Buffer[]) {
   yield* chunks;
 }

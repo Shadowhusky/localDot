@@ -3,6 +3,7 @@ import { isAbsolute, normalize } from "node:path";
 import { ImagePin, imageRef } from "../../../../packages/protocol/src/release.ts";
 import { DOCKER_API } from "../../../daemon/src/cells/docker.ts";
 import { type ImagePullProgress, readImagePullProgress } from "./image-progress.ts";
+import { SetupFailure } from "./setup-failure.ts";
 
 export interface ImageEngine {
   id: string;
@@ -87,8 +88,16 @@ export function installImageClient(
       controller.signal.throwIfAborted();
       if (!response.complete) throw fail();
       return result;
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
+      if (error instanceof SetupFailure) throw error;
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        ["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN"].includes(String(error.code))
+      )
+        throw new SetupFailure("network-unavailable");
       throw fail();
     } finally {
       response?.destroy();

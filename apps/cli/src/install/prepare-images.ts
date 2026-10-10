@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { ReleaseIdentity } from "../../../../packages/protocol/src/install-update.ts";
 import {
   IMAGE_DIGEST,
@@ -9,6 +10,7 @@ import { imageVerdict } from "../../../daemon/src/doctor-image.ts";
 import { type InstallImageClient, installImageClient } from "./image-client.ts";
 import type { ImagePullProgress } from "./image-progress.ts";
 import { readInstalledRelease } from "./promote-release.ts";
+import { SetupFailure } from "./setup-failure.ts";
 
 export interface ImagePreparationProgress {
   role: (typeof IMAGE_ROLES)[number];
@@ -70,7 +72,25 @@ export async function prepareReleaseImages(
     if (!id) {
       signal.throwIfAborted();
       report(Object.freeze({ role, phase: "pulling" }));
-      await client.pull(pin, signal, (progress) => report(Object.freeze({ ...progress, role })));
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await client.pull(pin, signal, (progress) =>
+            report(Object.freeze({ ...progress, role })),
+          );
+          break;
+        } catch (error) {
+          signal.throwIfAborted();
+          if (!(error instanceof SetupFailure) || !error.retryable || attempt >= 2) throw error;
+          await delay(attempt === 0 ? 1000 : 3000, undefined, { signal });
+          const current = await client.engine(signal);
+          if (
+            current.id !== engine.id ||
+            current.architecture !== engine.architecture ||
+            current.operatingSystem !== engine.operatingSystem
+          )
+            throw fail();
+        }
+      }
       signal.throwIfAborted();
       id = verified(reference, await client.inspect(pin, signal));
     }

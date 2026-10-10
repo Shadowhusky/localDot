@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { runDefault } from "./default.ts";
+import { SetupFailure } from "./setup-failure.ts";
 
 const mock = vi.hoisted(() => ({
   exists: vi.fn(),
@@ -114,6 +115,13 @@ it("runs first setup in order and holds the preparation mutex through sign-in", 
     { home: f.context.home, port: 4891, signal: f.controller.signal },
     expect.objectContaining({ out: expect.any(Function), err: expect.any(Function) }),
   );
+});
+it("preserves safe storage recovery guidance instead of reporting a generic setup error", async () => {
+  const f = fixture();
+  mock.activate.mockRejectedValue(new SetupFailure("storage-read-only"));
+  expect(await f.run()).toBe(1);
+  expect(f.io.err).toHaveBeenCalledWith(expect.stringContaining("Docker storage is read-only"));
+  expect(mock.open).not.toHaveBeenCalled();
 });
 it("reuses an existing installation without preflight/downloads or parsing ambient settings", async () => {
   const f = fixture();
