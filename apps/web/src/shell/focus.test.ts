@@ -24,6 +24,11 @@ describe("focus mode", () => {
     expect(inFocus({ ...base, needsThread: true })).toBe(false);
     expect(inFocus({ ...base, left: true })).toBe(false);
   });
+
+  it("lets an explicit full-screen request reopen after leaving landscape focus", () => {
+    expect(inFocus({ ...base, left: true, full: true })).toBe(true);
+    expect(inFocus({ ...base, left: true, full: true, needsThread: true })).toBe(false);
+  });
 });
 
 describe("useStill", () => {

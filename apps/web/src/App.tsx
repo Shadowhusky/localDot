@@ -1890,15 +1890,15 @@ function Theatre({ api }: { api: ApiClient }) {
                     : undefined
                 }
               />
-              {!phone && !yours && !full && stageHud.live && (
+              {!yours && !full && !focus && stageHud.live && (
                 <span className="stage-expand">
                   <IconButton
                     variant="glass"
                     round
-                    size={32}
+                    size={phone ? 44 : 32}
                     icon="expand"
                     label="Full screen"
-                    kbd={["F"]}
+                    kbd={phone ? undefined : ["F"]}
                     onClick={fullScreen.enter}
                   />
                 </span>

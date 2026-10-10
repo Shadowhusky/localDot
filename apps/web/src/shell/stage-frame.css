@@ -431,8 +431,8 @@
   }
 }
 
-/* A glass button in the picture's corner while the user watches: full screen, also a double-click
-   or F away. It shows only while the pointer is over the picture. */
+/* Full screen stays in the picture's corner. Mouse users reveal it on hover;
+   touch users need a visible target without first taking control of the computer. */
 .stage-expand {
   position: absolute;
   right: calc(var(--spacing) * 3);
@@ -455,6 +455,15 @@
 @media (hover: hover) {
   .stage-box:hover .stage-expand {
     opacity: 1;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .stage-expand {
+    opacity: 1;
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 

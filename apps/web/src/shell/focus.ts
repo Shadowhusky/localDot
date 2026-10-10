@@ -22,7 +22,7 @@ export interface FocusInput {
 // Phone landscape focus mode (design-v2 §8.5): turned sideways while the computer is live, or asked
 // for full screen, a phone gives the whole screen to the picture.
 export function inFocus({ landscape, live, needsThread, left, full = false }: FocusInput): boolean {
-  return (landscape || full) && live && !needsThread && !left;
+  return (full || (landscape && !left)) && live && !needsThread;
 }
 
 export function useFocusMode(live: boolean, needsThread: boolean, full = false) {
