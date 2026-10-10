@@ -234,6 +234,7 @@ export function projectBrowser(
     const ariaLabels = new Map<number, string>();
     const fieldIds = new Map<number, string>();
     const labelsFor = new Map<string, number[]>();
+    const labelReferences = new Map<number, string>();
     // Each node's nearest <label>, itself included.
     const labelOf = new Map<number, number>();
     let referenceCount = 0;
@@ -286,6 +287,7 @@ export function projectBrowser(
       if (labelled !== undefined) labelOf.set(offset, labelled);
       const labelFor = tag === "LABEL" ? pairs.get("for") : undefined;
       if (labelFor) {
+        labelReferences.set(offset, labelFor);
         const labels = labelsFor.get(labelFor) ?? [];
         labels.push(offset);
         labelsFor.set(labelFor, labels);
@@ -565,6 +567,27 @@ export function projectBrowser(
         }),
       )
       .digest("hex");
+    // Clicking a radio/checkbox's visible HTML label activates its input, even when
+    // the input itself is a tiny styled control. Resolve that native association from
+    // the current snapshot, not the model's intent or arbitrary nearby page text.
+    const labelControls = new Map<number, Target[]>();
+    for (const [nodeId, target] of projected) {
+      if (target.role !== "radio" && target.role !== "checkbox") continue;
+      const offset = positions.get(nodeId);
+      if (offset === undefined || !editable.has(offset)) continue;
+      const id = fieldIds.get(offset);
+      const wrapped = labelOf.get(offset);
+      const labels = new Set([
+        ...(id && namedNodes.get(id)?.length === 1 ? (labelsFor.get(id) ?? []) : []),
+        ...(wrapped !== undefined && !labelReferences.has(wrapped) ? [wrapped] : []),
+      ]);
+      for (const label of labels) {
+        if (blocked.has(label)) continue;
+        const controls = labelControls.get(label) ?? [];
+        controls.push(target);
+        labelControls.set(label, controls);
+      }
+    }
     const targetForNode = (nodeId: number): Target | null => {
       let offset = positions.get(nodeId);
       while (offset !== undefined && offset >= 0) {
@@ -573,6 +596,26 @@ export function projectBrowser(
         const target = projected.get(currentId);
         if (target) return target;
         if (blocked.has(offset)) return null;
+        const controls = labelControls.get(offset);
+        if (controls?.length === 1) {
+          const control = controls[0];
+          const bounds = boxes.get(offset);
+          const region = bounds && pixels(bounds, geometry, content, 0);
+          if (control && region)
+            return Object.freeze({
+              ...control,
+              bbox: Object.freeze({
+                x: region[0] / scale,
+                y: region[1] / scale,
+                w: region[2] / scale,
+                h: region[3] / scale,
+              }),
+              point: Object.freeze({
+                x: (region[0] + region[2] / 2) / scale,
+                y: (region[1] + region[3] / 2) / scale,
+              }),
+            });
+        }
         offset = nodes.parentIndex[offset];
       }
       return null;
