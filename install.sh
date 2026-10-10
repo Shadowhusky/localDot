@@ -678,7 +678,8 @@ ensure_go() {
 }
 
 tools() {
-  PATH="$TOOLS:$NODE_DIR/bin:$PATH" COREPACK_HOME="$RUNTIME/corepack" \
+  PATH="$TOOLS:$NODE_DIR/bin:$GO_DIR/bin:$PATH" COREPACK_HOME="$RUNTIME/corepack" \
+    GOTOOLCHAIN=local GOPATH="$RUNTIME/gopath" GOCACHE="$RUNTIME/gocache" GOFLAGS=-modcacherw \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_AUTO_PIN=0 npm_config_update_notifier=false "$@"
 }
 
@@ -737,6 +738,9 @@ prepare_images() {
       if pull_image "$role"; then continue; fi
       say "No published $role image for this version, so it is built here."
     fi
+    # The gate compiles ldgate on the host. Keyd may already be built on a retry,
+    # so ensure the managed compiler exists even when build_keyd skipped its build.
+    if [ "$role" = gate ]; then ensure_go; fi
     say "Building the $role image"
     (cd "$APP" && tools bash "cells/$role/build.sh") || die "Building the $role image failed; see the messages above."
   done

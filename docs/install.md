@@ -84,6 +84,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | --- | --- |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
+| `go: command not found` while building the gate image | Rerun the latest installer. It supplies Go automatically; no separate Go installation is needed. |
 | A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
 | `localdot: command not found` | Open a new terminal. On Windows, use Ubuntu/WSL. If needed, run `~/.local/bin/localdot open`. |
 | Sign-in link expired | Run `localdot open` for a fresh link. |

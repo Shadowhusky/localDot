@@ -561,6 +561,27 @@ describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
     expect(calls.filter((call) => call.startsWith("build "))).toEqual([]);
   });
 
+  it.each(["wsl", "linux", "macos"])(
+    "builds the real gate script with managed Go on %s without system Go",
+    async (os) => {
+      const host = await makeHost({ os });
+      copyFileSync(join(repo, "cells/gate/build.sh"), join(host.origin, "cells/gate/build.sh"));
+      mkdirSync(join(host.origin, "cells/gate/dist"));
+      writeFileSync(join(host.origin, "cells/gate/dist/.keep"), "");
+      host.commit("Use the real gate build script");
+      script(join(host.stubs, "go"), 'echo "Unexpected system Go" >&2; exit 99');
+
+      const result = await host.run();
+      expect(result.stderr).not.toContain("Unexpected system Go");
+      expect(result.code, result.stderr).toBe(0);
+      expect(host.calls()).toContain(
+        "go build -trimpath -o ../cells/gate/dist/ldgate ./cmd/ldgate",
+      );
+      expect(host.calls()).toContain("docker build -t localdot/gate:dev .");
+      expect(result.stdout).toContain(`http://127.0.0.1:${host.port}/#code=fakecode`);
+    },
+  );
+
   it("builds an image whose published copy is missing", async () => {
     const host = await makeHost();
     expect((await host.run(["--registry", "ghcr.io/example"])).code).toBe(0);
