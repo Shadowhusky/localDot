@@ -1,0 +1,48 @@
+/* Conversation-specific button treatment must follow the shared kit defaults. */
+@layer utilities {
+  .thread-meta-trigger {
+    display: inline-flex;
+    justify-content: flex-start;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: calc(100% + var(--spacing) * 3);
+    margin: calc(var(--spacing) * -0.5) calc(var(--spacing) * -1.5);
+    padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 1.5);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background-color: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: start;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      color var(--dur-hover) var(--ease-standard);
+  }
+
+  @media (hover: hover) {
+    .thread-meta-trigger:not([data-pressed]):hover {
+      background-color: var(--color-control);
+      color: var(--color-fg-2);
+    }
+  }
+
+  .thread-meta-trigger[data-pressed],
+  .thread-meta-trigger[aria-expanded="true"] {
+    background-color: var(--color-control-pressed);
+    color: var(--color-fg-2);
+  }
+
+  .thread-meta-trigger:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
+  /* The shared button wraps its label; let that wrapper shrink before the text ellipsizes. */
+  .thread-meta-trigger > .ui-button-content {
+    min-width: 0;
+    max-width: 100%;
+  }
+}

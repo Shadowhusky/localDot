@@ -786,8 +786,8 @@
   color: var(--color-fg-3);
 }
 
-/* A finished turn's last line: the model and what its calls reported, quiet under dot's words or in
-   line with the work line's text. It opens on each model's tokens. */
+/* A finished turn's last line: the model and what its calls reported, aligned with the
+   conversation's left edge, including when it follows steps. It opens on each model's tokens. */
 .thread-row[data-kind="meta"]:not([data-group-start]) {
   margin-top: var(--spacing);
 }
@@ -802,7 +802,6 @@
 
 .thread-meta[data-under="work"] {
   margin-top: calc(var(--spacing) * -1.5);
-  padding-inline-start: calc(var(--spacing) * 5.5);
 }
 
 .thread-meta-text {
@@ -810,44 +809,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.thread-meta-trigger {
-  display: inline-flex;
-  min-width: 0;
-  max-width: calc(100% + var(--spacing) * 3);
-  margin: calc(var(--spacing) * -0.5) calc(var(--spacing) * -1.5);
-  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 1.5);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background-color: transparent;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-align: start;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    background-color var(--dur-hover) var(--ease-standard),
-    color var(--dur-hover) var(--ease-standard);
-}
-
-@media (hover: hover) {
-  .thread-meta-trigger:not([data-pressed]):hover {
-    background-color: var(--color-control);
-    color: var(--color-fg-2);
-  }
-}
-
-.thread-meta-trigger[data-pressed],
-.thread-meta-trigger[aria-expanded="true"] {
-  background-color: var(--color-control-pressed);
-  color: var(--color-fg-2);
-}
-
-.thread-meta-trigger:focus-visible {
-  outline: var(--focus-width) solid var(--color-fg-1);
-  outline-offset: calc(var(--focus-width) * -1);
 }
 
 .thread-meta-models {
