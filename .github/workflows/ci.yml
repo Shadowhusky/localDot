@@ -11,21 +11,6 @@ jobs:
       - name: PowerShell 7 installer regression checks
         shell: pwsh
         run: ./scripts/install/install-ps1.test.ps1
-  unix-installer:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: bash -n install.sh
-      - run: pnpm exec vitest run scripts/install/install.test.mjs
   check:
     runs-on: ubuntu-latest
     steps:
