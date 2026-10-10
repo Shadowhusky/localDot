@@ -104,8 +104,9 @@ Panel sizes, visibility, and selected tabs are remembered in this browser across
 
 Background commands and file changes appear in a read-only **Activity** window inside dot's
 computer, visible through the same live screen. It uses existing redacted output, without extra
-model calls or command execution. A short native entrance and dot gesture introduce it, and consecutive
-background steps reuse the same window. The window clears before visual actions or handing control to you.
+model calls or command execution. It opens as a compact corner window with selectable output,
+a draggable header, and controls to collapse or dismiss it. Background steps share one transcript;
+brief operations do not flash it open. It clears before browser or desktop interaction, or handing control to you.
 Model usage and cost, including clearly marked estimates, live in the turn metadata. Steps and Files
 follow the selected conversation and remain available when its computer reconnects.
 

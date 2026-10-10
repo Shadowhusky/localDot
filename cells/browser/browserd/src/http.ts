@@ -410,7 +410,10 @@ export class BrowserHttp {
         send(response, 200, { ok: true });
         return;
       }
-      await this.#options.workWindow?.hide();
+      // Metadata and download collection do not touch the screen. Keep the activity window
+      // stable through those calls, but clear it before any visual action or control handoff.
+      if (!route.startsWith("POST /downloads/") && route !== "POST /timing")
+        await this.#options.workWindow?.hide();
       if (route === "POST /stop") {
         const identity = identitySchema.safeParse(body);
         if (

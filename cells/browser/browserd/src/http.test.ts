@@ -912,3 +912,13 @@ it("shows passive work only for agent control and hides it before observation", 
   expect(f.workWindow.update).toHaveBeenCalledTimes(1);
   expect((await f.send("POST", "/work-window", { ...update, visible: false })).status).toBe(200);
 });
+
+it("does not dismiss activity for timing or download bookkeeping", async () => {
+  const f = await setup();
+  expect(
+    (await f.send("POST", "/timing", { permit, tabId, request: { kind: "clock" } })).status,
+  ).toBe(200);
+  // Downloads are disabled in this fixture; even that metadata request must not hide work.
+  await f.send("POST", "/downloads/list", { permit, tabId });
+  expect(f.workWindow.hide).not.toHaveBeenCalled();
+});

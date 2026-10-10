@@ -6,6 +6,7 @@ type Display = {
   endpoint: Endpoint;
   update: WorkWindowUpdate;
   step: string;
+  presented: boolean;
   timer?: ReturnType<typeof setTimeout>;
 };
 
@@ -13,6 +14,7 @@ type Display = {
 // are no extra agent turns, commands, file reads or output polling.
 export class WorkWindowFeed {
   readonly #shown = new Map<string, Display>();
+  readonly #steps = new Map<string, { step: string; kind: string; intent?: string }>();
   readonly #hiding = new Map<string, Promise<void>>();
   readonly #sending = new Map<string, Promise<void>>();
   readonly #pending = new Map<string, { endpoint: Endpoint; update: WorkWindowUpdate }>();
@@ -36,33 +38,32 @@ export class WorkWindowFeed {
       return;
     }
     if (event.type === "step.start") {
-      if (event.data.kind !== "shell" && event.data.kind !== "file") {
-        if (["gui", "browser", "ask", "app"].includes(event.data.kind)) this.hide(id);
+      const step = event.step ?? event.id;
+      this.#steps.set(id, { step, kind: event.data.kind, intent: event.data.intent });
+      if (["gui", "ask"].includes(event.data.kind)) {
+        void this.hide(id);
         return;
       }
-      const previous = this.#shown.get(id);
-      if (previous?.endpoint.baseUrl === target.baseUrl && previous.endpoint.token === target.token)
-        clearTimeout(previous.timer);
-      else this.hide(id);
-      const display: Display = {
-        endpoint: target,
-        step: event.step ?? event.id,
-        update: {
-          phase: `${id}/${event.step ?? event.id}`,
-          visible: true,
-          title:
-            event.data.intent ||
-            (event.data.kind === "shell" ? "Running a command" : "Working with files"),
-          text: "",
-        },
-      };
-      this.#shown.set(id, display);
+      if (["shell", "file", "app"].includes(event.data.kind))
+        this.#begin(id, target, step, event.data.intent ?? "Working in the background");
+      // "browser" also labels public search/fetch. Wait for the tool's actual identity.
+    }
+    if (event.type === "tool.start") {
+      const step = this.#steps.get(id);
+      if (step?.kind === "browser" && step.step === event.step) {
+        if (!["web_search", "web_fetch"].includes(event.data.tool)) {
+          void this.hide(id);
+          return;
+        }
+        this.#begin(id, target, step.step, event.data.title ?? "Reading the web");
+      }
     }
     const display = this.#shown.get(id);
     if (!display || (event.step && event.step !== display.step)) return;
-    if (event.type === "tool.start")
-      display.update.text += `$ ${event.data.title ?? event.data.tool}\n\n`;
-    else if (event.type === "tool.output") display.update.text += event.data.chunk;
+    if (event.type === "tool.start") {
+      display.update.title = event.data.title ?? event.data.tool;
+      display.update.text += `${display.update.text ? "\n" : ""}${event.data.tool === "shell" ? "$ " : ""}${event.data.title ?? event.data.tool}\n\n`;
+    } else if (event.type === "tool.output") display.update.text += event.data.chunk;
     else if (event.type === "file.change")
       display.update.text += `${event.data.op}: ${event.data.path}\n${event.data.patch ?? ""}\n`;
     else if (event.type === "step.end")
@@ -70,22 +71,47 @@ export class WorkWindowFeed {
     else if (event.type !== "step.start") return;
     display.update.text = display.update.text.slice(-12000);
     if (!display.timer)
-      display.timer = setTimeout(() => {
-        display.timer = undefined;
-        if (this.#shown.get(id) !== display) return;
-        const current = this.deps.target(id);
-        if (
-          current?.baseUrl !== display.endpoint.baseUrl ||
-          current.token !== display.endpoint.token
-        ) {
-          this.hide(id);
-          return;
-        }
-        this.#send(display.endpoint, { ...display.update });
-      }, 120);
+      display.timer = setTimeout(
+        () => {
+          display.timer = undefined;
+          if (this.#shown.get(id) !== display) return;
+          const current = this.deps.target(id);
+          if (
+            current?.baseUrl !== display.endpoint.baseUrl ||
+            current.token !== display.endpoint.token
+          ) {
+            this.hide(id);
+            return;
+          }
+          display.presented = true;
+          this.#send(display.endpoint, { ...display.update });
+        },
+        display.presented ? 120 : 650,
+      );
+  }
+
+  #begin(id: string, endpoint: Endpoint, step: string, title: string): void {
+    const previous = this.#shown.get(id);
+    if (
+      previous?.endpoint.baseUrl === endpoint.baseUrl &&
+      previous.endpoint.token === endpoint.token
+    ) {
+      // A background sequence is one display phase, with one entrance and a retained transcript.
+      previous.step = step;
+      previous.update.title = title;
+      return;
+    }
+    if (previous) void this.hide(id);
+    this.#shown.set(id, {
+      endpoint,
+      step,
+      presented: false,
+      update: { phase: `${id}/${step}`, visible: true, title, text: "" },
+    });
   }
 
   hide(id: string): Promise<void> {
+    this.#steps.delete(id);
     const display = this.#shown.get(id);
     if (!display) return this.#hiding.get(id) ?? Promise.resolve();
     clearTimeout(display.timer);

@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "5423f55685caa2bb38c4b65bdc3fed065b755406d57461a10852cc6d752ed669",
+  "inputSha256": "ae866bf464c56298b9bd3ecfb7b2e6ea8598171532be42f8d612773306f45751",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/autonomy-replay.test.ts": "e9c7540227ee016f4fc15e3b7a492a83e0ddb4bcca9419d55701e2ba85596c31",
@@ -278,8 +278,8 @@
     "apps/daemon/src/agent/wiring-independent.test.ts": "ee93b1b4424486d32e258760614b9cd1ab93bc0efb4c98c7894af59c3ba75262",
     "apps/daemon/src/agent/wiring.test.ts": "88bb45f9cbab1c4f6bfc2e846e9a44f3914f08f537ea012b75b80d6c1f213950",
     "apps/daemon/src/agent/wiring.ts": "c7e0bb5430143379619ff2e544473e014fa81b827d5b7d7ff53ae212b558e1ec",
-    "apps/daemon/src/agent/work-window.test.ts": "805a843b68a6db350ae17c392fcd490b156aadea6ebd5fb57a2d2b97abbc2028",
-    "apps/daemon/src/agent/work-window.ts": "793982f6060301777c8c7e24064c2c1d52bf07b32f626b59dfb344931f061cff",
+    "apps/daemon/src/agent/work-window.test.ts": "497fff444e23124f8f4b88efdd73e124b63c1fc9c9cba9cddd2eb8f169e1d705",
+    "apps/daemon/src/agent/work-window.ts": "30106374e00087ebcbf1111ba7471af3bad60ba8505833faabef1c9fa72d8da8",
     "apps/daemon/src/app-events.test.ts": "79cd9982416e3ff809d07fb65d0c9b90f46bcb7d6badc2de17f9a57d0f94af5a",
     "apps/daemon/src/app-events.ts": "250584008486745b63d58a4a3af196b1068ee671915715dd2ffbdee698f4e46c",
     "apps/daemon/src/app.test.ts": "a291709dfeaa2fa674db0cfc5cd26e31a34087ca4967018aef354533d1d20f2d",
@@ -994,7 +994,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "c5b23544aa68d3e1d0a3d18cb7b6a33b66058b6e012cfeddf786f0060ddabb92",
+  "reportSha256": "c388699b94d70b1bc060f749ff2cffe9e7d83fa76fab24ccae59a21a762edb2a",
   "exit": {
     "code": 0,
     "signal": null
