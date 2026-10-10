@@ -113,6 +113,8 @@ function normalizeComputerAction(
   basedOn: string | undefined,
 ): ComputerAction | string {
   const action = input.action ?? "";
+  if (action === "maximize_window" || action === "restore_window" || action === "minimize_window")
+    return { action };
   const at = () => modelPoint(input.coordinate, coords);
   const frame = basedOn ? { basedOn } : {};
   const click = Object.hasOwn(CLICKS, action) ? CLICKS[action] : undefined;

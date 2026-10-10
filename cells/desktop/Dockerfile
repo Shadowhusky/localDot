@@ -2,6 +2,28 @@
 # Base: linuxserver webtop, Ubuntu 26.04.1 + XFCE 4.20 + Selkies 2.0.0 (GPL-3.0-only, a separate
 # program inside this image). Pinned by digest; resolve with
 #   docker image inspect --format '{{index .RepoDigests 0}}' lscr.io/linuxserver/webtop:ubuntu-xfce
+# Rofi must choose a Render visual with alpha, not merely the last 32-bit visual.
+# Keep the narrow upstream patch and build tools out of the runtime image.
+FROM lscr.io/linuxserver/webtop@sha256:73f966bd414cd4aef183c96aba8fab37dd98715f41a278b655fee594d36bd804 AS rofi-build
+ARG ROFI_VERSION=2.0.0
+ARG ROFI_SHA256=6a55ee27f189ef9a1435cea329b146805b5dc830d8abc7a08c50a971521a8d8d
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential meson ninja-build pkg-config flex bison curl xz-utils \
+      libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev \
+      libxkbcommon-x11-dev libxcb-util-dev libxcb-ewmh-dev libxcb-icccm4-dev \
+      libxcb-randr0-dev libxcb-cursor-dev libxcb-xinerama0-dev libxcb-keysyms1-dev \
+      libxcb-render-util0-dev libstartup-notification0-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY patches/rofi-argb-visual.patch /tmp/rofi-argb-visual.patch
+RUN set -eu; \
+    curl -fsSL --retry 3 "https://github.com/davatorium/rofi/releases/download/${ROFI_VERSION}/rofi-${ROFI_VERSION}.tar.xz" -o /tmp/rofi.tar.xz; \
+    echo "${ROFI_SHA256}  /tmp/rofi.tar.xz" | sha256sum -c -; \
+    mkdir /src; tar -xJf /tmp/rofi.tar.xz -C /src --strip-components=1; \
+    cd /src; patch -p1 < /tmp/rofi-argb-visual.patch; \
+    meson setup build --buildtype=release -Dwayland=disabled -Dxcb=enabled -Dcheck=disabled -Dimdkit=false; \
+    meson compile -C build
+
 FROM lscr.io/linuxserver/webtop@sha256:73f966bd414cd4aef183c96aba8fab37dd98715f41a278b655fee594d36bd804 AS base
 
 ARG NODE_VERSION=24.21.0
@@ -139,6 +161,9 @@ RUN apt-get update \
         > "/usr/local/share/applications/$app.desktop"; \
     done
 
+COPY --from=rofi-build /src/build/rofi /usr/local/bin/rofi
+COPY --from=rofi-build /src/COPYING /usr/share/doc/localdot-themes/rofi.COPYING
+COPY patches/rofi-argb-visual.patch /usr/share/doc/localdot-themes/rofi-argb-visual.patch
 COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
 
 COPY root/ /

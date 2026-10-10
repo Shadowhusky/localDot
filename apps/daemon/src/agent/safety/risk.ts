@@ -18,6 +18,7 @@ export interface NativeTargetFacts {
 }
 export type RiskFacts = {
   operation:
+    | "window"
     | "observe"
     | "navigate"
     | "click"

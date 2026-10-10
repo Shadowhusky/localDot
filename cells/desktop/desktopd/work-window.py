@@ -105,7 +105,10 @@ mascot.set_valign(Gtk.Align.CENTER)
 mascot.set_tooltip_text("dot is working")
 row.pack_start(mascot, False, False, 0)
 title = Gtk.Label(label="Working on your computer", xalign=0)
+title.set_single_line_mode(True)
+title.set_line_wrap(False)
 title.set_ellipsize(Pango.EllipsizeMode.END)
+title.set_valign(Gtk.Align.CENTER)
 title.set_hexpand(True)
 title.set_size_request(0, -1)
 row.pack_start(title, True, True, 0)
@@ -293,7 +296,9 @@ def update(message):
         adjustment = scroll.get_vadjustment()
         follow = adjustment.get_value() + adjustment.get_page_size() >= adjustment.get_upper() - 30
         caption = str(message.get("title", ""))[:240] or "Working on your computer"
-        title.set_text(caption)
+        # Tool titles can contain a whole multiline shell command. Keep the header
+        # one line; the body and tooltip retain the original command formatting.
+        title.set_text(" ".join(caption.split()))
         title.set_tooltip_text(caption)
         # TextBuffer does not interpret markup, terminal escapes or hyperlinks.
         content = str(message.get("text", ""))[-12000:]

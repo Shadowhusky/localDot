@@ -17,6 +17,8 @@ import {
   TypeProgress,
   type TypeRequest,
   TypeResult,
+  type WindowControlRequest,
+  WindowControlResult,
   type ZoomRequest,
 } from "@localdot/protocol";
 import type { DesktopdEndpoint } from "../cells/types.ts";
@@ -123,6 +125,17 @@ export class DesktopdClient {
 
   arm(): Promise<{ mono: number }> {
     return this.#json("POST", "/arm", {}, TIMEOUT_MS.clock, ClockResult.parse);
+  }
+
+  windowControl(req: WindowControlRequest, signal?: AbortSignal): Promise<WindowControlResult> {
+    return this.#json(
+      "POST",
+      "/window-control",
+      req,
+      TIMEOUT_MS.launch,
+      WindowControlResult.parse,
+      signal,
+    );
   }
 
   launch(req: LaunchRequest, signal?: AbortSignal): Promise<LaunchResult> {

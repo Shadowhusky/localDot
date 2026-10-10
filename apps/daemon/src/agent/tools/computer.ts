@@ -486,6 +486,44 @@ export async function computerTool(
   ctx.check();
   const { session } = ctx;
   const selected = screenContext(ctx);
+  if (
+    a.action === "maximize_window" ||
+    a.action === "restore_window" ||
+    a.action === "minimize_window"
+  ) {
+    if (ctx.screen?.selection.screen === "browser")
+      return {
+        ok: false,
+        content: [text("Window controls are on the desktop screen. Switch to it first.")],
+      };
+    const client = deps.launcher(session.cellId);
+    if (!client?.windowControl)
+      return {
+        ok: false,
+        content: [text("This computer needs an update for native window controls.")],
+      };
+    const windowControl = client.windowControl.bind(client);
+    const target = await windowControl({ action: "inspect" }, ctx.signal);
+    ctx.check();
+    const input = { action: a.action, windowId: target.windowId };
+    const permit = await authorizePrepared(ctx, {
+      tool: "computer",
+      input,
+      target,
+      facts: { operation: "window" },
+      revalidate: async () =>
+        (await windowControl({ action: "inspect" }, ctx.signal)).windowId === target.windowId,
+    });
+    ctx.check();
+    if (!permit) return { ok: false, content: [text("Window operation was not authorized.")] };
+    const current = await windowControl({ action: "inspect" }, ctx.signal);
+    ctx.check();
+    if (current.windowId !== target.windowId || !permit.consume(input, target))
+      return { ok: false, content: [text("Window operation was not authorized.")] };
+    await windowControl(input, ctx.signal);
+    ctx.check();
+    return screenshot(deps, ctx, undefined);
+  }
   if (a.action === "screenshot") {
     if (!ctx.permit?.consume(a, null))
       return { ok: false, content: [text("This screenshot was not authorized.")] };

@@ -55,7 +55,9 @@ export interface ToolDeps {
       > &
         Partial<Pick<DesktopdTools, "elements">>)
     | undefined;
-  launcher(cellId: string): Pick<DesktopdClient, "launch"> | undefined;
+  launcher(
+    cellId: string,
+  ): (Pick<DesktopdClient, "launch"> & Partial<Pick<DesktopdClient, "windowControl">>) | undefined;
   // The desktop's input device while its computer takes input: where a secret answer is typed
   // when the session has no screen controller.
   device?(cellId: string): NativeDevice | undefined;

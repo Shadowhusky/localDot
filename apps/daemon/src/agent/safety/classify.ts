@@ -150,6 +150,8 @@ const PATTERNS = {
 
 export function classify(facts: RiskFacts): readonly ActionClass[] {
   switch (facts.operation) {
+    case "window":
+      return ["computer"];
     case "observe":
     case "files_read":
       return ["reading"];

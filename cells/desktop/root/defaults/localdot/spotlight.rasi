@@ -1,7 +1,7 @@
-/* The Super+Space launcher. Sizes are in pt; startwm.sh writes them out as pixels for the scale.
-   The header sits inside the input bar because rofi sizes the window from the input bar and the
-   list alone. Rofi picks a 32-bit visual the compositor treats as opaque, so the glass is drawn
-   over a screenshot of what is behind it, a little denser than the design's blurred glass. */
+/* The Super+Space launcher. startwm.sh converts pt to pixels at the desktop scale.
+   Applications and documents share one RGBA surface. The desktop runs xfwm4 compositing:
+   use real transparency so the area outside the rounded outline stays live and transparent,
+   rather than painting a rectangular screenshot of whatever was behind the launcher. */
 configuration {
   modi: "drun,filebrowser";
   show-icons: true;
@@ -26,7 +26,7 @@ configuration {
 }
 
 window {
-  transparency: "screenshot";
+  transparency: "real";
   location: north;
   anchor: north;
   y-offset: 168pt;

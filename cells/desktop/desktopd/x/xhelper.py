@@ -607,6 +607,52 @@ class Commands:
     # Managed windows, top first. With `stack`, the mapped override-redirect windows (menus,
     # popups, tooltips) join them in their stacking place, every window names its transient
     # parent, and the reply carries the screen's change generation.
+    def cmd_window_control(self, a):
+        action = a.get("action")
+        if action not in ("inspect", "maximize_window", "restore_window", "minimize_window"):
+            raise ValueError("Unsupported window operation")
+        wid = self.active_window()
+        managed = [int(v) for v in (self.prop(self.root, self.d.intern_atom("_NET_CLIENT_LIST")) or [])]
+        if not wid or wid not in managed:
+            raise ValueError("No active application window")
+        w = self.window(wid)
+        types = self.prop(w, self.d.intern_atom("_NET_WM_WINDOW_TYPE")) or []
+        if any(self.d.intern_atom(t) in types for t in ("_NET_WM_WINDOW_TYPE_DESKTOP", "_NET_WM_WINDOW_TYPE_DOCK")):
+            raise ValueError("This is not an application window")
+        if action == "inspect":
+            return {"windowId": wid}
+        if self.buttons or self.held:
+            raise ValueError("Release held input before managing a window")
+        # The daemon reviewed this exact active window. Never apply to a newly
+        # focused application after a user interaction or an approval delay.
+        if a.get("windowId") != wid:
+            raise ValueError("The active window changed; look again")
+        if action == "minimize_window":
+            message = xevent.ClientMessage(window=w,
+                client_type=self.d.intern_atom("WM_CHANGE_STATE"), data=(32, [3, 0, 0, 0, 0]))
+        else:
+            message = xevent.ClientMessage(window=w,
+                client_type=self.d.intern_atom("_NET_WM_STATE"), data=(32, [
+                    1 if action == "maximize_window" else 0,
+                    self.d.intern_atom("_NET_WM_STATE_MAXIMIZED_VERT"),
+                    self.d.intern_atom("_NET_WM_STATE_MAXIMIZED_HORZ"), 2, 0]))
+        self.root.send_event(message, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+        self.d.sync()
+        deadline = mono() + 750
+        while mono() < deadline:
+            states = self.prop(w, self.d.intern_atom("_NET_WM_STATE")) or []
+            maximized = all(self.d.intern_atom(atom) in states for atom in
+                ("_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ"))
+            normal = not any(self.d.intern_atom(atom) in states for atom in
+                ("_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ"))
+            wm_state = self.prop(w, self.d.intern_atom("WM_STATE"))
+            if ((action == "maximize_window" and maximized)
+                    or (action == "restore_window" and normal)
+                    or (action == "minimize_window" and wm_state is not None and int(wm_state[0]) == 3)):
+                return {"windowId": wid}
+            self.pause(0.01)
+        raise ValueError("Window manager did not confirm the change; inspect the screen")
+
     def cmd_windows(self, a):
         ids = [int(wid) for wid in (self.prop(self.root, self.NET_STACK) or [])]
         active = self.active_window()

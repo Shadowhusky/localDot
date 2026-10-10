@@ -1,0 +1,69 @@
+--- a/source/xcb/display.c
++++ b/source/xcb/display.c
+@@ -45,6 +45,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <xcb/randr.h>
++#include <xcb/xcb_renderutil.h>
+ #include <xcb/xcb.h>
+ #include <xcb/xcb_aux.h>
+ #include <xcb/xcb_cursor.h>
+@@ -1784,4 +1785,30 @@
++/* A 32-bit TrueColor visual can be XRGB, with no alpha channel. Xvfb exposes
++ * those after ARGB visuals; selecting the last 32-bit visual produces black
++ * rectangular corners even with compositing and a transparent cairo surface. */
++static bool visual_has_alpha(xcb_render_query_pict_formats_reply_t *formats,
++                             xcb_visualid_t id) {
++  if (formats == NULL) {
++    return false;
++  }
++  xcb_render_pictvisual_t *pv = xcb_render_util_find_visual_format(formats, id);
++  if (pv == NULL) {
++    return false;
++  }
++  xcb_render_pictforminfo_iterator_t it =
++      xcb_render_query_pict_formats_formats_iterator(formats);
++  for (; it.rem; xcb_render_pictforminfo_next(&it)) {
++    if (it.data->id == pv->format) {
++      return it.data->type == XCB_RENDER_PICT_TYPE_DIRECT &&
++             it.data->direct.alpha_mask != 0;
++    }
++  }
++  return false;
++}
++
+ static void x11_create_visual_and_colormap(void) {
++  xcb_render_query_pict_formats_reply_t *formats =
++      xcb_render_query_pict_formats_reply(
++          xcb->connection, xcb_render_query_pict_formats(xcb->connection), NULL);
+   xcb_depth_t *root_depth = NULL;
+   xcb_depth_iterator_t depth_iter;
+   for (depth_iter = xcb_screen_allowed_depths_iterator(xcb->screen);
+@@ -1793,7 +1820,8 @@
+          xcb_visualtype_next(&visual_iter)) {
+       xcb_visualtype_t *v = visual_iter.data;
+       if ((v->bits_per_rgb_value == 8) && (d->depth == 32) &&
+-          (v->_class == XCB_VISUAL_CLASS_TRUE_COLOR)) {
++          (v->_class == XCB_VISUAL_CLASS_TRUE_COLOR) &&
++          visual_has_alpha(formats, v->visual_id)) {
+         depth = d;
+         visual = v;
+       }
+@@ -1803,6 +1831,7 @@
+       }
+     }
+   }
++  free(formats);
+   if (visual != NULL) {
+     xcb_void_cookie_t c;
+     xcb_generic_error_t *e;
+--- a/meson.build
++++ b/meson.build
+@@ -81,6 +81,7 @@
+ xcb = dependency('xcb', required: xcb_opt)
+ xcb_deps = [
+     xcb,
++    dependency('xcb-renderutil', required: xcb_opt),
+     dependency('xcb-aux', required: xcb_opt),
+     dependency('xcb-xkb', required: xcb_opt),
+     dependency('xkbcommon-x11', required: xcb_opt),

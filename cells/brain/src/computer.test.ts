@@ -506,3 +506,10 @@ describe("elementsOnGrid", () => {
     );
   });
 });
+
+it.each(["maximize_window", "restore_window", "minimize_window"] as const)(
+  "normalizes %s without a coordinate or screenshot",
+  (action) => {
+    expect(toComputerActions({ action }, "pixels", undefined)).toEqual([{ action }]);
+  },
+);

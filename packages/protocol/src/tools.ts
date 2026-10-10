@@ -9,6 +9,7 @@ import { PeopleInput } from "./tools/people.ts";
 import { RecallInput } from "./tools/recall.ts";
 import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 import { WebFetchInput, WebSearchInput } from "./tools/web.ts";
+import { WINDOW_ACTIONS } from "./window-control.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
 // daemon's tool API runs, including M7's isolated browser screen.
@@ -81,6 +82,7 @@ const STEP_ACTIONS = [
   "hold_key",
 ] as const;
 const COMPUTER_ACTIONS = [
+  ...WINDOW_ACTIONS,
   ...STEP_ACTIONS,
   "screenshot",
   "zoom",
@@ -168,7 +170,14 @@ export type ComputerStep = z.infer<typeof ComputerStep>;
 // model pixels (MODEL_SCREEN), keys as X-style names. A click, scroll or button press without a
 // point acts where the cursor is.
 export const ComputerAction = z.object({
-  action: z.enum([...INPUT_ACTIONS, "screenshot", "zoom", "cursor_position", "batch"]),
+  action: z.enum([
+    ...INPUT_ACTIONS,
+    ...WINDOW_ACTIONS,
+    "screenshot",
+    "zoom",
+    "cursor_position",
+    "batch",
+  ]),
   ...computerFields,
   region: z
     .object({ x: z.number().int(), y: z.number().int(), w: z.number().int(), h: z.number().int() })

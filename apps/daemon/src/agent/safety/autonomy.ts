@@ -123,7 +123,11 @@ export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDeci
       "unknown";
     return {
       actionClass,
-      mode: permission === "full" || classes.every((c) => c === "reading") ? "act" : "ask",
+      mode:
+        permission === "full" ||
+        classes.every((c) => ["reading", "browsing", "computer"].includes(c))
+          ? "act"
+          : "ask",
       risk: risk(actionClass),
     };
   }

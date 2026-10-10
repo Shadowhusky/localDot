@@ -34,7 +34,7 @@ const H = MODEL_SCREEN.height;
 
 // The computer tool for every harness; each adds how its actions are checked against the screen.
 export const COMPUTER_DESCRIPTION =
-  `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: screenshot (returns the screen), ` +
+  `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: maximize_window, restore_window, minimize_window (the active desktop window; prefer these to clicking titlebar buttons; not in batches), screenshot (returns the screen), ` +
   `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}, or where the cursor is without one; ` +
   'button left/right/middle; count 1-3; mods: modifier keys held during the click, such as ["shift"] or ' +
   '["ctrl"]), drag (path: 2 to 64 points {x, y} to follow, start first, such as a stroke when drawing; ' +

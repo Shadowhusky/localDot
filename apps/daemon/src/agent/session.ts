@@ -192,7 +192,14 @@ export class AgentSession {
   // subsequent actions without changing a decision already on screen.
   permissionMode: () => "custom" | "auto" | "full" = () => "custom";
   autoPermit?: (
-    action: { tool: string; operation: string; actionClass: string; input: unknown },
+    action: {
+      tool: string;
+      operation: string;
+      actionClass: string;
+      input: unknown;
+      target?: unknown;
+      facts?: unknown;
+    },
     signal: AbortSignal,
   ) => Promise<boolean>;
   readonly #autonomy: Readonly<AutonomyPolicy>;

@@ -71,6 +71,8 @@ export function approvalDraft(
     return ApprovalRequestDraft.parse({ ...card, fields });
   }
   fields.push(["Tool", tool]);
+  if (facts.operation === "window" && typeof object?.action === "string")
+    add("Action", object.action.replaceAll("_", " "));
   if (tool === "computer" && object?.action && typeof object.action === "object") {
     const action = object.action as Record<string, unknown>;
     const verb = String(action.verb);
@@ -207,6 +209,8 @@ export async function authorizePrepared(
           operation: prepared.facts.operation,
           actionClass: decision.actionClass,
           input,
+          target,
+          facts: actingFacts(ctx, prepared.facts),
         },
         ctx.signal,
       )

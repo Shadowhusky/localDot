@@ -80,6 +80,21 @@ fixture. For a LaunchAgent, send `SIGTERM` to its loaded service and let its sup
 The token fragment is removed from the visible URL after loading. Browser history may retain
 the original install link, so treat that link as a credential.
 
+The native UI regression runs in an isolated display, never the user's running computer:
+
+```sh
+mkdir -p /tmp/localdot-corners
+docker run --rm --network none --entrypoint /bin/sh \
+  -v "$PWD/cells/desktop:/source:ro" -v /tmp/localdot-corners:/results \
+  localdot/desktop:dev /source/tests/native-corners.sh --out /results
+```
+
+It checks application search, file search and Activity corners against a changing background
+at both display scales, including a multiline command in the single-line Activity header.
+It also verifies native maximize, restore and minimize operations and rejects changed targets.
+Rofi is built with a narrow alpha-visual patch: a 32-bit X11 visual alone does not guarantee
+transparent corners. Screenshots are saved in `/tmp/localdot-corners`.
+
 ## Replay
 
 Sessions record locally even when nobody is watching. Open **Replay** and choose a session in

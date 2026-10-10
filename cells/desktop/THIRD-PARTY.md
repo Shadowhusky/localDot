@@ -7,7 +7,7 @@
 | WhiteSur icon theme | tag 2026-09-10, commit 73d8040da51a9ed74e47c7366e7e9ff437601a5c | GPL-3.0 (separately licensed data) | `/usr/share/icons/WhiteSur*`, license at `/usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING` |
 | Plank | Ubuntu package (unpinned, like the rest of apt) | GPL-3.0-or-later | `/usr/bin/plank`, license at `/usr/share/doc/plank/copyright` |
 | vala-panel-appmenu: `xfce4-appmenu-plugin`, `appmenu-registrar` | Ubuntu packages (unpinned) | LGPL-3.0-or-later | the menu bar's app name and menus, licenses at `/usr/share/doc/xfce4-appmenu-plugin/copyright` and `/usr/share/doc/appmenu-registrar/copyright` |
-| rofi | Ubuntu package (unpinned) | MIT | `/usr/bin/rofi` (the Super+Space launcher), license at `/usr/share/doc/rofi/copyright` |
+| rofi | 2.0.0 + localDot alpha-visual selection patch | MIT | `/usr/local/bin/rofi` (the Super+Space launcher); license and patch at `/usr/share/doc/localdot-themes/rofi.COPYING` and `rofi-argb-visual.patch`. Ubuntu package supplies runtime dependencies and themes. |
 | localDot Daylight wallpaper | design-v2 | MIT (localDot's own) | `/usr/share/backgrounds/localdot/daylight.png` |
 | Cua Driver | 0.30.4 | MIT | `/opt/cua`, `/usr/local/bin/cua-driver` |
 | VSCodium | 1.135.06055 | MIT | `/usr/share/codium` |

@@ -104,6 +104,7 @@ describe("chat permission modes", () => {
   it("auto permits only a Jev approval and asks when unavailable or unsure", async () => {
     const h = harness(CAREFUL_AUTONOMY);
     h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.taskAutonomy.signIn("desktop");
     const judge = vi
       .fn()
       .mockResolvedValueOnce(true)
@@ -119,9 +120,54 @@ describe("chat permission modes", () => {
     expect(judge).toHaveBeenCalledTimes(3);
     expect(h.asks).toHaveBeenCalledTimes(3);
   });
+  it("auto runs identified routine controls without a judge round trip", async () => {
+    const h = harness(CAREFUL_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.taskAutonomy.signIn("desktop");
+    h.ctx.session.autoPermit = vi.fn(async () => false);
+    for (const facts of [
+      { operation: "window" as const },
+      { operation: "scroll" as const },
+      {
+        operation: "click" as const,
+        target: { source: "ax" as const, fresh: true, role: "button", name: "Maximize" },
+      },
+    ]) {
+      await authorizePrepared(h.ctx, {
+        tool: "computer",
+        input: {},
+        target: null,
+        facts,
+        revalidate: async () => true,
+      });
+    }
+    expect(h.asks).not.toHaveBeenCalled();
+    expect(h.ctx.session.autoPermit).not.toHaveBeenCalled();
+  });
+  it("auto gives the judge target evidence and still asks for an unidentified signed-in click", async () => {
+    const h = harness(CAREFUL_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.taskAutonomy.signIn("desktop");
+    const judge = vi.fn(async (_action: unknown, _signal: AbortSignal) => false);
+    h.ctx.session.autoPermit = judge;
+    const target = { point: { x: 10, y: 20 }, source: "coords" };
+    await authorizePrepared(h.ctx, {
+      tool: "computer",
+      input: { action: "click" },
+      target,
+      facts: { operation: "click", target: { source: "coords", fresh: true } },
+      revalidate: async () => true,
+    });
+    expect(judge.mock.calls[0]?.[0]).toMatchObject({
+      target,
+      facts: { signedIn: true, target: { source: "coords" } },
+    });
+    expect(h.asks).toHaveBeenCalledOnce();
+  });
   it("does not execute an auto-approved target that changed during the check", async () => {
     const h = harness(CAREFUL_AUTONOMY);
     h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.taskAutonomy.signIn("desktop");
     h.ctx.session.autoPermit = async () => true;
     expect(
       await authorizePrepared(h.ctx, { ...effect("files_write"), revalidate: async () => false }),

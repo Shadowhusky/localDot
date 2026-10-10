@@ -12,6 +12,7 @@ import {
   SettleRequest,
   TypeRequest,
   type TypeResult,
+  WindowControlRequest,
   ZoomRequest,
 } from "@localdot/protocol";
 import { type Context, Hono } from "hono";
@@ -139,6 +140,7 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
         "/settle",
         "/release",
         "/launch",
+        "/window-control",
         "/browser/navigate",
         "/browser/read",
       ].includes(c.req.path)
@@ -333,6 +335,15 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
 
   app.post("/arm", async (c) =>
     withX(async (x) => c.json(await x.call<{ mono: number }>("arm")))(),
+  );
+
+  app.post("/window-control", async (c) =>
+    withX(async (x) => {
+      const parsed = WindowControlRequest.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.text("invalid window operation", 400);
+      if (c.req.raw.signal.aborted) return c.text("request aborted", 408);
+      return c.json(await x.call("window_control", parsed.data));
+    })(),
   );
 
   app.post("/launch", async (c) =>

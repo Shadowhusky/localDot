@@ -583,3 +583,35 @@ describe("desktopd zoom", () => {
     expect((await a.request("/zoom", { method: "POST", body: "{}" })).status).toBe(401);
   });
 });
+
+it("native window controls require the cell token and accept only bounded window operations", async () => {
+  const calls: unknown[] = [];
+  const wired = createDesktopdApp({
+    token: TOKEN,
+    scale: 2,
+    display: ":1",
+    readXsettings: async () => null,
+    readScreen: async () => null,
+    x: {
+      alive: true,
+      call: async (command: string, args?: Record<string, unknown>) => {
+        calls.push([command, args]);
+        return { windowId: 42 };
+      },
+    } as unknown as XHelper,
+  });
+  const request = (value: unknown, authorized = true) =>
+    wired.request("/window-control", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(authorized ? bearer : {}) },
+      body: JSON.stringify(value),
+    });
+  expect((await request({ action: "maximize_window", windowId: 42 }, false)).status).toBe(401);
+  expect((await request({ action: "close", windowId: 42 })).status).toBe(400);
+  expect((await request({ action: "maximize_window", windowId: -1 })).status).toBe(400);
+  expect(calls).toEqual([]);
+  expect(await (await request({ action: "maximize_window", windowId: 42 })).json()).toMatchObject({
+    windowId: 42,
+  });
+  expect(calls).toEqual([["window_control", { action: "maximize_window", windowId: 42 }]]);
+});
