@@ -16,8 +16,11 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
   expect(await overlay.locator("iframe,canvas").count()).toBe(0);
   expect(await page.locator(".stage .work-overlay").count()).toBe(0);
   const assertFits = async () => {
-    const panel = await overlay.boundingBox();
-    const stage = await page.locator(".watch .stage-box").boundingBox();
+    // Read both rectangles in one frame, including during orientation layout changes.
+    const { panel, stage } = await page.evaluate(() => ({
+      panel: document.querySelector(".work-overlay")?.getBoundingClientRect().toJSON(),
+      stage: document.querySelector(".watch .stage-box")?.getBoundingClientRect().toJSON(),
+    }));
     expect(panel).not.toBeNull();
     expect(stage).not.toBeNull();
     if (!panel || !stage) throw new Error("missing geometry");
@@ -69,6 +72,14 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
   }
   await page.getByRole("button", { name: "Minimize command window" }).click();
   await page.screenshot({ path: `e2e/out/work-overlay-compact-${test.info().project.name}.png` });
+  await page.getByRole("button", { name: "Hide commands" }).click();
+  await expect(overlay).toBeHidden();
+  await page.reload();
+  await ui.picture();
+  await expect(overlay).toBeHidden();
+  await page.getByRole("button", { name: "Show commands" }).click();
+  await assertFits();
+  await page.getByRole("button", { name: "Minimize command window" }).click();
   const saved = await page.evaluate(() => localStorage.getItem("localdot.work-overlay.v1"));
   await page.reload();
   await ui.picture();
@@ -90,4 +101,45 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
     await page.setViewportSize({ width: 390, height: 844 });
   }
   await page.screenshot({ path: `e2e/out/work-overlay-${test.info().project.name}.png` });
+});
+
+test("dragging the command handle does not scroll the page", async ({ page, ui }) => {
+  await ui.open("running");
+  await ui.picture();
+  const handle = page.getByRole("button", { name: "Move command window" });
+  await expect(handle).toBeVisible();
+  const positions = () =>
+    page.evaluate(() => [
+      window.scrollY,
+      ...Array.from(document.querySelectorAll(".watch, .stage-col, .thread-body")).map(
+        (node) => node.scrollTop,
+      ),
+    ]);
+  const before = await positions();
+  // All engines must prevent the legacy touchmove default, including Safari.
+  expect(
+    await handle.evaluate((node) => {
+      const event = new Event("touchmove", { bubbles: true, cancelable: true });
+      node.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+  ).toBe(true);
+  expect(await handle.evaluate((node) => getComputedStyle(node).touchAction)).toBe("none");
+  if (test.info().project.name === "c39") {
+    const box = await handle.boundingBox();
+    if (!box) throw new Error("missing handle");
+    const client = await page.context().newCDPSession(page);
+    const x = box.x + 20,
+      y = box.y + 20;
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (let n = 1; n <= 8; n++) {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + n * 3, y: y - n * 8 }],
+      });
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await client.detach();
+  }
+  expect(await positions()).toEqual(before);
 });

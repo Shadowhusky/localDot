@@ -1038,3 +1038,23 @@
 .work-overlay[data-compact] .work-overlay-state {
   display: none;
 }
+
+.work-overlay .work-overlay-handle {
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.work-overlay-show.ui-button {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  pointer-events: auto;
+}
+@media (pointer: coarse) {
+  .work-overlay-show.ui-button {
+    width: 44px;
+    height: 44px;
+  }
+}

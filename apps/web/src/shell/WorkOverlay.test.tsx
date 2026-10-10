@@ -82,7 +82,20 @@ it("bounds retained output and strips terminal control sequences", () => {
 });
 it("validates saved positions and allows storage to be unavailable", () => {
   localStorage.setItem(WORK_LAYOUT_KEY, '{"x":20,"y":-4,"minimized":true}');
-  expect(readWorkLayout()).toEqual({ x: 1, y: 0, minimized: true });
+  expect(readWorkLayout()).toEqual({ x: 1, y: 0, minimized: true, hidden: false });
   localStorage.setItem(WORK_LAYOUT_KEY, "broken");
   expect(readWorkLayout().x).toBe(0.02);
+});
+
+it("keeps commands hidden across output and reload, and restores them on request", () => {
+  const view = render(<WorkOverlay model={model()} working />);
+  fireEvent.click(screen.getByRole("button", { name: "Hide commands" }));
+  view.rerender(<WorkOverlay model={model()} working />);
+  expect(screen.queryByRole("region", { name: "Background work" })).toBeNull();
+  expect(readWorkLayout().hidden).toBe(true);
+  view.unmount();
+  render(<WorkOverlay model={model()} working />);
+  fireEvent.click(screen.getByRole("button", { name: "Show commands" }));
+  expect(screen.getByRole("region", { name: "Recent command output" })).toBeTruthy();
+  expect(readWorkLayout().hidden).toBe(false);
 });

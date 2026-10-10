@@ -6,9 +6,11 @@ export interface WorkLayout {
   x: number;
   y: number;
   minimized: boolean;
+  hidden: boolean;
 }
 export function readWorkLayout(): WorkLayout {
   const fallback = {
+    hidden: false,
     x: 0.02,
     y: window.innerWidth < 700 ? 0.48 : 0.78,
     minimized: window.innerWidth < 700,
@@ -16,6 +18,7 @@ export function readWorkLayout(): WorkLayout {
   try {
     const value = JSON.parse(localStorage.getItem(WORK_LAYOUT_KEY) ?? "null");
     return {
+      hidden: value?.hidden === true,
       x: Number.isFinite(value?.x) ? Math.max(0, Math.min(1, value.x)) : fallback.x,
       y: Number.isFinite(value?.y) ? Math.max(0, Math.min(1, value.y)) : fallback.y,
       minimized: typeof value?.minimized === "boolean" ? value.minimized : fallback.minimized,
