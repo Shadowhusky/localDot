@@ -26,19 +26,28 @@ def rounded(cr, width, height, inset=0):
 
 class ActivityWindow(Gtk.Window):
     def do_draw(self, cr):
-        # Clip every child, including the text and scrollbars, to the same outline.
         width, height = self.get_allocated_width(), self.get_allocated_height()
         cr.save()
-        rounded(cr, width, height)
-        cr.clip()
+        # Erase the previous allocation's corners on the RGBA surface. Otherwise
+        # resizing or expanding can leave opaque pixels outside the new outline.
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        # Paint children together, then apply one antialiased outline. Clipping
+        # and painting each child separately compounds coverage at the edge.
+        cr.push_group()
         cr.set_source_rgb(0.09, 0.10, 0.11)
         cr.paint()
         Gtk.Window.do_draw(self, cr)
-        cr.restore()
+        cr.pop_group_to_source()
+        rounded(cr, width, height)
+        cr.fill()
         rounded(cr, width, height, 0.5)
         cr.set_source_rgba(0.70, 0.73, 0.78, 0.28)
         cr.set_line_width(1)
         cr.stroke()
+        cr.restore()
         return False
 
 window = ActivityWindow(title="dot · Activity")
@@ -56,8 +65,9 @@ initial_width = min(520, max(240, root.width - 32))
 initial_height = min(260, max(140, root.height // 3))
 window.set_default_size(initial_width, initial_height)
 
-# Shape the native window too: the streamed X desktop may have no compositor.
-# CSS rounding alone leaves opaque rectangular corners in that environment.
+# X Shape regions are binary masks: use them for hit testing, but let the
+# compositor blend the visible edge. Keep a bounding shape only on desktops
+# without RGBA compositing, where transparent corners would otherwise be opaque.
 def shape_window(_widget, allocation):
     native = window.get_window()
     if not native:
@@ -68,10 +78,17 @@ def shape_window(_widget, allocation):
         distance = max(RADIUS-y-0.5, y+0.5-(h-RADIUS), 0)
         inset = math.ceil(RADIUS-math.sqrt(max(0, RADIUS**2-distance**2))) if distance else 0
         region.union(cairo.RectangleInt(inset, y, max(0, w-2*inset), 1))
-    native.shape_combine_region(region, 0, 0)
+    composited = visual is not None and window.get_screen().is_composited()
+    native.shape_combine_region(None if composited else region, 0, 0)
     native.input_shape_combine_region(region, 0, 0)
 
 window.connect("size-allocate", shape_window)
+
+def compositing_changed(_screen):
+    shape_window(window, window.get_allocation())
+    window.queue_draw()
+
+window.get_screen().connect("composited-changed", compositing_changed)
 body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 window.add(body)
 header = Gtk.EventBox()
