@@ -33,7 +33,9 @@ automatically in PowerShell. You do not need to type `exit`. If Windows asks for
 and run the same installer command again.
 
 In Docker Desktop, enable **Settings → Resources → WSL integration** for Ubuntu (or your chosen
-distro). If the installer stopped because Docker was unavailable, enable integration and rerun it.
+distro), then click **Apply**. The Windows installer waits for Docker and continues automatically
+when it is ready. If the WSL integration option is missing, switch Docker Desktop to Linux containers.
+If an older installer already stopped, enable integration and rerun it; Ubuntu stays installed.
 
 ### 3. Open localDot
 

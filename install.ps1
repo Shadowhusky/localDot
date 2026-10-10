@@ -210,6 +210,52 @@ function Unregister-KeepRunning {
     ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
 }
 
+function Wait-Docker([int]$TimeoutSeconds = 1200) {
+  $explained = $false
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    # Check the same Linux environment that will run localDot, not merely docker.exe on Windows.
+    $result = Invoke-Wsl -d $Distro --exec timeout 10 docker info --format '{{.ServerVersion}}/{{.OSType}}'
+    if ($result.Code -eq 0 -and $result.Text -match '^(\d+)\.[^/]+/linux$') {
+      if ([int]$Matches[1] -ge 28) {
+        if ($explained) { Write-Host "Docker is ready in $Distro. Continuing installation..." }
+        return $true
+      }
+    }
+    if (-not $explained) {
+      $explained = $true
+      Write-Host ""
+      Write-Host "Ubuntu is ready. One more step: connect Docker."
+      Write-Host "1. Install or open Docker Desktop for Windows: https://www.docker.com/products/docker-desktop/"
+      Write-Host "2. In Docker Desktop, enable Settings > General > Use the WSL 2 based engine."
+      Write-Host "3. Under Settings > Resources > WSL integration, enable $Distro and click Apply."
+      Write-Host "Use Linux containers and Docker Engine 28 or newer. An existing Docker Engine inside $Distro works too."
+      Write-Host ""
+      Write-Host "Waiting for Docker in $Distro. Installation continues automatically; keep this window open."
+      Write-Host "Press Ctrl+C to stop. Your Ubuntu setup is kept."
+      $desktop = Find-DockerDesktop
+      if ($desktop) {
+        try { Start-Process -FilePath $desktop | Out-Null } catch {
+          Write-Host "Please open Docker Desktop from the Windows Start menu."
+        }
+      }
+    }
+    Start-Sleep -Seconds 3
+  }
+  Write-Host "Docker is still unavailable in $Distro. Finish the steps above, then rerun this installer."
+  return $false
+}
+
+function Find-DockerDesktop {
+  foreach ($root in @($env:ProgramFiles, $env:LOCALAPPDATA)) {
+    if ($root) {
+      $candidate = Join-Path $root 'Docker\Docker\Docker Desktop.exe'
+      if (Test-Path $candidate) { return $candidate }
+    }
+  }
+  return $null
+}
+
 function Install-LocalDot {
   if (-not (Enable-Wsl)) { return }
   Initialize-Distro
@@ -221,6 +267,7 @@ function Install-LocalDot {
     Unregister-KeepRunning
     return
   }
+  if (-not (Wait-Docker)) { return }
   Invoke-Installer $options
   Register-KeepRunning
   Write-Host ""

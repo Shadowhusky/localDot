@@ -16,6 +16,7 @@ function Reset-Machine([hashtable]$machine) {
     Status = 0; Version = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
     InstallAdds = $null; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
     SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false
+    DockerResponses = @("29.2.0/linux"); Desktop = $null
   }
   foreach ($key in $machine.Keys) { $script:machine[$key] = $machine[$key] }
   $script:calls = [System.Collections.Generic.List[string]]::new()
@@ -40,6 +41,13 @@ function wsl.exe {
     }
     "^--install --distribution (\S+)$" { if ($script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds } }
     "--exec id -u$" { $out = $script:machine.Uid }
+    "--exec timeout 10 docker info " {
+      $out = $script:machine.DockerResponses[0]
+      if ($script:machine.DockerResponses.Count -gt 1) {
+        $script:machine.DockerResponses = @($script:machine.DockerResponses | Select-Object -Skip 1)
+      }
+      if ($out -eq "missing") { $code = 127 }
+    }
     "--exec test -d /run/systemd/system$" { $code = $script:machine.Systemd }
     "--exec mktemp \.localdot-install\.XXXXXX$" { $out = ".localdot-install.Ab12Cd" }
     "--exec curl " { $code = $script:machine.Download }
@@ -77,6 +85,7 @@ function Stop-Job { param($Job) $script:calls.Add("Stop-Job") }
 function Start-Sleep { param($Seconds) if ($script:machine.ProbePending) { throw "Cancelled setup" } }
 function Stop-Process { param($Id) $script:calls.Add("Stop-Process $Id") }
 function Get-WindowsBuild { 22631 }
+
 function Get-ScheduledTask { if ($script:machine.TaskExists) { "task" } }
 function New-ScheduledTaskAction { param($Execute, $Argument) "$Execute $Argument" }
 function New-ScheduledTaskTrigger { param([switch]$AtLogOn, $User) "logon" }
@@ -90,6 +99,18 @@ function Get-CimInstance { }
 
 # Dot-sourcing replaced the build check; put the pretend one back.
 function Get-WindowsBuild { 22631 }
+
+function Find-DockerDesktop { $script:machine.Desktop }
+
+Reset-Machine @{ DockerResponses = @("missing", "27.0.0/linux", "29.2.0/windows", "29.2.0/linux"); Desktop = "test-docker-desktop.exe" }
+Check (Wait-Docker) "continues once Docker becomes available in Ubuntu with the required Linux engine"
+Check (@($script:calls | Where-Object { $_ -like '*--exec timeout 10 docker info*' }).Count -eq 4) "rejects missing Docker, old engines and Windows container mode"
+Check (@($script:calls | Where-Object { $_ -like 'Start-Process test-docker-desktop.exe*' }).Count -eq 1) "opens installed Docker Desktop only once while waiting"
+
+Reset-Machine @{}
+Check (Wait-Docker) "uses an existing Linux Docker engine without extra setup"
+Check (-not (@($script:calls) -match 'Start-Process')) "does not launch Desktop when Docker already works"
+Check (-not (Wait-Docker -TimeoutSeconds 0)) "returns a resumable setup state on timeout"
 
 Reset-Machine @{ Status = 1; Stderr = $true }
 $savedEncoding = [Console]::OutputEncoding
@@ -189,6 +210,7 @@ Install-LocalDot
 $Uninstall = [switch]$false
 Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec bash .localdot-install.Ab12Cd --uninstall") "uninstalls inside Linux"
 Check ($script:calls -contains "Unregister-ScheduledTask localDot") "removes the keep-alive task"
+Check (-not (@($script:calls) -match '--exec timeout 10 docker info')) "uninstall does not wait for Docker"
 
 Check (-not $EnableSystemd.Contains('"')) "passes the systemd edit without double quotes"
 # The systemd edit runs inside Linux and intentionally uses GNU sed, not macOS BSD sed.
