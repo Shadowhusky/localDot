@@ -17,6 +17,8 @@ for (const fallback of [false, true]) {
     await ui.open("running");
     await ui.picture();
     const app = page.locator(".app");
+    await expect(app).not.toHaveAttribute("data-entering");
+    await ui.settle();
     const expand = page.locator(".stage-expand").getByRole("button", { name: "Full screen" });
     const leave = page.getByRole("button", { name: "Exit full screen" });
     const stream = await page.locator("iframe.desktop-frame").elementHandle();
