@@ -41,6 +41,7 @@ import {
   toTranscript,
 } from "./context.ts";
 import type { EventSink } from "./events.ts";
+import { driveHarness } from "./harness.ts";
 import { imagesInToolResults } from "./models.ts";
 import { type PlanLine, screenHands, systemPrompt } from "./prompt.ts";
 import type { ToolClient } from "./tool-client.ts";
@@ -70,7 +71,7 @@ function withoutFrames(result: ToolResult): ToolResult {
   };
 }
 
-// pi-agent-core's event contract and hooks (spec "Loop"): what a host can watch and veto.
+// Host event contract: what localDot can watch and veto.
 export type AgentEvent =
   | { type: "agent_start" }
   | { type: "agent_end"; outcome: RunOutcome }
@@ -152,6 +153,15 @@ interface ModelStep {
   calls: Call[];
   binding: ModelBinding;
   basedOn?: string;
+  text: string;
+}
+
+interface ToolBatch {
+  step: ModelStep;
+  done: { call: Call; result: ToolResult }[];
+  failed: boolean;
+  paused: boolean;
+  final?: RunOutcome;
 }
 
 function responseHeader(error: APICallError, name: string): string | undefined {
@@ -200,9 +210,9 @@ let nextId = 0;
 const callId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${(nextId++).toString(36)}`;
 
-// localDot's own loop on the AI SDK (spec "Loop"): one model call per turn with every v1 tool
-// declared and none executed by the SDK; each call goes through the daemon's tool API, in order.
-// Steering messages join before the next model call, follow-ups when the model would stop.
+// DeepSeek Harness drives the model/tool cycle. This host adapter owns localDot's
+// durable transcript, provider replay, inbox acknowledgements and daemon policy.
+// No harness plugin receives credentials or direct access to the computer.
 export class Agent {
   readonly #o: AgentOptions;
   #history: ModelMessage[];
@@ -323,66 +333,115 @@ export class Agent {
           : "(localDot restarted your process. Continue from the saved task; take a screenshot if you need a fresh view.)",
       });
     await this.#persist(signal);
-    for (;;) {
-      if (signal.aborted) return "stopped";
-      const inbox = await this.#drain(0, signal);
-      if (inbox === "stopped") return "stopped";
-      // A safety hold precedes guard questions, retry limits and model work.
-      // Paused skipped calls are not a decision from the user to end the task.
-      await this.#waitSafety(signal);
-      const limits = boot.limits;
-      if (limits.maxTurns !== undefined && this.#turns >= limits.maxTurns) {
-        if (
-          !(await this.#keepGoing(`This task has taken ${this.#turns} steps. Keep going?`, signal))
-        )
-          return "gave_up";
-        this.#turns = 0;
-      }
-      if (limits.maxFailedCalls !== undefined && this.#failed >= limits.maxFailedCalls) {
-        if (
-          !(await this.#keepGoing(`My last ${this.#failed} actions failed. Keep trying?`, signal))
-        )
-          return "gave_up";
-        this.#failed = 0;
-      } else if (limits.maxFailedCalls === undefined && this.#failed >= FAILURE_CUE) {
-        this.#history.push({ role: "user", content: FAILURE_NOTE(this.#failed) });
-        this.#failed = 0;
-        await this.#persist(signal);
-      }
-      this.#turns += 1;
-      this.#o.onEvent?.({ type: "turn_start", turn: this.#turns });
-      await this.#waitSafety(signal);
-      sink.state("thinking");
-      sink.busy(true);
-      const step = await this.#callModel(signal).finally(() => sink.busy(false));
-      if (step === "stopped" || step === "gave_up") return step;
-      sink.endText();
-      if (step.calls.length === 0) {
+    let outcome: RunOutcome | undefined;
+    let batch: ToolBatch | undefined;
+    return driveHarness({
+      sessionId: boot.sessionId,
+      task: boot.task,
+      signal,
+      request: async (requestSignal) => {
+        if (batch && batch.done.length !== batch.step.calls.length)
+          throw new Error("Harness did not settle every call in the previous step");
+        if (requestSignal.aborted) return undefined;
+        const inbox = await this.#drain(0, requestSignal);
+        if (inbox === "stopped") {
+          outcome = "stopped";
+          return undefined;
+        }
+        // Product safety and budget policy run before harness model admission.
+        await this.#waitSafety(requestSignal);
+        const limits = boot.limits;
+        if (limits.maxTurns !== undefined && this.#turns >= limits.maxTurns) {
+          if (
+            !(await this.#keepGoing(
+              `This task has taken ${this.#turns} steps. Keep going?`,
+              requestSignal,
+            ))
+          ) {
+            outcome = "gave_up";
+            return undefined;
+          }
+          this.#turns = 0;
+        }
+        if (limits.maxFailedCalls !== undefined && this.#failed >= limits.maxFailedCalls) {
+          if (
+            !(await this.#keepGoing(
+              `My last ${this.#failed} actions failed. Keep trying?`,
+              requestSignal,
+            ))
+          ) {
+            outcome = "gave_up";
+            return undefined;
+          }
+          this.#failed = 0;
+        } else if (limits.maxFailedCalls === undefined && this.#failed >= FAILURE_CUE) {
+          this.#history.push({ role: "user", content: FAILURE_NOTE(this.#failed) });
+          this.#failed = 0;
+          await this.#persist(requestSignal);
+        }
+        this.#turns += 1;
+        this.#o.onEvent?.({ type: "turn_start", turn: this.#turns });
+        await this.#waitSafety(requestSignal);
+        sink.state("thinking");
+        sink.busy(true);
+        const step = await this.#callModel(requestSignal).finally(() => sink.busy(false));
+        if (step === "stopped" || step === "gave_up") {
+          outcome = step;
+          return undefined;
+        }
+        sink.endText();
+        batch = { step, done: [], failed: false, paused: false };
+        if (step.calls.length) this.#nudges = 0;
+        return {
+          text: step.text,
+          calls: step.calls.map((call) => ({
+            id: call.toolCallId,
+            name: call.toolName,
+            input: call.input,
+          })),
+        };
+      },
+      execute: async (id, toolSignal) => {
+        if (!batch) throw new Error("Harness dispatched a tool outside a model step");
+        const call = batch.step.calls[batch.done.length];
+        if (!call || call.toolCallId !== id) throw new Error("Harness tool order changed");
+        sink.state("acting");
+        sink.busy(true);
+        const result = await this.#runCall(batch, call, toolSignal).finally(() => sink.busy(false));
+        if (batch.done.length === batch.step.calls.length) {
+          this.#completeBatch(batch);
+          await this.#persist(toolSignal);
+          this.#o.onEvent?.({ type: "turn_end", turn: this.#turns, toolCalls: batch.done.length });
+          outcome = batch.final;
+          if (
+            !outcome &&
+            batch.step.calls.some((c) => c.toolName === "done") &&
+            this.#hasFollowUps()
+          )
+            await this.#deliverFollowUps(toolSignal);
+        }
+        return { result, conclude: !!batch.final };
+      },
+      stopping: async (turnSignal) => {
+        if (outcome) return false;
         if (this.#hasFollowUps()) {
-          await this.#deliverFollowUps(signal);
-          continue;
+          await this.#deliverFollowUps(turnSignal);
+          return true;
         }
         this.#nudges += 1;
-        if (this.#nudges > MAX_NUDGES) return "gave_up";
+        if (this.#nudges > MAX_NUDGES) {
+          outcome = "gave_up";
+          return false;
+        }
         this.#history.push({
           role: "user",
           content:
             "You stopped without calling a tool. If the task is finished, call done; if you need the user, call ask_user; otherwise continue.",
         });
-        await this.#persist(signal);
-        continue;
-      }
-      this.#nudges = 0;
-      sink.state("acting");
-      sink.busy(true);
-      const final = await this.#runCalls(step, signal).finally(() => sink.busy(false));
-      signal.throwIfAborted();
-      await this.#persist(signal);
-      this.#o.onEvent?.({ type: "turn_end", turn: this.#turns, toolCalls: step.calls.length });
-      if (final) return final;
-      if (step.calls.some((c) => c.toolName === "done") && this.#hasFollowUps())
-        await this.#deliverFollowUps(signal);
-    }
+        await this.#persist(turnSignal);
+        return true;
+      },
+    }).then(() => outcome ?? (signal.aborted ? "stopped" : "gave_up"));
   }
 
   #hasFollowUps(): boolean {
@@ -536,13 +595,15 @@ export class Agent {
       signal.throwIfAborted();
       const binding = this.#binding();
       const calls: Call[] = [];
+      let text = "";
       // Anthropic's own computer tool has no field for dot's line, so dot says it just before
       // its computer actions. That line goes with the call, beside dot, not into the
       // conversation: a short opening waits until the reply shows what follows it.
       let opening = screenHands(binding) === "calls" ? "" : undefined;
-      const say = (text: string) => {
-        sink.text(text);
-        this.#o.onEvent?.({ type: "message_update", delta: text });
+      const say = (delta: string) => {
+        text += delta;
+        sink.text(delta);
+        this.#o.onEvent?.({ type: "message_update", delta });
       };
       // This exact pruned prompt and full-frame basis belong to the whole returned tool batch.
       const messages = pruneScreenshots(this.#history);
@@ -602,7 +663,7 @@ export class Agent {
         const response = await result.response;
         signal.throwIfAborted();
         this.#history.push(...response.messages.filter((m) => m.role === "assistant"));
-        return { calls, binding, ...(basedOn ? { basedOn } : {}) };
+        return { calls, binding, text, ...(basedOn ? { basedOn } : {}) };
       } catch (err) {
         if (signal.aborted) return "stopped";
         sink.endText();
@@ -675,72 +736,73 @@ export class Agent {
     }
   }
 
-  // The turn's calls, in order: a failed screen action stops the rest of the batch (spec "Tools").
-  // Only the turn's newest screen goes back to the model: an earlier action's is already old.
-  async #runCalls(step: ModelStep, signal: AbortSignal): Promise<RunOutcome | undefined> {
-    const { calls, binding, basedOn } = step;
-    const done: { call: Call; result: ToolResult }[] = [];
-    let batchFailed = false;
-    let batchPaused = false;
-    let final: RunOutcome | undefined;
-    for (const call of calls) {
-      signal.throwIfAborted();
-      const info: ToolCallInfo = {
-        callId: call.toolCallId,
-        name: call.toolName,
-        input: call.input,
+  // Harness schedules calls serially; localDot preserves screen-batch safety and
+  // retains the exact provider representation for transcript replay.
+  async #runCall(batch: ToolBatch, call: Call, signal: AbortSignal): Promise<ToolResult> {
+    const { binding, basedOn } = batch.step;
+    signal.throwIfAborted();
+    const info: ToolCallInfo = {
+      callId: call.toolCallId,
+      name: call.toolName,
+      input: call.input,
+    };
+    this.#o.onEvent?.({ type: "tool_execution_start", callId: info.callId, name: info.name });
+    let result: ToolResult;
+    // A skipped call never ran, so it is not another failed action.
+    let skipped = false;
+    if (signal.aborted) result = { ok: false, content: [{ type: "text", text: "Stopped." }] };
+    else if (batch.paused)
+      result = {
+        ok: false,
+        pause: true,
+        content: [
+          { type: "text", text: "Skipped: the task was paused before this call executed." },
+        ],
       };
-      this.#o.onEvent?.({ type: "tool_execution_start", callId: info.callId, name: info.name });
-      let result: ToolResult;
-      // A skipped call never ran, so it is not another failed action.
-      let skipped = false;
-      if (signal.aborted) result = { ok: false, content: [{ type: "text", text: "Stopped." }] };
-      else if (batchPaused)
-        result = {
-          ok: false,
-          pause: true,
-          content: [
-            { type: "text", text: "Skipped: the task was paused before this call executed." },
-          ],
-        };
-      else if (final) {
-        skipped = true;
-        result = {
-          ok: false,
-          content: [{ type: "text", text: "Skipped: the task already ended." }],
-        };
-      } else if (batchFailed && ACTS_ON_SCREEN.has(call.toolName)) {
-        skipped = true;
-        result = {
-          ok: false,
-          content: [{ type: "text", text: "Skipped: an earlier action in this batch failed." }],
-        };
-      } else if (call.toolName === "done" && this.#hasFollowUps())
-        result = {
-          ok: false,
-          content: [
-            {
-              type: "text",
-              text: "A new user follow-up is waiting. Continue with it before finishing.",
-            },
-          ],
-        };
-      else result = await this.#execute(call, info, binding, basedOn, signal);
-      signal.throwIfAborted();
-      if (!result.ok && result.pause !== true && !skipped) {
-        this.#failed += 1;
-        if (ACTS_ON_SCREEN.has(call.toolName)) batchFailed = true;
-      } else if (result.ok) this.#failed = 0;
-      if (result.pause === true) batchPaused = true;
-      if (result.final) final = result.ok && call.toolName === "done" ? "done" : "stopped";
-      done.push({ call, result });
-      this.#o.onEvent?.({
-        type: "tool_execution_end",
-        callId: info.callId,
-        name: info.name,
-        ok: result.ok,
-      });
-    }
+    else if (batch.final) {
+      skipped = true;
+      result = {
+        ok: false,
+        content: [{ type: "text", text: "Skipped: the task already ended." }],
+      };
+    } else if (batch.failed && ACTS_ON_SCREEN.has(call.toolName)) {
+      skipped = true;
+      result = {
+        ok: false,
+        content: [{ type: "text", text: "Skipped: an earlier action in this batch failed." }],
+      };
+    } else if (call.toolName === "done" && this.#hasFollowUps())
+      result = {
+        ok: false,
+        content: [
+          {
+            type: "text",
+            text: "A new user follow-up is waiting. Continue with it before finishing.",
+          },
+        ],
+      };
+    else result = await this.#execute(call, info, binding, basedOn, signal);
+    signal.throwIfAborted();
+    if (!result.ok && result.pause !== true && !skipped) {
+      this.#failed += 1;
+      if (ACTS_ON_SCREEN.has(call.toolName)) batch.failed = true;
+    } else if (result.ok) this.#failed = 0;
+    if (result.pause === true) batch.paused = true;
+    if (result.final) batch.final = result.ok && call.toolName === "done" ? "done" : "stopped";
+    batch.done.push({ call, result });
+    this.#o.onEvent?.({
+      type: "tool_execution_end",
+      callId: info.callId,
+      name: info.name,
+      ok: result.ok,
+    });
+
+    return result;
+  }
+
+  #completeBatch(batch: ToolBatch): void {
+    const { done } = batch;
+    const { binding } = batch.step;
     const newest = done.findLastIndex(({ result }) => fullFrames(result) > 0);
     const parts: ReturnType<typeof resultParts>["part"][] = [];
     const images: ReturnType<typeof resultParts>["images"] = [];
@@ -760,7 +822,6 @@ export class Agent {
           ...images,
         ] as never,
       });
-    return final;
   }
 
   async #execute(

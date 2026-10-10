@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,6 +56,39 @@ describe("bundle notice accounting", () => {
     expect(records.map((r) => r.version)).toEqual(["1.0.0", "2.0.0"]);
     expect(records[1]?.files.map((f) => f.text)).toEqual(["license two", "notice two"]);
     expect(records.every((r) => r.files.every((f) => /^[a-f0-9]{64}$/.test(f.sha256)))).toBe(true);
+  });
+  it("builds an executable bundle when a dependency imports createRequire", async () => {
+    const f = fixture();
+    mkdirSync(join(f.root, "src"), { recursive: true });
+    writeFileSync(
+      join(f.root, "src/main.ts"),
+      "import { createRequire } from 'node:module'; console.log(typeof createRequire(import.meta.url));\n",
+    );
+    await buildBrain(f.root);
+    expect(
+      execFileSync(process.execPath, [join(f.root, "dist/brain.mjs")], { encoding: "utf8" }).trim(),
+    ).toBe("function");
+  });
+  it("embeds DSH's own package version so the bundle runs away from node_modules", async () => {
+    const f = fixture();
+    const dsh = f.input("@deepseek-ai/dsh-llm", "0.1.7-rc.2", "fixture MIT license");
+    const entry = join(dsh.dir, "lib/index.js");
+    mkdirSync(join(dsh.dir, "lib"), { recursive: true });
+    writeFileSync(
+      entry,
+      'import { createRequire } from "node:module"; export const { version } = createRequire(import.meta.url)("../package.json");',
+    );
+    mkdirSync(join(f.root, "src"), { recursive: true });
+    writeFileSync(
+      join(f.root, "src/main.ts"),
+      `import { version } from ${JSON.stringify(entry)}; console.log(version);`,
+    );
+    await buildBrain(f.root);
+    // The original module and metadata are unavailable at execution time.
+    rmSync(join(f.root, "node_modules"), { recursive: true });
+    expect(
+      execFileSync(process.execPath, [join(f.root, "dist/brain.mjs")], { encoding: "utf8" }).trim(),
+    ).toBe("0.1.7-rc.2");
   });
   it("refuses missing or empty licenses instead of silently omitting bundled code", () => {
     const f = fixture();

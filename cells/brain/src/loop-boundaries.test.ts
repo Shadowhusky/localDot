@@ -500,7 +500,7 @@ describe("tool lifetime cancellation", () => {
     expect(t.main.prompts).toHaveLength(0);
     expect(append).not.toHaveBeenCalled();
   });
-  it("passes the same active signal to tools and rejects late results before later calls or persistence", async () => {
+  it("propagates cancellation through the harness and rejects late results before later calls or persistence", async () => {
     const f = fakeApi();
     const tool = f.api.tool;
     const gate = defer<ToolResult>();
@@ -519,9 +519,9 @@ describe("tool lifetime cancellation", () => {
     );
     const run = t.run();
     await vi.waitUntil(() => active !== undefined);
-    expect(active).toBe(t.abort.signal);
     expect(active?.aborted).toBe(false);
     t.abort.abort();
+    expect(active?.aborted).toBe(true);
     const count = f.transcript.length;
     gate.resolve({ ok: true, content: [{ type: "text", text: "late secret data" }] });
     expect(await run).toBe("stopped");

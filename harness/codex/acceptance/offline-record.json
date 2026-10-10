@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "0432aee51b397a7920f41652c0fcaa951fbb9a65777b4618f337e47e8389f2d7",
+  "inputSha256": "e8e3a65307b891522b850b97571cd9d237afd13a999799f55cdf0917ea20428b",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/autonomy-replay.test.ts": "e9c7540227ee016f4fc15e3b7a492a83e0ddb4bcca9419d55701e2ba85596c31",
@@ -934,7 +934,7 @@
     "packages/protocol/src/tools/web.ts": "92c0fda67a537c0bfcb54a99696eb858b7c92d90b5bd3b56d681e37fb6b522ba",
     "packages/protocol/src/upload-metadata.ts": "0f2f6891b20252f3609730718d2f3485baea7f94dd539fc02d60c21c7b12a575",
     "packages/protocol/src/work-window.ts": "b8cd5ce59fbd018fd5d26c43aa0ccaa06775ecd2bd4a97431d204547b2bd6e3e",
-    "pnpm-lock.yaml": "abe7129602dbb30b149a8248842355b65e9ac434b253646bc89b7493f6bce25d",
+    "pnpm-lock.yaml": "9d354603b4659d8474d6fdc65804a049de70eb435aa14e0e8510b554726f542b",
     "pnpm-workspace.yaml": "531701e99d6d4dd8ed5173950f62ef30193d7676daec60978c857d6670a77cb5",
     "scripts/check-codex-release.mjs": "ef1341641a5001bfe53e19a9c520d6c9facb93816b19d00b5660873dfbce35a9",
     "scripts/check-codex-release.test.mjs": "5059f6f5cfec1e1a7c05c9990399059ad87db1a8ae8c21dc98d93869a5cef5ac",
@@ -994,7 +994,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "e626a98c29c684187c18d9d70e7928d45d345bca10c0d57b153b9bd77693a218",
+  "reportSha256": "950d17debf5175af223dd1987321d20da5aa9e3b55f0e8fb4e6ee108f3fd7ca9",
   "exit": {
     "code": 0,
     "signal": null

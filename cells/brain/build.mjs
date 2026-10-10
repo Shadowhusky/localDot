@@ -80,9 +80,39 @@ export async function buildBrain(root = here) {
     format: "esm",
     metafile: true,
     write: false,
+    plugins: [
+      {
+        name: "deepseek-bundled-package-metadata",
+        setup(builder) {
+          builder.onLoad(
+            { filter: /[/\\]@deepseek-ai[/\\]dsh-llm[/\\]lib[/\\]index\.js$/ },
+            ({ path }) => {
+              // DSH reads its own version using createRequire(import.meta.url). That
+              // relative path no longer exists in our single-file, read-only image.
+              // Embed only this audited package's metadata, never redirect require.
+              const pkg = JSON.parse(readFileSync(join(dirname(path), "../package.json"), "utf8"));
+              const source = readFileSync(path, "utf8");
+              const lookup = 'createRequire(import.meta.url)("../package.json")';
+              if (
+                pkg.name !== "@deepseek-ai/dsh-llm" ||
+                pkg.version !== "0.1.7-rc.2" ||
+                source.split(lookup).length !== 2
+              )
+                throw new Error(
+                  "brain: review DeepSeek package metadata bundling for this version",
+                );
+              return {
+                contents: source.replace(lookup, JSON.stringify({ version: pkg.version })),
+                loader: "js",
+              };
+            },
+          );
+        },
+      },
+    ],
     logLevel: "silent",
     banner: {
-      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+      js: "import { createRequire as __localdotCreateRequire } from 'node:module'; const require = __localdotCreateRequire(import.meta.url);",
     },
   });
   const notices = collectNotices(Object.keys(result.metafile.inputs), root);

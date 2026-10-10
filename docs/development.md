@@ -171,13 +171,26 @@ locally; CI runs the host tests, Go checks and real-keyd integration suites.
 ## The agent
 
 Build `localdot/brain:dev` with `cells/brain/build.sh`, alongside the gate and desktop images.
-The agent runs in a separate brain cell. Model traffic passes through keyd; tools pass through
-the daemon's authenticated tool API at `127.0.0.1:4751`. Computer actions use the same action
-gateway and event log as the live desktop. **Stop** revokes access and freezes the computer.
-During a requested login takeover, the agent cannot observe or act until explicit hand-back;
-a follow-up message does not hand control back.
+The API-model agent runs in a separate brain cell. DeepSeek Harness **0.1.7-rc.2**
+with Cordis **4.0.4** drives its step scheduling, serial tool dispatch, turn completion and
+cancellation (`cells/brain/src/harness.ts`). These exact pins satisfy the repository's
+14-day dependency-age policy. Claude Code and ChatGPT plan integrations retain their
+respective vendor runtimes.
 
-The chat and model picker are Part 5b work. The core API uses the existing install-token
+The localDot adapter retains the durable multimodal transcript, provider-native replay,
+compaction, queue acknowledgements, retry/budget handling and screenshot coordinates.
+DSH's session is currently a process-local orchestration log; it is **not** a second durable
+conversation store. Restart restores localDot's saved transcript and inbox cursor. Model
+requests continue through the AI SDK and keyd; tools continue through the authenticated
+daemon API at `127.0.0.1:4751`, including JEV approvals and computer ownership checks.
+No default DSH shell, credential store, session uploader or telemetry plugin is mounted.
+
+**Stop** ends the agent run and revokes its access. It does not shut down the computer;
+new conversations use the existing desktop. Computer recovery remains a daemon concern,
+independent of the harness. Switching frameworks does not by itself improve a model's
+screen recognition or eliminate browser failures.
+
+The chat and model picker use the core API with the existing install-token
 Authorization header and JSON request bodies:
 
 - `GET /api/agent/providers` lists providers, catalog models, capabilities and available key IDs.

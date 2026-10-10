@@ -329,7 +329,7 @@ it steps out for a few seconds and comes back, and the rest of the app carries o
 | **Daemon** | The app itself, on your machine (TypeScript on Node). Serves the web UI, runs tasks, streams the picture, records everything, and decides what needs your OK. |
 | **Desktop** | The screen you watch: a Linux desktop streamed as H.264. dot clicks, types and drags here. |
 | **Web browser** | A separate browser that keeps your sign-ins. The desktop can't read its cookies. |
-| **Brain** | The agent loop that talks to the model. It holds stand-in keys only. |
+| **Brain** | DeepSeek Harness drives the API-model agent loop through localDot’s tool and permission gateways. It holds stand-in keys only. |
 | **Gate** | The computer's only way out to the network. No LAN, no router, no cloud metadata. Apps that ignore the proxy are caught here and checked like everything else. |
 | **Web tools** | Web search and page reading, done by the daemon itself through a keyd listener of their own. It reaches public websites only and carries no sign-ins and no keys. |
 | **App cells** | One sealed container for each of your apps that runs as a program: read-only, none of your files, and a gate that only reaches keyd. Apps on the internet are reached through keyd directly. |
