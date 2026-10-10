@@ -869,3 +869,172 @@
   caret-color: transparent;
   background: transparent;
 }
+
+/* App chrome only: neither the computer framebuffer nor the replay/export canvas. */
+.work-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+}
+.work-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+  width: min(420px, calc(100% - 16px));
+  max-height: min(280px, calc(75% - 8px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-xl);
+  color: var(--color-fg-1);
+  background: var(--color-overlay);
+  box-shadow: var(--shadow-overlay);
+  font-size: var(--text-callout);
+}
+.work-overlay[data-compact] {
+  width: min(168px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  border-radius: var(--radius-full);
+}
+.work-overlay-header {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 36px;
+  min-width: 0;
+}
+.work-overlay .work-overlay-handle,
+.work-overlay .work-overlay-toggle {
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.work-overlay .work-overlay-handle {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 0 0 calc(var(--spacing) * 2.5);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.work-overlay-handle:active {
+  cursor: grabbing;
+}
+.work-overlay-handle .ui-button-content {
+  width: 100%;
+  min-width: 0;
+  gap: calc(var(--spacing) * 1.5);
+}
+.work-overlay .work-overlay-handle svg {
+  flex: none;
+}
+.work-overlay-heading {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.work-overlay-state {
+  margin-left: auto;
+  padding-left: calc(var(--spacing) * 1);
+  color: var(--color-fg-2);
+  font-size: var(--text-footnote);
+}
+.work-overlay .work-overlay-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  height: 36px;
+  cursor: pointer;
+}
+.work-overlay-toggle:active {
+  background: var(--color-raised-2);
+}
+.work-overlay :is(.ui-button, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-xenon);
+  outline-offset: -3px;
+  border-radius: var(--radius-group);
+}
+.work-overlay-output {
+  min-height: 0;
+  height: 224px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5) calc(var(--spacing) * 4);
+  border-top: 1px solid var(--color-separator);
+  background: var(--color-console);
+  scrollbar-width: thin;
+}
+.work-overlay-entry + .work-overlay-entry {
+  margin-top: calc(var(--spacing) * 4);
+  padding-top: calc(var(--spacing) * 3.5);
+  border-top: 1px solid var(--color-separator);
+}
+.work-overlay-entry-heading {
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  padding-block: calc(var(--spacing) * 2);
+  background: var(--color-console);
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--spacing) * 3);
+  margin-bottom: calc(var(--spacing) * 2);
+}
+.work-overlay-command {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  color: var(--color-fg-2);
+}
+.work-overlay pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--text-body) / var(--text-reading--line-height) var(--font-mono);
+  tab-size: 2;
+  color: var(--color-fg-1);
+}
+.work-overlay-empty,
+.work-overlay-result {
+  margin: calc(var(--spacing) * 1.5) 0 0;
+  color: var(--color-fg-2);
+  font-size: var(--text-footnote);
+}
+
+/* Keep touch controls generous without making the collapsed pill wide. */
+@media (pointer: coarse) {
+  .work-overlay-header,
+  .work-overlay .work-overlay-handle,
+  .work-overlay .work-overlay-toggle {
+    height: 44px;
+  }
+  .work-overlay .work-overlay-toggle {
+    flex-basis: 44px;
+  }
+}
+.work-overlay-result {
+  flex: none;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.work-overlay[data-compact] .work-overlay-state {
+  display: none;
+}

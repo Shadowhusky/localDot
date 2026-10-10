@@ -1,7 +1,7 @@
 import { type PointerEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { AgentModel } from "../agent/model.ts";
 import { Glyph } from "../dot/Glyph.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import {
   readWorkLayout,
@@ -9,7 +9,6 @@ import {
   type WorkLayout,
   workTranscript,
 } from "./work-overlay.ts";
-import "./work-overlay.css";
 
 export function WorkOverlay({ model, working }: { model: AgentModel; working: boolean }) {
   const { steps, changes } = model;
@@ -60,7 +59,7 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
     save(latest.current);
   };
   if (!transcript.entries.length) return null;
-  return createPortal(
+  return (
     <div className="work-overlay-layer" ref={layer}>
       <section
         className="work-overlay"
@@ -74,8 +73,9 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
         }}
       >
         <div className="work-overlay-header">
-          <button
-            type="button"
+          <Button
+            variant="quiet"
+            size="sm"
             className="work-overlay-handle"
             aria-label="Move command window"
             title="Drag to move. Use arrow keys when focused."
@@ -137,14 +137,18 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
               });
             }}
           >
-            <Glyph size={24} />
+            <Glyph size={18} />
             <span className="work-overlay-heading">{compact ? "Commands" : "Background work"}</span>
-            <span className="work-overlay-state">
+            <span
+              className="work-overlay-state"
+              data-live={(working && transcript.background) || undefined}
+            >
               {working && transcript.background ? "Live" : "Recent"}
             </span>
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="quiet"
+            size="sm"
             className="work-overlay-toggle"
             aria-label={compact ? "Expand command window" : "Minimize command window"}
             aria-expanded={!compact}
@@ -154,7 +158,7 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
             }}
           >
             <Icon name={compact ? "chevron-up" : "minus"} size={18} />
-          </button>
+          </Button>
         </div>
         {!compact && (
           <section
@@ -170,7 +174,12 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
           >
             {transcript.entries.map((entry) => (
               <div className="work-overlay-entry" key={entry.id}>
-                <p className="work-overlay-command">{entry.title}</p>
+                <div className="work-overlay-entry-heading">
+                  <p className="work-overlay-command">{entry.title}</p>
+                  <span className="work-overlay-result" data-status={entry.status}>
+                    {entry.status === "ok" ? "Finished" : entry.status || "Running"}
+                  </span>
+                </div>
                 {entry.text ? (
                   <pre>{entry.text}</pre>
                 ) : (
@@ -181,17 +190,11 @@ export function WorkOverlay({ model, working }: { model: AgentModel; working: bo
                 {entry.shortened && (
                   <p className="work-overlay-empty">Recent output shown. More in Activity.</p>
                 )}
-                {entry.status && (
-                  <span className="work-overlay-result">
-                    {entry.status === "ok" ? "Finished" : entry.status}
-                  </span>
-                )}
               </div>
             ))}
           </section>
         )}
       </section>
-    </div>,
-    document.body,
+    </div>
   );
 }

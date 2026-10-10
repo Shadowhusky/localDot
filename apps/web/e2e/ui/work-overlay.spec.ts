@@ -17,7 +17,7 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
   expect(await page.locator(".stage .work-overlay").count()).toBe(0);
   const assertFits = async () => {
     const panel = await overlay.boundingBox();
-    const stage = await page.locator(".work-overlay-layer").boundingBox();
+    const stage = await page.locator(".watch .stage-box").boundingBox();
     expect(panel).not.toBeNull();
     expect(stage).not.toBeNull();
     if (!panel || !stage) throw new Error("missing geometry");
@@ -29,7 +29,10 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
       await page
         .locator(".work-overlay-header")
         .evaluate((node) => node.getBoundingClientRect().height),
-    ).toBeCloseTo(44, 2);
+    ).toBeCloseTo(
+      (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) ? 44 : 36,
+      2,
+    );
   };
   await assertFits();
   const handle = page.getByRole("button", { name: "Move command window" });
@@ -45,6 +48,27 @@ test("command overlay moves, minimizes, survives reload and never joins the stre
   await page.mouse.move(box.x + 85, box.y - 80, { steps: 8 });
   await page.mouse.up();
   await assertFits();
+  expect((await overlay.boundingBox())?.width).toBeLessThanOrEqual(168);
+  // Both sizes must stay inside the actual computer, even when dragged beyond every corner.
+  for (const expanded of [false, true]) {
+    if (expanded) await expand.click();
+    for (const point of [
+      { x: 0, y: 0 },
+      { x: 1400, y: 0 },
+      { x: 1400, y: 890 },
+      { x: 0, y: 890 },
+    ]) {
+      const box = await handle.boundingBox();
+      if (!box) throw new Error("missing handle");
+      await page.mouse.move(box.x + 15, box.y + 15);
+      await page.mouse.down();
+      await page.mouse.move(point.x, point.y, { steps: 4 });
+      await page.mouse.up();
+      await assertFits();
+    }
+  }
+  await page.getByRole("button", { name: "Minimize command window" }).click();
+  await page.screenshot({ path: `e2e/out/work-overlay-compact-${test.info().project.name}.png` });
   const saved = await page.evaluate(() => localStorage.getItem("localdot.work-overlay.v1"));
   await page.reload();
   await ui.picture();
