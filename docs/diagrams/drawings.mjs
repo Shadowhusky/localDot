@@ -69,7 +69,7 @@ export function system() {
 
   s.rect(370, 230, 260, 470, { strokeWidth: 2.6 });
   s.text("localDot", 500, 286, { size: 38, bold: true, anchor: "middle" });
-  s.text("the daemon,\non your Mac", 500, 326, { size: 23, anchor: "middle", color: SOFT });
+  s.text("the daemon,\non your machine", 500, 326, { size: 23, anchor: "middle", color: SOFT });
   s.text(
     "chat & tasks\nlive picture\nrecordings\napprovals\nroutines\nweb search\nyour apps",
     400,
@@ -102,7 +102,7 @@ export function system() {
 
   s.rect(700, 190, 450, 600, { strokeWidth: 1.8, strokeLineDash: [14, 10], roughness: 1.2 });
   s.text("your isolated computer", 925, 236, { size: 30, bold: true, anchor: "middle" });
-  s.text("containers. nothing of your Mac inside.", 925, 268, {
+  s.text("containers, isolated from your files.", 925, 268, {
     size: 21,
     anchor: "middle",
     color: SOFT,
@@ -159,7 +159,7 @@ export function system() {
 
   s.rect(1220, 546, 230, 210, { strokeWidth: 2.6, ...xenonFill });
   s.text("keyd", 1335, 604, { size: 40, bold: true, anchor: "middle" });
-  s.text("holds your real\nkeys, on your Mac", 1335, 644, { size: 23, anchor: "middle" });
+  s.text("holds your real\nkeys locally", 1335, 644, { size: 23, anchor: "middle" });
   s.arrow(
     [
       [1126, 660],
@@ -523,8 +523,8 @@ export function capabilities() {
     ["voice", "talk instead of typing.\nit can read replies aloud", microphone],
     ["your apps", "connectors (MCP)\nas tools", plug],
     ["routines", "the same task,\non a schedule", clock],
-    ["memory", "two Markdown files\nyou can edit", notebook],
-    ["asks you", "before it acts as you.\ntake over any time", asks],
+    ["memory", "editable notes and\nsetup experience", notebook],
+    ["asks you", "your permission mode.\ntake over any time", asks],
   ];
   const w = 330;
   const h = 268;
@@ -553,7 +553,7 @@ export function capabilities() {
 export function safety() {
   const s = new Sheet(1760, 960);
   s.text("What stands between dot and the world", 60, 82, { size: 50, bold: true });
-  s.text("(most things sail through. a few really shouldn't.)", 64, 124, {
+  s.text("Custom permissions, Balanced preset. Other modes change what asks.", 64, 124, {
     size: 24,
     color: SOFT,
   });
@@ -620,4 +620,146 @@ export function safety() {
     else s.text(lane.note, right - 32, lane.y - 18, { size: 22, anchor: "end", color: SOFT });
   }
   return { sheet: s, title: "What stands between dot and the world" };
+}
+
+// Narrow versions use the same paper, pencil, lettering and doodles as the originals.
+// At a 288 px README width, 26 px lettering on this 520 px sheet is still about 14 px.
+export function capabilitiesMobile() {
+  const rows = [
+    ["the screen", "clicks, types, drags\nand looks again", screen],
+    ["web browser", "keeps your sign-ins\nacross tasks", globe],
+    ["terminal", "runs code and\ncommands", terminal],
+    ["files", "makes them, changes\nthem, hands them over", files],
+    ["web search", "web, images, news;\nreads public pages", magnifier],
+    ["deep research", "numbered sources,\na cited report", sources],
+    ["voice", "talk instead of typing;\nhear replies aloud", microphone],
+    ["your apps", "connectors (MCP)\nas tools", plug],
+    ["routines", "the same task,\non a schedule", clock],
+    ["memory", "editable notes and\nsetup experience", notebook],
+    ["asks you", "your permission mode;\ntake over any time", asks],
+  ];
+  const s = new Sheet(520, 1690);
+  s.text("What dot can do", 28, 60, { size: 38, bold: true });
+  rows.forEach(([name, note, doodle], i) => {
+    const y = 90 + i * 140;
+    s.rect(22, y, 476, 126, { strokeWidth: 2, roughness: 1.2 });
+    doodle(s, name === "asks you" ? 88 : 102, y + 62);
+    s.text(name, 194, y + 36, { size: 30, bold: true });
+    s.text(note, 194, y + 73, { size: 26, color: SOFT, leading: 1.25 });
+  });
+  s.text("dot does the work. you keep the say.", 260, 1660, {
+    size: 26,
+    anchor: "middle",
+    color: SOFT,
+  });
+  return { sheet: s, title: "What dot can do — phone layout" };
+}
+
+export function systemMobile() {
+  const s = new Sheet(520, 1260);
+  s.text("How localDot fits together", 260, 62, { size: 34, bold: true, anchor: "middle" });
+  const card = (y, height, title, note) => {
+    s.rect(30, y, 460, height, { strokeWidth: 2.4 });
+    s.text(title, 260, y + 40, { size: 32, bold: true, anchor: "middle" });
+    s.text(note, 260, y + 80, { size: 26, color: SOFT, anchor: "middle", leading: 1.3 });
+  };
+  const down = (y) =>
+    s.arrow(
+      [
+        [260, y],
+        [257, y + 18],
+        [260, y + 36],
+      ],
+      { stroke: XENON, strokeWidth: 3 },
+    );
+  card(94, 126, "your browser or phone", "watch, chat and take over");
+  down(230);
+  card(
+    280,
+    156,
+    "localDot, on your machine",
+    "chat, tasks, live picture,\nrecordings and routines",
+  );
+  down(446);
+  s.rect(30, 496, 460, 278, { strokeWidth: 2, strokeLineDash: [12, 9] });
+  s.text("your isolated computer", 260, 536, { size: 32, bold: true, anchor: "middle" });
+  s.text(
+    "desktop: the screen you watch\nbrowser: keeps your sign-ins\nbrain: the agent loop\ngate: the computer's way out",
+    64,
+    586,
+    { size: 26, leading: 1.65 },
+  );
+  down(784);
+  s.rect(30, 834, 460, 166, { strokeWidth: 2.4, ...xenonFill });
+  s.text("keyd · the local key service", 260, 876, { size: 30, bold: true, anchor: "middle" });
+  s.text("holds the real keys; adds them\nonly for their allowed hosts", 260, 922, {
+    size: 26,
+    anchor: "middle",
+    leading: 1.3,
+  });
+  down(1010);
+  cloud(s, 66, 1060, 388, 124);
+  s.text("providers, the web & your apps", 260, 1144, { size: 26, bold: true, anchor: "middle" });
+  s.text("Search and app tools also use keyd.", 260, 1226, {
+    size: 25,
+    color: SOFT,
+    anchor: "middle",
+  });
+  return { sheet: s, title: "How localDot fits together — phone layout" };
+}
+
+export function taskLoopMobile() {
+  const s = new Sheet(520, 1130);
+  s.text("One task, start to finish", 260, 60, { size: 36, bold: true, anchor: "middle" });
+  const rows = [
+    ["ask", "you type what you want", bubble],
+    ["plan", "dot makes a short plan", checklist],
+    ["act", "click, type, run code", cursor],
+    ["look", "check the result", eye],
+    ["narrate", "say what happened", (sh, x, y) => dotFace(sh, x, y, 70)],
+    ["replay", "revisit or export the task", film],
+  ];
+  rows.forEach(([name, note, doodle], i) => {
+    const y = 152 + i * 146;
+    s.circle(102, y, 110, { strokeWidth: 2.4, ...(i >= 2 && i <= 4 ? xenonFill : {}) });
+    doodle(s, 102, y);
+    s.text(name, 182, y - 6, { size: 34, bold: true });
+    s.text(note, 182, y + 32, { size: 25, color: SOFT });
+    if (i < rows.length - 1)
+      s.arrow(
+        [
+          [102, y + 62],
+          [98, y + 80],
+          [102, y + 90],
+        ],
+        { stroke: XENON, strokeWidth: 2.6 },
+      );
+  });
+  s.rect(28, 980, 464, 116, { strokeWidth: 2, ...xenonFill });
+  s.text("Act → look → narrate repeats.", 260, 1023, { size: 28, bold: true, anchor: "middle" });
+  s.text("Needs you? dot asks in the chat.", 260, 1066, { size: 26, anchor: "middle" });
+  return { sheet: s, title: "One task, start to finish — phone layout" };
+}
+
+export function safetyMobile() {
+  const s = new Sheet(520, 1230);
+  s.text("Between dot and the world", 260, 58, { size: 34, bold: true, anchor: "middle" });
+  s.text("Custom mode · Balanced preset", 260, 98, { size: 25, color: SOFT, anchor: "middle" });
+  const rows = [
+    ["hard checks", "sending as you, payments\nand uploads ask first"],
+    ["purpose check", "optional: flags private data\nheaded somewhere unrelated"],
+    ["approvals", "a yes can cover one action,\na task, a site or always"],
+    ["isolated computer", "dot works inside its\nown computer"],
+    ["network gate", "no LAN, router or\ncloud metadata access"],
+    ["stand-in keys", "the real API key is added\nonly at the local edge"],
+  ];
+  rows.forEach(([name, note], i) => {
+    const y = 136 + i * 170;
+    s.rect(28, y, 464, 146, { strokeWidth: 2 });
+    s.rect(46, y + 22, 20, 100, { strokeWidth: 2, fill: GRAPHITE, fillWeight: 1, hachureGap: 7 });
+    s.text(name, 94, y + 40, { size: 32, bold: true });
+    s.text(note, 94, y + 82, { size: 26, color: SOFT, leading: 1.3 });
+  });
+  s.text("Your mode controls confirmations.", 260, 1186, { size: 26, anchor: "middle" });
+  return { sheet: s, title: "Safety layers — phone layout" };
 }

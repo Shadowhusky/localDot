@@ -1,8 +1,11 @@
-# The README's numbers — October 9, 2026
+# Internal development measurements — October 9, 2026
 
-Every number in the README's charts and tables, with how it was measured. All runs were on a
-Mac Studio (Apple M3 Ultra) with sample data. Treat them as the direction of a change on one
-machine, not as a promise for yours.
+These measurements compare experimental implementations during development of the first version.
+They do **not** compare released versions of localDot or competing products. They were removed
+from the README because an unqualified “before / after” suggests a release comparison.
+
+All runs were on a Mac Studio (Apple M3 Ultra) with sample data. These are engineering observations
+on one machine, not performance promises. Each section describes its specific baseline.
 
 ## Fewer screenshots (oracle eval)
 
