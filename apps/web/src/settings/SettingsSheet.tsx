@@ -7,6 +7,7 @@ import { spendText } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
+import type { ApiClient } from "../lib/api.ts";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { FreshStartButton } from "../shell/FreshStartButton.tsx";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
@@ -42,6 +43,7 @@ import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
 import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
 import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
+import { RemoteAccessSettings } from "./RemoteAccessSettings.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import {
   autonomyValue,
@@ -73,6 +75,7 @@ export const AUTOSAVE_MS = 500;
 export type CatalogState = "loading" | "ready" | "empty" | "stale" | "refreshing" | "offline";
 
 export interface SettingsSheetProps {
+  remoteApi?: ApiClient;
   open: boolean;
   // Where to go, and a count that changes with each request, so asking again still goes there.
   // With no section, a phone shows the list of sections and a wide screen starts at the top.
@@ -743,6 +746,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
   return (
     <>
       {props.appUpdate && <AppUpdateSettings update={props.appUpdate} />}
+      {props.remoteApi && <RemoteAccessSettings api={props.remoteApi} />}
       {(update || login || stream) && (
         <div>
           <Group>

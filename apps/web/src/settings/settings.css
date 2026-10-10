@@ -1033,3 +1033,39 @@
     animation: none;
   }
 }
+
+.settings-remote-pairing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+.settings-remote-pairing > .ui-group-note {
+  margin-block: 0;
+}
+
+.settings-remote-action {
+  display: grid;
+  justify-items: start;
+  gap: var(--spacing);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  min-width: 0;
+}
+.settings-remote-action > .ui-button {
+  margin-left: calc(var(--spacing) * -2);
+}
+.settings-remote-hint {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+.settings-remote-privacy {
+  margin: calc(var(--spacing) * 2) calc(var(--spacing) * 3.5) 0;
+}
+.settings-remote-privacy p {
+  margin: var(--spacing) 0;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+.settings-remote-pairing {
+  margin-top: calc(var(--spacing) * 3);
+}

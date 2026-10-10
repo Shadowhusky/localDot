@@ -428,8 +428,10 @@ manual `localdot update` to enable automatic checks. [Update details](docs/insta
 - **Diagnose a problem:** `localdot doctor`
 - **Uninstall:** `localdot uninstall` — keeps your data in `~/.localdot`.
 
-For remote access, use a private Tailscale connection or SSH tunnel. Keep the service off the
-public internet. [Phone and server setup](docs/install.md#servers-without-a-screen).
+For remote access today, use a private Tailscale connection or SSH tunnel.
+[Phone and server setup](docs/install.md#servers-without-a-screen). An optional domain relay is
+implemented but not publicly deployed yet. It stays off until you enable it, and Settings explains
+its privacy tradeoff. [Remote access and deployment](docs/remote-access.md).
 
 ## FAQ
 

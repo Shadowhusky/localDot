@@ -15,3 +15,8 @@ apps/daemon/src/cells/testing/out/
 keyd/bin/
 apps/web/dist-gallery/
 __pycache__/
+
+# Cloudflare development state and local secrets
+.wrangler/
+.dev.vars*
+apps/remote/worker-configuration.d.ts

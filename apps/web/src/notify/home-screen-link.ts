@@ -30,9 +30,23 @@ export async function copyHomeScreenLink(
       throw new Error("The sign-in link could not be made.");
     return { link: `${origin}/#code=${code}`, expiresAt: Number(expiresAt) };
   });
-  const copyText = async () => clipboard.writeText((await issued).link);
+  return copyIssuedLink(issued, clipboard, Item);
+}
+
+// Shared by local Home Screen pairing and the optional relay. Start the clipboard operation
+// during the tap, before awaiting the server, to preserve Safari's user activation.
+export async function copyIssuedLink(
+  issued: Promise<{ link: string; expiresAt: number }>,
+  clipboard: LinkClipboard | undefined,
+  Item: typeof ClipboardItem | undefined = globalThis.ClipboardItem,
+): Promise<{ expiresAt: number }> {
+  const copyText = async () => {
+    const value = await issued;
+    if (!clipboard) throw new LinkNotCopied(value.link, value.expiresAt);
+    return clipboard.writeText(value.link);
+  };
   try {
-    if (Item && clipboard.write) {
+    if (Item && clipboard?.write) {
       const text = issued.then(({ link }) => new Blob([link], { type: "text/plain" }));
       await clipboard.write([new Item({ "text/plain": text })]).catch(copyText);
     } else await copyText();

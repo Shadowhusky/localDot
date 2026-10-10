@@ -2273,6 +2273,7 @@ function Theatre({ api }: { api: ApiClient }) {
           stopAll={settingsStopAll}
           startAtLogin={settingsLogin}
           appUpdate={appUpdate}
+          remoteApi={api}
           update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
           freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
           open={settings.open}

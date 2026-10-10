@@ -66,6 +66,7 @@ import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
+import { configuredRemoteDomain, RemoteAccess } from "./remote/manager.ts";
 import { AbsenceGuard } from "./routines/absence.ts";
 import { RoutineLauncher } from "./routines/launch.ts";
 import { ExpiredRuns, routinePolicy } from "./routines/policy.ts";
@@ -518,6 +519,7 @@ const exportJobs = new ExportJobs({
 });
 shutdown.push(() => exportJobs.close());
 const installCodes = new InstallCodes(token, port);
+const remoteAccess = new RemoteAccess(home, port, configuredRemoteDomain(home), installCodes);
 const installWait = () => {
   if (
     orchestrator
@@ -537,6 +539,7 @@ const appUpdater = serviceIdentity
 appUpdater.start();
 shutdown.unshift(() => appUpdater.close());
 const app = createApp({
+  remoteAccess,
   appUpdater,
   appInstalling: () => appInstalling,
   token,
@@ -632,6 +635,7 @@ const app = createApp({
 });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
+  remoteAccess.start();
   console.log(`localdot daemon on http://127.0.0.1:${port} (token in ${tokenFile})`);
   if (!serviceIdentity) {
     console.log(
@@ -659,6 +663,7 @@ attachUpgradeRouter(server as Server, { port, token }, [
   appEventsRoute(appEvents, notify.presence),
 ]);
 shutdown.unshift(() => {
+  remoteAccess.close();
   server.close();
   tuning.close();
 });

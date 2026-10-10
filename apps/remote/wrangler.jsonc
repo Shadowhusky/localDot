@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "localdot-remote",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-10",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": { "REMOTE_DOMAIN": "example.com" },
+  "durable_objects": { "bindings": [{ "name": "DEVICES", "class_name": "DeviceRelay" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceRelay"] }],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 0.01 },
+    // Automatic HTTP traces contain URL paths; the desktop uses bearer tickets in paths.
+    // Keep them off until the platform supports redacting those paths before export.
+    "traces": { "enabled": false }
+  },
+  "limits": { "cpu_ms": 20 }
+}

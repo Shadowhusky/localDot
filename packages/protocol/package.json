@@ -9,7 +9,8 @@
     "./guidance": "./src/guidance.ts",
     "./keys": "./src/keys.ts",
     "./motion": "./src/motion.ts",
-    "./qr": "./src/qr.ts"
+    "./qr": "./src/qr.ts",
+    "./remote": "./src/remote-wire.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",

@@ -26,6 +26,7 @@ import type { InstallCodes } from "./install-codes.ts";
 import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
 import { type NotifyRoutesDeps, notifyRoutes } from "./notify/routes.ts";
 import type { Recorder } from "./recorder/recorder.ts";
+import { type RemoteAccess, remoteRoutes } from "./remote/manager.ts";
 import { type RoutineRoutesDeps, routineRoutes } from "./routines/routes.ts";
 import { type SearchRoutesDeps, searchRoutes } from "./search/routes.ts";
 import type { ManagedServiceReadiness } from "./service-readiness.ts";
@@ -62,6 +63,7 @@ export interface AppOptions {
   connectors?: Omit<ConnectorRoutesDeps, "port">;
   voice?: VoiceRoutesDeps;
   appUpdater?: AppUpdater;
+  remoteAccess?: RemoteAccess;
   appInstalling?(): boolean;
 }
 
@@ -89,6 +91,7 @@ export function createApp({
   connectors,
   voice,
   appUpdater,
+  remoteAccess,
   appInstalling,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
@@ -146,6 +149,7 @@ export function createApp({
   });
 
   if (appUpdater) appUpdateRoutes(app, appUpdater);
+  if (remoteAccess) remoteRoutes(app, remoteAccess);
   app.get("/api/whoami", (c) => c.json({ ok: true }));
   if (doctorSelfTests) doctorSelfTestRoutes(app, doctorSelfTests);
   if (serviceReadiness)
