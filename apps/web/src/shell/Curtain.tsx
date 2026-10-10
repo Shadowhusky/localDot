@@ -69,7 +69,7 @@ const STEP_WORDS: Partial<Record<ComputerOperationStep, string>> = {
 };
 
 // The stage while there is no picture (design-v2 §11 A, B): dot asleep in a pool of light over one
-// porcelain action. The column keeps its height whatever it says, so dot never moves on it.
+// porcelain action. Content fits the available space, keeping recovery actions within reach.
 export function Curtain({
   phase,
   first,

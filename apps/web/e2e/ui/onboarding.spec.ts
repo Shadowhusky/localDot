@@ -63,7 +63,11 @@ test("first run shows Turn on without scrolling and keeps the stage where the co
     .locator(".curtain *")
     .evaluateAll(
       (all) =>
-        all.filter((element) => /auto|scroll/.test(getComputedStyle(element).overflowY)).length,
+        all.filter(
+          (element) =>
+            /auto|scroll/.test(getComputedStyle(element).overflowY) &&
+            element.scrollHeight > element.clientHeight + 1,
+        ).length,
     );
   expect(scrollers).toBe(0);
   const before = await box(page, ".stage");

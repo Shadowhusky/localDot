@@ -1790,6 +1790,13 @@
   min-width: 0;
 }
 
+/* A long placeholder must not grow an empty, narrow composer into a column.
+   Actual messages retain their normal multiline wrapping. */
+.composer-field:placeholder-shown {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .composer-card[data-layout="pill"] > .composer-bar {
   display: contents;
 }

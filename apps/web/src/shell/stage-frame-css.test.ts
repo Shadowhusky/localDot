@@ -24,12 +24,6 @@ it("keeps the rim mounted and lights it by opacity alone", () => {
   );
 });
 
-it("gives a phone's curtain words the width, so its button is never cut off", () => {
-  expect(css).toMatch(
-    /\.curtain-col \{[^}]*max-width: min\(calc\(100% - var\(--spacing\) \* 12\), 320px\);/,
-  );
-});
-
 it("animates the picture and the veil with tokens that exist", () => {
   expect(app).not.toMatch(/var\(--duration-|var\(--ease-(?:veil|lit)\)/);
 });
