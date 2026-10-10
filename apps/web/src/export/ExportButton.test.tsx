@@ -80,3 +80,19 @@ it("holds a check once the video is ready, and opens even while the page would r
   fireEvent.click(trigger);
   expect(onOpen).toHaveBeenCalledOnce();
 });
+
+it("puts its ring in the accessibility tree only while a video is being made", () => {
+  const exporting = job({ phase: "exporting", done: 30, total: 120 });
+  const { rerender } = render(
+    <ExportButton ref={null} job={job({})} open={false} onOpen={() => {}} />,
+  );
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  rerender(<ExportButton ref={null} job={exporting} open={false} onOpen={() => {}} />);
+  expect(screen.getByRole("progressbar", { name: "Exporting" })).toBeTruthy();
+  rerender(<ExportButton ref={null} job={exporting} open onOpen={() => {}} />);
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  rerender(
+    <ExportButton ref={null} job={job({ phase: "ready" })} open={false} onOpen={() => {}} />,
+  );
+  expect(screen.queryByRole("progressbar")).toBeNull();
+});
