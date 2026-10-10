@@ -24,179 +24,209 @@
     "updated": 0,
     "didUpdate": false
   },
-  "startTime": 1791457140740,
+  "startTime": 1791637638905,
   "success": true,
   "testResults": [
     {
       "assertionResults": [
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance regenerates all35 committed schema files from the independently verified pin",
           "status": "passed",
           "title": "regenerates all35 committed schema files from the independently verified pin",
-          "duration": 4260.23725,
+          "duration": 3362.2596249999997,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance sends store:false on both actual requests and carries encrypted reasoning into continuation",
           "status": "passed",
           "title": "sends store:false on both actual requests and carries encrypted reasoning into continuation",
-          "duration": 12026.751458,
+          "duration": 12493.182292,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance refreshes only the owned fake credentials while preserving the protected home sentinel",
           "status": "passed",
           "title": "refreshes only the owned fake credentials while preserving the protected home sentinel",
-          "duration": 5009.21775,
+          "duration": 4383.713083000002,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance does not reuse a reader after the fake credential file changes",
           "status": "passed",
           "title": "does not reuse a reader after the fake credential file changes",
-          "duration": 5009.639790999998,
+          "duration": 6157.033041000002,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance runs the actual tool bridge with no command tool, declines file edits, and submits the full PNG",
           "status": "passed",
           "title": "runs the actual tool bridge with no command tool, declines file edits, and submits the full PNG",
-          "duration": 13406.747917000004,
+          "duration": 14017.614542000003,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance keeps frame A for two same-turn clicks even when the first returns a newer image",
           "status": "passed",
           "title": "keeps frame A for two same-turn clicks even when the first returns a newer image",
-          "duration": 14284.950249999994,
+          "duration": 13648.066791999998,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance cancels the remaining click and its image after a stale batch action, then submits a fresh full-frame turn",
           "status": "passed",
           "title": "cancels the remaining click and its image after a stale batch action, then submits a fresh full-frame turn",
-          "duration": 23598.55520799999,
+          "duration": 22913.585375000002,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance Stop fences a pending real MCP call and closes Codex, nc and all pipes without a late image",
           "status": "passed",
           "title": "Stop fences a pending real MCP call and closes Codex, nc and all pipes without a late image",
-          "duration": 14265.911000000007,
+          "duration": 12756.418082999997,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance preserves held takeover after a pending MCP call is canceled and only resumes after matching hand-back",
           "status": "passed",
           "title": "preserves held takeover after a pending MCP call is canceled and only resumes after matching hand-back",
-          "duration": 23471.599707999994,
+          "duration": 21489.254291000005,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance matching native Pause drains a real MCP call and resumes once without replaying its effect",
           "status": "passed",
           "title": "matching native Pause drains a real MCP call and resumes once without replaying its effect",
-          "duration": 23764.641333999985,
+          "duration": 20701.197499999995,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance uncertain real MCP result ownership contains native Pause and refuses Resume",
           "status": "passed",
           "title": "uncertain real MCP result ownership contains native Pause and refuses Resume",
-          "duration": 13942.568958000018,
+          "duration": 13903.672167000012,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance pauses a failed fake refresh without daemon retry, replacement, fallback or new frames until Stop",
           "status": "passed",
           "title": "pauses a failed fake refresh without daemon retry, replacement, fallback or new frames until Stop",
-          "duration": 14000.971417000022,
+          "duration": 13716.583290999988,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance refuses a forced alternate-model sub-agent without creating a child thread or granting tools",
           "status": "passed",
           "title": "refuses a forced alternate-model sub-agent without creating a child thread or granting tools",
-          "duration": 15661.757374999986,
+          "duration": 12646.162374999985,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance exposes no connector, plugin, foreign MCP or web tool and sends only allowed fixture HTTP requests",
           "status": "passed",
           "title": "exposes no connector, plugin, foreign MCP or web tool and sends only allowed fixture HTTP requests",
-          "duration": 19107.980500000005,
+          "duration": 12776.255082999996,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         },
         {
-          "ancestorTitles": ["actual pinned Codex 0.154.0 offline acceptance"],
+          "ancestorTitles": [
+            "actual pinned Codex 0.154.0 offline acceptance"
+          ],
           "fullName": "actual pinned Codex 0.154.0 offline acceptance closes the real nc bridge and pending call on app-server stdin EOF without delivering a late image",
           "status": "passed",
           "title": "closes the real nc bridge and pending call on app-server stdin EOF without delivering a late image",
-          "duration": 19274.794708,
+          "duration": 12633.473874999996,
           "failureMessages": [],
           "meta": {},
           "tags": [],
           "benchmarks": []
         }
       ],
-      "startTime": 1791457141318,
-      "endTime": 1791457362405.7947,
+      "startTime": 1791637639562,
+      "endTime": 1791637837161.4739,
       "status": "passed",
       "message": "",
       "name": "apps/daemon/src/agent/codex/codex-harness.codex.test.ts"

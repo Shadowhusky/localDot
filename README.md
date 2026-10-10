@@ -368,7 +368,7 @@ in Settings → Models, then switch between them from the chip in the message bo
 | Kind | Options | Good to know |
 | --- | --- | --- |
 | API keys | Anthropic, OpenAI, Google Gemini, Azure OpenAI, xAI, Mistral, DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot (Kimi), Alibaba (Qwen), Z.ai, Zhipu AI, MiniMax, Volcengine Ark, SiliconFlow | Keys live in keyd on your Mac. Prices come from the models.dev catalogue. |
-| ChatGPT plan | Sign in with a code, runs through Codex | Apple silicon Macs. localDot keeps its own Codex home, separate from yours. |
+| ChatGPT plan | Sign in with a code, runs through Codex | Apple silicon Macs; enabled only in builds with native and real-account acceptance recorded. localDot keeps its own Codex home, separate from yours. |
 | Claude Code (your plan) | Your own installed Claude Code | Uses your plan's limits. localDot never touches your Claude sign-in, settings or memory files. Off until you choose it. |
 | Coding and token plans | MiniMax Token Plan, Alibaba Token Plan, Alibaba Coding Plan | Some vendors only allow their coding plans inside the coding tools they list (GLM Coding Plan, Kimi For Coding, Ark Coding Plan). For those, use the vendor's API key instead. |
 | Your own endpoint | Any OpenAI-compatible or Anthropic-compatible base URL | You give it the model ID, what the model can do and what it costs. |
