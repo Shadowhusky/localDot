@@ -58,6 +58,8 @@ Usage: install.sh [options]
   --passphrase-vault             Linux: keep saved keys in a file only your passphrase opens
   --registry <registry/owner>    Pull published computer images instead of building them.
                                  Only for a registry you trust: they run as published.
+  --install-prerequisites        Install supported missing prerequisites without a setup prompt
+  --no-prerequisites             Only check prerequisites; do not install or launch them
   --skip-images                  Use the computer images already in Docker
   --uninstall                    Remove localDot; keeps your data
   --help                         Show this help
@@ -149,7 +151,7 @@ detect_platform() {
     esac
   fi
   if [ "$(id -u)" = 0 ]; then
-    die "Run the installer as your own user, not as root. localDot runs as that user's services and never needs sudo. On a fresh server, create a user with Docker access first; see docs/install.md."
+    die "Run the installer as your own user, not as root. localDot runs as that user's services; only prerequisite setup may request sudo. On a fresh server, create a user with Docker access first; see docs/install.md."
   fi
 }
 
@@ -189,9 +191,9 @@ docker_problem() {
     if [ "$OS" = macos ]; then
       say "Docker Desktop. Install it from https://www.docker.com/products/docker-desktop/ and start it."
     elif [ -n "$WSL" ]; then
-      say "Docker. Install Docker Desktop for Windows and turn on Settings > Resources > WSL integration for this distro, or install $engine here: curl -fsSL https://get.docker.com | sudo sh, then sudo usermod -aG docker $(id -un) and open a new terminal."
+      say "Docker. Install Docker Desktop for Windows and turn on Settings > Resources > WSL integration for this distro, or follow https://docs.docker.com/engine/install/ for a native engine."
     else
-      say "$engine. On Ubuntu or Debian: curl -fsSL https://get.docker.com | sudo sh, then sudo usermod -aG docker $(id -un) and sign in again. Other systems: https://docs.docker.com/engine/install/"
+      say "$engine. Rerun interactively to install it on Ubuntu or Debian, or follow https://docs.docker.com/engine/install/"
     fi
     return
   fi
@@ -229,6 +231,169 @@ user_systemd() {
   systemctl --user show-environment >/dev/null 2>&1
 }
 
+# Read consent from the terminal: stdin may be the curl | bash script itself.
+approve_prerequisites() {
+  case "${PREREQUISITES:-ask}" in
+  no) return 1 ;;
+  yes) return 0 ;;
+  esac
+  local answer
+  if ! ( : </dev/tty ) 2>/dev/null; then return 1; fi
+  say "localDot can install missing build tools and Docker. Administrator permission may be needed."
+  say "Existing engines are kept. Docker Desktop presents its own first-run terms."
+  [ "$OS" != linux ] || say "Native Linux setup gives your user Docker access, which grants administrator-equivalent control."
+  printf 'Install missing prerequisites and continue? [Y/n] ' >/dev/tty
+  IFS= read -r answer </dev/tty || return 1
+  case "$answer" in
+  '' | y | Y | yes | Yes) PREREQUISITES=yes ;;
+  *) PREREQUISITES=no; return 1 ;;
+  esac
+}
+
+wait_for_docker() {
+  local deadline=$((SECONDS + 1200)) problem
+  step "Waiting for Docker"
+  say "Finish Docker's first-run setup in its window. Installation continues here when it is ready."
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    find_docker || true
+    problem=$(docker_problem)
+    [ -n "$problem" ] || return 0
+    sleep 3
+  done
+  die "Docker is not ready yet. $problem Rerun this installer after resolving it; completed setup is kept."
+}
+
+install_mac_docker() (
+  # A subshell confines cleanup traps to this download and mounted installer.
+  set -e
+  # Bash 3.2 unwinds function-local variables before an errexit EXIT trap.
+  # These variables are already isolated by the subshell.
+  platform= digest= folder= mountpoint= mounted=0
+  case "$ARCH" in
+  arm64) platform=arm64; digest=02147e4d559ff41e1d9d7be63a554101340237064c7b6df234548aa111ebf04c ;;
+  x64) platform=amd64; digest=44a9c8524c6f5cc6ba51cec7fd6343b2a744ff4cb5126f7d3d5b6f4da06fd905 ;;
+  *) die "Unsupported Docker Desktop architecture: $ARCH" ;;
+  esac
+  folder=$(mktemp -d "${TMPDIR:-/tmp}/localdot-docker.XXXXXX")
+  mountpoint="$folder/volume"
+  cleanup_docker_download() {
+    if [ "$mounted" = 1 ] && ! hdiutil detach "$mountpoint" -quiet >/dev/null 2>&1; then
+      warn "Docker's installer volume is still mounted at $mountpoint. Eject it in Finder."
+      return
+    fi
+    rm -rf "$folder"
+  }
+  trap cleanup_docker_download EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  step "Downloading Docker Desktop 4.94.0"
+  curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 --max-time 1800 \
+    "https://desktop.docker.com/mac/main/$platform/241994/Docker.dmg" -o "$folder/Docker.dmg"
+  [ "$(sha256_of "$folder/Docker.dmg")" = "$digest" ] || die "Docker download verification failed. Nothing was installed; rerun setup to retry."
+  hdiutil attach "$folder/Docker.dmg" -mountpoint "$mountpoint" -nobrowse -quiet
+  mounted=1
+  # Do not accept Docker's terms on the user's behalf or bypass macOS security checks.
+  sudo "$mountpoint/Docker.app/Contents/MacOS/install" --user="$(id -un)"
+)
+
+linux_distribution() {
+  . /etc/os-release
+  printf '%s %s\n' "$ID" "${VERSION_CODENAME:-}"
+}
+
+install_linux_prerequisites() {
+  # Only native Ubuntu/Debian use this route. WSL is managed by install.ps1 to avoid
+  # installing an independent engine alongside Docker Desktop's WSL integration.
+  local distro codename need_docker=$1 tool owned_repo=no
+  read -r distro codename < <(linux_distribution)
+  case "$distro" in ubuntu | debian) ;; *) return 0 ;; esac
+  case "$codename" in '' | *[!a-zA-Z0-9.-]*) return 0 ;; esac
+  command -v apt-get >/dev/null 2>&1 || return 0
+  if [ "$need_docker" = yes ]; then
+    if [ -f /etc/apt/sources.list.d/docker.sources ] && grep -qx '# Configured by localDot prerequisite setup' /etc/apt/sources.list.d/docker.sources; then
+      owned_repo=yes
+    fi
+    # Never remove or replace another container runtime's packages automatically.
+    for tool in docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc docker-ce docker-ce-cli; do
+      if [ "$owned_repo" = yes ]; then
+        case "$tool" in containerd | runc | docker-ce | docker-ce-cli) continue ;; esac
+      fi
+      if dpkg-query -W -f='${Status}' "$tool" 2>/dev/null | grep -q 'install ok installed'; then
+        die "Existing container package '$tool' found. Follow https://docs.docker.com/engine/install/$distro/ to configure it, then rerun setup. No packages were replaced."
+      fi
+    done
+    if { [ -e /etc/apt/sources.list.d/docker.sources ] && [ "$owned_repo" != yes ]; } || [ -e /etc/apt/sources.list.d/docker.list ]; then
+      die "An existing Docker package repository needs attention. Follow https://docs.docker.com/engine/install/$distro/ and rerun setup. Its configuration was kept."
+    fi
+  fi
+  step "Installing Linux prerequisites"
+  sudo bash -s -- "$distro" "$codename" "$need_docker" <<'ROOT'
+set -euo pipefail
+apt-get update
+apt-get install -y git curl tar gzip ca-certificates
+if [ "$3" = yes ]; then
+  install -m 0755 -d /etc/apt/keyrings
+  curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 --max-time 120 \
+    "https://download.docker.com/linux/$1/gpg" -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  printf '# Configured by localDot prerequisite setup\nTypes: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+    "$1" "$2" "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/docker.sources
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  systemctl enable --now docker
+fi
+ROOT
+  if [ "$need_docker" = yes ]; then
+    say "Docker is installed. Giving your user Docker access (this grants administrator-equivalent control)."
+    sudo usermod -aG docker "$(id -un)"
+    # Both the shell AND systemd's user manager need refreshed group membership.
+    # sg/newgrp refresh only the shell and can leave the installed app unable to connect.
+    die "One sign-out is needed to activate Docker access. Sign out of all sessions and sign back in (or restart), then rerun the same installer command. Docker and the downloaded packages are kept."
+  fi
+}
+
+prepare_prerequisites() {
+  [ "${PREREQUISITES:-ask}" != no ] || return 0
+  local missing=0 need_docker=no deadline problem
+  # A background updater must never launch interactive system installers.
+  if [ "${PREREQUISITES:-ask}" = ask ] && ! ( : </dev/tty ) 2>/dev/null; then return 0; fi
+  git --version >/dev/null 2>&1 || missing=1
+  for tool in curl tar gzip; do command -v "$tool" >/dev/null 2>&1 || missing=1; done
+  find_docker || need_docker=yes
+  if [ "$OS" = macos ]; then
+    if [ "$missing" = 1 ]; then
+      approve_prerequisites || return 0
+      step "Installing Apple's command line tools"
+      xcode-select --install || true
+      say "Finish Apple's installer. localDot will continue here afterward."
+      deadline=$((SECONDS + 1800))
+      until git --version >/dev/null 2>&1; do
+        [ "$SECONDS" -lt "$deadline" ] || die "Command line tools are not ready. Finish Apple's setup, then rerun this installer."
+        sleep 5
+      done
+    fi
+    if [ "$need_docker" = yes ] && [ ! -d /Applications/Docker.app ]; then
+      # A configured remote or alternate engine must never be replaced by a local Desktop.
+      [ -z "${DOCKER_HOST:-}${DOCKER_CONTEXT:-}" ] || return 0
+      approve_prerequisites || return 0
+      install_mac_docker
+    fi
+    problem=$(docker_problem)
+    case "$problem" in *"update Docker."*) return 0 ;; esac
+    if [ -n "$problem" ] && [ -d /Applications/Docker.app ] && [ -z "${DOCKER_HOST:-}${DOCKER_CONTEXT:-}" ]; then
+      # Respect an existing alternate context even when its engine is unavailable.
+      case "$(docker context show 2>/dev/null || true)" in '' | default | desktop-linux) ;; *) return 0 ;; esac
+      [ "${PREREQUISITES:-ask}" != no ] || return 0
+      open /Applications/Docker.app
+      wait_for_docker
+    fi
+  elif [ -z "$WSL" ] && { [ "$missing" = 1 ] || [ "$need_docker" = yes ]; }; then
+    [ "$need_docker" = no ] || [ -z "${DOCKER_HOST:-}${DOCKER_CONTEXT:-}" ] || return 0
+    approve_prerequisites || return 0
+    install_linux_prerequisites "$need_docker"
+  fi
+}
+
 check_prerequisites() {
   local problems="" missing="" tool problem
   git --version >/dev/null 2>&1 || missing="git"
@@ -259,6 +424,7 @@ check_prerequisites() {
 
 parse_args() {
   OPT_REF="" OPT_REPO="" OPT_PORT="" OPT_HOME="" OPT_TAILSCALE="" OPT_REGISTRY="" OPT_VAULT=""
+  PREREQUISITES=ask
   SKIP_IMAGES=0 UNINSTALL=0 AS_COMMAND=0
   COMMAND="" COMMAND_ARGS=()
   PREFIX="${LOCALDOT_PREFIX:-${XDG_DATA_HOME:-$HOME/.local/share}/localdot}"
@@ -276,6 +442,8 @@ parse_args() {
       esac
       shift 2
       ;;
+    --install-prerequisites) [ "$PREREQUISITES" != no ] || die "Choose one prerequisite mode."; PREREQUISITES=yes; shift ;;
+    --no-prerequisites) [ "$PREREQUISITES" != yes ] || die "Choose one prerequisite mode."; PREREQUISITES=no; shift ;;
     --tailscale) OPT_TAILSCALE=on && shift ;;
     --no-tailscale) OPT_TAILSCALE=off && shift ;;
     --passphrase-vault) OPT_VAULT=passphrase && shift ;;
@@ -927,6 +1095,7 @@ run_install() {
   check_prefix
   set_paths
   check_services_are_ours
+  prepare_prerequisites
   check_prerequisites
   check_port
   if [ "${LOCALDOT_UPDATE_SHUTDOWN:-}" = 1 ]; then

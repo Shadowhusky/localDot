@@ -18,13 +18,109 @@ param(
   [string]$Distro = "Ubuntu",
   [string]$Ref,
   [switch]$Tailscale,
-  [switch]$Uninstall
+  [switch]$Uninstall,
+  [switch]$InstallPrerequisites,
+  [switch]$NoPrerequisites,
+  [switch]$Resume
 )
 
 $ErrorActionPreference = "Stop"
 $InstallUrl = "https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh"
 $TaskName = "localDot"
 $KeepRunning = Join-Path $env:LOCALAPPDATA "localDot\keep-running.vbs"
+$InstallerScriptPath = $PSCommandPath
+$SetupDirectory = Join-Path $env:LOCALAPPDATA "localDot\setup"
+$ResumeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+
+function Save-SetupResume {
+  try { Write-SetupResume }
+  catch {
+    Write-Host "Couldn't save automatic continuation: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "After restarting Windows, run the same localDot installer command again. Completed setup is kept."
+  }
+}
+
+function Write-SetupResume {
+  New-Item -ItemType Directory -Force $SetupDirectory | Out-Null
+  $saved = Join-Path $SetupDirectory 'install.ps1'
+  if ($InstallerScriptPath) {
+    if ([IO.Path]::GetFullPath($InstallerScriptPath) -ne [IO.Path]::GetFullPath($saved)) { Copy-Item $InstallerScriptPath $saved -Force }
+  } else {
+    Receive-SetupFile 'https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1' $saved
+  }
+  @{ Distro = $Distro; Ref = $Ref; Tailscale = [bool]$Tailscale; InstallPrerequisites = [bool]$InstallPrerequisites; NoPrerequisites = [bool]$NoPrerequisites; Resume = $true } |
+    ConvertTo-Json | Set-Content (Join-Path $SetupDirectory 'options.json') -Encoding UTF8
+  $runner = Join-Path $SetupDirectory 'resume.ps1'
+  @'
+$ErrorActionPreference = 'Stop'
+$options = @{}
+(Get-Content (Join-Path $PSScriptRoot 'options.json') -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $options[$_.Name] = $_.Value }
+try { & (Join-Path $PSScriptRoot 'install.ps1') @options }
+catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
+Read-Host 'Press Enter to close this setup window'
+'@ | Set-Content $runner -Encoding UTF8
+  if (-not (Test-Path $ResumeKey)) { New-Item -Path $ResumeKey | Out-Null }
+  New-ItemProperty -Path $ResumeKey -Name 'localDotSetup' -PropertyType String -Force -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runner`"" | Out-Null
+  Write-Host "Setup is saved and will reopen after you restart Windows and sign in."
+  Write-Host "To cancel that continuation: Remove-ItemProperty -Path '$ResumeKey' -Name localDotSetup"
+}
+
+function Receive-SetupFile([string]$Url, [string]$Path) {
+  $previous = [Net.ServicePointManager]::SecurityProtocol
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = $previous -bor [Net.SecurityProtocolType]::Tls12
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+      try { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 600; return }
+      catch { if ($attempt -eq 3) { throw }; Start-Sleep -Seconds 2 }
+    }
+  } finally { [Net.ServicePointManager]::SecurityProtocol = $previous }
+}
+
+function Approve-Prerequisites {
+  if ($NoPrerequisites) { return $false }
+  if ($InstallPrerequisites) { return $true }
+  Write-Host "localDot can install missing Linux build tools and Docker Desktop. Windows may ask for permission."
+  Write-Host "Existing Docker installations are kept. Docker's license and first-run choices stay in its own window."
+  $answer = Read-Host 'Install missing prerequisites and continue? [Y/n]'
+  if ($answer -notin @('', 'y', 'yes')) { return $false }
+  $script:InstallPrerequisites = [switch]$true
+  return $true
+}
+
+function Ensure-LinuxTools {
+  $check = Invoke-Wsl -d $Distro --exec sh -c 'for tool in git curl tar gzip timeout; do command -v $tool >/dev/null 2>&1 || exit 1; done'
+  if ($check.Code -eq 0) { return }
+  if (-not (Approve-Prerequisites)) { throw "Install git, curl, tar, gzip and coreutils inside $Distro, then rerun setup." }
+  Write-Host "Installing Linux build tools in $Distro..."
+  & wsl.exe -d $Distro -u root --exec sh -c 'command -v apt-get >/dev/null || exit 2; apt-get update && apt-get install -y git curl tar gzip coreutils ca-certificates'
+  if ($LASTEXITCODE -ne 0) { throw "Couldn't install build tools in $Distro. Check the package-manager output above." }
+}
+
+function Install-DockerDesktop {
+  if (-not (Approve-Prerequisites)) { return $false }
+  $arch = $env:PROCESSOR_ARCHITEW6432
+  if (-not $arch) { $arch = $env:PROCESSOR_ARCHITECTURE }
+  switch ($arch) {
+    'AMD64' { $platform = 'amd64'; $digest = 'a9814e31049d66156477a86614e83365669677733014ec72f74229623ff3890a' }
+    'ARM64' { $platform = 'arm64'; $digest = '2cfdd5f1a325f0f38c02adda47ff35ab929da328684df5633ea21e522ad79ec5' }
+    default { throw "Docker Desktop requires 64-bit Windows (Intel/AMD or ARM)." }
+  }
+  $folder = Join-Path ([IO.Path]::GetTempPath()) ('localdot-docker-' + [guid]::NewGuid())
+  New-Item -ItemType Directory $folder | Out-Null
+  $file = Join-Path $folder 'Docker Desktop Installer.exe'
+  try {
+    Write-Host "Downloading Docker Desktop 4.94.0. This may take a few minutes..."
+    Receive-SetupFile "https://desktop.docker.com/win/main/$platform/241994/Docker%20Desktop%20Installer.exe" $file
+    if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $digest) { throw "Docker download verification failed. Nothing was installed; rerun setup to retry." }
+    $signature = Get-AuthenticodeSignature $file
+    if ($signature.Status -ne 'Valid') { throw "Windows couldn't verify Docker's installer signature. Nothing was installed." }
+    # Intentionally omit --accept-license. Docker presents its terms to the user on first run.
+    $process = Start-Process -FilePath $file -ArgumentList 'install', '--user', '--backend=wsl-2' -Wait -PassThru
+    if ($process.ExitCode -in @(3010, 1641)) { Save-SetupResume; return $false }
+    if ($process.ExitCode -ne 0) { throw "Docker setup stopped (exit $($process.ExitCode)). Rerun localDot setup to retry." }
+    return $true
+  } finally { Remove-Item $folder -Recurse -Force -ErrorAction SilentlyContinue }
+}
 
 # Windows PowerShell 5.1 turns redirected native stderr into ErrorRecords. WSL's expected
 # "not installed" response must reach the exit-code check, rather than abort the installer.
@@ -71,16 +167,19 @@ function Enable-Wsl {
     throw "localDot needs Windows 10 version 2004 (build 19041) or newer for WSL 2."
   }
   if ((Invoke-Wsl --status).Code -ne 0) {
+    if ($NoPrerequisites) { throw "WSL 2 is missing. Install it with wsl --install, or rerun setup without -NoPrerequisites." }
     Write-Host "Turning on WSL 2. Windows asks for permission first."
     $install = Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--no-distribution" -Verb RunAs -Wait -PassThru
     if ($install.ExitCode -notin @(0, 3010)) {
       throw "WSL setup didn't finish (exit $($install.ExitCode)). Open PowerShell as administrator, run 'wsl --install --no-distribution', restart Windows, then run this installer again."
     }
-    Write-Host "Restart Windows to finish turning on WSL, then run this installer again."
+    Save-SetupResume
+    Write-Host "Restart Windows to finish turning on WSL."
     return $false
   }
   # systemd needs the WSL from the Microsoft Store; the one built into older Windows lacks --version.
   if ((Invoke-Wsl --version).Code -ne 0) {
+    if ($NoPrerequisites) { throw "Update WSL with wsl --update, then rerun setup." }
     Write-Host "Updating WSL."
     $update = Invoke-Wsl --update
     if ($update.Code -ne 0) { throw "Couldn't update WSL. Run 'wsl --update' in PowerShell as administrator, then run this installer again." }
@@ -91,11 +190,13 @@ function Enable-Wsl {
 function Initialize-Distro {
   $found = @(Get-WslDistros | Where-Object { $_.Name -eq $Distro })
   if ($found.Count -eq 0) {
-    Install-Distro
+    if ($NoPrerequisites) { throw "Install $Distro with wsl --install --distribution $Distro, then rerun setup." }
+    if (-not (Install-Distro)) { return $false }
     $found = @(Get-WslDistros | Where-Object { $_.Name -eq $Distro })
     if ($found.Count -eq 0) { throw "$Distro isn't set up yet. Open it once from the Start menu to create your user, then run this installer again." }
   }
   if ($found[0].Version -eq "1") {
+    if ($NoPrerequisites) { throw "Move $Distro to WSL 2 with wsl --set-version $Distro 2, then rerun setup." }
     Write-Host "Moving $Distro to WSL 2."
     & wsl.exe --set-version $Distro 2
     if ($LASTEXITCODE -ne 0) { throw "Moving $Distro to WSL 2 failed." }
@@ -108,11 +209,13 @@ function Initialize-Distro {
     throw "$Distro signs in as root. Create your own user in it and make that the default; see docs/install.md."
   }
   if ((Invoke-Wsl -d $Distro --exec test -d /run/systemd/system).Code -ne 0) {
+    if ($NoPrerequisites) { throw "Enable systemd in /etc/wsl.conf for $Distro, restart that distro, then rerun setup." }
     Write-Host "Turning on systemd in $Distro."
     $result = Invoke-Wsl -d $Distro -u root --exec sh -c $EnableSystemd
     if ($result.Code -ne 0) { throw "Couldn't turn on systemd in ${Distro}: $($result.Text)" }
     & wsl.exe --terminate $Distro | Out-Null
   }
+  return $true
 }
 
 function Install-Distro {
@@ -128,6 +231,11 @@ function Install-Distro {
   try {
     while ((Get-Date) -lt $deadline) {
       $setup.Refresh()
+      if ($setup.HasExited -and $setup.ExitCode -in @(3010, 1641)) {
+        Save-SetupResume
+        Write-Host "Restart Windows to finish setting up $Distro."
+        return $false
+      }
       if ($setup.HasExited -and $setup.ExitCode -ne 0) {
         throw "Installing $Distro didn't finish (exit $($setup.ExitCode)). Run this installer again."
       }
@@ -150,7 +258,7 @@ function Install-Distro {
         $probe = $null
         if ($uidText -match '^\d+$' -and $uidText -ne "0") {
           Write-Host "$Distro account is ready. Continuing localDot installation..."
-          return
+          return $true
         }
         if ($setup.HasExited) {
           throw "$Distro setup closed before a Linux user was ready. Open $Distro from the Start menu to finish account setup, then rerun this installer."
@@ -234,7 +342,13 @@ function Wait-Docker([int]$TimeoutSeconds = 1200) {
       Write-Host "Waiting for Docker in $Distro. Installation continues automatically; keep this window open."
       Write-Host "Press Ctrl+C to stop. Your Ubuntu setup is kept."
       $desktop = Find-DockerDesktop
-      if ($desktop) {
+      if (-not $desktop -and $result.Code -eq 127) {
+        if (-not (Install-DockerDesktop)) { return $false }
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $desktop = Find-DockerDesktop
+        if (-not $desktop) { throw "Docker setup finished but the app wasn't found. Open Docker Desktop, then rerun localDot setup." }
+      }
+      if ($desktop -and -not $NoPrerequisites) {
         try { Start-Process -FilePath $desktop | Out-Null } catch {
           Write-Host "Please open Docker Desktop from the Windows Start menu."
         }
@@ -257,19 +371,24 @@ function Find-DockerDesktop {
 }
 
 function Install-LocalDot {
+  if ($InstallPrerequisites -and $NoPrerequisites) { throw "Choose either -InstallPrerequisites or -NoPrerequisites." }
+  if ($Resume) { Write-Host "Resuming localDot setup. Completed steps will be reused." }
   if (-not (Enable-Wsl)) { return }
-  Initialize-Distro
+  if (-not (Initialize-Distro)) { return }
   $options = @()
   if ($Ref) { $options += "--ref", $Ref }
   if ($Tailscale) { $options += "--tailscale" }
   if ($Uninstall) {
     Invoke-Installer (@("--uninstall") + $options)
     Unregister-KeepRunning
+    Remove-ItemProperty -Path $ResumeKey -Name localDotSetup -ErrorAction SilentlyContinue
     return
   }
+  Ensure-LinuxTools
   if (-not (Wait-Docker)) { return }
   Invoke-Installer $options
   Register-KeepRunning
+  Remove-ItemProperty -Path $ResumeKey -Name 'localDotSetup' -ErrorAction SilentlyContinue
   Write-Host ""
   Write-Host "localDot installation finished. Your app link is printed above."
   Write-Host "For a fresh sign-in link from PowerShell: wsl -d $Distro -- ~/.local/bin/localdot open"

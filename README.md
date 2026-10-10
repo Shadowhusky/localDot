@@ -14,20 +14,8 @@
 
 ## Install
 
-**1. Install the prerequisites first.** localDot does **not** install Docker for you.
-
-- **Windows:** [install Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
-  and open it. When Ubuntu is ready, enable **Settings → Resources → WSL integration → Ubuntu → Apply**.
-  The localDot installer sets up WSL 2 and Ubuntu and waits while you connect Docker.
-- **macOS:** [install Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/)
-  and open it. Install Apple's command line tools with `xcode-select --install` if needed for Git.
-- **Linux:** [install Docker Engine](https://docs.docker.com/engine/install/) **28+**,
-  plus `git`, `curl`, `tar` and `gzip`. Make sure `docker info` works as your normal user.
-
-Allow about **15 GB** of free space. Node.js, Go and the app are installed automatically.
-[Prerequisite setup and checks](docs/install.md#1-install-the-prerequisites).
-
-**2. Run the installer.**
+**1. Run the installer.** It checks your computer and offers to install missing tools and Docker.
+Existing working Docker installations are reused. Allow about **15 GB** of free space.
 
 macOS or Linux — in Terminal, as your normal user:
 
@@ -41,13 +29,15 @@ Windows — in PowerShell:
 irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
 ```
 
-On Windows, keep PowerShell open while you create your user in the Ubuntu setup window;
-installation continues automatically afterward. Enable Docker Desktop’s WSL integration
-for that distro. If Windows asks for a restart, restart and run the same command again.
-Allow **10–30 minutes** for the first computer-image build. Node.js and Go are installed automatically.
+**2. Follow the setup prompts.** On Windows, keep PowerShell open while you create your Ubuntu
+account; setup continues automatically. If a restart is needed, setup reopens after you sign in.
+Finish Docker Desktop’s first-run setup and enable its **WSL integration → Ubuntu** when prompted.
+On macOS, finish any Apple command line tools and Docker first-run prompts.
+Native Ubuntu/Debian users may need one sign-out after Docker installation, then rerun the command.
 
-**3. Open the sign-in link** shown at the end. Choose a model, add your key or supported plan
-sign-in, then turn on dot’s computer and send a task.
+**3. Open the sign-in link** printed at the end. Choose a model, add your key or supported plan
+sign-in, then turn on dot’s computer and send a task. Allow **10–30 minutes** for the first
+computer-image build; Node.js and Go are installed automatically.
 
 To reopen localDot or replace an expired link, run `localdot open`. On Windows, run this and
 other `localdot` commands in **Ubuntu/WSL**, not PowerShell.

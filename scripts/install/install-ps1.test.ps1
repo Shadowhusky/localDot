@@ -47,6 +47,7 @@ function wsl.exe {
         $script:machine.DockerResponses = @($script:machine.DockerResponses | Select-Object -Skip 1)
       }
       if ($out -eq "missing") { $code = 127 }
+      if ($out -eq "timeout") { $code = 124 }
     }
     "--exec test -d /run/systemd/system$" { $code = $script:machine.Systemd }
     "--exec mktemp \.localdot-install\.XXXXXX$" { $out = ".localdot-install.Ab12Cd" }
@@ -97,6 +98,15 @@ function Get-CimInstance { }
 
 . $installer
 
+# Registry writes stay inside the test harness, including on actual Windows runners.
+function New-Item {
+  param($Path, $ItemType, [switch]$Force)
+  if ($Path -like 'HKCU:*') { return }
+  Microsoft.PowerShell.Management\New-Item -Path $Path -ItemType $ItemType -Force:$Force
+}
+function New-ItemProperty { param($Path, $Name, $PropertyType, $Value, [switch]$Force) $script:calls.Add("Registry $Name $Value") }
+function Remove-ItemProperty { param($Path, $Name) $script:calls.Add("Remove registry $Name") }
+
 # Dot-sourcing replaced the build check; put the pretend one back.
 function Get-WindowsBuild { 22631 }
 
@@ -112,6 +122,56 @@ Check (Wait-Docker) "uses an existing Linux Docker engine without extra setup"
 Check (-not (@($script:calls) -match 'Start-Process')) "does not launch Desktop when Docker already works"
 Check (-not (Wait-Docker -TimeoutSeconds 0)) "returns a resumable setup state on timeout"
 
+# Actual prerequisite installation code, with downloaded files and processes simulated.
+& {
+  $InstallPrerequisites = [switch]$true
+  $NoPrerequisites = [switch]$false
+  $env:PROCESSOR_ARCHITECTURE = 'AMD64'
+  $env:PROCESSOR_ARCHITEW6432 = ''
+  $script:digest = 'a9814e31049d66156477a86614e83365669677733014ec72f74229623ff3890a'
+  $script:signature = 'Valid'
+  $script:dockerExit = 0
+  function Receive-SetupFile { param($Url, $Path) $script:calls.Add("Download $Url"); Set-Content $Path 'fixture' }
+  function Get-FileHash { param($Path, $Algorithm) [pscustomobject]@{ Hash = $script:digest } }
+  function Get-AuthenticodeSignature { param($Path) [pscustomobject]@{ Status = $script:signature } }
+  function Start-Process {
+    param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru)
+    $script:calls.Add("Docker install $($ArgumentList -join ' ')")
+    [pscustomobject]@{ ExitCode = $script:dockerExit }
+  }
+  Reset-Machine @{}
+  Check (Install-DockerDesktop) "installs verified Docker Desktop and continues"
+  Check ($script:calls -contains 'Docker install install --user --backend=wsl-2') "uses per-user WSL installation without accepting the license"
+  $script:digest = 'bad'
+  Reset-Machine @{}
+  $message = ''
+  try { Install-DockerDesktop | Out-Null } catch { $message = $_.Exception.Message }
+  Check ($message -like '*verification failed*' -and -not (@($script:calls) -match '^Docker install')) "rejects a corrupt download before executing it"
+  $script:digest = 'a9814e31049d66156477a86614e83365669677733014ec72f74229623ff3890a'
+  $script:signature = 'NotTrusted'
+  Reset-Machine @{}
+  $message = ''
+  try { Install-DockerDesktop | Out-Null } catch { $message = $_.Exception.Message }
+  Check ($message -like '*signature*' -and -not (@($script:calls) -match '^Docker install')) "rejects an untrusted installer signature"
+  $script:signature = 'Valid'
+  $script:dockerExit = 3010
+  Reset-Machine @{}
+  Check (-not (Install-DockerDesktop)) "saves a continuation instead of claiming success when Docker needs a restart"
+  Check (@($script:calls | Where-Object { $_ -like 'Registry localDotSetup*' }).Count -eq 1) "registers Docker's restart continuation"
+  $script:dockerExit = 1
+  $message = ''
+  try { Install-DockerDesktop | Out-Null } catch { $message = $_.Exception.Message }
+  Check ($message -like '*exit 1*') "reports a failed Docker installer"
+  $NoPrerequisites = [switch]$true
+  Reset-Machine @{}
+  Check (-not (Install-DockerDesktop)) "manual prerequisite mode declines Docker installation"
+  Check ($script:calls.Count -eq 0) "manual mode never downloads or executes Docker setup"
+}
+
+Reset-Machine @{ DockerResponses = @('timeout', '29.2.0/linux') }
+Check (Wait-Docker) "continues after a slow existing engine responds"
+Check (-not (@($script:calls) -match 'Start-Process')) "does not install Desktop because an engine probe timed out"
+
 Reset-Machine @{ Status = 1; Stderr = $true }
 $savedEncoding = [Console]::OutputEncoding
 $savedUtf8 = $env:WSL_UTF8
@@ -120,6 +180,10 @@ Check ($probe.Code -eq 1 -and $probe.Text -like "*WSL is not installed*") "captu
 Check ($ErrorActionPreference -eq "Stop") "preserves the caller's error handling"
 Check ([Console]::OutputEncoding.CodePage -eq $savedEncoding.CodePage -and $env:WSL_UTF8 -eq $savedUtf8) "restores console encoding and WSL environment"
 $ready = Enable-Wsl
+$savedOptions = Get-Content (Join-Path $SetupDirectory 'options.json') -Raw | ConvertFrom-Json
+Check ($savedOptions.Resume -and $savedOptions.Distro -eq 'Ubuntu') "persists setup options for resuming after restart"
+Check (@($script:calls | Where-Object { $_ -like 'Registry localDotSetup powershell.exe*' }).Count -eq 1) "registers a visible one-time continuation"
+Check (Test-Path (Join-Path $SetupDirectory 'install.ps1')) "saves installer locally before asking for a restart"
 Check (-not $ready) "asks Windows to turn on WSL when it is off, and stops for a restart"
 Check ($script:calls -match "Start-Process wsl.exe --install --no-distribution RunAs").Count "turns WSL on elevated, without a distribution"
 
@@ -165,6 +229,11 @@ $vbs = Get-Content (Join-Path $env:LOCALAPPDATA "localDot/keep-running.vbs") -Ra
 Check ($vbs -match '\.Run "wsl\.exe -d Ubuntu --exec sleep infinity", 0, False') "runs the keep-alive hidden"
 $Ref = $null; $Tailscale = [switch]$false
 
+Reset-Machine @{ SetupExited = $true; SetupExit = 3010 }
+Install-LocalDot
+Check (@($script:calls | Where-Object { $_ -like 'Registry localDotSetup*' }).Count -eq 1) "resumes when distribution installation requires a restart"
+Check (-not (@($script:calls) -match '--exec bash')) "does not continue app installation before the required restart"
+
 Reset-Machine @{ SetupExited = $true; SetupExit = 1 }
 $message = ""
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
@@ -187,7 +256,7 @@ $machine.Distros = @(, @("Ubuntu", "1"))
 Install-LocalDot
 Check ($script:calls -contains "wsl --set-version Ubuntu 2") "moves a WSL 1 distro to WSL 2"
 Check (-not ($script:calls -contains "Start-ScheduledTask localDot")) "doesn't start a second keep-alive on an upgrade"
-Check (-not (@($script:calls) -match "--exec sh -c")) "leaves systemd alone when it is already on"
+Check (-not (@($script:calls) -match "--exec sh -c .*systemd=true")) "leaves systemd alone when it is already on"
 
 Reset-Machine @{ Uid = "0" }
 $machine.Distros = @(, @("Ubuntu", "2"))

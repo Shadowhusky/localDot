@@ -350,7 +350,7 @@ describe.concurrent("prerequisites", { timeout: 60_000 }, () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("localDot needs a few things first:");
     expect(result.stderr).toContain("sudo apt-get update && sudo apt-get install -y git");
-    expect(result.stderr).toContain("curl -fsSL https://get.docker.com | sudo sh");
+    expect(result.stderr).toContain("https://docs.docker.com/engine/install/");
     expect(result.stderr).toContain("sudo loginctl enable-linger");
     expect(host.calls().filter((call) => call.startsWith("curl"))).toEqual([]);
   });
@@ -889,6 +889,154 @@ describe.concurrent("options it refuses before doing anything", { timeout: 60_00
     expect(result.stderr).toContain(words);
     expect(host.calls()).toEqual([]);
     expect(existsSync(join(host.prefix, "app"))).toBe(false);
+  });
+});
+
+describe.concurrent("guided prerequisite setup", { timeout: 60_000 }, () => {
+  const functions = (host, code) =>
+    runBash(["-c", `source "$1"\n${code}`, "test", installer], host.env);
+
+  it.each(["arm64", "x64"])(
+    "verifies and installs the Mac %s artifact, then unmounts it",
+    async (arch) => {
+      const host = await makeHost({ os: "macos" });
+      const result = await functions(
+        host,
+        `
+ARCH=${arch}
+curl() { printf 'download %s\\n' "$*" >> "$STUB_LOG"; }
+sha256_of() { echo ${arch === "arm64" ? "02147e4d559ff41e1d9d7be63a554101340237064c7b6df234548aa111ebf04c" : "44a9c8524c6f5cc6ba51cec7fd6343b2a744ff4cb5126f7d3d5b6f4da06fd905"}; }
+hdiutil() { printf 'hdiutil %s\\n' "$*" >> "$STUB_LOG"; }
+sudo() { printf 'sudo %s\\n' "$*" >> "$STUB_LOG"; }
+install_mac_docker
+`,
+      );
+      expect(result.code).toBe(0);
+      const calls = host.calls().join("\n");
+      expect(calls).toContain(`/mac/main/${arch === "x64" ? "amd64" : arch}/241994/Docker.dmg`);
+      expect(calls).toContain("hdiutil attach");
+      expect(calls).toContain("/Docker.app/Contents/MacOS/install --user=");
+      expect(calls).toContain("hdiutil detach");
+      expect(calls).not.toContain("--accept-license");
+    },
+  );
+
+  it("rejects a corrupt Mac download without mounting or executing it", async () => {
+    const host = await makeHost({ os: "macos" });
+    const result = await functions(
+      host,
+      `
+ARCH=arm64
+curl() { :; }
+sha256_of() { echo bad; }
+hdiutil() { printf 'hdiutil %s\\n' "$*" >> "$STUB_LOG"; }
+sudo() { echo sudo >> "$STUB_LOG"; }
+install_mac_docker
+`,
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("verification failed");
+    expect(host.calls().join("\n")).not.toMatch(/hdiutil attach|sudo/);
+  });
+
+  it("keeps the installer failure visible and cleans up its Mac mount", async () => {
+    const host = await makeHost({ os: "macos" });
+    const result = await functions(
+      host,
+      `
+ARCH=arm64
+curl() { :; }
+sha256_of() { echo 02147e4d559ff41e1d9d7be63a554101340237064c7b6df234548aa111ebf04c; }
+hdiutil() { printf 'hdiutil %s\\n' "$*" >> "$STUB_LOG"; }
+sudo() { return 42; }
+install_mac_docker
+echo should-not-continue
+`,
+    );
+    expect(result.code).toBe(42);
+    expect(host.calls().join("\n")).toContain("hdiutil detach");
+    expect(result.stdout).not.toContain("should-not-continue");
+  });
+
+  it("leaves a working engine alone", async () => {
+    const host = await makeHost();
+    const result = await functions(
+      host,
+      `
+OS=linux WSL='' PREREQUISITES=yes
+install_linux_prerequisites() { echo unexpected-install; exit 99; }
+prepare_prerequisites
+`,
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("unexpected-install");
+  });
+
+  it("does not install or launch dependencies in manual mode", async () => {
+    const host = await makeHost({ os: "macos" });
+    const result = await functions(
+      host,
+      `
+parse_args --no-prerequisites
+prepare_prerequisites
+`,
+    );
+    expect(result.code).toBe(0);
+    expect(host.calls()).toEqual([]);
+  });
+
+  it("never installs a second engine in WSL", async () => {
+    const host = await makeHost({ os: "wsl" });
+    const result = await functions(
+      host,
+      `
+OS=linux WSL=2 PREREQUISITES=yes
+find_docker() { return 1; }
+install_linux_prerequisites() { echo unexpected-install; exit 99; }
+prepare_prerequisites
+`,
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("unexpected-install");
+  });
+
+  it("does not replace a configured remote engine when its CLI is missing", async () => {
+    const host = await makeHost();
+    const result = await functions(
+      host,
+      `
+OS=linux WSL='' PREREQUISITES=yes DOCKER_HOST=tcp://example.test:2376
+find_docker() { return 1; }
+install_linux_prerequisites() { echo unexpected-install; exit 99; }
+prepare_prerequisites
+`,
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("unexpected-install");
+  });
+
+  it("does not claim Linux setup completed when apt fails", async () => {
+    const host = await makeHost();
+    const result = await functions(
+      host,
+      `
+linux_distribution() { echo ubuntu noble; }
+apt-get() { :; }
+sudo() { cat >/dev/null; return 42; }
+install_linux_prerequisites no
+echo should-not-continue
+`,
+    );
+    expect(result.code).toBe(42);
+    expect(result.stdout).not.toContain("should-not-continue");
+  });
+
+  it("rejects conflicting prerequisite flags", async () => {
+    const host = await makeHost();
+    const result = await host.run(["--install-prerequisites", "--no-prerequisites"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Choose one prerequisite mode");
+    expect(host.calls()).toEqual([]);
   });
 });
 
