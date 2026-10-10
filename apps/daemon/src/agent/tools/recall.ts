@@ -39,13 +39,17 @@ export async function recallTool(
   const experience = deps.recallExperience?.(query, ctx.session.id) ?? "";
   const history = hits.length
     ? hits
-        .map((h, i) => `${i + 1}. ${h.title} · ${h.day} · ${KIND_WORD[h.kind]}\n   ${h.snippet}`)
+        .map(
+          (h, i) =>
+            `${i + 1}. ${h.title} · ${h.day} · ${KIND_WORD[h.kind]}${h.sessionId ? ` · task ${h.sessionId}` : ""}\n   ${h.snippet}${h.context ? `\n${h.context}` : ""}`,
+        )
         .join("\n")
     : "No earlier tasks match.";
   const body = experience ? `${experience}\n\n${history}` : history;
   ctx.session.tainted = true;
   if (hits.length || experience) ctx.session.taint.add("recall", "earlier tasks", body);
   ctx.check();
+  append(ctx, "tool.output", { stream: "stdout", chunk: ctx.redact(body) });
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
   return { ok: true, content: [text(untrusted("earlier tasks", ctx.redact(body)))] };

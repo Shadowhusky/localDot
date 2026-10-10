@@ -25,6 +25,7 @@ import { z } from "zod";
 import { parseLine } from "../event-file.ts";
 import type { EventLog } from "../event-log.ts";
 import { PrivateFiles } from "./private-files.ts";
+import { taskCheckpoint } from "./task-checkpoint.ts";
 
 const FILE = "conversation.json";
 const Stored = z.strictObject({
@@ -39,7 +40,7 @@ const LOOK_BACK = 20;
 // What an ended task said never changes, so the tasks read back most often are kept.
 const KEPT_TASKS = 64;
 const TURN_TYPES =
-  /"type":"(?:message\.user|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end)"/;
+  /"type":"(?:message\.user|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end|plan\.set|tool\.start|step\.end|action\.intent|action\.target)"/;
 // The list of conversations reads through this many of the newest sessions.
 const LIST_SCAN = 200;
 // A task's session.end is among the last lines of its log.
@@ -152,13 +153,21 @@ export class Conversations {
     return chain.more ? [EARLIER_LEFT_OUT, ...turns] : turns;
   }
 
+  // Recall expands a match from this task only, never the entire conversation chain.
+  taskContext(sessionId: string): string {
+    if (!this.has(sessionId)) return "";
+    return this.#turns(sessionId).slice(-4).join("\n").slice(-3000);
+  }
+
   #turns(sessionId: string): string[] {
     const kept = this.#said.get(sessionId);
     if (kept) return kept;
     const turns: string[] = [];
     const questions = new Map<string, Extract<LocalDotEvent, { type: "ask.request" }>["data"]>();
     let ended = false;
-    for (const event of this.#events(sessionId)) {
+    let completed = false;
+    const events = this.#events(sessionId);
+    for (const event of events) {
       switch (event.type) {
         case "message.user":
           turns.push(`The user: ${clip(event.data.text)}`);
@@ -203,11 +212,18 @@ export class Conversations {
         }
         case "session.end": {
           ended = true;
+          completed = event.data.reason === "done";
           const ending = ENDINGS[event.data.reason];
           if (ending) turns.push(ending);
           break;
         }
       }
+    }
+    if (!completed) {
+      const checkpoint = taskCheckpoint(events);
+      if (checkpoint)
+        turns.push(`Recorded task progress; verify live state before acting:
+${checkpoint}`);
     }
     if (ended) {
       this.#said.set(sessionId, turns);

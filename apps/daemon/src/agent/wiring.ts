@@ -405,7 +405,26 @@ export function createAgent(d: AgentWiringDeps) {
       png,
       memory,
       people,
-      ...(d.recall ? { recall: d.recall } : {}),
+      ...(d.recall
+        ? {
+            recall: (query: string, limit: number, exclude: string) => {
+              let remaining = 6000;
+              return (d.recall?.(query, limit, exclude) ?? []).map((hit) => {
+                if (!hit.sessionId || hit.sessionId === exclude || remaining <= 0) return hit;
+                let context = "";
+                try {
+                  context = conversations
+                    .taskContext(hit.sessionId)
+                    .slice(0, Math.min(3000, remaining));
+                } catch {
+                  // An unreadable old log must not discard the other search results.
+                }
+                remaining -= context.length;
+                return { ...hit, context };
+              });
+            },
+          }
+        : {}),
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
       stopForUncertainty: (session, reason) => runner.contain(session, reason),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),

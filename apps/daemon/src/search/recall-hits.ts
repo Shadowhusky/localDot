@@ -8,6 +8,7 @@ export function recallHits(
   excludeSessionId: string,
 ): RecallHit[] {
   return index.search({ query, limit, excludeSessionId }).map((r) => ({
+    ...(r.sessionId && r.kind !== "note" ? { sessionId: r.sessionId } : {}),
     title: r.title ?? (r.kind === "note" ? "Daily note" : "Untitled task"),
     day: (r.startedAt ?? r.at).slice(0, 10),
     kind: r.kind,

@@ -16,6 +16,8 @@ import type { Transfers } from "../transfers.ts";
 import type { WebAccess } from "../web/cell.ts";
 
 export interface RecallHit {
+  sessionId?: string;
+  context?: string;
   title: string;
   day: string;
   kind: "title" | "user" | "assistant" | "summary" | "step" | "file" | "note";

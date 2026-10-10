@@ -315,3 +315,106 @@ describe("conversation routes", () => {
     expect(f.releases).not.toHaveBeenCalled();
   });
 });
+
+it("recovers recorded progress and locations after restart without carrying secrets or raw output", async () => {
+  const f = setup();
+  const id = await f.task("Continue the multiplayer task");
+  const step = ulid();
+  f.log.append(id, {
+    type: "plan.set",
+    agent: "main",
+    data: {
+      items: [
+        { id: "one", text: "Create a room", status: "done" },
+        { id: "two", text: "Wait for another player", status: "doing" },
+      ],
+    },
+  });
+  f.log.append(id, {
+    type: "action.target",
+    agent: "main",
+    step,
+    data: {
+      target: {
+        point: { x: 1, y: 1 },
+        bbox: { x: 0, y: 0, w: 5, h: 5 },
+        source: "ax",
+        role: "button",
+        name: "Room",
+        app: "Chromium",
+        url: "https://user:password@example.com/room?token=private#secret",
+        secret: false,
+      },
+    },
+  });
+  f.log.append(id, {
+    type: "tool.start",
+    agent: "main",
+    step,
+    data: { tool: "browser_read", title: "Checking the room" },
+  });
+  f.log.append(id, {
+    type: "tool.output",
+    agent: "main",
+    step,
+    data: { stream: "stdout", chunk: "Raw output must not enter context" },
+  });
+  f.log.append(id, { type: "step.end", agent: "main", step, data: { status: "ok" } });
+  f.end(id, "stopped");
+  const reopened = f.open();
+  const earlier = reopened.earlier(id).join("\n");
+  expect(earlier).toContain("[done] Create a room");
+  expect(earlier).toContain("[doing] Wait for another player");
+  expect(earlier).toContain("https://example.com/room");
+  expect(earlier).toContain("[ok] Checking the room");
+  expect(earlier).not.toMatch(/password|token=|#secret|Raw output/);
+  expect(reopened.taskContext(id)).toContain("Saved plan");
+  expect(reopened.taskContext(id).length).toBeLessThanOrEqual(3000);
+});
+
+it("bounds the checkpoint, distinguishes unfinished actions, and skips secret targets", async () => {
+  const f = setup();
+  const id = await f.task("Resume work");
+  f.log.append(id, {
+    type: "plan.set",
+    agent: "main",
+    data: {
+      items: Array.from({ length: 6 }, (_, i) => ({
+        id: `p${i}`,
+        text: "A long plan item ".repeat(10),
+        status: "todo" as const,
+      })),
+    },
+  });
+  for (let n = 0; n < 12; n++) {
+    const step = ulid();
+    f.log.append(id, {
+      type: "tool.start",
+      agent: "main",
+      step,
+      data: { tool: "browser_read", title: `Read page ${n}` },
+    });
+  }
+  f.log.append(id, {
+    type: "action.target",
+    agent: "main",
+    step: ulid(),
+    data: {
+      target: {
+        point: { x: 1, y: 1 },
+        bbox: { x: 0, y: 0, w: 5, h: 5 },
+        source: "ax",
+        role: "textbox",
+        name: "Password",
+        app: "Chromium",
+        url: "https://private.example/secret-target",
+        secret: true,
+      },
+    },
+  });
+  const context = f.open().taskContext(id);
+  expect(context.length).toBeLessThanOrEqual(3000);
+  expect(context).toContain("[unconfirmed] Read page 11");
+  expect(context).not.toContain("Read page 0");
+  expect(context).not.toContain("secret-target");
+});

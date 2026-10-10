@@ -52,6 +52,9 @@ describe("recall", () => {
     h.tools.recall = recall;
     const out = (await h.call("recall", { query: "nothing" })).body.content[0]?.text ?? "";
     expect(out).toContain("No earlier tasks match.");
+    expect(h.events().find((event) => event.type === "tool.output")).toMatchObject({
+      data: { stream: "stdout", chunk: "No earlier tasks match." },
+    });
     expect(recall).toHaveBeenCalledWith("nothing", 5, h.session.id);
     expect(h.session.tainted).toBe(true);
     expect(h.session.taint.tainted).toBe(false);
@@ -78,5 +81,22 @@ describe("recall", () => {
     h.session.stop();
     await held;
     expect(h.session.tainted).toBe(false);
+  });
+});
+
+it("shows the recovered task context in both model results and visible step output", async () => {
+  const h = harness();
+  h.tools.recall = () => [
+    {
+      ...hit,
+      sessionId: "01M4KZJT1QYPBQP21KS6NDGH89",
+      context: "Saved plan:\n[doing] Wait for another player",
+    },
+  ];
+  const out = (await h.call("recall", { query: "room" })).body.content[0]?.text ?? "";
+  expect(out).toContain("task 01M4KZJT1QYPBQP21KS6NDGH89");
+  expect(out).toContain("[doing] Wait for another player");
+  expect(h.events().find((event) => event.type === "tool.output")).toMatchObject({
+    data: { chunk: expect.stringContaining("Wait for another player") },
   });
 });
