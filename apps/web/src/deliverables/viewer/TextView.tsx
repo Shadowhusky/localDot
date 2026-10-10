@@ -1,8 +1,9 @@
 import { type TextFileReply, type TextFormat, textFormat } from "@localdot/protocol";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SafeMarkdown } from "../../agent/SafeMarkdown.tsx";
 import { count } from "../../copy/format.ts";
 import type { ApiClient } from "../../lib/api.ts";
+import { Button } from "../../ui/Button.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { loadText } from "../api.ts";
@@ -18,16 +19,19 @@ export function useText(
   name: string,
   version: number | null,
   from: "start" | "end",
+  attempt = 0,
 ): Loaded {
   const [text, setText] = useState<Loaded>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt deliberately restarts a failed request.
   useEffect(() => {
     const controller = new AbortController();
+    setText(null);
     loadText(api, sessionId, name, version, from, controller.signal).then(
       (reply) => !controller.signal.aborted && setText(reply),
       () => !controller.signal.aborted && setText("failed"),
     );
     return () => controller.abort();
-  }, [api, sessionId, name, version, from]);
+  }, [api, sessionId, name, version, from, attempt]);
   return text;
 }
 
@@ -43,25 +47,39 @@ export function TextView({
   sessionId,
   name,
   version,
+  download,
 }: {
   api: ApiClient;
   sessionId: string;
   name: string;
   version: number | null;
+  download?: ReactNode;
 }) {
   const format = textFormat(name);
-  const text = useText(api, sessionId, name, version, format === "log" ? "end" : "start");
+  const [attempt, setAttempt] = useState(0);
+  const text = useText(api, sessionId, name, version, format === "log" ? "end" : "start", attempt);
   if (text === null) return <ViewerLoading label="Loading the text" />;
   if (text === "failed" || text.kind === "none")
     return (
       <ViewerMessage
         name={name}
+        action={
+          text === "failed" ? (
+            <Button size="md" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
+              Try again
+            </Button>
+          ) : (
+            download
+          )
+        }
         title={
           text !== "failed" && (text.reason === "binary" || text.reason === "missing")
             ? TEXT_REASONS[text.reason]
             : "Can't show this file"
         }
-      />
+      >
+        Download the file to open it in another app.
+      </ViewerMessage>
     );
   return <TextBody name={name} format={format} reply={text} />;
 }

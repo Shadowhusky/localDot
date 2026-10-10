@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { boundedJson, tableExcerpt, textExcerpt } from "./excerpt.ts";
+import { boundedJson, fileText, tableExcerpt, textExcerpt } from "./excerpt.ts";
 
 const bytes = (s: string) => Buffer.from(s);
 describe("text and table excerpts", () => {
+  it.each(["le", "be"])("reads BOM-marked UTF-16%s and its tail", (order) => {
+    const content = Buffer.from("\ufeffFirst\n保😀\nLast", "utf16le");
+    if (order === "be") content.swap16();
+    expect(textExcerpt("settings.unknown", content, content.length)).toMatchObject({
+      kind: "text",
+      lines: ["First", "保😀", "Last"],
+    });
+    expect(
+      fileText(
+        content.subarray(4),
+        content.length,
+        "end",
+        order === "le" ? "utf-16le" : "utf-16be",
+      ),
+    ).toMatchObject({ kind: "text", lines: ["保😀", "Last"], truncated: true });
+  });
+  it("shows a bounded prefix of a single long line, and distinguishes empty text from binary", () => {
+    const content = bytes("x".repeat(1000));
+    expect(textExcerpt("data.lock", content, 10000)).toMatchObject({
+      kind: "text",
+      truncated: true,
+    });
+    const full = fileText(content, 10000, "start");
+    expect(full.kind === "text" && full.lines[0]?.length).toBeGreaterThan(0);
+    expect(fileText(Buffer.alloc(0), 0, "start")).toMatchObject({ kind: "text", lines: [""] });
+    expect(fileText(Buffer.from([1, 2, 3, 4, 5, 6]), 6, "start")).toEqual({
+      kind: "none",
+      reason: "binary",
+    });
+  });
   it("keeps the first 40 lines and says when there were more", () => {
     const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
     const preview = textExcerpt("notes.md", bytes(text), Buffer.byteLength(text));

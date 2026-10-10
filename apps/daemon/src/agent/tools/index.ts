@@ -256,6 +256,22 @@ async function dispatchAdmitted(
     if (refusal) return { status: 200, result: fail(refusal) };
     const stopped = researchRefusal(session, name, frozen);
     if (stopped) return { status: 200, result: fail(stopped) };
+    if (
+      [
+        "computer",
+        "find",
+        "browser_read",
+        "browser_navigate",
+        "browser_act",
+        "browser_upload",
+        "switch_screen",
+        "ask_user",
+        "request_takeover",
+      ].includes(name)
+    ) {
+      await deps.tools.hideWork?.(session.id);
+      ctx.check();
+    }
     // Public pages open in the web browser, where the user's sign-ins are; local addresses
     // only resolve on the desktop.
     let fellBack = false;

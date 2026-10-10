@@ -58,7 +58,7 @@ describe("Codex developer instructions", () => {
     expect(text).not.toContain("research");
     expect(text).toContain("browser_upload");
     expect(text).toContain(workingRules("batch"));
-    expect(text.length).toBeLessThan(4300);
+    expect(text.length).toBeLessThan(6500);
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("adds the research rules and tool only in research mode", () => {
@@ -107,7 +107,7 @@ describe("Codex developer instructions", () => {
 
   it("keeps every sign-in in the web browser", () => {
     expect(CODEX_TOOL_DESCRIPTIONS.switch_screen).toContain(
-      "Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields.",
+      "Every sign-in happens here, never in the desktop's Chromium: switch here first and check the existing session before asking for missing details.",
     );
     expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(
       "Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",

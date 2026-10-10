@@ -35,7 +35,6 @@ import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
-import { WorkStage } from "./agent/WorkStage.tsx";
 import { deliverText } from "./agent/write-api.ts";
 import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
@@ -1875,21 +1874,6 @@ function Theatre({ api }: { api: ApiClient }) {
                         onRefused: setPasteRefused,
                       }
                     : undefined
-                }
-              />
-              <WorkStage
-                model={agent.model}
-                owner={agent.sessionId ?? "idle"}
-                available={
-                  !replayId &&
-                  !yours &&
-                  !viewedConversation &&
-                  !switching &&
-                  !decision &&
-                  !curtain.up &&
-                  !opening &&
-                  !agent.model.pendingAsk &&
-                  !agent.model.pendingTakeover
                 }
               />
               {!phone && !yours && !full && stageHud.live && (

@@ -81,6 +81,37 @@ function viewer(api: ReturnType<typeof daemon>["api"], entries: ViewerEntry[], i
 }
 
 describe("the full preview", () => {
+  it.each(["Makefile", "settings.env", "settings.unfamiliar"])(
+    "opens %s as escaped text",
+    async (name) => {
+      const { api } = daemon("<script>window.unwanted = true</script>\nPORT=3000");
+      viewer(api, [entry(name)]);
+      const contents = await screen.findByRole("region", { name: `Contents of ${name}` });
+      expect(contents.textContent).toContain("<script>");
+      expect(contents.querySelector("script")).toBeNull();
+    },
+  );
+  it("explains binary files and offers a download", async () => {
+    const api = createApi("a".repeat(43), {
+      fetchImpl: async () => Response.json({ kind: "none", reason: "binary" }),
+    });
+    viewer(api, [entry("archive.unknown")]);
+    expect(await screen.findByText("This file isn't text")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Download" }).length).toBeGreaterThan(0);
+  });
+  it("lets a failed text request retry without closing the file", async () => {
+    let calls = 0;
+    const api = createApi("a".repeat(43), {
+      fetchImpl: async () =>
+        ++calls === 1
+          ? new Response("unavailable", { status: 503 })
+          : Response.json({ kind: "text", lines: ["Recovered"], from: "start", truncated: false }),
+    });
+    viewer(api, [entry("notes.custom")]);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("region", { name: "Contents of notes.custom" })).toBeTruthy();
+    expect(screen.getByText("Recovered")).toBeTruthy();
+  });
   it("frames a page in an empty sandbox from the task's preview link, and says what it leaves out", async () => {
     const { api } = daemon();
     viewer(api, [entry("page.html")]);
@@ -168,7 +199,7 @@ describe("the full preview", () => {
     expect(onIndex).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Previous file" }));
     expect(onIndex).toHaveBeenLastCalledWith(1);
-    expect(screen.getByText("No preview for this kind of file")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Contents of c.zip" })).toBeTruthy();
   });
 
   it("opens from a file's row, and the row points there for a file it can't draw inline", async () => {

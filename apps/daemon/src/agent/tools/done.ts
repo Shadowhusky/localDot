@@ -60,6 +60,15 @@ export async function doneTool(
   const checked = input.checked?.trim();
   if (checked)
     append(ctx, "step.verify", { status: "success", evidence: cut(ctx.redact(checked), 200) });
+  if (input.experience && deps.saveExperience) {
+    const experience = input.experience;
+    deps.saveExperience(ctx.session.id, {
+      scope: ctx.redact(experience.scope),
+      when: ctx.redact(experience.when),
+      procedure: ctx.redact(experience.procedure),
+      recheck: ctx.redact(experience.recheck),
+    });
+  }
   append(ctx, "task.result", { summary: cut(ctx.redact(input.summary), 8000), files });
   return { ok: true, final: true, content: [text("Task finished.")] };
 }

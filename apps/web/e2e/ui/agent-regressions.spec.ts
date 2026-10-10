@@ -2,6 +2,37 @@ import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "c39", "w14", "w39");
 
+test("phone composer icons share a center on the last line", async ({ page, ui }) => {
+  test.skip(!isPhone(page), "Phone pill layout");
+  await ui.open("running");
+  const form = page.getByRole("form", { name: "Message dot" });
+  for (const width of [320, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const draft of ["", "Please check this", "First line\nSecond line\nThird line"]) {
+      await form.getByRole("textbox", { name: "Message" }).fill(draft);
+      await ui.settle();
+      const centers = await form.evaluate((element) => {
+        return [
+          ".composer-bar > .ui-icon-button:first-child > svg",
+          ".composer-permissions > svg",
+          ...(element.querySelector("textarea")?.value ? [] : [".voice-mic > button > svg"]),
+          ".composer-send > svg",
+        ].map((selector) => {
+          const icon = element.querySelector(selector);
+          if (!icon) throw new Error(`Missing icon: ${selector}`);
+          const box = icon.getBoundingClientRect();
+          return box.top + box.height / 2;
+        });
+      });
+      expect(Math.max(...centers) - Math.min(...centers), `${width}px, ${draft}`).toBeLessThan(1);
+    }
+    await page.screenshot({ path: test.info().outputPath(`phone-composer-${width}.png`) });
+  }
+  await form.getByRole("button", { name: /^Permission mode:/ }).click();
+  await expect(page.getByRole("menuitemradio", { name: /^Auto/ })).toBeVisible();
+  await expect(page.getByRole("radiogroup", { name: "Screen view" })).toHaveCount(0);
+});
+
 test("the composer keeps controls inside a narrow panel", async ({ page, ui }) => {
   await ui.open("running");
   const form = page.getByRole("form", { name: "Message dot" });

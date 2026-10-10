@@ -30,7 +30,7 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
-import { fileText, screenLine } from "./excerpt.ts";
+import { fileText, screenLine, textEncoding } from "./excerpt.ts";
 import { fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
@@ -177,7 +177,12 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
         ? stored.tail(rel, VIEWER_LIMITS.textBytes)
         : stored.head(rel, VIEWER_LIMITS.textBytes));
     const reply: TextFileReply = read
-      ? fileText("tail" in read ? read.tail : read.head, read.size, from)
+      ? fileText(
+          "tail" in read ? read.tail : read.head,
+          read.size,
+          from,
+          textEncoding((rel && stored.head(rel, 4)?.head) || new Uint8Array()),
+        )
       : { kind: "none", reason: "missing" };
     return c.json(TextFileReply.parse(reply));
   });

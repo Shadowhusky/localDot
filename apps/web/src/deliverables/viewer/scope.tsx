@@ -12,6 +12,9 @@ import type { AgentResult } from "../../agent/model.ts";
 import type { ResultDownloads } from "../../agent/ResultFiles.tsx";
 import type { ApiClient } from "../../lib/api.ts";
 import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
+import { Sheet } from "../../ui/Sheet.tsx";
+import { showToast } from "../../ui/Toast.tsx";
+import { ViewerLoading } from "./states.tsx";
 
 type ResultFile = AgentResult["files"][number];
 // One file a list shows, by the result that handed it over and the task whose copy it is.
@@ -64,6 +67,11 @@ export function FileViewerScope({
   const open = useCallback(
     (key: string, shown?: ShownVersion) => {
       if (keys.includes(key)) setViewing({ open: true, key, shown });
+      else
+        showToast({
+          title: "This file is no longer in the list. Reopen the task and try again.",
+          tone: "neutral",
+        });
     },
     [keys],
   );
@@ -73,7 +81,13 @@ export function FileViewerScope({
       {children}
       {viewing && index >= 0 && (
         <ErrorBoundary floating>
-          <Suspense fallback={null}>
+          <Suspense
+            fallback={
+              <Sheet open={viewing.open} title="Opening file" onClose={() => setViewing(null)}>
+                <ViewerLoading label="Loading the file viewer" />
+              </Sheet>
+            }
+          >
             <FileViewer
               api={api}
               entries={entries}

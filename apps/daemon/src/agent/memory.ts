@@ -8,6 +8,8 @@ import {
   unifiedDiff,
 } from "@localdot/protocol";
 import { z } from "zod";
+import { LearnedExperience } from "../../../../packages/protocol/src/experience.ts";
+import { experienceText, parseExperience, relevantExperience } from "./experience.ts";
 import {
   bootView,
   entryTextProblem,
@@ -167,12 +169,63 @@ export class MemoryStore {
   readBoth() {
     return { user: this.read("USER.md"), memory: this.read("MEMORY.md") };
   }
-  // What a task's model reads: pinned facts first and no metadata. Daily notes never boot.
-  bootMemory(): { user: string; memory: string } {
+  // Pinned facts plus a small selection of relevant, attributed experience. Ordinary daily notes stay in recall.
+  bootMemory(task = ""): { user: string; memory: string } {
+    const experience = task ? relevantExperience(this.experiences(), task) : "";
     return {
       user: bootView(this.read("USER.md"), MEMORY_MAX_CHARS),
-      memory: bootView(this.read("MEMORY.md"), MEMORY_MAX_CHARS),
+      memory: bootView(this.read("MEMORY.md"), MEMORY_MAX_CHARS - experience.length) + experience,
     };
+  }
+  experiences(): StoredEntry[] {
+    return this.listNotes()
+      .slice(0, 90)
+      .flatMap((file) => {
+        try {
+          return this.entries(file).reverse();
+        } catch {
+          return [];
+        } // One damaged optional note must not block a new task.
+      })
+      .filter((entry) => parseExperience(entry.text));
+  }
+  learn(
+    sessionId: string,
+    input: LearnedExperience,
+    evidence: string,
+  ): MemoryChangeRecord | undefined {
+    this.#recover();
+    const value = LearnedExperience.parse(input);
+    if (!Id.safeParse(sessionId).success || !ULID_PATTERN.test(evidence))
+      throw new MemoryError(400, "invalid experience evidence");
+    const text = experienceText(value, evidence);
+    if (keyLikePresent(text))
+      throw new MemoryError(400, "experience contains a secret-shaped value");
+    const previous = this.experiences().find((entry) => {
+      const old = parseExperience(entry.text);
+      return (
+        old?.scope.toLowerCase() === value.scope.toLowerCase() &&
+        old.when.toLowerCase() === value.when.toLowerCase()
+      );
+    });
+    if (previous && JSON.stringify(parseExperience(previous.text)) === JSON.stringify(value))
+      return undefined;
+    const file: NotesFile = previous
+      ? (previous.file as NotesFile)
+      : `notes/${localDay(this.#now())}.md`;
+    const before = this.#read(file);
+    const raw = renderEntry(
+      text,
+      { id: previous?.id ?? ulid(), src: sessionId, at: localDay(this.#now()) },
+      eolOf(before),
+    );
+    const after = previous
+      ? parseMemory(before)
+          .map((block) => (isEntry(block) && block.id === previous.id ? raw : block.raw))
+          .join("")
+      : `${before}${before.endsWith("\n") ? "" : "\n"}${raw}`;
+    if (after.length > MEMORY_MAX_CHARS) throw new MemoryError(409, "today's notes are full");
+    return this.#commit({ sessionId, source: "agent", file, before, after });
   }
   #history(id: string): History {
     const text = this.#files.text(`.history/${id}.json`, 256 * 1024);

@@ -219,6 +219,7 @@ COPY --from=lscr.io/linuxserver/webtop@sha256:73f966bd414cd4aef183c96aba8fab37dd
 FROM base AS desktop
 # The bundle lands in the final stage only, so `--target selkies-client` never needs it built.
 COPY desktopd/dist/desktopd.mjs /opt/localdot/desktopd.mjs
+COPY desktopd/work-window.py /opt/localdot/work-window.py
 COPY desktopd/x/xhelper.py /opt/localdot/xhelper.py
 COPY desktopd/x/native.py /opt/localdot/native.py
 COPY desktopd/place-download.py /opt/localdot/place-download.py

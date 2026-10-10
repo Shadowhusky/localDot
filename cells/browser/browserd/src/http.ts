@@ -22,6 +22,8 @@ import {
   BrowserUploadRequest,
 } from "../../../../packages/protocol/src/browser-uploads.ts";
 import { DOWNLOAD_BYTES } from "../../../../packages/protocol/src/quarantine.ts";
+import { WorkWindowUpdate } from "../../../../packages/protocol/src/work-window.ts";
+import type { WorkWindow } from "../../../desktop/desktopd/src/work-window.ts";
 import { type BrowserAccounts, isSiteName } from "./accounts.ts";
 import type { BrowserControl } from "./control.ts";
 import type { BrowserDownloadService } from "./download-service.ts";
@@ -58,6 +60,7 @@ const progressSchema = schema.strictObject({
   pressMono: schema.number().finite().nonnegative(),
 });
 const routes = new Set([
+  "POST /work-window",
   "GET /health",
   "GET /tabs",
   "PUT /control",
@@ -83,6 +86,7 @@ const routes = new Set([
 const signOutSchema = schema.strictObject({ site: schema.string().max(253) });
 
 export interface BrowserHttpOptions {
+  readonly workWindow?: Pick<WorkWindow, "update" | "hide" | "close">;
   readonly config: BrowserRuntimeConfig;
   readonly instance: string;
   readonly control: Pick<BrowserControl, "holder" | "set">;
@@ -305,6 +309,7 @@ export class BrowserHttp {
   }
 
   async close(): Promise<void> {
+    this.#options.workWindow?.close();
     try {
       await this.stop();
     } finally {
@@ -394,6 +399,18 @@ export class BrowserHttp {
         return;
       }
       const body = await jsonBody(request, disconnected.signal);
+      if (route === "POST /work-window") {
+        this.#available(signal);
+        const update = WorkWindowUpdate.safeParse(body);
+        if (!update.success) throw new HttpRefusal(400, "request");
+        if (!this.#options.workWindow) throw new HttpRefusal(503, "unavailable");
+        if (update.data.visible && this.#options.control.holder !== "agent")
+          throw new HttpRefusal(409, "refused");
+        await this.#options.workWindow.update(update.data);
+        send(response, 200, { ok: true });
+        return;
+      }
+      await this.#options.workWindow?.hide();
       if (route === "POST /stop") {
         const identity = identitySchema.safeParse(body);
         if (

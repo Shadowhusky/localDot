@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
+import { LearnedExperience } from "./experience.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { ResearchInput } from "./research.ts";
 import { SwitchScreenInput } from "./screens.ts";
@@ -335,6 +336,9 @@ export const RememberInput = z.object({
 export type RememberInput = z.infer<typeof RememberInput>;
 
 export const DoneInput = z.object({
+  experience: LearnedExperience.optional().describe(
+    "A reusable workflow actually validated in this task: setup, pitfalls and a cheap recheck. Omit trivial or unverified lessons.",
+  ),
   summary: z.string().min(1).max(8000),
   files: z.array(z.string().min(1).max(1024)).max(16).optional(),
   checked: z

@@ -6,6 +6,7 @@ import {
   PREVIEW_LIMITS,
   type PreviewReason,
   VIEWER_LIMITS,
+  viewerKind,
 } from "@localdot/protocol";
 import { outputPath } from "../agent/output-store.ts";
 import { boundedJson, tableExcerpt, textExcerpt } from "./excerpt.ts";
@@ -123,13 +124,13 @@ export class Previews {
     const rel = outputPath(sessionId, name, version);
     if (!rel || !this.#files.exists(rel)) return none("missing");
     const kind = fileKind(name);
-    if (kind === "attachment") return none("attachment");
-    if (kind === "text" || kind === "table") {
+    if (kind === "attachment" && viewerKind(name) !== "details") return none("attachment");
+    if (kind === "text" || kind === "table" || kind === "attachment") {
       const read = this.#files.head(rel, PREVIEW_LIMITS.readBytes);
       if (!read) return none("missing");
       return {
         json: boundedJson(
-          (kind === "text" ? textExcerpt : tableExcerpt)(name, read.head, read.size),
+          (kind === "table" ? tableExcerpt : textExcerpt)(name, read.head, read.size),
         ),
       };
     }

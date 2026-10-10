@@ -13,6 +13,7 @@ import type { PerceptionDeps } from "./perception/hit-test.ts";
 import { AtspiAccessibility } from "./perception/native.ts";
 import { cachedSelfTest, nodeProbes, runSelfTest, selfTestConfigFromEnv } from "./selftest.ts";
 import { PageBrowser } from "./tools/browser.ts";
+import { WorkWindow } from "./work-window.ts";
 import { startXHelper, type XHelper } from "./x/helper.ts";
 import { readScreen, readXsettings, windowScaling } from "./xsettings.ts";
 
@@ -75,6 +76,7 @@ const cdp = new ChromiumPerception({
 });
 const scaling = windowScaling(() => readXsettings(uid), scale);
 const app = createDesktopdApp({
+  workWindow: new WorkWindow(),
   prepareBrowser: prepareDesktopBrowser,
   tools: {
     home: process.env.LOCALDOT_HOME_DIR ?? "/config",

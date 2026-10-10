@@ -67,13 +67,11 @@ appears only when there is a choice of when to send. Use **Panels** in the top b
 restore Chat and Activity; the Activity close button hides its Steps, Files, and Sources view.
 Panel sizes, visibility, and selected tabs are remembered in this browser across visits.
 
-The screen's **Auto / Computer / Work** control shows command output and file changes while dot
-works in the background, then returns to the computer for visual actions or human input.
-Choose **Computer** or **Work** to keep a view; the choice is remembered. Work uses the existing
-activity stream, with no extra model calls, command execution, or file polling. You can scroll
-back through the most recent eight background steps without the output pulling you away.
+Background commands and file changes appear in a read-only **Activity** window inside dot's
+computer, visible through the same live screen. It uses existing redacted output, without extra
+model calls or command execution. The window clears before visual actions or handing control to you.
 
-<img src="docs/readme/work.png" alt="The Work view shows file diffs and command output, with Auto, Computer and Work controls at the bottom of the screen">
+<img src="docs/readme/work.png" alt="The native Activity window inside the computer shows command output and file changes; pictured with sample test output">
 
 <img src="docs/readme/panels.png" alt="The Panels menu offers Hide chat and Hide activity; Files is selected in the resizable Activity panel">
 
@@ -478,9 +476,16 @@ and the model calls stay on your Mac.
 Look at it.
 
 **Can I build on it?**
-Yes. Skills are plain `SKILL.md` folders, dot's memory is two Markdown files you can read and
-edit, and any MCP server can become one of dot's tools in Settings → Connectors. See
+Yes. Skills are plain `SKILL.md` folders, dot's memory uses editable Markdown files and daily notes, and any MCP server can become one of dot's tools in Settings → Connectors. See
 [docs/development.md](docs/development.md).
+
+Reusable setup experience is saved with its project or workflow scope, conditions, source task,
+and a check to perform before reuse. Relevant experience is loaded into new conversations and
+routine runs. You can inspect, edit, or delete it under **What dot knows → Daily notes**.
+It remains observed context, never permission to act. [Design and experiments](docs/experience-memory.md).
+
+Text files with unfamiliar extensions open as text when their bytes are readable. Binary or
+unavailable files show an explanation; failed text loads have **Try again**, and files remain downloadable.
 
 ## Contributing
 

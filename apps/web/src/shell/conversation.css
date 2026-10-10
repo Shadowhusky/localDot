@@ -1835,6 +1835,9 @@
 
 .composer-card[data-layout="pill"] .composer-permissions {
   order: 1;
+  /* Its 28 px face shares the center of the adjacent 36 px controls. Keep that
+     center on the last line when the message grows. */
+  margin-bottom: var(--spacing);
 }
 
 .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button:first-child {

@@ -61,15 +61,7 @@ export function StageFrame({
           <i data-light="you" />
         </div>
         {/* biome-ignore lint/a11y/noStaticElementInteractions: a pointer shortcut; F and the corner button are the keyboard's way */}
-        <div
-          className={picture}
-          onDoubleClick={(event) => {
-            // Selecting terminal text or pressing an overlay control is not a picture gesture.
-            if (event.target instanceof Element && event.target.closest("[data-picture-overlay]"))
-              return;
-            onPictureDoubleClick?.();
-          }}
-        >
+        <div className={picture} onDoubleClick={onPictureDoubleClick}>
           {children}
         </div>
         <div className="stage-rim" aria-hidden="true">

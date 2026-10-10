@@ -73,6 +73,7 @@ import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
 import { ChatgptSetup, SANDBOX_REASONS, SETUP_UNSAVED } from "./codex/setup.ts";
 import { Conversations } from "./conversation.ts";
+import { ExperienceRecorder } from "./experience-recorder.ts";
 import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
@@ -97,6 +98,7 @@ import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
 import { WebCell } from "./web/cell.ts";
+import { WorkWindowFeed } from "./work-window.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
   home: string;
@@ -123,7 +125,8 @@ export interface AgentWiringDeps {
   relay?: () => Promise<GateRelay>;
   codex?: { realHome: string; user: string };
   claudeCode?: { realHome: string };
-  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser">;
+  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual" | "startBrowser"> &
+    Partial<Pick<SessionScreens, "workEndpoint">>;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
@@ -147,6 +150,28 @@ export function createAgent(d: AgentWiringDeps) {
     isLive: (id) => d.live.cellOf(id) !== undefined,
   });
   const conversations = new Conversations(d.home, d.eventLog);
+  const experience = new ExperienceRecorder({
+    memory,
+    task: (id) => runner.get(id)?.task,
+    allowed: (id) => {
+      const session = runner.get(id);
+      return (
+        !!session &&
+        !session.stopped &&
+        (session.permissionMode() === "full" ||
+          session.autonomy.memory === "act" ||
+          session.taskAutonomy.relaxes("memory", {}))
+      );
+    },
+    changed: (id, change) => {
+      runner.get(id)?.append("memory.change", {
+        file: change.file,
+        patch: change.patch,
+        changeId: change.changeId,
+      });
+      d.notesChanged?.(change.file);
+    },
+  });
   const transcripts = new TranscriptStore(d.home),
     png = new FramePng(d.frames, d.gateway),
     outputs = new OutputStore(d.home),
@@ -358,6 +383,8 @@ export function createAgent(d: AgentWiringDeps) {
   const dispatch: DispatchDeps = {
     ...(d.policy ? { policy: d.policy } : {}),
     tools: {
+      hideWork: (id) => workWindow.hide(id),
+      saveExperience: (id, lesson) => experience.save(id, lesson),
       uploads: { desktop, transfers },
       gateway: d.gateway,
       bindScreen: d.sessionScreens?.bind.bind(d.sessionScreens),
@@ -424,6 +451,8 @@ export function createAgent(d: AgentWiringDeps) {
         ? AbortSignal.any([lease.signal, screen.signal])
         : lease.signal;
       check();
+      await workWindow.hide(session.id);
+      check();
       const frame = await d.gateway.observe({
         sessionId: session.id,
         cellId: binding?.cellId ?? session.cellId,
@@ -467,7 +496,7 @@ export function createAgent(d: AgentWiringDeps) {
           observe,
           instructions: (session) =>
             codexInstructions({
-              memory: tainting(session, memory.bootMemory()),
+              memory: tainting(session, memory.bootMemory(session.task)),
               recent: session.recent,
               skills: runner.skillsOf(session.id),
               today: new Date(),
@@ -555,7 +584,7 @@ export function createAgent(d: AgentWiringDeps) {
         transcripts,
         instructions: (session) =>
           claudeCodeInstructions({
-            memory: tainting(session, memory.bootMemory()),
+            memory: tainting(session, memory.bootMemory(session.task)),
             recent: session.recent,
             skills: runner.skillsOf(session.id),
             today: new Date(),
@@ -885,6 +914,29 @@ export function createAgent(d: AgentWiringDeps) {
     }
     return { tools, signal: access.signal, check: access.check, release: access.release };
   };
+  const workWindow = new WorkWindowFeed({
+    target: (id) => {
+      const session = runner.get(id);
+      if (
+        closing ||
+        !session ||
+        session.stopped ||
+        session.controlHeld ||
+        session.pendingAsk ||
+        session.status === "paused" ||
+        session.status === "waiting_user" ||
+        session.status === "idle"
+      )
+        return undefined;
+      return session.screens?.selection.screen === "browser"
+        ? d.sessionScreens?.workEndpoint?.(session)
+        : d.cells.endpoints(session.cellId)?.desktopd;
+    },
+  });
+  const stopWorkFeed = d.eventLog.subscribe((id, event) => {
+    workWindow.event(id, event);
+    experience.event(id, event);
+  });
   let server: ReturnType<typeof serve> | undefined,
     socketServer: ReturnType<typeof createAdaptorServer> | undefined,
     startPromise: Promise<void> | undefined,
@@ -959,6 +1011,8 @@ export function createAgent(d: AgentWiringDeps) {
       closing = true;
       ready = false;
       unsubscribe();
+      stopWorkFeed();
+      workWindow.close();
       transfers.close();
       installer?.cancel();
       claudeSetup?.close();

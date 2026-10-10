@@ -11,6 +11,32 @@ afterEach(cleanFixtures);
 const json = async (res: Response) => JsonPreview.parse(JSON.parse(await res.text()));
 
 describe("previews", () => {
+  it.each([
+    "settings.env",
+    "pnpm.lock",
+    "schema.proto",
+    "Dockerfile",
+    "Makefile",
+    "settings.unfamiliar",
+  ])("opens readable %s as text in both the card and full viewer", async (name) => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    f.result(id, { [name]: "# setup\nPORT=3000\n" });
+    for (const endpoint of ["preview", "text"]) {
+      const res = await f.get(`/api/agent/sessions/${id}/files/${name}/${endpoint}?v=1`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ kind: "text", lines: ["# setup", "PORT=3000", ""] });
+    }
+  });
+  it("gives unknown binary files an explicit reason instead of an empty preview", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    f.result(id, { "blob.unknown": Buffer.from([0, 3, 255, 0]) });
+    for (const endpoint of ["preview", "text"])
+      expect(
+        await (await f.get(`/api/agent/sessions/${id}/files/blob.unknown/${endpoint}?v=1`)).json(),
+      ).toEqual({ kind: "none", reason: "binary" });
+  });
   it("bounds a large picture to 1024 px with no metadata, and a noisy one to 2 MiB", async () => {
     const f = deliverablesFixture();
     const id = f.task();

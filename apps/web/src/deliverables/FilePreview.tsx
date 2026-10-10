@@ -46,7 +46,7 @@ export function FilePreview({
   opens?: boolean;
 }) {
   const picture = kind === "image" || kind === "office" || kind === "pdf";
-  if (kind === "attachment")
+  if (kind === "attachment" && viewerKind(name) !== "details")
     return (
       <Note
         text={

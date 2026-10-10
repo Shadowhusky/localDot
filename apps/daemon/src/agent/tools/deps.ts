@@ -23,6 +23,11 @@ export interface RecallHit {
 }
 
 export interface ToolDeps {
+  hideWork?(id: string): Promise<void>;
+  saveExperience?(
+    id: string,
+    experience: import("../../../../../packages/protocol/src/experience.ts").LearnedExperience,
+  ): boolean;
   uploads?: {
     desktop(cellId: string): Pick<DesktopdTools, "inspectUpload" | "readUpload"> | undefined;
     transfers: Pick<Transfers, "acquire">;

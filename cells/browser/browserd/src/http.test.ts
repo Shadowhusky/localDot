@@ -163,7 +163,9 @@ async function setup(enableNavigation = true) {
     ready = false;
     closing = control.close();
   });
+  const workWindow = { update: vi.fn(async () => {}), hide: vi.fn(async () => {}), close: vi.fn() };
   const service = new BrowserHttp({
+    workWindow,
     config: {
       browserCellId,
       parentCellId,
@@ -262,6 +264,7 @@ async function setup(enableNavigation = true) {
     return socket;
   };
   return {
+    workWindow,
     service,
     control,
     send,
@@ -893,4 +896,19 @@ describe("authenticated browser HTTP transport", () => {
     socket.destroy();
     expect((await peer.send("POST", "/observe", { permit, tabId })).status).toBe(200);
   });
+});
+
+it("shows passive work only for agent control and hides it before observation", async () => {
+  const f = await setup();
+  const update = { phase: "task/step", visible: true, title: "Checking", text: "redacted output" };
+  expect((await f.send("POST", "/work-window", update)).status).toBe(200);
+  expect(f.workWindow.update).toHaveBeenCalledWith(update);
+  await f.send("POST", "/observe", { permit, tabId });
+  expect(f.workWindow.hide.mock.invocationCallOrder[0]).toBeLessThan(
+    f.observe.mock.invocationCallOrder[0] ?? 0,
+  );
+  await f.control.set({ ...identity, revision: 2, requestId: ulid(), holder: "user" });
+  expect((await f.send("POST", "/work-window", update)).status).toBe(409);
+  expect(f.workWindow.update).toHaveBeenCalledTimes(1);
+  expect((await f.send("POST", "/work-window", { ...update, visible: false })).status).toBe(200);
 });

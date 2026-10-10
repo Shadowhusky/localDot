@@ -38,6 +38,14 @@ export class SessionScreens {
     await this.deps.browser.start(cellId);
   }
 
+  workEndpoint(session: AgentSession): { baseUrl: string; token: string } | undefined {
+    if (session.screens?.selection.screen !== "browser") return undefined;
+    const endpoint = this.deps.browser.endpoints(session.cellId);
+    return endpoint?.browserCellId === session.screens.selection.cellId
+      ? endpoint.browserd
+      : undefined;
+  }
+
   install(session: AgentSession, cell: CellSummary): void {
     if (session.cellId !== cell.id) throw new Error("The session computer changed.");
     session.attachScreens(

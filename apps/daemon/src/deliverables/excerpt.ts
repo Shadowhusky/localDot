@@ -13,12 +13,31 @@ const L = PREVIEW_LIMITS;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Excerpts show control bytes as a replacement mark.
 const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
-// The start of a file as text, or undefined when it is not UTF-8 text. A character cut by the read
-// boundary of an incomplete head is dropped rather than counted as binary.
-export function decodeHead(head: Uint8Array, complete: boolean): string | undefined {
-  if (head.includes(0)) return undefined;
+export type TextEncoding = "utf-8" | "utf-16le" | "utf-16be";
+export function textEncoding(head: Uint8Array): TextEncoding {
+  if (head[0] === 0xff && head[1] === 0xfe) return "utf-16le";
+  if (head[0] === 0xfe && head[1] === 0xff) return "utf-16be";
+  return "utf-8";
+}
+
+// Inspect bytes, not the suffix. UTF-16 needs a BOM; guessing legacy encodings would turn
+// arbitrary binary into apparent text. An incomplete final character is held at the read boundary.
+export function decodeHead(
+  head: Uint8Array,
+  complete: boolean,
+  encoding = textEncoding(head),
+): string | undefined {
+  if (encoding === "utf-8" && head.includes(0)) return undefined;
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(head, { stream: !complete });
+    const text = new TextDecoder(encoding, { fatal: true }).decode(head, { stream: !complete });
+    if (text.includes("\0")) return undefined;
+    // Keep occasional terminal controls (masked below), but reject control-heavy binary data.
+    let controls = 0;
+    for (const ch of text) {
+      const code = ch.charCodeAt(0);
+      if (code < 32 && ![9, 10, 12, 13, 27].includes(code)) controls++;
+    }
+    return controls > Math.max(2, text.length / 20) ? undefined : text;
   } catch {
     return undefined;
   }
@@ -58,7 +77,7 @@ export function textExcerpt(name: string, head: Uint8Array, fileBytes: number): 
   const text = decodeHead(head, complete);
   if (text === undefined) return { kind: "none", reason: "binary" };
   const all = text.split(/\r\n|\r|\n/);
-  if (!complete) all.pop(); // The last line may be cut mid-way.
+  if (!complete && all.length > 1) all.pop(); // Keep a bounded excerpt even for one very long line.
   const shown = all.slice(0, L.lines);
   const ext = fileExtension(name);
   return {
@@ -130,20 +149,28 @@ export function fileText(
   bytes: Uint8Array,
   fileBytes: number,
   from: "start" | "end",
+  encoding = textEncoding(bytes),
 ): TextFileReply {
   const complete = fileBytes <= bytes.byteLength;
   let body = bytes;
   // A tail may begin inside a character: its continuation bytes are dropped.
-  if (from === "end" && !complete) {
+  if (from === "end" && !complete && encoding === "utf-8") {
     let skip = 0;
     while (skip < 3 && ((body[skip] ?? 0) & 0xc0) === 0x80) skip++;
     body = body.subarray(skip);
   }
-  const text = decodeHead(body, complete || from === "end");
+  if (from === "end" && !complete && encoding !== "utf-8" && body.length >= 2) {
+    const unit =
+      encoding === "utf-16le"
+        ? (body[0] ?? 0) | ((body[1] ?? 0) << 8)
+        : ((body[0] ?? 0) << 8) | (body[1] ?? 0);
+    if (unit >= 0xdc00 && unit <= 0xdfff) body = body.subarray(2);
+  }
+  const text = decodeHead(body, complete || from === "end", encoding);
   if (text === undefined) return { kind: "none", reason: "binary" };
   const all = text.split(/\r\n|\r|\n/);
-  if (!complete) {
-    // The line at the cut is partial.
+  if (!complete && all.length > 1) {
+    // The line at the cut is partial. Keep a single long line instead of an empty view.
     if (from === "end") all.shift();
     else all.pop();
   }

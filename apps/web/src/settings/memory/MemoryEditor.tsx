@@ -29,7 +29,8 @@ const EMPTY: Record<Shelf, string> = {
 const FOOTNOTE: Record<Shelf, string> = {
   "USER.md": "Pinned facts come first in every task.",
   "MEMORY.md": "Pinned facts come first in every task.",
-  notes: "dot looks these up when it needs them. A task doesn't start with them.",
+  notes:
+    "Relevant learned workflows are brought into new tasks automatically. Other notes are looked up when needed.",
 };
 
 // Pinned facts first in file order, then the newest, undated ones last: the order a task reads.

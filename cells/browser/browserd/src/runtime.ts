@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
+import { WorkWindow } from "../../../desktop/desktopd/src/work-window.ts";
 import { BrowserAccounts } from "./accounts.ts";
 import { BrowserCapture } from "./capture.ts";
 import { BrowserControl } from "./control.ts";
@@ -326,6 +327,12 @@ export class BrowserRuntime {
       });
       this.#navigation = new BrowserNavigation(this.#control, targets);
       this.#http = new BrowserHttp({
+        workWindow: new WorkWindow({
+          ...process.env,
+          DISPLAY: ":1",
+          GDK_SCALE: String(this.#config.scale),
+          HOME: "/home/browser",
+        }),
         config: this.#config,
         instance: this.instance,
         control: this.#control,

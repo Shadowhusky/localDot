@@ -1,4 +1,4 @@
-import { canOpenOnMac, type FileVersion, fileKind } from "@localdot/protocol";
+import { canOpenOnMac, type FileVersion, fileKind, viewerKind } from "@localdot/protocol";
 import { useId, useRef, useState } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import type { FileState, ResultDownloads } from "../agent/ResultFiles.tsx";
@@ -83,7 +83,7 @@ export function DeliverableFile({
     shown.sessionId,
     file.name,
     shown.version,
-    open && kind !== "attachment",
+    open && (kind !== "attachment" || viewerKind(file.name) === "details"),
     attempt,
   );
   const pair = comparePair(file.name, versions, current);

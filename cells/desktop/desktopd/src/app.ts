@@ -21,6 +21,7 @@ import {
   DesktopBrowserReady,
   DesktopBrowserTask,
 } from "../../../../packages/protocol/src/desktop-browser.ts";
+import { WorkWindowUpdate } from "../../../../packages/protocol/src/work-window.ts";
 import { bearerMatches } from "./auth.ts";
 import {
   ActivationError,
@@ -42,12 +43,14 @@ import {
 import { observe } from "./perception/observe.ts";
 import { settle } from "./settle.ts";
 import { addToolRoutes, type ToolRouteDeps } from "./tools/routes.ts";
+import type { WorkWindow } from "./work-window.ts";
 import type { XHelper } from "./x/helper.ts";
 import type { Screen, Xsettings } from "./xsettings.ts";
 
 export type Scale = 1 | 2;
 
 export interface DesktopdDeps {
+  workWindow?: Pick<WorkWindow, "update" | "hide">;
   token: string;
   scale: Scale;
   display: string;
@@ -122,6 +125,27 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     await next();
   });
   const standardBodyLimit = bodyLimit({ maxSize: 64 * 1024 });
+  app.use("*", async (c, next) => {
+    if (
+      [
+        "/observe",
+        "/input",
+        "/type",
+        "/find",
+        "/elements",
+        "/hitTest",
+        "/focused",
+        "/zoom",
+        "/settle",
+        "/release",
+        "/launch",
+        "/browser/navigate",
+        "/browser/read",
+      ].includes(c.req.path)
+    )
+      await deps.workWindow?.hide();
+    await next();
+  });
   app.use("*", (c, next) => {
     // Tool routes consume their own abort-aware, incrementally bounded request bodies. Only
     // write/edit/put have larger limits; all original routes retain the standard 64 KiB limit.
@@ -144,6 +168,14 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     return standardBodyLimit(c, next);
   });
   if (deps.tools) addToolRoutes(app, deps.tools);
+
+  app.post("/work-window", async (c) => {
+    const parsed = WorkWindowUpdate.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text("invalid display update", 400);
+    if (!deps.workWindow) return c.text("display unavailable", 503);
+    await deps.workWindow.update(parsed.data);
+    return c.json({ ok: true });
+  });
 
   app.post("/browser/task", async (c) => {
     const parsed = DesktopBrowserTask.safeParse(await c.req.json().catch(() => null));

@@ -112,7 +112,7 @@ export function textFormat(name: string): TextFormat {
   const ext = fileExtension(name);
   if (ext === "md" || ext === "markdown") return "markdown";
   if (ext === "json" || ext === "log") return ext;
-  return ext === "txt" ? "plain" : "code";
+  return CODE.has(ext) || ["xml", "yaml", "yml", "toml"].includes(ext) ? "code" : "plain";
 }
 const PRESENTATIONS = new Set(["pptx", "ppt", "pps", "ppsx", "odp"]);
 // Shown a slide at a time in the full preview.

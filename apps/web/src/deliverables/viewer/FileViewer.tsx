@@ -424,8 +424,10 @@ function ViewBody({
       </ViewerMessage>
     );
   if (url === "failed") return <ViewerMessage name={name} title="Couldn't load the preview" />;
-  if (kind === "text")
-    return <TextView api={api} sessionId={sessionId} name={name} version={version} />;
+  if (kind === "text" || kind === "details")
+    return (
+      <TextView api={api} sessionId={sessionId} name={name} version={version} download={download} />
+    );
   if (kind === "table")
     return <TableView api={api} sessionId={sessionId} name={name} version={version} />;
   if (kind === "sheet")
@@ -438,12 +440,6 @@ function ViewBody({
     );
   if (kind === "html")
     return <PageView api={api} url={url} sessionId={sessionId} name={name} version={version} />;
-  if (kind === "details")
-    return (
-      <ViewerMessage name={name} title="No preview for this kind of file">
-        {kindLabel(name)} · {bytes(item.bytes)}
-      </ViewerMessage>
-    );
   if (url === null) return <ViewerLoading label="Loading the preview" />;
   if (kind === "pdf")
     return (
