@@ -57,10 +57,11 @@ versions, timestamps, redacted logs, screenshots and disk measurements with each
 
 Write one receipt per platform/host using `DistributionAcceptance`. Each check is `true` only after
 the corresponding test was performed successfully. Hash the retained redacted evidence bundle in
-`evidenceSha256`. Do not put credentials, reusable access tokens or sign-in URLs in that bundle.
+`evidenceSha256`, and retain it as `evidence/<sha256>.tgz`. The gate requires the actual
+bundle and checks its bytes against the receipt. Do not put credentials, reusable access tokens or sign-in URLs in that bundle.
 
 ```sh
-node scripts/release/acceptance.mjs distribution.json acceptance-*.json
+node scripts/release/acceptance.mjs distribution.json evidence acceptance-*.json
 ```
 
 This checks complete coverage, test results, exact catalog/source/image identities and Windows

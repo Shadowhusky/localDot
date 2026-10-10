@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   DistributionAcceptance,
@@ -45,13 +47,31 @@ export function verifyAcceptance(manifestBytes, records) {
   };
 }
 
+// Require the retained evidence bytes as well as a receipt. Matching the hash prevents an
+// accidentally replaced/missing bundle from passing; a reviewer still authenticates its origin.
+export async function verifyEvidence(records, directory) {
+  for (const raw of records) {
+    const record = DistributionAcceptance.parse(raw);
+    const hash = createHash("sha256");
+    const path = join(directory, `${record.evidenceSha256}.tgz`);
+    let size = 0;
+    for await (const chunk of createReadStream(path)) {
+      size += chunk.length;
+      hash.update(chunk);
+    }
+    if (!size || hash.digest("hex") !== record.evidenceSha256)
+      throw new Error(`Evidence bundle does not match ${record.platform}:${record.host}`);
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [manifest, ...receipts] = process.argv.slice(2);
-  if (!manifest || !receipts.length)
-    throw new Error("Usage: acceptance.mjs distribution.json acceptance-*.json");
-  const result = verifyAcceptance(
-    await readFile(manifest),
-    await Promise.all(receipts.map(async (path) => JSON.parse(await readFile(path, "utf8")))),
+  const [manifest, evidenceDirectory, ...receipts] = process.argv.slice(2);
+  if (!manifest || !evidenceDirectory || !receipts.length)
+    throw new Error("Usage: acceptance.mjs distribution.json evidence-directory acceptance-*.json");
+  const records = await Promise.all(
+    receipts.map(async (path) => JSON.parse(await readFile(path, "utf8"))),
   );
+  const result = verifyAcceptance(await readFile(manifest), records);
+  await verifyEvidence(records, evidenceDirectory);
   console.log(JSON.stringify(result, null, 2));
 }

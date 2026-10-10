@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
   ACCEPTANCE_CHECKS,
   DistributionManifest,
 } from "../../packages/protocol/src/distribution.ts";
-import { verifyAcceptance } from "./acceptance.mjs";
+import { verifyAcceptance, verifyEvidence } from "./acceptance.mjs";
 
 function fixture() {
   const version = "0.1.0-rc.1",
@@ -95,4 +98,22 @@ it("rejects package-name substitution, incomplete image platforms and fictional 
   const h = fixture();
   h.manifest.bundles["linux-x64"].installPeakBytes = 1;
   expect(DistributionManifest.safeParse(h.manifest).success).toBe(false);
+});
+
+it("requires the actual retained evidence and rejects missing or replaced bundles", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "localdot-evidence-"));
+  try {
+    const { records } = fixture();
+    const bytes = Buffer.from("redacted test evidence fixture");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    for (const record of records) record.evidenceSha256 = digest;
+    await expect(verifyEvidence(records, directory)).rejects.toThrow();
+    const path = join(directory, `${digest}.tgz`);
+    await writeFile(path, bytes);
+    await expect(verifyEvidence(records, directory)).resolves.toBeUndefined();
+    await writeFile(path, "replaced evidence");
+    await expect(verifyEvidence(records, directory)).rejects.toThrow("does not match");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
