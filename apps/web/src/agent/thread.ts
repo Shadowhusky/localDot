@@ -66,6 +66,7 @@ export type ThreadItem =
       durationMs?: number;
       // What the turn's calls cost, only when the provider billed every one.
       usd?: number;
+      estimated?: boolean;
       // The turn's work line, just above, already says how long it took and what it cost.
       work: boolean;
     });
@@ -284,7 +285,7 @@ function turnMeta(
   ].filter((t): t is number => t !== null);
   const last = ends.length ? Math.max(...ends) : null;
   const usd = bills.reduce((sum, call) => sum + call.usd, 0);
-  const billed = usd > 0 && billsWhole && !bills.some((call) => call.estimated);
+  const billed = usd > 0 && billsWhole;
   return {
     kind: "meta",
     key: `meta-${turn.key}`,
@@ -295,7 +296,9 @@ function turnMeta(
     ...(turn.start !== null && last !== null && last >= turn.start
       ? { durationMs: last - turn.start }
       : {}),
-    ...(billed ? { usd } : {}),
+    ...(billed
+      ? { usd, ...(bills.some((call) => call.estimated) ? { estimated: true } : {}) }
+      : {}),
     work: own.length > 0,
   };
 }

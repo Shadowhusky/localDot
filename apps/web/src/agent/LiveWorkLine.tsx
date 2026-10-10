@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { count, spendText } from "../copy/format.ts";
+import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -56,7 +56,6 @@ export function LiveWorkLine({
   startMs,
   live,
   ended,
-  spend,
 }: {
   steps: readonly WorkStep[];
   startMs: number | null;
@@ -102,7 +101,6 @@ export function LiveWorkLine({
     count(steps.length, "step", "steps"),
     failed ? `${failed} failed` : "",
     running && elapsed !== null ? clock(elapsed) : "",
-    !running && spend ? spendText(spend.usd, spend.estimated) : "",
   ]
     .filter(Boolean)
     .join(" · ");

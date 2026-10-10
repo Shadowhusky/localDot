@@ -111,6 +111,31 @@ keys already have a passphrase you didn't set, start over: `localdot down`, dele
 `~/.localdot/passphrase-chosen`, `localdot up`, run `localdot unlock` to choose your own
 passphrase, then add your keys again.
 
+## Automatic updates
+
+Settings → Your computer → Software update shows the installed build, last successful check,
+new version, download progress, and errors with retry. A quiet notice appears once per version
+when dot is idle; dismissing it does not remove the update from Settings.
+
+The installed daemon checks after a short startup delay, then about every six hours with jitter.
+Offline failures back off from five minutes to six hours. Checks are shared across tabs and phones,
+and preferences and pending updates survive app restarts. Check now bypasses the scheduled delay.
+Automatic checks and downloads can each be disabled. Neither shuts down a running computer.
+
+For the current source installer, checks follow your configured Git branch over HTTPS. An exact
+commit or tag stays pinned. Download adds Git objects without modifying the running checkout.
+Install update asks before shutting down the computer and rebuilding the downloaded commit;
+it preserves the branch for future checks. Linux/WSL installation runs in a separate systemd user
+service so stopping the daemon cannot kill the installer. This source path is not a signed binary
+release. A build can still require dependency/image downloads and take several minutes.
+Existing installations need one `localdot update` to register the updater with their service.
+
+The separate packaged-release path verifies publisher provenance, helper signatures and image
+digests before marking a download ready. Its Install at next launch option applies a prepared
+release only after services have stopped; opening another tab or an idle conversation is not a
+restart. Failed activation uses the existing rollback transaction and does not repeat each launch.
+Packaged publication/signing/installed acceptance gates remain in [release packaging](release-packaging.md).
+
 ## Upgrade, change settings, uninstall
 
 - `localdot update` gets the latest version of the branch you installed and restarts only what

@@ -452,3 +452,31 @@ it("draws the page for a new message or line, and only the message for its other
   expect(version()).toBe(at);
   expect(heard).toHaveBeenCalledOnce();
 });
+
+it("keeps steps and files bound to the conversation when its computer disappears and returns", async () => {
+  const f = conversing({ resting: SESSION });
+  f.run(SESSION);
+  await wait(1_000);
+  await f.play(
+    SESSION,
+    event(0, "session.start", START),
+    event(1, "task.result", {
+      summary: "Done",
+      files: [{ name: "report.txt", path: "report.txt", bytes: 12 }],
+    }),
+  );
+  const before = f.view.result.current.model;
+  expect(before.startT).not.toBeNull();
+  f.run(null);
+  f.view.rerender({ cell: null, resting: SESSION });
+  await wait(100);
+  expect(f.view.result.current.sessionId).toBe(SESSION);
+  expect(f.view.result.current.model.startT).toBe(before.startT);
+  f.view.rerender({ cell: ready, resting: SESSION });
+  await wait(1_000);
+  expect(f.view.result.current.sessionId).toBe(SESSION);
+  expect(f.view.result.current.model.startT).toBe(before.startT);
+  expect(f.view.result.current.agentFeed.read().model.results[0]?.files[0]?.name).toBe(
+    "report.txt",
+  );
+});

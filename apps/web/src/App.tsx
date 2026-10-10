@@ -108,6 +108,7 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useAppUpdate } from "./settings/useAppUpdate.ts";
 import { useConnectors } from "./settings/useConnectors.ts";
 import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
@@ -1036,6 +1037,10 @@ function Theatre({ api }: { api: ApiClient }) {
       : task && task.phase !== "finished"
         ? "Wait for dot to finish"
         : undefined;
+  const appUpdate = useAppUpdate(api, hud.phase === "live" && !updateWait, () => {
+    settings.show();
+    setSettingsAt((previous) => ({ section: "computer", request: previous.request + 1 }));
+  });
   useUpdateNotice(cell, hud.phase === "live" && !updateWait, computerUpdate);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
@@ -1312,11 +1317,15 @@ function Theatre({ api }: { api: ApiClient }) {
               panelsButton.current?.focus();
             }
       }
-      cellId={cell?.id}
+      cellId={viewedConversation ? undefined : cell?.id}
       releaseReady={
-        cell?.state === "ready" && !cell.paused && !cell.fenced && !cell.replacementPending
+        !viewedConversation &&
+        cell?.state === "ready" &&
+        !cell.paused &&
+        !cell.fenced &&
+        !cell.replacementPending
       }
-      models={agent.snapshot?.models}
+      models={(viewedConversation ? historyAgent : agent).snapshot?.models}
       modelName={modelName}
       onSpending={(trigger) => showSettings(trigger, "spending")}
       memoryAction={(change) => {
@@ -1337,7 +1346,10 @@ function Theatre({ api }: { api: ApiClient }) {
                       ? "conflict"
                       : "failed"
                     : "ready",
-          onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
+          onUndo:
+            !viewedConversation && controls.canUndoMemory
+              ? (id) => void controls.undo(id)
+              : undefined,
           onReread: (trigger) => {
             controls.recheck();
             setReadMemory(true);
@@ -1345,14 +1357,14 @@ function Theatre({ api }: { api: ApiClient }) {
           },
         };
       }}
-      agent={agent.model}
-      rows={rows}
-      keyUses={session.model.keyUses}
-      sessionId={session.sessionId}
+      agent={viewedConversation ? historyAgent.model : agent.model}
+      rows={viewedConversation ? historyRows : rows}
+      keyUses={(viewedConversation ? historySession : session).model.keyUses}
+      sessionId={(viewedConversation ? historySession : session).sessionId}
       scale={cell?.scale ?? 2}
       api={api}
       nowMs={now}
-      historyLoaded={agent.history === true}
+      historyLoaded={(viewedConversation ? historyAgent : agent).history === true}
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
@@ -2258,6 +2270,7 @@ function Theatre({ api }: { api: ApiClient }) {
           stop={sheetStopControl}
           stopAll={settingsStopAll}
           startAtLogin={settingsLogin}
+          appUpdate={appUpdate}
           update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
           freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
           open={settings.open}

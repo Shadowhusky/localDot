@@ -48,9 +48,9 @@ describe("a turn's meta line", () => {
     expect(metaLine(item(), names)).toBe("Claude Sonnet 5.5 · 1:12 · 20.6K tokens · $0.04");
   });
 
-  it("leaves time and cost to the work line above, and says nothing it wasn't told", () => {
+  it("keeps cost with model usage and leaves duration to the work line", () => {
     expect(metaLine(item({ work: true, models: [sonnet, luna] }), names)).toBe(
-      "Claude Sonnet 5.5 · 25.1K tokens",
+      "Claude Sonnet 5.5 · 25.1K tokens · $0.04",
     );
     expect(
       metaLine(item({ durationMs: undefined, usd: undefined, models: [], main: sonnet }), names),
@@ -75,4 +75,14 @@ describe("a turn's meta line", () => {
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText(/^Claude Sonnet 5\.5 · 1:12/)).toBeTruthy();
   });
+});
+
+it("shows approximate cost in the metadata and its expanded details", () => {
+  render(<TurnMeta item={item({ work: true, estimated: true })} names={names} />);
+  const button = screen.getByRole("button", { name: /This turn:/ });
+  expect(button.textContent).toMatch(/≈\s\$0\.04/);
+  fireEvent.click(button);
+  expect(screen.getByRole("dialog", { name: "Models this turn used" }).textContent).toContain(
+    "Estimated cost",
+  );
 });

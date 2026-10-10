@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { runOpenLink } from "../../../daemon/src/open-link.ts";
 import type { ConsoleIO, RuntimeContext } from "../runtime.ts";
+import { applyPreparedOnLaunch } from "./background-update.ts";
 import { privateDirectory } from "./copy-inventory.ts";
 import { readHostDockerFacts } from "./host-docker-facts.ts";
 import { keydLockAcquirer, withInstallLock } from "./install-lock.ts";
@@ -110,20 +111,30 @@ export async function runUp(
         isolation: verifyInstalledIsolation,
       });
       io.out("Checking localDot and recovering any interrupted startup…");
-      const recovered = await recoverServiceLifecycle(host);
+      let recovered = await recoverServiceLifecycle(host);
       signal.throwIfAborted();
       if (!recovered || !same(recovered.configuration, active.configuration))
         throw new Error("Service configuration changed");
       if (recovered.phase !== "running") {
         if (recovered.phase !== "stopped") throw new Error("Service recovery required");
-        // Verify isolation before dispatch as well as within exact-release readiness afterward.
-        await host.verify(recovered.configuration, signal);
-        await verifyInstalledIsolation(recovered.configuration, signal);
-        await prepareInstalledRuntimes(recovered.configuration, checked.keydPath, signal);
-        if (!same(await releaseLayout(state, installedReleaseVerifier(state)).current(), selected))
-          throw new Error("Selected release changed");
-        io.out("Starting localDot…");
-        await startServiceLifecycle(host, recovered.configuration, signal);
+        const installed = await applyPreparedOnLaunch(recovered.configuration, signal, io);
+        if (installed) {
+          const updated = await records.read();
+          if (updated?.phase !== "running" || !same(updated.configuration, installed))
+            throw new Error("Updated service readiness changed");
+          recovered = updated;
+        } else {
+          // Verify isolation before dispatch as well as within exact-release readiness afterward.
+          await host.verify(recovered.configuration, signal);
+          await verifyInstalledIsolation(recovered.configuration, signal);
+          await prepareInstalledRuntimes(recovered.configuration, checked.keydPath, signal);
+          if (
+            !same(await releaseLayout(state, installedReleaseVerifier(state)).current(), selected)
+          )
+            throw new Error("Selected release changed");
+          io.out("Starting localDot…");
+          await startServiceLifecycle(host, recovered.configuration, signal);
+        }
       }
       signal.throwIfAborted();
       if (options.atLogin)

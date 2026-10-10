@@ -30,7 +30,7 @@ export class WorkWindowFeed {
       event.type === "session.end" ||
       event.type === "screen.switch" ||
       (event.type === "agent.state" &&
-        ["waiting_user", "paused", "error", "done", "idle", "observing"].includes(event.data.state))
+        ["waiting_user", "paused", "error", "done", "idle"].includes(event.data.state))
     ) {
       this.hide(id);
       return;
@@ -40,7 +40,10 @@ export class WorkWindowFeed {
         if (["gui", "browser", "ask", "app"].includes(event.data.kind)) this.hide(id);
         return;
       }
-      this.hide(id);
+      const previous = this.#shown.get(id);
+      if (previous?.endpoint.baseUrl === target.baseUrl && previous.endpoint.token === target.token)
+        clearTimeout(previous.timer);
+      else this.hide(id);
       const display: Display = {
         endpoint: target,
         step: event.step ?? event.id,

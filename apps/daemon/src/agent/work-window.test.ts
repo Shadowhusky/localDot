@@ -60,3 +60,27 @@ it("drops pending output when control or the selected computer changes", async (
   expect(send.mock.calls.every((call) => !call[1].visible)).toBe(true);
   feed.close();
 });
+
+it("keeps one window through consecutive background steps and abstract observing state", async () => {
+  vi.useFakeTimers();
+  const send = vi.fn(
+    async (
+      _endpoint: unknown,
+      _update: import("../../../../packages/protocol/src/work-window.ts").WorkWindowUpdate,
+    ) => {},
+  );
+  const feed = new WorkWindowFeed({
+    target: () => ({ baseUrl: "http://browser-screen", token: "private" }),
+    send,
+  });
+  feed.event("task", event("step.start", { kind: "shell" }, "first"));
+  await vi.advanceTimersByTimeAsync(120);
+  feed.event("task", event("agent.state", { state: "observing" }));
+  feed.event("task", event("step.start", { kind: "file" }, "second"));
+  await vi.advanceTimersByTimeAsync(120);
+  expect(send.mock.calls).toHaveLength(2);
+  expect(send.mock.calls.every((call) => call[1].visible)).toBe(true);
+  expect(send.mock.lastCall?.[1].phase).toBe("task/second");
+  await feed.hide("task");
+  expect(send.mock.lastCall?.[1].visible).toBe(false);
+});

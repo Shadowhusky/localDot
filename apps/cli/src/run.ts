@@ -57,7 +57,13 @@ export async function runCli(
       );
     if (command.kind === "update")
       return await runtime.update(
-        { home: localdotHome(options.env), signal: options.signal, version: command.version },
+        {
+          home: localdotHome(options.env),
+          signal: options.signal,
+          version: command.version,
+          ...(command.prepareOnly ? { prepareOnly: true } : {}),
+          ...(command.installPrepared ? { installPrepared: true } : {}),
+        },
         io,
       );
     if (command.kind === "down")

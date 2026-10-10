@@ -22,6 +22,7 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { routeLabel } from "../voice/words.ts";
 import { AccountsSection } from "./AccountsSection.tsx";
+import { AppUpdateSettings } from "./AppUpdateSettings.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import { ClaudeCodePanel } from "./ClaudeCodePanel.tsx";
@@ -54,6 +55,7 @@ import {
 } from "./sections.ts";
 import type { CheckInKey, CheckInsDraft, ResearchDraft, SpendingDraft } from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
+import type { AppUpdateControl } from "./useAppUpdate.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 import type { ConnectorsView } from "./useConnectors.ts";
@@ -134,6 +136,7 @@ export interface SettingsSheetProps {
   stop?: { label: string; enabled: boolean; run(): void; task?: boolean };
   // A new version of the computer, while one is ready or going on.
   update?: ComputerUpdate;
+  appUpdate?: AppUpdateControl;
   // Erases the computer and starts a clean one, unless dot is at work or the user holds it.
   freshStart?: FreshStart & { waitReason?: string };
   // On a phone, how the task's Stop went, which stays after Stop itself has gone; it drops from
@@ -461,6 +464,7 @@ function shownSections(props: SettingsSheetProps, phone = false): SettingsSectio
     computer:
       (!!props.stop && !(phone && props.stop.task)) ||
       !!props.update?.available ||
+      !!props.appUpdate ||
       !!props.freshStart ||
       !!props.stream ||
       !!props.stopAll ||
@@ -598,7 +602,10 @@ function SectionList({
     connectors:
       props.connectors?.phase === "ready" ? countValue(props.connectors.connectors.length) : "",
     keys: countValue(props.keysPanel?.keys.keys.length),
-    computer: props.update?.available ? "Update ready" : "",
+    computer:
+      props.appUpdate?.status?.availableVersion || props.update?.available
+        ? "Update available"
+        : "",
   };
   const row = (id: SettingsSection) => {
     const section = SECTIONS.find((each) => each.id === id);
@@ -735,6 +742,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
   const shutDown = phone && props.stop && !props.stop.task ? props.stop : undefined;
   return (
     <>
+      {props.appUpdate && <AppUpdateSettings update={props.appUpdate} />}
       {(update || login || stream) && (
         <div>
           <Group>

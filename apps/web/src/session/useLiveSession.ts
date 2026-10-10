@@ -94,26 +94,24 @@ export function useLiveSession(
   const words = useRef(false);
   const cellId = cell?.id ?? null;
   const ready = cell?.state === "ready";
-  const sessionId = shown && (!shown.live || shown.cellId === cellId) ? shown.sessionId : null;
+  const sessionId =
+    shown && (!shown.live || shown.cellId === cellId || resting !== undefined)
+      ? shown.sessionId
+      : null;
   const previousCell = useRef(cellId);
   const lookNow = useRef(() => {});
-  const live = useRef(shown?.live ?? false);
-  live.current = shown?.live ?? false;
   // A task that has ended never runs again, whatever a slower answer says.
   const over = useRef(new Set<string>());
 
   useEffect(() => {
     if (previousCell.current === cellId) return;
     previousCell.current = cellId;
-    modelRef.current = emptyModel();
-    modelOwner.current = null;
-    dirty.current = false;
-    words.current = false;
-    stage.current?.resetSession();
-    if (live.current) setShown(null);
-    setEnded(false);
-    setVersion((v) => v + 1);
-  }, [cellId, stage]);
+    // The computer can disappear temporarily during restart/update. History belongs to the
+    // conversation, not the physical connection; keep it visible while rediscovering ownership.
+    setShown((now) =>
+      resting === undefined ? null : now?.live ? { ...now, cellId: null, live: false } : now,
+    );
+  }, [cellId, resting]);
 
   // A conversation chosen anew (a new one, or an older one continued) takes the page once no live
   // task is at work there. On opening, a running computer first says whether it still runs one.
@@ -219,7 +217,7 @@ export function useLiveSession(
 
   useEffect(() => {
     const prior = agentFeed.read();
-    if (prior.cellId !== cellId || prior.sessionId !== sessionId) {
+    if (prior.sessionId !== sessionId) {
       agentFeed.reset(cellId, sessionId);
       modelRef.current = emptyModel();
       modelOwner.current = sessionId;
@@ -228,6 +226,7 @@ export function useLiveSession(
       clock.current = null;
       setVersion((v) => v + 1);
     }
+    if (prior.cellId !== cellId) agentFeed.bindCell(cellId);
     if (!sessionId) return;
     // Same-session history survives API replacement; transport readiness never does.
     agentFeed.connection("connecting");

@@ -742,6 +742,22 @@ describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, (
     );
   });
 
+  it("installs the exact prepared commit while retaining its branch for future checks", async () => {
+    const host = await makeHost();
+    expect((await host.run()).code).toBe(0);
+    host.commit("prepared");
+    const prepared = git(host.origin, "rev-parse", "HEAD");
+    host.commit("later");
+    const result = await host.command(["update"], {
+      LOCALDOT_UPDATE_COMMIT: prepared,
+      LOCALDOT_UPDATE_SHUTDOWN: "1",
+    });
+    expect(result.code, result.stderr).toBe(0);
+    const saved = readFileSync(join(host.prefix, "install.env"), "utf8");
+    expect(saved).toContain(`LOCALDOT_COMMIT="${prepared}"`);
+    expect(saved).toContain('LOCALDOT_REF="main"');
+  });
+
   it("uninstalls everything it added and keeps the data", async () => {
     const host = await makeHost();
     writeFileSync(

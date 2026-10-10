@@ -590,6 +590,7 @@ function wellFormed(e: LocalDotEvent): boolean {
 }
 export interface AgentFeedOwner extends AgentFeed, AgentWords {
   reset(cellId: string | null, sessionId: string | null): void;
+  bindCell(cellId: string | null): void;
   // Tells the messages on show that new words arrived.
   words(): void;
   connection(value: AgentConnection): void;
@@ -633,6 +634,11 @@ export function createAgentFeed(now: () => number = () => performance.now()): Ag
     },
     words() {
       for (const listener of wordListeners) listener();
+    },
+    bindCell(cellId) {
+      if (value.cellId === cellId) return;
+      value = { ...value, cellId };
+      invalidate();
     },
     reset(cellId, sessionId) {
       missingThrough = -1;

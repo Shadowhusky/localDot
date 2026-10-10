@@ -454,7 +454,11 @@ sync_source() {
     git -c init.defaultBranch=main init --quiet "$dir"
     git -C "$dir" remote add origin "$REPO"
   fi
-  git -C "$dir" fetch --quiet --depth 1 origin "$REF" || die "Couldn't get $REF from $REPO."
+  local target=${LOCALDOT_UPDATE_COMMIT:-$REF}
+  if [ -n "${LOCALDOT_UPDATE_COMMIT:-}" ]; then
+    [[ "$LOCALDOT_UPDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "Invalid prepared update."
+  fi
+  git -C "$dir" fetch --quiet --depth 1 origin "$target" || die "Couldn't get $REF from $REPO."
   git -C "$dir" -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
   [ "$dir" = "$APP" ] || mv "$dir" "$APP"
   [ -f "$APP/install.sh" ] || die "localDot $REF has no installer. Choose a newer version with --ref."
@@ -630,7 +634,7 @@ service_path() {
 }
 
 daemon_environment() {
-  printf '%s\n' "HOME=$HOME" "PATH=$(service_path)" "LOCALDOT_HOME=$LD_HOME" "LOCALDOT_PORT=$PORT"
+  printf '%s\n' "HOME=$HOME" "PATH=$(service_path)" "LOCALDOT_HOME=$LD_HOME" "LOCALDOT_PORT=$PORT" "LOCALDOT_INSTALL_PREFIX=$PREFIX"
   [ -z "$PUBLIC_ORIGIN" ] || say "LOCALDOT_PUBLIC_ORIGIN=$PUBLIC_ORIGIN"
   [ -z "${DOCKER_HOST:-}" ] || say "DOCKER_HOST=$DOCKER_HOST"
 }
@@ -909,6 +913,11 @@ run_install() {
   check_services_are_ours
   check_prerequisites
   check_port
+  if [ "${LOCALDOT_UPDATE_SHUTDOWN:-}" = 1 ]; then
+    # Only the explicitly confirmed UI install sets this. Checks/downloads never stop services.
+    stop_services
+    unset LOCALDOT_UPDATE_SHUTDOWN
+  fi
   if [ "${LOCALDOT_INSTALL_STAGE:-}" != checked-out ] || [ ! -d "$APP/.git" ]; then
     sync_source
     # Continue with the installer of the version just checked out, so its pins match its code.

@@ -5,6 +5,7 @@ import { runUp } from "./up.ts";
 
 const mock = vi.hoisted(() => ({
   directory: vi.fn(),
+  prepared: vi.fn(),
   read: vi.fn(),
   helper: vi.fn(),
   lock: vi.fn(),
@@ -24,6 +25,7 @@ const mock = vi.hoisted(() => ({
   save: vi.fn(),
   docker: vi.fn(),
 }));
+vi.mock("./background-update.ts", () => ({ applyPreparedOnLaunch: mock.prepared }));
 vi.mock("./login-agent.ts", () => ({
   syncLoginAgent: mock.sync,
   startAtLoginStore: () => ({ save: mock.save, read: async () => null }),
@@ -189,6 +191,7 @@ it("reuses a freshly verified running service without kickstarting it again", as
   mock.recover.mockResolvedValue({ ...f.record, phase: "running" });
   expect(await f.run()).toBe(0);
   expect(mock.start).not.toHaveBeenCalled();
+  expect(mock.prepared).not.toHaveBeenCalled();
   expect(mock.open).toHaveBeenCalledOnce();
 });
 it.each([
@@ -340,4 +343,21 @@ it("plain up still succeeds when the agent sync fails, and says so", async () =>
   mock.sync.mockRejectedValueOnce(new Error("Start at login could not be changed safely."));
   expect(await f.run()).toBe(0);
   expect(f.io.err).toHaveBeenCalledWith(expect.stringContaining("localdot start-at-login status"));
+});
+
+it("uses the prepared release only on stopped startup without starting the old version", async () => {
+  const f = fixture();
+  const updated = {
+    ...f.record.configuration,
+    release: { ...f.record.configuration.release, version: "2.0.0" },
+  };
+  mock.prepared.mockImplementationOnce(async () => {
+    mock.read.mockResolvedValue({ ...f.record, phase: "running", configuration: updated });
+    return updated;
+  });
+  expect(await f.run()).toBe(0);
+  expect(mock.prepared).toHaveBeenCalledTimes(1);
+  expect(mock.start).not.toHaveBeenCalled();
+  expect(mock.runtimes).not.toHaveBeenCalled();
+  expect(mock.open).toHaveBeenCalledOnce();
 });

@@ -69,7 +69,10 @@ Panel sizes, visibility, and selected tabs are remembered in this browser across
 
 Background commands and file changes appear in a read-only **Activity** window inside dot's
 computer, visible through the same live screen. It uses existing redacted output, without extra
-model calls or command execution. The window clears before visual actions or handing control to you.
+model calls or command execution. A short native entrance and dot gesture introduce it, and consecutive
+background steps reuse the same window. The window clears before visual actions or handing control to you.
+Model usage and cost, including clearly marked estimates, live in the turn metadata. Steps and Files
+follow the selected conversation and remain available when its computer reconnects.
 
 <img src="docs/readme/work.png" alt="The native Activity window inside the computer shows command output and file changes; pictured with sample test output">
 
@@ -421,7 +424,7 @@ starts localDot as your own user's services and prints a one-time sign-in link. 
 the setup and turn the computer on. If something is missing, the installer lists all of it up
 front, with the commands to fix it, rather than one complaint at a time.
 
-- **Upgrade:** `localdot update`, or run the installer again. Settings and data stay put.
+- **Updates:** Settings → Your computer → Software update checks your installed branch automatically, downloads source updates in the background, and keeps a pending update visible after you dismiss its notice. Choose Install update when you are ready to shut down the computer and restart localDot. `localdot update` still works. Settings and data stay put. Existing installations need one manual update to enable automatic checks.
 - **Uninstall:** `localdot uninstall`. It keeps your data in `~/.localdot` and prints the commands
   that delete it, for when you really mean it.
 - **Something looks off:** `localdot doctor` checks Docker, the images, the key service and the

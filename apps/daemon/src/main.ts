@@ -87,6 +87,8 @@ import { summarizeSession, writeSummary } from "./sessions/summary.ts";
 import { Thumbnails } from "./sessions/thumbs.ts";
 import { webDir } from "./static-ui.ts";
 import { loadOrCreateToken } from "./token.ts";
+import { installedAppUpdater } from "./updates/installed-updater.ts";
+import { sourceAppUpdater } from "./updates/source-updater.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
 import { installedSpeech } from "./voice/speech.ts";
 
@@ -131,6 +133,7 @@ const clock = monotonicClock();
 const eventLog = new EventLog(home, clock);
 const tickets = new TicketRegistry();
 const resetHolds = new ComputerResetHolds(home);
+let appInstalling = false;
 const runtimeAdmission = new RuntimeUpdateAdmission(home);
 const runtimeImages = serviceIdentity ? RuntimeImages.parse(imagesFromEnv()) : undefined;
 const fences = new ComputerFences(home, (id) => resetHolds.oldHeld(id));
@@ -166,8 +169,8 @@ const orchestrator = new CellOrchestrator({
   permanentFence: (id) =>
     fences.record(id) ? { revision: fences.record(id)?.revision ?? 1 } : fences.isFenced(id),
   candidateHold: (id) => resetHolds.candidateHeld(id),
-  runtimeHold: (id) => runtimeAdmission.held(id),
-  creationAllowed: () => runtimeAdmission.creationAllowed(),
+  runtimeHold: (id) => appInstalling || runtimeAdmission.held(id),
+  creationAllowed: () => !appInstalling && runtimeAdmission.creationAllowed(),
   ...(runtimeImages
     ? {
         verifyRuntime: (record: import("./cells/types.ts").CellRecord) =>
@@ -394,6 +397,7 @@ const routineLauncher = new RoutineLauncher({
   runner: agentRunnerPort(running.runner, live, eventLog),
   events: eventLog,
   dockerAvailable: async () => {
+    if (appInstalling) return false;
     try {
       await docker.version();
       return true;
@@ -514,7 +518,27 @@ const exportJobs = new ExportJobs({
 });
 shutdown.push(() => exportJobs.close());
 const installCodes = new InstallCodes(token, port);
+const installWait = () => {
+  if (
+    orchestrator
+      .list()
+      .some((cell) => live.get(cell.id) || live.idleOperationPending(cell.id) || cell.operation)
+  )
+    return "Finish or stop the task before updating localDot.";
+  appInstalling = true;
+  return null;
+};
+const installSettled = () => {
+  appInstalling = false;
+};
+const appUpdater = serviceIdentity
+  ? installedAppUpdater(home, serviceIdentity, installWait, installSettled)
+  : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
+appUpdater.start();
+shutdown.unshift(() => appUpdater.close());
 const app = createApp({
+  appUpdater,
+  appInstalling: () => appInstalling,
   token,
   port,
   installCodes,

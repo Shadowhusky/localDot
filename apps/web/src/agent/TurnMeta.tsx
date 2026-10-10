@@ -14,7 +14,7 @@ const ROLES: Record<string, string> = { fast: "Fast", local: "Local" };
 const whole = (value: number) => value.toLocaleString();
 
 // The line names the model, and its plan's app when the plan, not a key, paid for the turn. The
-// work line above a turn that worked already says how long it took and what it cost.
+// work line above a turn says how long it took; cost belongs with model usage here.
 export function metaLine(item: MetaItem, names?: ModelNames): string {
   const lead = item.models[0] ?? item.main;
   if (!lead) return "";
@@ -24,7 +24,7 @@ export function metaLine(item: MetaItem, names?: ModelNames): string {
     subscription(lead.route) ? providerName(lead.route) : "",
     !item.work && (item.durationMs ?? 0) >= 1000 ? clock(item.durationMs ?? 0) : "",
     tokens ? tokenCount(tokens) : "",
-    !item.work && item.usd !== undefined ? spendText(item.usd, false) : "",
+    item.usd !== undefined ? spendText(item.usd, !!item.estimated) : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -33,6 +33,12 @@ export function metaLine(item: MetaItem, names?: ModelNames): string {
 function Details({ item, names }: { item: MetaItem; names?: ModelNames }) {
   return (
     <dl className="thread-meta-models">
+      {item.usd !== undefined && (
+        <div>
+          <dt>{item.estimated ? "Estimated cost" : "Cost"}</dt>
+          <dd className="num">{spendText(item.usd, !!item.estimated)}</dd>
+        </div>
+      )}
       {item.models.map((row) => {
         const provider = names?.provider(row.route, row.model);
         return (

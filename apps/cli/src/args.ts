@@ -8,7 +8,7 @@ export type Command =
   | { kind: "down" }
   | { kind: "up"; atLogin?: true; fromLogin?: true }
   | { kind: "start-at-login"; operation: "on" | "off" | "status" }
-  | { kind: "update"; version?: string }
+  | { kind: "update"; version?: string; prepareOnly?: true; installPrepared?: true }
   | { kind: "logs"; follow: boolean }
   | { kind: "stop"; cellId?: string; all?: true }
   | {
@@ -94,12 +94,17 @@ export function parseArgs(args: readonly string[]): Command | undefined {
   if (
     args.length === 3 &&
     args[0] === "update" &&
-    args[1] === "--to" &&
+    (args[1] === "--to" || args[1] === "--prepare" || args[1] === "--install-prepared") &&
     args[2] &&
     args[2].length <= 64 &&
     RELEASE_VERSION.test(args[2])
   )
-    return { kind: "update", version: args[2] };
+    return {
+      kind: "update",
+      version: args[2],
+      ...(args[1] === "--prepare" ? { prepareOnly: true as const } : {}),
+      ...(args[1] === "--install-prepared" ? { installPrepared: true as const } : {}),
+    };
   if (args.length === 2 && args[0] === "stop" && args[1] === "--all")
     return { kind: "stop", all: true };
   if (
@@ -122,6 +127,8 @@ Usage:
                                 Turn start at login on or off, or show it
   localdot update [--to <version>]
                                 Install the latest stable or an exact newer release; keep data
+  localdot update --prepare <version>
+                                Download and verify without interrupting the app
   localdot open [--qr]          Print a fresh, single-use sign-in link; --qr also draws it as
                                 a QR code for your phone (needs remote access set up)
   localdot stop [--cell <id>]   Stop agent actions and revoke access

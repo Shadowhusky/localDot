@@ -93,3 +93,16 @@ it("opens again on what dot does next, never on the words of the wait", () => {
   expect(screen.queryByText("Needs your answer")).toBeNull();
   expect(screen.getByText("Typing PDF")).toBeTruthy();
 });
+
+it("keeps cost out of the steps summary because it belongs in turn metadata", () => {
+  render(
+    <LiveWorkLine
+      steps={steps}
+      startMs={1000}
+      spend={{ usd: 0.42, estimated: true }}
+      live={null}
+    />,
+  );
+  expect(summary()).not.toContain("$");
+  expect(summary()).toContain("3 steps");
+});

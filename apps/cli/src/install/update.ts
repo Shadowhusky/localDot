@@ -5,6 +5,7 @@ import { RELEASE_VERSION } from "../../../../packages/protocol/src/release.ts";
 import { runOpenLink } from "../../../daemon/src/open-link.ts";
 import type { ConsoleIO } from "../runtime.ts";
 import { activateInstalledRelease } from "./activate-release.ts";
+import { prepareBackgroundUpdate, preparedAppUpdateStore } from "./background-update.ts";
 import { hasInstallState } from "./initialize-home.ts";
 import { keydLockAcquirer, withInstallLock } from "./install-lock.ts";
 import { installedUpdateHost } from "./installed-update.ts";
@@ -19,26 +20,18 @@ export interface UpdateContext {
   home: string;
   signal: AbortSignal;
   version?: string;
+  prepareOnly?: boolean;
+  installPrepared?: boolean;
 }
 const failure = () => new Error("Update preparation could not be confirmed.");
 function valid(version: string) {
   if (version.length > 64 || !RELEASE_VERSION.test(version)) throw failure();
   return version;
 }
-/** Compare the deliberately small supported grammar without number precision loss. */
-export function compareReleaseVersions(left: string, right: string): number {
-  const parse = (value: string) =>
-    valid(value)
-      .split(/\.|-rc\./)
-      .map(BigInt);
-  const a = parse(left),
-    b = parse(right);
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return (a[i] ?? 0n) > (b[i] ?? 0n) ? 1 : -1;
-  }
-  if (a.length !== b.length) return a.length < b.length ? 1 : -1;
-  return a[3] === b[3] ? 0 : (a[3] ?? 0n) > (b[3] ?? 0n) ? 1 : -1;
-}
+
+export { compareReleaseVersions } from "../../../../packages/protocol/src/app-update.ts";
+
+import { compareReleaseVersions } from "../../../../packages/protocol/src/app-update.ts";
 
 /** No ambient port, socket, registry or credential configuration replaces installed authority.
  * Recovery is offline first. All preparation/activation work drains inside its helper lock. */
@@ -48,6 +41,10 @@ export async function runUpdate(input: UpdateContext, io: ConsoleIO): Promise<nu
   try {
     signal.throwIfAborted();
     if (requested !== undefined) valid(requested);
+    if (input.prepareOnly) {
+      if (!requested) throw failure();
+      return prepareBackgroundUpdate({ home, signal, version: requested }, io);
+    }
     if (!(await hasInstallState(home))) {
       io.err("localDot is not installed. Run localdot first.");
       return 1;
@@ -95,10 +92,39 @@ export async function runUpdate(input: UpdateContext, io: ConsoleIO): Promise<nu
           )
         )
           throw failure();
+        if (input.installPrepared) {
+          if (!requested) throw failure();
+          const pending = await preparedAppUpdateStore(scope.state).read();
+          if (
+            !pending?.candidate ||
+            pending.candidate.version !== requested ||
+            !equal(pending.previous, recovered.configuration.release) ||
+            compareReleaseVersions(requested, recovered.configuration.release.version) <= 0
+          )
+            throw failure();
+          // Explicit UI/CLI install only. Reuse the verified payload; activation re-verifies it
+          // before stopping services. No registry name/version alone becomes execution authority.
+          await preparedAppUpdateStore(scope.state).save({ ...pending, candidate: null });
+          const candidateHelper = await readInstalledLockHelper(
+            scope.state,
+            pending.candidate,
+            signal,
+          );
+          await activateInstalledRelease(
+            recovered.configuration.settings,
+            pending.candidate,
+            candidateHelper.keydPath,
+            signal,
+          );
+        }
         return structuredClone(recovered.configuration);
       },
     );
     signal.throwIfAborted();
+    if (input.installPrepared) {
+      io.out("localDot is updated and ready.");
+      return 0;
+    }
     io.out(
       requested
         ? `Checking localDot ${requested}…`

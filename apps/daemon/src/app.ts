@@ -33,6 +33,8 @@ import { NDJSON_TYPE } from "./sessions/ndjson.ts";
 import { eventStreamResponse, type ReplayRoutesDeps, replayRoutes } from "./sessions/routes.ts";
 import { serveUi } from "./static-ui.ts";
 import { tokensMatch } from "./token.ts";
+import type { AppUpdater } from "./updates/app-updater.ts";
+import { appUpdateRoutes } from "./updates/routes.ts";
 import { type VoiceRoutesDeps, voiceRoutes } from "./voice/routes.ts";
 
 export interface AppOptions {
@@ -59,6 +61,8 @@ export interface AppOptions {
   routines?: RoutineRoutesDeps;
   connectors?: Omit<ConnectorRoutesDeps, "port">;
   voice?: VoiceRoutesDeps;
+  appUpdater?: AppUpdater;
+  appInstalling?(): boolean;
 }
 
 export function createApp({
@@ -84,6 +88,8 @@ export function createApp({
   routines,
   connectors,
   voice,
+  appUpdater,
+  appInstalling,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
     throw new Error("install codes belong to another daemon");
@@ -134,9 +140,12 @@ export function createApp({
   app.use("/api/*", async (c, next) => {
     const given = tokenFromHeaders({ authorization: c.req.header("authorization") });
     if (!tokensMatch(token, given)) return c.text("unauthorized", 401);
+    if (appInstalling?.() && !["GET", "HEAD"].includes(c.req.method))
+      return c.text("localDot is installing an update. Please wait.", 503);
     await next();
   });
 
+  if (appUpdater) appUpdateRoutes(app, appUpdater);
   app.get("/api/whoami", (c) => c.json({ ok: true }));
   if (doctorSelfTests) doctorSelfTestRoutes(app, doctorSelfTests);
   if (serviceReadiness)

@@ -270,12 +270,12 @@ describe("the meta line of each finished turn", () => {
     });
   });
 
-  it("says no amount when any call's cost was only estimated", () => {
+  it("retains approximate cost for turn metadata", () => {
     const items = threadItems([message("hi", 1), message("hello", 2, "assistant")]);
     const thread = withWork(items, [], false, [spent(3000, 0.01), spent(3500, 0.02, true)], {
       usage: [used(3000)],
     });
-    expect(meta(thread)[0]).not.toHaveProperty("usd");
+    expect(meta(thread)[0]).toMatchObject({ usd: 0.03, estimated: true });
   });
 
   it("follows a turn's work line, leads with the main model and keeps each turn's own calls", () => {
