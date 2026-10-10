@@ -306,6 +306,46 @@ describe("screenshot economy", () => {
     expect(images(closed.content)).toHaveLength(1);
   });
 
+  it("returns an already changed screen without sleeping", async () => {
+    const s = await setup();
+    await s.setFrames(await grey({ x: 20, y: 20, w: 20, h: 20 }));
+    const run = vi.spyOn(s.deps.gateway, "run");
+    const result = await computerTool(s.deps, s.ctx, { action: "wait", ms: 30000 });
+    expect(run).not.toHaveBeenCalled();
+    expect(images(result.content)).toHaveLength(1);
+  });
+
+  it("ends a long wait on the first changed frame", async () => {
+    const s = await setup();
+    const original = s.deps.gateway.run.bind(s.deps.gateway);
+    const run = vi.spyOn(s.deps.gateway, "run").mockImplementation(async (ctx, action) => {
+      const result = await original(ctx, action);
+      await s.setFrames(await grey({ x: 20, y: 20, w: 20, h: 20 }));
+      return result;
+    });
+    const result = await computerTool(s.deps, s.ctx, { action: "wait", ms: 30000 });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]?.[1]).toMatchObject({ verb: "wait", ms: 1000 });
+    expect(images(result.content)).toHaveLength(1);
+  });
+
+  it("bounds an unchanged wait without sending intermediate frames to the model", async () => {
+    const s = await setup();
+    const run = vi.spyOn(s.deps.gateway, "run");
+    const result = await computerTool(s.deps, s.ctx, {
+      action: "wait",
+      ms: 2500,
+      basedOn: s.basis,
+    });
+    expect(run.mock.calls.map(([, action]) => action)).toEqual([
+      { verb: "wait", ms: 1000 },
+      { verb: "wait", ms: 1000 },
+      { verb: "wait", ms: 500 },
+    ]);
+    expect(images(result.content)).toHaveLength(0);
+    expect(texts(result.content)).toContain(UNCHANGED);
+  });
+
   it("always sends the screen to a model with no screenshot to compare it with", async () => {
     const s = await setup();
     const result = await computerTool(s.deps, s.ctx, { action: "wait", ms: 10 });

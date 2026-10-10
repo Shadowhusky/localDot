@@ -158,7 +158,8 @@ const computerFields = {
   repeat: z.number().int().min(1).max(100).optional(),
   dx: z.number().int().min(-30).max(30).optional(),
   dy: z.number().int().min(-30).max(30).optional(),
-  // wait and hold_key: how long. drag: how long the motion takes, up to MAX_DRAG_MS.
+  // wait: maximum duration, returns early on screen change. hold_key: duration.
+  // drag: how long the motion takes, up to MAX_DRAG_MS.
   ms: z.number().int().min(0).max(30_000).optional(),
 };
 

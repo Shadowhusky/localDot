@@ -45,7 +45,7 @@ export const COMPUTER_DESCRIPTION =
   "onto a web page, asks first), " +
   "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
   "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
-  "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
+  "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms: maximum wait, returns early on screen change), zoom " +
   "(region {x, y, w, h}, returns that part enlarged), cursor_position, batch (steps: up to " +
   `${MAX_BATCH_STEPS} of the actions above but screenshot, zoom and cursor_position, run in order with one ` +
   "screenshot at the end; for predictable sequences such as click a field, type, press Tab, type, press " +

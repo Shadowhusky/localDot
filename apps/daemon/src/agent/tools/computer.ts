@@ -295,7 +295,7 @@ export async function runInput(
   }
   // A hold or a drag ends when the task is paused: nobody is left to let go.
   const hold =
-    (action.verb === "key" && action.holdMs) || action.verb === "drag"
+    (action.verb === "key" && action.holdMs) || action.verb === "drag" || action.verb === "wait"
       ? untilPaused(session, ctx.signal)
       : undefined;
   let needsUser = false;
@@ -345,8 +345,32 @@ export async function runInput(
     },
   };
   let outcome: ActionOutcome;
+  let waitedFrameId: string | undefined;
   try {
-    outcome = await deps.gateway.run(nativeContext, action);
+    if (action.verb === "wait" && deps.png.same) {
+      // A wait is bounded observation, not a blind sleep. Compare against the last
+      // delivered frame so a change that arrived before the call returns immediately.
+      const watchContext = { ...selected, signal: nativeContext.signal };
+      const initial = await deps.gateway.observe(watchContext);
+      ctx.check();
+      const baseline = session.lastFrameId ?? initial.frameId;
+      waitedFrameId = initial.frameId;
+      outcome = { ok: true };
+      let remaining = action.ms;
+      while (remaining > 0 && deps.png.same(session.id, baseline, waitedFrameId)) {
+        ctx.check();
+        nativeContext.signal?.throwIfAborted();
+        const interval = Math.min(remaining, 1000);
+        const started = performance.now();
+        outcome = await deps.gateway.run(nativeContext, { ...action, ms: interval });
+        ctx.check();
+        if (!outcome.ok) break;
+        const current = await deps.gateway.observe(watchContext);
+        ctx.check();
+        waitedFrameId = current.frameId;
+        remaining -= Math.max(interval, performance.now() - started);
+      }
+    } else outcome = await deps.gateway.run(nativeContext, action);
   } finally {
     hold?.end();
   }
@@ -356,9 +380,9 @@ export async function runInput(
   if (outcome.cancelled === "preflight" && outcome.error === ELEMENT_GONE)
     return { ok: false, notes: [], gone: true };
   if (action.verb === "wait" && outcome.ok) {
-    const o = await deps.gateway.observe(selected);
+    const frameId = waitedFrameId ?? (await deps.gateway.observe(selected)).frameId;
     ctx.check();
-    return { ok: true, notes: [], frameId: o.frameId };
+    return { ok: true, notes: [], frameId };
   }
   const notes: ToolResult["content"] = [];
   const note = keyboardNote(a, outcome) ?? pointerNote(a, outcome);
