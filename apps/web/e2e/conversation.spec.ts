@@ -124,7 +124,8 @@ for (const [engine, size, options] of MATRIX) {
     // Long enough to scroll, the thread is still the only thing in the column that does.
     await qa("say?n=12&text=Checking that each month adds up");
     await expect(thread.locator(".thread-row")).toHaveCount(14);
-    expect(await scrollers(page)).toEqual(["ui-scroll-area thread-scroll"]);
+    // Measured once the new rows have eased in to their height.
+    await expect.poll(() => scrollers(page)).toEqual(["ui-scroll-area thread-scroll"]);
     // The thread keeps saying what dot does as it moves on.
     await qa("steps?n=1&item=calc");
     await expect(work).toContainText("Fill area 1 with brown");

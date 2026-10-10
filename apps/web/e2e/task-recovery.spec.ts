@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, load, proof } from "./fixtures/recovery-server.ts";
 import { showActivity, showChat } from "./layout.ts";
 import { closeSettings, openSettings } from "./settings-ui.ts";
@@ -9,6 +9,12 @@ test.setTimeout(60_000);
 async function showMemoryFile(knows: Locator) {
   await knows.getByRole("radio", { name: "Notes", exact: true }).click();
   await knows.getByRole("button", { name: /^Show the file/ }).click();
+}
+// A memory update is a change dot made, listed under Activity's Files tab.
+async function memoryChange(page: Page) {
+  const rail = await showActivity(page);
+  await rail.getByRole("tab", { name: /^Files/ }).click();
+  return rail.getByTestId("change-row").first();
 }
 test.use({ hasTouch: true });
 
@@ -57,8 +63,7 @@ for (const width of [1280, 390])
       await expect(recovery).toHaveCount(0);
       f.session.stop();
       f.session.append("session.end", { reason: "done" });
-      await showActivity(page);
-      const card = page.getByTestId("change-row").first();
+      const card = await memoryChange(page);
       await card.getByRole("button", { name: /Memory updated/ }).click();
       await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
         "aria-disabled",
@@ -129,8 +134,7 @@ test("memory conflict preserves the newer durable file and offers an explicit re
   try {
     const p = await load(page, f);
     f.memory.apply(f.id, "MEMORY.md", "append", "Newer fact must remain.");
-    await showActivity(page);
-    const card = page.getByTestId("change-row").first();
+    const card = await memoryChange(page);
     await card.getByRole("button", { name: /Memory updated/ }).click();
     await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
       "aria-disabled",
@@ -166,8 +170,7 @@ for (const width of [1280, 390])
     try {
       const p = await load(page, f);
       await f.finish();
-      await showActivity(page);
-      const card = page.getByTestId("change-row").first();
+      const card = await memoryChange(page);
       await card.getByRole("button", { name: /Memory updated/ }).click();
       await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
         "aria-disabled",

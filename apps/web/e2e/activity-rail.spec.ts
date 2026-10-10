@@ -236,9 +236,12 @@ for (const [engine, size, options] of [
     });
     await page.goto(`${fixture.origin}/#token=${TOKEN}`);
     const rail = await showActivity(page);
-    await expect(rail.getByTestId("download-row")).toHaveCount(10);
     await expect(rail.getByText("Plan and steps appear here once dot starts.")).toBeVisible();
-    expect(await scrollers(page, size)).toEqual([SCROLLER[size]]);
+    // Downloads are files: they sit under the Files tab.
+    await rail.getByRole("tab", { name: /^Files/ }).click();
+    await expect(rail.getByTestId("download-row")).toHaveCount(10);
+    await expect(rail.getByTestId("download-row").first()).toBeVisible();
+    await expect.poll(() => scrollers(page, size)).toEqual([SCROLLER[size]]);
     const scroller = page.locator(`.${SCROLLER[size].split(" ").at(-1)}`);
     expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
     const refresh = rail.getByRole("button", { name: "Refresh downloads" });
