@@ -3,13 +3,15 @@
 The [README](../README.md) is the tour. This page is the workshop: how to build, run and test
 localDot from source, and the details behind each part.
 
-The [browser workspace guide](browser-workspace.md) covers the M7 author draft's separate
-web browser, manual sign-in, reviewed downloads and approved uploads. Final integration
-and independent review are pending.
+The [browser workspace guide](browser-workspace.md) covers the separate web browser, protected
+saved logins, manual takeover, reviewed downloads and approved uploads.
 
 ## Development
 
-The shipping CLI is an author draft pending independent review and installed acceptance.
+The release-based CLI in `apps/cli` is an author draft pending independent review and installed
+acceptance. The README's `install.sh` uses the existing source installer; its branch-based update
+commands are documented in [Installing localDot](install.md). The following release commands
+apply to the release-based CLI:
 For a managed installation, `localdot update` checks for the latest stable release;
 `localdot update --to 1.2.3-rc.2` selects an exact version (including a release candidate).
 Both recover interrupted updates first and authenticate the exact release before activation.
@@ -51,8 +53,9 @@ subprotocols `localdot.v1, localdot.token.<token>`.
 - Build the UI with `pnpm --filter @localdot/web build`, start the daemon, then open its
   `#token=` link. **Start computer** creates an isolated desktop, gate and named home volume.
   The live stream reaches Chrome through the daemon. **Stop computer** shuts it down while
-  keeping the home volume for the next start. During a session, **Stop** freezes it;
-  **Resume computer** continues it with fresh key stand-ins.
+  keeping the home volume for the next start. **Stop task** in the composer ends the agent run
+  and releases it for a new conversation. The CLI emergency Stop freezes the computer;
+  **Resume computer** continues a frozen computer with fresh key stand-ins.
 - The desktop has the WhiteSur light theme, a menu bar and a Plank dock. Pinned versions and
   licenses are in `cells/desktop/THIRD-PARTY.md`.
 - `LOCALDOT_DOCKER_TESTS=1 pnpm test:docker` runs the Docker suites.

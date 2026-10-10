@@ -1,7 +1,7 @@
 # Browser workspace
 
-This guide describes the M7 author draft. Final integration and independent review are still
-pending; an older development preview may not contain these controls.
+This guide describes the current development UI. Older installed builds may not contain all
+of these controls.
 
 ## Two screens for one task
 
@@ -35,7 +35,22 @@ computers each had a profile, the current computer's profile is used.
 To sign in yourself, open **Settings → Accounts** and use **Sign in to a site**: type a site such
 as google.com, or pick a common one. The web browser opens that site's sign-in page and you are in
 control there; hand the computer back when you are done, and the site appears in the list. dot
-signs in the same way, only ever in the web browser.
+uses the protected sign-in flow below, only in the web browser.
+
+When dot asks for an account and password in chat, the daemon delivers them through a private
+browser input channel. For a supported HTTPS sign-in, it verifies the password field, fills the
+account and password, and submits the same-origin POST form in one operation. Ordinary model
+clicks and typing still cannot enter a password field. The model sees the result, never the
+password, and credentials are excluded from conversation events.
+
+Supported logins are saved in keyd's protected store (Keychain, keyring or encrypted file,
+depending on the installation), bound to the exact HTTPS origin. One account is saved per origin;
+a later answer replaces it. A future task can reuse it once before asking for updated credentials
+if the site rejects it. Two-factor authentication, security challenges and forms the protected
+path cannot verify may require your input or a clearly explained takeover.
+
+Saved passwords and browser cookies are separate. **Sign out** clears browser sign-in state;
+it does not delete the saved password in keyd. There is not yet a saved-password management UI.
 
 **Settings → Accounts** lists the sites with stored sign-ins, grouped by site, with **Sign out**
 for one site (its cookies, including partitioned ones, and the saved data of the hosts they were
@@ -97,8 +112,9 @@ separate interaction.
 
 ## Stop, replay and recovery
 
-**Stop** withdraws agent control and contains both screens and their active transfers. Recovery
-waits for in-flight work to drain before another task may take ownership. Do not treat an
+**Stop task** cancels the run and its queued messages, withdraws agent control and waits for
+in-flight work to drain before a new conversation can take ownership. It does not leave a paused
+task holding the computer. The CLI emergency Stop and Stop computer remain separate controls. Do not treat an
 interrupted upload or release as proof that the receiving side saw no bytes.
 
 Replay records both screens while the agent is working, including when you are not watching.

@@ -43,3 +43,7 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
 - **Before capture:** `node --import tsx e2e/ui/plan-capture.ts` and `e2e/ui/plan-states.ts` write
   reference screenshots and control notes of today's app to `e2e/out/before` (or `$OUT`), outside
   the harness's own output, which Playwright empties on every run.
+
+- **README screenshots:** after building the app, run
+  `node --import tsx e2e/ui/readme-capture.ts` from `apps/web`. This refreshes Watch, Permissions
+  and the message queue in `docs/readme` using a separate fixture daemon and synthetic data.

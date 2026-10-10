@@ -5,7 +5,7 @@
 <h1 align="center">localDot</h1>
 
 <p align="center">
-  <b>An assistant with its own computer. It lives on your Mac, and you can watch it work.</b>
+  <b>An assistant with its own computer. It runs locally, and you can watch it work.</b>
 </p>
 
 <p align="center">
@@ -15,11 +15,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/tour.gif" width="880" alt="A sample task: dot works through a spreadsheet, narrating each step, asks before sending an email, then hands over two files">
+  <img src="docs/readme/watch.png" width="880" alt="localDot's current Watch view: an isolated desktop, live task controls and a chat composer with model and permission choices">
 </p>
 <p align="center">
-  <sub>Twenty seconds of a sample task: dot works through a spreadsheet, stops to ask before
-  sending anything as you, then hands over the files. <a href="docs/readme/tour.mp4">MP4 version</a>.</sub>
+  <sub>The current UI with sample data. Watch dot work, queue the next message or take control.</sub>
 </p>
 
 ## What it is
@@ -29,10 +28,10 @@ the web, reads pages, runs code and uses your apps. It just doesn't do any of th
 computer.
 
 dot (that's the assistant) gets a small, isolated computer of its own. It runs in containers on
-your Mac, and you watch it live in a browser tab or on your phone. You can take over at any
+your machine, and you watch it live in a browser tab or on your phone. You can take over at any
 moment, and every task is recorded, so you can scrub back through it later.
 
-Think of it as giving a new assistant their own desk, rather than your laptop and your passwords.
+Think of it as giving an assistant their own desk, with credentials kept in a separate local vault.
 
 Three things we cared about most:
 
@@ -41,8 +40,8 @@ Three things we cared about most:
 - **Your keys never reach the model.** The agent only ever holds stand-ins. A small key service
   on your Mac adds the real key on the way out, and only for the hosts that key belongs to.
 - **Nothing leaves without a reason.** Everything dot sends out passes one checkpoint on your Mac.
-  Sending as you, paying, passwords and uploads always ask first. Ordinary work on its own
-  computer just runs.
+  Your permission mode decides what needs confirmation. Passwords use a private input path;
+  API keys stay in the key service. Ordinary work on its own computer can just run.
 
 ## What dot can do
 
@@ -61,12 +60,20 @@ The tour below shows them at work.
 
 <img src="docs/readme/watch.png" alt="localDot in Chrome: the computer's screen in the middle with a spreadsheet open, a status island above it, dot narrating below, and the chat on the right">
 
-The picture is dot's computer, live. The island on top says what's happening and keeps Pause,
-Stop and Take control within reach. dot sits under the picture and tells you what it's doing in
-plain words. The chat is on the right, and you can type into it while dot works. Send a message
-and dot shows it's thinking straight away. The timer runs on localDot's own clock, so it doesn't
-stick or jump, even after the tab has been in the background. Earlier conversations are one click
-away, grouped by day and searchable.
+The picture is dot's computer, live. The island keeps **Stop** and **Take control** within
+reach. dot sits under the picture and tells you what it's doing. The chat is on the right;
+its controls stay on one row as you narrow the panel, with secondary options tucked into the menu.
+
+With an empty message box, the main button is **Stop**. Stopping ends the current run and releases
+it so you can start a new conversation. Start typing and that button becomes **Send**: while dot
+works, your message waits until the current task finishes. Choose **Steer now** on a queued
+message to deliver it immediately. Stopping also cancels messages still waiting in the queue.
+
+<img src="docs/readme/queue.png" width="560" alt="A queued message marked After this task, with a Steer now button and Stop in the empty composer">
+
+The timer uses localDot's own clock, including after the tab has been in the background. Earlier
+conversations are searchable and grouped by day. You can read them while you hold computer control,
+and starting a new conversation keeps the previous one out of the new thread.
 
 ### Activity
 
@@ -104,7 +111,9 @@ as Markdown and as a PDF, with the passages it quoted from each source.
 
 The chip in the message box names the model doing the work. Open it to pick from every model
 you've set up, grouped by provider and plan; **Manage models…** at the bottom takes you to
-Settings. A switch applies from the next task, and the one running keeps its model.
+Settings. Configuring another provider keeps the models you already added. A switch applies to
+the next task; the running task keeps its model. If a task is held by a model or credit limit,
+choose an available model and **Continue** retries with that selection.
 
 Under each finished reply, a quiet line names the model and the tokens it used. For a reply that
 was just talk it adds the time, and the cost when your provider billed it. Tap the line to see
@@ -118,21 +127,33 @@ Hold the mic in the message box, or press ⌥Space (Ctrl+Shift+Space off a Mac),
 words land in the message so you can check them before you send. The speech is turned into text
 on your device when the browser can do it, or by a whisper.cpp model you already have on your
 Mac. The browser's online speech service is only used if you allow it. dot can also read its
-replies aloud in your device's own voice. Your voice is never saved.
+replies aloud in your device's own voice. Cancel recording or dismiss a microphone notice to
+return immediately to the normal controls. Your voice is never saved.
 
 ### It asks, right where you are
 
 <img src="docs/readme/approval.png" alt="An approval card over the computer: Send this as you? with the target, the site, and buttons for Don't send and Send">
 
-Sending as you, paying, passwords, uploads and account changes stop and ask. The card says
-exactly what will happen, and your answer can cover just this once, the whole task, the site, or
-always. Clicking around on its own computer doesn't ask. Nobody wants to approve thirty clicks an
-hour.
+The shield in the message box opens **Permissions**:
+
+- **Custom** follows your autonomy and tool settings, including the Balanced and Careful presets.
+- **Auto** lets Jev review routine actions, asking you when it cannot approve them.
+- **Full access** runs actions without routine confirmation, while destructive actions still ask.
+
+<img src="docs/readme/permissions.png" width="560" alt="Permissions menu in the chat composer: Custom, Auto and Full access, each with a short explanation">
+
+Under the default Custom/Balanced settings, sending as you, paying, uploads and account changes
+ask first. The card says what will happen, and eligible answers can cover this once, the task,
+the site or always. Network isolation and private credential handling apply in every mode.
 
 <img src="docs/readme/ask.png" alt="dot asks for a sign-in inside the chat: username and password fields, with a note that dot types the password into the site and never sees it">
 
 When dot needs a sign-in, the form shows up in the chat (or as a sheet on your phone). You type
-the password, localDot puts it into the page, and the model never sees it.
+the account and password once. localDot saves supported browser logins in its protected local
+vault, fills the verified sign-in form and submits it. Later tasks can reuse the saved login
+for the same HTTPS site without asking again. The password stays out of model input and
+conversation logs. Verification codes, security challenges and unsupported forms may still need
+you; a handoff tells you why. See [browser sign-ins](docs/browser-workspace.md#sign-in-once).
 
 ### Take over any time
 
@@ -140,7 +161,7 @@ the password, localDot puts it into the page, and the model never sees it.
 
 Press **Take control** and the computer is yours: mouse, keyboard, paste, the lot. dot can't see
 or touch anything until you hand it back, and that stretch isn't recorded. Full screen is one
-click away when you want the whole display.
+click away when you want the whole display. Conversation history stays available during takeover.
 
 ### Your apps, as tools
 
@@ -149,8 +170,8 @@ click away when you want the whole display.
 Some jobs are quicker without the screen. In **Settings → Connectors** you can give dot your
 apps directly: GitHub, Linear, Notion, Sentry, Brave Search and DeepWiki are a click away, and any
 other MCP server can be added by its address or the command that runs it. Each tool is set to
-**Just runs**, **Asks first** or **Off**. Reading runs; anything that changes something asks
-first, and the card shows exactly what dot would send. Keys and sign-ins stay in keyd and only
+**Just runs**, **Asks first** or **Off**. With Custom permissions, reading runs and changes ask
+first by default; the card shows exactly what dot would send. Keys and sign-ins stay in keyd and only
 ever go to their own app. An app that runs as a program gets a sealed cell of its own: read-only,
 none of your files, and no way out except through keyd.
 
@@ -207,9 +228,9 @@ editable and deletable), the sites you're signed in to, your apps, and your keys
 
 It's Linux in containers, dressed to feel familiar: menu bar, dock, a launcher, traffic lights.
 It comes with Chromium, LibreOffice, GIMP, a code editor and a terminal. Sign-ins in its web
-browser stay put across restarts and new tasks, so you log in once. If the web browser ever
-fails, dot carries on in the desktop's Chromium (without your sign-ins) instead of stopping the
-task or the computer.
+browser stay put across restarts and new tasks, so you log in once. If the web browser stops
+answering, localDot attempts to restart it with the saved profile.
+A failed browser action is never silently redirected into the desktop's Chromium.
 
 <img src="docs/readme/computer-launcher.png" alt="The launcher open over LibreOffice Calc, with calc typed in the search field">
 
@@ -273,7 +294,7 @@ up in the same step list.
   <img src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Searching, reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
 </picture>
 
-What asks and what doesn't, on the default **Balanced** setting:
+What asks and what doesn't, with **Custom** permissions and the default **Balanced** preset:
 
 | dot wants to… | What happens |
 | --- | --- |
@@ -283,7 +304,7 @@ What asks and what doesn't, on the default **Balanced** setting:
 | Run code or a terminal command on its own computer | Just runs |
 | Send a message or email as you, or post as you | Asks first |
 | Pay for or buy something | Asks first |
-| Enter a password or another secret | Asks you to type it; the model never sees it |
+| Sign in to a supported HTTPS site | Uses a saved login or asks once in a private form; the model never sees the password |
 | Upload your files somewhere | Asks first |
 | Change account settings or delete data on a remote service | Asks first |
 | Change something with one of your apps | Asks first, with exactly what it would send (you can set each tool) |
@@ -292,7 +313,8 @@ What asks and what doesn't, on the default **Balanced** setting:
 | Reach your LAN, your router or cloud metadata | Blocked |
 | Use an API key | Gets a stand-in; the real key is added at the edge, for that key's hosts only |
 
-**Careful** mode asks before every step except reading and browsing. Either way, your answer
+The **Careful** preset asks before every step except reading and browsing. **Auto** and
+**Full access** change the confirmation policy as described above. Eligible answers
 can be scoped: just this once, for this task, for this site, or always, and you can take an
 "always" back in Settings.
 
@@ -419,8 +441,9 @@ No. dot works on its own computer, in containers. It sees your files only when y
 and its results open on your Mac only when you click Open.
 
 **Could it email my boss without asking?**
-No. Sending as you always needs your OK, and the card shows exactly what's going out. Your boss
-remains blissfully unaware.
+With the default Custom/Balanced settings, sending as you asks first and the card shows what
+would be sent. Auto can approve routine actions through Jev; Full access allows sending without
+a routine confirmation. Choose the permission mode that matches the authority you want to give dot.
 
 **What does it cost?**
 localDot is free and MIT licensed. Models cost whatever your provider charges, and localDot shows

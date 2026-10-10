@@ -79,9 +79,11 @@ gets the key service's socket through a read-only folder, `~/.localdot/keyd/rela
 `localdot doctor` checks this with a test computer (`gate-relay`). Docker from the Snap Store
 can't share that hidden folder: install Docker Engine from docs.docker.com instead.
 
-## Saved keys
+## Saved keys and logins
 
-Your provider keys are kept by the key service, and the computers only ever see stand-ins:
+Your provider keys are kept by the key service, and the computers only ever see stand-ins.
+Saved browser accounts and passwords use the same protected store through a separate private
+input channel; they are bound to the exact HTTPS site and never supplied to the model:
 
 - **Linux with a desktop keyring** (GNOME Keyring, KWallet): in the keyring.
 - **Linux without one**, such as a server or WSL 2: in an encrypted file. With systemd 256 or

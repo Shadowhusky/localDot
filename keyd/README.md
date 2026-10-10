@@ -1,8 +1,17 @@
 # keyd
 
-keyd is localDot's key layer: the only process that holds real secrets. It keeps its state in
+keyd is localDot's key layer: it stores real credentials and issues scoped API-key stand-ins. It keeps its state in
 `<home>/keyd`, answers the daemon on `<home>/keyd/admin.sock` and stores secret values as Keychain
 items whose access list trusts only keyd of generation 2 or later, signed by team `87FD3FSZBG`.
+
+## Saved browser logins
+
+Browser account/password pairs use the same protected store, in a reserved `login-` namespace
+bound to the exact HTTPS origin. They are not listed as API keys or issued as surrogates. The
+daemon saves and retrieves them over the private admin socket, then delivers them through the
+browser's protected input channel; values do not enter model input, conversation events or audit
+payloads. One login is stored per origin. Browser sign-out clears cookies separately from these
+saved passwords. See [browser sign-ins](../docs/browser-workspace.md#sign-in-once).
 
 ## Two binaries
 
