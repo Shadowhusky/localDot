@@ -1,0 +1,81 @@
+name: release-image-candidate
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish tested candidate images (requires protected release-candidate environment)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: release-images-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  images:
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    environment: release-candidate
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: keyd/go.mod
+          cache: false
+      - uses: docker/setup-buildx-action@v3
+      - run: pnpm install --frozen-lockfile
+      - name: Build all four images natively
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          test "$(docker version --format '{{.Server.Arch}}')" = "$EXPECTED_ARCH"
+          for role in gate brain desktop browser; do bash "cells/$role/build.sh"; done
+      - name: Exercise real image contents and desktop startup
+        env:
+          LOCALDOT_DOCKER_TESTS: '1'
+          LOCALDOT_DESKTOP_IMAGE: localdot/desktop:dev
+          LOCALDOT_GATE_IMAGE: localdot/gate:dev
+          LOCALDOT_BROWSER_IMAGE: localdot/browser:dev
+        run: |
+          mkdir -p candidate-evidence
+          pnpm exec vitest run --config vitest.docker.config.ts \
+            apps/daemon/src/cells/gate-image.docker.test.ts \
+            apps/daemon/src/cells/desktop-image.docker.test.ts \
+            --reporter=default --reporter=json --outputFile=candidate-evidence/tests.json
+          node scripts/release/require-test-pass.mjs candidate-evidence/tests.json
+      - name: Record candidate image identities and sizes
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: node scripts/release/image-receipt.mjs candidate-evidence/images.json
+      - name: Publish tested architecture candidates
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-images.mjs candidate-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-images-${{ matrix.architecture }}
+          path: candidate-evidence/
+          if-no-files-found: error
+          retention-days: 14
+  # This workflow deliberately does not promote a release. Native image checks are not
+  # Windows/macOS installation acceptance, nor publisher provenance for app/helper archives.

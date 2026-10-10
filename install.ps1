@@ -287,7 +287,7 @@ function Invoke-Installer([string[]]$Options) {
     $download = Invoke-Wsl -d $Distro --cd "~" --exec curl -fsSL -o $file $InstallUrl
     if ($download.Code -ne 0) { throw "Couldn't download the installer inside ${Distro}: $($download.Text)" }
     & wsl.exe -d $Distro --cd "~" --exec bash $file @Options
-    if ($LASTEXITCODE -ne 0) { throw "The installer inside $Distro stopped; see its message above." }
+    if ($LASTEXITCODE -ne 0) { throw "localDot setup inside $Distro failed (exit $LASTEXITCODE). The specific cause and recovery steps are printed above. Completed setup and your data are kept; rerun the same installer after fixing that issue." }
   } finally {
     Invoke-Wsl -d $Distro --cd "~" --exec rm -f $file | Out-Null
   }

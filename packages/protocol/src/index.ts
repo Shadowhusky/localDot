@@ -11,6 +11,7 @@ export * from "./conversation.ts";
 export * from "./deliverables.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";
+export * from "./distribution.ts";
 export * from "./events.ts";
 export * from "./exports.ts";
 export * from "./geometry.ts";

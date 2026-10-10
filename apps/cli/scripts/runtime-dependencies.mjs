@@ -8,7 +8,7 @@ import { runtimeBuildOptions, WORKSPACE } from "./build-options.mjs";
 const NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const EXACT =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/;
-const NATIVE = ["@img/sharp-darwin-arm64", "@img/sharp-libvips-darwin-arm64"];
+const TARGETS = new Set(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
 const HOOKS = ["preinstall", "install", "postinstall"];
 const ordered = (entries) => Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)));
 
@@ -53,7 +53,16 @@ function platformFields(meta) {
 }
 
 /** Deterministic projection of this release's runtime graph. This does not install dependencies. */
-export function projectRuntimeDependencies({ lock, version, sharpVersion, metadata = {} }) {
+export function projectRuntimeDependencies({
+  lock,
+  version,
+  sharpVersion,
+  metadata = {},
+  target = "darwin-arm64",
+}) {
+  if (!TARGETS.has(target)) throw new Error("Unsupported runtime target");
+  const [os, cpu] = target.split("-");
+  const native = [`@img/sharp-${target}`, `@img/sharp-libvips-${target}`];
   runtimeBuildOptions(version);
   if (String(lock.lockfileVersion) !== "9.0") throw new Error("Unsupported pnpm lock format");
   const sharp = own(own(lock.importers, "apps/daemon").dependencies, "sharp");
@@ -61,11 +70,15 @@ export function projectRuntimeDependencies({ lock, version, sharpVersion, metada
     throw new Error("Sharp package and lock pins disagree");
   const sharpSnapshot = own(lock.snapshots, `sharp@${sharp.version}`);
   const roots = { sharp: sharp.version };
-  for (const name of NATIVE) {
+  for (const name of native) {
     roots[name] = own(sharpSnapshot.optionalDependencies, name);
     const meta = own(lock.packages, `${name}@${versionOf(roots[name])}`);
-    if (JSON.stringify(meta.os) !== '["darwin"]' || JSON.stringify(meta.cpu) !== '["arm64"]')
-      throw new Error("Required native package is not Darwin arm64");
+    if (
+      JSON.stringify(meta.os) !== JSON.stringify([os]) ||
+      JSON.stringify(meta.cpu) !== JSON.stringify([cpu]) ||
+      (os === "linux" && JSON.stringify(meta.libc) !== '["glibc"]')
+    )
+      throw new Error("Required native package does not match the runtime target");
   }
   const queue = Object.entries(roots).map(([name, reference]) => ({
     name,
@@ -171,8 +184,8 @@ export function projectRuntimeDependencies({ lock, version, sharpVersion, metada
       "npm-shrinkwrap.json",
     ],
     engines: { node: ">=24" },
-    os: ["darwin"],
-    cpu: ["arm64"],
+    os: [os],
+    cpu: [cpu],
     dependencies,
   };
   const packages = {
@@ -225,7 +238,7 @@ export function readPnpmLock(bytes) {
   return JSON.parse(text);
 }
 
-export async function writeRuntimeDependencies({ output, version }) {
+export async function writeRuntimeDependencies({ output, version, target = "darwin-arm64" }) {
   const bytes = await readFile(join(WORKSPACE, "pnpm-lock.yaml")),
     lock = readPnpmLock(bytes);
   const daemon = JSON.parse(await readFile(join(WORKSPACE, "apps/daemon/package.json"), "utf8"));
@@ -236,6 +249,7 @@ export async function writeRuntimeDependencies({ output, version }) {
     semver: JSON.parse(await readFile(requireSharp.resolve("semver/package.json"), "utf8")),
   };
   const result = projectRuntimeDependencies({
+    target,
     lock,
     version,
     sharpVersion: daemon.dependencies.sharp,

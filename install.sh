@@ -742,8 +742,60 @@ prepare_images() {
     # so ensure the managed compiler exists even when build_keyd skipped its build.
     if [ "$role" = gate ]; then ensure_go; fi
     say "Building the $role image"
-    (cd "$APP" && tools bash "cells/$role/build.sh") || die "Building the $role image failed; see the messages above."
+    (cd "$APP" && run_setup_stage "$role" tools bash "cells/$role/build.sh") || return $?
   done
+}
+
+# Keep the original build output in the terminal, but persist only a classified diagnostic:
+# build output may contain registry credentials or signed URLs. Never log it verbatim.
+run_setup_stage() {
+  local role=$1 capture code=0 reason recovery
+  shift
+  capture=$(mktemp "$RUNTIME/.image-build.XXXXXX") || return 1
+  chmod 600 "$capture"
+  "$@" 2>&1 | awk -v diagnostic="$capture" '
+    { print; fflush(); line=tolower($0)
+      if (line ~ /read-only file system/) print "read-only file system" >> diagnostic
+      if (line ~ /no space left on device|disk quota exceeded|not enough space/) print "no space left on device" >> diagnostic
+      if (line ~ /permission denied|access is denied/) print "permission denied" >> diagnostic
+      if (line ~ /could not resolve|temporary failure resolving|connection timed out|tls handshake timeout/) print "could not resolve" >> diagnostic
+      close(diagnostic)
+    }' || code=$?
+  if [ "$code" = 0 ]; then rm -f "$capture"; return 0; fi
+  reason="image-build-failed"
+  recovery="Read the build output above, fix the reported issue, then rerun the same installer."
+  if grep -qi 'read-only file system' "$capture"; then
+    reason="docker-storage-read-only"
+    recovery="Docker storage is read-only. Check free space on the disk holding Docker data, then restart Docker and rerun setup. If it persists, collect Docker diagnostics. Do not reset Docker or delete its data."
+  elif grep -qiE 'no space left on device|disk quota exceeded|not enough space' "$capture"; then
+    reason="docker-storage-full"
+    recovery="Docker ran out of storage. Check both the host disk and Docker disk allocation, free space without deleting your computer data, then rerun setup."
+  elif grep -qiE 'permission denied|access is denied' "$capture"; then
+    reason="docker-permission-denied"
+    recovery="The image build was denied access. Check Docker access for your user and the denied path printed above, then rerun setup."
+  elif grep -qiE 'could not resolve|temporary failure resolving|connection timed out|TLS handshake timeout' "$capture"; then
+    reason="image-download-unavailable"
+    recovery="An image dependency could not be downloaded. Check your connection, DNS and proxy settings, then rerun setup; Docker keeps completed layers."
+  fi
+  rm -f "$capture"
+  (umask 077; printf 'stage=image-%s\ncode=%s\nreason=%s\n' "$role" "$code" "$reason" > "$RUNTIME/install-failure.txt")
+  printf '\nCould not prepare the %s image: %s\n%s\nDiagnostic: %s/install-failure.txt\n' "$role" "$reason" "$recovery" "$RUNTIME" >&2
+  return "$code"
+}
+
+check_docker_storage() {
+  local probe tag code=0
+  probe=$(mktemp -d "$RUNTIME/.storage-probe.XXXXXX") || return 1
+  tag="localdot-install-probe:$(basename "$probe" | tr '[:upper:]' '[:lower:]' | tr -d '.')"
+  printf 'FROM scratch\nCOPY marker /localdot-storage-probe\n' > "$probe/Dockerfile"
+  printf 'localDot installation storage check\n' > "$probe/marker"
+  step "Checking Docker can write an image layer"
+  run_setup_stage storage-check with_timeout 60 docker build --label localdot.install-probe=true -q -t "$tag" "$probe" || code=$?
+  # Remove only this invocation's random tag; never prune shared Docker resources.
+  with_timeout 10 docker image rm "$tag" >/dev/null 2>&1 || true
+  rm -rf "$probe"
+  [ "$code" = 0 ] || return "$code"
+  say "Docker storage is writable now. Downloads can still fail if storage fills later."
 }
 
 tailscale_cli() {
@@ -998,7 +1050,7 @@ cli() {
 
 wait_ready() {
   local tries=0
-  until curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/"; do
+  until curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/"; do
     tries=$((tries + 1))
     if [ $tries -ge 60 ]; then
       tail -n 20 "$LD_HOME/logs/daemon.log" >&2 2>/dev/null || true
@@ -1079,14 +1131,11 @@ finish() {
   wait_ready
   offer_unlock
   step "Checking the installation"
-  local healthy=1
-  cli doctor || healthy=0
+  if ! cli doctor; then
+    die "Installation checks failed. Setup is not complete. Your data is kept; run localdot doctor, fix the reported checks, then rerun setup."
+  fi
   step "Sign in"
   show_link
-  if [ "$healthy" = 0 ]; then
-    say ""
-    say "Some checks failed (marked FAIL above). Fix them, then run: localdot doctor"
-  fi
   case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
   *) say "To use the localdot command, open a new terminal or add $HOME/.local/bin to your PATH." ;;
@@ -1115,6 +1164,10 @@ run_install() {
   unset LOCALDOT_INSTALL_STAGE
   COMMIT=$(git -C "$APP" rev-parse HEAD)
   ensure_node
+  rm -f "$RUNTIME/install-failure.txt"
+  if [ "$SKIP_IMAGES" = 0 ] && { [ "$COMMIT" != "$BUILT_COMMIT" ] || ! images_present; }; then
+    check_docker_storage
+  fi
   build_app
   build_keyd
   configure_remote_access

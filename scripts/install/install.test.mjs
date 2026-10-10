@@ -160,6 +160,7 @@ info)
 image) role=\${3#localdot/}; [ -f "$STUB_STATE/image-\${role%:dev}" ] ;;
 pull) [ -n "\${STUB_PULL_OK:-}" ] ;;
 tag) role=\${3#localdot/}; touch "$STUB_STATE/image-\${role%:dev}" ;;
+build) [ -z "\${STUB_STORAGE_ERROR:-}" ] || { echo "$STUB_STORAGE_ERROR" >&2; exit 9; } ;;
 esac`,
   );
   script(
@@ -418,6 +419,53 @@ describe.concurrent("prerequisites", { timeout: 60_000 }, () => {
 });
 
 describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
+  it("catches unwritable Docker storage before building images and cleans up only its probe", async () => {
+    const host = await makeHost();
+    const result = await host.run([], {
+      STUB_STORAGE_ERROR: "metadata_v2.db: read-only file system",
+    });
+    expect(result.code).toBe(9);
+    expect(result.stderr).toContain("docker-storage-read-only");
+    expect(host.calls().some((call) => call.startsWith("build "))).toBe(false);
+    expect(
+      host.calls().some((call) => call.startsWith("docker image rm localdot-install-probe:")),
+    ).toBe(true);
+    expect(host.calls().some((call) => /prune|volume rm/.test(call))).toBe(false);
+  });
+  it.each([
+    ["write metadata_v2.db: read-only file system", "docker-storage-read-only"],
+    ["no space left on device", "docker-storage-full"],
+    ["permission denied", "docker-permission-denied"],
+    ["Temporary failure resolving archive.ubuntu.com", "image-download-unavailable"],
+  ])(
+    "explains image failure %s and keeps diagnostics free of raw build secrets",
+    async (error, reason) => {
+      const host = await makeHost();
+      script(
+        join(host.origin, "cells/desktop/build.sh"),
+        `echo '${error}'; echo 'Bearer private-fixture-secret'; exit 7`,
+      );
+      host.commit("Fail desktop image");
+      const result = await host.run();
+      expect(result.code).toBe(7);
+      expect(result.stderr).toContain(reason);
+      const diagnostic = readFileSync(join(host.prefix, "runtime/install-failure.txt"), "utf8");
+      expect(diagnostic).toContain(`reason=${reason}`);
+      expect(diagnostic).not.toContain("private-fixture-secret");
+      expect(
+        host.calls().some((call) => /prune|wsl --shutdown|systemctl.*restart/.test(call)),
+      ).toBe(false);
+      expect(result.stdout).not.toContain("#code=");
+    },
+  );
+
+  it("does not claim success or issue a sign-in link when doctor fails", async () => {
+    const host = await makeHost();
+    const result = await host.run([], { STUB_DOCTOR_RC: "1" });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Setup is not complete");
+    expect(result.stdout).not.toContain("#code=");
+  });
   it("builds, starts user services, checks and prints a link with a way in from elsewhere", async () => {
     const host = await makeHost();
     const result = await host.run();
@@ -596,12 +644,14 @@ describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
     expect(result.stderr).toContain("sudo loginctl enable-linger");
   });
 
-  it("says so when the checks fail, and still prints the link", async () => {
+  it("recovers from failed final checks when the installer is rerun", async () => {
     const host = await makeHost();
     const result = await host.run([], { STUB_DOCTOR_RC: "1" });
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Some checks failed");
-    expect(result.stdout).toContain("#code=fakecode");
+    expect(result.code).toBe(1);
+    expect(result.stdout).not.toContain("#code=fakecode");
+    const retry = await host.run();
+    expect(retry.code, retry.stderr).toBe(0);
+    expect(retry.stdout).toContain("#code=fakecode");
   });
 });
 

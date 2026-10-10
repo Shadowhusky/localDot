@@ -17,6 +17,23 @@ afterEach(async () => {
 const project = (lock) =>
   projectRuntimeDependencies({ lock, version: "1.2.3", sharpVersion: "1.0.0" });
 
+it.each(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"])(
+  "projects the actual frozen native dependency graph for %s without resolving new versions",
+  async (target) => {
+    const root = await mkdtemp(join(tmpdir(), "localdot-platform-lock-"));
+    roots.push(root);
+    const receipt = await writeRuntimeDependencies({ output: root, version: "0.0.0-rc.0", target });
+    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+    expect(pkg.os).toEqual([target.split("-")[0]]);
+    expect(pkg.cpu).toEqual([target.split("-")[1]]);
+    expect(Object.keys(pkg.dependencies).sort()).toEqual(
+      [`@img/sharp-${target}`, `@img/sharp-libvips-${target}`, "sharp"].sort(),
+    );
+    expect(receipt.graph.find((item) => item.name === `@img/sharp-${target}`).optional).toBe(false);
+    expect(receipt.cleanInstallVerified).toBe(false);
+  },
+);
+
 it("projects the actual32-package frozen graph with all six required packages and no development peer", async () => {
   const root = await mkdtemp(join(tmpdir(), "localdot-real-runtime-lock-"));
   roots.push(root);

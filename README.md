@@ -15,7 +15,8 @@
 ## Install
 
 **1. Run the installer.** It checks your computer and offers to install missing tools and Docker.
-Existing working Docker installations are reused. Allow about **15 GB** of free space.
+Existing working Docker installations are reused. Keep free space on both your installation
+disk and the disk holding Docker’s data; peak storage requirements are still being measured.
 
 macOS or Linux — in Terminal, as your normal user:
 

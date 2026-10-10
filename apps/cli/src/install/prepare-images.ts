@@ -32,7 +32,17 @@ export async function prepareReleaseImages(
   signal.throwIfAborted();
   const manifest = ReleaseManifest.parse(input);
   const engine = { ...(await client.engine(signal)) };
-  if (engine.operatingSystem !== "linux" || engine.architecture !== "arm64" || !engine.id)
+  if (
+    engine.operatingSystem !== "linux" ||
+    !["arm64", "amd64"].includes(engine.architecture) ||
+    !engine.id
+  )
+    throw fail();
+  if (
+    IMAGE_ROLES.some(
+      (role) => !manifest.images[role].platforms.includes(`linux/${engine.architecture}`),
+    )
+  )
     throw fail();
   const images: Record<string, { reference: string; imageId: string }> = {};
   function verified(reference: string, inspection: unknown): string | undefined {
@@ -90,7 +100,7 @@ export async function prepareReleaseImages(
   return Object.freeze({
     version: manifest.version,
     engineId: engine.id,
-    platform: "linux/arm64" as const,
+    platform: `linux/${engine.architecture}` as const,
     images: Object.freeze(images),
   });
 }

@@ -112,6 +112,19 @@ it("encodes exact inspect references and treats only 404 as missing", async () =
   mockResponse({ status: 500 });
   await expect(client().inspect(pin, signal())).rejects.toThrow();
 });
+it("pulls the explicitly selected AMD64 release and rejects missing platform pins", async () => {
+  mockResponse({ chunks: [Buffer.from('{"status":"Downloading"}\n')] });
+  const amd64 = installImageClient("/fixture/docker.sock", "amd64");
+  await amd64.pull(pin, signal(), vi.fn());
+  expect(
+    new URL(request.mock.calls[0]?.[0].path, "http://docker").searchParams.get("platform"),
+  ).toBe("linux/amd64");
+  request.mockClear();
+  await expect(
+    amd64.pull({ ...pin, platforms: ["linux/arm64"] }, signal(), vi.fn()),
+  ).rejects.toThrow();
+  expect(request).not.toHaveBeenCalled();
+});
 it("normalizes Docker's arm64 alias but requires a Desktop Linux engine and stable ID", async () => {
   mockResponse((path) => ({
     chunks: [

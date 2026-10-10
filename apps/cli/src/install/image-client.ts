@@ -7,7 +7,7 @@ import { type ImagePullProgress, readImagePullProgress } from "./image-progress.
 export interface ImageEngine {
   id: string;
   operatingSystem: "linux";
-  architecture: "arm64";
+  architecture: "arm64" | "amd64";
 }
 export interface InstallImageClient {
   engine(signal: AbortSignal): Promise<ImageEngine>;
@@ -23,8 +23,12 @@ const fail = () => new Error("Docker image preparation failed. Check Docker Desk
 /** Fixed local-socket operations only. No CLI spawn, environment auth, credential helper or
  * registry-login request. Callers obtain this socket through the local installation preflight.
  */
-export function installImageClient(socketPath: string): InstallImageClient {
+export function installImageClient(
+  socketPath: string,
+  architecture: ImageEngine["architecture"] = "arm64",
+): InstallImageClient {
   if (
+    !["arm64", "amd64"].includes(architecture) ||
     !isAbsolute(socketPath) ||
     normalize(socketPath) !== socketPath ||
     socketPath === "/" ||
@@ -128,14 +132,16 @@ export function installImageClient(socketPath: string): InstallImageClient {
         !version ||
         !info ||
         version.Os !== "linux" ||
-        !["arm64", "aarch64"].includes(String(version.Arch)) ||
+        !(architecture === "arm64" ? ["arm64", "aarch64"] : ["amd64", "x86_64"]).includes(
+          String(version.Arch),
+        ) ||
         typeof info.ID !== "string" ||
         !/^[A-Za-z0-9_:-]{1,256}$/.test(info.ID) ||
         typeof info.OperatingSystem !== "string" ||
         !/^Docker Desktop(?:\s|$)/.test(info.OperatingSystem)
       )
         throw fail();
-      return { id: info.ID, operatingSystem: "linux", architecture: "arm64" };
+      return { id: info.ID, operatingSystem: "linux", architecture };
     },
     async inspect(input, signal) {
       const pin = ImagePin.parse(input);
@@ -143,7 +149,11 @@ export function installImageClient(socketPath: string): InstallImageClient {
     },
     async pull(input, signal, report) {
       const pin = ImagePin.parse(input);
-      const query = new URLSearchParams({ fromImage: imageRef(pin), platform: "linux/arm64" });
+      if (!pin.platforms.includes(`linux/${architecture}`)) throw fail();
+      const query = new URLSearchParams({
+        fromImage: imageRef(pin),
+        platform: `linux/${architecture}`,
+      });
       await exchange(
         "POST",
         `/${DOCKER_API}/images/create?${query}`,

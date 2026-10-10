@@ -1,7 +1,9 @@
 # Install localDot
 
 Run the installer, follow its setup prompts, then open the sign-in link.
-Allow **15 GB** of disk space and **10–30 minutes** for the first computer-image build.
+The current installer builds from source. Allow **10–30 minutes or longer** for the first
+computer-image build. Peak disk requirements have not yet been validated; both your installation
+disk and Docker's data disk need free space. Prebuilt distribution is not enabled yet.
 
 ## Install
 
@@ -84,6 +86,9 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | --- | --- |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
+| `docker-storage-read-only` or `read-only file system` | Docker could not write its storage. Check the host disk holding Docker's data, restart Docker, then rerun setup. If it persists, collect Docker diagnostics. Do not factory-reset Docker or delete its disk image. |
+| `docker-storage-full` or `no space left on device` | Check space on both the host disk and Docker's virtual disk. Free space without deleting localDot's computer data, then rerun setup. |
+| Final installation checks failed | Setup is not complete. Run `localdot doctor`, fix the reported checks, and rerun the installer. A running web server alone is not a successful installation. |
 | `go: command not found` while building the gate image | Rerun the latest installer. It supplies Go automatically; no separate Go installation is needed. |
 | A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
 | `localdot: command not found` | Open a new terminal. On Windows, use Ubuntu/WSL. If needed, run `~/.local/bin/localdot open`. |
@@ -105,7 +110,8 @@ For your phone or a remote server, see [remote access](#servers-without-a-screen
 - git, curl, tar and gzip (inside Ubuntu/WSL on Windows). The installer brings its own Node.js and Go,
   checked against pinned checksums,
   and kept in localDot’s own directory. Prerequisite setup can install system packages.
-- About 15 GB of free disk space, most of it for the computer images.
+- Free space for downloads, extraction and computer images. Peak usage is not yet validated;
+  Docker's virtual disk and its underlying host disk are separate constraints.
 
 Run the localDot installer as your own user, not as root. Installing system prerequisites may
 require administrator access or `sudo`; Windows may request elevation for WSL setup.

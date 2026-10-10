@@ -268,7 +268,7 @@ Reset-Machine @{ Installer = 1 }
 $machine.Distros = @(, @("Ubuntu", "2"))
 $message = ""
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
-Check ($message -like "*installer inside Ubuntu stopped*") "reports a failed Linux install"
+Check ($message -like "*inside Ubuntu failed (exit 1)*" -and $message -like "*data are kept*") "reports a failed Linux install with its exit code and recovery guidance"
 Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec rm -f .localdot-install.Ab12Cd") "removes the file after a failed install too"
 Check (-not (@($script:calls) -match "Register-ScheduledTask")) "registers nothing after a failed install"
 
