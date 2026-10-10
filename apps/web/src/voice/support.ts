@@ -71,10 +71,17 @@ export function speechRecognition(): SpeechRecognitionCtor | undefined {
   return scope.SpeechRecognition ?? scope.webkitSpeechRecognition;
 }
 
+// Chrome alone serves speech on the device. Other Chromium builds can offer the same method with no
+// service behind it, and the browser closes the tab that calls it.
+function servesOnDevice(): boolean {
+  const agent = navigator as { userAgentData?: { brands?: readonly { brand: string }[] } };
+  return !!agent.userAgentData?.brands?.some((entry) => entry.brand === "Google Chrome");
+}
+
 export async function browserSpeech(language: string): Promise<BrowserSpeech> {
   const recognition = speechRecognition();
   if (!recognition) return "none";
-  if (typeof recognition.available !== "function") return "online";
+  if (typeof recognition.available !== "function" || !servesOnDevice()) return "online";
   try {
     const status = await recognition.available({ langs: [language], processLocally: true });
     if (status === "available") return "local";
