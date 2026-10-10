@@ -279,7 +279,13 @@ for (const width of [390, 640])
       await expect(page.locator("article.thread-message").first()).toContainText(
         "Recorded message",
       );
-      await page.getByRole("button", { name: "Jump to latest", exact: true }).focus();
+      // Jump to latest is inert until the thread has left the latest rows; only then can it take
+      // the focus.
+      const latest = page.getByRole("button", { name: "Jump to latest", exact: true });
+      await expect(async () => {
+        await latest.focus();
+        await expect(latest).toBeFocused({ timeout: 200 });
+      }).toPass();
       await page.keyboard.press("Enter");
       await expect(page.locator("article.thread-message").last()).toContainText(
         "Recorded message 300",
