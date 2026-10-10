@@ -43,12 +43,18 @@ test("a postponed app update stays in Settings with aligned mobile controls", as
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Later", exact: true })).toBeFocused();
   await dialog.getByRole("button", { name: "Later", exact: true }).click();
+  await expect(dialog).toBeHidden();
   expect(installs).toBe(0);
   await expect(title).toBeVisible();
-  await sheet.getByRole("switch", { name: "Install at next launch", exact: true }).click();
+  const preference = sheet.getByRole("switch", { name: "Install at next launch", exact: true });
+  await preference.scrollIntoViewIfNeeded();
+  await ui.settle();
+  const before = await sheet.locator("#settings-computer").boundingBox();
+  await preference.click();
   await expect(
     sheet.getByRole("switch", { name: "Install at next launch", exact: true }),
   ).not.toBeChecked();
+  expect(await sheet.locator("#settings-computer").boundingBox()).toEqual(before);
   await closeSettings(page);
   await page.reload();
   const reopened = await openSettings(page, undefined, "Your computer");
@@ -57,6 +63,7 @@ test("a postponed app update stays in Settings with aligned mobile controls", as
     reopened.getByRole("switch", { name: "Install at next launch", exact: true }),
   ).not.toBeChecked();
   await ui.settle();
+  await page.waitForTimeout(450);
   await page.screenshot({ path: test.info().outputPath("software-update.png") });
   const overflow = await reopened.evaluate((el) =>
     [...el.querySelectorAll<HTMLElement>(".ui-group-row")]

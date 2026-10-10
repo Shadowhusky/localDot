@@ -3,7 +3,8 @@ import { type ApiClient, ApiError } from "../lib/api.ts";
 import { copyHomeScreenLink, LinkNotCopied } from "../notify/home-screen-link.ts";
 import { Button } from "../ui/Button.tsx";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
-import { TextField } from "../ui/TextField.tsx";
+import { SignInLinkSheet } from "./SignInLinkSheet.tsx";
+import { StableText } from "./StableText.tsx";
 
 type Address = { origin: string; label: string; description: string };
 export function AccessLinksSettings({ api }: { api: ApiClient }) {
@@ -82,9 +83,17 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
                 disabledReason={busy && busy !== address.origin ? "Creating a link…" : undefined}
                 onClick={() => void copy(address.origin)}
               >
-                {result?.origin === address.origin && !result.fallback
-                  ? `${address.label} link copied`
-                  : `Copy ${address.label.toLowerCase()} link`}
+                <StableText
+                  choices={[
+                    `Copy ${address.label.toLowerCase()} link`,
+                    `${address.label} link copied`,
+                  ]}
+                  value={
+                    result?.origin === address.origin && !result.fallback
+                      ? `${address.label} link copied`
+                      : `Copy ${address.label.toLowerCase()} link`
+                  }
+                />
               </Button>
               <span className="settings-remote-hint settings-access-origin">{address.origin}</span>
             </div>
@@ -93,25 +102,25 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         </div>
       ))}
       <GroupNote>
-        Sign-in links work once and expire in 1 minute. Only share with a device you trust.
+        <span role="status">
+          <StableText
+            choices={[
+              "Sign-in links work once and expire in 1 minute. Only share with a device you trust.",
+              "Link copied. Open it on your device within a minute. Only share with a device you trust.",
+            ]}
+            value={
+              result && !result.fallback
+                ? "Link copied. Open it on your device within a minute. Only share with a device you trust."
+                : "Sign-in links work once and expire in 1 minute. Only share with a device you trust."
+            }
+          />
+        </span>
       </GroupNote>
-      {result && (
-        <GroupNote>
-          <span role="status">
-            {result.fallback
-              ? "Copying was blocked. Select and copy the link below."
-              : "Link copied. Open it on your device within a minute."}
-          </span>
-        </GroupNote>
-      )}
-      {result?.fallback && (
-        <TextField
-          aria-label="App sign-in link"
-          value={result.fallback}
-          readOnly
-          onFocus={(event) => event.currentTarget.select()}
-        />
-      )}
+      <SignInLinkSheet
+        link={result?.fallback}
+        label="App sign-in link"
+        onClose={() => setResult(null)}
+      />
       {error && (
         <GroupNote>
           <span role="alert">{error}</span>{" "}

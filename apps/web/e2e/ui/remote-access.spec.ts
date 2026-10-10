@@ -43,10 +43,21 @@ test("remote access requires opt-in and keeps its privacy and pairing controls i
   expect(mutations).toBe(0);
   await toggle.click();
   const create = sheet.getByRole("button", { name: "Copy sign-in link" });
+  await create.scrollIntoViewIfNeeded();
+  await ui.settle();
+  const layout = () =>
+    sheet.locator(".settings-remote-action").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return [rect.x, rect.y, rect.width, rect.height].map(Math.round);
+      }),
+    );
+  const beforeCopy = await layout();
   await create.click();
   const field = sheet.getByRole("textbox", { name: "Remote sign-in link" });
   await expect(sheet.getByRole("button", { name: "Link copied" })).toBeVisible();
   await expect(field).toHaveCount(0);
+  expect(await layout()).toEqual(beforeCopy);
   await sheet.getByRole("heading", { name: "Remote access", exact: true }).scrollIntoViewIfNeeded();
   await ui.settle();
   const clipped = await sheet.locator("button:visible, input:visible").evaluateAll((controls) =>

@@ -3,6 +3,7 @@ import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { StableText } from "./StableText.tsx";
 import type { AppUpdateControl } from "./useAppUpdate.ts";
 
 export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
@@ -26,13 +27,31 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
               : status.checkedAt
                 ? "localDot is up to date"
                 : "Check for a new version";
+  const displayVersion = version?.length === 40 ? version.slice(0, 8) : version;
+  const titles = [
+    "Installing update… Reconnecting shortly",
+    "Checking for updates…",
+    "localDot is up to date",
+    "Check for a new version",
+    ...(version
+      ? [
+          `Downloading localDot ${displayVersion}…`,
+          `localDot ${displayVersion} is ready`,
+          `localDot ${displayVersion} is available`,
+        ]
+      : []),
+  ];
   return (
     <div>
       <GroupHead title="Software update" />
       <Group>
         <GroupRow
           leading={<IconTile icon="download" />}
-          label={<span role="status">{title}</span>}
+          label={
+            <span role="status">
+              {status.supported ? <StableText choices={titles} value={title} /> : title}
+            </span>
+          }
           detail={
             status.supported
               ? `Installed ${status.currentVersion.length === 40 ? `build ${status.currentVersion.slice(0, 8)}` : `version ${status.currentVersion}`}`
@@ -51,11 +70,16 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
                       : update.check
                 }
               >
-                {status.phase === "ready"
-                  ? "Install update"
-                  : version && status.phase !== "checking"
-                    ? "Download update"
-                    : "Check now"}
+                <StableText
+                  choices={["Install update", "Download update", "Check now"]}
+                  value={
+                    status.phase === "ready"
+                      ? "Install update"
+                      : version && status.phase !== "checking"
+                        ? "Download update"
+                        : "Check now"
+                  }
+                />
               </Button>
             )
           }
@@ -100,16 +124,34 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       {(update.error || status.error) && <GroupNote>{update.error ?? status.error}</GroupNote>}
       {status.phase === "ready" && (
         <GroupNote>
-          {!status.installOnLaunchSupported
-            ? "The source update is downloaded. Install when you’re ready; building it may take a few minutes."
-            : status.preferences.installOnLaunch
-              ? "Ready for your next launch. Install now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app."
-              : "Your download is saved. Turn on Install at next launch when you’re ready to update."}{" "}
+          <StableText
+            choices={[
+              "The source update is downloaded. Install when you’re ready; building it may take a few minutes.",
+              "Ready for your next launch. Install now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app.",
+              "Your download is saved. Turn on Install at next launch when you’re ready to update.",
+            ]}
+            value={
+              !status.installOnLaunchSupported
+                ? "The source update is downloaded. Install when you’re ready; building it may take a few minutes."
+                : status.preferences.installOnLaunch
+                  ? "Ready for your next launch. Install now when you’re finished, or leave it for after you quit localDot. Closing this browser tab does not quit the app."
+                  : "Your download is saved. Turn on Install at next launch when you’re ready to update."
+            }
+          />{" "}
           Your computer and tasks keep running until you choose to stop them.
         </GroupNote>
       )}
-      {status.checkedAt !== null && (
-        <GroupNote>Last checked {new Date(status.checkedAt).toLocaleString()}</GroupNote>
+      {status.supported && (
+        <GroupNote>
+          <StableText
+            choices={[`Last checked ${new Date().toLocaleString()}`, "Not checked yet"]}
+            value={
+              status.checkedAt !== null
+                ? `Last checked ${new Date(status.checkedAt).toLocaleString()}`
+                : "Not checked yet"
+            }
+          />
+        </GroupNote>
       )}
       <Dialog
         open={confirm}

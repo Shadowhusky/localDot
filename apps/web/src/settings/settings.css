@@ -1074,3 +1074,18 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+
+/* Known feedback states share a grid cell: wrapping text reserves its real height at any width. */
+.settings-stable-text {
+  white-space: normal;
+  display: inline-grid;
+  min-width: 0;
+  max-width: 100%;
+}
+.settings-stable-text > span {
+  grid-area: 1 / 1;
+}
+.settings-stable-text > [data-hidden] {
+  visibility: hidden;
+  pointer-events: none;
+}

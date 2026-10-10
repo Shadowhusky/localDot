@@ -223,8 +223,8 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
             spellCheck={false}
             suffix={
               <IconButton
-                label="Copy code"
-                icon="copy"
+                label={account.notice === "Sign-in code copied." ? "Code copied" : "Copy code"}
+                icon={account.notice === "Sign-in code copied." ? "check" : "copy"}
                 size={28}
                 disabledReason={
                   account.expired || !account.materialReady ? "No code to copy yet" : waitReason
@@ -261,7 +261,16 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
 
       {signedIn && <SignedIn account={account} />}
 
-      <div className="settings-messages">
+      <div
+        className={
+          account.notice === "Sign-in code copied." &&
+          !account.error &&
+          !account.blocked &&
+          !account.busy?.startsWith("cancel_")
+            ? "ui-visually-hidden"
+            : "settings-messages"
+        }
+      >
         {account.error && !refused && (
           <p role="alert" className="settings-error">
             <Icon name="circle-alert" size={12} />
@@ -279,7 +288,12 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
           </p>
         )}
         {account.notice && (
-          <p role="status" className="settings-note">
+          <p
+            role="status"
+            className={
+              account.notice === "Sign-in code copied." ? "ui-visually-hidden" : "settings-note"
+            }
+          >
             {account.notice}
           </p>
         )}

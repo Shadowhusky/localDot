@@ -5,7 +5,8 @@ import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
 import { Switch } from "../ui/Switch.tsx";
-import { TextField } from "../ui/TextField.tsx";
+import { SignInLinkSheet } from "./SignInLinkSheet.tsx";
+import { StableText } from "./StableText.tsx";
 
 type Status = {
   supported: boolean;
@@ -135,12 +136,23 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
               disabledReason={status.state !== "online" ? "Wait until connected" : undefined}
               onClick={() => void createLink()}
             >
-              {copiedUntil ? "Link copied" : "Copy sign-in link"}
+              <StableText
+                choices={["Copy sign-in link", "Link copied"]}
+                value={copiedUntil ? "Link copied" : "Copy sign-in link"}
+              />
             </Button>
             <span className="settings-remote-hint" role="status">
-              {copiedUntil
-                ? "Open on your other device within a minute."
-                : "One device · Expires in 1 minute"}
+              <StableText
+                choices={[
+                  "Open on your other device within a minute.",
+                  "One device · Expires in 1 minute",
+                ]}
+                value={
+                  copiedUntil
+                    ? "Open on your other device within a minute."
+                    : "One device · Expires in 1 minute"
+                }
+              />
             </span>
           </div>
         )}
@@ -153,17 +165,7 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
           disconnect remote devices and revoke their access.
         </p>
       </Disclosure>
-      {link && (
-        <div className="settings-remote-pairing">
-          <GroupNote>Copying was blocked. Select this link and copy it manually.</GroupNote>
-          <TextField
-            aria-label="Remote sign-in link"
-            value={link.url}
-            readOnly
-            onFocus={(event) => event.currentTarget.select()}
-          />
-        </div>
-      )}
+      <SignInLinkSheet link={link?.url} label="Remote sign-in link" onClose={() => setLink(null)} />
       {(error || loadError) && <GroupNote>{error || loadError}</GroupNote>}
     </div>
   );
