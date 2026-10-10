@@ -220,6 +220,13 @@ ssh -N -L 4750:127.0.0.1:4750 you@your-server
 Keep the same port on both ends: localDot only answers to its own address. Then run
 `localdot open` on the server and open the link on your computer within a minute.
 
+### Copy a sign-in link
+
+In **Settings → Your computer → App links**, copy a fresh link for the local address or a
+configured Tailscale/HTTPS address. Links work once and expire after one minute. The local
+address works only on the host computer; Tailscale requires both devices on your tailnet.
+The optional relay has its own **Copy sign-in link** under Remote access.
+
 ### Tailscale, for all your devices
 
 Tailscale Serve gives the server an HTTPS address that only devices in your own tailnet can

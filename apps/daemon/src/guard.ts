@@ -39,6 +39,11 @@ function parseOrigin(value: string): URL {
   return url;
 }
 
+// Only explicitly configured HTTPS fronts. Relay pairing has its own access-link route.
+export function configuredAccessOrigins(): string[] {
+  return [...new Set(publicOrigins.map((url) => url.origin))];
+}
+
 export function isPublicOrigin(origin: string | undefined): boolean {
   return (
     publicOrigins.some((url) => origin === url.origin) ||

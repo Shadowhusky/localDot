@@ -1,0 +1,125 @@
+import { useEffect, useRef, useState } from "react";
+import { type ApiClient, ApiError } from "../lib/api.ts";
+import { copyHomeScreenLink, LinkNotCopied } from "../notify/home-screen-link.ts";
+import { Button } from "../ui/Button.tsx";
+import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
+import { TextField } from "../ui/TextField.tsx";
+
+type Address = { origin: string; label: string; description: string };
+export function AccessLinksSettings({ api }: { api: ApiClient }) {
+  const [links, setLinks] = useState<Address[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [busy, setBusy] = useState<string | null>(null);
+  const lock = useRef(false);
+  const [result, setResult] = useState<{
+    origin: string;
+    expiresAt: number;
+    fallback?: string;
+  } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry explicitly reloads the address list.
+  useEffect(() => {
+    let disposed = false;
+    const read = async () => {
+      try {
+        const value = await api.get<{ links: Address[] }>("/api/access-links");
+        if (!Array.isArray(value.links)) throw new Error("Invalid address list");
+        if (!disposed) {
+          setLinks(value.links);
+          setError(null);
+        }
+      } catch (failure) {
+        if (!disposed)
+          setError(
+            failure instanceof ApiError && failure.status === 404
+              ? "App links will be available after the localDot service is updated and restarted."
+              : "App addresses couldn't load. Try again.",
+          );
+      }
+    };
+    void read();
+    window.addEventListener("focus", read);
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", read);
+    };
+  }, [api, retry]);
+  useEffect(() => {
+    if (!result) return;
+    const timer = setTimeout(() => setResult(null), Math.max(0, result.expiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [result]);
+  const copy = async (origin: string) => {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(origin);
+    setResult(null);
+    setError(null);
+    try {
+      const value = await copyHomeScreenLink(api, navigator.clipboard, origin);
+      setResult({ origin, expiresAt: value.expiresAt });
+    } catch (failure) {
+      if (failure instanceof LinkNotCopied)
+        setResult({ origin, expiresAt: failure.expiresAt, fallback: failure.link });
+      else setError("Couldn't create a sign-in link. Try again.");
+    } finally {
+      lock.current = false;
+      setBusy(null);
+    }
+  };
+  return (
+    <div>
+      <GroupHead title="App links" />
+      <GroupNote>Open localDot on your devices. Keep this computer on.</GroupNote>
+      {links.map((address) => (
+        <div key={address.origin}>
+          <Group>
+            <div className="settings-remote-action">
+              <Button
+                variant="quiet"
+                icon={result?.origin === address.origin && !result.fallback ? "check" : "copy"}
+                busy={busy === address.origin}
+                disabledReason={busy && busy !== address.origin ? "Creating a link…" : undefined}
+                onClick={() => void copy(address.origin)}
+              >
+                {result?.origin === address.origin && !result.fallback
+                  ? `${address.label} link copied`
+                  : `Copy ${address.label.toLowerCase()} link`}
+              </Button>
+              <span className="settings-remote-hint settings-access-origin">{address.origin}</span>
+            </div>
+          </Group>
+          <GroupNote>{address.description}</GroupNote>
+        </div>
+      ))}
+      <GroupNote>
+        Sign-in links work once and expire in 1 minute. Only share with a device you trust.
+      </GroupNote>
+      {result && (
+        <GroupNote>
+          <span role="status">
+            {result.fallback
+              ? "Copying was blocked. Select and copy the link below."
+              : "Link copied. Open it on your device within a minute."}
+          </span>
+        </GroupNote>
+      )}
+      {result?.fallback && (
+        <TextField
+          aria-label="App sign-in link"
+          value={result.fallback}
+          readOnly
+          onFocus={(event) => event.currentTarget.select()}
+        />
+      )}
+      {error && (
+        <GroupNote>
+          <span role="alert">{error}</span>{" "}
+          <Button variant="quiet" onClick={() => setRetry((value) => value + 1)}>
+            Retry
+          </Button>
+        </GroupNote>
+      )}
+    </div>
+  );
+}

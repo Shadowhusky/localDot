@@ -22,6 +22,7 @@ import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { routeLabel } from "../voice/words.ts";
+import { AccessLinksSettings } from "./AccessLinksSettings.tsx";
 import { AccountsSection } from "./AccountsSection.tsx";
 import { AppUpdateSettings } from "./AppUpdateSettings.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
@@ -746,6 +747,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
   return (
     <>
       {props.appUpdate && <AppUpdateSettings update={props.appUpdate} />}
+      {props.remoteApi && <AccessLinksSettings api={props.remoteApi} />}
       {props.remoteApi && <RemoteAccessSettings api={props.remoteApi} />}
       {(update || login || stream) && (
         <div>

@@ -1069,3 +1069,8 @@
 .settings-remote-pairing {
   margin-top: calc(var(--spacing) * 3);
 }
+
+.settings-access-origin {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}

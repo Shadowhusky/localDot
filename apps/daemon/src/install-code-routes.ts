@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { isPublicOrigin } from "./guard.ts";
+import { configuredAccessOrigins, isPublicOrigin } from "./guard.ts";
 import { InstallCodeCapacityError, type InstallCodes } from "./install-codes.ts";
 
 const MAX_BODY_BYTES = 128;
@@ -8,7 +8,26 @@ const BODY_PATTERN =
   /^[\t\n\r ]*\{[\t\n\r ]*"code"[\t\n\r ]*:[\t\n\r ]*"([A-Za-z0-9_-]{43})"[\t\n\r ]*\}[\t\n\r ]*$/;
 
 /** Register after the existing /api bearer guard; exchange still uses the global Host guard. */
-export function installCodeRoutes(app: Hono, codes: InstallCodes): void {
+export function installCodeRoutes(app: Hono, codes: InstallCodes, port: number): void {
+  app.get("/api/access-links", (c) => {
+    c.header("cache-control", "no-store");
+    return c.json({
+      links: [
+        {
+          origin: `http://localhost:${port}`,
+          label: "This computer",
+          description: "Works only on the computer running localDot.",
+        },
+        ...configuredAccessOrigins().map((origin) => ({
+          origin,
+          label: new URL(origin).hostname.endsWith(".ts.net") ? "Tailscale" : "Remote address",
+          description: new URL(origin).hostname.endsWith(".ts.net")
+            ? "Connect your other device to the same Tailscale network."
+            : "Use this configured address from another device.",
+        })),
+      ],
+    });
+  });
   app.post("/api/install-code", (c) => {
     if (new URL(c.req.url).search) return c.text("invalid request", 400);
     try {

@@ -157,7 +157,7 @@ export function createApp({
       const snapshot = ServiceReadinessReply.parse(await serviceReadiness.snapshot());
       return c.json(snapshot, snapshot.ready ? 200 : 503);
     });
-  if (installCodes) installCodeRoutes(app, installCodes);
+  if (installCodes) installCodeRoutes(app, installCodes, port);
   if (browser) browserViewerApi(app, browser);
   if (accounts) accountsRoutes(app, accounts);
 
