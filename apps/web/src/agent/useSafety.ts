@@ -448,6 +448,7 @@ export function useSafety(props: SafetyProps) {
         )
           return;
         setReplacement(value);
+        setError(null);
         setReplacementRetry(false);
         if (value.phase === "ready" && value.newCellId) {
           // Even a successful mutation reply must pass a separate current status read and an unheld Ready cell read.
@@ -480,13 +481,14 @@ export function useSafety(props: SafetyProps) {
           current.current.cell?.id === id &&
           replacementRequest.current === input
         ) {
+          // Status can race the POST before its durable record exists. The mutation
+          // still owns the outcome; a speculative read must not report it as failed.
+          if (replacementSending.current) return;
           // A rejected POST has no durable record. Retain its idempotency key, but
           // let the user retry instead of polling a 404 forever with a disabled button.
-          if (!replacementSending.current) {
-            setReplacementRetry(true);
-            replacingRef.current = false;
-            setReplacing(false);
-          }
+          setReplacementRetry(true);
+          replacingRef.current = false;
+          setReplacing(false);
           setError(
             failure instanceof ControlFailure && failure.status === 404
               ? "The replacement hasn't started. Try Replace computer again."
@@ -591,8 +593,10 @@ export function useSafety(props: SafetyProps) {
         current.current.api === p.api &&
         current.current.cell?.id === id &&
         current.current.cell.fenced?.revision === revision
-      )
+      ) {
         setReplacement(value);
+        setError(null);
+      }
       return true;
     } catch {
       if (

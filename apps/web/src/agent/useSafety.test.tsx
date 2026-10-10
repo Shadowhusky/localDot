@@ -945,7 +945,8 @@ it("a rejected replacement and missing status allow explicit retry with the same
   expect(requests).toHaveLength(2);
   expect(requests[0]).toBe(requests[1]);
 });
-it("a 404 while the mutation is in flight does not enable another replacement", async () => {
+it("a status 404 while the mutation is in flight neither reports failure nor enables a duplicate", async () => {
+  let statusReads = 0;
   let finish!: (response: Response) => void;
   const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
     if (String(url).endsWith("/fence")) return Response.json({ revision: 4 });
@@ -953,6 +954,7 @@ it("a 404 while the mutation is in flight does not enable another replacement", 
       return new Promise<Response>((resolve) => {
         finish = resolve;
       });
+    statusReads++;
     return new Response("missing", { status: 404 });
   });
   const f = fixture(fetchImpl, null);
@@ -961,9 +963,11 @@ it("a 404 while the mutation is in flight does not enable another replacement", 
   act(() => {
     pending = f.result.current.replace();
   });
-  await waitFor(() => expect(f.result.current.error).toContain("hasn't started"), {
+  await waitFor(() => expect(statusReads).toBeGreaterThan(0), {
     timeout: 2500,
   });
+  expect(f.result.current.error).toBeNull();
+  expect(f.result.current.replacing).toBe(true);
   expect(f.result.current.canReplace).toBe(false);
   await act(async () => {
     finish(new Response("conflict", { status: 409 }));
@@ -971,6 +975,53 @@ it("a 404 while the mutation is in flight does not enable another replacement", 
   });
   expect(f.result.current.canReplace).toBe(true);
 });
+it("finishes the first replacement after an early status miss without a second click", async () => {
+  let finish!: () => void;
+  let statusReads = 0;
+  let ready = false;
+  let posts = 0;
+  const candidate = "01J00000000000000000000009";
+  const record = {
+    requestId: OTHER,
+    oldCellId: CELL,
+    revision: 4,
+    phase: "ready",
+    newCellId: candidate,
+  };
+  const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+    if (String(url).endsWith("/fence")) return Response.json({ revision: 4 });
+    if (init?.method === "POST") {
+      posts++;
+      record.requestId = JSON.parse(String(init.body)).requestId;
+      return new Promise<Response>((resolve) => {
+        finish = () => {
+          ready = true;
+          resolve(Response.json(record));
+        };
+      });
+    }
+    statusReads++;
+    return ready ? Response.json(record) : new Response("missing", { status: 404 });
+  });
+  const f = fixture(fetchImpl, null);
+  f.update({ cell: { ...f.props.cell!, fenced: { revision: 4 } } });
+  let pending!: Promise<boolean>;
+  act(() => {
+    pending = f.result.current.replace();
+  });
+  await waitFor(() => expect(statusReads).toBeGreaterThan(0), { timeout: 2500 });
+  expect(f.result.current.error).toBeNull();
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  await waitFor(() => expect(f.props.selectReady).toHaveBeenCalledWith(candidate), {
+    timeout: 2500,
+  });
+  expect(posts).toBe(1);
+  expect(f.result.current.error).toBeNull();
+});
+
 it("uses the fence's saved request to follow a completed replacement instead of posting a duplicate", async () => {
   const candidate = "01J00000000000000000000009";
   const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
