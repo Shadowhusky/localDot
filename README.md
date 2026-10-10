@@ -63,7 +63,11 @@ The tour below shows them at work.
 The picture is dot's computer, live. The island keeps **Stop** and **Take control** within
 reach. dot sits under the picture and tells you what it's doing. The chat is on the right;
 its controls stay on one row as you narrow the panel. Research has one toggle; the message menu
-appears only when there is a choice of when to send.
+appears only when there is a choice of when to send. Use **Panels** in the top bar to hide or
+restore Chat and Activity; the Activity close button hides its Steps, Files, and Sources view.
+Panel sizes, visibility, and selected tabs are remembered in this browser across visits.
+
+<img src="docs/readme/panels.png" alt="The Panels menu offers Hide chat and Hide activity; Files is selected in the resizable Activity panel">
 
 With an empty message box, the main button is **Stop**. Stopping ends the current run and releases
 it so you can start a new conversation on the same running computer. Start typing and that button

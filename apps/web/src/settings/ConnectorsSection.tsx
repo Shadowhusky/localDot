@@ -627,8 +627,8 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
   return (
     <div className="settings-connectors">
       <p className="settings-lede">
-        dot works in these apps directly, without the screen. Their keys stay with localDot, never
-        with dot, and anything that changes something asks you first.
+        The agent works in these apps directly. Connection keys are stored securely by localDot and
+        are never shared with the agent. Changes require your approval.
       </p>
       {phase === "error" ? (
         <Group>

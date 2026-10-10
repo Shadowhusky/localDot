@@ -38,7 +38,7 @@ it("answers a sign-in with its fields, the password masked and gone once sent", 
   expect(password.type).toBe("password");
   expect(password.getAttribute("autocomplete")).toBe("current-password");
   expect(password.value).toBe("");
-  expect(screen.getByText("dot types this in for you and never sees it.")).toBeTruthy();
+  expect(screen.getByText("localDot enters this without sharing it with the agent.")).toBeTruthy();
   const send = screen.getByRole("button", { name: "Sign in" });
   expect(send.getAttribute("aria-disabled")).toBe("true");
   fireEvent.change(user, { target: { value: "henry" } });

@@ -29,6 +29,7 @@ export interface TopBarProps {
   settingsRef?: Ref<HTMLButtonElement>;
   // At the very end: what has no place of its own, such as Stop everything.
   more?: ReactNode;
+  panels?: ReactNode;
 }
 
 // The wordmark and what is on the stage, then the modes, Settings and Keys. It redraws only when one
@@ -50,6 +51,7 @@ export const TopBar = memo(function TopBar({
   onSettings,
   settingsRef,
   more,
+  panels,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
     { value: "watch", label: "Watch", attention: watchAttention },
@@ -75,6 +77,7 @@ export const TopBar = memo(function TopBar({
       </div>
       <div className="bar-r">
         {lead}
+        {panels}
         <SegmentedControl
           className="bar-modes"
           aria-label="Mode"

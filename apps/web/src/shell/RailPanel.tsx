@@ -4,6 +4,7 @@ import "./rails.css";
 
 export interface RailPanelProps {
   label: string;
+  hidden?: boolean;
   // The views the panel switches between; the selected one is the panel's only title.
   views?: readonly SegmentItem[];
   view?: string;
@@ -18,6 +19,7 @@ export interface RailPanelProps {
 // composer at its foot.
 export function RailPanel({
   label,
+  hidden,
   views,
   view,
   onView,
@@ -27,7 +29,12 @@ export function RailPanel({
 }: RailPanelProps) {
   const switching = !!views && views.length > 1 && view !== undefined && !!onView;
   return (
-    <aside className={className ? `rail-panel ${className}` : "rail-panel"} aria-label={label}>
+    <aside
+      className={className ? `rail-panel ${className}` : "rail-panel"}
+      aria-label={label}
+      hidden={hidden}
+      inert={hidden}
+    >
       {(switching || end) && (
         <div className="rail-head">
           {switching ? (

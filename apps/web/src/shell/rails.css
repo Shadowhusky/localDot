@@ -356,3 +356,7 @@
 .conversations-row[data-current] .conversations-title {
   font-weight: var(--font-weight-semibold);
 }
+
+.rail-panel[hidden] {
+  display: none;
+}

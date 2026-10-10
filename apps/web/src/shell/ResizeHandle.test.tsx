@@ -75,6 +75,22 @@ describe("ResizeHandle", () => {
     expect(localStorage.getItem(PANEL.key)).toBeNull();
   });
 
+  it("restores the saved width after a smaller window temporarily constrains it", () => {
+    vi.stubGlobal("innerWidth", 1000);
+    saveWidth(PANEL, 460);
+    const view = render(<Page />);
+    vi.stubGlobal("innerWidth", 320);
+    fireEvent(window, new Event("resize"));
+    expect(shown()).toBe("320px");
+    expect(readWidth(PANEL)).toBe(460);
+    vi.stubGlobal("innerWidth", 1000);
+    fireEvent(window, new Event("resize"));
+    expect(shown()).toBe("460px");
+    view.unmount();
+    render(<Page />);
+    expect(shown()).toBe("460px");
+  });
+
   it("lets go of the width it set once it is gone", () => {
     const view = render(<Page />);
     expect(shown()).toBe("300px");

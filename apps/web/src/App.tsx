@@ -137,6 +137,8 @@ import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
+import { PanelMenu } from "./shell/PanelMenu.tsx";
+import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
 import { ACTIVITY_WIDTH, CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
@@ -176,8 +178,6 @@ export interface AppProps {
 }
 
 type Rejected = "stored" | "link" | "code" | null;
-// What the rail shows: the chat, or Activity or the routines laid over it.
-type RailView = "chat" | "activity" | "routines";
 
 const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
@@ -649,7 +649,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
   const phone = layout === "phone";
-  const [railView, setRailView] = useState<RailView>("chat");
+  const panelsButton = useRef<HTMLButtonElement>(null);
+  const { panels, update: updatePanels } = usePanelPreferences();
+  const railView = panels.view;
+  const setRailView = (view: RailView) => updatePanels({ view, chat: true });
+  const activityVisible = layout === "wide" && panels.activity;
+  const chatVisible = phone || panels.chat;
   // A phone shows Activity in a sheet over the thread.
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
@@ -1294,6 +1299,19 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const activity = (
     <ActivityRail
+      onHide={
+        phone
+          ? undefined
+          : () => {
+              if (activityVisible)
+                updatePanels({
+                  activity: false,
+                  ...(railView === "activity" ? { view: "chat" } : {}),
+                });
+              else setRailView("chat");
+              panelsButton.current?.focus();
+            }
+      }
       cellId={cell?.id}
       releaseReady={
         cell?.state === "ready" && !cell.paused && !cell.fenced && !cell.replacementPending
@@ -1627,6 +1645,8 @@ function Theatre({ api }: { api: ApiClient }) {
       ref={page}
       className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
+      data-chat-hidden={!chatVisible || undefined}
+      data-activity-hidden={(wide && !activityVisible) || undefined}
       data-replaying={replayId ? "" : undefined}
       data-focus={focus ? "" : undefined}
       data-full={full ? "" : undefined}
@@ -1668,6 +1688,27 @@ function Theatre({ api }: { api: ApiClient }) {
         onSettings={showSettings}
         settingsRef={settingsButton}
         more={barMore}
+        panels={
+          !phone &&
+          !replayId && (
+            <PanelMenu
+              buttonRef={panelsButton}
+              chat={chatVisible}
+              activity={activityVisible || (chatVisible && shownView === "activity")}
+              onChat={() =>
+                updatePanels({ chat: !chatVisible, ...(!chatVisible ? { view: "chat" } : {}) })
+              }
+              onActivity={() => {
+                if (wide)
+                  updatePanels({
+                    activity: !activityVisible,
+                    ...(railView === "activity" ? { view: "chat" } : {}),
+                  });
+                else setRailView(chatVisible && shownView === "activity" ? "chat" : "activity");
+              }}
+            />
+          )
+        }
       />
       <div className="watch" hidden={!!replayId} inert={!!replayId}>
         <main className="stage-col" aria-label="Computer">
@@ -1851,12 +1892,12 @@ function Theatre({ api }: { api: ApiClient }) {
             </StageFrame>
           </ErrorBoundary>
         </main>
-        {wide && (
+        {activityVisible && (
           <RailPanel label="Activity" className="rail-activity">
             <ErrorBoundary>{activity}</ErrorBoundary>
           </RailPanel>
         )}
-        {wide && (
+        {activityVisible && (
           <ResizeHandle
             panel={ACTIVITY_WIDTH}
             property="--activity-w"
@@ -1864,7 +1905,7 @@ function Theatre({ api }: { api: ApiClient }) {
             className="rail-resize-activity"
           />
         )}
-        {(wide || layout === "laptop") && (
+        {chatVisible && (wide || layout === "laptop") && (
           <ResizeHandle
             panel={CHAT_WIDTH}
             property="--rail-w"
@@ -1875,6 +1916,7 @@ function Theatre({ api }: { api: ApiClient }) {
         <RailPanel
           label="Conversation"
           className="rail-chat"
+          hidden={!chatVisible}
           views={views}
           view={shownView}
           onView={(view) => setRailView(view as RailView)}

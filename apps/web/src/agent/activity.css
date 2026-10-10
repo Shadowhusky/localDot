@@ -848,3 +848,15 @@ button.activity-usage-trigger:active {
     scale: none;
   }
 }
+
+.activity-tabs-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--spacing);
+  padding-right: calc(var(--spacing) * 2);
+}
+.activity-tabs-row > .activity-tabs {
+  flex: 1;
+  min-width: 0;
+}

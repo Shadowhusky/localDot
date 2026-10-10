@@ -402,10 +402,11 @@ function fieldNote(warning?: string, site?: string, hint?: string): ReactNode {
       {site !== undefined &&
         (site ? (
           <>
-            dot types this into <span className="ask-site">{site}</span> for you and never sees it.{" "}
+            localDot enters this on <span className="ask-site">{site}</span> without sharing it with
+            the agent.{" "}
           </>
         ) : (
-          "dot types this in for you and never sees it. "
+          "localDot enters this without sharing it with the agent. "
         ))}
       {hint && <RevealedText text={markdownToPlain(hint)} />}
     </>

@@ -144,7 +144,7 @@ describe("the curtain's clock and progress", () => {
     expect(shown.clock()).toBe("0:07");
     look();
     view.rerender(curtain({ phase: "connecting", operation: null }));
-    expect(shown.sub()).toContain("Connecting the screen…");
+    expect(shown.sub()).toContain("Your computer is ready. Waiting for its picture…");
     look();
     expect(seen.at(-1)).toBeGreaterThanOrEqual(0.9);
     pass(600_000);

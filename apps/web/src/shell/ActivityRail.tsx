@@ -31,13 +31,16 @@ import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
 import { TabPanel, Tabs } from "../ui/Tabs.tsx";
+import { activityTabs as chosenTabs } from "./activity-tabs.ts";
 import "../agent/activity.css";
 
 export interface ActivityRailProps {
+  onHide?(): void;
   rows: TimelineRow<StepRowView>[];
   keyUses?: readonly KeyUseState[];
   sessionId: string | null;
@@ -79,9 +82,7 @@ const EMPTY = emptyAgentModel();
 const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
 
 type RailTab = "steps" | "files" | "sources";
-// Per task, for as long as the page is open: the tab the user chose, and how many handed-over
-// files they have seen.
-const chosenTabs = new Map<string, RailTab>();
+// Seen indicators are transient; the selected tab is saved separately per task.
 const seenFiles = new Map<string, number>();
 
 function reveal(element: Element | null) {
@@ -107,6 +108,7 @@ export function ActivityRail({
   historyLoaded = false,
   onSelect,
   planSnapshot,
+  onHide,
 }: ActivityRailProps) {
   const replay = asOfMs !== undefined;
   const model = agent ?? EMPTY;
@@ -139,7 +141,7 @@ export function ActivityRail({
   const memoryChanges = model.changes.filter((change) => change.type === "memory");
   const files = (sessionId ? handed : 0) + downloads + model.changes.length;
   const research = sessionId ? model.research : undefined;
-  const [picked, setPicked] = useState<RailTab | null>(null);
+  const [picked, setPicked] = useState<{ owner: string; tab: RailTab } | null>(null);
   // A tab chosen before any task started stays chosen once one does.
   const lastOwner = useRef(owner);
   if (lastOwner.current !== owner) {
@@ -147,15 +149,17 @@ export function ActivityRail({
     if (lastOwner.current === "" && before && !chosenTabs.has(owner)) chosenTabs.set(owner, before);
     lastOwner.current = owner;
   }
-  const wanted = chosenTabs.get(owner) ?? "steps";
+  const localPick = picked?.owner === owner ? picked.tab : null;
+  const wanted = localPick ?? chosenTabs.get(owner) ?? "steps";
   // A tab stays while it is chosen, so a download's last word is not whisked away with it.
   const tab: RailTab =
-    (wanted === "files" && (files > 0 || picked === "files")) || (wanted === "sources" && research)
+    (wanted === "files" && (files > 0 || localPick === "files")) ||
+    (wanted === "sources" && research)
       ? wanted
       : "steps";
   const choose = (next: string) => {
     chosenTabs.set(owner, next as RailTab);
-    setPicked(next as RailTab);
+    setPicked({ owner, tab: next as RailTab });
   };
   useEffect(() => {
     if (historyLoaded && (tab === "files" || !seenFiles.has(owner))) seenFiles.set(owner, handed);
@@ -272,16 +276,19 @@ export function ActivityRail({
       {plan.length > 0 && (
         <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
       )}
-      {(started || tabs.length > 1) && (
-        <Tabs
-          id={`${domId}-tabs`}
-          aria-label="Activity"
-          variant="line"
-          className="activity-tabs"
-          items={tabs}
-          value={tab}
-          onValueChange={choose}
-        />
+      {(started || tabs.length > 1 || onHide) && (
+        <div className="activity-tabs-row">
+          <Tabs
+            id={`${domId}-tabs`}
+            aria-label="Activity"
+            variant="line"
+            className="activity-tabs"
+            items={tabs}
+            value={tab}
+            onValueChange={choose}
+          />
+          {onHide && <IconButton icon="x" label="Hide activity" size={28} onClick={onHide} />}
+        </div>
       )}
       <div className="activity-body">
         <ScrollArea

@@ -75,7 +75,8 @@ export function ResizeHandle({ panel, property, label, className }: ResizeHandle
     apply(live.current);
     const fit = () => {
       if (drag.current) return;
-      const fitted = clampWidth(live.current, widthLimits(panel, window.innerWidth));
+      cancelAnimationFrame(settling.current);
+      const fitted = clampWidth(readWidth(panel), widthLimits(panel, window.innerWidth));
       if (fitted !== live.current) apply(fitted);
     };
     window.addEventListener("resize", fit);

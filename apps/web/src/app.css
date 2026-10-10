@@ -86,6 +86,26 @@
   }
 }
 
+/* Hidden panels give their space back; the top-bar Panels control always stays reachable. */
+.app[data-chat-hidden] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (--wide) {
+  .app[data-activity-hidden] {
+    grid-template-columns: minmax(0, 1fr) var(--rail-w);
+  }
+  .app[data-activity-hidden] :is(.rail-chat, .rail-resize-chat) {
+    grid-area: 1 / 2 / 3 / 3;
+  }
+  .app[data-chat-hidden] {
+    grid-template-columns: minmax(0, 1fr) var(--activity-w);
+  }
+  .app[data-chat-hidden][data-activity-hidden] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* A tablet: the stage across the column, the rail under it filling what is left. */
 @media (--tablet) {
   .app {
@@ -106,6 +126,16 @@
 
   .app > :is(.replay, .replay-failed) {
     grid-area: 2 / 1 / -1 / -1;
+  }
+}
+
+@media (--tablet) {
+  .app[data-chat-hidden] {
+    grid-template-rows: var(--bar-h) minmax(0, 1fr);
+  }
+  .app[data-chat-hidden] .stage-col > .stage-frame {
+    flex: 1;
+    width: min(100%, (100dvh - var(--stage-top) - var(--rail-inset) - var(--band-min)) * 1.6);
   }
 }
 

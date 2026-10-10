@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AgentStep, emptyAgentModel } from "../agent/model.ts";
 import { appendTerminal, emptyTerminal } from "../agent/terminal-text.ts";
 import { createApi } from "../lib/api.ts";
@@ -8,7 +8,11 @@ import { timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { ActivityRail } from "./ActivityRail.tsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
 
 const api = createApi("test", { origin: "http://localhost" });
 const step = (
@@ -320,7 +324,7 @@ describe("ActivityRail", () => {
     expect(screen.getByRole("list", { name: "Sources dot read" }).textContent).toContain("A page");
   });
 
-  it("remembers the chosen tab per task while the page is open", () => {
+  it("remembers the chosen tab per task across mounts", () => {
     const model = {
       ...emptyAgentModel(),
       steps: new Map([tool("a", "x", 1)]),
@@ -343,6 +347,21 @@ describe("ActivityRail", () => {
     view.unmount();
     render(rail("memory-a"));
     expect(selected()).toBe("Files 1");
+  });
+
+  it("still switches tabs when browser storage cannot save preferences", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const model = {
+      ...emptyAgentModel(),
+      changes: [
+        { id: "f", type: "file" as const, path: "a.md", op: "create" as const, truncated: false },
+      ],
+    };
+    render(<ActivityRail rows={[]} sessionId="blocked" scale={1} api={api} agent={model} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Files 1" }));
+    expect(screen.getByRole("tab", { name: "Files 1" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("marks Files when a file is handed over, without leaving the tab the reader is on", () => {
