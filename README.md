@@ -14,8 +14,18 @@
 
 ## Install
 
-**1. Start Docker.** Use Docker Desktop on macOS or Windows, or Docker Engine 28+ on Linux.
-You also need git, curl and about **15 GB** of free space. [Full requirements](docs/install.md#what-you-need).
+**1. Install the prerequisites first.** localDot does **not** install Docker for you.
+
+- **Windows:** [install Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+  and open it. When Ubuntu is ready, enable **Settings → Resources → WSL integration → Ubuntu → Apply**.
+  The localDot installer sets up WSL 2 and Ubuntu and waits while you connect Docker.
+- **macOS:** [install Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/)
+  and open it. Install Apple's command line tools with `xcode-select --install` if needed for Git.
+- **Linux:** [install Docker Engine](https://docs.docker.com/engine/install/) **28+**,
+  plus `git`, `curl`, `tar` and `gzip`. Make sure `docker info` works as your normal user.
+
+Allow about **15 GB** of free space. Node.js, Go and the app are installed automatically.
+[Prerequisite setup and checks](docs/install.md#1-install-the-prerequisites).
 
 **2. Run the installer.**
 

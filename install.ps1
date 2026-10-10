@@ -247,11 +247,11 @@ function Wait-Docker([int]$TimeoutSeconds = 1200) {
 }
 
 function Find-DockerDesktop {
-  foreach ($root in @($env:ProgramFiles, $env:LOCALAPPDATA)) {
-    if ($root) {
-      $candidate = Join-Path $root 'Docker\Docker\Docker Desktop.exe'
-      if (Test-Path $candidate) { return $candidate }
-    }
+  $candidates = @()
+  if ($env:LOCALAPPDATA) { $candidates += Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\Docker Desktop.exe' }
+  if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe' }
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) { return $candidate }
   }
   return $null
 }

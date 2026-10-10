@@ -1,17 +1,52 @@
 # Install localDot
 
-Start Docker, run one command, then open the sign-in link. The installer builds the app and
-starts its local services. Allow **10–30 minutes** for the first computer-image build.
+Install the prerequisites below, run the localDot installer, then open the sign-in link.
+Allow **10–30 minutes** for the first computer-image build.
 
 ## Install
 
-### 1. Start Docker
+### 1. Install the prerequisites
 
-- **macOS or Windows:** start Docker Desktop.
-- **Linux:** start Docker Engine 28+ and make sure your user can run `docker info`.
+**Docker must be installed separately.** The localDot installer installs Node.js, Go, the app
+and its computer images, then starts the app's services. On Windows it also sets up WSL 2,
+Ubuntu and systemd; you create your Linux account when prompted.
 
-You need git, curl and about **15 GB** of free space. Node.js and Go are installed automatically.
-[Full platform requirements](#what-you-need).
+**Windows**
+
+1. [Install Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/),
+   following its WSL 2 setup prompts and restarting if requested. Open Docker Desktop.
+2. Once Ubuntu is installed, enable **Settings → Resources → WSL integration → Ubuntu**, then
+   click **Apply**. If Ubuntu is not installed yet, run the localDot command below first;
+   it sets up Ubuntu and waits at the Docker step while you enable integration.
+3. Use **Linux containers**. If WSL integration is missing from Settings, switch to Linux
+   containers from Docker's taskbar menu.
+
+Git for Windows is not required: the build runs in Ubuntu, where `git`, `curl`, `tar` and `gzip`
+must be available. For an existing Ubuntu installation missing these tools, run
+`sudo apt-get update && sudo apt-get install -y git curl tar gzip` in Ubuntu before continuing.
+
+**macOS**
+
+1. [Install Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
+   for your Mac's processor, open it and finish its first-run setup.
+2. Run `git --version`. If the command line tools are missing, run `xcode-select --install`
+   and finish that installation before continuing. macOS provides `curl`, `tar` and `gzip`.
+3. Check that `docker info` succeeds in Terminal.
+
+**Linux**
+
+1. [Install Docker Engine](https://docs.docker.com/engine/install/) **28 or newer** for your
+   distribution. Follow its [post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)
+   so `docker info` works as your normal user, without `sudo`.
+2. Install `git`, `curl`, `tar` and `gzip`. On Ubuntu or Debian:
+
+   ```sh
+   sudo apt-get update && sudo apt-get install -y git curl tar gzip
+   ```
+
+3. Use a distribution with glibc and a working systemd user session; Ubuntu and Debian are supported.
+
+All platforms need about **15 GB** of free disk space. [Full platform requirements](#what-you-need).
 
 ### 2. Run the installer
 
@@ -74,16 +109,19 @@ For your phone or a remote server, see [remote access](#servers-without-a-screen
 - **macOS** on Apple silicon or Intel, with Docker Desktop.
 - **Linux** on x86-64 or ARM64 with glibc and systemd (Ubuntu, Debian, Fedora and similar), with
   Docker Engine 28 or newer.
-- **Windows 10 version 2004 or newer, or Windows 11**, through WSL 2: either Docker Desktop with
-  WSL integration turned on for your distro, or Docker Engine installed inside the distro.
-- git and curl (inside Ubuntu/WSL on Windows). The installer brings its own Node.js and Go,
+- **Windows**, through WSL 2: use a Windows version supported by
+  [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/), with WSL
+  integration turned on for your distro. Alternatively, Docker Engine can run inside WSL 2;
+  the bootstrap requires Windows 10 build 19041 or newer.
+- git, curl, tar and gzip (inside Ubuntu/WSL on Windows). The installer brings its own Node.js and Go,
   checked against pinned checksums,
   and installs nothing system-wide.
 - About 15 GB of free disk space, most of it for the computer images.
 
-Run the installer as your own user, not as root; it never needs sudo. When something is missing,
-it lists everything at once, with the commands to fix it on your system, before downloading
-anything.
+Run the localDot installer as your own user, not as root. Installing system prerequisites may
+require administrator access or `sudo`; Windows may request elevation for WSL setup.
+The shell installer checks prerequisites before downloading the app and prints commands for
+anything missing. The Windows wrapper waits for Docker integration to become ready.
 
 ## Saved keys and logins
 
