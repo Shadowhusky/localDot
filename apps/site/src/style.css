@@ -158,6 +158,35 @@ svg {
   color: #111;
   border-color: transparent;
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.github-link.pill {
+  gap: 8px;
+}
+.github-link svg {
+  flex: none;
+}
+@media (max-width: 600px) {
+  .github-link.pill {
+    width: 44px;
+    padding: 0;
+  }
+  .github-label {
+    display: none;
+  }
+}
+@media (max-width: 360px) {
+  .header-actions {
+    gap: 8px;
+  }
+  .install-link > span {
+    display: none;
+  }
+}
 .world {
   display: none;
   position: fixed;
