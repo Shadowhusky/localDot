@@ -75,7 +75,8 @@ describe("dot's working rules", () => {
 
   it("stay short and never name localDot's own parts", () => {
     for (const rules of MODES.map(workingRules)) {
-      expect(rules.length).toBeLessThan(3000);
+      // Includes private sign-in recovery, visible app testing and reusable experience.
+      expect(rules.length).toBeLessThan(4400);
       expect(rules).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });

@@ -2,6 +2,11 @@ name: native-macos
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+# Superseded runs cannot validate the newest revision and waste private-repo minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native:
     runs-on: macos-26
@@ -20,4 +25,6 @@ jobs:
           cache: false
       - run: npm install --global pnpm@10.29.3
       - run: pnpm install --frozen-lockfile
+      - name: Complete app and installer regression suite
+        run: pnpm test --maxWorkers=3
       - run: pnpm test:native-macos

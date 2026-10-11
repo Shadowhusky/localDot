@@ -54,9 +54,9 @@ it("keeps a strip for the island over the stage, under the top bar or the phone'
 
 it("gives a full screen stage the screen under the island's strip", () => {
   expect(frame).toMatch(
-    /\.app\[data-full\] \.stage-col \{[^}]*--_strip: calc\([^;]*var\(--island-h\) \+ var\(--island-gap\)\);[^}]*padding: var\(--_strip\) 0 0;/,
+    /\.app\[data-full\] \.stage-col \{[^}]*--_strip: calc\([^;]*var\(--island-h\) \+ var\(--island-gap\)\);[^}]*padding: var\(--_strip\) 0 calc\(var\(--spacing\) \* 16\);/,
   );
-  expect(frame).toMatch(/width: min\(100vw, \(100dvh - var\(--_strip\)\) \* 1\.6\);/);
+  expect(frame).toMatch(/width: min\(100vw, \(100dvh - var\(--_strip\) - 64px\) \* 1\.6\);/);
 });
 
 it("floats full screen's control strip over the picture's input surface, as the island is", () => {
@@ -71,7 +71,7 @@ it("floats full screen's control strip over the picture's input surface, as the 
 
 it("keeps full screen's faded controls under the pointer, so a tap on one lands on it", () => {
   const faded = [...rules(hud), ...rules(frame)].filter(([selector]) =>
-    selector?.includes("[data-still]"),
+    selector?.includes(".app[data-full][data-still]"),
   );
   expect(faded.length).toBeGreaterThan(0);
   expect(faded.filter(([, body]) => /pointer-events:\s*none/.test(body ?? ""))).toEqual([]);

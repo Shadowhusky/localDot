@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/shadowhusky/localdot/keyd/internal/nativewatch/launchertest"
@@ -25,6 +26,15 @@ func TestLauncherRunsTheVerifiedCommand(t *testing.T) {
 	cmd := exec.Command(self, "native-run")
 	cmd.Env = []string{"KEYD_NATIVE_TEST_RUN=1"}
 	events, code := launchertest.Run(t, cmd, "/usr/bin/touch", []string{marker})
+	if runtime.GOOS != "darwin" {
+		if code != 2 || len(events) != 0 {
+			t.Fatalf("unsupported native-run exited %d with records %v", code, events)
+		}
+		if _, err := os.Lstat(marker); !os.IsNotExist(err) {
+			t.Fatal("unsupported native launcher ran the command")
+		}
+		return
+	}
 	if code != 0 || len(events) != 2 || events[0].Event != "started" || events[1].Event != "retired" ||
 		events[1].Code == nil || *events[1].Code != 0 {
 		t.Fatalf("native-run exited %d with records %v", code, events)

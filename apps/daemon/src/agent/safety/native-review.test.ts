@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareOwnedCodexRoots } from "@localdot/codex-harness";
 import { CAREFUL_AUTONOMY, msToMicros, ulid } from "@localdot/protocol";
@@ -65,7 +66,9 @@ function fixture() {
   const initial = h.session.generation;
   assert.ok(initial);
   h.session.retireBrain(initial);
-  const root = mkdtempSync("/private/tmp/ld-nr-");
+  const root = mkdtempSync(
+    join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "ld-nr-"),
+  );
   mkdirSync(join(root, "user"), { mode: 0o700 });
   const roots = prepareOwnedCodexRoots(join(root, "ld"), join(root, "user"));
   const fake = fakeCodex();

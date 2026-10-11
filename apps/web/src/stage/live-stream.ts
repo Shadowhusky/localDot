@@ -302,6 +302,8 @@ export class LiveStream {
     if (document.visibilityState === "hidden") {
       this.#polledAt = now;
       this.#away = true;
+      // A recovery deadline measures foreground time, never a later spell in the background.
+      this.#foreground = null;
       this.#report(this.#current, { visible: false }, now);
       this.#counted = null;
       return;

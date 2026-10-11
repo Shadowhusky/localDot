@@ -245,7 +245,9 @@ describe("review replacement effect gates", () => {
     const deletes = f.fake.state.calls
       .filter((call) => call.method === "DELETE")
       .slice(before)
-      .filter((call) => !call.path.includes("-link-") && !call.path.includes("localdot-system-copy-"));
+      .filter(
+        (call) => !call.path.includes("-link-") && !call.path.includes("localdot-system-copy-"),
+      );
     expect(deletes.length).toBe(foreign ? 0 : 4);
     expect(ReplacementRecord.parse(await response.json()).phase).toBe(
       foreign ? "blocked" : "ready",

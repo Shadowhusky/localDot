@@ -1,5 +1,10 @@
 name: unix-installers
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
+# Superseded runs cannot validate the newest revision and waste private-repo minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unix-installer:
     runs-on: ${{ matrix.os }}

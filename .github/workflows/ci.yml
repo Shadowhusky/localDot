@@ -1,5 +1,10 @@
 name: ci
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
+# Superseded runs cannot validate the newest revision and waste private-repo minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-installer:
     runs-on: windows-latest
@@ -26,7 +31,7 @@ jobs:
       - run: pnpm check:codex-release
       - run: pnpm --filter @localdot/brain build
       - run: pnpm --filter @localdot/web build
-      - run: pnpm test
+      # The complete app suite exercises macOS signing/launchd; native-macos runs it.
       - run: pnpm test:remote
       - run: pnpm hygiene
       - run: pnpm --filter @localdot/protocol schema && git diff --exit-code packages/protocol/schema

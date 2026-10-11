@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_AUTONOMY, ulid } from "@localdot/protocol";
 import { afterEach, expect, it, vi } from "vitest";
@@ -7,7 +8,7 @@ import { SettingsStore } from "../settings.ts";
 
 const homes: string[] = [];
 it("retains each configured model, including custom accounting, across saves and restart", () => {
-  const home = mkdtempSync("/private/tmp/localdot-test-models-");
+  const home = mkdtempSync(join(tmpdir(), "localdot-test-models-"));
   homes.push(home);
   const store = new SettingsStore(home);
   const first = {
@@ -31,7 +32,7 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 it("settings edits persist for new sessions and cannot mutate the active frozen policy", () => {
-  const home = mkdtempSync("/private/tmp/localdot-test-m5-settings-");
+  const home = mkdtempSync(join(tmpdir(), "localdot-test-m5-settings-"));
   homes.push(home);
   const store = new SettingsStore(home);
   expect(store.get()).toEqual({});
@@ -57,7 +58,7 @@ it("session detaches even an otherwise valid mutable in-process policy input", (
   }).toThrow();
 });
 it("invalid or inherited settings cannot overwrite the protected saved file", () => {
-  const home = mkdtempSync("/private/tmp/localdot-test-m5-settings-");
+  const home = mkdtempSync(join(tmpdir(), "localdot-test-m5-settings-"));
   homes.push(home);
   const store = new SettingsStore(home);
   store.put({ autonomy: DEFAULT_AUTONOMY });
@@ -70,7 +71,7 @@ it("invalid or inherited settings cannot overwrite the protected saved file", ()
   expect(store.get().autonomy).toEqual(DEFAULT_AUTONOMY);
 });
 it("a saved eight-class agent.json keeps loading, upgrades and saves the full policy", () => {
-  const home = mkdtempSync("/private/tmp/localdot-test-m5-settings-");
+  const home = mkdtempSync(join(tmpdir(), "localdot-test-m5-settings-"));
   homes.push(home);
   const legacy = {
     reading: "act",

@@ -11,6 +11,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { assertNativeRetired } from "./native-retirement.ts";
@@ -24,7 +25,7 @@ afterEach(async () => {
   for (const path of owned.splice(0)) await rm(path, { recursive: true, force: true });
 });
 async function fixture(create = true) {
-  const home = await realpath(await mkdtemp("/private/tmp/localdot-native-retired-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "localdot-native-retired-")));
   owned.push(home);
   await chmod(home, 0o700);
   const root = join(home, "codex"),

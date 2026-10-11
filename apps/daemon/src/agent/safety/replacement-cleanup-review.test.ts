@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ComputerSystemState } from "../../cells/system-state.ts";
 import { toolHarness } from "../testing/harness.ts";
 
 const cleanups: (() => void)[] = [];
@@ -34,6 +35,9 @@ const retire = new AsyncFunction(
   "keydHome",
   "errors",
   "rmSync",
+  "ComputerSystemState",
+  "docker",
+  "desktopImage",
   body,
 );
 
@@ -102,6 +106,9 @@ describe("review acceptance owned-evidence retirement", () => {
       keydHome,
       errors,
       rmSync,
+      ComputerSystemState,
+      {},
+      "inert-image",
     );
     expect(attempted).toEqual(["dispose", "live", "runner", "tools", "retire", "keyd"]);
     expect(errors.length).toBe(mode === "confirmed" ? 0 : 1);

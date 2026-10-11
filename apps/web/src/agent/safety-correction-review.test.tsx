@@ -106,7 +106,7 @@ function fixture(fetchImpl: typeof fetch, approval: Card | null = card) {
 afterEach(() => vi.useRealTimers());
 
 it.each(["pending GET", "failed GET", "nonterminal GET"] as const)(
-  "terminal POST does not release replacement identity while reconciliation is %s",
+  "terminal POST retains replacement identity while reconciliation is %s",
   async (mode) => {
     vi.useFakeTimers();
     const read = Promise.withResolvers<Response>();
@@ -142,11 +142,13 @@ it.each(["pending GET", "failed GET", "nonterminal GET"] as const)(
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-    expect(f.result.current.canReplace).toBe(false);
+    const retryable = mode === "failed GET";
+    expect(f.result.current.canReplace).toBe(retryable);
     await act(async () => {
-      expect(await f.result.current.replace()).toBe(false);
+      expect(await f.result.current.replace()).toBe(retryable);
     });
-    expect(posts).toHaveLength(1);
+    expect(posts).toHaveLength(retryable ? 2 : 1);
+    if (retryable) expect(posts[1]).toEqual(posts[0]);
     if (mode === "pending GET")
       await act(async () => {
         read.resolve(Response.json({ requestId, oldCellId: CELL, revision: 4, phase: "retiring" }));

@@ -1,4 +1,3 @@
-import { ComputerSystemState } from "../../cells/system-state.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
   CAREFUL_AUTONOMY,
@@ -16,6 +15,7 @@ import { CellOrchestrator } from "../../cells/orchestrator.ts";
 import { probeDesktopd, probeStream } from "../../cells/readiness.ts";
 import { TicketRegistry } from "../../cells/secrets.ts";
 import { CellStore } from "../../cells/store.ts";
+import { ComputerSystemState } from "../../cells/system-state.ts";
 import { DesktopdTools } from "../../desktopd/tools-client.ts";
 import { KillSwitch } from "../../gateway/kill-switch.ts";
 import { LiveSessions } from "../../gateway/live.ts";
@@ -311,7 +311,9 @@ describe.skipIf(!enabled)("actual fenced replacement", () => {
       if (!freshEndpoint) throw new Error("fresh endpoint missing");
       const freshTools = new DesktopdTools(freshEndpoint.desktopd);
       try {
-        expect((await freshTools.readFile("Downloads/safety5-recovery.txt")).content).toBe("owned-task5-effect\n");
+        expect((await freshTools.readFile("Downloads/safety5-recovery.txt")).content).toBe(
+          "owned-task5-effect\n",
+        );
       } finally {
         await freshTools.close();
       }
@@ -398,7 +400,10 @@ describe.skipIf(!enabled)("actual fenced replacement", () => {
         }
       for (const id of cleanupIds) {
         const saved = new ComputerSystemState(h.home, docker, desktopImage).records.read(id);
-        if (saved) await docker.request({ method: "DELETE", path: `/images/${saved.image}` }).catch((error) => errors.push(error));
+        if (saved)
+          await docker
+            .request({ method: "DELETE", path: `/images/${saved.image}` })
+            .catch((error) => errors.push(error));
       }
       try {
         await keyd?.stop();

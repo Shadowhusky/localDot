@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { imageRef, ReleaseManifest } from "../../../../packages/protocol/src/release.ts";
@@ -61,7 +62,7 @@ function required<T>(value: T | undefined): T {
   return value;
 }
 async function fixture(count = 1, fullcolor = false) {
-  const home = await realpath(await mkdtemp("/private/tmp/localdot-runtime-host-"));
+  const home = await realpath(await mkdtemp(join(tmpdir(), "localdot-runtime-host-")));
   homes.push(home);
   const state = join(home, "install");
   await mkdir(state, { mode: 0o700 });
@@ -208,6 +209,7 @@ async function fixture(count = 1, fullcolor = false) {
     };
   const request = vi.fn(async (r: DockerRequest) => {
     expect(held).toBe(true);
+    if (r.method === "GET" && /^\/containers\/[^/]+\/changes$/.test(r.path)) return [];
     if (r.method === "GET" && r.path.startsWith("/images/"))
       return image(decodeURIComponent(r.path.slice(8, -5)));
     if (r.method === "GET" && r.path === "/containers/json") {

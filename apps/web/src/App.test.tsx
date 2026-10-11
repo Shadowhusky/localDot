@@ -74,6 +74,7 @@ const keyReply = (path: string): Response | undefined => {
   if (path === `/api/cells/${CELL_ID}/quarantine`) return json({ items: [] });
   if (path === "/api/session-index") return json({ sessions: [], next: null });
   if (path === "/api/conversation") return json({ sessions: [], more: false });
+  if (path === "/api/app-update") return new Response("unavailable", { status: 404 });
   if (path === "/api/agent/settings") return json({});
   if (path === "/api/agent/providers") return json(providerFixture());
   if (path === "/api/keyd")
@@ -544,8 +545,10 @@ describe("App token states", () => {
     render(<App fetchImpl={fetchImpl} />);
     expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+    const callsAfterSignOut = fetchImpl.mock.calls.length;
+    expect(callsAfterSignOut).toBeGreaterThan(0);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(8);
+    expect(fetchImpl).toHaveBeenCalledTimes(callsAfterSignOut);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {

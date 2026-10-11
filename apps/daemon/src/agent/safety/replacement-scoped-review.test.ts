@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { CellStore } from "../../cells/store.ts";
+import { ComputerSystemState } from "../../cells/system-state.ts";
 import { toolHarness } from "../testing/harness.ts";
 import { ReplacementOwner } from "./replacement.ts";
 import { ReplacementStore } from "./replacement-store.ts";
@@ -35,6 +36,9 @@ const retire = new AsyncFunction(
   "keydHome",
   "errors",
   "rmSync",
+  "ComputerSystemState",
+  "docker",
+  "desktopImage",
   body,
 );
 
@@ -142,6 +146,9 @@ describe("scoped replacement corrections", () => {
           keydHome,
           errors,
           rmSync,
+          ComputerSystemState,
+          {},
+          "inert-image",
         );
       } catch (error) {
         escaped = error;

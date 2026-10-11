@@ -53,7 +53,7 @@ describe("gate role boundary", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("a relay exited");
     expect(result.calls).toEqual([
-      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=16,reuseaddr TCP4:host.docker.internal:4791",
+      "-t60 TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=16,reuseaddr TCP4:host.docker.internal:4791",
       "TCP4-LISTEN:4751,bind=172.30.4.10,fork,max-children=16,reuseaddr TCP4:host.docker.internal:4999",
     ]);
   });
@@ -61,14 +61,14 @@ describe("gate role boundary", () => {
     const result = run("connector");
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
-      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=16,reuseaddr TCP4:host.docker.internal:4791",
+      "-t60 TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=16,reuseaddr TCP4:host.docker.internal:4791",
     ]);
   });
   it("reserves separate bounded listeners for desktop control and video", () => {
     const result = run(undefined);
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
-      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=64,reuseaddr TCP4:host.docker.internal:4791",
+      "-t60 TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=64,reuseaddr TCP4:host.docker.internal:4791",
       "TCP4-LISTEN:8081,bind=172.30.5.10,fork,max-children=16,reuseaddr TCP4:172.30.4.11:7700",
       "TCP4-LISTEN:8082,bind=172.30.5.10,fork,max-children=16,reuseaddr TCP4:172.30.4.11:3000",
     ]);
@@ -79,11 +79,11 @@ describe("gate role boundary", () => {
       LD_TOOL_SOCKET: "/run/localdot/tool/tool.sock",
     };
     expect(run("brain", "4999", sockets).calls).toEqual([
-      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=16,reuseaddr UNIX-CONNECT:/run/localdot/keyd/4791.sock",
+      "-t60 TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=16,reuseaddr UNIX-CONNECT:/run/localdot/keyd/4791.sock",
       "TCP4-LISTEN:4751,bind=172.30.4.10,fork,max-children=16,reuseaddr UNIX-CONNECT:/run/localdot/tool/tool.sock",
     ]);
     expect(run(undefined, undefined, sockets).calls).toEqual([
-      "TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=64,reuseaddr UNIX-CONNECT:/run/localdot/keyd/4791.sock",
+      "-t60 TCP4-LISTEN:3128,bind=172.30.4.10,fork,max-children=64,reuseaddr UNIX-CONNECT:/run/localdot/keyd/4791.sock",
       "TCP4-LISTEN:8081,bind=172.30.5.10,fork,max-children=16,reuseaddr TCP4:172.30.4.11:7700",
       "TCP4-LISTEN:8082,bind=172.30.5.10,fork,max-children=16,reuseaddr TCP4:172.30.4.11:3000",
     ]);

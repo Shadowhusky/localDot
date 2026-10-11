@@ -276,6 +276,26 @@ func TestActualExecKeepsLeaseAndDoesNotPassItToChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := makeFixture(t, "daemon")
+	// Hosted tool caches can be group-writable or owned by a different build user. The managed launcher correctly rejects those;
+	// use a private executable fixture instead of weakening the production ownership check.
+	info, err := os.Stat(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatal("Node fixture has no ownership metadata")
+	}
+	if info.Mode().Perm()&0o022 != 0 || (st.Uid != 0 && int(st.Uid) != os.Getuid()) {
+		nodeBytes, err := os.ReadFile(node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node = filepath.Join(filepath.Dir(f.scope.State), "node")
+		if err := os.WriteFile(node, nodeBytes, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.record.Configuration.Settings.Node = node
 	f.record.Configuration.Configuration = configurationID(f.record.Configuration)
 	f.scope.Configuration = f.record.Configuration.Configuration
@@ -327,6 +347,8 @@ console.log('ready:'+process.pid+':'+child.pid);setInterval(()=>{},1000);`
 	}
 	parts := strings.Split(strings.TrimSpace(line), ":")
 	if len(parts) != 3 || parts[0] != "ready" {
+		cmd.Process.Kill()
+		cmd.Wait() // os/exec must finish copying stderr before the buffer is read.
 		t.Fatalf("no ready: %q %s", line, &stderr)
 	}
 	pid, _ := strconv.Atoi(parts[1])

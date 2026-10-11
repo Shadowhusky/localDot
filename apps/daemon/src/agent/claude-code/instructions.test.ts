@@ -38,7 +38,8 @@ describe("Claude Code's instructions", () => {
       codex.slice(codex.indexOf("# Untrusted content")),
     );
     const bare = { memory: { user: "", memory: "" }, skills: [], today: input.today };
-    expect(claudeCodeInstructions(bare).length).toBeLessThan(4300);
+    // Shared rules have their own budget; bound the harness and memory framing separately.
+    expect(claudeCodeInstructions(bare).length - workingRules("batch").length).toBeLessThan(2000);
   });
   it("say how to research, with the research tool, only for a research task", () => {
     const bare = { memory: { user: "", memory: "" }, skills: [], today: input.today };
