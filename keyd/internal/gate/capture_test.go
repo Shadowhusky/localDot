@@ -238,14 +238,14 @@ func TestAnAddressIsAskedForByTheNameItsTLSOrHTTPGives(t *testing.T) {
 	f := newCapture(t, k, netip.MustParseAddrPort("93.184.216.34:443"))
 	conn := f.dial(t)
 	go tls.Client(conn, &tls.Config{ServerName: "Chat.Example.com", InsecureSkipVerify: true}).Handshake()
-	if req := <-k.requests; req.Host != "chat.example.com:443" {
+	if req := <-k.requests; req.Host != "chat.example.com:443" || req.Header.Get("X-Localdot-Original-Destination") != "93.184.216.34:443" {
 		t.Fatalf("host %q", req.Host)
 	}
 	f.to(netip.MustParseAddrPort("93.184.216.34:80"))
 	conn = f.dial(t)
 	request := "GET / HTTP/1.1\r\nHost: www.example.com:80\r\nAccept: */*\r\n\r\n"
 	io.WriteString(conn, request)
-	if req := <-k.requests; req.Host != "www.example.com:80" {
+	if req := <-k.requests; req.Host != "www.example.com:80" || req.Header.Get("X-Localdot-Original-Destination") != "93.184.216.34:80" {
 		t.Fatalf("host %q", req.Host)
 	}
 	// What the program sent while the gate listened reaches the tunnel first.

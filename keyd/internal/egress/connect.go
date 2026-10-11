@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,13 +59,17 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 	if reason != "" {
 		return c.refuseConnect(ctx, line, reason)
 	}
+	destination, reason := c.captureDestination(ctx.Req, t)
+	if reason != "" {
+		return c.refuseConnect(ctx, line, reason)
+	}
 	line.Host = t.Host
 	var d policy.Decision
 	if !address {
 		d = c.cfg.Policy.Connect(t, c.interceptedHosts())
 	}
 	if address || d.Reason == policy.ReasonPort {
-		return c.handleOther(ctx, t, via, line)
+		return c.handleOther(ctx, t, via, line, destination)
 	}
 	if !d.Allow {
 		return c.refuseConnect(ctx, line, d.Reason)
@@ -77,12 +82,12 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 	if len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
 		return c.refuseConnect(ctx, line, ReasonInterceptionUnavailable)
 	}
-	return c.hijack(func(client net.Conn) { c.passthrough(client, t, line) }), hostport
+	return c.hijack(func(client net.Conn) { c.passthrough(client, t, line, destination) }), hostport
 }
 
 // handleOther is every CONNECT but the web's 443: it is tunnelled as raw TCP when policy allows it
 // outright, or once the daemon answers yes for the user.
-func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, line audit.Line) (*goproxy.ConnectAction, string) {
+func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, line audit.Line, destination string) (*goproxy.ConnectAction, string) {
 	line.DestPort = t.Port
 	g := c.current()
 	d := c.cfg.Policy.Other(t, c.interceptedHosts())
@@ -104,7 +109,7 @@ func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, l
 			return c.refuseConnect(ctx, line, reason)
 		}
 	}
-	return c.hijack(func(client net.Conn) { c.tunnel(client, g, t, line) }), net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
+	return c.hijack(func(client net.Conn) { c.tunnel(client, g, t, line, destination) }), net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
 }
 
 func (c *Cell) hijack(fn func(client net.Conn)) *goproxy.ConnectAction {
@@ -123,7 +128,7 @@ func (c *Cell) refuseConnect(ctx *goproxy.ProxyCtx, line audit.Line, reason stri
 }
 
 // passthrough relays an allowed host's TLS untouched once its ClientHello names that host.
-func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
+func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line, destination string) {
 	defer client.Close()
 	start := time.Now()
 	g := c.current()
@@ -152,7 +157,7 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		}
 		client = &replayConn{Conn: client, pending: first}
 		if !looksTLS(first) {
-			c.raw(client, g, t, line, start)
+			c.raw(client, g, t, line, start, destination)
 			return
 		}
 	}
@@ -166,7 +171,7 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		finish(audit.Deny, ReasonSNIMismatch, nil)
 		return
 	}
-	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", absolute(net.JoinHostPort(t.Host, "443")))
+	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", connectDestination(t, destination))
 	if err != nil {
 		decision, reason := dialOutcome(err)
 		finish(decision, reason, err)
@@ -189,9 +194,9 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 }
 
 // raw relays a captured connection to its named host as it is, with what was read already.
-func (c *Cell) raw(client net.Conn, g *generation, t policy.Target, line audit.Line, start time.Time) {
+func (c *Cell) raw(client net.Conn, g *generation, t policy.Target, line audit.Line, start time.Time, destination string) {
 	line.Mode = "raw"
-	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", absolute(net.JoinHostPort(t.Host, strconv.Itoa(t.Port))))
+	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", connectDestination(t, destination))
 	if err != nil {
 		line.Decision, line.Reason = dialOutcome(err)
 		line.Detail, line.DurationMs = err.Error(), msSince(start)
@@ -278,4 +283,37 @@ func splice(client, up net.Conn) (in, out int64) {
 	}()
 	wg.Wait()
 	return in, out
+}
+
+// A captured app may have chosen a specific CDN node independently of DNS. Keep the
+// observed hostname for policy and SNI checks, but dial its original public endpoint.
+// Only the gate's separate credential may supply this metadata. Intercepted secret
+// hosts still use mitm's own verified DNS route, never this destination override.
+const originalDestinationHeader = "X-Localdot-Original-Destination"
+const reasonCaptureDestination = "invalid-capture-destination"
+
+func (c *Cell) captureDestination(r *http.Request, t policy.Target) (string, string) {
+	values := r.Header.Values(originalDestinationHeader)
+	if len(values) == 0 {
+		return "", ""
+	}
+	if viaOf(r) != ViaCapture || len(values) != 1 {
+		return "", reasonCaptureDestination
+	}
+	ap, err := netip.ParseAddrPort(values[0])
+	if err != nil || ap.Addr().Zone() != "" || int(ap.Port()) != t.Port {
+		return "", reasonCaptureDestination
+	}
+	target := policy.Target{Host: ap.Addr().String(), Port: t.Port}
+	if reason := c.guard(c.current(), target); reason != "" {
+		return "", reason
+	}
+	return ap.String(), ""
+}
+
+func connectDestination(t policy.Target, destination string) string {
+	if destination != "" {
+		return destination
+	}
+	return absolute(net.JoinHostPort(t.Host, strconv.Itoa(t.Port)))
 }

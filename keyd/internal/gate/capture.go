@@ -68,6 +68,7 @@ func (c *Capture) handle(client net.Conn) {
 		reset(client)
 		return
 	}
+	var original string
 	var early *firstRead
 	if !named {
 		start, err := c.sniff(client)
@@ -81,6 +82,7 @@ func (c *Capture) handle(client net.Conn) {
 		if name, _ := Named(start); name != "" {
 			if host, ok := Reachable(name); ok {
 				_, port, _ := net.SplitHostPort(target)
+				original = target
 				target = net.JoinHostPort(host, port)
 			}
 		}
@@ -94,6 +96,9 @@ func (c *Capture) handle(client net.Conn) {
 	}
 	request := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\nProxy-Authorization: Basic " +
 		base64.StdEncoding.EncodeToString([]byte("gate:"+c.Token)) + "\r\n"
+	if original != "" {
+		request += "X-Localdot-Original-Destination: " + original + "\r\n"
+	}
 	if port := portOf(client.RemoteAddr()); port != 0 {
 		request += sourceHeader + ": " + strconv.Itoa(port) + "\r\n"
 	}

@@ -215,7 +215,7 @@ func askID() (string, error) {
 // tunnel relays raw TCP to the destination once it is dialled: a refusal at the dial (netguard
 // again, after a fresh lookup) reaches the program as a CONNECT answer, never as a dropped tunnel.
 // The kill switch closes both ends.
-func (c *Cell) tunnel(client net.Conn, g *generation, t policy.Target, line audit.Line) {
+func (c *Cell) tunnel(client net.Conn, g *generation, t policy.Target, line audit.Line, destination string) {
 	defer client.Close()
 	start := time.Now()
 	defer g.track(client)()
@@ -228,7 +228,7 @@ func (c *Cell) tunnel(client net.Conn, g *generation, t policy.Target, line audi
 		line.DurationMs = msSince(start)
 		c.record(line)
 	}
-	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", absolute(net.JoinHostPort(t.Host, strconv.Itoa(t.Port))))
+	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", connectDestination(t, destination))
 	if err != nil {
 		decision, reason := dialOutcome(err)
 		if g.ctx.Err() != nil {
