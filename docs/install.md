@@ -249,9 +249,9 @@ serving.
 
 ### Optional domain relay
 
-The built-in relay is implemented but **public access is awaiting DNS setup and verification**. It is not needed for local,
-SSH or Tailscale access. Once a service is configured, enable **Settings → Your computer →
-Remote access**, then choose **Copy sign-in link** and open it on your other device within a minute.
+The optional relay is available at `localdot.dev`. It is not needed for local, SSH or Tailscale
+access. Enable **Settings → Your computer → Remote access**, then choose **Copy sign-in link**
+and open it on your other device within a minute.
 
 It stays off until you enable it. Traffic passes through localDot’s relay and Cloudflare, which
 can process it; the Settings panel includes privacy details. Turning it off disconnects remote
@@ -295,7 +295,10 @@ Windows PowerShell accepts `-Distro`, `-Ref`, `-Tailscale` and `-Uninstall`. For
 The Windows installer enables systemd in the selected distro and adds a hidden Windows task to
 keep it running after you sign in.
 
-### What the installer does
+### What the source installer does
+
+The public commands at the top download prebuilt packages. The steps below apply only to
+an authenticated source checkout, not to the packaged installer.
 
 1. Gets localDot's source into `~/.local/share/localdot/app` (`--ref` picks a branch, tag or
    commit) and continues with the installer from that version.
