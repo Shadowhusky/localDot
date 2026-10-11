@@ -1,4 +1,4 @@
-import { type PointerEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentModel } from "../agent/model.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -36,7 +36,19 @@ export function WorkOverlay({
   const drag = useRef<{ id: number; x: number; y: number; start: WorkLayout } | null>(null);
   const latest = useRef(layout);
   latest.current = layout;
-  const compact = layout.minimized || (!peek && (!working || !transcript.background));
+  const background = working && transcript.background;
+  const [autoExpanded, setAutoExpanded] = useState(background);
+  // Brief tool handoffs should not close and reopen the window. Manual controls
+  // remain immediate, and an interrupted transition starts from its current size.
+  useEffect(() => {
+    if (background) {
+      setAutoExpanded(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setAutoExpanded(false), 400);
+    return () => window.clearTimeout(timer);
+  }, [background]);
+  const compact = layout.minimized || (!peek && !background && !autoExpanded);
   const availableX = Math.max(0, bounds.width - bounds.panelWidth - 16);
   const availableY = Math.max(0, bounds.height - bounds.panelHeight - 16);
   const save = (value: WorkLayout) => {
@@ -63,13 +75,22 @@ export function WorkOverlay({
   );
   useLayoutEffect(() => {
     if (layout.hidden || !hasEntries || !layer.current || !panel.current) return;
-    const measure = () =>
-      setBounds({
+    const measure = () => {
+      const next = {
         width: layer.current?.clientWidth ?? 0,
         height: layer.current?.clientHeight ?? 0,
         panelWidth: panel.current?.offsetWidth ?? 0,
         panelHeight: panel.current?.offsetHeight ?? 0,
-      });
+      };
+      setBounds((old) =>
+        old.width === next.width &&
+        old.height === next.height &&
+        old.panelWidth === next.panelWidth &&
+        old.panelHeight === next.panelHeight
+          ? old
+          : next,
+      );
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(layer.current);
@@ -202,8 +223,8 @@ export function WorkOverlay({
                 });
               }}
             >
-              {!compact && <Glyph size={18} />}
-              <span className="work-overlay-heading">{compact ? "Work" : "Background work"}</span>
+              <Glyph size={18} />
+              <span className="work-overlay-heading">Work</span>
               <span
                 className="work-overlay-state"
                 data-live={(working && transcript.background) || undefined}
@@ -230,12 +251,12 @@ export function WorkOverlay({
               onClick={() => save({ ...layout, hidden: true })}
             />
           </div>
-          {!compact && (
+          <div className="work-overlay-body" inert={compact} aria-hidden={compact || undefined}>
             <section
               className="work-overlay-output"
               ref={output}
               // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard scrolling of the command transcript.
-              tabIndex={0}
+              tabIndex={compact ? -1 : 0}
               aria-label="Recent command output"
               onScroll={(event) => {
                 const node = event.currentTarget;
@@ -263,7 +284,7 @@ export function WorkOverlay({
                 </div>
               ))}
             </section>
-          )}
+          </div>
         </section>
       )}
     </div>

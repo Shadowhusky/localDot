@@ -1746,7 +1746,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 !curtain.up &&
                 !viewedConversation &&
                 !switching &&
-                stageHud.live &&
+                (stageHud.live || stageHud.phase === "reconnecting") &&
                 session.sessionId ? (
                   <WorkOverlay
                     key={session.sessionId}

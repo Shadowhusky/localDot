@@ -276,7 +276,7 @@ poster.decode().then(dismissLoader).catch(dismissLoader);
 const greetings = [
   "Hello, you. What shall we do first?",
   "Something useful? Something fun? I’m here.",
-  "A little curiosity goes a long way.",
+  "Let’s try a task. Pick a recording to see how I work.",
 ];
 const setGreeting = stableText("#greeting", greetings);
 let greeting = 0;
@@ -286,20 +286,20 @@ $("#greet").addEventListener("click", () => {
 });
 const features = {
   work: [
-    "A real computer. Real work.",
-    "Browse, research with sources, run code, and make files you can open right in the conversation. Connect your apps or let dot use the screen.",
-    "Read. Think. Make.",
-    "Every step, in view.",
+    "Apps, files, and a terminal.",
+    "dot can use desktop apps, read websites, and run code. Files appear in the conversation for you to open or revise. Connect your apps to give it more tools.",
+    "Browser · Terminal · Files",
+    "Watch or replay a task.",
   ],
   memory: [
-    "A little wiser next time.",
-    "Useful lessons can carry across sessions: your preferences, working approaches, and things worth remembering. Review and edit what dot knows.",
+    "Keep useful lessons.",
+    "dot can save preferences and lessons from completed tasks for later sessions. Review, edit, or delete these notes in What dot knows.",
     "Remember what helps.",
     "You decide what stays.",
   ],
   routines: [
-    "For the things you do again.",
-    "Set up a routine for recurring work. dot can follow the steps, use your connected apps, and ask when a decision needs you.",
+    "Schedule recurring tasks.",
+    "Schedule a task to run while localDot is on. Routines use the same tools and permissions as other tasks. Choose what happens when an approval is needed and you’re away.",
     "On your schedule.",
     "Still under your control.",
   ],

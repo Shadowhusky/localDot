@@ -276,21 +276,35 @@ export function ActivityRail({
       {plan.length > 0 && (
         <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
       )}
-      {(started || tabs.length > 1 || onHide) && (
-        <div className="activity-tabs-row">
-          <Tabs
-            id={`${domId}-tabs`}
-            aria-label="Activity"
-            size={32}
-            variant="line"
-            className="activity-tabs"
-            items={tabs}
-            value={tab}
-            onValueChange={choose}
-          />
-          {onHide && <IconButton icon="x" label="Hide activity" size={28} onClick={onHide} />}
-        </div>
-      )}
+      <div className="activity-controls">
+        {(started || tabs.length > 1 || onHide) && (
+          <div className="activity-tabs-row">
+            <Tabs
+              id={`${domId}-tabs`}
+              aria-label="Activity"
+              size={32}
+              variant="line"
+              className="activity-tabs"
+              items={tabs}
+              value={tab}
+              onValueChange={choose}
+            />
+            {onHide && <IconButton icon="x" label="Hide activity" size={28} onClick={onHide} />}
+          </div>
+        )}
+        {onSteps && started && entries.length > 0 && (
+          <div className="activity-filter">
+            <SegmentedControl
+              aria-label="Activity filter"
+              size={32}
+              variant="quiet"
+              items={FILTERS}
+              value={filter}
+              onValueChange={(value) => setFilter(value as ActivityFilter)}
+            />
+          </div>
+        )}
+      </div>
       <div className="activity-body">
         <ScrollArea
           ref={follow.ref}
@@ -314,18 +328,6 @@ export function ActivityRail({
             <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab}>
               {!started && (
                 <p className="activity-empty">Plan and steps appear here once dot starts.</p>
-              )}
-              {started && entries.length > 0 && (
-                <div className="activity-filter">
-                  <SegmentedControl
-                    aria-label="Activity filter"
-                    size={32}
-                    variant="quiet"
-                    items={FILTERS}
-                    value={filter}
-                    onValueChange={(value) => setFilter(value as ActivityFilter)}
-                  />
-                </div>
               )}
               {page.hasOlder && (
                 <Button variant="quiet" size="sm" className="activity-page" onClick={page.older}>

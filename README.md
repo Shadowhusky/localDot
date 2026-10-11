@@ -5,7 +5,7 @@
 <h1 align="center">localDot</h1>
 
 <p align="center">
-  An assistant with its own computer. Runs locally. Watch it work from your browser or phone.
+  An AI assistant that runs a Linux desktop on your computer. Watch and control it from your browser.
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 ## Install
 
-**Install the alpha.** No GitHub account or access to this repository is needed.
+The installer downloads prebuilt packages. You do not need a GitHub account or a local copy of this repository.
 
 **macOS (Apple silicon) or Linux (x64)** — open Terminal:
 
@@ -28,9 +28,9 @@ curl -fsSL https://downloads.localdot.dev/install.sh | bash
 irm https://downloads.localdot.dev/install.ps1 | iex
 ```
 
-Keep the terminal open. Setup checks Docker, offers to install missing prerequisites, downloads
-prebuilt app files and computer images, and prints a sign-in link. Approve system prompts as needed;
-Windows also guides you through WSL and Ubuntu. Then choose a model and send dot a task.
+Keep the terminal open until setup prints your app link. The installer checks Docker and offers
+to install missing dependencies. On Windows, it also guides you through WSL, Ubuntu, and Docker
+integration. Follow any prompts, then open the link and choose a model.
 
 Already installed? `localdot update` installs the latest release and keeps your data.
 `localdot open` prints a fresh sign-in link. Open a new terminal if the command
@@ -40,15 +40,15 @@ the Linux package through WSL 2. Clean native Windows installation remains to be
 [Installation guide](docs/install.md) · [Public downloads](https://github.com/Shadowhusky/localdot-downloads) ·
 [Use your phone or a server](docs/install.md#servers-without-a-screen) · [Run from source](docs/development.md#development)
 
-## What it is
+## About
 
-localDot runs an AI assistant in a containerized Linux desktop on your machine. Give it a
-task and watch the screen in your browser. It can use desktop apps, browse the web, work with
-files and run commands. You can take control or stop a task, then replay its recorded steps.
+localDot gives an AI agent a Linux desktop with a browser, terminal, and desktop apps. The
+desktop runs in Docker on your machine; the interface opens in your browser. Ask dot to work
+on a task, watch its progress, or take control yourself. Recordings let you review what happened.
 
-The app and recordings are stored locally. If you use a hosted model, screenshots and task
-context are sent to that provider. A local model is also an option; results depend on the
-model and the task.
+Conversations, files, and recordings are stored locally. You can use a provider API, a supported
+subscription, or a local model. Hosted models receive screenshots and task context. Results
+depend on the model and the task.
 
 Credentials are managed by a separate local service. Permission settings control which
 actions need your approval. This is alpha software: expect bugs and review work before
@@ -65,15 +65,15 @@ relying on it.
 
 [Open the full-size drawing](docs/readme/capabilities.svg).
 
-Explore the illustrated tour below. Every image links to its original size.
+The tour below shows the interface. Links below each image open the full-size version.
 
 ## A quick tour
 
 > Screenshots use sample data. On a phone, tap a screenshot to open its full-size view.
 
 [Watch](#watch) · [Activity](#activity) · [Research](#search-read-and-research) ·
-[Models](#pick-the-model-see-what-it-used) · [Permissions](#it-asks-right-where-you-are) ·
-[Connectors](#your-apps-as-tools) · [Phone](#on-your-phone) · [Replay](#replay-and-export) ·
+[Models](#models-and-usage) · [Permissions](#permissions-and-sign-in) ·
+[Connectors](#connectors) · [Phone](#on-your-phone) · [Replay](#replay-and-export) ·
 [Routines](#routines) · [Settings](#first-run-and-settings)
 
 ### Watch
@@ -134,7 +134,7 @@ page it reads as a source. It stops at 20 sources or 15 minutes unless you chang
 Settings, and you can tell it to wrap up early or keep going. You get a report with citations,
 as Markdown and as a PDF, with the passages it quoted from each source.
 
-### Pick the model, see what it used
+### Models and usage
 
 <a href="docs/readme/models.png"><img src="docs/readme/models.png" alt="Left: the model menu from the message box, grouped as Anthropic, OpenAI, Claude Code and ChatGPT plan, with Manage models at the bottom. Right: a finished turn's line, Claude Sonnet 5.5 · 25.1K tokens, opened to show each model's tokens in and out"></a>
 
@@ -157,7 +157,7 @@ machine. The browser's online speech service is only used if you allow it. dot c
 replies aloud in your device's own voice. Cancel recording or dismiss a microphone notice to
 return to the message controls. localDot does not save the microphone recording.
 
-### It asks, right where you are
+### Permissions and sign-in
 
 <a href="docs/readme/approval.png"><img src="docs/readme/approval.png" alt="An approval card over the computer: Send this as you? with the target, the site, and buttons for Don't send and Send"></a>
 
@@ -193,17 +193,17 @@ Press **Take control** to use the mouse, keyboard or paste text. Agent interacti
 recording pause until you hand control back. Full screen is one
 click away when you want the whole display. Conversation history stays available during takeover.
 
-### Your apps, as tools
+### Connectors
 
 <a href="docs/readme/connectors.png"><img src="docs/readme/connectors.png" width="760" alt="Settings, Connectors: GitHub with its tools listed one by one, each set to Just runs, Asks first or Off, and Linear waiting for a sign-in"></a>
 
-Some jobs are quicker without the screen. In **Settings → Connectors** you can give dot your
-apps directly: GitHub, Linear, Notion, Sentry, Brave Search and DeepWiki are a click away, and any
-other MCP server can be added by its address or the command that runs it. Each tool is set to
-**Just runs**, **Asks first** or **Off**. With Custom permissions, reading runs and changes ask
-first by default; the card shows exactly what dot would send. Keys and sign-ins stay in keyd and only
-ever go to their own app. An app that runs as a program gets a sealed cell of its own: read-only,
-none of your files, and no way out except through keyd.
+Connect GitHub, Linear, Notion, Sentry, Brave Search, or DeepWiki in **Settings → Connectors**.
+You can also add an MCP server by URL or command. dot can then call its tools directly.
+
+Set each tool to **Just runs**, **Asks first**, or **Off**. With Custom permissions, reads run
+without approval and changes ask first by default. Credentials are held by keyd and sent only
+to the connected service. Command-based connectors run in separate containers without access
+to your host files.
 
 ### On your phone
 
@@ -217,20 +217,18 @@ notification permissions.
 
 <a href="docs/readme/export.png"><img src="docs/readme/export.png" alt="Replay with the Export video sheet: a preview with dot under the picture, a filmstrip with trim handles, and the Quality, Fast and Showcase presets"></a>
 
-Computer tasks are recorded locally, except while you hold control. Scrub through it, compare before and after for any step, skip
-the idle bits. Export trims to the part you want and comes with presets: **Quality**, **Fast**
-(small and quick) and **Showcase**, which puts dot and its lines into the video. Exports run on
-the host computer, so closing the browser tab does not cancel them.
+Computer tasks are recorded locally, except while you hold control. Scrub through a recording,
+compare the screen before and after a step, or skip idle time. Trim a section and export it with
+**Quality**, **Fast**, or **Showcase** settings. Showcase includes dot and its captions. Exports
+run on the host computer and continue if you close the browser tab.
 
-### What it made
+### Files and revisions
 
 <a href="docs/readme/done.png"><img src="docs/readme/done.png" alt="A finished task: the summary, two files with inline previews, a start and an end screenshot, Watch replay, and a quiet line with the model and tokens"></a>
 
-When dot finishes you get the files with previews (images, PDFs, HTML in a sandbox, text, code,
-CSV and spreadsheets, audio and video), before and after screenshots, and
-**Revise** for when it's nearly right. Revised files keep their versions, with Compare. Open a
-PDF, a document or a deck in full and you can page through it, with thumbnails, and a deck can
-present a slide at a time.
+Files appear in the conversation with previews for images, documents, code, spreadsheets,
+audio, and video. Use **Revise** to request a change; earlier versions remain available to
+compare. Documents and slide decks open in a viewer with page thumbnails.
 
 Readable text files can be previewed even with an unfamiliar extension. Unsupported files
 remain downloadable; a failed preview offers **Try again**.
@@ -239,9 +237,9 @@ remain downloadable; a failed preview offers **Try again**.
 
 <a href="docs/readme/routines.png"><img src="docs/readme/routines.png" alt="Left: dot proposes a routine called Morning bills in the chat. Right: the Routines list with schedules"></a>
 
-Checking the same three sites every weekday at 8:30? dot can offer to turn a task into a routine,
-or you can write one yourself. Routines run while localDot is running, with the same checks, and
-you choose what happens when you're away.
+Schedule recurring tasks, such as checking a set of sites each weekday. You can create a
+routine yourself or ask dot to set one up. Routines require localDot to be running and use
+your permission settings, including how to handle requests while you are away.
 
 ### First run and Settings
 
@@ -260,8 +258,8 @@ editable and deletable), the sites you're signed in to, your apps, and your keys
 
 <a href="docs/readme/computer.png"><img src="docs/readme/computer.png" alt="dot's computer: a macOS-style menu bar and dock, with Chromium showing a travel article"></a>
 
-It's Linux in containers, dressed to feel familiar: menu bar, dock, a launcher, traffic lights.
-It comes with Chromium, LibreOffice, GIMP, a code editor and a terminal. Sign-ins in its web
+The desktop includes Chromium, LibreOffice, GIMP, a code editor, and a terminal, with a menu
+bar, dock, and app launcher. Sign-ins in its web
 browser are retained across restarts and new tasks, though sites may ask you to sign in again. If the web browser stops
 answering, localDot attempts to restart it with the saved profile.
 
@@ -269,9 +267,8 @@ answering, localDot attempts to restart it with the saved profile.
 
 <a href="docs/readme/starting.png"><img src="docs/readme/starting.png" width="600" alt="Starting your computer: dot over a dark curtain, 0:14 · Waiting for the desktop, and a progress bar"></a>
 
-Starting, updating and restarting the computer show real progress from localDot itself, and a
-start names each step on the way, from the network to the desktop to the screen. Refresh the page
-or open a second tab and you see the same count, not a fresh one.
+Startup progress shows which service is being prepared: networking, desktop, or streaming.
+The status survives a page refresh and is shared across browser tabs.
 
 ## Meet dot
 
@@ -365,9 +362,9 @@ Review permission settings before giving dot access to your accounts.
 
 ## Models
 
-dot needs a main model that can use a computer, meaning it can look at a screenshot and point at
-things. A fast model for titles and quick checks is optional, and so is a local one. Set them up
-in Settings → Models, then switch between them from the chip in the message box.
+For screen interaction, choose a model that can interpret screenshots and use tools. You can
+optionally assign a smaller model to titles and other quick tasks. Configure providers in
+**Settings → Models**, then select a model from the message box.
 
 - **Provider APIs:** Anthropic, OpenAI, Google Gemini, Azure OpenAI, xAI, Mistral, DeepSeek,
   Groq, OpenRouter, Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot,

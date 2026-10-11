@@ -947,7 +947,11 @@
   left: 0;
   pointer-events: auto;
   width: min(420px, calc(100% - 16px));
-  max-height: min(280px, calc(75% - 8px));
+  height: min(262px, calc(75% - 8px));
+  transition:
+    width 200ms var(--ease-standard),
+    height 200ms var(--ease-standard),
+    border-radius 200ms var(--ease-standard);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -961,8 +965,8 @@
 }
 .work-overlay[data-compact] {
   width: min(168px, calc(100% - 16px));
-  max-height: calc(100% - 16px);
-  border-radius: var(--radius-full);
+  height: 38px;
+  border-radius: var(--radius-xl);
 }
 .work-overlay-header {
   padding: var(--spacing);
@@ -1033,9 +1037,19 @@
   outline-offset: -3px;
   border-radius: var(--radius-group);
 }
+.work-overlay-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 140ms var(--ease-standard);
+}
+.work-overlay[data-compact] .work-overlay-body {
+  opacity: 0;
+}
 .work-overlay-output {
   min-height: 0;
-  height: 224px;
+  height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
   padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5) calc(var(--spacing) * 4);
@@ -1084,6 +1098,9 @@
 
 /* Keep touch controls generous without making the collapsed pill wide. */
 @media (pointer: coarse) {
+  .work-overlay[data-compact] {
+    height: 46px;
+  }
   .work-overlay-header {
     height: 44px;
     padding-block: 0;
@@ -1149,4 +1166,11 @@
 }
 .stream-menu-note {
   padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-overlay,
+  .work-overlay-body {
+    transition: none;
+  }
 }

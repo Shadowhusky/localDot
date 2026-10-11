@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { type AgentStep, emptyAgentModel } from "../agent/model.ts";
 import { WorkOverlay } from "./WorkOverlay.tsx";
@@ -17,6 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   localStorage.clear();
   vi.unstubAllGlobals();
 });
@@ -37,9 +38,7 @@ it("keeps command output in app DOM and keeps the chrome title on one line", () 
   expect(screen.getByRole("region", { name: "Recent command output" }).textContent).toContain(
     "hello",
   );
-  expect(screen.getByRole("button", { name: "Move command window" }).textContent).toBe(
-    "Background workLive",
-  );
+  expect(screen.getByRole("button", { name: "Move command window" }).textContent).toBe("WorkLive");
   expect(document.querySelector("iframe, canvas")).toBeNull();
 });
 it("preserves minimize across output, tool changes and remounts", () => {
@@ -55,12 +54,16 @@ it("preserves minimize across output, tool changes and remounts", () => {
   expect(readWorkLayout().minimized).toBe(true);
 });
 it("collapses for screen interaction and completion without destroying the transcript", () => {
+  vi.useFakeTimers();
   const view = render(<WorkOverlay model={model()} working />);
+  const original = screen.getByRole("region", { name: "Recent command output" });
   const browser = model();
   browser.steps.set("two", step("two", "browser"));
   view.rerender(<WorkOverlay model={browser} working />);
+  act(() => vi.advanceTimersByTime(400));
   expect(screen.queryByRole("region", { name: "Recent command output" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Expand command window" }));
+  expect(screen.getByRole("region", { name: "Recent command output" })).toBe(original);
   expect(screen.getByRole("region", { name: "Recent command output" }).textContent).toContain(
     "hello",
   );
@@ -98,4 +101,16 @@ it("keeps commands hidden across output and reload, and restores them on request
   fireEvent.click(screen.getByRole("button", { name: "Show commands" }));
   expect(screen.getByRole("region", { name: "Recent command output" })).toBeTruthy();
   expect(readWorkLayout().hidden).toBe(false);
+});
+
+it("does not collapse during a brief tool handoff", () => {
+  vi.useFakeTimers();
+  const view = render(<WorkOverlay model={model()} working />);
+  const browser = model();
+  browser.steps.set("two", step("two", "browser"));
+  view.rerender(<WorkOverlay model={browser} working />);
+  act(() => vi.advanceTimersByTime(200));
+  view.rerender(<WorkOverlay model={model()} working />);
+  act(() => vi.advanceTimersByTime(500));
+  expect(screen.getByRole("region", { name: "Recent command output" })).toBeTruthy();
 });

@@ -116,8 +116,8 @@ function Wait-SetupProcess($Process, [string]$Activity, [int]$TimeoutSeconds = 1
 function Approve-Prerequisites {
   if ($NoPrerequisites) { return $false }
   if ($InstallPrerequisites) { return $true }
-  Write-Host "localDot can install missing Linux build tools and Docker Desktop. Windows may ask for permission."
-  Write-Host "Existing Docker installations are kept. Docker's license and first-run choices stay in its own window."
+  Write-Host "Checking for Linux tools and Docker Desktop. Setup can install them if they are missing."
+  Write-Host "If Docker opens, complete its setup prompts there. Keep this PowerShell window open."
   $answer = Read-Host 'Install missing prerequisites and continue? [Y/n]'
   if ($answer -notin @('', 'y', 'yes')) { return $false }
   $script:InstallPrerequisites = [switch]$true
@@ -617,14 +617,14 @@ function Install-LocalDot {
   Write-Host "[3/5] Checking dependencies and Docker"
   Ensure-LinuxTools
   if (-not (Wait-Docker)) { return }
-  Write-Host "[4/5] Installing localDot (detailed progress below)"
+  Write-Host "[4/5] Installing localDot"
   Invoke-Installer $options
-  Write-Host "[5/5] Setting up the localdot command and sign-in startup"
+  Write-Host "[5/5] Setting up the localdot command and startup at login"
   Install-Command
   Register-KeepRunning
   Remove-ItemProperty -Path $ResumeKey -Name 'localDotSetup' -ErrorAction SilentlyContinue
   Write-Host ""
-  Write-Host "localDot installation finished. Your app link is printed above."
+  Write-Host "localDot is installed. Open the app link above to finish setup."
   Write-Host "For a fresh sign-in link from PowerShell: localdot open"
 }
 

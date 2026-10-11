@@ -1208,7 +1208,7 @@ wait_ready() {
     fi
     if [ $tries -ge 60 ]; then
       tail -n 20 "$LD_HOME/logs/daemon.log" >&2 2>/dev/null || true
-      die "localDot didn't start; its last log lines are above. Fix what they say, then run: localdot up"
+      die "localDot could not start. Check the error above, then retry with: localdot up"
     fi
     sleep 1
   done
@@ -1253,7 +1253,7 @@ show_link() {
     say "  $link"
     if browser=$(local_browser); then
       "$browser" "$link" >/dev/null 2>&1 || true
-      say "Tried opening your Windows browser. You can also open the link above."
+      say "If your Windows browser did not open, use the link above."
     fi
     say "For a fresh link from PowerShell: wsl -d ${WSL_DISTRO_NAME:-Ubuntu} -- ~/.local/bin/localdot open"
     return
@@ -1277,7 +1277,7 @@ show_link() {
   say "  $link"
   # explorer.exe reports failure even when it opened the link.
   "$browser" "$link" >/dev/null 2>&1 || true
-  say "Tried opening your browser. If it didn't open, use the link above."
+  say "If your browser did not open, use the link above."
   [ -z "$PUBLIC_ORIGIN" ] || say "For your phone or another computer, run: localdot open --qr"
 }
 
@@ -1291,7 +1291,7 @@ finish() {
   0) ;;
   2) say "localDot is installed. Before starting a task, choose or unlock your vault passphrase:"
      say "  localdot unlock"
-     say "Your saved keys stay protected until you do." ;;
+     say "The vault must be unlocked before dot can use your saved keys." ;;
   *) die "Installation checks failed. Setup is not complete. Your data is kept; run localdot doctor, fix the reported checks, then rerun setup." ;;
   esac
   step "Sign in"
