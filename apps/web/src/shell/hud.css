@@ -288,6 +288,7 @@
 }
 
 .app[data-focus] .island .island-label {
+  justify-content: center;
   width: auto;
   max-width: min(420px, 100vw - 96px);
 }

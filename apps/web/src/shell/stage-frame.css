@@ -383,6 +383,10 @@
   line-height: var(--text-callout--line-height);
 }
 
+.app[data-focus] .narrator[data-empty] .narration {
+  display: none;
+}
+
 .app[data-focus] .narration-text {
   align-items: center;
 }
@@ -449,17 +453,20 @@
   .app[data-focus] .stage-side {
     top: 100%;
     bottom: auto;
+    align-items: start;
+    padding-top: clamp(20px, 4dvh, 32px);
   }
 
   .app[data-focus] .narrator {
     flex-direction: column;
-    padding: 4px 16px;
+    justify-content: flex-end;
+    padding: 4px 16px 16px;
     gap: 8px;
   }
 
   .app[data-focus] .narrator-dock {
-    width: clamp(64px, calc(var(--_margin) - 112px), 120px);
-    height: clamp(64px, calc(var(--_margin) - 112px), 120px);
+    width: clamp(64px, calc(var(--_margin) - 124px), 120px);
+    height: clamp(64px, calc(var(--_margin) - 124px), 120px);
   }
 
   .app[data-focus] .narration {

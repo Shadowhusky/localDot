@@ -1820,8 +1820,8 @@ function Theatre({ api }: { api: ApiClient }) {
               band={
                 <>
                   <NarratorBand
-                    line={bandLine}
-                    speaker={bandSpeaker}
+                    line={focus && idle && !hearing ? narration : bandLine}
+                    speaker={focus && idle && !hearing ? speaker : bandSpeaker}
                     reveal={!!asked && narration === asked}
                     forUser={hearing || !atWork(appStatus.row)}
                     showDot={showDot.value}

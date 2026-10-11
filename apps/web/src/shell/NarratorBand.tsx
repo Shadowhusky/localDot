@@ -63,6 +63,7 @@ export function NarratorBand({
     <div
       className="narrator"
       data-dot={showDot ? "" : undefined}
+      data-empty={!text || undefined}
       onPointerEnter={onHover && (() => onHover(true))}
       onPointerLeave={onHover && (() => onHover(false))}
     >
