@@ -75,7 +75,7 @@ Links work once and expire after a minute. To get a new one, or reopen the app l
 localdot open
 ```
 
-**On Windows, run `localdot` commands inside Ubuntu/WSL, not PowerShell.** Open the resulting
+**On Windows, `localdot` works in PowerShell and Ubuntu/WSL after installation.** Open the resulting
 link in your Windows browser. If your saved keys are locked, run `localdot unlock`.
 
 ## If setup stops
@@ -91,7 +91,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | Final installation checks failed | Setup is not complete. Run `localdot doctor`, fix the reported checks, and rerun the installer. A running web server alone is not a successful installation. |
 | `go: command not found` while building the gate image | Rerun the latest installer. It supplies Go automatically; no separate Go installation is needed. |
 | A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
-| `localdot: command not found` | Open a new terminal. On Windows, use Ubuntu/WSL. If needed, run `~/.local/bin/localdot open`. |
+| `localdot: command not found` | Open a new terminal. On macOS/Linux/WSL, you can also run `~/.local/bin/localdot open`. On Windows, rerun setup if the PowerShell command is missing. |
 | Sign-in link expired | Run `localdot open` for a fresh link. |
 | Saved keys are locked | Run `localdot unlock`. |
 | Something else failed | Run `localdot doctor`; use `localdot logs --follow` for details. |

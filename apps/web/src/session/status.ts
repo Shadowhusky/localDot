@@ -212,6 +212,12 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
     label: "Model not answering",
     caption: "The model isn't answering. Try again, or change the model.",
   },
+  [STALL.providerLimit]: {
+    row: "limit",
+    label: "Provider limit reached",
+    caption:
+      "Your provider is out of credit or included usage. Change the model or check your plan.",
+  },
   [STALL.modelRefused]: {
     row: "recovery",
     label: "Model turned down a request",

@@ -44,6 +44,7 @@ import type { EventSink } from "./events.ts";
 import { driveHarness } from "./harness.ts";
 import { imagesInToolResults } from "./models.ts";
 import { type PlanLine, screenHands, systemPrompt } from "./prompt.ts";
+import { providerFailure } from "./provider-failure.ts";
 import type { ToolClient } from "./tool-client.ts";
 import { toolSet } from "./tools.ts";
 
@@ -692,8 +693,19 @@ export class Agent {
           continue;
         }
         // keyd's budget refusal (Part 4a): the task pauses until the user raises the budget.
-        if (status === 402) {
-          if (!(await this.#waitForResume("budget", signal))) return "stopped";
+        const failure = providerFailure(err);
+        if (failure) {
+          if (
+            !(await this.#waitForResume(
+              failure === "budget" ? STALL.budget : STALL.providerLimit,
+              signal,
+              failure === "limit"
+                ? "The provider reports that credit or included usage is exhausted."
+                : undefined,
+            ))
+          )
+            return "stopped";
+          attempt = 0;
           continue;
         }
         const detail = status ? `${status}: ${message}` : message;

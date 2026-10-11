@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync }
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildMacNotifier } from "./mac-notifier.mjs";
 import { writeNotices } from "./notices.mjs";
 
 // Publish dependencies first and HTML last. Existing tabs can still import their old hashed
@@ -39,6 +40,7 @@ export function build(webDir) {
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Frontend build failed (${result.status})`);
     writeNotices({ webDir, outDir: staged });
+    buildMacNotifier(webDir, staged);
     publishBuild(staged, join(webDir, "dist"));
   } finally {
     rmSync(staged, { recursive: true, force: true });

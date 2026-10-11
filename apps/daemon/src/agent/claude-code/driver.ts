@@ -84,6 +84,7 @@ type CycleResult =
   | { kind: "completed"; pending: boolean }
   | {
       kind: "done" | "retired" | "control" | "crashed" | "signed_out" | "plan_limit" | "safety";
+      detail?: string;
     }
   | { kind: "violation"; what: Violation }
   | { kind: "retry" | "failed"; message: string };
@@ -295,6 +296,7 @@ export class ClaudeCodeDriver {
             result.kind === "signed_out"
               ? "claude code sign-in expired"
               : "claude code plan limit reached",
+            result.detail,
           );
           next = "Continue.";
           retries = 0;
@@ -360,15 +362,20 @@ export class ClaudeCodeDriver {
       this.#running.delete(session.id);
     }
   }
-  #state(session: AgentSession, state: "paused" | "idle" | "error", reason: string): void {
+  #state(
+    session: AgentSession,
+    state: "paused" | "idle" | "error",
+    reason: string,
+    detail?: string,
+  ): void {
     if (session.stopped || session.controlHeld) return;
     if (state !== "error") session.setStatus(state);
-    session.append("agent.state", { state, reason });
+    session.append("agent.state", { state, reason, ...(detail ? { detail } : {}) });
   }
-  async #pause(session: AgentSession, reason: string): Promise<void> {
+  async #pause(session: AgentSession, reason: string, detail?: string): Promise<void> {
     await session.waitForControl();
     const after = session.inboxSequence;
-    this.#state(session, "paused", reason);
+    this.#state(session, "paused", reason, detail);
     await session.waitForResume(after);
     await session.waitForControl();
   }
@@ -653,7 +660,7 @@ export class ClaudeCodeDriver {
           event.error === "billing_error" ||
           (event.error === "rate_limit" && mapper.limitReached)
         )
-          finish({ kind: "plan_limit" });
+          finish({ kind: "plan_limit", detail: event.detail });
         else if (event.error === "model_not_found" || event.error === "invalid_request")
           finish({
             kind: "failed",

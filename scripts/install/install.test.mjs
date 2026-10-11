@@ -531,6 +531,23 @@ describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
     expect(readlinkSync(join(host.home, ".local/bin/localdot"))).toBe(
       join(host.prefix, "bin/localdot"),
     );
+    // New shells can find the command even when ~/.local/bin was absent at install time.
+    const loginPath = execFileSync(
+      "/bin/bash",
+      ["--noprofile", "--norc", "-c", 'source "$HOME/.profile"; command -v localdot'],
+      {
+        env: { HOME: host.home, PATH: "/usr/bin:/bin" },
+        encoding: "utf8",
+      },
+    ).trim();
+    expect(loginPath).toBe(join(host.home, ".local/bin/localdot"));
+    if (existsSync("/bin/zsh")) {
+      const zshPath = execFileSync("/bin/zsh", ["-lic", "command -v localdot"], {
+        env: { HOME: host.home, ZDOTDIR: host.home, PATH: "/usr/bin:/bin" },
+        encoding: "utf8",
+      }).trim();
+      expect(zshPath).toBe(join(host.home, ".local/bin/localdot"));
+    }
     const recorded = readFileSync(join(host.prefix, "install.env"), "utf8");
     expect(recorded).toContain(`LOCALDOT_COMMIT="${git(host.origin, "rev-parse", "HEAD")}"`);
     expect(recorded).toContain(`LOCALDOT_PORT="${host.port}"`);

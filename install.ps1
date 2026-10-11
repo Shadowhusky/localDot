@@ -370,6 +370,27 @@ function Find-DockerDesktop {
   return $null
 }
 
+function Read-UserPath { [Environment]::GetEnvironmentVariable('Path', 'User') }
+function Write-UserPath([string]$Value) { [Environment]::SetEnvironmentVariable('Path', $Value, 'User') }
+
+function Install-Command {
+  $bin = Join-Path $env:LOCALAPPDATA 'localDot\bin'
+  New-Item -ItemType Directory -Force -Path $bin | Out-Null
+  $shim = Join-Path $bin 'localdot.cmd'
+  if ((Test-Path $shim) -and -not ((Get-Content -Raw $shim) -match 'localDot command')) {
+    Write-Warning "Another command exists at $shim; leaving it alone."
+    return
+  }
+  # Distro is a WSL name, never shell input. Reject metacharacters before writing a cmd file.
+  if ($Distro -notmatch '^[A-Za-z0-9._-]+$') { throw 'Unsupported WSL distribution name.' }
+  Set-Content -Encoding ASCII -Path $shim -Value "@echo off`r`n@rem localDot command`r`nwsl.exe -d `"$Distro`" -- ~/.local/bin/localdot %*`r`nexit /b %errorlevel%"
+  $userPath = Read-UserPath
+  if (($userPath -split ';') -notcontains $bin) {
+    Write-UserPath ((([string]$userPath).TrimEnd(';') + ';' + $bin).TrimStart(';'))
+  }
+  if (($env:Path -split ';') -notcontains $bin) { $env:Path = "$bin;$env:Path" }
+}
+
 function Install-LocalDot {
   if ($InstallPrerequisites -and $NoPrerequisites) { throw "Choose either -InstallPrerequisites or -NoPrerequisites." }
   if ($Resume) { Write-Host "Resuming localDot setup. Completed steps will be reused." }
@@ -387,11 +408,12 @@ function Install-LocalDot {
   Ensure-LinuxTools
   if (-not (Wait-Docker)) { return }
   Invoke-Installer $options
+  Install-Command
   Register-KeepRunning
   Remove-ItemProperty -Path $ResumeKey -Name 'localDotSetup' -ErrorAction SilentlyContinue
   Write-Host ""
   Write-Host "localDot installation finished. Your app link is printed above."
-  Write-Host "For a fresh sign-in link from PowerShell: wsl -d $Distro -- ~/.local/bin/localdot open"
+  Write-Host "For a fresh sign-in link from PowerShell: localdot open"
 }
 
 if ($MyInvocation.InvocationName -ne ".") { Install-LocalDot }

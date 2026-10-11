@@ -60,6 +60,7 @@ import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import {
   exchangeInstallCode,
   type InstallLink,
+  InstallLinkError,
   linkArrived,
   takeInstallLink,
 } from "./lib/install-link.ts";
@@ -181,7 +182,7 @@ export interface AppProps {
   fetchImpl?: typeof fetch;
 }
 
-type Rejected = "stored" | "link" | "code" | null;
+type Rejected = "stored" | "link" | "code" | "unconfirmed" | null;
 
 const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
@@ -266,9 +267,11 @@ export function App({ fetchImpl }: AppProps) {
           await createApi(accepted, { fetchImpl }).get("/api/whoami");
           accept(accepted);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (!current()) return;
-          setRejected("code");
+          setRejected(
+            error instanceof InstallLinkError && error.kind === "expired" ? "code" : "unconfirmed",
+          );
           setCandidate(null);
         });
       return () => {
@@ -329,6 +332,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
   stored: "signed-out",
   link: "expired",
   code: "expired",
+  unconfirmed: "unconfirmed",
 };
 
 // How long a sent message shows dot thinking with no word from the task before the real status returns.

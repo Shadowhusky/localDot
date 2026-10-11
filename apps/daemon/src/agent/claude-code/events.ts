@@ -9,7 +9,7 @@ export type ClaudeSignal =
   | { kind: "started" }
   | { kind: "turn" }
   | { kind: "violation"; what: Violation }
-  | { kind: "error"; error: string }
+  | { kind: "error"; error: string; detail?: string }
   | { kind: "consumed"; uuids: string[] }
   | { kind: "result"; ok: boolean; queued: boolean };
 export interface MapperSink {
@@ -44,7 +44,11 @@ const MessageStart = z.looseObject({
 const BlockStart = z.looseObject({
   type: z.literal("content_block_start"),
   index: z.number().int(),
-  content_block: z.looseObject({ type: z.string(), name: z.string().optional() }),
+  content_block: z.looseObject({
+    type: z.string(),
+    name: z.string().optional(),
+    text: z.string().optional(),
+  }),
 });
 const BlockDelta = z.looseObject({
   type: z.literal("content_block_delta"),
@@ -71,7 +75,9 @@ const Assistant = Consumed.extend({
   parent_tool_use_id: z.string().nullish(),
   error: z.string().optional(),
   message: z.looseObject({
-    content: z.array(z.looseObject({ type: z.string(), name: z.string().optional() })),
+    content: z.array(
+      z.looseObject({ type: z.string(), name: z.string().optional(), text: z.string().optional() }),
+    ),
   }),
 });
 const User = z.looseObject({ type: z.literal("user"), parent_tool_use_id: z.string().nullish() });
@@ -209,7 +215,23 @@ export class ClaudeCodeEventMapper {
       return [{ kind: "violation", what: "foreign_tool" }];
     return [
       ...this.#consumed(parsed.data),
-      ...(parsed.data.error ? [{ kind: "error" as const, error: parsed.data.error }] : []),
+      ...(parsed.data.error
+        ? [
+            {
+              kind: "error" as const,
+              error: parsed.data.error,
+              detail: clip(
+                this.#redact(
+                  parsed.data.message.content
+                    .filter((block) => block.type === "text")
+                    .map((block) => block.text ?? "")
+                    .join(" "),
+                ),
+                200,
+              ),
+            },
+          ]
+        : []),
     ];
   }
   #stream(message: unknown): ClaudeSignal[] {

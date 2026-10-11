@@ -52,6 +52,7 @@ import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
+import { providerNotice } from "./provider-notice.ts";
 import type { RecentActivity } from "./recent-activity.ts";
 import { ResearchLog } from "./research.ts";
 import { SafetyController } from "./safety/controller.ts";
@@ -198,6 +199,8 @@ interface Runtime {
   brain?: BrainCell;
   brainOpening?: Promise<void>;
   initialized: boolean;
+  failure?: { reason?: string; detail?: string };
+  providerNotice?: string;
   serial: Promise<void>;
   pause?: "budget" | "keyd" | "model" | "auth";
   budgetScope?: "task" | "day";
@@ -253,7 +256,15 @@ export class AgentRunner {
         rt.budgetScope = event.data.scope;
       }
       if (event.type !== "agent.state") return;
+      if (event.data.state === "error") rt.failure = event.data;
+      else if (["thinking", "acting", "observing", "done"].includes(event.data.state))
+        rt.failure = undefined;
       if (event.data.state === "paused") {
+        const notice = providerNotice(event.data.reason, event.data.detail);
+        if (notice && rt.providerNotice !== notice) {
+          rt.providerNotice = notice;
+          rt.session.append("message.assistant", { messageId: ulid(), text: notice });
+        }
         if (rt.selection.kind === "chatgpt" && event.data.reason === "chatgpt account changed") {
           const generation = this.deps.codex?.authGeneration?.();
           if (generation !== undefined) this.pauseForAuth(rt.session, generation);
@@ -266,6 +277,7 @@ export class AgentRunner {
           rt.pause =
             event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
       } else if (["thinking", "acting", "observing"].includes(event.data.state)) {
+        rt.providerNotice = undefined;
         rt.pause = undefined;
         rt.budgetScope = undefined;
         if (rt.session.generation && rt.session.isCurrent(rt.session.generation))
@@ -1233,6 +1245,14 @@ export class AgentRunner {
         const heldOnExit = session.controlHeld;
         await session.waitForControl();
         if (heldOnExit || rt.authResumeAfter !== undefined) continue;
+        if (code === BRAIN_GAVE_UP && rt.failure) {
+          reason = "error";
+          session.append("message.assistant", {
+            messageId: ulid(),
+            text: `I couldn't continue: ${rt.failure.reason ?? "The task failed."}${rt.failure.detail ? ` ${rt.failure.detail}` : ""} Check Settings or choose another model, then send your message again.`,
+          });
+          break;
+        }
         if (code === BRAIN_DONE || code === BRAIN_GAVE_UP) {
           crashes = 0;
           session.append(

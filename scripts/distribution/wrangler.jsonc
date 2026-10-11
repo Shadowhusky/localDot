@@ -1,0 +1,10 @@
+{
+  "$schema": "../../apps/remote/node_modules/wrangler/config-schema.json",
+  "name": "localdot-downloads",
+  "account_id": "31c17ebe287229213316608e4ef93f80",
+  "compatibility_date": "2026-10-11",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "downloads.localdot.dev", "custom_domain": true }],
+  "assets": { "directory": "./.site", "html_handling": "none", "not_found_handling": "none" }
+}

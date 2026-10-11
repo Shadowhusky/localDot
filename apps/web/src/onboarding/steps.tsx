@@ -91,9 +91,8 @@ export function ThinksStep({
         {
           value: "api",
           label: "API key",
-          tag: "Recommended",
           icon: "key-round",
-          description: "Pay only for what dot uses. Best results.",
+          description: "Pay for what dot uses through your API provider.",
         },
         {
           value: "chatgpt",
@@ -104,9 +103,9 @@ export function ThinksStep({
         },
         {
           value: "claude-code",
-          label: "Claude Code (your plan)",
+          label: "Claude Code",
           icon: "terminal",
-          description: "Uses your own Claude Code on this Mac, with your Claude plan.",
+          description: "Use Claude Code installed on the computer running localDot.",
           disabledReason: claudeReason,
         },
         {
@@ -118,9 +117,8 @@ export function ThinksStep({
         {
           value: "local",
           label: "Local model",
-          tag: "Free",
           icon: "cpu",
-          description: "Free and private. Runs on this Mac with LM Studio or Ollama.",
+          description: "Run a model on your computer with LM Studio or Ollama.",
         },
         {
           value: "custom",

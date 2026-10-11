@@ -5,7 +5,7 @@ import { isHomeScreenApp } from "../notify/this-device.ts";
 import { CommandChip } from "./CommandChip.tsx";
 import "./sign-in.css";
 
-export type SignInState = "first" | "checking" | "expired" | "signed-out";
+export type SignInState = "first" | "checking" | "expired" | "signed-out" | "unconfirmed";
 
 // A sign-in that finishes sooner than this shows nothing at all, so a quick one never flashes.
 export const CHECKING_REVEAL_MS = 600;
@@ -13,6 +13,8 @@ export const CHECKING_REVEAL_MS = 600;
 const COMMAND = "localdot open";
 
 const MESSAGES: Record<Exclude<SignInState, "checking">, string> = {
+  unconfirmed:
+    "Sign-in could not be confirmed. Check that localDot is running and try a fresh link:",
   first: "This page needs a sign-in link. Run this to get one:",
   expired: "That link has expired or was already used. Run this for a fresh one:",
   "signed-out": "This browser was signed out. Run this to sign in again:",
@@ -56,15 +58,20 @@ export function SignIn({
         </div>
       </main>
     );
+  const remote = window.location.hostname.includes("--dot.");
   return (
     <main className="sign-in" data-state={state}>
       <div className="sign-in-body">
         <Dot size={56} state={state === "first" ? "idle" : "waiting"} />
-        <h1 className="sign-in-title">Open localDot from Terminal</h1>
+        <h1 className="sign-in-title">
+          {remote ? "Sign in to localDot" : "Open localDot from Terminal"}
+        </h1>
         <p className="sign-in-message" role={state === "first" ? "status" : "alert"}>
-          {MESSAGES[state]}
+          {remote
+            ? `${MESSAGES[state].split(". ")[0]}. On the computer running localDot, open Settings → Your computer → Remote access and create a new sign-in link.`
+            : MESSAGES[state]}
         </p>
-        <CommandChip text={COMMAND} size="lg" className="sign-in-command" />
+        {!remote && <CommandChip text={COMMAND} size="lg" className="sign-in-command" />}
         <p className="sign-in-foot">Each link works once, for one minute.</p>
       </div>
     </main>

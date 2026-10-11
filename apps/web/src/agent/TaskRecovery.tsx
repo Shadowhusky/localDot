@@ -34,6 +34,11 @@ function knownReason(
       title: "I can't reach your keys",
       text: "dot can't reach your keys. Bring Keys back online, check the task, then continue.",
     };
+  if (reason === STALL.providerLimit)
+    return {
+      title: "Your provider's credit or usage limit is reached",
+      text: "Add credit or wait for your plan to reset, then continue. You can also choose another model and continue with it.",
+    };
   if (reason === STALL.modelBusy)
     return {
       title: "The model is busy",
@@ -67,7 +72,7 @@ function knownReason(
   if (reason === "chatgpt plan limit reached")
     return {
       title: "Paused at your plan's limit",
-      text: "Your ChatGPT plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
+      text: "Your ChatGPT plan is at its limit. Wait for it to reset, or choose another model and continue with it.",
     };
   if (reason === "claude code sign-in expired")
     return {
@@ -77,7 +82,7 @@ function knownReason(
   if (reason === "claude code plan limit reached")
     return {
       title: "Paused at your plan's limit",
-      text: "Your Claude plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
+      text: "Your Claude plan is at its limit. Wait for it to reset, or choose another model and continue with it.",
     };
   if (reason === STALL.modelUnavailable)
     return {
@@ -255,6 +260,10 @@ export function TaskRecovery({
       )
     : null;
   const retry = RETRY.has(reason);
+  const providerLimited =
+    reason === STALL.providerLimit ||
+    reason === "chatgpt plan limit reached" ||
+    reason === "claude code plan limit reached";
   // The key to enter again, or to remove and add again, when keyd named one.
   const reentry = !hold && reason === STALL.keyReenter ? (state.detail ?? "") : undefined;
   const changed = !hold && reason === STALL.keyRebound ? (state.detail ?? "") : undefined;
@@ -297,7 +306,7 @@ export function TaskRecovery({
             : (known?.text ?? UNEXPLAINED)}
       </p>
       {reason && !known && <p className="thread-recovery-reason">Reported reason: {reason}</p>}
-      {retry && state.detail && (
+      {state.detail && !reentry && !changed && (
         <p className="thread-recovery-reason">The model said: {state.detail}</p>
       )}
       {resets && (
@@ -400,7 +409,7 @@ export function TaskRecovery({
               </Button>
             )}
             {resume}
-            {retry && reason !== STALL.modelBusy && (
+            {(retry || providerLimited) && reason !== STALL.modelBusy && (
               <Button
                 variant="secondary"
                 onClick={(event) => onSettings(event.currentTarget, "models")}

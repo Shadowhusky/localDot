@@ -101,7 +101,7 @@ describe("App one-use sign-in", () => {
         <App fetchImpl={request} />
       </StrictMode>,
     );
-    await screen.findByText(/That link has expired or was already used/);
+    await screen.findByText(/Sign-in could not be confirmed/);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
@@ -164,7 +164,7 @@ describe("App one-use sign-in", () => {
   it("refuses malformed success authority and ambiguous fragments without storing them", async () => {
     const request = daemon(() => json({ token: "bad" }));
     render(<App fetchImpl={request} />);
-    await screen.findByText(/That link has expired or was already used/);
+    await screen.findByText(/Sign-in could not be confirmed/);
     navigate(`${OTHER_CODE}&token=${TOKEN}`);
     await act(async () => {});
     expect(window.location.hash).toBe("");

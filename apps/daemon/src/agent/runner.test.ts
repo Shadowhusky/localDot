@@ -267,6 +267,55 @@ describe("the user's own hold on the computer", () => {
       expect(next.id).not.toBe(sessionId);
     },
   );
+  it("keeps a driver's failure in chat instead of overwriting it with idle", async () => {
+    const f = setup();
+    f.run.mockImplementationOnce(async (session) => {
+      session.append("agent.state", {
+        state: "error",
+        reason: "The provider rejected this model.",
+      });
+      return 3;
+    });
+    const session = await f.runner.start(f.cellId, "Say hello");
+    await f.live.settled(session.id);
+    const events = f.log.read(session.id);
+    expect(events.filter((e) => e.type === "agent.state").at(-1)?.data).toMatchObject({
+      state: "error",
+    });
+    expect(events.find((e) => e.type === "message.assistant")?.data).toMatchObject({
+      text: expect.stringContaining("The provider rejected this model."),
+    });
+    expect(events.at(-1)?.data).toEqual({ reason: "error" });
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+  it.each([
+    "provider limit reached",
+    "chatgpt plan limit reached",
+    "claude code plan limit reached",
+  ])("persists a reply when %s prevents any model output", async (reason) => {
+    const f = setup();
+    f.run.mockImplementationOnce(async (session) => {
+      session.append("agent.state", {
+        state: "paused",
+        reason,
+        detail: "Usage resets later today.",
+      });
+      session.append("agent.state", {
+        state: "paused",
+        reason,
+        detail: "Usage resets later today.",
+      });
+      await abortable(new Promise<never>(() => {}), session.abort.signal);
+      return 0;
+    });
+    const session = await f.runner.start(f.cellId, "Say hello");
+    await until(() => f.log.read(session.id).some((e) => e.type === "message.assistant"));
+    const replies = f.log.read(session.id).filter((e) => e.type === "message.assistant");
+    expect(replies).toHaveLength(1);
+    expect(replies[0]?.data).toMatchObject({
+      text: expect.stringContaining("Usage resets later today."),
+    });
+  });
   it("retires a plan-limited task and starts the conversation on the newly selected model", async () => {
     const f = setup();
     const conversations = new Conversations(f.home, f.log);

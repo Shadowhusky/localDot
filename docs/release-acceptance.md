@@ -4,6 +4,10 @@ The public installer still builds from source. Prebuilt distribution must not be
 until the package transport, native helpers and clean-machine checks below are complete.
 Passing the simulated installer suite is not evidence that a fresh installation works.
 
+The separate [packaged testing channel](packaged-testing.md) can distribute prerelease app files
+without exposing the private source repository. Its archive/runtime verification does not satisfy
+the real-machine acceptance checks below or promote the production native installer.
+
 ## Build and inspect image candidates
 
 Run **release-image-candidate** from Actions on `main`. Its default is build/test only. It builds

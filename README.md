@@ -41,7 +41,8 @@ sign-in, then turn on dot’s computer and send a task. Allow **10–30 minutes*
 computer-image build; Node.js and Go are installed automatically.
 
 To reopen localDot or replace an expired link, run `localdot open`. On Windows, run this and
-other `localdot` commands in **Ubuntu/WSL**, not PowerShell.
+other `localdot` commands in **PowerShell or Ubuntu/WSL** after installation. Open a new terminal
+if the command is not found.
 
 [Installation help](docs/install.md) · [Use your phone or a server](docs/install.md#servers-without-a-screen) ·
 [Run from source](docs/development.md#development)

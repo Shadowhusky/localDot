@@ -317,3 +317,21 @@ it("names a key changed outside localDot and opens Keys, never re-entry", () => 
     "secondary",
   );
 });
+
+it.each(["provider limit reached", "chatgpt plan limit reached", "claude code plan limit reached"])(
+  "explains %s and offers another model",
+  (reason) => {
+    render(
+      <TaskRecovery
+        agent={agentWith(reason, "Usage resets later today.")}
+        controls={controls}
+        onSettings={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Task recovery" }).textContent).toMatch(
+      /credit|plan/,
+    );
+    expect(screen.getByText("The model said: Usage resets later today.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change model" })).toBeTruthy();
+  },
+);

@@ -18,6 +18,7 @@ export default defineConfig({
       "apps/*/scripts/**/*.test.mjs",
       "cells/*/scripts/**/*.test.mjs",
       "scripts/**/*.test.mjs",
+      "scripts/distribution/**/*.test.ts",
     ],
     exclude: [
       "**/node_modules/**",

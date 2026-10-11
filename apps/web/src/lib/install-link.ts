@@ -20,18 +20,28 @@ export function takeInstallLink(host: TokenHost = window): InstallLink | null {
   return { kind: entry[0], value: entry[1] };
 }
 
+export class InstallLinkError extends Error {
+  constructor(readonly kind: "expired" | "unconfirmed") {
+    super(
+      kind === "expired"
+        ? "Open a fresh sign-in link."
+        : "Sign-in could not be confirmed. Open a fresh sign-in link.",
+    );
+  }
+}
+
 /** Never retry: a missing reply may follow successful consumption by the daemon. */
 export async function exchangeInstallCode(
   code: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
-  if (!TOKEN_PATTERN.test(code)) throw new Error("Open a fresh sign-in link.");
+  if (!TOKEN_PATTERN.test(code)) throw new InstallLinkError("unconfirmed");
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       controller.abort();
-      reject(new Error("Open a fresh sign-in link."));
+      reject(new InstallLinkError("unconfirmed"));
     }, 10_000);
   });
   try {
@@ -42,13 +52,15 @@ export async function exchangeInstallCode(
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ code }),
-          credentials: "omit",
+          // The relay requires its same-origin pairing cookie before the code can reach the daemon.
+          credentials: "same-origin",
           cache: "no-store",
           redirect: "error",
           referrerPolicy: "no-referrer",
           signal: controller.signal,
         });
-        if (!reply.ok || reply.redirected) throw new Error("Open a fresh sign-in link.");
+        if (reply.status === 401) throw new InstallLinkError("expired");
+        if (!reply.ok || reply.redirected) throw new InstallLinkError("unconfirmed");
         const value: unknown = await reply.json();
         if (
           !value ||
@@ -59,14 +71,15 @@ export async function exchangeInstallCode(
           typeof value.token !== "string" ||
           !TOKEN_PATTERN.test(value.token)
         ) {
-          throw new Error("Open a fresh sign-in link.");
+          throw new InstallLinkError("unconfirmed");
         }
         return value.token;
       })(),
     ]);
-  } catch {
+  } catch (error) {
+    if (error instanceof InstallLinkError) throw error;
     // No response text, URL, thrown provider message or credential reaches the UI.
-    throw new Error("Open a fresh sign-in link.");
+    throw new InstallLinkError("unconfirmed");
   } finally {
     clearTimeout(timer);
   }

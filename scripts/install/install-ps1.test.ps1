@@ -98,6 +98,11 @@ function Get-CimInstance { }
 
 . $installer
 
+# Never change the tester's persistent user PATH.
+$script:userPath = 'C:\Existing\bin'
+function Read-UserPath { $script:userPath }
+function Write-UserPath([string]$Value) { $script:userPath = $Value }
+
 # Registry writes stay inside the test harness, including on actual Windows runners.
 function New-Item {
   param($Path, $ItemType, [switch]$Force)

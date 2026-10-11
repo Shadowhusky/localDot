@@ -98,6 +98,7 @@ export const STALL = {
   modelBusy: "model busy",
   modelUnavailable: "model unavailable",
   modelRefused: "model refused",
+  providerLimit: "provider limit reached",
   actionLimit: "action limit",
   // The detail names the key whose value the user enters again.
   keyReenter: "key needs re-entering",

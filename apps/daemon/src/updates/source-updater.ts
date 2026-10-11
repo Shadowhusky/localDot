@@ -6,6 +6,7 @@ import { z } from "zod";
 import { AppUpdateRecord } from "../../../../packages/protocol/src/app-update.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { AppUpdater } from "./app-updater.ts";
+import { packageAppUpdater } from "./package-updater.ts";
 
 const exec = promisify(execFile);
 const Commit = z.string().regex(/^[0-9a-f]{40}$/);
@@ -42,6 +43,10 @@ export async function sourceAppUpdater(
     const settings = new Map(
       [...text.matchAll(/^([A-Z_]+)="([^"\n]*)"$/gm)].map((match) => [match[1], match[2]]),
     );
+    if (settings.get("LOCALDOT_PACKAGE_CHANNEL")) {
+      if (settings.get("LOCALDOT_HOME") !== home) throw new Error("Installation home changed");
+      return packageAppUpdater(home, prefix, installWait, settled);
+    }
     const version = Commit.parse(settings.get("LOCALDOT_COMMIT"));
     const ref = settings.get("LOCALDOT_REF"),
       repo = settings.get("LOCALDOT_REPO");

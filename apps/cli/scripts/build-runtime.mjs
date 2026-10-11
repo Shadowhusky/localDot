@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { RULES } from "../../../scripts/check-hygiene.mjs";
 import { MAX_FILE_BYTES, PACK_ALLOWLIST, PACK_RULES } from "../../../scripts/check-pack.mjs";
+import { buildMacNotifier } from "../../web/scripts/mac-notifier.mjs";
 import { writeNotices } from "../../web/scripts/notices.mjs";
 import { assertRuntimeImports, runtimeBuildOptions, WORKSPACE } from "./build-options.mjs";
 import { DIAGNOSTIC_ASSETS } from "./diagnostic-assets.mjs";
@@ -43,12 +44,17 @@ async function copyAsset(source, destination) {
 }
 
 /** Assemble the real runtime payload. Metadata/dependency verification and publishing stay separate. */
-export async function buildRuntime({ output, version, sandboxArchive }) {
+export async function buildRuntime({
+  output,
+  version,
+  sandboxArchive,
+  target = `${process.platform}-${process.arch}`,
+}) {
   const options = runtimeBuildOptions(version);
   const out = resolve(output);
   // An existing directory may contain a user's files or an earlier artifact. Never merge into it.
   await mkdir(out, { mode: 0o700 });
-  const runtimeDependencyLock = await writeRuntimeDependencies({ output: out, version });
+  const runtimeDependencyLock = await writeRuntimeDependencies({ output: out, version, target });
   const sandbox = await buildSandbox({ output: out, version, upstreamArchive: sandboxArchive });
   const result = await build({
     ...options,
@@ -99,6 +105,7 @@ export async function buildRuntime({ output, version, sandboxArchive }) {
     worker: { plugins: () => [collectModules()] },
     build: { outDir: webOut, emptyOutDir: false, sourcemap: false },
   });
+  if (target.startsWith("darwin-")) buildMacNotifier(webDir, webOut);
   const dependencyNotices = await writeDependencyNotices({
     inputs: [...Object.keys(result.metafile.inputs), ...sandbox.inputs, ...webModules],
     workspace: WORKSPACE,

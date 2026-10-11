@@ -59,7 +59,7 @@ export function liveHostBanner(detect: () => HostBanner = () => hostBanner()): L
   };
 }
 
-// macOS shows banners with osascript; a Linux desktop with notify-send over the session bus. A
+// macOS shows banners with its bundled notification app; a Linux desktop with notify-send over the session bus. A
 // machine nobody signs in to on a screen gets none, and Settings says so.
 export function hostBanner(
   probe: HostBannerProbe = systemBannerProbe(),

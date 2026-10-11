@@ -48,14 +48,14 @@ describe("install link capture", () => {
 });
 
 describe("one-use exchange transport", () => {
-  it("sends only JSON to the same origin, without ambient credentials or redirects", async () => {
+  it("sends only JSON to the same origin, with the relay cookie but without bearer credentials or redirects", async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(json({ token: TOKEN }));
     expect(await exchangeInstallCode(CODE, request)).toBe(TOKEN);
     const [url, options] = request.mock.calls[0] ?? [];
     expect(String(url)).toBe(`${window.location.origin}/auth/exchange-code`);
     expect(options).toMatchObject({
       method: "POST",
-      credentials: "omit",
+      credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
       referrerPolicy: "no-referrer",
@@ -76,7 +76,7 @@ describe("one-use exchange transport", () => {
   it("does not repeat an exchange after a lost reply or expose the thrown credential", async () => {
     const request = vi.fn<typeof fetch>().mockRejectedValue(new Error(`lost ${CODE} ${TOKEN}`));
     await expect(exchangeInstallCode(CODE, request)).rejects.toThrow(
-      /^Open a fresh sign-in link\.$/,
+      /^Sign-in could not be confirmed\. Open a fresh sign-in link\.$/,
     );
     expect(request).toHaveBeenCalledTimes(1);
   });

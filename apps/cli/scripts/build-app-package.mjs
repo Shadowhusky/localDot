@@ -277,7 +277,12 @@ export async function buildAppPackage(
     await mkdir(dirname(join(out, path)), { recursive: true, mode: 0o700 });
     await writeFile(join(out, path), bytes, {
       flag: "wx",
-      mode: path === "bin/localdot.mjs" ? 0o700 : 0o600,
+      mode: [
+        "bin/localdot.mjs",
+        "web/dist/native/localDot.app/Contents/MacOS/localdot-notify",
+      ].includes(path)
+        ? 0o700
+        : 0o600,
     });
   }
   const files = [...payload].map(([path, bytes]) => ({

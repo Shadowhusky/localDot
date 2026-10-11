@@ -10,6 +10,8 @@ GO_VERSION=1.27.1
 MIN_DOCKER_MAJOR=28
 DEFAULT_REPO=https://github.com/Shadowhusky/localdot.git
 DEFAULT_REF=main
+DEFAULT_PACKAGE_CHANNEL=""
+PACKAGE_BOOTSTRAP_SHA256=""
 MARKER="Managed by localDot's install.sh"
 IMAGE_ROLES="gate brain desktop browser"
 KEYD_LABEL=dev.localdot.keyd
@@ -45,9 +47,10 @@ die() {
 
 usage() {
   cat <<'EOF'
-Install or upgrade localDot from source on macOS, Linux or WSL 2.
+Install or upgrade localDot on macOS, Linux or WSL 2.
 
 Usage: install.sh [options]
+  --package-channel <https-url> Install a signed, prebuilt testing release (no repository access)
   --ref <branch, tag or commit>  Version to install (default: main, or the one installed)
   --repo <url or path>           Where to get localDot from
   --port <port>                  Local port for the app (default 4750)
@@ -357,7 +360,7 @@ prepare_prerequisites() {
   local missing=0 need_docker=no deadline problem
   # A background updater must never launch interactive system installers.
   if [ "${PREREQUISITES:-ask}" = ask ] && ! ( : </dev/tty ) 2>/dev/null; then return 0; fi
-  git --version >/dev/null 2>&1 || missing=1
+  [ -n "${PACKAGE_CHANNEL:-}" ] || git --version >/dev/null 2>&1 || missing=1
   for tool in curl tar gzip; do command -v "$tool" >/dev/null 2>&1 || missing=1; done
   find_docker || need_docker=yes
   if [ "$OS" = macos ]; then
@@ -396,7 +399,7 @@ prepare_prerequisites() {
 
 check_prerequisites() {
   local problems="" missing="" tool problem
-  git --version >/dev/null 2>&1 || missing="git"
+  [ -n "${PACKAGE_CHANNEL:-}" ] || git --version >/dev/null 2>&1 || missing="git"
   for tool in curl tar gzip df; do
     command -v "$tool" >/dev/null 2>&1 || missing="${missing:+$missing }$tool"
   done
@@ -423,6 +426,7 @@ check_prerequisites() {
 }
 
 parse_args() {
+  OPT_PACKAGE_CHANNEL="" OPT_PACKAGE_VERSION=""
   OPT_REF="" OPT_REPO="" OPT_PORT="" OPT_HOME="" OPT_TAILSCALE="" OPT_REGISTRY="" OPT_VAULT=""
   PREREQUISITES=ask
   SKIP_IMAGES=0 UNINSTALL=0 AS_COMMAND=0
@@ -430,7 +434,7 @@ parse_args() {
   PREFIX="${LOCALDOT_PREFIX:-${XDG_DATA_HOME:-$HOME/.local/share}/localdot}"
   while [ $# -gt 0 ]; do
     case "$1" in
-    --ref | --repo | --port | --home | --prefix | --registry)
+    --ref | --repo | --port | --home | --prefix | --registry | --package-channel | --package-version)
       [ $# -ge 2 ] || die "$1 needs a value. Run install.sh --help for usage."
       case "$1" in
       --ref) OPT_REF=$2 ;;
@@ -439,6 +443,8 @@ parse_args() {
       --home) OPT_HOME=$2 ;;
       --prefix) PREFIX=$2 ;;
       --registry) OPT_REGISTRY=$2 ;;
+      --package-channel) OPT_PACKAGE_CHANNEL=$2 ;;
+      --package-version) OPT_PACKAGE_VERSION=$2 ;;
       esac
       shift 2
       ;;
@@ -476,6 +482,7 @@ read_state() {
     value=${value%\"}
     case "$key" in
     LOCALDOT_REPO) REPO=$value ;;
+    LOCALDOT_PACKAGE_CHANNEL) PACKAGE_CHANNEL=$value ;;
     LOCALDOT_REF) REF=$value ;;
     LOCALDOT_HOME) LD_HOME=$value ;;
     LOCALDOT_PORT) PORT=$value ;;
@@ -492,6 +499,7 @@ write_state() {
   cat >"$PREFIX/install.env.new" <<EOF
 # $MARKER
 LOCALDOT_REPO="$REPO"
+LOCALDOT_PACKAGE_CHANNEL="$PACKAGE_CHANNEL"
 LOCALDOT_REF="$REF"
 LOCALDOT_HOME="$LD_HOME"
 LOCALDOT_PORT="$PORT"
@@ -506,11 +514,18 @@ EOF
 
 # Recorded settings win over the environment, and options win over both.
 resolve_settings() {
-  REPO=$DEFAULT_REPO REF=$DEFAULT_REF
+  REPO=$DEFAULT_REPO REF=$DEFAULT_REF PACKAGE_CHANNEL=$DEFAULT_PACKAGE_CHANNEL
   LD_HOME=${LOCALDOT_HOME:-$HOME/.localdot} PORT=${LOCALDOT_PORT:-4750}
   TAILSCALE=off PUBLIC_ORIGIN="" REGISTRY="" VAULT="" BUILT_COMMIT="" INSTALLED=0
   check_path "The install folder" "$PREFIX"
   if read_state; then INSTALLED=1; fi
+  # A published installer must not silently fall back to a private Git checkout on upgrade.
+  [ -z "$DEFAULT_PACKAGE_CHANNEL" ] || [ -n "$PACKAGE_CHANNEL" ] || PACKAGE_CHANNEL=$DEFAULT_PACKAGE_CHANNEL
+  [ -z "$OPT_PACKAGE_CHANNEL" ] || PACKAGE_CHANNEL=$OPT_PACKAGE_CHANNEL
+  case "$PACKAGE_CHANNEL" in
+  "" | https://downloads.localdot.dev/channels/testing.json | https://downloads.localdot.dev/channels/stable.json) ;;
+  *) die "Use an official localDot package channel." ;;
+  esac
   WAS_TAILSCALE=$TAILSCALE OLD_PORT=$PORT
   [ -z "$OPT_REPO" ] || REPO=$OPT_REPO
   [ -z "$OPT_REF" ] || REF=$OPT_REF
@@ -570,6 +585,7 @@ check_prefix() {
   ! owned "$PREFIX/install.env" || return 0
   local other
   other=$(cd "$PREFIX" && find . -mindepth 1 -maxdepth 2 \
+    ! -path ./app.previous ! -path './app.previous/*' ! -path ./.package-install.lock ! -path './.package-install.lock/*' \
     ! -path ./app ! -path './app/*' ! -path ./app.new ! -path './app.new/*' \
     ! -path ./runtime ! -path './runtime/*' ! -path ./install.env.new ! -path ./bin \
     ! -path ./bin/keyd ! -path ./bin/keyd.new ! -path ./bin/localdot ! -path ./bin/localdot.new \
@@ -579,7 +595,7 @@ check_prefix() {
 
 # Removes only what the installer makes, and the prefix itself once nothing else is in it.
 remove_installed() {
-  rm -rf "$PREFIX/app" "$PREFIX/app.new" "$PREFIX/runtime"
+  rm -rf "$PREFIX/app" "$PREFIX/app.new" "$PREFIX/app.previous" "$PREFIX/runtime"
   rm -f "$PREFIX/install.env" "$PREFIX/install.env.new" "$PREFIX/bin/keyd" "$PREFIX/bin/keyd.new" \
     "$PREFIX/bin/localdot" "$PREFIX/bin/localdot.new"
   rmdir "$PREFIX/bin" 2>/dev/null || true
@@ -661,8 +677,9 @@ ensure_node() {
     mkdir -p "$RUNTIME"
     install_archive "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-$NODE_PLATFORM.tar.gz" \
       "$(node_sha256 "$NODE_PLATFORM")" "$NODE_DIR"
-    remove_other_versions "$NODE_DIR" "$RUNTIME"/node-v*
+    [ -n "${PACKAGE_CHANNEL:-}" ] || remove_other_versions "$NODE_DIR" "$RUNTIME"/node-v*
   fi
+  [ -z "${PACKAGE_CHANNEL:-}" ] || return 0
   mkdir -p "$TOOLS"
   [ -x "$TOOLS/pnpm" ] || tools corepack enable --install-directory "$TOOLS" pnpm ||
     die "Couldn't set up pnpm with Node.js's corepack."
@@ -806,7 +823,8 @@ check_install_storage() {
     '' | *[!0-9]*) die "Could not read the installation filesystem's available space." ;;
   esac
   [ "$available" -gt 0 ] || die "The installation filesystem has no free space. Free space, then rerun setup."
-  printf 'Installation filesystem available: %s KiB. Source-build peak usage is not yet measured.\n' "$available"
+  printf 'Installation filesystem available: %s KiB.\n' "$available"
+  [ -n "${PACKAGE_CHANNEL:-}" ] || say "Source-build peak usage is not yet measured."
   if [ -n "$WSL" ]; then
     say "This is Ubuntu's filesystem space, not Windows physical disk space. Check free space on the Windows drive holding Docker/WSL data too."
   else
@@ -877,10 +895,14 @@ daemon_environment() {
   printf '%s\n' "HOME=$HOME" "PATH=$(service_path)" "LOCALDOT_HOME=$LD_HOME" "LOCALDOT_PORT=$PORT" "LOCALDOT_INSTALL_PREFIX=$PREFIX"
   [ -z "$PUBLIC_ORIGIN" ] || say "LOCALDOT_PUBLIC_ORIGIN=$PUBLIC_ORIGIN"
   [ -z "${DOCKER_HOST:-}" ] || say "DOCKER_HOST=$DOCKER_HOST"
+  if [ -n "${PACKAGE_CHANNEL:-}" ]; then
+    "$NODE_DIR/bin/node" -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for(const [role,pin] of Object.entries(r.images)) console.log("LOCALDOT_"+role.toUpperCase()+"_IMAGE="+pin)' "$APP/package-release.json"
+  fi
 }
 
 systemd_units() {
-  local environment="" line vault=""
+  local environment="" line vault="" daemon_args='"--import" "tsx" "src/main.ts"' working=$APP/apps/daemon
+  if [ -n "${PACKAGE_CHANNEL:-}" ]; then daemon_args='"dist/daemon.mjs"'; working=$APP; fi
   [ "$VAULT" != passphrase ] || vault=' "-vault" "passphrase"'
   while IFS= read -r line; do environment="$environment"$'\n'"Environment=\"$line\""; done <<EOF
 $(daemon_environment)
@@ -908,8 +930,8 @@ After=$KEYD_UNIT
 
 [Service]
 Type=exec
-WorkingDirectory=$APP/apps/daemon$environment
-ExecStart=\"$NODE_DIR/bin/node\" \"--import\" \"tsx\" \"src/main.ts\"
+WorkingDirectory=$working$environment
+ExecStart=\"$NODE_DIR/bin/node\" $daemon_args
 SuccessExitStatus=143
 UMask=0077
 Restart=on-failure
@@ -922,7 +944,8 @@ WantedBy=default.target"
 }
 
 plist() {
-  local label=$1 log=$2 arguments="" environment="" argument line
+  local label=$1 log=$2 arguments="" environment="" argument line working=$APP/apps/daemon
+  [ -z "${PACKAGE_CHANNEL:-}" ] || working=$APP
   shift 2
   for argument in "$@"; do arguments="$arguments"$'\n'"    <string>$argument</string>"; done
   if [ "$label" = "$DAEMON_LABEL" ]; then
@@ -935,7 +958,7 @@ EOF
   <key>EnvironmentVariables</key>
   <dict>$environment
   </dict>
-  <key>WorkingDirectory</key><string>$APP/apps/daemon</string>"
+  <key>WorkingDirectory</key><string>$working</string>"
   fi
   say "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -969,7 +992,11 @@ write_services() {
   if [ "$OS" = macos ]; then
     # Without the signed release, keyd can't use the Keychain; a passphrase protects the keys.
     KEYD_CONTENT=$(plist "$KEYD_LABEL" keyd "$PREFIX/bin/keyd" -home "$LD_HOME" -vault file)
-    DAEMON_CONTENT=$(plist "$DAEMON_LABEL" daemon "$NODE_DIR/bin/node" --import tsx src/main.ts)
+    if [ -n "${PACKAGE_CHANNEL:-}" ]; then
+      DAEMON_CONTENT=$(plist "$DAEMON_LABEL" daemon "$NODE_DIR/bin/node" dist/daemon.mjs)
+    else
+      DAEMON_CONTENT=$(plist "$DAEMON_LABEL" daemon "$NODE_DIR/bin/node" --import tsx src/main.ts)
+    fi
   else
     systemd_units
   fi
@@ -1042,6 +1069,35 @@ remove_services() {
   if [ "$OS" = linux ]; then systemctl --user daemon-reload 2>/dev/null || true; fi
 }
 
+# Configure shells as well as creating the executable. A piped installer cannot change the
+# parent terminal's environment, so finish also prints a command for that current terminal.
+install_command_path() {
+  local file login zdir=${ZDOTDIR:-$HOME}
+  mkdir -p "$zdir"
+  login=$HOME/.profile
+  if [ -f "$HOME/.bash_profile" ]; then login=$HOME/.bash_profile
+  elif [ -f "$HOME/.bash_login" ]; then login=$HOME/.bash_login; fi
+  for file in "$zdir/.zprofile" "$zdir/.zshrc" "$HOME/.bashrc" "$login"; do
+    if ! grep -qF '# localDot command path' "$file" 2>/dev/null; then
+      cat >>"$file" <<'PATH_CONFIG'
+
+# localDot command path
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+PATH_CONFIG
+    fi
+  done
+  if [ "${SHELL##*/}" = fish ]; then
+    file=${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/localdot.fish
+    mkdir -p "${file%/*}"
+    if [ ! -e "$file" ]; then
+      printf '%s\n' '# localDot command path' 'contains -- "$HOME/.local/bin" $PATH; or set -gx PATH "$HOME/.local/bin" $PATH' >"$file"
+    fi
+  fi
+}
+
 install_command() {
   local shim=$PREFIX/bin/localdot link=$HOME/.local/bin/localdot
   mkdir -p "$PREFIX/bin" "${link%/*}"
@@ -1054,12 +1110,21 @@ EOF
   mv "$shim.new" "$shim"
   if [ ! -e "$link" ] && [ ! -L "$link" ] || [ "$(readlink "$link" 2>/dev/null || true)" = "$shim" ]; then
     ln -sfn "$shim" "$link"
+    install_command_path
   else
     warn "$link is another program, so this one stays at $shim."
   fi
 }
 
 cli() {
+  if [ -n "${PACKAGE_CHANNEL:-}" ]; then
+    (cd "$APP"
+      while IFS= read -r line; do case "$line" in LOCALDOT_*_IMAGE=*) export "$line" ;; esac; done <<EOF
+$(daemon_environment)
+EOF
+      LOCALDOT_HOME="$LD_HOME" LOCALDOT_PORT="$PORT" LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN" "$NODE_DIR/bin/node" dist/cli.mjs "$@")
+    return
+  fi
   (cd "$APP/apps/daemon" && LOCALDOT_HOME="$LD_HOME" LOCALDOT_PORT="$PORT" \
     LOCALDOT_PUBLIC_ORIGIN="$PUBLIC_ORIGIN" "$NODE_DIR/bin/node" --import tsx ../cli/src/main.ts "$@")
 }
@@ -1154,7 +1219,8 @@ finish() {
   show_link
   case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
-  *) say "To use the localdot command, open a new terminal or add $HOME/.local/bin to your PATH." ;;
+  *) say "The localdot command is ready in new terminals. To use it in this terminal now:"
+     say '  export PATH="$HOME/.local/bin:$PATH"' ;;
   esac
 }
 
@@ -1164,6 +1230,7 @@ run_install() {
   check_prefix
   set_paths
   check_services_are_ours
+  if [ -n "$PACKAGE_CHANNEL" ]; then run_package_install; return; fi
   prepare_prerequisites
   check_prerequisites
   check_port
@@ -1265,6 +1332,119 @@ run_command() {
     exit 2
     ;;
   esac
+}
+
+# Public testing releases use the same prerequisite, service and data-directory handling as
+# developer installs. Only immutable, signed, already-built payloads enter this path.
+prepare_package() {
+  mkdir -p "$RUNTIME"
+  local bootstrap=$APP/bootstrap.mjs scratch
+  if [ ! -f "$bootstrap" ]; then
+    [ -n "$PACKAGE_BOOTSTRAP_SHA256" ] || die "This installer has no packaged bootstrap. Download it from https://downloads.localdot.dev/install.sh."
+    bootstrap=$RUNTIME/bootstrap.mjs
+    curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 --max-time 120 \
+      "https://downloads.localdot.dev/bootstrap/$PACKAGE_BOOTSTRAP_SHA256.mjs" -o "$bootstrap.new" || die "Couldn't download the installer. Rerun the same command to try again."
+    [ "$(sha256_of "$bootstrap.new")" = "$PACKAGE_BOOTSTRAP_SHA256" ] || die "Installer checksum did not match. Nothing was installed."
+    mv "$bootstrap.new" "$bootstrap"
+  fi
+  scratch=$(mktemp -d "$RUNTIME/.package.XXXXXX")
+  PACKAGE_SCRATCH=$scratch
+  # A failed or interrupted attempt owns only its private staging directory.
+  if ! "$NODE_DIR/bin/node" "$bootstrap" prepare "$PACKAGE_CHANNEL" "$NODE_PLATFORM" "$scratch" "$scratch/app" "$OPT_PACKAGE_VERSION"; then
+    rm -rf "$scratch"
+    die "The packaged download could not be prepared. Your existing app and computer data are kept."
+  fi
+  PACKAGE_STAGE=$scratch/app
+  COMMIT=$("$NODE_DIR/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).commit' "$PACKAGE_STAGE/package-release.json")
+  step "Downloading the computer images"
+  local role image
+  for role in $IMAGE_ROLES; do
+    image=$("$NODE_DIR/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).images[process.argv[2]]' "$PACKAGE_STAGE/package-release.json" "$role")
+    docker pull "$image" || die "Couldn't download the $role image. Rerun setup to reuse completed downloads; the current app is kept."
+  done
+}
+
+rollback_package() {
+  [ "${PACKAGE_PENDING:-0}" = 1 ] || return 0
+  PACKAGE_PENDING=0
+  warn "The new app did not finish starting. Restoring the previous installation; your computer data is kept."
+  stop_services
+  if [ "${PACKAGE_ACTIVE:-0}" = 1 ]; then mv "$APP" "$PACKAGE_ROLLBACK/failed-app"; fi
+  if [ "${PACKAGE_MOVED:-0}" = 1 ]; then mv "$PREFIX/app.previous" "$APP"; fi
+  local name file
+  for name in keyd daemon state binary; do
+    case "$name" in keyd) file=$KEYD_FILE ;; daemon) file=$DAEMON_FILE ;; state) file=$PREFIX/install.env ;; binary) file=$PREFIX/bin/keyd ;; esac
+    if [ -f "$PACKAGE_ROLLBACK/$name" ]; then cp -p "$PACKAGE_ROLLBACK/$name" "$file"; else rm -f "$file"; fi
+  done
+  if [ -f "$PACKAGE_ROLLBACK/state" ]; then start_services 1 1 || warn "Run localdot up to start the restored app."; fi
+}
+
+package_exit() {
+  local result=$?
+  trap - EXIT
+  set +e
+  rollback_package
+  [ -z "${PACKAGE_SCRATCH:-}" ] || rm -rf "$PACKAGE_SCRATCH"
+  rm -f "$PREFIX/.package-install.lock/pid"
+  rmdir "$PREFIX/.package-install.lock" 2>/dev/null || true
+  exit "$result"
+}
+
+activate_package() {
+  # No service is stopped until all app files and all images have verified and downloaded.
+  # Keep one complete previous installation for rollback. Computer volumes are never touched.
+  local backup=$PREFIX/app.previous scratch=${PACKAGE_STAGE%/app} name file
+  PACKAGE_ROLLBACK=$(mktemp -d "$RUNTIME/.rollback.XXXXXX")
+  for name in keyd daemon state binary; do
+    case "$name" in keyd) file=$KEYD_FILE ;; daemon) file=$DAEMON_FILE ;; state) file=$PREFIX/install.env ;; binary) file=$PREFIX/bin/keyd ;; esac
+    [ ! -f "$file" ] || cp -p "$file" "$PACKAGE_ROLLBACK/$name"
+  done
+  if [ -e "$backup" ]; then rm -rf "$backup"; fi
+  PACKAGE_PENDING=1 PACKAGE_MOVED=0 PACKAGE_ACTIVE=0
+  stop_services
+  if [ -d "$APP" ]; then mv "$APP" "$backup"; PACKAGE_MOVED=1; fi
+  mv "$PACKAGE_STAGE" "$APP"
+  PACKAGE_ACTIVE=1
+  rm -rf "$scratch"
+  mkdir -p "$PREFIX/bin"
+  cp "$APP/keyd" "$PREFIX/bin/keyd.new"
+  chmod 700 "$PREFIX/bin/keyd.new"
+  KEYD_CHANGED=0 DAEMON_CHANGED=1
+  if [ -f "$PREFIX/bin/keyd" ] && cmp -s "$PREFIX/bin/keyd" "$PREFIX/bin/keyd.new"; then rm "$PREFIX/bin/keyd.new"
+  else mv "$PREFIX/bin/keyd.new" "$PREFIX/bin/keyd"; KEYD_CHANGED=1; fi
+  configure_remote_access
+  write_services
+  install_command
+  start_services "$KEYD_CHANGED" "$DAEMON_CHANGED"
+  write_state
+}
+
+run_package_install() {
+  [ -z "$OPT_REF$OPT_REPO$OPT_REGISTRY" ] || die "Packaged installs use their published release channel. Source --ref, --repo and --registry options do not apply."
+  local lock=$PREFIX/.package-install.lock
+  mkdir -p "$PREFIX"
+  [ ! -L "$lock" ] || die "Installation lock must not be a link."
+  if ! mkdir -m 700 "$lock" 2>/dev/null; then
+    [ -d "$lock" ] && [ -O "$lock" ] && [ ! -L "$lock/pid" ] || die "Invalid installation lock."
+    local owner=""
+    [ ! -f "$lock/pid" ] || owner=$(cat "$lock/pid")
+    case "$owner" in '' | *[!0-9]*) die "An incomplete installation lock remains at $lock. Check no installer is running before removing it." ;; esac
+    if kill -0 "$owner" 2>/dev/null; then die "Another localDot installation is already running. Wait for it to finish."; fi
+    rm -f "$lock/pid"; rmdir "$lock" || die "Couldn't clear the previous installation lock."
+    mkdir "$lock" || die "Another installer started; wait for it to finish."
+  fi
+  printf '%s\n' "$$" > "$lock/pid"
+  trap package_exit EXIT
+  prepare_prerequisites
+  check_prerequisites
+  check_port
+  ensure_node
+  check_install_storage
+  prepare_package
+  activate_package
+  finish
+  PACKAGE_PENDING=0
+  rm -rf "$PACKAGE_ROLLBACK"
 }
 
 main() {

@@ -405,6 +405,7 @@ describe("Agent", () => {
     it("pauses on keyd's 402 until the user raises the budget, then retries the same turn", async () => {
       const budget = new APICallError({
         message: "budget_exceeded",
+        responseHeaders: { "x-keyd-reason": "budget-task" },
         url: "http://llm.ldot/anthropic/messages",
         requestBodyValues: {},
         statusCode: 402,

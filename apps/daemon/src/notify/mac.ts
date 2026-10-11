@@ -1,4 +1,6 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import { join } from "node:path";
+import { webDir } from "../static-ui.ts";
 
 export type MacResult = "shown" | "failed" | "unavailable";
 // This computer's own banner: macOS Notification Center, or a Linux desktop's notifications.
@@ -14,18 +16,6 @@ export type ExecFile = (
   callback: (error: Error | null) => void,
 ) => void;
 
-const OSASCRIPT = "/usr/bin/osascript";
-// The text travels as run-handler arguments after "--", never inside the script: nothing in a
-// task's title can become AppleScript, and a title that starts with "-" is not an option.
-const SCRIPT = [
-  "-e",
-  "on run argv",
-  "-e",
-  "display notification (item 2 of argv) with title (item 1 of argv)",
-  "-e",
-  "end run",
-  "--",
-];
 const PER_MINUTE = 6;
 
 export function cleanLine(text: string, max: number): string {
@@ -36,19 +26,51 @@ export function cleanLine(text: string, max: number): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
-// A banner from osascript has no click action and shows under Script Editor's notification
-// settings.
+// A real app bundle gives Notification Center its own localDot identity and mascot.
 export function macNotifier(
-  opts: { platform?: NodeJS.Platform; execFile?: ExecFile; now?: () => number } = {},
+  opts: {
+    platform?: NodeJS.Platform;
+    execFile?: ExecFile;
+    now?: () => number;
+    bundle?: string;
+  } = {},
 ): MacNotifier {
-  return bannerCommand({
+  const bundle = opts.bundle ?? webDir("dist/native/localDot.app");
+  const run = opts.execFile ?? (nodeExecFile as unknown as ExecFile);
+  let registration: Promise<boolean> | undefined;
+  const notifier = bannerCommand({
     available: (opts.platform ?? process.platform) === "darwin",
-    file: OSASCRIPT,
-    args: (title, body) => [...SCRIPT, title, body],
+    file: join(bundle, "Contents/MacOS/localdot-notify"),
+    args: (title, body) => [title, body],
     env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, LANG: "en_US.UTF-8" },
-    failure: "a Mac notification could not be shown",
+    failure:
+      "localDot notifications are unavailable; allow localDot in macOS System Settings > Notifications",
+    timeout: 60_000, // First use may wait for the user's notification permission.
     ...opts,
   });
+  return {
+    available: notifier.available,
+    async show(title, body) {
+      if (!notifier.available) return "unavailable";
+      registration ??= new Promise((resolve) => {
+        run(
+          "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+          ["-f", bundle],
+          {
+            timeout: 5_000,
+            maxBuffer: 16 * 1024,
+            env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME },
+          },
+          (error) => resolve(!error),
+        );
+      });
+      if (!(await registration)) {
+        registration = undefined;
+        return "failed";
+      }
+      return notifier.show(title, body);
+    },
+  };
 }
 
 // One program that shows a banner, at most PER_MINUTE a minute, its text as plain arguments.
@@ -58,6 +80,7 @@ export function bannerCommand(opts: {
   args: (title: string, body: string) => string[];
   env: NodeJS.ProcessEnv;
   failure: string;
+  timeout?: number;
   execFile?: ExecFile;
   now?: () => number;
 }): MacNotifier {
@@ -75,10 +98,15 @@ export function bannerCommand(opts: {
       recent.push(at);
       const args = opts.args(cleanLine(title, 64) || "localDot", cleanLine(body, 160) || " ");
       return new Promise((resolve) => {
-        run(opts.file, args, { timeout: 5_000, maxBuffer: 16 * 1024, env: opts.env }, (error) => {
-          if (error) console.error(opts.failure);
-          resolve(error ? "failed" : "shown");
-        });
+        run(
+          opts.file,
+          args,
+          { timeout: opts.timeout ?? 5_000, maxBuffer: 16 * 1024, env: opts.env },
+          (error) => {
+            if (error) console.error(opts.failure);
+            resolve(error ? "failed" : "shown");
+          },
+        );
       });
     },
   };

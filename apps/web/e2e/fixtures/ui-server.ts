@@ -1702,9 +1702,22 @@ const deliverablesFixture = {
 };
 // The node bindings pass through: Open on Mac checks the socket address.
 const server: Server = createServer(
-  getRequestListener(
-    (request, env) => app?.fetch(request, env) ?? new Response("starting", { status: 503 }),
-  ),
+  getRequestListener((request, env) => {
+    const url = new URL(request.url);
+    if (url.pathname === "/__qa/relay-sign-in")
+      return new Response(null, {
+        status: 302,
+        headers: {
+          "set-cookie": "relay-access=fixture-only; Path=/; HttpOnly; SameSite=Strict",
+          location: "/?fresh=1#code=" + "c".repeat(43),
+        },
+      });
+    if (url.pathname === "/auth/exchange-code" && request.method === "POST")
+      return request.headers.get("cookie")?.includes("relay-access=fixture-only")
+        ? Response.json({ token: TOKEN })
+        : new Response("Unauthorized", { status: 401 });
+    return app?.fetch(request, env) ?? new Response("starting", { status: 503 });
+  }),
 );
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
