@@ -146,7 +146,7 @@ function Invoke-Wsl {
 
 function Get-WslDistros {
   $list = Invoke-Wsl --list --verbose
-  if ($list.Code -ne 0) { return @() }
+  if ($list.Code -ne 0) { throw "Could not list WSL distributions (exit $($list.Code)): $($list.Text). Check wsl --status before retrying; no distribution was installed or removed." }
   foreach ($line in ($list.Text -split "`r?`n" | Select-Object -Skip 1)) {
     $fields = @(($line -replace '^\s*\*?\s*', '').Trim() -split '\s+')
     if ($fields.Count -ge 3) { [pscustomobject]@{ Name = $fields[0]; Version = $fields[-1] } }
@@ -187,6 +187,15 @@ function Enable-Wsl {
   return $true
 }
 
+# WSL may print a startup notice before id's output. Only accept the final nonempty
+# line from a successful command, never a number embedded in an error message.
+function Get-WslUserId($Result) {
+  if ($Result.Code -ne 0) { return $null }
+  $lines = @(($Result.Text -replace "`0", '' -replace '[\uFEFF\uFFFE]', '') -split "`r?`n" | Where-Object { $_.Trim() })
+  if ($lines.Count -gt 0 -and $lines[-1].Trim() -match '^\d+$') { return $lines[-1].Trim() }
+  return $null
+}
+
 function Initialize-Distro {
   $found = @(Get-WslDistros | Where-Object { $_.Name -eq $Distro })
   if ($found.Count -eq 0) {
@@ -202,10 +211,11 @@ function Initialize-Distro {
     if ($LASTEXITCODE -ne 0) { throw "Moving $Distro to WSL 2 failed." }
   }
   $user = Invoke-Wsl -d $Distro --exec id -u
-  if ($user.Code -ne 0 -or $user.Text -notmatch '^\d+$') {
-    throw "Couldn't start $Distro. Run 'wsl -d $Distro' to check its setup, then rerun this installer."
+  $uidText = Get-WslUserId $user
+  if ($null -eq $uidText) {
+    throw "Couldn't confirm a Linux user in $Distro (exit $($user.Code)): $($user.Text). Run 'wsl -d $Distro' to check its setup, then rerun this installer."
   }
-  if ($user.Text -eq "0") {
+  if ($uidText -eq "0") {
     throw "$Distro signs in as root. Create your own user in it and make that the default; see docs/install.md."
   }
   if ((Invoke-Wsl -d $Distro --exec test -d /run/systemd/system).Code -ne 0) {
@@ -272,6 +282,8 @@ function Install-Distro {
   $setup = Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--distribution", $Distro -PassThru
   $probe = $null
   $accountReady = $false
+  $closedDeadline = $null
+  $lastReadiness = "WSL has not answered the account check."
   $deadline = (Get-SetupTime).AddMinutes(30)
   $nextNotice = (Get-SetupTime).AddSeconds(15)
   try {
@@ -285,6 +297,12 @@ function Install-Distro {
       if ($setup.HasExited -and $setup.ExitCode -ne 0) {
         throw "Installing $Distro didn't finish (exit $($setup.ExitCode)). Run this installer again."
       }
+      if ($setup.HasExited -and $null -eq $closedDeadline) {
+        # Successful launcher exit is not proof that registration/account setup failed.
+        $closedDeadline = (Get-SetupTime).AddSeconds(60)
+        Write-Host "$Distro's installer has exited. Checking its account for up to one minute..."
+        Write-Host "If account setup has not appeared, open $Distro from the Windows Start menu."
+      }
       if (-not $probe) {
         # A not-yet-registered distro can return an error; retry while its setup is running.
         $probe = Start-SetupProbe 'wsl.exe' "-d $Distro --exec id -u"
@@ -293,18 +311,27 @@ function Install-Distro {
       if ($null -ne $result) {
         Stop-SetupProbe $probe
         $probe = $null
-        if ($result.Code -eq 0 -and $result.Text -match '^\d+$' -and $result.Text -ne "0") {
+        $uidText = Get-WslUserId $result
+        if ($null -ne $uidText -and $uidText -ne "0") {
           $accountReady = $true
           Write-Host "$Distro account is ready. Continuing localDot installation..."
           return $true
         }
-        if ($setup.HasExited) {
-          throw "$Distro setup closed before a Linux user was ready. Open $Distro from the Start menu to finish account setup, then rerun this installer."
+        if ($uidText -eq "0") {
+          $lastReadiness = "$Distro still starts as root (uid 0); its default Linux user is not ready."
+        } else {
+          $detail = $result.Text
+          if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'No user ID was returned.' }
+          $lastReadiness = "WSL account check returned exit $($result.Code): $detail"
         }
       } elseif (((Get-SetupTime) - $probe.Started).TotalSeconds -ge 15) {
         Stop-SetupProbe $probe
         $probe = $null
-        Write-Host "$Distro hasn't answered the readiness check yet. Retrying; its setup window is still available."
+        $lastReadiness = "WSL did not answer the account check within 15 seconds."
+        Write-Host "$lastReadiness Retrying."
+      }
+      if ($null -ne $closedDeadline -and (Get-SetupTime) -ge $closedDeadline) {
+        throw "$Distro installation exited, but its user is still not ready. $lastReadiness Open $Distro from the Start menu to finish account setup. If that also fails, run 'wsl --list --verbose' and 'wsl -d $Distro --exec id -u' for the actual WSL error. Your existing data is kept."
       }
       if ((Get-SetupTime) -ge $nextNotice) {
         Write-Host "Waiting for $Distro account setup. Finish its username/password prompts; if you already see a shell prompt, type exit there."
@@ -312,7 +339,7 @@ function Install-Distro {
       }
       Start-Sleep -Seconds 1
     }
-    throw "$Distro account setup hasn't finished. Complete its setup, then run this installer again."
+    throw "$Distro account setup hasn't finished. $lastReadiness Complete its setup, then run this installer again."
   } finally {
     if ($probe) { Stop-SetupProbe $probe }
     # A cancelled/timed-out check must not close an unfinished Ubuntu download or account form.

@@ -13,9 +13,9 @@ $env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) ("localdot-ps1-" + [gui
 # Each scenario sets these, then wsl.exe answers from them.
 function Reset-Machine([hashtable]$machine) {
   $script:machine = @{
-    Status = 0; Version = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
+    Status = 0; Version = 0; List = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
     InstallAdds = $null; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
-    SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false; ProbeTimeouts = 0
+    SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false; ProbeTimeouts = 0; ProbeCodes = @(0)
     DockerResponses = @("29.2.0/linux"); Desktop = $null
   }
   foreach ($key in $machine.Keys) { $script:machine[$key] = $machine[$key] }
@@ -36,6 +36,7 @@ function wsl.exe {
     "^--update$" { $code = $script:machine.Update }
     "^--version$" { $code = $script:machine.Version }
     "^--list --verbose$" {
+      $code = $script:machine.List
       # Older wsl.exe writes UTF-16, which arrives with NULs between characters.
       $text = "  NAME      STATE           VERSION`n" + (($script:machine.Distros | ForEach-Object { "* $($_[0])    Stopped         $($_[1])" }) -join "`n")
       $out = ($text.ToCharArray() | ForEach-Object { "$_`0" }) -join ""
@@ -103,8 +104,10 @@ function Read-SetupProbe {
   param($Probe)
   if ($Probe.Blocked -or $script:machine.ProbePending) { return $null }
   $value = $script:machine.ProbeUids[0]
-  $script:machine.ProbeUids = @($script:machine.ProbeUids | Select-Object -Skip 1)
-  [pscustomobject]@{ Code = 0; Text = $value }
+  if ($script:machine.ProbeUids.Count -gt 1) { $script:machine.ProbeUids = @($script:machine.ProbeUids | Select-Object -Skip 1) }
+  $code = $script:machine.ProbeCodes[0]
+  if ($script:machine.ProbeCodes.Count -gt 1) { $script:machine.ProbeCodes = @($script:machine.ProbeCodes | Select-Object -Skip 1) }
+  [pscustomobject]@{ Code = $code; Text = $value }
 }
 function Stop-SetupProbe { param($Probe) $script:calls.Add("Stop-SetupProbe") }
 
@@ -256,9 +259,35 @@ Check ($message -like "*Installing Ubuntu didn't finish*") "reports setup failur
 Check (-not (@($script:calls) -match "--exec bash")) "never reports an app install after failed Ubuntu setup"
 
 Reset-Machine @{ SetupExited = $true; InstallAdds = @("Ubuntu", "2") }
-$message = ""
+Install-LocalDot
+Check (@($script:calls | Where-Object { $_ -eq 'Start-SetupProbe -d Ubuntu --exec id -u' }).Count -eq 2) "allows root-to-user transition after a successful setup launcher exit"
+Check ([bool](@($script:calls) -match '--exec bash')) "continues installation after delayed account readiness"
+
+Reset-Machine @{ SetupExited = $true; InstallAdds = @("Ubuntu", "2"); ProbeUids = @('0') }
+$began = Get-SetupTime
+$message = ''
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
-Check ($message -like "*setup closed before a Linux user was ready*") "reports a closed setup window without waiting for the timeout"
+Check ($message -like '*still starts as root (uid 0)*') "reports the actual root-user state when setup cannot finish"
+Check (((Get-SetupTime) - $began).TotalSeconds -ge 60) "gives registration a grace period rather than failing on the first probe"
+Check (-not ([bool](@($script:calls) -match '--exec bash'))) "never installs the app as root"
+
+Reset-Machine @{ SetupExited = $true; ProbeCodes = @(1, 0); ProbeUids = @('WSL_E_DISTRO_NOT_FOUND', '1000') }
+Check (Install-Distro) "retries transient registration errors after launcher exit"
+
+Reset-Machine @{ SetupExited = $true; ProbeCodes = @(1); ProbeUids = @('WSL_E_DISTRO_NOT_FOUND') }
+$message = ''
+try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*exit 1: WSL_E_DISTRO_NOT_FOUND*') "preserves WSL diagnostics when registration never becomes ready"
+
+Reset-Machine @{ List = 1 }
+$message = ''
+try { Initialize-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*Could not list WSL distributions*') "does not confuse a failed WSL listing with an absent Ubuntu install"
+Check (-not ([bool](@($script:calls) -match 'Start-Process'))) "does not reinstall after a WSL listing failure"
+
+Check ((Get-WslUserId ([pscustomobject]@{ Code = 0; Text = "WSL startup notice`n1000`n" })) -eq '1000') "accepts a user ID after WSL startup notices"
+Check ($null -eq (Get-WslUserId ([pscustomobject]@{ Code = 1; Text = '1000' }))) "rejects numeric output from a failed check"
+Check ($null -eq (Get-WslUserId ([pscustomobject]@{ Code = 0; Text = 'Error 1000' }))) "does not mistake an error number for a user ID"
 
 Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbePending = $true }
 $message = ""
