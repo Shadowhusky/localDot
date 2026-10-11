@@ -15,11 +15,12 @@ function Reset-Machine([hashtable]$machine) {
   $script:machine = @{
     Status = 0; Version = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
     InstallAdds = $null; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
-    SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false
+    SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false; ProbeTimeouts = 0
     DockerResponses = @("29.2.0/linux"); Desktop = $null
   }
   foreach ($key in $machine.Keys) { $script:machine[$key] = $machine[$key] }
   $script:calls = [System.Collections.Generic.List[string]]::new()
+  $script:now = [DateTime]::UtcNow
 }
 
 function wsl.exe {
@@ -70,20 +71,11 @@ function Start-Process {
   $process | Add-Member ScriptMethod Dispose { }
   $process
 }
-function Start-Job {
-  param($ArgumentList, $ScriptBlock)
-  $script:calls.Add("Start-Job user probe $ArgumentList")
-  [pscustomobject]@{ State = $(if ($script:machine.ProbePending) { "Running" } else { "Completed" }) }
+function Start-Sleep {
+  param($Seconds)
+  $script:now = $script:now.AddSeconds($Seconds)
+  if ($script:machine.ProbePending) { throw "Cancelled setup" }
 }
-function Receive-Job {
-  param($Job)
-  $value = $script:machine.ProbeUids[0]
-  $script:machine.ProbeUids = @($script:machine.ProbeUids | Select-Object -Skip 1)
-  $value
-}
-function Remove-Job { param($Job, [switch]$Force) $script:calls.Add("Remove-Job") }
-function Stop-Job { param($Job) $script:calls.Add("Stop-Job") }
-function Start-Sleep { param($Seconds) if ($script:machine.ProbePending) { throw "Cancelled setup" } }
 function Stop-Process { param($Id) $script:calls.Add("Stop-Process $Id") }
 function Get-WindowsBuild { 22631 }
 
@@ -97,6 +89,24 @@ function Unregister-ScheduledTask { param($TaskName, $Confirm) $script:calls.Add
 function Get-CimInstance { }
 
 . $installer
+
+# The actual native-process helper is tested separately; model account readiness here.
+function Get-SetupTime { $script:now }
+function Start-SetupProbe {
+  param($FilePath, $Arguments)
+  $script:calls.Add("Start-SetupProbe $Arguments")
+  $blocked = $script:machine.ProbeTimeouts -gt 0
+  if ($blocked) { $script:machine.ProbeTimeouts-- }
+  [pscustomobject]@{ Started = Get-SetupTime; Blocked = $blocked }
+}
+function Read-SetupProbe {
+  param($Probe)
+  if ($Probe.Blocked -or $script:machine.ProbePending) { return $null }
+  $value = $script:machine.ProbeUids[0]
+  $script:machine.ProbeUids = @($script:machine.ProbeUids | Select-Object -Skip 1)
+  [pscustomobject]@{ Code = 0; Text = $value }
+}
+function Stop-SetupProbe { param($Probe) $script:calls.Add("Stop-SetupProbe") }
 
 # Never change the tester's persistent user PATH.
 $script:userPath = 'C:\Existing\bin'
@@ -220,7 +230,7 @@ Install-LocalDot
 $calls = @($script:calls)
 Check (@($calls | Where-Object { $_ -like "Start-Process wsl.exe --install --distribution Ubuntu*" }).Count -eq 1) "installs Ubuntu in its own setup window"
 Check (-not ($calls -contains "wsl --install --distribution Ubuntu")) "never blocks the installer in Ubuntu's interactive shell"
-Check (@($calls | Where-Object { $_ -eq "Start-Job user probe Ubuntu" }).Count -eq 2) "waits until account setup replaces root with the user's account"
+Check (@($calls | Where-Object { $_ -eq "Start-SetupProbe -d Ubuntu --exec id -u" }).Count -eq 2) "waits until account setup replaces root with the user's account"
 Check ($calls.IndexOf("Stop-Process 123456") -lt $calls.IndexOf("wsl -d Ubuntu --cd ~ --exec mktemp .localdot-install.XXXXXX")) "closes only the owned setup window before continuing installation"
 Check (@($calls | Where-Object { $_ -like "wsl -d Ubuntu -u root --exec sh -c *systemd=true*" }).Count -eq 1) "turns on systemd as root"
 Check ($calls -contains "wsl --terminate Ubuntu") "restarts the distro so systemd starts"
@@ -254,7 +264,24 @@ Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbePending = $true }
 $message = ""
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
 Check ($message -eq "Cancelled setup") "allows cancellation while WSL waits for account setup"
-Check ($script:calls -contains "Stop-Job" -and $script:calls -contains "Stop-Process 123456") "cleans up the pending probe and only its own setup process"
+Check ($script:calls -contains "Stop-SetupProbe" -and $script:calls -notcontains "Stop-Process 123456") "cancels the readiness probe without closing unfinished Ubuntu setup"
+
+# A readiness call stuck behind WSL setup must be replaced, not disable the main timeout.
+Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbeTimeouts = 1; ProbeUids = @("1000") }
+Check (Install-Distro) "continues after a timed-out WSL probe is retried"
+Check (@($script:calls | Where-Object { $_ -eq 'Start-SetupProbe -d Ubuntu --exec id -u' }).Count -eq 2) "replaces the stuck probe after its deadline"
+Check (-not ($script:calls -contains 'wsl --list --verbose')) "never blocks on a synchronous distro list while Ubuntu setup runs"
+Check ($script:calls -contains 'Stop-Process 123456') "closes the owned setup window only after readiness is confirmed"
+
+Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbeTimeouts = 200 }
+$message = ''
+try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like "*account setup hasn't finished*") "the overall deadline still fires when every WSL probe hangs"
+Check ($script:calls -notcontains 'Stop-Process 123456') "timeout leaves unfinished Ubuntu setup available"
+
+Reset-Machine @{ SetupExited = $true; InstallAdds = @("Ubuntu", "2"); ProbeUids = @("1000") }
+Check (Install-Distro) "continues after the user exits a completed Ubuntu shell"
+Check ($script:calls -notcontains 'Stop-Process 123456') "does not stop an already exited setup process"
 
 Reset-Machine @{ TaskExists = $true }
 $machine.Distros = @(, @("Ubuntu", "1"))

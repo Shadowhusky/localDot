@@ -12,10 +12,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Windows PowerShell 5.1 installer regression checks
         shell: powershell
-        run: ./scripts/install/install-ps1.test.ps1
+        run: |
+          ./scripts/install/install-ps1.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/install/setup-probe.test.ps1
       - name: PowerShell 7 installer regression checks
         shell: pwsh
-        run: ./scripts/install/install-ps1.test.ps1
+        run: |
+          ./scripts/install/install-ps1.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/install/setup-probe.test.ps1
   check:
     runs-on: ubuntu-latest
     steps:

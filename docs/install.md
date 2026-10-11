@@ -23,8 +23,9 @@ Mac and Linux x64, including Windows through WSL 2. Clean native Windows install
 been verified for this candidate. Intel Mac and Linux ARM64 packages are not published yet.
 
 Keep PowerShell open. Ubuntu account setup opens in a separate window; create your Linux user
-and password there. The installer closes its setup window when the account is ready and continues
-automatically in PowerShell. You do not need to type `exit`. If Windows asks for a restart, restart
+and password there. PowerShell checks readiness in the background and continues when the account
+is ready. If Ubuntu already shows a normal `user@computer` prompt but PowerShell still waits,
+type `exit` in that Ubuntu window to release setup. If Windows asks for a restart, restart
 and sign in again; setup reopens automatically.
 
 In Docker Desktop, enable **Settings → Resources → WSL integration** for Ubuntu (or your chosen
@@ -87,6 +88,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | --- | --- |
 | `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Use the public commands above; retrying the private URL will not help. |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
+| Stuck at “Keep this PowerShell window open” | Finish Ubuntu’s username/password prompts. If it already shows a normal shell prompt, type `exit` there. If PowerShell still does not continue, press Ctrl+C in PowerShell and rerun the public installer command above; Ubuntu is kept. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
 | `docker-storage-read-only` or `read-only file system` | Docker could not write its storage. Check the host disk holding Docker's data, restart Docker, then rerun setup. If it persists, collect Docker diagnostics. Do not factory-reset Docker or delete its disk image. |
 | `docker-storage-full` or `no space left on device` | Check space on both the host disk and Docker's virtual disk. Free space without deleting localDot's computer data, then rerun setup. |

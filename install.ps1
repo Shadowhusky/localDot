@@ -218,18 +218,64 @@ function Initialize-Distro {
   return $true
 }
 
+# Probe WSL without blocking PowerShell's progress/timeout loop. Async stream reads avoid
+# a full stderr pipe deadlocking the child. Only this probe client is killed on timeout.
+function Get-SetupTime { [DateTime]::UtcNow }
+
+function Start-SetupProbe([string]$FilePath, [string]$Arguments) {
+  $info = New-Object System.Diagnostics.ProcessStartInfo
+  $info.FileName = $FilePath
+  $info.Arguments = $Arguments
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $info.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+  $info.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+  $info.EnvironmentVariables['WSL_UTF8'] = '1'
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $info
+  try {
+    if (-not $process.Start()) { throw "Couldn't start the WSL readiness check." }
+    [pscustomobject]@{
+      Process = $process
+      Output = $process.StandardOutput.ReadToEndAsync()
+      ErrorOutput = $process.StandardError.ReadToEndAsync()
+      Started = Get-SetupTime
+    }
+  } catch { $process.Dispose(); throw }
+}
+
+function Read-SetupProbe($Probe) {
+  if (-not $Probe.Process.HasExited -or -not $Probe.Output.IsCompleted -or -not $Probe.ErrorOutput.IsCompleted) { return $null }
+  $text = if ($Probe.Process.ExitCode -eq 0) { $Probe.Output.Result } else { $Probe.Output.Result + $Probe.ErrorOutput.Result }
+  [pscustomobject]@{ Code = $Probe.Process.ExitCode; Text = ($text -replace "`0", '').Trim() }
+}
+
+function Stop-SetupProbe($Probe) {
+  try {
+    if (-not $Probe.Process.HasExited) {
+      $Probe.Process.Kill()
+      $null = $Probe.Process.WaitForExit(1000)
+    }
+  } finally { $Probe.Process.Dispose() }
+}
+
 function Install-Distro {
-  # Keep the installer in PowerShell while WSL runs its normal, interactive account setup.
-  # Supplying --exec skips WSL's OOBE, so it cannot replace this first interactive launch.
-  # Distro names become one Windows command-line argument, never shell input.
+  # Keep Ubuntu's normal account setup in its own window. Never synchronously list WSL
+  # distributions here: even --list can wait behind the first-run registration lock.
   if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid distribution name: $Distro" }
   Write-Host "Installing $Distro in a setup window. Create your Linux user name and password there."
-  Write-Host "Keep this PowerShell window open. localDot will continue here automatically after account setup."
+  Write-Host "Keep this PowerShell window open. It checks account setup automatically."
+  Write-Host "If Ubuntu reaches a normal user@computer prompt but setup still waits, type exit in that Ubuntu window."
+  Write-Host "Press Ctrl+C here to stop waiting; your Ubuntu installation is kept."
   $setup = Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--distribution", $Distro -PassThru
   $probe = $null
-  $deadline = (Get-Date).AddMinutes(30)
+  $accountReady = $false
+  $deadline = (Get-SetupTime).AddMinutes(30)
+  $nextNotice = (Get-SetupTime).AddSeconds(15)
   try {
-    while ((Get-Date) -lt $deadline) {
+    while ((Get-SetupTime) -lt $deadline) {
       $setup.Refresh()
       if ($setup.HasExited -and $setup.ExitCode -in @(3010, 1641)) {
         Save-SetupResume
@@ -239,39 +285,39 @@ function Install-Distro {
       if ($setup.HasExited -and $setup.ExitCode -ne 0) {
         throw "Installing $Distro didn't finish (exit $($setup.ExitCode)). Run this installer again."
       }
-      if (-not $probe -and @(Get-WslDistros | Where-Object { $_.Name -eq $Distro }).Count -gt 0) {
-        # A WSL request can wait for OOBE's lock. Run the read-only probe asynchronously so
-        # cancellation, setup failure and timeout remain responsive while the user types.
-        $probe = Start-Job -ArgumentList $Distro -ScriptBlock {
-          param($Name)
-          $env:WSL_UTF8 = "1"
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-          $ErrorActionPreference = "Continue"
-          $PSNativeCommandUseErrorActionPreference = $false
-          $uidText = & wsl.exe -d $Name --exec id -u 2>$null
-          if ($LASTEXITCODE -eq 0) { (($uidText -join "") -replace "`0", "").Trim() }
-        }
+      if (-not $probe) {
+        # A not-yet-registered distro can return an error; retry while its setup is running.
+        $probe = Start-SetupProbe 'wsl.exe' "-d $Distro --exec id -u"
       }
-      if ($probe -and $probe.State -in @("Completed", "Failed", "Stopped")) {
-        $uidText = ((Receive-Job $probe -ErrorAction SilentlyContinue) -join "").Trim()
-        Remove-Job $probe -Force
+      $result = Read-SetupProbe $probe
+      if ($null -ne $result) {
+        Stop-SetupProbe $probe
         $probe = $null
-        if ($uidText -match '^\d+$' -and $uidText -ne "0") {
+        if ($result.Code -eq 0 -and $result.Text -match '^\d+$' -and $result.Text -ne "0") {
+          $accountReady = $true
           Write-Host "$Distro account is ready. Continuing localDot installation..."
           return $true
         }
         if ($setup.HasExited) {
           throw "$Distro setup closed before a Linux user was ready. Open $Distro from the Start menu to finish account setup, then rerun this installer."
         }
+      } elseif (((Get-SetupTime) - $probe.Started).TotalSeconds -ge 15) {
+        Stop-SetupProbe $probe
+        $probe = $null
+        Write-Host "$Distro hasn't answered the readiness check yet. Retrying; its setup window is still available."
+      }
+      if ((Get-SetupTime) -ge $nextNotice) {
+        Write-Host "Waiting for $Distro account setup. Finish its username/password prompts; if you already see a shell prompt, type exit there."
+        $nextNotice = (Get-SetupTime).AddSeconds(15)
       }
       Start-Sleep -Seconds 1
     }
     throw "$Distro account setup hasn't finished. Complete its setup, then run this installer again."
   } finally {
-    if ($probe) { Stop-Job $probe; Remove-Job $probe -Force }
-    # Close only the setup client we launched. Never terminate the distro or other terminals.
+    if ($probe) { Stop-SetupProbe $probe }
+    # A cancelled/timed-out check must not close an unfinished Ubuntu download or account form.
     $setup.Refresh()
-    if (-not $setup.HasExited) { Stop-Process -Id $setup.Id -ErrorAction SilentlyContinue }
+    if ($accountReady -and -not $setup.HasExited) { Stop-Process -Id $setup.Id -ErrorAction SilentlyContinue }
     $setup.Dispose()
   }
 }
