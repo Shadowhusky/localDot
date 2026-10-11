@@ -208,3 +208,20 @@ it("deleting the final recording legitimately disables Replay once back in Watch
   await watch();
   expect(button.hasAttribute("aria-disabled")).toBe(true);
 });
+
+it("returns directly to the conversation when the recording was opened from Watch", async () => {
+  const f = fixture();
+  enterApp();
+  window.history.pushState({ fromWatch: true }, "", `/?replay=${f.cards[0]?.id}`);
+  render(<App fetchImpl={f.fetchImpl} />);
+  await screen.findByRole("heading", { name: "Newest notes" });
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => expect(replayParam()).toBeNull());
+  expect(screen.queryByRole("textbox", { name: "Search recordings" })).toBeNull();
+  expect(screen.getByRole("radio", { name: "Watch" }).getAttribute("aria-checked")).toBe("true");
+  // Forward restores the recording and retains the same return destination.
+  await travel(1);
+  await screen.findByRole("heading", { name: "Newest notes" });
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => expect(replayParam()).toBeNull());
+});

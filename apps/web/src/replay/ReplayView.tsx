@@ -112,8 +112,9 @@ export interface ReplayViewProps {
   sessionId: string | null;
   // Opens a recording in the player.
   onSelect(id: string): void;
-  // Back from the player to the library.
+  // Return to the surface that opened the player.
   onLibrary(): void;
+  backLabel?: string;
   onGoLive(): void;
   onDeleted(id: string): void;
   // What the top bar names while a recording plays; null once it closes.
@@ -134,6 +135,7 @@ export function ReplayView({
   sessionId,
   onSelect,
   onLibrary,
+  backLabel = "Replay",
   onGoLive,
   onDeleted,
   onTitle,
@@ -184,6 +186,7 @@ export function ReplayView({
       tasks={tasks}
       onSelect={onSelect}
       onLibrary={onLibrary}
+      backLabel={backLabel}
       onGoLive={onGoLive}
       onDeleted={onDeleted}
       onTitle={onTitle}
@@ -513,6 +516,7 @@ function Player({
   tasks,
   onSelect,
   onLibrary,
+  backLabel = "Replay",
   onGoLive,
   onDeleted,
   onTitle,
@@ -527,6 +531,7 @@ function Player({
   tasks: TaskIndex;
   onSelect(id: string): void;
   onLibrary(): void;
+  backLabel?: string;
   onGoLive(): void;
   onDeleted(id: string): void;
   onTitle?(title: RecordedTitle | null): void;
@@ -713,7 +718,7 @@ function Player({
 
   return (
     <div className="replay" data-view="player">
-      {phone && <NavBar back="Replay" onBack={onLibrary} title={note || title} />}
+      {phone && <NavBar back={backLabel} onBack={onLibrary} title={note || title} />}
       <main ref={area} className="stage-col replay-main" aria-label="Replay">
         <h1 className="ui-visually-hidden">{title}</h1>
         <StageFrame

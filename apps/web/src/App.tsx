@@ -2276,7 +2276,8 @@ function Theatre({ api }: { api: ApiClient }) {
             api={api}
             sessionId={playing}
             onSelect={selectReplay}
-            onLibrary={() => selectReplay(LIBRARY)}
+            backLabel={window.history.state?.fromWatch ? "Conversation" : "Replay"}
+            onLibrary={() => selectReplay(window.history.state?.fromWatch ? null : LIBRARY)}
             onGoLive={() => selectReplay(null)}
             onDeleted={(id) => {
               deletedRecordings.current.add(id);
