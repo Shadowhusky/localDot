@@ -32,10 +32,21 @@ afterEach(() => {
 describe("gateRelay", () => {
   it("uses Docker Desktop's host name, and the sockets on Docker Engine", () => {
     expect(gateRelay(engineInfo, "/h", "darwin")).toEqual(HOST_RELAY);
-    expect(gateRelay(desktopInfo, "/h", "linux")).toEqual(HOST_RELAY);
+    expect(gateRelay(desktopInfo, "/h", "linux", null)).toEqual(HOST_RELAY);
     const socket = { kind: "socket", keydDir: "/h/keyd/relay", toolDir: "/h/relay" };
     expect(gateRelay(engineInfo, "/h", "linux")).toEqual(socket);
     expect(gateRelay(rootlessInfo, "/h", "linux")).toEqual(socket);
+  });
+
+  it("uses shared Linux sockets in WSL 2 even when the engine is Docker Desktop", async () => {
+    const dir = home();
+    const request = vi.fn().mockResolvedValue(desktopInfo);
+    const relay = gateRelaySource({ request }, dir, "linux", 2);
+    expect(await relay()).toEqual({ kind: "socket", ...relayDirs(dir) });
+    expect(await relay()).toEqual(gateRelay(desktopInfo, dir, "linux", 2));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(statSync(relayDirs(dir).keydDir).isDirectory()).toBe(true);
+    expect(statSync(relayDirs(dir).toolDir).isDirectory()).toBe(true);
   });
 
   it("asks Docker once, again after a failure, and makes the folders before any gate", async () => {

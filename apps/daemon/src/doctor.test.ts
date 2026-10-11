@@ -592,13 +592,13 @@ describe("runDoctor on Linux", () => {
     const home = mkdtempSync(join(tmpdir(), "ld-doctor-relay-"));
     try {
       const seen: RelayProbeDeps[] = [];
-      const run = async (info: Record<string, unknown>) => {
+      const run = async (info: Record<string, unknown>, host = linux) => {
         fake = await startFakeDocker({ info: { ...limits, ...info } });
         const report = await runDoctor({
           docker: new DockerClient(fake.socketPath),
           images,
           port: await freePort(),
-          host: linux,
+          host,
           home,
           relayProbe: async (deps) => {
             seen.push(deps);
@@ -623,6 +623,12 @@ describe("runDoctor on Linux", () => {
       });
       await run({ OperatingSystem: "Docker Desktop" });
       expect(seen[1]?.relay).toEqual({ kind: "host" });
+      await run({ OperatingSystem: "Docker Desktop" }, { ...linux, wsl: 2 });
+      expect(seen[2]?.relay).toEqual({
+        kind: "socket",
+        keydDir: join(home, "keyd", "relay"),
+        toolDir: join(home, "relay"),
+      });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

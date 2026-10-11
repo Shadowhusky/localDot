@@ -29,10 +29,16 @@ is ready. If Ubuntu already shows a normal `user@computer` prompt but PowerShell
 type `exit` in that Ubuntu window to release setup. If Windows asks for a restart, restart
 and sign in again; setup reopens automatically.
 
+Setup labels each stage and keeps download and package-manager progress visible. During
+checks that cannot report a percentage, it shows elapsed time and what it is waiting for.
+Docker installs without a completion window blocking localDot; its first-run choices still
+appear in Docker Desktop.
+
 In Docker Desktop, enable **Settings → Resources → WSL integration** for Ubuntu (or your chosen
 distro), then click **Apply**. The Windows installer waits for Docker and continues automatically
 when it is ready. If the WSL integration option is missing, switch Docker Desktop to Linux containers.
 If an older installer already stopped, enable integration and rerun it; Ubuntu stays installed.
+The installer repeats these instructions while it waits and confirms when Ubuntu can use Docker.
 
 ## 2. Finish prerequisite setup
 

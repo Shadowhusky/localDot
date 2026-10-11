@@ -66,14 +66,51 @@ Read-Host 'Press Enter to close this setup window'
 }
 
 function Receive-SetupFile([string]$Url, [string]$Path) {
+  # Windows includes curl.exe; its native meter shows bytes, speed and remaining
+  # time without PowerShell 5.1's expensive per-buffer progress rendering.
+  $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
+  if ($curl) {
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    & $curl.Source --fail --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 30 --max-time 1800 --output $Path $Url
+    if ($LASTEXITCODE -ne 0) { throw "Download failed (curl exit $LASTEXITCODE). The error is printed above; rerun setup to retry." }
+    return
+  }
   $previous = [Net.ServicePointManager]::SecurityProtocol
+  $ProgressPreference = 'Continue'
   try {
     [Net.ServicePointManager]::SecurityProtocol = $previous -bor [Net.SecurityProtocolType]::Tls12
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-      try { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 600; return }
-      catch { if ($attempt -eq 3) { throw }; Start-Sleep -Seconds 2 }
+      try { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 1800; return }
+      catch {
+        if ($attempt -eq 3) { throw }
+        Write-Host "Download interrupted. Retrying ($attempt of 2)..."
+        Start-Sleep -Seconds 2
+      }
     }
   } finally { [Net.ServicePointManager]::SecurityProtocol = $previous }
+}
+
+function Wait-SetupProcess($Process, [string]$Activity, [int]$TimeoutSeconds = 1200) {
+  $started = Get-SetupTime
+  $nextNotice = $started
+  try {
+    while (-not $Process.HasExited) {
+      $elapsed = [int]((Get-SetupTime) - $started).TotalSeconds
+      if ($elapsed -ge $TimeoutSeconds) {
+        throw "$Activity has not exited after $TimeoutSeconds seconds. Check its window; if it says installation succeeded, close that window and rerun localDot setup. The installer was not stopped and existing data is kept."
+      }
+      $status = "Elapsed $([TimeSpan]::FromSeconds($elapsed).ToString('mm\:ss')). Waiting for the installer to finish."
+      Write-Progress -Id 42 -Activity $Activity -Status $status -PercentComplete -1
+      if ((Get-SetupTime) -ge $nextNotice) {
+        Write-Host "$Activity - $status"
+        $nextNotice = (Get-SetupTime).AddSeconds(15)
+      }
+      Start-Sleep -Seconds 1
+      $Process.Refresh()
+    }
+    return $Process.ExitCode
+  } finally { Write-Progress -Id 42 -Activity $Activity -Completed }
 }
 
 function Approve-Prerequisites {
@@ -109,15 +146,21 @@ function Install-DockerDesktop {
   New-Item -ItemType Directory $folder | Out-Null
   $file = Join-Path $folder 'Docker Desktop Installer.exe'
   try {
-    Write-Host "Downloading Docker Desktop 4.94.0. This may take a few minutes..."
+    Write-Host "Downloading Docker Desktop 4.94.0 (bytes, speed and time remaining below)."
     Receive-SetupFile "https://desktop.docker.com/win/main/$platform/241994/Docker%20Desktop%20Installer.exe" $file
+    Write-Host "Download complete. Verifying Docker checksum and publisher..."
     if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $digest) { throw "Docker download verification failed. Nothing was installed; rerun setup to retry." }
     $signature = Get-AuthenticodeSignature $file
     if ($signature.Status -ne 'Valid') { throw "Windows couldn't verify Docker's installer signature. Nothing was installed." }
     # Intentionally omit --accept-license. Docker presents its terms to the user on first run.
-    $process = Start-Process -FilePath $file -ArgumentList 'install', '--user', '--backend=wsl-2' -Wait -PassThru
-    if ($process.ExitCode -in @(3010, 1641)) { Save-SetupResume; return $false }
-    if ($process.ExitCode -ne 0) { throw "Docker setup stopped (exit $($process.ExitCode)). Rerun localDot setup to retry." }
+    Write-Host "Verified. Installing Docker Desktop. Its first-run choices will open afterwards."
+    # Quiet installer mode exits without leaving a completion window blocking setup.
+    # It does not accept Docker's license; first-run consent remains in Docker Desktop.
+    $process = Start-Process -FilePath $file -ArgumentList 'install', '--user', '--backend=wsl-2', '--quiet' -PassThru
+    $code = Wait-SetupProcess $process 'Installing Docker Desktop'
+    if ($code -in @(3010, 1641)) { Save-SetupResume; return $false }
+    if ($code -ne 0) { throw "Docker setup stopped (exit $code). Check $env:LOCALAPPDATA\Docker\install-log.txt for details, then rerun localDot setup." }
+    Write-Host "Docker Desktop installed. Checking that its Linux engine is ready..."
     return $true
   } finally { Remove-Item $folder -Recurse -Force -ErrorAction SilentlyContinue }
 }
@@ -450,33 +493,52 @@ function Unregister-KeepRunning {
     ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
 }
 
+function Get-DockerWaitStatus($Result) {
+  if ($Result.Code -eq 0 -and $Result.Text -match '/windows$') {
+    return 'Action needed: switch Docker Desktop to Linux containers.'
+  }
+  if ($Result.Code -eq 0 -and $Result.Text -match '^(\d+)\.[^/]+/linux$' -and [int]$Matches[1] -lt 28) {
+    return 'Action needed: update Docker Desktop to Docker Engine 28 or newer.'
+  }
+  if ($Result.Code -eq 127) {
+    return "Action needed: enable $Distro in Docker Desktop > Settings > Resources > WSL integration, then click Apply."
+  }
+  return "Waiting for Docker in $Distro. Finish Docker's first-run prompts; if its engine is already running, check WSL integration below."
+}
+
+function Show-DockerConnectionGuide {
+  Write-Host ""
+  Write-Host "Connect Docker to $Distro" -ForegroundColor Yellow
+  Write-Host "1. Finish any first-run prompts in Docker Desktop."
+  Write-Host "2. Open Settings > Resources > WSL integration."
+  Write-Host "3. Turn ON $Distro itself (the default-distro checkbox alone may not enable it)."
+  Write-Host "4. Click Apply / Apply & restart if shown."
+  Write-Host "If WSL integration is missing, enable Settings > General > Use the WSL 2 based engine and use Linux containers."
+  Write-Host "Keep this PowerShell window open. Setup checks the connection and continues automatically."
+  Write-Host "Press Ctrl+C to stop waiting; completed setup is kept."
+  Write-Host ""
+}
+
 function Wait-Docker([int]$TimeoutSeconds = 1200) {
   $explained = $false
-  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  while ((Get-Date) -lt $deadline) {
+  $started = Get-SetupTime
+  $nextNotice = $started
+  $lastStatus = ''
+  $deadline = $started.AddSeconds($TimeoutSeconds)
+  while ((Get-SetupTime) -lt $deadline) {
     # Check the same Linux environment that will run localDot, not merely docker.exe on Windows.
     $result = Invoke-Wsl -d $Distro --exec timeout 10 docker info --format '{{.ServerVersion}}/{{.OSType}}'
     if ($result.Code -eq 0 -and $result.Text -match '^(\d+)\.[^/]+/linux$') {
       if ([int]$Matches[1] -ge 28) {
-        if ($explained) { Write-Host "Docker is ready in $Distro. Continuing installation..." }
+        if ($explained) { Write-Host "Connected: Docker is ready in $Distro. Continuing installation..." -ForegroundColor Green }
         return $true
       }
     }
     if (-not $explained) {
       $explained = $true
-      Write-Host ""
-      Write-Host "Ubuntu is ready. One more step: connect Docker."
-      Write-Host "1. Install or open Docker Desktop for Windows: https://www.docker.com/products/docker-desktop/"
-      Write-Host "2. In Docker Desktop, enable Settings > General > Use the WSL 2 based engine."
-      Write-Host "3. Under Settings > Resources > WSL integration, enable $Distro and click Apply."
-      Write-Host "Use Linux containers and Docker Engine 28 or newer. An existing Docker Engine inside $Distro works too."
-      Write-Host ""
-      Write-Host "Waiting for Docker in $Distro. Installation continues automatically; keep this window open."
-      Write-Host "Press Ctrl+C to stop. Your Ubuntu setup is kept."
       $desktop = Find-DockerDesktop
       if (-not $desktop -and $result.Code -eq 127) {
         if (-not (Install-DockerDesktop)) { return $false }
-        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
         $desktop = Find-DockerDesktop
         if (-not $desktop) { throw "Docker setup finished but the app wasn't found. Open Docker Desktop, then rerun localDot setup." }
       }
@@ -485,6 +547,18 @@ function Wait-Docker([int]$TimeoutSeconds = 1200) {
           Write-Host "Please open Docker Desktop from the Windows Start menu."
         }
       }
+      # Show this AFTER installation output, so the required click is not buried
+      # above a lengthy download or Docker installer log.
+      Show-DockerConnectionGuide
+      $started = Get-SetupTime
+      $deadline = $started.AddSeconds($TimeoutSeconds)
+    }
+    $status = Get-DockerWaitStatus $result
+    if ($status -ne $lastStatus -or (Get-SetupTime) -ge $nextNotice) {
+      $elapsed = [int]((Get-SetupTime) - $started).TotalSeconds
+      Write-Host "[$elapsed seconds] $status"
+      $lastStatus = $status
+      $nextNotice = (Get-SetupTime).AddSeconds(15)
     }
     Start-Sleep -Seconds 3
   }
@@ -526,7 +600,9 @@ function Install-Command {
 function Install-LocalDot {
   if ($InstallPrerequisites -and $NoPrerequisites) { throw "Choose either -InstallPrerequisites or -NoPrerequisites." }
   if ($Resume) { Write-Host "Resuming localDot setup. Completed steps will be reused." }
+  Write-Host "[1/5] Checking Windows Subsystem for Linux"
   if (-not (Enable-Wsl)) { return }
+  Write-Host "[2/5] Preparing $Distro and your Linux account"
   if (-not (Initialize-Distro)) { return }
   $options = @()
   if ($Ref) { $options += "--ref", $Ref }
@@ -537,9 +613,12 @@ function Install-LocalDot {
     Remove-ItemProperty -Path $ResumeKey -Name localDotSetup -ErrorAction SilentlyContinue
     return
   }
+  Write-Host "[3/5] Checking dependencies and Docker"
   Ensure-LinuxTools
   if (-not (Wait-Docker)) { return }
+  Write-Host "[4/5] Installing localDot (detailed progress below)"
   Invoke-Installer $options
+  Write-Host "[5/5] Setting up the localdot command and sign-in startup"
   Install-Command
   Register-KeepRunning
   Remove-ItemProperty -Path $ResumeKey -Name 'localDotSetup' -ErrorAction SilentlyContinue

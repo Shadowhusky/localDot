@@ -5,20 +5,43 @@ import { withExtractedDependency } from "../../apps/cli/src/install/extract-rele
 import { authenticatedCatalog, TARGETS, type Target } from "./catalog.ts";
 
 declare const __LOCALDOT_DISTRIBUTION_KEY__: string;
-async function download(url: string, max: number, signal: AbortSignal): Promise<Buffer> {
-  const response = await fetch(url, { signal, redirect: "follow" });
-  if (!response.ok || !response.url.startsWith("https://") || !response.body)
-    throw new Error(
-      `Download unavailable (${response.status}). Your existing installation is unchanged.`,
-    );
-  const chunks: Uint8Array[] = [];
+async function download(
+  url: string,
+  max: number,
+  signal: AbortSignal,
+  label?: string,
+): Promise<Buffer> {
   let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    if (size > max) throw new Error("Download exceeds the release size limit.");
-    chunks.push(chunk);
+  const started = Date.now();
+  const report = () => {
+    const elapsed = Math.max(1, (Date.now() - started) / 1000);
+    const percent = Math.floor((size / max) * 100);
+    const text = `${label}: ${(size / 1048576).toFixed(1)} / ${(max / 1048576).toFixed(1)} MB (${percent}%) · ${(size / 1048576 / elapsed).toFixed(1)} MB/s · ${Math.floor(elapsed)}s elapsed`;
+    process.stderr.write(process.stderr.isTTY ? `\r\x1b[2K${text}` : `${text}\n`);
+  };
+  // The app's exact byte count is authenticated by the catalog. Metadata checks
+  // stay silent so `check` continues to return only the machine-readable version.
+  if (label) report();
+  const timer = label ? setInterval(report, process.stderr.isTTY ? 1000 : 5000) : undefined;
+  timer?.unref();
+  try {
+    const response = await fetch(url, { signal, redirect: "follow" });
+    if (!response.ok || !response.url.startsWith("https://") || !response.body)
+      throw new Error(
+        `Download unavailable (${response.status}). Your existing installation is unchanged.`,
+      );
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > max) throw new Error("Download exceeds the release size limit.");
+      chunks.push(chunk);
+    }
+    if (label) report();
+    return Buffer.concat(chunks);
+  } finally {
+    clearInterval(timer);
+    if (label && process.stderr.isTTY) process.stderr.write("\n");
   }
-  return Buffer.concat(chunks);
 }
 async function main() {
   const [command, channel, target, workspace, destination, expectedVersion] = process.argv.slice(2);
@@ -52,13 +75,15 @@ async function main() {
     stage = resolve(destination);
   await mkdir(work, { recursive: true, mode: 0o700 });
   const archive = join(work, "app.tgz");
-  const body = await download(artifact.url, artifact.bytes, signal);
+  const body = await download(artifact.url, artifact.bytes, signal, "Downloading localDot");
+  console.error("Download complete. Verifying the signed app package...");
   if (
     body.length !== artifact.bytes ||
     createHash("sha512").update(body).digest("hex") !== artifact.sha512
   )
     throw new Error("App download did not match the signed release. Nothing was installed.");
   await writeFile(archive, body, { flag: "wx", mode: 0o400 });
+  console.error("Extracting and checking app files...");
   await withExtractedDependency(
     work,
     { archive, sha512: artifact.sha512 },
@@ -76,6 +101,7 @@ async function main() {
         )
           throw new Error("App file inventory did not verify.");
       }
+      console.error(`Verified ${Object.keys(extracted.files).length} files. Preparing the app...`);
       await mkdir(stage, { mode: 0o700 });
       for (const [path, file] of Object.entries(extracted.files)) {
         const to = join(stage, path);

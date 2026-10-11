@@ -254,13 +254,17 @@ approve_prerequisites() {
 }
 
 wait_for_docker() {
-  local deadline=$((SECONDS + 1200)) problem
+  local started=$SECONDS deadline=$((SECONDS + 1200)) notice=$((SECONDS + 15)) problem
   step "Waiting for Docker"
   say "Finish Docker's first-run setup in its window. Installation continues here when it is ready."
   while [ "$SECONDS" -lt "$deadline" ]; do
     find_docker || true
     problem=$(docker_problem)
-    [ -n "$problem" ] || return 0
+    [ -n "$problem" ] || { say "Docker is ready. Continuing installation."; return 0; }
+    if [ "$SECONDS" -ge "$notice" ]; then
+      say "Still waiting for Docker ($((SECONDS - started)) seconds). ${problem%%$'\n'*}"
+      notice=$((SECONDS + 15))
+    fi
     sleep 3
   done
   die "Docker is not ready yet. $problem Rerun this installer after resolving it; completed setup is kept."
@@ -292,10 +296,13 @@ install_mac_docker() (
   step "Downloading Docker Desktop 4.94.0"
   curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 --max-time 1800 \
     "https://desktop.docker.com/mac/main/$platform/241994/Docker.dmg" -o "$folder/Docker.dmg"
+  step "Verifying Docker Desktop"
   [ "$(sha256_of "$folder/Docker.dmg")" = "$digest" ] || die "Docker download verification failed. Nothing was installed; rerun setup to retry."
+  step "Opening the verified Docker installer"
   hdiutil attach "$folder/Docker.dmg" -mountpoint "$mountpoint" -nobrowse -quiet
   mounted=1
   # Do not accept Docker's terms on the user's behalf or bypass macOS security checks.
+  say "Installing Docker Desktop. Approve the administrator prompt if macOS asks."
   sudo "$mountpoint/Docker.app/Contents/MacOS/install" --user="$(id -un)"
 )
 
@@ -652,11 +659,13 @@ install_archive() {
   local url=$1 sum=$2 destination=$3 work=$RUNTIME/.download
   rm -rf "$work"
   mkdir -p "$work/out"
-  curl -fsSL --retry 3 -o "$work/archive.tar.gz" "$url" || die "Couldn't download $url."
+  curl -fL --retry 3 -o "$work/archive.tar.gz" "$url" || die "Couldn't download $url."
+  say "Download complete. Verifying the archive..."
   if [ "$(sha256_of "$work/archive.tar.gz")" != "$sum" ]; then
     rm -rf "$work"
     die "The download from $url doesn't match its pinned checksum, so nothing was installed."
   fi
+  say "Verified. Extracting the runtime..."
   tar -xzf "$work/archive.tar.gz" -C "$work/out" --strip-components 1
   rm -rf "$destination"
   mv "$work/out" "$destination"
@@ -1130,9 +1139,14 @@ EOF
 }
 
 wait_ready() {
-  local tries=0
+  local tries=0 started=$SECONDS notice=$((SECONDS + 15))
+  say "Checking that localDot is responding..."
   until curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/"; do
     tries=$((tries + 1))
+    if [ "$SECONDS" -ge "$notice" ]; then
+      say "Waiting for localDot to respond ($((SECONDS - started)) seconds)."
+      notice=$((SECONDS + 15))
+    fi
     if [ $tries -ge 60 ]; then
       tail -n 20 "$LD_HOME/logs/daemon.log" >&2 2>/dev/null || true
       die "localDot didn't start; its last log lines are above. Fix what they say, then run: localdot up"
@@ -1366,6 +1380,7 @@ prepare_package() {
   local role image
   for role in $IMAGE_ROLES; do
     image=$("$NODE_DIR/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).images[process.argv[2]]' "$PACKAGE_STAGE/package-release.json" "$role")
+    step "Computer image: $role (Docker shows progress for each layer)"
     docker pull "$image" || die "Couldn't download the $role image. Rerun setup to reuse completed downloads; the current app is kept."
   done
 }

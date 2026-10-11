@@ -167,11 +167,11 @@ Check (-not (Wait-Docker -TimeoutSeconds 0)) "returns a resumable setup state on
   function Start-Process {
     param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru)
     $script:calls.Add("Docker install $($ArgumentList -join ' ')")
-    [pscustomobject]@{ ExitCode = $script:dockerExit }
+    [pscustomobject]@{ ExitCode = $script:dockerExit; HasExited = $true }
   }
   Reset-Machine @{}
   Check (Install-DockerDesktop) "installs verified Docker Desktop and continues"
-  Check ($script:calls -contains 'Docker install install --user --backend=wsl-2') "uses per-user WSL installation without accepting the license"
+  Check ($script:calls -contains 'Docker install install --user --backend=wsl-2 --quiet') "uses per-user unattended installation without accepting the license"
   $script:digest = 'bad'
   Reset-Machine @{}
   $message = ''
@@ -197,6 +197,39 @@ Check (-not (Wait-Docker -TimeoutSeconds 0)) "returns a resumable setup state on
   Check (-not (Install-DockerDesktop)) "manual prerequisite mode declines Docker installation"
   Check ($script:calls.Count -eq 0) "manual mode never downloads or executes Docker setup"
 }
+
+# Reproduce a successful Docker install followed by disabled WSL integration.
+& {
+  $messages = [System.Collections.Generic.List[string]]::new()
+  function Write-Host { param($Object, $ForegroundColor) $messages.Add([string]$Object) }
+  function Install-DockerDesktop { $messages.Add('Docker installed'); $script:machine.Desktop = 'test-docker-desktop.exe'; return $true }
+  Reset-Machine @{ DockerResponses = @('missing', 'missing', '29.2.0/linux') }
+  $ready = Wait-Docker
+  Check $ready "continues automatically after the user enables WSL integration"
+  Check ($messages.IndexOf('Connect Docker to Ubuntu') -gt $messages.IndexOf('Docker installed')) "prints integration instructions after Docker install output"
+  Check ([bool](@($messages) -match 'Action needed: enable Ubuntu.*Apply')) "names the exact distro toggle and Apply action while waiting"
+  Check ([bool](@($messages) -match '^Connected: Docker is ready')) "confirms the connection before continuing"
+  Reset-Machine @{ DockerResponses = @('missing'); Desktop = 'test-docker-desktop.exe' }
+  $messages.Clear()
+  $ready = Wait-Docker -TimeoutSeconds 20
+  Check (-not $ready) "returns without continuing if integration stays disabled"
+  Check (@($messages | Where-Object { $_ -like '*Action needed: enable Ubuntu*' }).Count -ge 2) "keeps the required user action visible during a long wait"
+}
+
+# A process wait remains observable, reads its real exit code, and never kills an
+# external installer merely because its completion window did not close.
+Reset-Machine @{}
+$fakeProcess = [pscustomobject]@{ HasExited = $false; ExitCode = 7; Checks = 0 }
+$fakeProcess | Add-Member ScriptMethod Refresh { $this.Checks++; if ($this.Checks -ge 16) { $this.HasExited = $true } }
+Check ((Wait-SetupProcess $fakeProcess 'Fixture installer') -eq 7) "waits through a slow installer and preserves its real failure code"
+Check ($fakeProcess.Checks -eq 16) "continues checking the native process until it actually exits"
+Reset-Machine @{}
+$fakeProcess = [pscustomobject]@{ HasExited = $false; ExitCode = 0 }
+$fakeProcess | Add-Member ScriptMethod Refresh { }
+$message = ''
+try { Wait-SetupProcess $fakeProcess 'Fixture installer' -TimeoutSeconds 2 | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*has not exited after 2 seconds*') "bounds a stuck installer wait with actionable recovery"
+Check (-not ([bool](@($script:calls) -match 'Stop-Process'))) "does not kill a potentially active installer on timeout"
 
 Reset-Machine @{ DockerResponses = @('timeout', '29.2.0/linux') }
 Check (Wait-Docker) "continues after a slow existing engine responds"

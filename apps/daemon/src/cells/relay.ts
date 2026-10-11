@@ -2,11 +2,13 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import type { Server } from "node:net";
 import { dirname, join } from "node:path";
 import { dockerRuntime } from "../platform/docker-runtime.ts";
+import { detectHost } from "../platform/host.ts";
 import type { DockerClient } from "./docker.ts";
 
-// Docker Desktop gives containers the host's loopback as host.docker.internal. Docker Engine has
-// no such name, and its containers can't reach 127.0.0.1, so there a gate reaches keyd and the
-// daemon's tool API through their Unix sockets in read-only folder mounts (cells/gate/relay.sh).
+// Desktop on macOS/native Linux exposes the host through host.docker.internal. In WSL
+// that name points to Windows, not the Ubuntu distro running localDot. WSL 2 shares a
+// Linux kernel with Desktop and its integration translates bind mounts, so use the same
+// read-only Unix socket relay as native Docker Engine (cells/gate/relay.sh).
 export type GateRelay = { kind: "host" } | { kind: "socket"; keydDir: string; toolDir: string };
 
 export const HOST_RELAY: GateRelay = { kind: "host" };
@@ -20,8 +22,14 @@ export function relayDirs(home: string): { keydDir: string; toolDir: string } {
   return { keydDir: join(home, "keyd", "relay"), toolDir: join(home, "relay") };
 }
 
-export function gateRelay(info: unknown, home: string, platform = process.platform): GateRelay {
-  if (platform === "darwin" || dockerRuntime(info)?.flavor === "desktop") return HOST_RELAY;
+export function gateRelay(
+  info: unknown,
+  home: string,
+  platform = process.platform,
+  wsl: 1 | 2 | null = detectHost().wsl,
+): GateRelay {
+  if (platform === "darwin" || (wsl !== 2 && dockerRuntime(info)?.flavor === "desktop"))
+    return HOST_RELAY;
   return { kind: "socket", ...relayDirs(home) };
 }
 
@@ -31,12 +39,13 @@ export function gateRelaySource(
   docker: Pick<DockerClient, "request">,
   home: string,
   platform = process.platform,
+  wsl: 1 | 2 | null = detectHost().wsl,
 ): () => Promise<GateRelay> {
   let known: Promise<GateRelay> | undefined;
   return () => {
     if (platform === "darwin") return Promise.resolve(HOST_RELAY);
     known ??= docker.request<unknown>({ method: "GET", path: "/info" }).then((info) => {
-      const relay = gateRelay(info, home, platform);
+      const relay = gateRelay(info, home, platform, wsl);
       if (relay.kind === "socket") makeRelayDirs(home);
       return relay;
     });

@@ -336,7 +336,7 @@ describe.concurrent("which machines it installs on", { timeout: 60_000 }, () => 
     const result = await host.run([], { STUB_TRANSLATED: "1" });
     expect(result.code).toBe(1);
     expect(host.calls()).toContain(
-      "curl -fsSL --retry 3 -o " +
+      "curl -fL --retry 3 -o " +
         join(host.prefix, "runtime/.download/archive.tar.gz") +
         " https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
     );

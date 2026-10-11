@@ -232,7 +232,7 @@ async function dockerChecks(deps: DoctorDeps, host: HostPlatform): Promise<Docto
   if (host.os === "macos" || !home) return checks;
   if (!runtime || !gate.ok || signal?.aborted) return [...checks, ...skipped(["gate-relay"])];
   const probe = deps.relayProbe ?? runRelayProbe;
-  const relay = gateRelay(info, home, "linux");
+  const relay = gateRelay(info, home, "linux", host.wsl);
   const verdict = await probe({ docker, relay, home, image: images.gate, snap: runtime.snap });
   return [...checks, { name: "gate-relay", ...verdict }];
 }
