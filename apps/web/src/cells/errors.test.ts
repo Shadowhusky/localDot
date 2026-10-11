@@ -30,7 +30,7 @@ describe("describeRequestError", () => {
       "This computer no longer exists.",
     );
     expect(describeRequestError(new ApiError(409, SKIPPED))).toBe(
-      "Some computer records can't be read. Fix or remove them in localDot's cells folder, then try again.",
+      "A saved computer record couldn’t be read. Your data is kept. Run localdot doctor in Ubuntu or Terminal to check recovery.",
     );
     expect(describeRequestError(new ApiError(500, "internal error"))).toBe(
       "localDot couldn't do that. Try again.",
@@ -42,7 +42,20 @@ describe("describeRequestError", () => {
 
   it("says the daemon can't be reached when no answer came back", () => {
     expect(describeRequestError(new TypeError("Failed to fetch"))).toBe(
-      "localDot isn't answering. Check that it's running on your Mac.",
+      "localDot isn't answering. Check that it's running on your computer.",
     );
   });
+});
+
+it("does not diagnose generic startup conflicts as corrupt computer records", () => {
+  expect(
+    describeRequestError(new ApiError(409, "Computer runtime update recovery is incomplete.")),
+  ).toContain("recovering after the update");
+  expect(describeRequestError(new ApiError(409, "computer identity is unavailable"))).toContain(
+    "already being created",
+  );
+  const unknown = describeRequestError(new ApiError(409, "private /home/name/cells/record"));
+  expect(unknown).not.toContain("record");
+  expect(unknown).not.toContain("/home");
+  expect(unknown).not.toContain("remove");
 });

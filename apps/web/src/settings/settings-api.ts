@@ -8,6 +8,7 @@ const model = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
   name: z.string().max(200),
   contextTokens: z.number().int().positive(),
+  releaseDate: z.string().max(32).optional(),
   inputUSDPerMTok: z.number().nonnegative(),
   outputUSDPerMTok: z.number().nonnegative(),
   tier: z.enum(["native", "vision-tools", "text-only", "no-tools"]),
@@ -21,6 +22,9 @@ export const ProviderIndex = z
       .strictObject({
         fetchedAt: z.iso.datetime({ offset: true }).max(64),
         skipped: z.number().int().nonnegative(),
+        stale: z.boolean().optional(),
+        refreshing: z.boolean().optional(),
+        refreshFailed: z.boolean().optional(),
       })
       .nullable(),
     keyLayer: z.enum(["online", "offline"]),

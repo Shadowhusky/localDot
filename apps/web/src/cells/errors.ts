@@ -16,7 +16,7 @@ const RESUME_ANSWERS: Record<string, string> = {
 // codes, cell ids) stays out of the caption.
 export function describeRequestError(err: unknown, action?: "resume"): string {
   if (!(err instanceof ApiError))
-    return "localDot isn't answering. Check that it's running on your Mac.";
+    return "localDot isn't answering. Check that it's running on your computer.";
   if (action === "resume" && [409, 502, 503].includes(err.status)) {
     // Only the route's fixed answers are recognised, each said in plain words; never echo internals.
     return RESUME_ANSWERS[err.message] ?? "Your computer couldn't resume. Try again.";
@@ -27,7 +27,19 @@ export function describeRequestError(err: unknown, action?: "resume"): string {
     case 404:
       return GONE;
     case 409:
-      return "Some computer records can't be read. Fix or remove them in localDot's cells folder, then try again.";
+      if (
+        err.message.startsWith("cell records ") ||
+        err.message === "unreadable cell records may retain keyd ports"
+      )
+        return "A saved computer record couldn’t be read. Your data is kept. Run localdot doctor in Ubuntu or Terminal to check recovery.";
+      if (
+        err.message === "Computer runtime update recovery is incomplete." ||
+        err.message === "installed service recovery could not be confirmed"
+      )
+        return "localDot hasn’t finished recovering after the update. Your data is kept. Run localdot up in Ubuntu or Terminal, then try again.";
+      if (err.message === "computer identity is unavailable")
+        return "This computer is already being created or recovered. Wait a moment, then try again.";
+      return "The computer couldn’t start this action in its current state. Try again; if it persists, run localdot doctor in Ubuntu or Terminal.";
     default:
       return err.status >= 500
         ? "localDot couldn't do that. Try again."

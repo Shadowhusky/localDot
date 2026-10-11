@@ -165,6 +165,12 @@ keys already have a passphrase you didn't set, start over: `localdot down`, dele
 `~/.localdot/passphrase-chosen`, `localdot up`, run `localdot unlock` to choose your own
 passphrase, then add your keys again.
 
+Model lists load automatically from the public models.dev catalog, without an AI call or sending
+an API key. Saved lists appear immediately and refresh in the background once five minutes old.
+Setup checks again when you change provider; open pages pick up refreshed lists automatically.
+If the catalog is unreachable, the saved list stays usable and is marked as older. Your chosen
+model stays selected. Catalog entries describe models, not your account’s access or remaining credit.
+
 ## Automatic updates
 
 Settings → Your computer → Software update shows the installed build, last successful check,

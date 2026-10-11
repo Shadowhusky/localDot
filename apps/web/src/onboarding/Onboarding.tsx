@@ -62,6 +62,7 @@ export interface OnboardingProps {
   saved: AgentSettingsDocument | null;
   modelsLoading?: boolean;
   onRefreshModels?(): void;
+  onCheckModels?(): void;
   // The saved settings changed: read them again.
   onSaved(): void;
   // Turns the computer on; null while it is already on.
@@ -128,6 +129,10 @@ export function Onboarding(props: OnboardingProps) {
   const { progress } = control;
   const step = progress.step;
   const [draft, setDraft] = useState(() => draftOf(progress, saved));
+  const checkModels = props.onCheckModels;
+  useEffect(() => {
+    if (draft.provider) checkModels?.();
+  }, [draft.provider, checkModels]);
   const change = (next: Partial<SetupDraft>) => setDraft((now) => ({ ...now, ...next }));
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -182,9 +187,7 @@ export function Onboarding(props: OnboardingProps) {
   const catalog = draft.kind === "api" || draft.kind === "plan";
   const recommended = recommendedMain(models);
   const mainModel = catalog
-    ? models.some((model) => model.id === draft.model)
-      ? draft.model
-      : (recommended?.id ?? "")
+    ? draft.model || (recommended?.id ?? "")
     : appKind(draft.kind)
       ? appModels.some((model) => model.id === draft.model)
         ? draft.model
@@ -472,7 +475,7 @@ export function Onboarding(props: OnboardingProps) {
           sub: appKind(draft.kind)
             ? "One of your plan's models. Change it any time in Settings."
             : catalog
-              ? "Picked for your key. Change it any time in Settings."
+              ? "Choose from this provider’s model list. Change it any time in Settings."
               : "Type the model's name as your server shows it.",
           body: (
             <ModelStep
@@ -481,6 +484,7 @@ export function Onboarding(props: OnboardingProps) {
               loading={catalog && props.modelsLoading}
               onRefresh={catalog ? props.onRefreshModels : undefined}
               catalogAvailable={!!index?.catalog}
+              catalogStatus={catalog ? index?.catalog : undefined}
               models={appKind(draft.kind) ? [] : models}
               allModels={allModels}
               subscriptionModels={appModels}

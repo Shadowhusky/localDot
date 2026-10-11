@@ -365,7 +365,14 @@ describe("the take control route", () => {
         },
       },
       settings: { get: unused, put: unused },
-      catalog: { get: unused, refresh: unused },
+      catalog: {
+        fresh() {
+          return Promise.resolve(this.get());
+        },
+        freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+        get: unused,
+        refresh: unused,
+      },
       keyd: { secrets: unused },
       memory: {
         readBoth: unused,

@@ -172,7 +172,12 @@ async function fixture(supported = true) {
   app.get("/api/keys", (c) => c.text("owned key layer offline", 503));
   const deps: AgentRoutesDeps = {
     settings,
-    catalog: { get: () => catalog, refresh: async () => catalog },
+    catalog: {
+      get: () => catalog,
+      refresh: async () => catalog,
+      fresh: async () => catalog,
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+    },
     keyd: {
       secrets: async () => {
         throw new KeydUnavailableError("owned key layer offline", "/owned-fixture");

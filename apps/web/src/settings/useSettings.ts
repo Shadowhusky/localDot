@@ -206,6 +206,47 @@ export function useSettings(
       document.removeEventListener("visibilitychange", visible);
     };
   }, [read]);
+  const checkingModels = useRef(false);
+  const checkModels = useCallback(async () => {
+    if (
+      !mounted.current ||
+      document.hidden ||
+      blocked.current ||
+      reading.current ||
+      mutating.current ||
+      checkingModels.current
+    )
+      return;
+    const generation = current.current.generation;
+    const abort = new AbortController();
+    checkingModels.current = true;
+    try {
+      const next = await loadProviderIndex(api, abort.signal);
+      if (
+        !mounted.current ||
+        document.hidden ||
+        blocked.current ||
+        current.current.api !== api ||
+        current.current.generation !== generation ||
+        reading.current ||
+        mutating.current
+      )
+        return;
+      current.current.index = next;
+      setIndex(next);
+    } catch {
+      // Keep the last verified list and all unsaved choices through an outage.
+    } finally {
+      checkingModels.current = false;
+    }
+  }, [api]);
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => void checkModels(),
+      index?.catalog?.refreshing ? 2000 : 60_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [checkModels, index?.catalog?.refreshing]);
   const show = useCallback(() => {
     const owner = current.current;
     if (document.hidden || blocked.current) return;
@@ -609,7 +650,11 @@ export function useSettings(
     reload,
     chooseMain,
     choosePermissions,
-    browseAccounts: () => setBrowsing(true),
+    checkModels,
+    browseAccounts: () => {
+      setBrowsing(true);
+      void checkModels();
+    },
     captureKey,
     keySaved,
     dirty: !!draft && !!saved && !sameDraft(draft, formOf(saved)),

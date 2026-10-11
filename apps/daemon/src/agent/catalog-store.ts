@@ -14,6 +14,27 @@ export class CatalogStore {
   readonly #opts: Required<CatalogStoreOptions>;
   #cached: Catalog | undefined;
   #refreshing: Promise<Catalog> | undefined;
+  #retryAfter = 0;
+  #refreshFailed = false;
+
+  freshness() {
+    const at = Date.parse(this.get()?.fetchedAt ?? "");
+    const age = this.#opts.now().getTime() - at;
+    return {
+      stale: !Number.isFinite(age) || age < 0 || age >= 300_000,
+      refreshing: !!this.#refreshing,
+      refreshFailed: this.#refreshFailed,
+    };
+  }
+
+  // Serve a usable cache immediately. All tabs share one refresh, and an outage
+  // retries at most once a minute. No credentials or model calls are involved.
+  async fresh(): Promise<Catalog | undefined> {
+    const cached = this.get();
+    if (!this.freshness().stale || this.#opts.now().getTime() < this.#retryAfter) return cached;
+    const refreshed = this.refresh().catch(() => cached);
+    return cached ?? (await refreshed);
+  }
   constructor(home: string, opts: CatalogStoreOptions = {}) {
     this.#files = new PrivateFiles(home, "catalog");
     this.#opts = {
@@ -47,9 +68,20 @@ export class CatalogStore {
     return this.#cached;
   }
   refresh(): Promise<Catalog> {
-    this.#refreshing ??= this.#fetch().finally(() => {
-      this.#refreshing = undefined;
-    });
+    this.#refreshing ??= this.#fetch()
+      .then((catalog) => {
+        this.#refreshFailed = false;
+        this.#retryAfter = 0;
+        return catalog;
+      })
+      .catch((error) => {
+        this.#refreshFailed = true;
+        this.#retryAfter = this.#opts.now().getTime() + 60_000;
+        throw error;
+      })
+      .finally(() => {
+        this.#refreshing = undefined;
+      });
     return this.#refreshing;
   }
   async #fetch(): Promise<Catalog> {

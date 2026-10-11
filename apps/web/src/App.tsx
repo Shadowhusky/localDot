@@ -2325,7 +2325,7 @@ function Theatre({ api }: { api: ApiClient }) {
           keys={settings.index ? pickerKeys(settings.index) : []}
           keyLayer={settings.index?.keyLayer ?? "unknown"}
           catalog={
-            settings.phase === "refreshing"
+            settings.phase === "refreshing" || settings.index?.catalog?.refreshing
               ? "refreshing"
               : settings.phase === "loading"
                 ? "loading"
@@ -2333,7 +2333,8 @@ function Theatre({ api }: { api: ApiClient }) {
                   ? "offline"
                   : !settings.index?.catalog
                     ? "empty"
-                    : Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 86_400_000
+                    : settings.index.catalog.stale ||
+                        Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 300_000
                       ? "stale"
                       : "ready"
           }
@@ -2538,6 +2539,7 @@ function Theatre({ api }: { api: ApiClient }) {
             index={settings.index}
             modelsLoading={settings.phase === "loading" || settings.phase === "refreshing"}
             onRefreshModels={settings.refreshModels}
+            onCheckModels={settings.checkModels}
             saved={settings.saved}
             onSaved={settings.reload}
             turnOn={

@@ -42,7 +42,14 @@ function fixture() {
   const deps: AgentRoutesDeps = {
     runner: { start, get: () => undefined, raiseBudget: unused },
     settings: { get: settings, put: unused },
-    catalog: { get: () => undefined, refresh: unused },
+    catalog: {
+      fresh() {
+        return Promise.resolve(this.get());
+      },
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+      get: () => undefined,
+      refresh: unused,
+    },
     keyd: { secrets: unused },
     memory: {
       readBoth: unused,

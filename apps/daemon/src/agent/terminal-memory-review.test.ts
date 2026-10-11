@@ -232,7 +232,14 @@ it("keeps an ended real task readable for the terminal-memory action authority",
     runner: h.runner,
     memory,
     settings: new SettingsStore(h.home),
-    catalog: { get: h.deps.catalog, refresh: async () => h.deps.catalog()! },
+    catalog: {
+      fresh() {
+        return Promise.resolve(this.get());
+      },
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+      get: h.deps.catalog,
+      refresh: async () => h.deps.catalog()!,
+    },
     keyd: { secrets: async () => [] },
     skills: () => [],
     desktop: () => {
@@ -360,7 +367,14 @@ it("boots the next task without a memory entry deleted through the entries route
     runner: h.runner,
     memory,
     settings: new SettingsStore(h.home),
-    catalog: { get: h.deps.catalog, refresh: async () => required(h.deps.catalog()) },
+    catalog: {
+      fresh() {
+        return Promise.resolve(this.get());
+      },
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+      get: h.deps.catalog,
+      refresh: async () => required(h.deps.catalog()),
+    },
     keyd: { secrets: async () => [] },
     skills: () => [],
     desktop: () => {

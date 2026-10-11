@@ -122,3 +122,24 @@ describe("the models setup suggests", () => {
     expect(recommendedFast(models("xai"), "grok-4.3")).toBeUndefined();
   });
 });
+
+it("updates suggestions from published release dates instead of model name ordering", () => {
+  const base = models("anthropic")[0];
+  if (!base) throw new Error("Missing model fixture");
+  const older = {
+    ...base,
+    id: "z-old",
+    name: "Z old",
+    tier: "vision-tools" as const,
+    outputUSDPerMTok: 10,
+    releaseDate: "2025-01-01",
+  };
+  const newer = {
+    ...older,
+    id: "a-new",
+    name: "A new",
+    outputUSDPerMTok: 2,
+    releaseDate: "2026-10-01",
+  };
+  expect(recommendedMain([older, newer])?.id).toBe("a-new");
+});

@@ -457,3 +457,17 @@
 .app[data-setup] > :is(.bar, .watch, .replay, .replay-failed) {
   visibility: hidden;
 }
+
+.onboarding-catalog-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-block-size: 3rem;
+}
+.onboarding-catalog-status > span {
+  flex: 1;
+  min-width: 0;
+}
+.onboarding-catalog-status > button {
+  flex-shrink: 0;
+}

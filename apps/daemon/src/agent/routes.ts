@@ -109,7 +109,7 @@ export interface AgentRoutesDeps {
     >;
   conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has" | "list">;
   settings: Pick<SettingsStore, "get" | "put">;
-  catalog: Pick<CatalogStore, "get" | "refresh">;
+  catalog: Pick<CatalogStore, "get" | "refresh" | "fresh" | "freshness">;
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
   memory: Pick<
     MemoryStore,
@@ -443,17 +443,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   app.get(
     "/api/agent/providers",
     route(async (c) => {
-      let catalog = deps.catalog.get();
-      // A new installation has no cache. Loading provider choices must initialise
-      // it; entering a key is unrelated to this public metadata download.
-      if (!catalog) {
-        try {
-          catalog = await deps.catalog.refresh();
-        } catch {
-          // Keep local models and plan sign-ins available when the catalog is
-          // unreachable. Setup exposes a retry for the missing remote choices.
-        }
-      }
+      const catalog = await deps.catalog.fresh();
       let keys: KeydRecord[] = [];
       let keyLayer: "online" | "offline" = "online";
       try {
@@ -464,7 +454,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }
       check(c.req.raw.signal);
       return c.json({
-        catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
+        catalog: catalog
+          ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped, ...deps.catalog.freshness() }
+          : null,
         keyLayer,
         subscriptions: [
           { id: CHATGPT, name: "ChatGPT plan", ...harness() },
@@ -500,6 +492,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
             id: model.id,
             name: model.name,
             contextTokens: model.contextTokens,
+            ...(model.releaseDate ? { releaseDate: model.releaseDate } : {}),
             inputUSDPerMTok: model.inputUSDPerMTok,
             outputUSDPerMTok: model.outputUSDPerMTok,
             ...capabilityOf(provider, model),

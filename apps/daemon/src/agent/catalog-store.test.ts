@@ -71,3 +71,70 @@ it("does not replace a usable model cache with an empty catalog", async () => {
   await expect(store.refresh()).rejects.toThrow("no usable models");
   expect(store.get()?.providers.deepseek).toBeDefined();
 });
+
+it("serves cached models immediately, refreshes stale data once, and backs off offline", async () => {
+  const home = ownedTemp(join(tmpdir(), "ld-fresh-catalog-"));
+  let time = Date.parse("2026-10-11T10:00:00Z");
+  let calls = 0;
+  let release: (() => void) | undefined;
+  let fail = false;
+  const store = new CatalogStore(home, {
+    now: () => new Date(time),
+    fetchImpl: async () => {
+      calls++;
+      if (calls > 1)
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      if (fail) throw new Error("offline");
+      return Response.json(MODELS_DEV_FIXTURE);
+    },
+  });
+  const first = await store.fresh();
+  expect(calls).toBe(1);
+  expect(store.freshness()).toEqual({ stale: false, refreshing: false, refreshFailed: false });
+  await store.fresh();
+  expect(calls).toBe(1);
+  time += 300_001;
+  expect(await store.fresh()).toBe(first);
+  expect(store.freshness().refreshing).toBe(true);
+  await store.fresh();
+  expect(calls).toBe(2);
+  const shared = store.refresh();
+  release?.();
+  await shared;
+  expect(store.get()?.fetchedAt).not.toBe(first?.fetchedAt);
+  time += 300_001;
+  fail = true;
+  await store.fresh();
+  const failed = store.refresh();
+  release?.();
+  await expect(failed).rejects.toThrow("offline");
+  expect(store.freshness()).toEqual({ stale: true, refreshing: false, refreshFailed: true });
+  await store.fresh();
+  expect(calls).toBe(3);
+  time += 60_001;
+  await store.fresh();
+  expect(calls).toBe(4);
+  const last = store.refresh();
+  release?.();
+  await expect(last).rejects.toThrow("offline");
+});
+
+it("refreshes a stale disk cache after restarting and keeps it if the download fails", async () => {
+  const home = ownedTemp(join(tmpdir(), "ld-disk-catalog-"));
+  const original = new CatalogStore(home, {
+    now,
+    fetchImpl: async () => Response.json(MODELS_DEV_FIXTURE),
+  });
+  await original.refresh();
+  const restarted = new CatalogStore(home, {
+    now: () => new Date("2026-10-12"),
+    fetchImpl: async () => {
+      throw new Error("offline");
+    },
+  });
+  expect((await restarted.fresh())?.providers.deepseek).toBeDefined();
+  await expect(restarted.refresh()).rejects.toThrow("offline");
+  expect(restarted.get()?.fetchedAt).toBe(now().toISOString());
+});

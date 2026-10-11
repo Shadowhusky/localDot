@@ -43,6 +43,10 @@ function fixture() {
       },
     },
     catalog: {
+      fresh() {
+        return Promise.resolve(this.get());
+      },
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
       get: () => undefined,
       refresh: async () => {
         throw new Error("unexpected refresh");

@@ -9,7 +9,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Field } from "../ui/Field.tsx";
-import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
+import { Group, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
@@ -374,6 +374,7 @@ export function ModelStep({
   loading = false,
   onRefresh,
   catalogAvailable = false,
+  catalogStatus,
   kind,
   provider,
   models,
@@ -396,6 +397,7 @@ export function ModelStep({
   loading?: boolean;
   onRefresh?(): void;
   catalogAvailable?: boolean;
+  catalogStatus?: { stale?: boolean; refreshing?: boolean; refreshFailed?: boolean } | null;
   kind: ThinkKind;
   provider: string;
   models: readonly PickerModel[];
@@ -504,6 +506,22 @@ export function ModelStep({
     );
   return (
     <>
+      {catalogStatus && (
+        <GroupNote className="onboarding-catalog-status" role="status">
+          <span>
+            {catalogStatus.refreshing
+              ? "Checking for new models…"
+              : catalogStatus.stale
+                ? "Using a saved list. The latest list couldn’t be reached."
+                : "Models checked automatically."}
+          </span>
+          {onRefresh && (
+            <Button size="sm" busy={catalogStatus.refreshing} onClick={onRefresh}>
+              {catalogStatus.refreshFailed ? "Retry" : "Refresh"}
+            </Button>
+          )}
+        </GroupNote>
+      )}
       <Group roomy>
         <GroupRow
           className="onboarding-model"

@@ -122,7 +122,12 @@ test.beforeAll(async () => {
   });
   const deps: AgentRoutesDeps = {
     settings,
-    catalog: { get: () => catalog, refresh: async () => catalog },
+    catalog: {
+      get: () => catalog,
+      refresh: async () => catalog,
+      fresh: async () => catalog,
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+    },
     keyd: {
       secrets: async () => keys,
       budget: async () => ({

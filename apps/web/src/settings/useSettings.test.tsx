@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { AgentSettingsDocument } from "@localdot/protocol";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import type { ProviderIndex } from "./settings-api.ts";
 import { providerFixture } from "./testing.ts";
@@ -516,4 +516,55 @@ describe("switching the main model from the composer", () => {
     expect(saved).toBe(false);
     await waitFor(() => expect(result.current.saved?.main?.model).toBe("gpt-6-luna"));
   });
+});
+
+it("refreshes model metadata without resetting unsaved settings or writing them", async () => {
+  const f = server();
+  const view = await opened(f);
+  act(() => view.result.current.change("main", { provider: "deepseek", model: "deepseek-v4-pro" }));
+  const draft = structuredClone(view.result.current.draft);
+  f.state.index = {
+    ...f.state.index,
+    catalog: { fetchedAt: "2026-10-12T09:00:00Z", skipped: 0, stale: false, refreshing: false },
+  };
+  await act(async () => {
+    await view.result.current.checkModels();
+  });
+  expect(view.result.current.index?.catalog?.fetchedAt).toBe("2026-10-12T09:00:00Z");
+  expect(view.result.current.draft).toEqual(draft);
+  expect(f.state.puts).toHaveLength(0);
+  act(() => setHidden(true));
+  const count = f.state.calls.length;
+  await act(async () => {
+    await view.result.current.checkModels();
+  });
+  expect(f.state.calls).toHaveLength(count);
+});
+
+it("picks up a background catalog refresh automatically without changing settings", async () => {
+  const f = server();
+  const view = await opened(f);
+  vi.useFakeTimers();
+  try {
+    f.state.index = {
+      ...f.state.index,
+      catalog: { fetchedAt: "2026-10-11T09:00:00Z", skipped: 0, stale: true, refreshing: true },
+    };
+    await act(async () => {
+      await view.result.current.checkModels();
+    });
+    f.state.index = {
+      ...f.state.index,
+      catalog: { fetchedAt: "2026-10-12T09:00:00Z", skipped: 0, stale: false, refreshing: false },
+    };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(view.result.current.index?.catalog?.fetchedAt).toBe("2026-10-12T09:00:00Z");
+    expect(view.result.current.saved).toEqual(initial());
+    expect(f.state.puts).toHaveLength(0);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
 });

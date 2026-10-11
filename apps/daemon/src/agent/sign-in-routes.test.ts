@@ -33,7 +33,14 @@ function routes(page?: string | Error) {
   const deps: AgentRoutesDeps = {
     runner: { start: unused, get: () => undefined, raiseBudget: unused, signIn },
     settings: { get: unused, put: unused },
-    catalog: { get: unused, refresh: unused },
+    catalog: {
+      fresh() {
+        return Promise.resolve(this.get());
+      },
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+      get: unused,
+      refresh: unused,
+    },
     keyd: { secrets: unused },
     memory: {
       readBoth: unused,

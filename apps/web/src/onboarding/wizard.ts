@@ -165,7 +165,7 @@ function score(model: PickerModel): number {
 }
 
 // The model to suggest for the work: the best at using a computer, then the strongest at an
-// everyday price, then the newest name. Models that can't call tools are never suggested.
+// everyday price, then the latest release date when available. Models that can't call tools are never suggested.
 export function recommendedMain(models: readonly PickerModel[]): PickerModel | undefined {
   const usable = models.filter((model) => model.tier !== "no-tools");
   const best = Math.max(...usable.map(score));
@@ -174,9 +174,14 @@ export function recommendedMain(models: readonly PickerModel[]): PickerModel | u
   const pool = everyday.length ? everyday : top;
   return [...pool].sort(
     (a, b) =>
+      (Number.isFinite(Date.parse(a.releaseDate ?? "")) &&
+      Number.isFinite(Date.parse(b.releaseDate ?? ""))
+        ? Date.parse(b.releaseDate ?? "") - Date.parse(a.releaseDate ?? "")
+        : 0) ||
       (everyday.length
         ? b.outputUSDPerMTok - a.outputUSDPerMTok
-        : a.outputUSDPerMTok - b.outputUSDPerMTok) || byName(a, b),
+        : a.outputUSDPerMTok - b.outputUSDPerMTok) ||
+      byName(a, b),
   )[0];
 }
 

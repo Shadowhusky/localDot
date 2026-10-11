@@ -331,9 +331,9 @@ describe("agent user routes", () => {
   });
   it("downloads model metadata on the first provider read without needing a key", async () => {
     const f = await setup();
-    const catalog = f.deps.catalog.get();
-    const refresh = vi.fn().mockResolvedValue(catalog);
-    f.deps.catalog = { get: () => undefined, refresh };
+    rmSync(join(f.home, "catalog"), { recursive: true });
+    const refresh = vi.fn(async () => Response.json(MODELS_DEV_FIXTURE));
+    f.deps.catalog = new CatalogStore(f.home, { fetchImpl: refresh });
     (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const reply = await f.send("GET", "/api/agent/providers");
     expect(reply.status).toBe(200);
@@ -351,10 +351,12 @@ describe("agent user routes", () => {
 
   it("keeps local and plan setup accessible when the first catalog download fails", async () => {
     const f = await setup();
-    f.deps.catalog = {
-      get: () => undefined,
-      refresh: vi.fn().mockRejectedValue(new Error("timeout")),
-    };
+    rmSync(join(f.home, "catalog"), { recursive: true });
+    f.deps.catalog = new CatalogStore(f.home, {
+      fetchImpl: async () => {
+        throw new Error("timeout");
+      },
+    });
     const reply = await f.send("GET", "/api/agent/providers");
     expect(reply.status).toBe(200);
     const body = (await reply.json()) as {

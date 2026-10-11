@@ -63,6 +63,10 @@ for (const control of ["takeover", "stop", "cell readiness loss"] as const)
       settings: new SettingsStore(home),
       memory: new MemoryStore(home),
       catalog: {
+        fresh() {
+          return Promise.resolve(this.get());
+        },
+        freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
         get: () => undefined,
         refresh: async () => {
           throw new Error("No catalog fixture");

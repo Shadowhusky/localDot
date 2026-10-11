@@ -317,7 +317,12 @@ export async function fixture(
   const agent: AgentRoutesDeps = {
     home,
     settings: new SettingsStore(home),
-    catalog: { get: () => catalog, refresh: async () => catalog },
+    catalog: {
+      get: () => catalog,
+      refresh: async () => catalog,
+      fresh: async () => catalog,
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+    },
     keyd: { secrets: async () => [] },
     memory,
     skills: () => [

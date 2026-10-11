@@ -709,7 +709,14 @@ function routesOf(h: ReturnType<typeof setup>) {
     runner: h.runner,
     memory: new MemoryStore(h.home),
     settings: new SettingsStore(h.home),
-    catalog: { get: h.deps.catalog, refresh: async () => required(h.deps.catalog()) },
+    catalog: {
+      fresh() {
+        return Promise.resolve(this.get());
+      },
+      freshness: () => ({ stale: false, refreshing: false, refreshFailed: false }),
+      get: h.deps.catalog,
+      refresh: async () => required(h.deps.catalog()),
+    },
     keyd: { secrets: async () => [] },
     skills: () => [],
     desktop: () => undefined,
