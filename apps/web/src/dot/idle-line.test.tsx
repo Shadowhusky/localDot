@@ -234,3 +234,28 @@ describe("tips", () => {
     expect(view.result.current).toBe(true);
   });
 });
+
+it("restores the same tip and action immediately after another panel covers Watch", () => {
+  const view = idle();
+  wait(TIP_MS);
+  wait(TIP_MS);
+  const previous = view.result.current;
+  view.rerender({ resting: false, suspended: true, held: false, signals: SIGNALS, tips: THREE });
+  expect(view.result.current).toBeNull();
+  wait(TIP_MS * 2);
+  view.rerender({ resting: true, suspended: false, held: false, signals: SIGNALS, tips: THREE });
+  expect(view.result.current).toEqual(previous);
+  wait(TIP_MS - 1);
+  expect(view.result.current).toEqual(previous);
+  wait(1);
+  expect(view.result.current?.text).toBe("Tip c.");
+});
+
+it("does not restore an idle tip over work started while Watch was covered", () => {
+  const view = idle();
+  view.rerender({ resting: false, suspended: true, held: false, signals: SIGNALS, tips: THREE });
+  view.rerender({ resting: false, suspended: false, held: false, signals: SIGNALS, tips: THREE });
+  expect(view.result.current).toBeNull();
+  view.rerender({ resting: true, held: false, signals: SIGNALS, tips: THREE });
+  expect(view.result.current).toBeNull();
+});

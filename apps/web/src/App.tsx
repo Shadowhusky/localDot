@@ -1574,6 +1574,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const exported = useMemo(() => hasExported(), [resting]);
   const idle = useIdleLine({
     resting,
+    suspended: !!replayId || onboarding.open,
     held: pageHidden || overBand || settings.open,
     signals: {
       touch: touch || phone,

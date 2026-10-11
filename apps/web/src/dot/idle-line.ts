@@ -103,6 +103,8 @@ export interface IdleLine {
 
 export interface IdleInput {
   resting: boolean;
+  // Another panel covers Watch; preserve its line without rotating tips.
+  suspended?: boolean;
   // The rotation waits: the page is hidden or the pointer is over the band.
   held: boolean;
   signals: TipSignals;
@@ -111,13 +113,20 @@ export interface IdleInput {
 
 // What dot says while the band rests: a greeting the first time on this page, then a tip every
 // TIP_MS. After a task it waits one turn in silence before its next tip.
-export function useIdleLine({ resting, held, signals, tips = TIPS }: IdleInput): IdleLine | null {
+export function useIdleLine({
+  resting,
+  suspended = false,
+  held,
+  signals,
+  tips = TIPS,
+}: IdleInput): IdleLine | null {
   const [line, setLine] = useState<IdleLine | null>(null);
   const greeted = useRef(false);
   const seen = useRef<string[]>([]);
   const latest = useRef({ signals, tips });
   latest.current = { signals, tips };
   useEffect(() => {
+    if (suspended) return;
     if (!resting) {
       setLine(null);
       return;
@@ -125,10 +134,10 @@ export function useIdleLine({ resting, held, signals, tips = TIPS }: IdleInput):
     if (greeted.current) return;
     greeted.current = true;
     setLine({ text: greeting(new Date()) });
-  }, [resting]);
+  }, [resting, suspended]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: each new line starts the wait again
   useEffect(() => {
-    if (!resting || held) return;
+    if (!resting || suspended || held) return;
     const timer = setTimeout(() => {
       const { signals, tips } = latest.current;
       const next = nextTip(rankTips(tips, signals), seenTips() ?? seen.current);
@@ -141,8 +150,8 @@ export function useIdleLine({ resting, held, signals, tips = TIPS }: IdleInput):
       });
     }, TIP_MS);
     return () => clearTimeout(timer);
-  }, [resting, held, line]);
-  return resting ? line : null;
+  }, [resting, suspended, held, line]);
+  return resting && !suspended ? line : null;
 }
 
 const subscribeVisibility = (onChange: () => void) => {
