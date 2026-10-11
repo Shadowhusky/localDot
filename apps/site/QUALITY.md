@@ -33,3 +33,7 @@ independent of access to the private source repository. Demo source data is synt
 Physical iPhone/Android graphics performance, screen-reader exploration and fresh native
 Windows installation remain outside the verified coverage. The Windows installer is available
 for alpha testing; its Linux package is tested separately in an isolated Ubuntu environment.
+
+The public host initially returned complete MP4 responses for byte-range requests. The Worker now
+adds bounded range handling only for the six owned demo clips (maximum 4 MiB). Prefix, suffix,
+open-ended, invalid/unsatisfiable and If-Range cases are checked by `check-video-ranges.mjs`.

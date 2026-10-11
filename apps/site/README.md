@@ -11,6 +11,7 @@ This directory has its own pinned pnpm workspace and lockfile.
 pnpm --dir apps/site install --frozen-lockfile
 pnpm --dir apps/site dev
 pnpm --dir apps/site check:browser  # while the dev server is running
+node apps/site/scripts/check-video-ranges.mjs
 pnpm --dir apps/site typecheck
 pnpm --dir apps/site deploy:check
 pnpm --dir apps/site run deploy
