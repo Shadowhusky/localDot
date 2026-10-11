@@ -2,6 +2,8 @@
 # Base: linuxserver webtop, Ubuntu 26.04.1 + XFCE 4.20 + Selkies 2.0.0 (GPL-3.0-only, a separate
 # program inside this image). Pinned by digest; resolve with
 #   docker image inspect --format '{{index .RepoDigests 0}}' lscr.io/linuxserver/webtop:ubuntu-xfce
+# Use Python's data-filtered extraction for verified build inputs: newer GNU tar needs
+# openat2, which Apple's x86 emulator does not implement. Keep path/link filtering enabled.
 # Rofi must choose a Render visual with alpha, not merely the last 32-bit visual.
 # Keep the narrow upstream patch and build tools out of the runtime image.
 FROM lscr.io/linuxserver/webtop@sha256:73f966bd414cd4aef183c96aba8fab37dd98715f41a278b655fee594d36bd804 AS rofi-build
@@ -19,7 +21,8 @@ COPY patches/rofi-argb-visual.patch /tmp/rofi-argb-visual.patch
 RUN set -eu; \
     curl -fsSL --retry 3 "https://github.com/davatorium/rofi/releases/download/${ROFI_VERSION}/rofi-${ROFI_VERSION}.tar.xz" -o /tmp/rofi.tar.xz; \
     echo "${ROFI_SHA256}  /tmp/rofi.tar.xz" | sha256sum -c -; \
-    mkdir /src; tar -xJf /tmp/rofi.tar.xz -C /src --strip-components=1; \
+    python3 -m tarfile --filter=data -e /tmp/rofi.tar.xz /tmp; \
+    mv "/tmp/rofi-${ROFI_VERSION}" /src; \
     cd /src; patch -p1 < /tmp/rofi-argb-visual.patch; \
     meson setup build --buildtype=release -Dwayland=disabled -Dxcb=enabled -Dcheck=disabled -Dimdkit=false; \
     meson compile -C build
@@ -62,8 +65,8 @@ RUN set -eu; \
     curl -fsSL -o /tmp/node.tar.xz \
       "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
     echo "${sum}  /tmp/node.tar.xz" | sha256sum -c -; \
-    mkdir -p /opt/node; \
-    tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1; \
+    python3 -m tarfile --filter=data -e /tmp/node.tar.xz /opt; \
+    mv "/opt/node-v${NODE_VERSION}-linux-${node_arch}" /opt/node; \
     rm /tmp/node.tar.xz; \
     ln -s /opt/node/bin/node /usr/local/bin/node; \
     ln -s /opt/node/bin/npm /usr/local/bin/npm; \
@@ -120,8 +123,8 @@ ARG WHITESUR_GTK_COMMIT=99247ecd219bdc1c7409baff062b4aafcf1102a7
 RUN set -eu; \
     git clone --depth 1 --branch "$WHITESUR_GTK_TAG" https://github.com/vinceliuice/WhiteSur-gtk-theme /tmp/whitesur-gtk; \
     test "$(git -C /tmp/whitesur-gtk rev-parse HEAD)" = "$WHITESUR_GTK_COMMIT"; \
-    tar -xJf /tmp/whitesur-gtk/release/WhiteSur-Light-solid.tar.xz -C /usr/share/themes \
-      --transform 's,^WhiteSur-Light-solid,WhiteSur-Light,'; \
+    python3 -m tarfile --filter=data -e /tmp/whitesur-gtk/release/WhiteSur-Light-solid.tar.xz /usr/share/themes; \
+    mv /usr/share/themes/WhiteSur-Light-solid /usr/share/themes/WhiteSur-Light; \
     rm -rf /usr/share/themes/WhiteSur-Light/gnome-shell; \
     for size in hdpi xhdpi; do \
       mkdir -p "/usr/share/themes/WhiteSur-Light-${size}/xfwm4"; \

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Installs localDot from source on macOS, Linux and WSL 2: checks what it needs, builds the app
-# and its computer images, starts its services and prints a sign-in link. Run it again to
-# upgrade; --uninstall removes it. The installed `localdot` command runs this script too.
+# Installs localDot on macOS, Linux and WSL 2: checks prerequisites, installs a signed package
+# or builds an authorized source checkout, starts services and prints a sign-in link. Run it
+# again to upgrade; --uninstall removes the app. The installed `localdot` command uses this script.
 # On Windows, install.ps1 sets up WSL 2 and runs this inside it. See docs/install.md.
 set -euo pipefail
 
@@ -73,7 +73,7 @@ EOF
 
 command_usage() {
   cat <<'EOF'
-localdot: run localDot installed from source
+localdot: start and manage localDot
 
   localdot up                  Start localDot and print a sign-in link
   localdot down                Stop localDot until you start it again or restart this computer
