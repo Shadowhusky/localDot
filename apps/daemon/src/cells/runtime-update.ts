@@ -9,6 +9,7 @@ import {
   type RuntimeUpdateStore,
   runtimeSource,
 } from "./runtime-update-store.ts";
+import { requireUnmodifiedSystem } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
 type Role = "gate" | "desktop";
@@ -77,6 +78,7 @@ async function prepare(
     await retained(fresh);
     // A fresh update cannot invent missing originals; only durable intent permits retrying retirement.
     for (const role of roles) if (!(await original(fresh, role))) throw failure();
+    await requireUnmodifiedSystem(host.docker, current.ownership?.desktop ?? "");
     await host.assertQuiescent(input.cellId);
     host.signal?.throwIfAborted();
     if (
@@ -117,6 +119,8 @@ async function prepare(
   if (active.phase === "retiring") {
     // Validate both before the first DELETE, then freshly validate each exact stopped identity.
     for (const role of roles) await original(active, role);
+    if (await original(active, "desktop"))
+      await requireUnmodifiedSystem(host.docker, active.source.ownership?.desktop ?? "");
     for (const role of roles) {
       await beforeMutation();
       if (!(await original(active, role))) continue;

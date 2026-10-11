@@ -12,6 +12,7 @@ import {
   RuntimeUpdateStore,
 } from "./runtime-update-store.ts";
 import { CellStore } from "./store.ts";
+import { ComputerSystemState } from "./system-state.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
 
 const roots: string[] = [];
@@ -381,4 +382,47 @@ it("rechecks runtime admission after asynchronous Start verification before wiri
   expect(wire).not.toHaveBeenCalled();
   expect(f.request).not.toHaveBeenCalled();
   cells.dispose();
+});
+
+it("admits only locally recorded system snapshots derived from the installed release", async () => {
+  const f = fixture();
+  const snapshotImage = `sha256:${hex(12)}`;
+  const baseImage = f.containers.desktop.Image;
+  const labels = { "localdot.snapshot": other, "localdot.snapshot-source": hex(13) };
+  const state = new ComputerSystemState(f.home, f.docker, images.desktop);
+  const snapshot = {
+    cellId: other,
+    container: hex(13),
+    image: snapshotImage,
+    baseImage,
+    homeVolume: "snapshot-home",
+  };
+  state.records.write(other, snapshot);
+  f.containers.desktop.Image = snapshotImage;
+  f.containers.desktop.Config.Image = snapshotImage;
+  Object.assign(f.containers.desktop.Config.Labels, labels);
+  const original = f.request.getMockImplementation();
+  if (!original) throw new Error("Missing Docker fixture");
+  f.request.mockImplementation(async <T>(req: DockerRequest): Promise<T> => {
+    if (req.path === `/images/${encodeURIComponent(snapshotImage)}/json`)
+      return { Id: snapshotImage, Config: { Labels: labels } } as T;
+    if (req.path === "/volumes/snapshot-home")
+      return {
+        Name: "snapshot-home",
+        Labels: { "localdot.cell": other, "localdot.role": "home" },
+      } as T;
+    return (await original(req)) as T;
+  });
+  await expect(
+    verifyDesktopRuntimeImages(f.docker, f.record, images, f.home),
+  ).resolves.toBeUndefined();
+  state.records.write(other, { ...snapshot, baseImage: `sha256:${hex(14)}` });
+  await expect(verifyDesktopRuntimeImages(f.docker, f.record, images, f.home)).rejects.toThrow(
+    "does not match",
+  );
+  state.records.write(other, snapshot);
+  f.containers.desktop.Image = `sha256:${hex(15)}`;
+  await expect(verifyDesktopRuntimeImages(f.docker, f.record, images, f.home)).rejects.toThrow(
+    "does not match",
+  );
 });

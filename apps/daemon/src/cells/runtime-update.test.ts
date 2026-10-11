@@ -94,6 +94,7 @@ function fixture() {
       return [...mounted].map((Id) => ({ Id }));
     const path = req.path.replace(/\/json$/, "");
     const key = aliases.get(path) ?? path;
+    if (req.method === "GET" && req.path.endsWith("/changes")) return [];
     if (req.method === "GET") {
       const result = objects.get(key);
       if (!result) throw new DockerError(404, "absent", req.path);

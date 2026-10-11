@@ -277,34 +277,38 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
     );
     expect(nativeEffects.every((call) => call.path.includes("id-localdot-"))).toBe(true);
   });
-  it.each(["keyd closure", "container deletion", "network deletion", "post-delete absence"])(
-    "%s failure never allocates or wires another computer",
-    async (boundary) => {
-      const f = await fixture();
-      await f.fence();
-      const wires = f.keyd.wire.mock.calls.length,
-        creates = f.fake.state.calls.filter(
-          (call) => call.method === "POST" && call.path === "/containers/create",
-        ).length;
-      if (boundary === "keyd closure") f.keyd.close.mockRejectedValue(new Error("lost close"));
-      if (boundary === "container deletion")
-        f.fake.state.failRequests.add(`DELETE /containers/${f.old.ownership?.desktop}`);
-      if (boundary === "network deletion")
-        f.fake.state.failRequests.add(`DELETE /networks/${f.old.ownership?.internalNetwork}`);
-      if (boundary === "post-delete absence")
-        f.fake.state.failRequests.add(`GET /containers/${f.old.ownership?.desktop}/json`);
-      const response = await f.request(`/api/cells/${f.oldCellId}/replacement`, "POST", f.body());
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ phase: "blocked", reason: "old_retirement" });
-      expect(f.keyd.wire).toHaveBeenCalledTimes(wires);
-      expect(
-        f.fake.state.calls.filter(
-          (call) => call.method === "POST" && call.path === "/containers/create",
-        ),
-      ).toHaveLength(creates);
-      expect(new ComputerFences(f.home).isFenced(f.oldCellId)).toBe(true);
-    },
-  );
+  it.each([
+    "keyd closure",
+    "container deletion",
+    "network deletion",
+    "post-delete absence",
+    "system snapshot",
+  ])("%s failure never allocates or wires another computer", async (boundary) => {
+    const f = await fixture();
+    await f.fence();
+    const wires = f.keyd.wire.mock.calls.length,
+      creates = f.fake.state.calls.filter(
+        (call) => call.method === "POST" && call.path === "/containers/create",
+      ).length;
+    if (boundary === "keyd closure") f.keyd.close.mockRejectedValue(new Error("lost close"));
+    if (boundary === "container deletion")
+      f.fake.state.failRequests.add(`DELETE /containers/${f.old.ownership?.desktop}`);
+    if (boundary === "system snapshot") f.fake.state.failRequests.add("POST /commit");
+    if (boundary === "network deletion")
+      f.fake.state.failRequests.add(`DELETE /networks/${f.old.ownership?.internalNetwork}`);
+    if (boundary === "post-delete absence")
+      f.fake.state.failRequests.add(`GET /containers/${f.old.ownership?.desktop}/json`);
+    const response = await f.request(`/api/cells/${f.oldCellId}/replacement`, "POST", f.body());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ phase: "blocked", reason: "old_retirement" });
+    expect(f.keyd.wire).toHaveBeenCalledTimes(wires);
+    expect(
+      f.fake.state.calls.filter(
+        (call) => call.method === "POST" && call.path === "/containers/create",
+      ),
+    ).toHaveLength(creates);
+    expect(new ComputerFences(f.home).isFenced(f.oldCellId)).toBe(true);
+  });
   it("all ownership is checked before any foreign collision is touched", async () => {
     const f = await fixture();
     await f.fence();

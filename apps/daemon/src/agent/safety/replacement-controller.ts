@@ -88,7 +88,7 @@ export function createReplacementController(d: ReplacementControllerDeps) {
       createFresh: async (id) => {
         const record = d.cells.record(oldCellId);
         if (!record) throw new Error("old computer record unavailable");
-        await d.cells.create({ id, scale: record.scale });
+        await d.cells.create({ id, scale: record.scale, restoreFrom: oldCellId });
         const deadline = Date.now() + (d.readyTimeoutMs ?? 180000);
         for (;;) {
           const cell = d.cells.get(id);

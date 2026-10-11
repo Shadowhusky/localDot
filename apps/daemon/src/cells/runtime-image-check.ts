@@ -1,5 +1,6 @@
 import type { DockerClient } from "./docker.ts";
 import { RuntimeImages, runtimeSource } from "./runtime-update-store.ts";
+import { ComputerSystemState } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -15,6 +16,7 @@ export async function verifyDesktopRuntimeImages(
   docker: Pick<DockerClient, "request">,
   input: CellRecord,
   target: { desktop: string; gate: string },
+  home?: string,
 ): Promise<void> {
   try {
     const record = runtimeSource(input),
@@ -22,6 +24,21 @@ export async function verifyDesktopRuntimeImages(
     for (const role of ["gate", "desktop"] as const) {
       const path = `/containers/${encodeURIComponent(record.docker[role])}/json`;
       const before = await docker.request<unknown>({ method: "GET", path });
+      let expected = images[role];
+      let snapshot: { image: string; baseImage: string } | undefined;
+      if (
+        role === "desktop" &&
+        home &&
+        object(before) &&
+        object(before.Config) &&
+        object(before.Config.Labels) &&
+        typeof before.Config.Labels["localdot.snapshot"] === "string"
+      ) {
+        snapshot = await new ComputerSystemState(home, docker, images.desktop).read(
+          before.Config.Labels["localdot.snapshot"],
+        );
+        expected = snapshot.image;
+      }
       const valid = (raw: unknown, imageId?: unknown) =>
         object(raw) &&
         raw.Id === record.ownership?.[role] &&
@@ -29,7 +46,7 @@ export async function verifyDesktopRuntimeImages(
         /^sha256:[0-9a-f]{64}$/.test(raw.Image) &&
         (imageId === undefined || raw.Image === imageId) &&
         object(raw.Config) &&
-        raw.Config.Image === images[role] &&
+        raw.Config.Image === expected &&
         object(raw.Config.Labels) &&
         raw.Config.Labels["localdot.cell"] === record.id &&
         raw.Config.Labels["localdot.role"] === role;
@@ -46,8 +63,9 @@ export async function verifyDesktopRuntimeImages(
         image.Architecture !== "arm64" ||
         !Array.isArray(image.RepoDigests) ||
         !image.RepoDigests.includes(images[role]) ||
-        !valid(before, image.Id) ||
-        !valid(await docker.request({ method: "GET", path }), image.Id)
+        !(snapshot ? snapshot.baseImage === image.Id : true) ||
+        !valid(before, snapshot?.image ?? image.Id) ||
+        !valid(await docker.request({ method: "GET", path }), snapshot?.image ?? image.Id)
       )
         throw failure();
     }

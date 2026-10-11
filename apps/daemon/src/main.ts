@@ -175,7 +175,7 @@ const orchestrator = new CellOrchestrator({
   ...(runtimeImages
     ? {
         verifyRuntime: (record: import("./cells/types.ts").CellRecord) =>
-          verifyDesktopRuntimeImages(docker, record, runtimeImages),
+          verifyDesktopRuntimeImages(docker, record, runtimeImages, home),
       }
     : {}),
   docker,
@@ -454,7 +454,7 @@ const startup = () =>
         readCell: (id) => store.get(id),
         verify: async (record) => {
           if (!runtimeImages) throw new Error("Installed runtime image authority is missing.");
-          await verifyDesktopRuntimeImages(docker, record, runtimeImages);
+          await verifyDesktopRuntimeImages(docker, record, runtimeImages, home);
         },
         canPublish: () => !shuttingDown,
         retired: (id) =>

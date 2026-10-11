@@ -133,7 +133,7 @@ export class CellStore {
   readonly #root: string;
 
   constructor(
-    home: string,
+    readonly home: string,
     readonly keydPorts: PortRange = KEYD_PORT_RANGE,
   ) {
     this.#root = join(home, "cells");

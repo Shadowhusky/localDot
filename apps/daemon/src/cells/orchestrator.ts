@@ -36,6 +36,7 @@ import {
   NAME_PREFIX,
 } from "./spec.ts";
 import type { CellStore } from "./store.ts";
+import { ComputerSystemState } from "./system-state.ts";
 import {
   type CellEndpoints,
   type CellRecord,
@@ -469,7 +470,7 @@ export class CellOrchestrator {
     }
   }
 
-  async create(opts: { scale: Scale; id?: string }): Promise<CellSummary> {
+  async create(opts: { scale: Scale; id?: string; restoreFrom?: string }): Promise<CellSummary> {
     if (this.deps.creationAllowed?.() === false)
       throw new CellControlConflict("Computer runtime update recovery is incomplete.");
     const id = opts.id ?? ulid();
@@ -507,14 +508,19 @@ export class CellOrchestrator {
       );
       this.#reservedKeydPorts.add(keydPort);
       const port = keydPort;
-      return await this.#queued(id, () => this.#provision(id, port, opts.scale));
+      return await this.#queued(id, () => this.#provision(id, port, opts.scale, opts.restoreFrom));
     } finally {
       this.#reservedIds.delete(id);
       if (keydPort !== undefined) this.#reservedKeydPorts.delete(keydPort);
     }
   }
 
-  async #provision(id: string, keydPort: number, scale: Scale): Promise<CellSummary> {
+  async #provision(
+    id: string,
+    keydPort: number,
+    scale: Scale,
+    restoreFrom?: string,
+  ): Promise<CellSummary> {
     const startedAt = this.#now();
     const names = cellNames(id, this.#namePrefix);
     const undo: UndoStep[] = [];
@@ -587,12 +593,16 @@ export class CellOrchestrator {
           desktopIp: hostAddress(internalSubnet, DESKTOP_OFFSET),
         },
       };
+      let desktopImage = this.#images.desktop;
+      if (restoreFrom) {
+        const state = new ComputerSystemState(this.#store.home, this.#docker, this.#images.desktop);
+        // Even a lost helper-create response is cleaned up before volume rollback.
+        undo.push({ what: "home copy helper", run: () => state.cleanupCopy(id) });
+        desktopImage = await state.copyHome(restoreFrom, id, names.homeVolume);
+      }
       for (const [name, spec] of [
         [names.gate, gateSpec(record, this.#images.gate, await this.#relay())],
-        [
-          names.desktop,
-          desktopSpec(record, this.#images.desktop, { fullcolor: this.#streamFullcolor }),
-        ],
+        [names.desktop, desktopSpec(record, desktopImage, { fullcolor: this.#streamFullcolor })],
       ] as const) {
         const made = await this.#docker.request<{ Id: string }>({
           method: "POST",
@@ -1929,6 +1939,23 @@ export class CellOrchestrator {
       const revoked = !!this.#keyd && (await this.#closeInKeyd(id));
       if (!revoked) return { absent: false, revoked: false };
       if (record) await this.deps.updates?.discard(record);
+      if (purgeHome)
+        await new ComputerSystemState(
+          this.#store.home,
+          this.#docker,
+          this.#images.desktop,
+        ).cleanupCopy(id);
+      if (!purgeHome) {
+        if (!record)
+          throw new Error("The system data source is unavailable; refusing a clean recovery.");
+        // Verify exact ownership before stopping or snapshotting any resource.
+        await inspectOwnedCell(this.#docker, id, names, record.ownership);
+        const state = new ComputerSystemState(this.#store.home, this.#docker, this.#images.desktop);
+        if (!state.records.read(id)) {
+          await this.#stopContainer(record.ownership?.desktop ?? names.desktop);
+        }
+        await state.capture(record);
+      }
       await retireExactCell(this.#docker, id, names, record?.ownership, purgeHome);
       this.#retiredPortOwners.add(id);
       this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });

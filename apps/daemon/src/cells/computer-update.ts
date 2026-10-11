@@ -17,6 +17,7 @@ import {
 import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
+import { requireUnmodifiedSystem } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
 type Docker = Pick<DockerClient, "request">;
@@ -198,7 +199,8 @@ export class ComputerUpdates {
   async prepare(record: CellRecord): Promise<void> {
     this.#store();
     if (this.pending(record.id)) return;
-    ownedContainers(record);
+    const owned = ownedContainers(record);
+    await requireUnmodifiedSystem(this.#docker, owned.desktop);
     if (!(await this.#targets())) throw new CellControlConflict(NOT_HERE);
   }
 
@@ -216,6 +218,7 @@ export class ComputerUpdates {
       this.#available.set(record.id, false);
       return record;
     }
+    await requireUnmodifiedSystem(this.#docker, previous.desktop);
     // The gate's token follows the gate image: a computer made before the gate captured apps that
     // ignore the proxy gets one, and one going onto a gate image that can't capture gives it up.
     // It is kept before anything is made, so the new containers match it from their first start.
@@ -341,6 +344,8 @@ export class ComputerUpdates {
     if (!gate || !desktop || !record.ownership) throw new Lasting();
     if (entry.phase === "creating") step("retiring");
     if (entry.phase === "retiring") {
+      if (await this.#container(entry.previous.desktop))
+        await requireUnmodifiedSystem(this.#docker, entry.previous.desktop);
       await retireExactContainers(
         this.#docker,
         record.id,

@@ -19,6 +19,7 @@ export interface FakeContainer {
   running: boolean;
   paused: boolean;
   files: Map<string, Buffer>;
+  changes?: { Path: string; Kind: number }[];
   exitCode: number;
   starts: number;
   ports: Record<string, { HostIp: string; HostPort: string }[]>;
@@ -167,6 +168,20 @@ export async function startFakeDocker(
         Architecture: state.version.Arch,
         ...state.info,
       });
+    if (method === "POST" && path === "/commit") {
+      const c = findContainer(query.get("container") ?? "");
+      if (!c) return notFound("container");
+      const id = `sha256:${(state.images.size + 1).toString(16).padStart(64, "0")}`;
+      state.images.add(id);
+      state.imageIds.set(id, id);
+      state.imageLabels.set(id, (body as { Labels: Record<string, string> }).Labels);
+      return json(201, { Id: id });
+    }
+    const changes = /^\/containers\/([^/]+)\/changes$/.exec(path);
+    if (method === "GET" && changes) {
+      const c = findContainer(segment(changes));
+      return c ? json(200, c.changes ?? []) : notFound("container");
+    }
     const image = /^\/images\/(.+)\/json$/.exec(path);
     if (method === "GET" && image) {
       const reference = segment(image);

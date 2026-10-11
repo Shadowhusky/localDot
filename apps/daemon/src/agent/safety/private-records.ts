@@ -29,7 +29,8 @@ export class PrivateRecords<T> {
       | "computer-reset-holds"
       | "computer-reset-releases"
       | "computer-updates"
-      | "computer-image-updates",
+      | "computer-image-updates"
+      | "computer-system-state",
     private readonly parse: (value: unknown, id: string) => T,
   ) {
     let dir = resolve(home);

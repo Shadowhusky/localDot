@@ -152,6 +152,25 @@ describe("update detection", () => {
 });
 
 describe("CellOrchestrator.update", () => {
+  it("leaves installed system changes running instead of discarding them in an update", async () => {
+    const { orchestrator, record, id } = await setup();
+    rebuild();
+    const desktop = fake.state.containers.get(record.docker.desktop);
+    if (!desktop) throw new Error("missing test desktop");
+    desktop.changes = [
+      { Path: "/opt/example-app/bin", Kind: 1 },
+      { Path: "/var/lib/dpkg/status", Kind: 0 },
+    ];
+    const before = fake.state.calls.length;
+    await expect(orchestrator.update(id)).rejects.toThrow("would discard");
+    expect(desktop.running).toBe(true);
+    expect(
+      fake.state.calls
+        .slice(before)
+        .some((call) => call.method === "DELETE" || call.path.endsWith("/stop")),
+    ).toBe(false);
+  });
+
   it("moves the computer onto the new images with the same home, and retires the old containers", async () => {
     const { updates, orchestrator, store, changes, id, record } = await setup();
     rebuild();
