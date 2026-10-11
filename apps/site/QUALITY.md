@@ -37,3 +37,16 @@ for alpha testing; its Linux package is tested separately in an isolated Ubuntu 
 The public host initially returned complete MP4 responses for byte-range requests. The Worker now
 adds bounded range handling only for the six owned demo clips (maximum 4 MiB). Prefix, suffix,
 open-ended, invalid/unsatisfiable and If-Range cases are checked by `check-video-ranges.mjs`.
+
+## Demo framing
+
+All three sample demos were recaptured for desktop (1440×900) and mobile (390×500).
+The fixture scales its source image across the entire 2560×1600 stream canvas; capture
+checks the rendered video dimensions and all four corners before recording the usable clip.
+The idle command overlay is hidden through the app’s saved preference. Startup frames are
+trimmed, and each clip returns to the screen after briefly showing its activity or sources.
+
+The first, middle and final encoded frames of all six MP4s were visually inspected. The
+website player follows the desktop recording’s 16:10 proportions, and all three mobile
+replays were inspected at 390×844. Responsive, accessibility and fallback checks above
+passed again after this update. Recordings remain explicitly labelled sample demos.

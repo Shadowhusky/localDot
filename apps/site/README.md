@@ -37,6 +37,11 @@ node --import ./apps/web/node_modules/tsx/dist/loader.mjs apps/site/scripts/capt
 node --import ./apps/web/node_modules/tsx/dist/loader.mjs apps/site/scripts/capture-demos.ts --mobile
 ```
 
+The fixture scales its source picture to the complete 2560 × 1600 stream. Capture checks all four
+stream corners, waits for video readiness, hides commands through the app’s saved preference, and
+trims startup from the recordings. Each loop opens on the unobstructed screen, briefly shows the
+relevant activity or sources, then returns to the screen.
+
 Only MP4 files and WebP posters in `public/demos` are published. Capture scratch files and QA
 screenshots stay in ignored `qa/`. Vite publishes `public/` and the compiled site, not the
 repository or design sources. The old `check-browser`, `check-character` and `check-resilience`

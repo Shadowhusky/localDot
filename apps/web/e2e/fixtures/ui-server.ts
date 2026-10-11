@@ -264,7 +264,7 @@ const SETTINGS: Record<string, AgentSettings> = {
 const DESKTOP_JS = `
 const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
 const ctx=canvas.getContext('2d');const still=new Image();still.src='/owned-desktop.webp';
-setInterval(()=>{if(still.complete)ctx.drawImage(still,0,0)},100);
+setInterval(()=>{if(still.complete)ctx.drawImage(still,0,0,canvas.width,canvas.height)},100);
 const video=document.getElementById('videoStream');video.srcObject=canvas.captureStream(10);
 video.play().catch(()=>{});
 `;

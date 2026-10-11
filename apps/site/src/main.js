@@ -15,23 +15,23 @@ let userPaused = false,
   hiddenPause = false;
 const phone = matchMedia("(max-width:900px)").matches;
 const mediaPath = (id, poster = false) =>
-  `/demos/${id}${phone ? "-mobile" : ""}${poster ? "-poster.webp" : ".mp4"}`;
+  `/demos/${id}${phone ? "-mobile" : ""}${poster ? "-poster.webp" : ".mp4"}?v=framing2`;
 const video = $("#demo-video"),
   loader = $("#loader"),
   motion = $("#motion-toggle");
 const demos = {
   work: {
-    name: "The everyday, handled.",
+    name: "Make a report.",
     src: "/demos/work.mp4",
     copy: "A tour of the real app using a sample report: the live screen, task steps, and finished files.",
   },
   research: {
-    name: "Follow your curiosity.",
+    name: "Research a question.",
     src: "/demos/research.mp4",
     copy: "Explore a sample research task, its sources, and the steps behind an answer. Recorded in the app with sample data.",
   },
   play: {
-    name: "Make room for play.",
+    name: "Draw something.",
     src: "/demos/play.mp4",
     copy: "A drawing task in the real app: follow the process and explore the files it makes. Recorded with sample data.",
   },

@@ -1462,3 +1462,26 @@ html:not(.enhanced) #copy-install {
     display: none;
   }
 }
+
+/* Keep desktop recordings at their native 16:10 ratio instead of boxing a small
+   picture inside an unnecessarily wide player. Mobile keeps its portrait capture. */
+@media (min-width: 901px) and (min-height: 511px) {
+  .demo-panel {
+    --demo-picture-height: min(55svh, calc(100svh - 340px));
+    --demo-library-width: 220px;
+  }
+  .demo-panel > .demo-heading,
+  .demo-panel > .replay-shell,
+  .demo-panel > .demo-bottom {
+    width: min(100%, calc(var(--demo-picture-height) * 1.6 + var(--demo-library-width) + 2px));
+    align-self: center;
+  }
+  .video-stage video {
+    max-height: none;
+  }
+}
+@media (min-width: 901px) and (max-width: 1000px) {
+  .demo-panel {
+    --demo-library-width: 190px;
+  }
+}
