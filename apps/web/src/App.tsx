@@ -23,7 +23,6 @@ import { PermissionChip } from "./agent/PermissionChip.tsx";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
-import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
@@ -1628,11 +1627,6 @@ function Theatre({ api }: { api: ApiClient }) {
     enter: fullScreen.enter,
     exit: fullScreen.exit,
   });
-  const working = !!task && !yours;
-  const stepCount = useMemo(
-    () => (focus && working ? workSteps(rows, agent.model).length : 0),
-    [focus, working, rows, agent.model],
-  );
   const replayContinue = {
     current: conversation.sessions.at(-1) ?? null,
     reason: conversationReason,
@@ -1831,7 +1825,6 @@ function Theatre({ api }: { api: ApiClient }) {
                     reveal={!!asked && narration === asked}
                     forUser={hearing || !atWork(appStatus.row)}
                     showDot={showDot.value}
-                    note={focus && stepCount ? `Step ${stepCount}` : undefined}
                     idle={!hearing && !!idle}
                     action={
                       hearing || !tipAction

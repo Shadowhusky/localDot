@@ -222,7 +222,7 @@
 }
 
 /* Focus mode (design-v2 §8.5): sideways with the computer live, the picture takes the screen's
-   height under the island's strip, dot and the step it is on sit in the left margin and the task's
+   height under the island's strip, dot and its live narration sit in the left margin and the task's
    controls in the right. */
 .app[data-focus] {
   grid-template-columns: minmax(0, 1fr);
@@ -239,7 +239,7 @@
 
 .app[data-focus] .stage-col > .stage-frame {
   width: calc((100dvh - var(--stage-top) - 8px) * 1.6);
-  max-width: calc(100% - 2 * (56px + 16px));
+  max-width: calc(100% - 2 * (144px + 16px));
 }
 
 @media (orientation: portrait) {

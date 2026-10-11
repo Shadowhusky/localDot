@@ -327,8 +327,7 @@
   }
 }
 
-/* Focus mode (design-v2 §8.5): the band moves into the left margin, dot over the step it is on, and
-   the task's controls stand in the right margin, each column 8 px from the picture. */
+/* Fullscreen keeps the current narration visible outside the computer picture. */
 .app[data-focus] .stage-spill {
   display: none;
 }
@@ -344,6 +343,7 @@
 
 .app[data-focus] .stage-band {
   right: calc(100% + 8px);
+  width: 144px;
 }
 
 .stage-side {
@@ -357,6 +357,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .app[data-focus] .narrator-dock {
@@ -364,12 +366,30 @@
   top: auto;
   left: auto;
   flex: none;
-  width: 64px;
-  height: 64px;
+  width: 88px;
+  height: 88px;
 }
 
 .app[data-focus] .narration {
-  display: none;
+  display: block;
+  position: relative;
+  inset: auto;
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  text-align: center;
+  font-size: var(--text-callout);
+  line-height: var(--text-callout--line-height);
+}
+
+.app[data-focus] .narration-text {
+  align-items: center;
+}
+
+.app[data-focus] .narration-line {
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
 }
 
 .narrator-note {
@@ -408,7 +428,7 @@
 }
 
 /* Focus mode held upright, after Full screen (design-v2 §8.5 turned on its side): the picture across
-   the screen's width at its middle, dot and its step above it, the controls in a row under it with
+   the screen's width at its middle, dot and its current narration above it, the controls in a row under it with
    a word on turning the phone for a bigger picture. */
 @media (orientation: portrait) {
   .app[data-focus] .stage-band,
@@ -422,12 +442,41 @@
 
   .app[data-focus] .stage-band {
     top: auto;
-    bottom: 100%;
+    bottom: calc(100% + 48px);
+    height: max(0px, calc(var(--_margin) - 48px));
   }
 
   .app[data-focus] .stage-side {
     top: 100%;
     bottom: auto;
+  }
+
+  .app[data-focus] .narrator {
+    flex-direction: column;
+    padding: 4px 16px;
+    gap: 8px;
+  }
+
+  .app[data-focus] .narrator-dock {
+    width: clamp(64px, calc(var(--_margin) - 112px), 120px);
+    height: clamp(64px, calc(var(--_margin) - 112px), 120px);
+  }
+
+  .app[data-focus] .narration {
+    flex: none;
+    width: 100%;
+    max-width: 32rem;
+    min-height: calc(var(--text-callout--line-height) * 3);
+    text-align: center;
+  }
+
+  .app[data-focus] .narration-text {
+    align-items: center;
+  }
+
+  .app[data-focus] .narration-line {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
   }
 
   .app[data-focus] .focus-controls {
