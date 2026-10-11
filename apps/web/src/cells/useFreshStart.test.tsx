@@ -29,7 +29,7 @@ function control() {
       calls.push({
         url: String(input),
         method: init?.method,
-        body: JSON.parse(String(init?.body)),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
       return new Promise<Response>((resolve) => {
         answer = resolve;
@@ -128,4 +128,49 @@ it("offers the curtain's way out only when it is needed", () => {
     <Shell api={api} computer={cell({ fenced: { revision: 1 } })} selectReady={selectReady} />,
   );
   expect(screen.getByTestId("curtain").textContent).toBe("");
+});
+
+it("adopts a reset completed elsewhere without repeating the erase request", async () => {
+  const requestId = "01JXYZ0000000000000000WXYZ";
+  localStorage.setItem(`localdot-fresh-start:${OLD}`, requestId);
+  const { api, calls, answer } = control();
+  const selectReady = vi.fn(async () => true);
+  render(
+    <Shell api={api} computer={cell({ fenced: { revision: 1 } })} selectReady={selectReady} />,
+  );
+  expect(calls).toEqual([
+    { url: `http://fixture/api/cells/${OLD}/reset/${requestId}`, method: "GET", body: undefined },
+  ]);
+  await act(async () =>
+    answer(Response.json({ requestId, oldCellId: OLD, newCellId: FRESH, phase: "ready" })),
+  );
+  expect(selectReady).toHaveBeenCalledWith(FRESH);
+  expect(localStorage.getItem(`localdot-fresh-start:${OLD}`)).toBeNull();
+});
+
+it("keeps recovery pending until selecting the replacement succeeds", async () => {
+  const requestId = "01JXYZ0000000000000000WXYZ";
+  localStorage.setItem(`localdot-fresh-start:${OLD}`, requestId);
+  const { api, answer } = control();
+  const selectReady = vi.fn(async () => false);
+  render(
+    <Shell api={api} computer={cell({ fenced: { revision: 1 } })} selectReady={selectReady} />,
+  );
+  await act(async () =>
+    answer(Response.json({ requestId, oldCellId: OLD, newCellId: FRESH, phase: "ready" })),
+  );
+  expect(localStorage.getItem(`localdot-fresh-start:${OLD}`)).toBe(requestId);
+});
+
+it("does not adopt a response for another recovery request", async () => {
+  localStorage.setItem(`localdot-fresh-start:${OLD}`, "01JXYZ0000000000000000WXYZ");
+  const { api, answer } = control();
+  const selectReady = vi.fn(async () => true);
+  render(
+    <Shell api={api} computer={cell({ fenced: { revision: 1 } })} selectReady={selectReady} />,
+  );
+  await act(async () =>
+    answer(Response.json({ requestId: FRESH, oldCellId: OLD, newCellId: FRESH, phase: "ready" })),
+  );
+  expect(selectReady).not.toHaveBeenCalled();
 });

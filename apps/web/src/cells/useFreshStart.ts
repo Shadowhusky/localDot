@@ -53,8 +53,7 @@ export function useFreshStart(
     const requestId = savedRequest(id) ?? saveRequest(id, ulid());
     void requestReset(api, id, requestId)
       .then(async (fresh) => {
-        forgetRequest(id);
-        await selectReady(fresh);
+        if (await selectReady(fresh)) forgetRequest(id);
       })
       .catch((failure: unknown) => {
         const status = failure instanceof ResetFailure ? failure.status : null;
@@ -65,6 +64,54 @@ export function useFreshStart(
         if (mounted.current) setBusy(false);
       });
   }, [api, id, selectReady]);
+  // A lost reply or another tab can finish the same reset. Observe its durable
+  // status without issuing another destructive request, and adopt it when ready.
+  const recovering = !!cell?.fenced && !busy;
+  useEffect(() => {
+    const requestId = id && savedRequest(id);
+    if (!id || !requestId || !recovering) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    const check = async () => {
+      try {
+        const response = await api.fetch(
+          `${api.socketUrl("").replace(/^ws/, "http")}/api/cells/${id}/reset/${requestId}`,
+          {
+            method: "GET",
+            headers: { authorization: api.authorization() },
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+          },
+        );
+        if (response.status === 401) {
+          api.rejectUnauthorized?.();
+          return;
+        }
+        const record = response.ok ? await response.json() : null;
+        if (
+          !cancelled &&
+          record?.phase === "ready" &&
+          record.oldCellId === id &&
+          record.requestId === requestId &&
+          typeof record.newCellId === "string" &&
+          ULID_PATTERN.test(record.newCellId)
+        ) {
+          if (await selectReady(record.newCellId)) {
+            forgetRequest(id);
+            if (!cancelled) setError(null);
+            return;
+          }
+        }
+      } catch {}
+      if (!cancelled) timer = setTimeout(() => void check(), 3000);
+    };
+    void check();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [api, id, recovering, selectReady]);
   // A fresh start that began holds the old computer aside until the same request finishes it.
   const left = !!cell?.fenced && !busy && savedRequest(cell.id) !== undefined;
   return {
