@@ -13,7 +13,7 @@ pnpm --dir apps/site dev
 pnpm --dir apps/site check:browser  # while the dev server is running
 pnpm --dir apps/site typecheck
 pnpm --dir apps/site deploy:check
-pnpm --dir apps/site deploy
+pnpm --dir apps/site run deploy
 ```
 
 Deployment updates only the `localdot-site` Cloudflare Worker on `localdot.dev` and
