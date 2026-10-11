@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build && node scripts/notices.mjs",
+    "build": "node scripts/build.mjs",
     "build:gallery": "vite build --config vite.gallery.config.ts",
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
