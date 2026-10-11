@@ -457,6 +457,8 @@ svg {
   color: #a0a9b1;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  flex: none;
+  min-width: 11ch;
 }
 .scrubber {
   flex: 1;
@@ -471,6 +473,21 @@ svg {
   height: 24px;
   cursor: pointer;
 }
+.stable-copy {
+  min-width: 0;
+}
+.copy-stack {
+  display: grid;
+}
+.copy-stack > span {
+  grid-area: 1 / 1;
+  align-self: start;
+}
+.copy-stack > .copy-size {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
 .demo-bottom {
   display: flex;
   justify-content: space-between;
@@ -481,7 +498,9 @@ svg {
   color: var(--muted);
 }
 .demo-bottom p {
-  max-width: 560px;
+  width: 560px;
+  max-width: 100%;
+  min-width: 0;
 }
 .scroll-link {
   display: flex;
@@ -528,7 +547,7 @@ svg {
   margin-top: 26px;
 }
 .response {
-  height: 32px;
+  min-height: 32px;
   margin-top: 14px;
   font-size: 12px;
   color: var(--accent);
@@ -1224,7 +1243,8 @@ svg {
   }
 }
 @media (max-height: 510px) {
-  .enhanced .chapter {
+  .enhanced .chapter,
+  .enhanced .chapter:last-child {
     height: auto;
     min-height: 100svh;
   }

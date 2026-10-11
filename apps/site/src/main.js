@@ -36,6 +36,37 @@ const demos = {
     copy: "See a drawing take shape as dot uses the computer. Real task footage, edited at 2× speed.",
   },
 };
+// Overlay each possible caption in one grid cell. Hidden sizing copies reserve
+// the tallest wrapped variant at the current width and font size, without
+// hard-coded line counts, clipping, resize observers, or layout work on selection.
+function stableText(selector, values) {
+  const element = $(selector);
+  const current = document.createElement("span");
+  current.textContent = element.textContent;
+  const sizes = [...new Set([element.textContent, ...values])].map((text) => {
+    const span = document.createElement("span");
+    span.textContent = text;
+    span.className = "copy-size";
+    span.setAttribute("aria-hidden", "true");
+    return span;
+  });
+  element.classList.add("stable-copy");
+  const stack = document.createElement("span");
+  stack.className = "copy-stack";
+  stack.replaceChildren(current, ...sizes);
+  element.replaceChildren(stack);
+  return (text) => {
+    current.textContent = text;
+  };
+}
+const setReplayDescription = stableText(
+  "#replay-description",
+  Object.values(demos).map((d) => d.copy),
+);
+const setReplayName = stableText(
+  "#replay-name",
+  Object.values(demos).map((d) => d.name),
+);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 function measureProgress() {
   const y = scrollY;
@@ -139,8 +170,8 @@ async function selectDemo(id) {
   userPaused = false;
   video.pause();
   $$("[data-demo]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.demo === id)));
-  $("#replay-name").textContent = demo.name;
-  $("#replay-description").textContent = demo.copy;
+  setReplayName(demo.name);
+  setReplayDescription(demo.copy);
   message("Loading replay…");
   video.poster = mediaPath(id, true);
   video.src = mediaPath(id);
@@ -247,9 +278,10 @@ const greetings = [
   "Something useful? Something fun? I’m here.",
   "A little curiosity goes a long way.",
 ];
+const setGreeting = stableText("#greeting", greetings);
 let greeting = 0;
 $("#greet").addEventListener("click", () => {
-  $("#greeting").textContent = greetings[greeting++ % greetings.length];
+  setGreeting(greetings[greeting++ % greetings.length]);
   world?.greet();
 });
 const features = {
@@ -272,11 +304,19 @@ const features = {
     "Still under your control.",
   ],
 };
+const setFeatureTitle = stableText(
+  "#feature-title",
+  Object.values(features).map((f) => f[0]),
+);
+const setFeatureCopy = stableText(
+  "#feature-copy",
+  Object.values(features).map((f) => f[1]),
+);
 $$("[data-feature]").forEach((b, i) =>
   b.addEventListener("click", () => {
     const [title, copy, a, c] = features[b.dataset.feature];
-    $("#feature-title").textContent = title;
-    $("#feature-copy").textContent = copy;
+    setFeatureTitle(title);
+    setFeatureCopy(copy);
     $("#window-label-one").textContent = a;
     $("#window-label-two").textContent = c;
     $$("[data-feature]").forEach((v) => v.setAttribute("aria-pressed", String(v === b)));
@@ -289,10 +329,11 @@ const permissions = {
   auto: "Automatic review handles routine approvals. You stay involved when a decision needs you.",
   full: "Let routine work proceed. Destructive actions still require your confirmation.",
 };
+const setPermissionCopy = stableText("#permission-copy", Object.values(permissions));
 $$("[data-permission]").forEach((b) =>
   b.addEventListener("click", () => {
     $$("[data-permission]").forEach((v) => v.setAttribute("aria-pressed", String(v === b)));
-    $("#permission-copy").textContent = permissions[b.dataset.permission];
+    setPermissionCopy(permissions[b.dataset.permission]);
   }),
 );
 motion.hidden = false;
@@ -350,20 +391,33 @@ const installers = {
     "Linux x64 with systemd. Paste this in your terminal.",
   ],
 };
+const setInstallCommand = stableText(
+  "#install-command",
+  Object.values(installers).map((i) => i[0]),
+);
+const setInstallHelp = stableText(
+  "#install-help",
+  Object.values(installers).map((i) => i[1]),
+);
+const setInstallFeedback = stableText("#install-feedback", [
+  "Setup guides you through Docker if it is missing.",
+  "Copied. Paste it into your terminal to begin.",
+  "Select and copy the command above.",
+]);
 $$("[data-os]").forEach((b) =>
   b.addEventListener("click", () => {
     const [command, help] = installers[b.dataset.os];
-    $("#install-command").textContent = command;
-    $("#install-help").textContent = help;
-    $("#install-feedback").textContent = "Setup guides you through Docker if it is missing.";
+    setInstallCommand(command);
+    setInstallHelp(help);
+    setInstallFeedback("Setup guides you through Docker if it is missing.");
     $$("[data-os]").forEach((v) => v.setAttribute("aria-pressed", String(v === b)));
   }),
 );
 $("#copy-install").addEventListener("click", async () => {
   try {
-    await navigator.clipboard.writeText($("#install-command").textContent);
-    $("#install-feedback").textContent = "Copied. Paste it into your terminal to begin.";
+    await navigator.clipboard.writeText($("#install-command .copy-stack > span").textContent);
+    setInstallFeedback("Copied. Paste it into your terminal to begin.");
   } catch {
-    $("#install-feedback").textContent = "Select and copy the command above.";
+    setInstallFeedback("Select and copy the command above.");
   }
 });
