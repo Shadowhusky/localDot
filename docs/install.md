@@ -1,25 +1,27 @@
 # Install localDot
 
-Run the installer, follow its setup prompts, then open the sign-in link.
-The current installer builds from source. Allow **10–30 minutes or longer** for the first
+**Public tester downloads are not ready yet.** The app packages are built, but the computer
+images and remaining runtime checks must be completed before the public installer is published.
+Do not send testers the old raw GitHub download commands: the source repository is private.
+A browser GitHub login does not authenticate downloads made by PowerShell or `curl`, so those
+commands return **404**. No installation has started when this happens.
+
+Already installed? Run `localdot open` to reopen the app. For contributors with source access,
+see [development setup](development.md#development).
+
+## Source installer reference
+
+The following describes the source installer for contributors, not a public tester release.
+The current source installer builds from source. Allow **10–30 minutes or longer** for the first
 computer-image build. Peak disk requirements have not yet been validated; both your installation
 disk and Docker's data disk need free space. Prebuilt distribution is not enabled yet.
 
-## Install
-
 ### 1. Run the installer
 
-**macOS or Linux** — open Terminal and run as your normal user, without `sudo`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash
-```
-
-**Windows** — open PowerShell and run:
-
-```powershell
-irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
-```
+The one-line public commands will be added here after the packaged release is verified.
+Downloading only `install.ps1` from a private checkout is not sufficient: the source installer
+also downloads `install.sh` and the application repository. Do not put a GitHub token in a shared
+installation command. Contributors should use [development setup](development.md#development).
 
 Keep PowerShell open. Ubuntu account setup opens in a separate window; create your Linux user
 and password there. The installer closes its setup window when the account is ready and continues
@@ -84,6 +86,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 
 | Message or problem | What to do |
 | --- | --- |
+| `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Wait for the public packaged installer; retrying the same URL will not help. |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
 | `docker-storage-read-only` or `read-only file system` | Docker could not write its storage. Check the host disk holding Docker's data, restart Docker, then rerun setup. If it persists, collect Docker diagnostics. Do not factory-reset Docker or delete its disk image. |
@@ -271,11 +274,13 @@ installer.
 
 ### Installer options
 
-To pass options to the shell installer, use `bash -s --`:
+For a locally saved installer from an authenticated source checkout:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash -s -- --tailscale
+bash install.sh --tailscale
 ```
+
+The source installer also needs authenticated Git access when it downloads the app.
 
 For an existing installation, use `localdot update --tailscale`. `localdot update --help`
 lists the installer options.
@@ -283,7 +288,7 @@ lists the installer options.
 Windows PowerShell accepts `-Distro`, `-Ref`, `-Tailscale` and `-Uninstall`. For example:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1))) -Tailscale
+./install.ps1 -Tailscale
 ```
 
 The Windows installer enables systemd in the selected distro and adds a hidden Windows task to

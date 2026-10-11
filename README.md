@@ -14,38 +14,19 @@
 
 ## Install
 
-**1. Run the installer.** It checks your computer and offers to install missing tools and Docker.
-Existing working Docker installations are reused. Keep free space on both your installation
-disk and the disk holding Docker’s data; peak storage requirements are still being measured.
+**External testing is not available yet.** Packaged downloads are being prepared so you can
+install without access to this private repository. The public installer link will appear here
+once the app packages and computer images are published and verified.
 
-macOS or Linux — in Terminal, as your normal user:
+The old `raw.githubusercontent.com/Shadowhusky/localdot/...` commands require repository access
+and return **404** when downloaded anonymously—even if you are signed into GitHub in your browser.
+They are not tester installation links.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.sh | bash
-```
+Already installed? Run `localdot open` for a fresh sign-in link. On Windows, use PowerShell or
+Ubuntu/WSL. Open a new terminal if the command is not found.
 
-Windows — in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | iex
-```
-
-**2. Follow the setup prompts.** On Windows, keep PowerShell open while you create your Ubuntu
-account; setup continues automatically. If a restart is needed, setup reopens after you sign in.
-Finish Docker Desktop’s first-run setup and enable its **WSL integration → Ubuntu** when prompted.
-On macOS, finish any Apple command line tools and Docker first-run prompts.
-Native Ubuntu/Debian users may need one sign-out after Docker installation, then rerun the command.
-
-**3. Open the sign-in link** printed at the end. Choose a model, add your key or supported plan
-sign-in, then turn on dot’s computer and send a task. Allow **10–30 minutes** for the first
-computer-image build; Node.js and Go are installed automatically.
-
-To reopen localDot or replace an expired link, run `localdot open`. On Windows, run this and
-other `localdot` commands in **PowerShell or Ubuntu/WSL** after installation. Open a new terminal
-if the command is not found.
-
-[Installation help](docs/install.md) · [Use your phone or a server](docs/install.md#servers-without-a-screen) ·
-[Run from source](docs/development.md#development)
+[Installation status and help](docs/install.md) · [Run from source](docs/development.md#development) ·
+[Use your phone or a server](docs/install.md#servers-without-a-screen)
 
 ## What it is
 
