@@ -30,7 +30,7 @@ export function useNowMs(
   const ticking = running(now);
   const delay = ticking ? 1000 - intoSecond(now - (model.startT ?? 0)) + TICK_SLACK_MS : null;
   useEffect(() => {
-    if (delay === null) return;
+    if (delay === null || document.visibilityState === "hidden") return;
     const timer = setTimeout(() => setTick((x) => x + 1), delay);
     return () => clearTimeout(timer);
   }, [delay]);

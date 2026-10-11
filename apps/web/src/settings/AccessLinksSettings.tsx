@@ -6,8 +6,9 @@ import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
 import { SignInLinkSheet } from "./SignInLinkSheet.tsx";
 import { StableText } from "./StableText.tsx";
 
-type Address = { origin: string; label: string; description: string };
+type Address = { origin: string; label: string; description: string; available?: boolean };
 export function AccessLinksSettings({ api }: { api: ApiClient }) {
+  const [tailscaleSetup, setTailscaleSetup] = useState(false);
   const [links, setLinks] = useState<Address[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -23,10 +24,13 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
     let disposed = false;
     const read = async () => {
       try {
-        const value = await api.get<{ links: Address[] }>("/api/access-links");
+        const value = await api.get<{ links: Address[]; tailscaleSetup?: boolean }>(
+          "/api/access-links",
+        );
         if (!Array.isArray(value.links)) throw new Error("Invalid address list");
         if (!disposed) {
           setLinks(value.links);
+          setTailscaleSetup(!!value.tailscaleSetup);
           setError(null);
         }
       } catch (failure) {
@@ -72,6 +76,42 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
     <div>
       <GroupHead title="App links" />
       <GroupNote>Open localDot on your devices. Keep this computer on.</GroupNote>
+      {tailscaleSetup && (
+        <Group>
+          <div className="settings-remote-action">
+            <Button
+              variant="quiet"
+              busy={busy === "tailscale"}
+              disabledReason={busy && busy !== "tailscale" ? "Please wait…" : undefined}
+              onClick={async () => {
+                if (lock.current) return;
+                lock.current = true;
+                setBusy("tailscale");
+                setError(null);
+                try {
+                  const value = await api.post<{ links: Address[]; tailscaleSetup?: boolean }>(
+                    "/api/access-links/tailscale",
+                  );
+                  setLinks(value.links);
+                  setTailscaleSetup(!!value.tailscaleSetup);
+                } catch {
+                  setError(
+                    "Tailscale could not be enabled. Check Tailscale is signed in and HTTPS is enabled, then try again.",
+                  );
+                } finally {
+                  lock.current = false;
+                  setBusy(null);
+                }
+              }}
+            >
+              Enable Tailscale link
+            </Button>
+            <span className="settings-remote-hint">
+              Only devices on your Tailscale network can connect.
+            </span>
+          </div>
+        </Group>
+      )}
       {links.map((address) => (
         <div key={address.origin}>
           <Group>
@@ -80,7 +120,13 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
                 variant="quiet"
                 icon={result?.origin === address.origin && !result.fallback ? "check" : "copy"}
                 busy={busy === address.origin}
-                disabledReason={busy && busy !== address.origin ? "Creating a link…" : undefined}
+                disabledReason={
+                  address.available === false
+                    ? "LAN sharing is not enabled"
+                    : busy && busy !== address.origin
+                      ? "Creating a link…"
+                      : undefined
+                }
                 onClick={() => void copy(address.origin)}
               >
                 <StableText

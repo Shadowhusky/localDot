@@ -19,6 +19,7 @@ afterEach(() => {
   for (const m of managers.splice(0)) m.close();
   for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 function home() {
   const h = mkdtempSync(join(tmpdir(), "localdot-remote-"));
@@ -30,7 +31,7 @@ function manager(h = home(), domain: string | null = "remote.example.com") {
   managers.push(m);
   return m;
 }
-it("is opt-in and unavailable without an operator-configured domain", () => {
+it("is opt-in and unavailable when the service is explicitly disabled", () => {
   const m = manager();
   m.start();
   expect(m.snapshot().state).toBe("off");
@@ -104,9 +105,33 @@ it("corrupt optional configuration cannot start a relay or prevent local startup
 });
 it("loads operator configuration without managed-service environment variables and fails closed", () => {
   const h = home();
-  expect(configuredRemoteDomain(h)).toBeNull();
+  expect(configuredRemoteDomain(h)).toBe("localdot.dev");
   writeFileSync(join(h, "remote-service.json"), JSON.stringify({ domain: "example.com" }));
   expect(configuredRemoteDomain(h)).toBe("example.com");
   writeFileSync(join(h, "remote-service.json"), JSON.stringify({ domain: "https://example.com" }));
   expect(configuredRemoteDomain(h)).toBeNull();
+});
+
+it("makes the bundled relay available without connecting until the user opts in", () => {
+  vi.stubEnv("LOCALDOT_REMOTE_DOMAIN", undefined);
+  const h = home();
+  const m = manager(h, configuredRemoteDomain(h));
+  m.start();
+  expect(m.snapshot()).toMatchObject({ supported: true, enabled: false, state: "off", url: null });
+  expect(connectRemote).not.toHaveBeenCalled();
+  m.configure(true);
+  expect(m.snapshot()).toMatchObject({ enabled: true, state: "online" });
+  expect(new URL(m.snapshot().url ?? "").hostname).toMatch(/--dot\.localdot\.dev$/);
+});
+it("respects explicit environment overrides and fails closed on malformed configuration", () => {
+  const h = home();
+  vi.stubEnv("LOCALDOT_REMOTE_DOMAIN", "private.example.com");
+  expect(configuredRemoteDomain(h)).toBe("private.example.com");
+  vi.stubEnv("LOCALDOT_REMOTE_DOMAIN", "");
+  expect(configuredRemoteDomain(h)).toBeNull();
+  vi.stubEnv("LOCALDOT_REMOTE_DOMAIN", undefined);
+  for (const contents of ["{bad", "{}", '{"domain":""}', '{"domain":42}']) {
+    writeFileSync(join(h, "remote-service.json"), contents);
+    expect(configuredRemoteDomain(h)).toBeNull();
+  }
 });

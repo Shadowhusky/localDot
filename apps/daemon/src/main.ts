@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
+import { AccessLinks } from "./access-links.ts";
 import { manualStreamRoute } from "./agent/manual-stream.ts";
 import { MemoryStore } from "./agent/memory.ts";
 import { ComputerFences } from "./agent/safety/fences.ts";
@@ -72,7 +73,7 @@ import { RoutineLauncher } from "./routines/launch.ts";
 import { ExpiredRuns, routinePolicy } from "./routines/policy.ts";
 import { agentRunnerPort } from "./routines/runner-port.ts";
 import { RoutineScheduler } from "./routines/scheduler.ts";
-import { startAtLoginPort } from "./routines/start-at-login.ts";
+import { shellStartAtLoginPort, startAtLoginPort } from "./routines/start-at-login.ts";
 import { stopAll } from "./routines/stop-all.ts";
 import { fileStopAllAudit } from "./routines/stop-all-audit.ts";
 import { RoutineStore, type StoredRoutine } from "./routines/store.ts";
@@ -538,6 +539,8 @@ const appUpdater = serviceIdentity
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
 shutdown.unshift(() => appUpdater.close());
+const accessLinks = new AccessLinks(port);
+void accessLinks.read().catch(() => {});
 const app = createApp({
   remoteAccess,
   appUpdater,
@@ -545,6 +548,7 @@ const app = createApp({
   token,
   port,
   installCodes,
+  accessLinks,
   serviceReadiness,
   eventLog,
   exports: exportJobs,
@@ -610,12 +614,14 @@ const app = createApp({
     redact: (text) => running.routes.redactUserText(text),
     zone,
     now: Date.now,
-    startAtLogin: startAtLoginPort({
-      home,
-      identity: serviceIdentity,
-      node: process.execPath,
-      env: process.env,
-    }),
+    startAtLogin: serviceIdentity
+      ? startAtLoginPort({
+          home,
+          identity: serviceIdentity,
+          node: process.execPath,
+          env: process.env,
+        })
+      : await shellStartAtLoginPort(home, process.env.LOCALDOT_INSTALL_PREFIX, process.env),
     stopAll: (by) =>
       stopAll(
         {

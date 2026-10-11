@@ -9,7 +9,9 @@ The isolated computer has a **Desktop** and a separate **Web browser**. dot uses
 for anything online: opening a public web page switches the screen to it. The desktop's own
 Chromium is for local files and pages served on the desktop itself, such as a site dot is
 building on localhost. The label above the live stage identifies the screen receiving the
-current actions. A browser connection error does not redirect its input to the desktop.
+current actions. A browser connection error does not redirect its input to the desktop or open a temporary
+browser. Retrying uses the same saved browser profile, so a connection failure does not ask
+you to sign in again.
 
 The web browser starts with the computer and stays running between tasks, so switching to it is
 immediate. If it is still starting, dot's switch waits for it rather than failing. A web browser

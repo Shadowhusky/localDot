@@ -1,6 +1,6 @@
 import { type IncomingMessage, request } from "node:http";
 import { DOCKER_API, dockerSocketPath } from "../../../daemon/src/cells/docker.ts";
-import { type ImageEngine, installImageClient } from "./image-client.ts";
+import type { ImageEngine } from "./image-client.ts";
 
 export interface InstallContainerClient {
   engine(signal: AbortSignal): Promise<ImageEngine>;
@@ -11,12 +11,14 @@ export interface InstallContainerClient {
 const failure = () => new Error("LocalDot container shutdown could not be confirmed.");
 const containerId = /^[a-f0-9]{64}$/;
 
-/** Fixed local inspection and SIGKILL only. No exec, start, unpause, container/volume deletion,
+/** Fixed local inspection and termination only. Graceful mode gives applications five seconds to exit. No exec, start, unpause, container/volume deletion,
  * engine fallback, credentials or proxy. A kill response never certifies stopped state.
  */
-export function installContainerClient(socketInput: string): InstallContainerClient {
+export function installContainerClient(
+  socketInput: string,
+  options: { graceful?: boolean } = {},
+): InstallContainerClient {
   const socket = dockerSocketPath({ DOCKER_HOST: `unix://${socketInput}` });
-  const images = installImageClient(socket);
   async function exchange(method: "GET" | "POST", path: string, signal: AbortSignal) {
     signal.throwIfAborted();
     const controller = new AbortController(),
@@ -66,7 +68,8 @@ export function installContainerClient(socketInput: string): InstallContainerCli
       if (!res.complete || (length !== undefined && Number(length) !== size)) throw failure();
       if (method === "POST") {
         // 404/409 can mean a concurrent exit. Only subsequent inspection proves quiescence.
-        if (![204, 404, 409].includes(res.statusCode ?? 0)) throw failure();
+        if (![204, ...(options.graceful ? [304] : []), 404, 409].includes(res.statusCode ?? 0))
+          throw failure();
         return null;
       }
       if (res.statusCode === 404 && path.endsWith("/json")) return null;
@@ -92,7 +95,27 @@ export function installContainerClient(socketInput: string): InstallContainerCli
     }
   }
   return {
-    engine: (signal) => images.engine(signal),
+    async engine(signal) {
+      // Retirement applies to every supported Linux engine, including x64 WSL and native Linux.
+      // Release preparation has stricter platform checks; reusing its arm64 default here would
+      // prevent an otherwise valid x64 installation from shutting down.
+      const version = (await exchange("GET", "/version", signal)) as Record<string, unknown> | null;
+      const info = (await exchange("GET", "/info", signal)) as Record<string, unknown> | null;
+      const architecture =
+        version?.Arch === "arm64" || version?.Arch === "aarch64"
+          ? "arm64"
+          : version?.Arch === "amd64" || version?.Arch === "x86_64"
+            ? "amd64"
+            : undefined;
+      if (
+        version?.Os !== "linux" ||
+        !architecture ||
+        typeof info?.ID !== "string" ||
+        !/^[A-Za-z0-9_:-]{1,256}$/.test(info.ID)
+      )
+        throw failure();
+      return { id: info.ID, operatingSystem: "linux", architecture };
+    },
     list: (signal) =>
       exchange(
         "GET",
@@ -105,7 +128,11 @@ export function installContainerClient(socketInput: string): InstallContainerCli
     },
     async kill(id, signal) {
       if (!containerId.test(id)) throw failure();
-      await exchange("POST", `/containers/${id}/kill?signal=SIGKILL`, signal);
+      await exchange(
+        "POST",
+        options.graceful ? `/containers/${id}/stop?t=5` : `/containers/${id}/kill?signal=SIGKILL`,
+        signal,
+      );
     },
   };
 }

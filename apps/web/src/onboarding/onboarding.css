@@ -461,13 +461,13 @@
 .onboarding-catalog-status {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(var(--spacing) * 3);
   min-block-size: 3rem;
 }
 .onboarding-catalog-status > span {
   flex: 1;
   min-width: 0;
 }
-.onboarding-catalog-status > button {
+.onboarding-catalog-status > .ui-button {
   flex-shrink: 0;
 }

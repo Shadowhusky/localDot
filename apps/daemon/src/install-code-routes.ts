@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import type { AccessLinks } from "./access-links.ts";
 import { configuredAccessOrigins, isPublicOrigin } from "./guard.ts";
 import { InstallCodeCapacityError, type InstallCodes } from "./install-codes.ts";
 
@@ -8,9 +9,15 @@ const BODY_PATTERN =
   /^[\t\n\r ]*\{[\t\n\r ]*"code"[\t\n\r ]*:[\t\n\r ]*"([A-Za-z0-9_-]{43})"[\t\n\r ]*\}[\t\n\r ]*$/;
 
 /** Register after the existing /api bearer guard; exchange still uses the global Host guard. */
-export function installCodeRoutes(app: Hono, codes: InstallCodes, port: number): void {
-  app.get("/api/access-links", (c) => {
+export function installCodeRoutes(
+  app: Hono,
+  codes: InstallCodes,
+  port: number,
+  access?: AccessLinks,
+): void {
+  app.get("/api/access-links", async (c) => {
     c.header("cache-control", "no-store");
+    if (access) return c.json(await access.read());
     return c.json({
       links: [
         {
@@ -27,6 +34,17 @@ export function installCodeRoutes(app: Hono, codes: InstallCodes, port: number):
         })),
       ],
     });
+  });
+  app.post("/api/access-links/tailscale", async (c) => {
+    if (!access) return c.text("Tailscale setup is unavailable", 503);
+    try {
+      return c.json(await access.enableTailscale());
+    } catch {
+      return c.text(
+        "Tailscale could not be enabled. Check Tailscale is signed in and HTTPS is enabled, then try again.",
+        503,
+      );
+    }
   });
   app.post("/api/install-code", (c) => {
     if (new URL(c.req.url).search) return c.text("invalid request", 400);

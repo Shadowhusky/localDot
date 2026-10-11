@@ -17,6 +17,7 @@ import { runStartAtLogin } from "./install/start-at-login.ts";
 import { runUp, type UpOptions } from "./install/up.ts";
 import { runUpdate, type UpdateContext } from "./install/update.ts";
 import { runResetComputer } from "./reset-computer.ts";
+import { runStopComputers } from "./stop-computers.ts";
 import { passphraseRecord, runUnlock, terminalPrompt } from "./unlock.ts";
 
 export interface CommandContextInput {
@@ -53,7 +54,7 @@ export interface Runtime {
   ): Promise<number>;
   open(context: RuntimeContext, io: ConsoleIO, options: { qr?: true }): Promise<number>;
   stop(
-    context: RuntimeContext & { cellId?: string; all?: boolean },
+    context: RuntimeContext & { cellId?: string; all?: boolean; computers?: boolean },
     io: ConsoleIO,
   ): Promise<number>;
   resetComputer(
@@ -83,7 +84,7 @@ export const runtime: Runtime = {
       },
       io,
     ),
-  stop: runStop,
+  stop: (context, io) => (context.computers ? runStopComputers(context, io) : runStop(context, io)),
   resetComputer: runResetComputer,
   unlock: (context, io) =>
     runUnlock(

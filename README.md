@@ -32,7 +32,8 @@ Keep the terminal open. Setup checks Docker, offers to install missing prerequis
 prebuilt app files and computer images, and prints a sign-in link. Approve system prompts as needed;
 Windows also guides you through WSL and Ubuntu. Then choose a model and send dot a task.
 
-Already installed? `localdot open` prints a fresh sign-in link. Open a new terminal if the command
+Already installed? `localdot update` installs the latest release and keeps your data.
+`localdot open` prints a fresh sign-in link. Open a new terminal if the command
 is not found. The current alpha includes Apple silicon Mac and Linux x64 packages; Windows uses
 the Linux package through WSL 2. Clean native Windows installation remains to be verified.
 

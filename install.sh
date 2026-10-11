@@ -77,6 +77,7 @@ localdot: start and manage localDot
 
   localdot up                  Start localDot and print a sign-in link
   localdot down                Stop localDot until you start it again or restart this computer
+  localdot start-at-login on|off|status  Choose whether localDot starts at login
   localdot restart             Restart localDot
   localdot open [--qr]         Print a fresh, single-use sign-in link (--qr: draw it for your phone)
   localdot doctor              Check Docker, the images, the key service and the app
@@ -1067,15 +1068,49 @@ ensure_linger() {
     warn "localDot stops when you sign out. To keep it running, run: sudo loginctl enable-linger $user"
 }
 
+# This setting changes future starts only. It never interrupts the running service.
+startup_preference() {
+  if [ -f "$PREFIX/start-at-login" ]; then cat "$PREFIX/start-at-login"; else say on; fi
+}
+set_startup_preference() {
+  local value=${1:-status} label
+  case "$value" in
+    status) startup_preference; return ;;
+    on|off) ;;
+    *) die "Usage: localdot start-at-login on|off|status" ;;
+  esac
+  owned "$KEYD_FILE" && owned "$DAEMON_FILE" || die "Startup services are missing. Rerun the localDot installer to repair them."
+  if [ "$OS" = macos ]; then
+    for label in "$KEYD_LABEL" "$DAEMON_LABEL"; do
+      if [ "$value" = on ]; then launchctl enable "gui/$(id -u)/$label"
+      else launchctl disable "gui/$(id -u)/$label"; fi
+    done
+  else
+    user_systemd || die "Your user services are unavailable. Sign in again, then retry."
+    if [ "$value" = on ]; then systemctl --user enable --quiet "$KEYD_UNIT" "$DAEMON_UNIT"
+    else systemctl --user disable --quiet "$KEYD_UNIT" "$DAEMON_UNIT"; fi
+  fi
+  (umask 077; printf '%s\n' "$value" > "$PREFIX/start-at-login.new")
+  mv "$PREFIX/start-at-login.new" "$PREFIX/start-at-login"
+  say "$value"
+}
+
 start_services() {
   if [ "$OS" = macos ]; then
+    launchctl enable "gui/$(id -u)/$KEYD_LABEL"
+    launchctl enable "gui/$(id -u)/$DAEMON_LABEL"
     load_agent "$KEYD_LABEL" "$1"
     load_agent "$DAEMON_LABEL" "$2"
+    if [ "$(startup_preference)" = off ]; then set_startup_preference off >/dev/null; fi
     return
   fi
   user_systemd || true
   systemctl --user daemon-reload
-  systemctl --user enable --quiet "$KEYD_UNIT" "$DAEMON_UNIT"
+  if [ "$(startup_preference)" = on ]; then
+    systemctl --user enable --quiet "$KEYD_UNIT" "$DAEMON_UNIT"
+  else
+    systemctl --user disable --quiet "$KEYD_UNIT" "$DAEMON_UNIT"
+  fi
   if [ "$1" = 1 ]; then systemctl --user restart "$KEYD_UNIT"; else systemctl --user start "$KEYD_UNIT"; fi
   if [ "$2" = 1 ]; then systemctl --user restart "$DAEMON_UNIT"; else systemctl --user start "$DAEMON_UNIT"; fi
   ensure_linger
@@ -1356,7 +1391,8 @@ run_command() {
     wait_ready
     show_link
     ;;
-  down) stop_services ;;
+  down) stop_services; cli stop --computers ;;
+  start-at-login) set_startup_preference "${COMMAND_ARGS[@]:-status}" ;;
   restart)
     stop_services
     start_services 0 0

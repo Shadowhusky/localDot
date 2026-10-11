@@ -69,3 +69,14 @@ it("copies in one action and hides the long URL when copying succeeds", async ()
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
   }
 });
+
+it("shows the actionable service explanation instead of hiding it behind a generic disabled label", async () => {
+  const detail =
+    "The custom relay address is invalid. Correct remote-service.json, then restart localDot.";
+  const api = fixture({ ...off, supported: false, detail });
+  const toggle = await screen.findByRole("switch", { name: "Allow remote access" });
+  expect(toggle.getAttribute("aria-disabled")).toBe("true");
+  expect(screen.getByText(detail)).toBeTruthy();
+  fireEvent.click(toggle);
+  expect(api.put).not.toHaveBeenCalled();
+});

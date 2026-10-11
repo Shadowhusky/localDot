@@ -143,11 +143,21 @@ export async function containServiceContainers(
   callerSignal: AbortSignal,
 ) {
   const config = checkedServiceConfiguration(configInput);
+  return containHomeContainers(config.settings.home, client, inventory, callerSignal);
+}
+
+/** The caller must hold the daemon lock throughout retirement and verification. */
+export async function containHomeContainers(
+  homePath: string,
+  client: InstallContainerClient,
+  inventory: () => Promise<Inventory>,
+  callerSignal: AbortSignal,
+) {
   const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(60_000)]);
   signal.throwIfAborted();
   const before = await inventory(),
     engine = await client.engine(signal);
-  const home = createHash("sha256").update(config.settings.home).digest("hex").slice(0, 16);
+  const home = createHash("sha256").update(homePath).digest("hex").slice(0, 16);
   const records = new Map(before.records.map((record) => [record.id, record]));
   let failed = before.invalid;
   const updates = new Map<string, RuntimeUpdateJournal>();

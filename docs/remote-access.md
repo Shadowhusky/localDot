@@ -97,11 +97,13 @@ Add deployment rate limits on connection/pairing endpoints and billing alerts be
    pattern, and rejects plain HTTP. Enable HTTPS redirects for this hostname space.
 3. Run `pnpm --filter @localdot/remote types`, `build`, and `test`, authenticate Wrangler to the
    intended account, then deploy with `pnpm --filter @localdot/remote run deploy`.
-4. Configure the daemon's service address with `~/.localdot/remote-service.json` containing
+4. Packaged installations use `localdot.dev` by default; remote access stays off until enabled.
+   For a custom relay, configure the daemon's service address with `~/.localdot/remote-service.json` containing
    `{"domain":"<your-domain>"}`. This file works with the installed service's clean environment;
    `LOCALDOT_REMOTE_DOMAIN` is also supported for manually started daemons. The service remains
    off until the user enables it. Restart the daemon when no task is active; never replace the
-   computer. A release can ship the service configuration once the production domain is verified.
+   computer. An invalid or empty override disables remote access rather than falling back to a
+   different service. Remove the override to return to the bundled relay.
 5. Enable the switch in Settings. Wait for Connected, copy a link, and open it on a different
    network. Check desktop video, controls, chat, file upload/download, reconnect and revocation.
 

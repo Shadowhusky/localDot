@@ -168,7 +168,7 @@ export function useLiveSession(
     let misses = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
-      if (polling) return;
+      if (cancelled || polling || document.visibilityState === "hidden") return;
       polling = true;
       again = false;
       const asked = choices.current;
@@ -197,7 +197,8 @@ export function useLiveSession(
         if (!cancelled) {
           if (first) setAnswered(cellId);
           first = false;
-          timer = setTimeout(poll, again ? 0 : misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
+          if (!document.hidden)
+            timer = setTimeout(poll, again ? 0 : misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
         }
       }
     };
@@ -210,7 +211,12 @@ export function useLiveSession(
     };
     void poll();
     const stopForeground = onForeground(() => lookNow.current());
+    const hide = () => {
+      if (document.visibilityState === "hidden") clearTimeout(timer);
+    };
+    document.addEventListener("visibilitychange", hide);
     return () => {
+      document.removeEventListener("visibilitychange", hide);
       stopForeground();
       cancelled = true;
       clearTimeout(timer);
@@ -241,7 +247,7 @@ export function useLiveSession(
     // The API's own fetch (injected in tests); a failed sync keeps the last clock and retries on
     // the timer instead of surfacing as an unhandled rejection.
     const sync = async () => {
-      if (syncing) return;
+      if (syncing || document.visibilityState === "hidden") return;
       syncing = true;
       try {
         const [viewer, session] = await Promise.all([
@@ -260,9 +266,10 @@ export function useLiveSession(
         syncing = false;
       }
     };
-    void sync();
-    const clockTimer = setInterval(() => void sync(), CLOCK_EVERY_MS);
-    const flush = setInterval(() => {
+    let clockTimer: ReturnType<typeof setInterval> | undefined;
+    let flush: ReturnType<typeof setInterval> | undefined;
+    const flushNow = () => {
+      if (document.visibilityState === "hidden") return;
       if (dirty.current) {
         dirty.current = false;
         words.current = false;
@@ -271,7 +278,18 @@ export function useLiveSession(
         words.current = false;
         agentFeed.words();
       }
-    }, REACT_HZ_MS);
+    };
+    const activity = () => {
+      clearInterval(clockTimer);
+      clearInterval(flush);
+      if (document.visibilityState === "hidden") return;
+      void sync();
+      flushNow();
+      clockTimer = setInterval(() => void sync(), CLOCK_EVERY_MS);
+      flush = setInterval(flushNow, REACT_HZ_MS);
+    };
+    document.addEventListener("visibilitychange", activity);
+    activity();
     // The task's history arrives whole, so the thread draws it at once; the live feed then goes on
     // from its last event, which it sends again to confirm it holds the same history.
     const reading = new AbortController();
@@ -340,6 +358,7 @@ export function useLiveSession(
     return () => {
       disposed = true;
       reading.abort();
+      document.removeEventListener("visibilitychange", activity);
       clearInterval(clockTimer);
       clearInterval(flush);
       if (!closed) socket?.close();

@@ -114,7 +114,7 @@ async function readEventLines(
 ): Promise<void> {
   const response = await api.fetch(`${replayOrigin(api)}${path}`, {
     headers: { authorization: api.authorization(), accept: "application/x-ndjson" },
-    credentials: "omit",
+    credentials: "same-origin",
     redirect: "error",
     signal,
   });

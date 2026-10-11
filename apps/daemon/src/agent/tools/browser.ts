@@ -23,9 +23,6 @@ import {
 import { ELEMENTS_HEADER, elementLine, pageElement } from "./elements.ts";
 import { sourceLine } from "./research.ts";
 
-export const DESKTOP_FALLBACK =
-  "The web browser couldn't start, so this page opened in the desktop's Chromium, which doesn't keep sign-ins: don't sign in there.";
-
 function selectedBrowser(ctx: ToolCallContext) {
   screenContext(ctx);
   if (ctx.screen?.selection.screen !== "browser") return undefined;

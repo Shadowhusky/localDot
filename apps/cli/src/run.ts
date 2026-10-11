@@ -92,7 +92,12 @@ export async function runCli(
       return await runtime.open(context, io, command.qr ? { qr: true } : {});
     if (command.kind === "stop")
       return await runtime.stop(
-        { ...context, cellId: command.cellId, ...(command.all ? { all: true } : {}) },
+        {
+          ...context,
+          cellId: command.cellId,
+          ...(command.all ? { all: true } : {}),
+          ...(command.computers ? { computers: true } : {}),
+        },
         io,
       );
     if (command.kind === "reset-computer" && command.operation !== "preview")

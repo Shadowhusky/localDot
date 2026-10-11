@@ -66,7 +66,7 @@ export function replayView(source: ReplaySource, view: View): View {
 export function replayRequestInit(source: ReplaySource): RequestInit {
   return {
     headers: { authorization: source.authorization },
-    credentials: "omit",
+    credentials: "same-origin",
     redirect: "error",
   };
 }

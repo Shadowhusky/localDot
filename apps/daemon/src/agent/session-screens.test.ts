@@ -1275,7 +1275,7 @@ describe("session-owned screen authority", () => {
     expect(f.deps.browser.start).not.toHaveBeenCalled();
   });
 
-  it("opens the page on the desktop with a note when the web browser cannot start", async () => {
+  it("keeps saved sign-ins isolated when the browser cannot start, and retries in the same browser", async () => {
     const f = fixture();
     await f.ready();
     const h = tools(f);
@@ -1283,15 +1283,19 @@ describe("session-owned screen authority", () => {
     bindDesktop(h);
     const desktop = vi.spyOn(h.tools, "desktop");
     const navigated = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
-    expect(navigated.result.ok).toBe(true);
+    expect(navigated.result.ok).toBe(false);
     expect(navigated.result.content[0]).toEqual({
       type: "text",
-      text: expect.stringContaining("web browser couldn't start"),
+      text: expect.stringContaining("Saved sign-ins are still kept"),
     });
     expect(f.screens.selection.screen).toBe("desktop");
-    expect(desktop).toHaveBeenCalledWith(f.session.cellId);
+    expect(desktop).not.toHaveBeenCalled();
     expect(f.client.navigate).not.toHaveBeenCalled();
     expect(f.session.stopped).toBe(false);
+    const retry = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
+    expect(retry.result.ok).toBe(true);
+    expect(f.screens.selection.screen).toBe("browser");
+    expect(desktop).not.toHaveBeenCalled();
   });
 
   it("goes back to the desktop for a local address while the web browser is shown", async () => {

@@ -1,7 +1,8 @@
-import { spawn as nodeSpawn } from "node:child_process";
+import { execFile, spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:fs";
-import { type FileHandle, open } from "node:fs/promises";
+import { type FileHandle, lstat, open, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { StartAtLoginState } from "@localdot/protocol";
 import {
   type ManagedServiceIdentity,
@@ -102,4 +103,61 @@ export function startAtLoginPort(deps: StartAtLoginDeps): StartAtLoginPort {
       return status();
     },
   };
+}
+
+// Public shell/package installs have install.env rather than the managed-release journal.
+// Invoke their own installed command, with fixed arguments and no credentials in its environment.
+export async function shellStartAtLoginPort(
+  home: string,
+  prefix: string | undefined,
+  env: NodeJS.ProcessEnv,
+  execute = promisify(execFile),
+): Promise<StartAtLoginPort> {
+  if (!prefix) return unavailableStartAtLogin;
+  try {
+    if ((await realpath(prefix)) !== prefix) return unavailableStartAtLogin;
+    const file = join(prefix, "install.env");
+    const stat = await lstat(file);
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.size > 8192 ||
+      stat.uid !== process.getuid?.() ||
+      stat.mode & 0o022
+    )
+      return unavailableStartAtLogin;
+    const text = await readFile(file, "utf8");
+    if (
+      !text.startsWith("# Managed by localDot's install.sh\n") ||
+      !text.split("\n").includes(`LOCALDOT_HOME="${home}"`)
+    )
+      return unavailableStartAtLogin;
+    const command = join(prefix, "bin", "localdot");
+    const script = await lstat(command);
+    if (
+      !script.isFile() ||
+      script.isSymbolicLink() ||
+      script.uid !== process.getuid?.() ||
+      script.mode & 0o022
+    )
+      return unavailableStartAtLogin;
+    const run = async (operation: "status" | "on" | "off"): Promise<StartAtLoginState> => {
+      try {
+        const { stdout } = await execute(command, ["start-at-login", operation], {
+          cwd: "/",
+          timeout: 15_000,
+          maxBuffer: 4096,
+          env: { HOME: env.HOME ?? "", PATH: env.PATH ?? "/usr/bin:/bin", LOCALDOT_HOME: home },
+        });
+        const value = stdout.trim();
+        if (value !== "on" && value !== "off") throw new Error("Unexpected startup state");
+        return value;
+      } catch {
+        throw new StartAtLoginError(operation === "status" ? UNREADABLE : CHANGE_FAILED);
+      }
+    };
+    return { status: () => run("status"), set: (enabled) => run(enabled ? "on" : "off") };
+  } catch {
+    return unavailableStartAtLogin;
+  }
 }

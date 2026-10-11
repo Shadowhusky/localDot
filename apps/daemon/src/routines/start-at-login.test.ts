@@ -1,10 +1,10 @@
 import type { SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StartAtLoginError, startAtLoginPort } from "./start-at-login.ts";
+import { StartAtLoginError, shellStartAtLoginPort, startAtLoginPort } from "./start-at-login.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -128,4 +128,35 @@ describe("start at login from the daemon", () => {
     symlinkSync(join(f.home, "elsewhere.json"), join(f.home, "install", "start-at-login.json"));
     await expect(f.port.status()).rejects.toThrow(StartAtLoginError);
   });
+});
+
+it("supports public packages and invokes only their installed startup command", async () => {
+  const prefix = realpathSync(mkdtempSync(join(tmpdir(), "ld-shell-login-")));
+  roots.push(prefix);
+  const home = join(prefix, "state");
+  mkdirSync(join(prefix, "bin"));
+  writeFileSync(
+    join(prefix, "install.env"),
+    `# Managed by localDot's install.sh\nLOCALDOT_HOME="${home}"\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(join(prefix, "bin/localdot"), "#!/bin/sh\n", { mode: 0o700 });
+  const execute = vi.fn(async (_command, args) => ({
+    stdout: args[1] === "off" ? "off\n" : "on\n",
+  }));
+  const port = await shellStartAtLoginPort(
+    home,
+    prefix,
+    { HOME: prefix, SECRET: "not-forwarded" },
+    execute as never,
+  );
+  expect(await port.status()).toBe("on");
+  expect(await port.set(false)).toBe("off");
+  expect(execute.mock.calls[1]?.slice(0, 2)).toEqual([
+    join(prefix, "bin/localdot"),
+    ["start-at-login", "off"],
+  ]);
+  expect(JSON.stringify(execute.mock.calls)).not.toContain("not-forwarded");
+  const wrong = await shellStartAtLoginPort("/other-home", prefix, {}, execute as never);
+  expect(await wrong.status()).toBe("unavailable");
 });

@@ -147,7 +147,7 @@ async function computerHearing(api: ApiClient, language: string): Promise<Hearin
             headers: { authorization: api.authorization(), "content-type": "audio/wav" },
             body: wavFile(samples),
             signal: AbortSignal.timeout(TRANSCRIBE_MS),
-            credentials: "omit",
+            credentials: "same-origin",
             cache: "no-store",
           },
         )

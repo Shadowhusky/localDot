@@ -10,7 +10,7 @@ export type Command =
   | { kind: "start-at-login"; operation: "on" | "off" | "status" }
   | { kind: "update"; version?: string; prepareOnly?: true; installPrepared?: true }
   | { kind: "logs"; follow: boolean }
-  | { kind: "stop"; cellId?: string; all?: true }
+  | { kind: "stop"; cellId?: string; all?: true; computers?: true }
   | {
       kind: "reset-computer";
       cellId: string;
@@ -105,6 +105,8 @@ export function parseArgs(args: readonly string[]): Command | undefined {
       ...(args[1] === "--prepare" ? { prepareOnly: true as const } : {}),
       ...(args[1] === "--install-prepared" ? { installPrepared: true as const } : {}),
     };
+  if (args.length === 2 && args[0] === "stop" && args[1] === "--computers")
+    return { kind: "stop", computers: true };
   if (args.length === 2 && args[0] === "stop" && args[1] === "--all")
     return { kind: "stop", all: true };
   if (

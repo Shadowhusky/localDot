@@ -112,58 +112,61 @@ export function Curtain({
       data-dot={showDot ? "" : undefined}
       aria-label={copy ? copy.title : "Your computer"}
     >
-      {copy ? (
-        <div className="curtain-col">
-          {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
+      <div className="curtain-col" data-checking={!copy || undefined}>
+        {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
+        {!copy && <VisuallyHidden role="status">Starting localDot</VisuallyHidden>}
+        {copy ? (
           <h2 className="curtain-title">{copy.title}</h2>
-          <p className="curtain-sub">
-            {copy.clock && timing && (
-              <>
-                <span className="num">{clock((now - timing.since) / 1000)}</span>
-                {" · "}
-              </>
-            )}
-            {(copy.steps && step && STEP_WORDS[step]) || copy.sub}
-          </p>
-          <div className="curtain-act" data-progress={copy.progress || undefined}>
-            <CurtainProgress timing={timing && { ...timing, step }} now={now} done={ready} />
-            {fresh ? (
-              <FreshStartButton
+        ) : (
+          <div className="curtain-title" aria-hidden="true">
+            {"\u00a0"}
+          </div>
+        )}
+        <p className="curtain-sub" aria-hidden={!copy || undefined}>
+          {copy?.clock && timing && (
+            <>
+              <span className="num">{clock((now - timing.since) / 1000)}</span>
+              {" · "}
+            </>
+          )}
+          {(copy?.steps && step && STEP_WORDS[step]) || copy?.sub || "\u00a0"}
+        </p>
+        <div
+          className="curtain-act"
+          data-progress={copy?.progress || undefined}
+          aria-hidden={!copy || undefined}
+        >
+          <CurtainProgress timing={timing && { ...timing, step }} now={now} done={ready} />
+          {fresh ? (
+            <FreshStartButton
+              variant="primary"
+              size={phone ? "xl" : "lg"}
+              className="curtain-button"
+              busy={fresh.busy}
+              aria-hidden={copy?.progress || undefined}
+              tabIndex={copy?.progress ? -1 : undefined}
+              run={fresh.run}
+            />
+          ) : (
+            (action || recovering) &&
+            copy?.button && (
+              <Button
                 variant="primary"
                 size={phone ? "xl" : "lg"}
+                icon={copy.button.icon}
                 className="curtain-button"
-                busy={fresh.busy}
-                aria-hidden={copy.progress || undefined}
-                tabIndex={copy.progress ? -1 : undefined}
-                run={fresh.run}
-              />
-            ) : (
-              (action || recovering) &&
-              copy.button && (
-                <Button
-                  variant="primary"
-                  size={phone ? "xl" : "lg"}
-                  icon={copy.button.icon}
-                  className="curtain-button"
-                  busy={recovering && replace.busy}
-                  disabledReason={enabled ? undefined : "Wait a moment"}
-                  aria-hidden={copy.progress || undefined}
-                  tabIndex={copy.progress ? -1 : undefined}
-                  onClick={copy.progress ? undefined : recovering ? replace.run : onAction}
-                >
-                  {copy.button.label}
-                </Button>
-              )
-            )}
-          </div>
+                busy={recovering && replace.busy}
+                disabledReason={enabled ? undefined : "Wait a moment"}
+                aria-hidden={copy?.progress || undefined}
+                tabIndex={copy?.progress ? -1 : undefined}
+                onClick={copy.progress ? undefined : recovering ? replace.run : onAction}
+              >
+                {copy.button.label}
+              </Button>
+            )
+          )}
         </div>
-      ) : (
-        // Nothing is known yet: dot wakes where it will sit, and no words that could turn out wrong.
-        <div className="curtain-col" role="status">
-          {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
-          <VisuallyHidden>Starting localDot</VisuallyHidden>
-        </div>
-      )}
+      </div>
     </section>
   );
 }

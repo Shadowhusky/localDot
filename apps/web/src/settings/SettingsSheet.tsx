@@ -761,12 +761,12 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
                 description={
                   login.state === "unavailable"
                     ? undefined
-                    : "So routines run without you opening anything"
+                    : "Start localDot when you sign in to this computer"
                 }
                 checked={login.state === "on"}
                 disabledReason={
                   login.state === "unavailable"
-                    ? "Works in the installed app"
+                    ? "Rerun the localDot installer on this computer to enable startup settings."
                     : login.state === undefined
                       ? "Checking…"
                       : login.busy

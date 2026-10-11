@@ -123,7 +123,11 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
           }
           checked={status.enabled}
           disabledReason={
-            !status.supported ? "Remote service is not configured" : busy ? "Saving…" : undefined
+            !status.supported
+              ? status.detail || "Update localDot to set up remote access, then reopen Settings."
+              : busy
+                ? "Saving…"
+                : undefined
           }
           onCheckedChange={(on) => void enable(on)}
         />

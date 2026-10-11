@@ -68,7 +68,7 @@ export function useAgentSession(
       return !disposed && current.cellId === cellId && current.sessionId === sessionId;
     };
     const poll = async () => {
-      if (!matches()) return;
+      if (!matches() || document.visibilityState === "hidden") return;
       if (busy) {
         queued = true;
         return;
@@ -134,12 +134,20 @@ export function useAgentSession(
     };
     const unsubscribe = feed.subscribe(invalidate);
     refresh.current = invalidate;
-    void poll();
-    const timer = setInterval(() => {
-      if (!feed.read().model.ended && !resting.current) void poll();
-    }, 1000);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const activity = () => {
+      clearInterval(timer);
+      if (document.visibilityState === "hidden") return;
+      void poll();
+      timer = setInterval(() => {
+        if (!feed.read().model.ended && !resting.current) void poll();
+      }, 1000);
+    };
+    document.addEventListener("visibilitychange", activity);
+    activity();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", activity);
       abort.abort();
       clearInterval(timer);
       unsubscribe();

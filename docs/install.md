@@ -215,7 +215,8 @@ Packaged publication/signing/installed acceptance gates remain in [release packa
 | Command | What it does |
 | --- | --- |
 | `localdot up` | Start localDot and print a sign-in link |
-| `localdot down` | Stop localDot until you start it again or restart the computer |
+| `localdot down` | Stop localDot services and its computers; keep installed apps, sign-ins and files |
+| `localdot start-at-login on` / `off` | Choose whether localDot starts when you sign in; does not interrupt current work |
 | `localdot restart` | Restart localDot |
 | `localdot open [--qr]` | Print a fresh, single-use sign-in link; `--qr` also draws it for your phone |
 | `localdot doctor` | Check Docker, the images, the key service and the app |
@@ -347,3 +348,19 @@ its containers can't reach services that listen on `127.0.0.1`, so there each co
 gets the key service's socket through a read-only folder, `~/.localdot/keyd/relay`, instead.
 `localdot doctor` checks this with a test computer (`gate-relay`). Docker from the Snap Store
 can't share that hidden folder: install Docker Engine from docs.docker.com instead.
+
+### Idle use and device links
+
+Hiding the app suspends its screen connection and viewer polling. Returning refreshes the
+screen and task status. Tasks and scheduled routines continue while the page is hidden.
+Use `localdot down` to stop the services and localDot containers completely; unrelated Docker
+apps are left running. Settings → Your computer → Open at login controls future startup.
+
+App links checks the Windows host as well as Ubuntu. An existing Tailscale HTTPS route appears
+automatically; if Tailscale is connected without a route, choose **Enable Tailscale link**.
+This uses private Tailscale Serve, not public Funnel. LAN addresses are labeled unavailable
+when no LAN listener exists, rather than offering a link that cannot connect. WSL localhost
+forwarding alone does not expose the app to other devices on the LAN.
+
+Remote access uses localDot’s relay and stays off until enabled. Pairing requires both the
+relay cookie and the app sign-in, including history, replay, file and control requests.

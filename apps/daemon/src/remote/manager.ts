@@ -26,6 +26,9 @@ export function remoteDomain(value: string | undefined): string | null {
     throw new Error("Invalid remote access domain");
   return domain;
 }
+// The bundled relay is available on every platform, but no connection starts before opt-in.
+// Explicit operator overrides take precedence, including an empty value that disables the service.
+const DEFAULT_REMOTE_DOMAIN = "localdot.dev";
 // Managed services use a clean environment. This operator-owned file also works in packaged apps.
 export function configuredRemoteDomain(home: string): string | null {
   try {
@@ -34,7 +37,7 @@ export function configuredRemoteDomain(home: string): string | null {
       process.env.LOCALDOT_REMOTE_DOMAIN ??
       (existsSync(file)
         ? (JSON.parse(readFileSync(file, "utf8")) as { domain?: string }).domain
-        : undefined);
+        : DEFAULT_REMOTE_DOMAIN);
     return remoteDomain(value);
   } catch {
     return null;
@@ -83,7 +86,7 @@ export class RemoteAccess {
       url: this.saved.enabled ? this.origin() : null,
       detail: this.domain
         ? "Remote connections pass through the localDot relay. Your computer must stay on."
-        : "The remote access service has not been configured for this installation.",
+        : "The custom relay address is missing or invalid. Correct remote-service.json in your localDot data folder, or remove the override to use localDot’s relay, then restart localDot.",
     };
   }
   start(): void {

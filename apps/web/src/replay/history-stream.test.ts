@@ -45,7 +45,7 @@ describe("replay history stream ownership", () => {
     expect(batches.flat()).toEqual(events.map((event) => event.seq));
     expect(calls[0]?.url).not.toContain("owned-token");
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer owned-token");
-    expect(calls[0]?.init?.credentials).toBe("omit");
+    expect(calls[0]?.init?.credentials).toBe("same-origin");
     expect(calls[0]?.init?.redirect).toBe("error");
   });
   it("cancels an idle history reader when its owner leaves", async () => {

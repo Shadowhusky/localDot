@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { ServiceReadinessReply } from "../../../packages/protocol/src/install-services.ts";
+import type { AccessLinks } from "./access-links.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
 import { type AccountsDeps, accountsRoutes } from "./browser/accounts.ts";
 import { type BrowserViewerDeps, browserViewerApi } from "./browser/viewer.ts";
@@ -55,6 +56,7 @@ export interface AppOptions {
   replay?: ReplayRoutesDeps;
   deliverables?: Omit<DeliverablesDeps, "port">;
   installCodes?: InstallCodes;
+  accessLinks?: AccessLinks;
   serviceReadiness?: Pick<ManagedServiceReadiness, "snapshot">;
   doctorSelfTests?: DoctorSelfTestsDeps;
   exports?: ExportJobs;
@@ -83,6 +85,7 @@ export function createApp({
   replay,
   deliverables,
   installCodes,
+  accessLinks,
   serviceReadiness,
   doctorSelfTests,
   exports,
@@ -157,7 +160,7 @@ export function createApp({
       const snapshot = ServiceReadinessReply.parse(await serviceReadiness.snapshot());
       return c.json(snapshot, snapshot.ready ? 200 : 503);
     });
-  if (installCodes) installCodeRoutes(app, installCodes, port);
+  if (installCodes) installCodeRoutes(app, installCodes, port, accessLinks);
   if (browser) browserViewerApi(app, browser);
   if (accounts) accountsRoutes(app, accounts);
 

@@ -761,12 +761,19 @@
 
 .curtain-title {
   flex: none;
+  min-height: 1lh;
   max-width: 100%;
   overflow-wrap: anywhere;
   font:
     var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
     var(--font-ui);
   letter-spacing: var(--text-title-1--letter-spacing);
+}
+
+/* Reserve the copy and action footprint during the first status request. */
+.curtain-col[data-checking] :is(.curtain-title, .curtain-sub, .curtain-act) {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* The words come in under dot once what the computer is doing is known. */
@@ -781,7 +788,7 @@
 }
 
 .curtain-sub {
-  min-height: 0;
+  min-height: 2lh;
   flex: 0 1 auto;
   overflow-y: auto;
   overflow-wrap: anywhere;
@@ -867,6 +874,7 @@
   }
 
   .curtain-sub {
+    min-height: 3lh;
     font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
     letter-spacing: var(--text-body--letter-spacing);
     text-wrap: balance;
@@ -879,7 +887,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .curtain-progress > i {
+  :is(.curtain, .curtain-title, .curtain-sub, .curtain-act, .curtain-progress > i) {
     transition: none;
   }
 }

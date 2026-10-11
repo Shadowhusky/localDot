@@ -160,6 +160,43 @@ export class LiveStream {
 
   constructor(target: StreamTarget) {
     this.target = target;
+    document.addEventListener("visibilitychange", this.#visibility);
+  }
+
+  readonly #visibility = () => {
+    if (document.visibilityState === "hidden") this.#suspend();
+    else if (this.#away && this.#sink && !this.#closed) {
+      this.#polledAt = Date.now();
+      this.#mintAt = 0;
+      this.#startPolling();
+      this.refresh();
+    }
+  };
+
+  #startPolling(): void {
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+    if (document.visibilityState !== "hidden")
+      this.#timer = setInterval(() => this.#poll(), POLL_MS);
+  }
+
+  // Retain the stage's last picture, but release the viewer's decoder, transport and frame tap.
+  // This affects this viewer only; tasks, recordings and other viewers keep running.
+  #suspend(): void {
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+    this.#source?.stop();
+    this.#source = null;
+    this.#report(this.#current, { visible: false }, Date.now());
+    this.#current?.frame.remove();
+    this.#next?.frame.remove();
+    this.#current = this.#next = null;
+    this.#counted = null;
+    this.#foreground = null;
+    this.#awaiting = false;
+    this.#away = true;
+    this.#mintAt = 0;
+    this.#show(this.#hadPicture ? "held" : "none");
   }
 
   get picture(): StreamPicture {
@@ -177,8 +214,7 @@ export class LiveStream {
     clearTimeout(this.#leaving);
     if (this.#current) this.#current.tapped = null;
     this.#polledAt = Date.now();
-    clearInterval(this.#timer);
-    this.#timer = setInterval(() => this.#poll(), POLL_MS);
+    this.#startPolling();
     this.#poll();
     return () => {
       if (this.#sink !== sink) return;
@@ -188,10 +224,7 @@ export class LiveStream {
       this.#counted = null;
       // A stream no stage shows asks the shared capture for nothing, unless a stage takes it again
       // at once.
-      this.#leaving = setTimeout(
-        () => this.#report(this.#current, { visible: false }, Date.now()),
-        TUNE_MS,
-      );
+      this.#leaving = setTimeout(() => this.#suspend(), TUNE_MS);
     };
   }
 
@@ -235,7 +268,14 @@ export class LiveStream {
 
   // A thawed page can hold an obsolete backlog: a fresh client takes over once it streams.
   replace(): void {
-    if (this.#closed || this.#replacing || this.#next) return;
+    if (
+      this.#closed ||
+      !this.#sink ||
+      document.visibilityState === "hidden" ||
+      this.#replacing ||
+      this.#next
+    )
+      return;
     this.#replacing = true;
     void this.#mint().then((path) => {
       this.#replacing = false;
@@ -245,6 +285,9 @@ export class LiveStream {
 
   close(): void {
     this.#closed = true;
+    document.removeEventListener("visibilitychange", this.#visibility);
+    this.#source?.stop();
+    this.#source = null;
     this.#sink = null;
     clearInterval(this.#timer);
     clearTimeout(this.#leaving);
@@ -283,7 +326,7 @@ export class LiveStream {
   }
 
   #prepare(path: string): void {
-    if (this.#closed) return;
+    if (this.#closed || !this.#sink || document.visibilityState === "hidden") return;
     this.#next?.frame.remove();
     const frame = document.createElement("iframe");
     frame.className = "desktop-frame";

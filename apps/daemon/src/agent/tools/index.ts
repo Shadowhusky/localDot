@@ -19,12 +19,12 @@ import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/aut
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
-import { browserNavigateTool, browserReadTool, DESKTOP_FALLBACK } from "./browser.ts";
+import { browserNavigateTool, browserReadTool } from "./browser.ts";
 import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
 import { connectorFacts, connectorTool } from "./connector.ts";
-import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { append, fail, intentOf, type ToolCallContext, type ToolDeps } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { findTool } from "./find.ts";
@@ -274,7 +274,6 @@ async function dispatchAdmitted(
     }
     // Public pages open in the web browser, where the user's sign-ins are; local addresses
     // only resolve on the desktop.
-    let fellBack = false;
     const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
     const shown = session.screens?.selection.screen;
     if (page && opensInWebBrowser(page) && shown === "desktop") {
@@ -283,7 +282,12 @@ async function dispatchAdmitted(
       } catch (error) {
         ctx.check();
         if (!(error instanceof ScreenUnavailableError)) throw error;
-        fellBack = true;
+        return {
+          status: 200,
+          result: fail(
+            "The browser is temporarily unavailable. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.",
+          ),
+        };
       }
       ctx.check();
     } else if (page && !opensInWebBrowser(page) && shown === "browser") {
@@ -364,7 +368,6 @@ async function dispatchAdmitted(
         break;
       case "browser_navigate":
         result = await browserNavigateTool(t, ctx, input);
-        if (fellBack) result = { ...result, content: [text(DESKTOP_FALLBACK), ...result.content] };
         break;
       case "browser_upload":
         result = await browserUploadTool(t, ctx, input);

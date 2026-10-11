@@ -167,3 +167,27 @@ it.each(["", "relative.sock", "/private/../docker.sock", "/socket?x=1"])(
     expect(request).not.toHaveBeenCalled();
   },
 );
+
+it("graceful shutdown allows time to save and accepts an already stopped container", async () => {
+  response({ status: 304, bytes: Buffer.alloc(0) });
+  await installContainerClient("/private/test/docker.sock", { graceful: true }).kill(id, signal());
+  expect(request.mock.calls[0]?.[0].path).toContain(`/containers/${id}/stop?t=5`);
+});
+
+it.each(["amd64", "x86_64", "arm64", "aarch64"])(
+  "can verify shutdown on a Linux %s engine",
+  async (arch) => {
+    response({ value: { Os: "linux", Arch: arch } });
+    const first = request.getMockImplementation()!;
+    response({ value: { ID: "engine-1", OperatingSystem: "Ubuntu" } });
+    const second = request.getMockImplementation()!;
+    request.mockImplementation((config, callback) =>
+      config.path.endsWith("/version") ? first(config, callback) : second(config, callback),
+    );
+    expect(await client().engine(signal())).toEqual({
+      id: "engine-1",
+      operatingSystem: "linux",
+      architecture: arch.includes("64") && ["amd64", "x86_64"].includes(arch) ? "amd64" : "arm64",
+    });
+  },
+);

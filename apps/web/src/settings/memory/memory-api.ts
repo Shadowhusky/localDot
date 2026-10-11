@@ -55,7 +55,7 @@ async function call<T>(
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
         : AbortSignal.timeout(15_000),
-      credentials: "omit",
+      credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
     });

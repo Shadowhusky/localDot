@@ -28,7 +28,7 @@ async function load(
   if (!held) {
     const response = await api.fetch(`${replayOrigin(api)}/api/sessions/${key}`, {
       headers: { authorization: api.authorization() },
-      credentials: "omit",
+      credentials: "same-origin",
       redirect: "error",
       signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
     });

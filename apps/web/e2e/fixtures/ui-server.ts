@@ -1906,6 +1906,19 @@ if (slowKeys > 0)
       await new Promise((resolve) => setTimeout(resolve, slowKeys));
       await next();
     });
+routes.get("/api/app-update", (c) =>
+  c.json({
+    supported: false,
+    installOnLaunchSupported: false,
+    currentVersion: "dev",
+    phase: "idle",
+    preferences: { automaticChecks: false, automaticDownloads: false, installOnLaunch: false },
+    checkedAt: null,
+    availableVersion: null,
+    dismissedVersion: null,
+    error: null,
+  }),
+);
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)

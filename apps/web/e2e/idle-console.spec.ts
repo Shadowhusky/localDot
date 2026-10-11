@@ -30,3 +30,30 @@ test("an idle computer logs no failed requests and is checked for tasks at a cal
   expect(looks).toBeGreaterThan(0);
   expect(looks).toBeLessThanOrEqual(20);
 });
+
+test("hidden viewers stop task polling and streaming, then refresh on return", async ({ page }) => {
+  fixture = await startUiFixture({ QA_SESSION: "0" });
+  let looks = 0;
+  page.on("request", (request) => {
+    if (/\/api\/cells\/[^/]+\/live$/.test(new URL(request.url()).pathname)) looks++;
+  });
+  await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForTimeout(1000);
+  const hiddenLooks = looks;
+  await page.waitForTimeout(10_000);
+  expect(looks).toBe(hiddenLooks);
+  expect(await page.locator("iframe.desktop-frame").count()).toBe(0);
+  await page.evaluate(() => {
+    Reflect.deleteProperty(document, "visibilityState");
+    Reflect.deleteProperty(document, "hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => looks).toBeGreaterThan(hiddenLooks);
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready");
+});

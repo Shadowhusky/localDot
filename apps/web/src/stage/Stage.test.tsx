@@ -557,7 +557,7 @@ describe("Stage in a Chromium browser", () => {
     view.unmount();
     await act(async () => vi.advanceTimersByTime(KEEP_MS - 1000));
     expect(worker()?.terminated).toBe(false);
-    expect(clients()).toHaveLength(1);
+    expect(clients()).toHaveLength(0);
     await act(async () => vi.advanceTimersByTime(1000));
     expect(worker()?.terminated).toBe(true);
     expect(clients()).toHaveLength(0);

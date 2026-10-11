@@ -40,6 +40,7 @@ it("lets a stream go at once when its computer stops, or a minute after its stag
   const { api } = daemon((n) => Response.json({ path: ticket(n) }));
   const target = { api, cellId: CELL, surface: "desktop" as const };
   const first = holdStream(target, () => [CELL]);
+  first.stream.connect(() => {});
   await vi.advanceTimersByTimeAsync(0);
   expect(clients()).toHaveLength(1);
   first.release(KEEP_MS);
@@ -334,5 +335,64 @@ it("keeps handing the worker the track once it showed a frame", async () => {
     expect(sources.map((source) => !!source.track)).toEqual([true, true]);
   } finally {
     restore();
+  }
+});
+
+it("releases hidden decoding and transports, then obtains a fresh stream on return", async () => {
+  const restore = fakeChromium();
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  try {
+    const { api, minted } = daemon((n) => Response.json({ path: ticket(n) }));
+    const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+    stream.connect(() => {});
+    await vi.advanceTimersByTimeAsync(250);
+    const frame = clients()[0];
+    if (!frame) throw new Error("no stream client");
+    playInClient(frame, "before-hide");
+    await vi.advanceTimersByTimeAsync(250);
+    stream.presented();
+    visibility = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(clients()).toHaveLength(0);
+    expect(stream.picture).toBe("held");
+    const requests = minted();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(minted()).toBe(requests);
+    expect(vi.getTimerCount()).toBe(0);
+    visibility = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(minted()).toBe(requests + 1);
+    expect(clients()).toHaveLength(1);
+    expect(clients()[0]).not.toBe(frame);
+  } finally {
+    visibility = "visible";
+    restore();
+    Reflect.deleteProperty(document, "visibilityState");
+  }
+});
+
+it("does not attach a ticket that finishes after the page hides", async () => {
+  let answer!: (reply: Response) => void;
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  try {
+    const api = createApi("a".repeat(43), {
+      fetchImpl: (() =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        })) as typeof fetch,
+    });
+    const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
+    stream.connect(() => {});
+    visibility = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    answer(Response.json({ path: ticket(1) }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clients()).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
   }
 });

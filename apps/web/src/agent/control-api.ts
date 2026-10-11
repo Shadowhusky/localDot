@@ -72,7 +72,7 @@ export async function controlRequest<T>(
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: owner,
         redirect: "error",
-        credentials: "omit",
+        credentials: "same-origin",
         cache: "no-store",
       }),
       owner,

@@ -30,7 +30,7 @@ it("sends exact owned IDs with header auth and keeps credentials out of answers 
     expect(String(url)).not.toContain(api.token);
     expect(init).toMatchObject({
       redirect: "error",
-      credentials: "omit",
+      credentials: "same-origin",
       cache: "no-store",
       headers: { authorization: api.authorization() },
     });

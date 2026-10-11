@@ -46,7 +46,7 @@ async function request(
   const response = await api.fetch(`${origin(api)}${path}`, {
     ...rest,
     headers: { authorization: api.authorization(), ...(rest.headers ?? {}) },
-    credentials: "omit",
+    credentials: "same-origin",
     redirect: "error",
     cache: "no-store",
     signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
@@ -225,7 +225,7 @@ export async function loadPreviewBytes(
   signal: AbortSignal,
 ): Promise<ArrayBuffer> {
   const response = await api.fetch(url, {
-    credentials: "omit",
+    credentials: "same-origin",
     redirect: "error",
     cache: "no-store",
     signal: AbortSignal.any([AbortSignal.timeout(60_000), signal]),

@@ -31,7 +31,7 @@ describe("recording requests", () => {
     expect(() => recordingUrl({ ...source, screen: "unknown" as "browser" })).toThrow();
   });
   it.each([401, 403, 404, 416])(
-    "does not retry HTTP %i and sends only header credentials",
+    "does not retry HTTP %i and keeps bearer auth in headers and allows same-origin relay cookies",
     async (status) => {
       const requests: { url: string; init?: RequestInit }[] = [];
       vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
@@ -48,7 +48,7 @@ describe("recording requests", () => {
         const headers = new Headers(requests[0]?.init?.headers);
         expect(headers.get("authorization")).toBe(source.authorization);
         expect(requests[0]?.init?.redirect).toBe("error");
-        expect(requests[0]?.init?.credentials).toBe("omit");
+        expect(requests[0]?.init?.credentials).toBe("same-origin");
       } finally {
         input.dispose();
       }

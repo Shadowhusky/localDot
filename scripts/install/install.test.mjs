@@ -215,6 +215,7 @@ case "$*" in
   echo "http://127.0.0.1:$LOCALDOT_PORT/#code=fakecode"
   [ -z "$LOCALDOT_PUBLIC_ORIGIN" ] || echo "From your other devices: $LOCALDOT_PUBLIC_ORIGIN/#code=fakecode"
   case "$*" in *--qr*) echo "[qr code]" ;; esac ;;
+*" stop --computers"*) exit "\${STUB_STOP_COMPUTERS_RC:-0}" ;;
 *" doctor"*) echo "ok   docker"; exit "\${STUB_DOCTOR_RC:-0}" ;;
 esac`,
   );
@@ -861,6 +862,7 @@ describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, (
     expect(host.calls()).toContain(
       "systemctl --user stop localdot-daemon.service localdot-keyd.service",
     );
+    expect(host.calls().some((call) => call.includes("stop --computers"))).toBe(true);
     writeFileSync(join(host.home, ".localdot/logs/daemon.log"), "daemon line\n");
     writeFileSync(join(host.home, ".localdot/logs/keyd.log"), "keyd line\n");
     const logs = await host.command(["logs"]);
@@ -871,6 +873,24 @@ describe.concurrent("the localdot command and uninstall", { timeout: 60_000 }, (
     expect(up.code).toBe(0);
     expect(host.calls()).toContain("systemctl --user start localdot-daemon.service");
     expect(up.stdout).toContain("#code=fakecode");
+  });
+
+  it("changes startup without stopping services and preserves the choice on restart", async () => {
+    const host = await makeHost();
+    expect((await host.run()).code).toBe(0);
+    host.clearCalls();
+    expect((await host.command(["start-at-login", "off"])).stdout.trim()).toBe("off");
+    expect(host.calls()).toContain(
+      "systemctl --user disable --quiet localdot-keyd.service localdot-daemon.service",
+    );
+    expect(host.calls().some((call) => /systemctl.*(stop|restart)/.test(call))).toBe(false);
+    host.clearCalls();
+    expect((await host.command(["restart"])).code).toBe(0);
+    expect(host.calls()).not.toContain(
+      "systemctl --user enable --quiet localdot-keyd.service localdot-daemon.service",
+    );
+    expect((await host.command(["start-at-login", "status"])).stdout.trim()).toBe("off");
+    expect((await host.command(["start-at-login", "on"])).stdout.trim()).toBe("on");
   });
 
   it("passes app commands to the CLI with the recorded settings", async () => {
