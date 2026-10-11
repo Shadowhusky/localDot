@@ -133,7 +133,9 @@ macOS login Keychain with disposable test entries.
 keyd learns and denies the network's public IPv4 address to block connections
 back through the router. It asks the router first (NAT-PMP); if the router has
 no public answer, it asks the configured STUN server (Cloudflare by default).
-`-stun off` disables that fallback; `-natpmp off -stun off` disables discovery.
+If UDP discovery fails, the default configuration tries Cloudflare over direct HTTPS/IPv4
+with certificate verification, no environment proxy, no redirects and a bounded response.
+`-stun off` disables both Cloudflare fallbacks; `-natpmp off -stun off` disables discovery.
 The admin status reports whether this guard is active, unknown or off. It retries
 unknown addresses every 30 seconds for four rounds, then every five minutes,
 refreshes known addresses every five minutes, and checks for a changed gateway

@@ -20,11 +20,12 @@ describe("runDoctor's key layer checks", () => {
     keyd = undefined;
   });
 
-  const keydChecks = async (client?: Pick<KeydClient, "status">) => {
+  const keydChecks = async (client?: Pick<KeydClient, "status">, discoveryDeadlineMs = 1000) => {
     fake = await startFakeDocker();
     const report = await runDoctor({
       docker: new DockerClient(fake.socketPath),
       images,
+      discoveryDeadlineMs,
       port: await freePort(),
       keyd: client ?? new KeydClient(keyd?.socketPath ?? "/tmp/ld-no-keyd/admin.sock", 500),
     });
@@ -47,10 +48,33 @@ describe("runDoctor's key layer checks", () => {
     keyd.hairpin = { state: "unknown", addresses: 0, error: "nat-pmp 192.168.1.1: timeout" };
     const unknown = (await keydChecks()).checks["hairpin-guard"];
     expect(unknown).toMatchObject({ ok: false });
-    expect(unknown?.detail).toMatch(/^unknown: .*keeps asking: nat-pmp 192\.168\.1\.1: timeout$/);
+    expect(unknown?.detail).toContain("nat-pmp 192.168.1.1: timeout");
+    expect(unknown?.detail).toContain("then rerun setup");
     await fake?.close();
     keyd.hairpin = { state: "off", addresses: 0 };
     expect((await keydChecks()).checks["hairpin-guard"]?.detail).toMatch(/^off: /);
+  });
+
+  it("waits for initial discovery instead of failing a healthy startup", async () => {
+    keyd = await startFakeKeyd();
+    const client = new KeydClient(keyd.socketPath);
+    let calls = 0;
+    const { report } = await keydChecks({
+      status: async () => {
+        const status = await client.status();
+        return ++calls === 1 ? { ...status, hairpin: { state: "unknown", addresses: 0 } } : status;
+      },
+    });
+    expect(report.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("bounds the initial discovery wait and does not pass an unknown guard", async () => {
+    keyd = await startFakeKeyd();
+    keyd.hairpin = { state: "unknown", addresses: 0 };
+    const { report, checks } = await keydChecks(undefined, 20);
+    expect(report.ok).toBe(false);
+    expect(checks["hairpin-guard"]).toMatchObject({ ok: false });
   });
 
   it("says to start keyd when it does not answer", async () => {

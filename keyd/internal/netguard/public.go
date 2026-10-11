@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// DefaultSTUN is the one third party keyd asks, and only when the router gives no public answer.
+// DefaultSTUN uses Cloudflare, asked only when the router gives no public answer.
 const DefaultSTUN = "stun.cloudflare.com:3478"
 
 // maxPublic bounds the addresses kept: a dynamic address that changes daily adds one a day.
@@ -48,11 +48,13 @@ type PublicStatus struct {
 }
 
 // Discovery says where the public address comes from: the router first (NAT-PMP, so no third
-// party learns anything), then one STUN server. Router nil or STUN "" turns that source off.
+// party learns anything), then STUN, then optional HTTPS when UDP is unavailable.
+// Nil/empty sources are disabled.
 type Discovery struct {
 	Router     func() (netip.Addr, error)
 	NATPMPPort int
 	STUN       string
+	HTTPS      func(context.Context, time.Duration) (netip.Addr, error)
 	Timeout    time.Duration
 	ctx        context.Context
 	stop       <-chan struct{}
@@ -74,8 +76,8 @@ func (d Discovery) err() error {
 	}
 }
 
-// Off says whether both sources are turned off.
-func (d Discovery) Off() bool { return d.Router == nil && d.STUN == "" }
+// Off says whether all sources are turned off.
+func (d Discovery) Off() bool { return d.Router == nil && d.STUN == "" && d.HTTPS == nil }
 
 func (p *Public) Addrs() []netip.Addr {
 	p.mu.RLock()
@@ -179,6 +181,21 @@ func (p *Public) Learn(d Discovery) error {
 		}
 		if err == nil {
 			err = fmt.Errorf("stun %s: answered %s, which is not a public address", d.STUN, a)
+		}
+		errs = append(errs, err)
+	}
+	if d.HTTPS != nil {
+		a, err := d.HTTPS(d.context(), d.Timeout)
+		if stopped := d.err(); stopped != nil {
+			return stopped
+		}
+		if err == nil && publicIPv4(a) {
+			p.add(a)
+			p.record("active", "https", nil)
+			return nil
+		}
+		if err == nil {
+			err = fmt.Errorf("HTTPS discovery returned a non-public IPv4 address")
 		}
 		errs = append(errs, err)
 	}

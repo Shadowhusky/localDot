@@ -1,5 +1,6 @@
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { HairpinGuard, KeydStatus, KeydVault } from "@localdot/protocol";
 import {
   compareApiVersions,
@@ -47,6 +48,7 @@ export interface DoctorDeps {
   signal?: AbortSignal;
   // How long the first /version may take before the socket counts as not answering.
   versionDeadlineMs?: number;
+  discoveryDeadlineMs?: number;
   keyd?: Pick<KeydClient, "status">;
   // The daemon's home: when its own daemon is running, the port is in use by localDot itself.
   home?: string;
@@ -74,15 +76,32 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   if (deps.signal?.aborted) return { ok: false, checks };
   checks.push(
     await portCheck(deps.port, deps.home),
-    ...(deps.keyd ? await keydChecks(deps.keyd) : []),
+    ...(deps.keyd ? await keydChecks(deps.keyd, deps.discoveryDeadlineMs, deps.signal) : []),
   );
   return { ok: !deps.signal?.aborted && checks.every((c) => c.ok), checks };
 }
 
-async function keydChecks(keyd: Pick<KeydClient, "status">): Promise<DoctorCheck[]> {
+async function keydChecks(
+  keyd: Pick<KeydClient, "status">,
+  discoveryDeadlineMs = 15_000,
+  signal?: AbortSignal,
+): Promise<DoctorCheck[]> {
   let status: KeydStatus;
   try {
     status = await keyd.status();
+    const deadline = Date.now() + discoveryDeadlineMs;
+    // keyd starts serving before its first network discovery finishes. Only wait
+    // for that initial round; a completed failure must retain its real diagnosis.
+    while (
+      status.hairpin?.state === "unknown" &&
+      !status.hairpin.checkedAt &&
+      !status.hairpin.error &&
+      Date.now() < deadline &&
+      !signal?.aborted
+    ) {
+      await delay(Math.min(250, deadline - Date.now()), undefined, { signal });
+      status = await keyd.status();
+    }
   } catch (err) {
     return [
       { name: "keyd", ok: false, detail: `${messageOf(err)}; start keyd (pnpm keyd)` },
@@ -164,7 +183,7 @@ function hairpinCheck(guard: HairpinGuard): DoctorCheck {
   return {
     name,
     ok: false,
-    detail: `unknown: keyd has not learned this network's public address and keeps asking${why}`,
+    detail: `unknown: keyd has not learned this network's public address${why}. Check this computer's internet connection or VPN/firewall, then rerun setup. Discovery tries the router, STUN and (with default settings) HTTPS.`,
   };
 }
 

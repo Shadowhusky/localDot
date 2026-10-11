@@ -93,6 +93,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 
 | Message or problem | What to do |
 | --- | --- |
+| `hairpin-guard` cannot learn the public address | Current setup waits for initial discovery and uses HTTPS if UDP discovery fails. Rerun the public installer to update older versions. If it still fails, check internet access from Ubuntu and any VPN/firewall rules; the final check prints the lookup failure. |
 | `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Use the public commands above; retrying the private URL will not help. |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
 | WSL says changes need a reboot | Save your work and restart Windows. The installer saves a continuation and reopens after sign-in, then installs Ubuntu. If setup does not reopen, run the same installer command again. |

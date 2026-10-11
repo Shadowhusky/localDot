@@ -136,6 +136,10 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if *stun != "off" {
 		discovery.STUN = *stun
+		// Keep custom STUN configurations and -stun off from contacting another service.
+		if *stun == netguard.DefaultSTUN {
+			discovery.HTTPS = netguard.HTTPSPublicIPv4
+		}
 	}
 	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange, Discovery: discovery, Service: service})
 	if err != nil {
