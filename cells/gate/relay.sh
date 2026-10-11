@@ -48,7 +48,10 @@ host_target() {
 keyd_children=16
 if [ "$LD_ROLE" = desktop ]; then keyd_children=64; fi
 keyd_to=$(host_target "${LD_KEYD_SOCKET:-}" "$LD_KEYD_PORT")
-socat "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,max-children=$keyd_children,reuseaddr" "$keyd_to" &
+# An upload can finish writing before the server finishes its acknowledgement. socat's
+# default half-close grace is only 0.5 s; keep the response path open for up to a minute.
+# This is not an inactivity limit on live connections; keyd can still revoke immediately.
+socat -t60 "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,max-children=$keyd_children,reuseaddr" "$keyd_to" &
 keyd=$!
 case "$LD_ROLE" in
   brain)

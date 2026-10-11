@@ -252,13 +252,21 @@ func sameHost(sni, host string) bool {
 	return strings.ToLower(strings.TrimSuffix(sni, ".")) == host
 }
 
-// splice copies both ways until either side ends, then closes both.
+// An upload's EOF ends only its sending side: the server can still return a receipt.
+// Upstream completion or any copy failure closes both ends; revocation also closes both
+// through generation tracking, including while a half-closed upload awaits its response.
 func splice(client, up net.Conn) (in, out int64) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		in, _ = io.Copy(up, client)
+		var err error
+		in, err = io.Copy(up, client)
+		if err == nil {
+			if writer, ok := up.(interface{ CloseWrite() error }); ok && writer.CloseWrite() == nil {
+				return
+			}
+		}
 		up.Close()
 		client.Close()
 	}()

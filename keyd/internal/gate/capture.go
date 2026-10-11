@@ -130,7 +130,7 @@ func (c *Capture) handle(client net.Conn) {
 		select {
 		case br = <-replied:
 		case f := <-first:
-			if f.err != nil {
+			if f.err != nil && (f.err != io.EOF || len(f.data) == 0) {
 				up.Close()
 				client.Close()
 				<-replied
@@ -145,8 +145,8 @@ func (c *Capture) handle(client net.Conn) {
 		reset(client)
 		return
 	}
-	// keyd's tunnel ends both ways at once, so the first side to end closes both here too: a Stop
-	// that cuts the tunnel cuts the program's connection.
+	// The app may half-close an upload before receiving its acknowledgement. Propagate that
+	// sending-side EOF without dropping the reply. A keyd cut still closes the app immediately.
 	var once sync.Once
 	end := func() {
 		once.Do(func() {
@@ -155,7 +155,6 @@ func (c *Capture) handle(client net.Conn) {
 		})
 	}
 	go func() {
-		defer end()
 		f := early
 		if f == nil {
 			got := <-first
@@ -163,12 +162,20 @@ func (c *Capture) handle(client net.Conn) {
 		}
 		if len(f.data) > 0 {
 			if _, err := up.Write(f.data); err != nil {
+				end()
 				return
 			}
 		}
-		if f.err == nil {
-			io.Copy(up, client)
+		err := f.err
+		if err == nil {
+			_, err = io.Copy(up, client)
 		}
+		if err == nil || err == io.EOF {
+			if writer, ok := up.(interface{ CloseWrite() error }); ok && writer.CloseWrite() == nil {
+				return
+			}
+		}
+		end()
 	}()
 	io.Copy(client, br)
 	end()

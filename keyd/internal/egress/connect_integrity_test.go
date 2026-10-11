@@ -871,3 +871,58 @@ func TestInterceptedHostSnapshotsRemainStableDuringBindingChanges(t *testing.T) 
 	}()
 	wg.Wait()
 }
+
+// An upload may signal end-of-body with a TCP half-close and then wait for its receipt.
+func TestSpliceKeepsUploadReceiptAfterClientHalfClose(t *testing.T) {
+	for _, wrapped := range []bool{false, true} {
+		t.Run(fmt.Sprint("sniffed=", wrapped), func(t *testing.T) {
+			pair := func() (*net.TCPConn, *net.TCPConn) {
+				ln, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer ln.Close()
+				a, err := net.DialTCP("tcp4", nil, ln.Addr().(*net.TCPAddr))
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := ln.AcceptTCP()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, c := range []*net.TCPConn{a, b} {
+					c.SetDeadline(time.Now().Add(2 * time.Second))
+					t.Cleanup(func() { c.Close() })
+				}
+				return a, b
+			}
+			app, client := pair()
+			up, server := pair()
+			var input net.Conn = client
+			if wrapped {
+				input = &replayConn{Conn: client}
+			}
+			done := make(chan struct{})
+			go func() { splice(input, up); close(done) }()
+			payload := bytes.Repeat([]byte("image-data"), 32768)
+			go func() { app.Write(payload); app.CloseWrite() }()
+			got, err := io.ReadAll(server)
+			if err != nil || !bytes.Equal(got, payload) {
+				t.Fatalf("upload: %d bytes, %v", len(got), err)
+			}
+			if _, err := io.WriteString(server, "upload accepted"); err != nil {
+				t.Fatal(err)
+			}
+			server.Close()
+			receipt, err := io.ReadAll(app)
+			if err != nil || string(receipt) != "upload accepted" {
+				t.Fatalf("receipt: %q, %v", receipt, err)
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("relay did not finish")
+			}
+		})
+	}
+}

@@ -5,11 +5,13 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -262,4 +264,48 @@ func TestANameKeydRefusesByNameLeavesTheAddress(t *testing.T) {
 		t.Fatalf("host %q", req.Host)
 	}
 	refused(t, conn)
+}
+
+func TestCapturedUploadRetainsReceiptAfterHalfClose(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	payload := strings.Repeat("file-data", 32768)
+	serverResult := make(chan error, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(2 * time.Second))
+		br := bufio.NewReader(conn)
+		_, err = http.ReadRequest(br)
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		io.WriteString(conn, "HTTP/1.1 200 Connection established\r\n\r\n")
+		got, err := io.ReadAll(br)
+		if err == nil && string(got) != payload {
+			err = fmt.Errorf("upload truncated: %d bytes", len(got))
+		}
+		if err == nil {
+			_, err = io.WriteString(conn, "upload accepted")
+		}
+		serverResult <- err
+	}()
+	f := newCapture(t, &fakeKeyd{ln: ln}, netip.MustParseAddrPort("93.184.216.34:443"))
+	app := f.dial(t).(*net.TCPConn)
+	go func() { io.WriteString(app, payload); app.CloseWrite() }()
+	receipt, err := io.ReadAll(app)
+	if err != nil || string(receipt) != "upload accepted" {
+		t.Errorf("receipt: %q, %v", receipt, err)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatal(err)
+	}
 }
