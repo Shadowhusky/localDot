@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "localdot-site",
+  "main": "src/worker.ts",
+  "account_id": "31c17ebe287229213316608e4ef93f80",
+  "compatibility_date": "2026-10-02",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist-holding",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "localdot.dev", "custom_domain": true },
+    { "pattern": "www.localdot.dev", "custom_domain": true }
+  ],
+  "observability": { "enabled": true, "traces": { "enabled": true } }
+}

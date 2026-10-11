@@ -1,0 +1,7 @@
+.wrangler/
+qa/
+worker-configuration.d.ts
+dist-holding/
+
+node_modules/
+dist/

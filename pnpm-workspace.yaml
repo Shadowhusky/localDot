@@ -1,5 +1,6 @@
 packages:
   - "apps/*"
+  - "!apps/site"
   - "packages/*"
   - "spikes/*"
   - "cells/desktop/desktopd"

@@ -1,0 +1,88 @@
+:root {
+  color-scheme: dark;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: #060b0f;
+  color: #f0f4f5;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100svh;
+  margin: 0;
+  padding: clamp(24px, 4vw, 68px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  isolation: isolate;
+}
+
+.background,
+.shade {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.background {
+  object-fit: cover;
+  object-position: 68% center;
+}
+
+.shade {
+  background:
+    linear-gradient(90deg, #03080c66, #03080c00 75%),
+    linear-gradient(0deg, #03080c80, #03080c00 35%, #03080c00 80%, #03080c40);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+}
+
+main {
+  align-self: center;
+  padding: 60px 0 9vh;
+}
+
+h1 {
+  margin: 0;
+  max-width: 8ch;
+  font-size: clamp(5rem, 10.5vw, 10rem);
+  font-weight: 400;
+  line-height: 0.94;
+  letter-spacing: -0.075em;
+}
+
+.ellipsis {
+  color: #bdd7e0;
+}
+
+@media (max-width: 640px) {
+  .background {
+    object-position: 69% center;
+  }
+
+  .shade {
+    background: linear-gradient(0deg, #03080cf2, #03080cb3 27%, #03080c00 65%, #03080c4d);
+  }
+
+  main {
+    align-self: end;
+    padding-bottom: 9svh;
+  }
+
+  h1 {
+    font-size: clamp(4rem, 17vw, 6.5rem);
+  }
+}

@@ -14,19 +14,30 @@
 
 ## Install
 
-**External testing is not available yet.** Packaged downloads are being prepared so you can
-install without access to this private repository. The public installer link will appear here
-once the app packages and computer images are published and verified.
+**Try the packaged alpha.** No GitHub account or access to this repository is needed.
 
-The old `raw.githubusercontent.com/Shadowhusky/localdot/...` commands require repository access
-and return **404** when downloaded anonymously—even if you are signed into GitHub in your browser.
-They are not tester installation links.
+**macOS (Apple silicon) or Linux (x64)** — open Terminal:
 
-Already installed? Run `localdot open` for a fresh sign-in link. On Windows, use PowerShell or
-Ubuntu/WSL. Open a new terminal if the command is not found.
+```sh
+curl -fsSL https://downloads.localdot.dev/install.sh | bash
+```
 
-[Installation status and help](docs/install.md) · [Run from source](docs/development.md#development) ·
-[Use your phone or a server](docs/install.md#servers-without-a-screen)
+**Windows** — open PowerShell:
+
+```powershell
+irm https://downloads.localdot.dev/install.ps1 | iex
+```
+
+Keep the terminal open. Setup checks Docker, offers to install missing prerequisites, downloads
+prebuilt app files and computer images, and prints a sign-in link. Approve system prompts as needed;
+Windows also guides you through WSL and Ubuntu. Then choose a model and send dot a task.
+
+Already installed? `localdot open` prints a fresh sign-in link. Open a new terminal if the command
+is not found. The current alpha includes Apple silicon Mac and Linux x64 packages; Windows uses
+the Linux package through WSL 2. Clean native Windows installation remains to be verified.
+
+[Installation guide](docs/install.md) · [Public downloads](https://github.com/Shadowhusky/localdot-downloads) ·
+[Use your phone or a server](docs/install.md#servers-without-a-screen) · [Run from source](docs/development.md#development)
 
 ## What it is
 

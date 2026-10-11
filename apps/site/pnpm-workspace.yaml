@@ -1,0 +1,3 @@
+packages:
+  - "."
+minimumReleaseAge: 20160

@@ -1,0 +1,13 @@
+Generated with the built-in image_gen tool on 2026-10-02.
+Original saved in artwork/chamber-source.png.
+Optimized website asset: public/chamber.webp.
+The separate dot-poster.webp and dot-open.webp are native renders of src/orb-scene.js.
+
+Exact generation prompt:
+Use case: stylized-concept.
+Asset type: cinematic environmental artwork for the localDot website, a local AI assistant in development.
+Primary request: an arresting, mysterious architectural world inside a computer. A monumental hollow rectangular gateway with very deep bevels, built from smoked optical glass and dark machined graphite, stands slightly off center to the right on a still black reflective floor. A thin icy cyan line is trapped inside its inner edge. Through the gateway is another impossible, distant smaller rectangular opening and atmospheric darkness; subtle pale-blue volumetric light, rich shadow, extraordinary tactile surface detail. A few tiny geometric blocks near the base communicate immense scale.
+Style: extremely high-end photoreal CGI, architectural product photography, cinematic practical lighting, restrained brutalist science fiction. Wide landscape 16:9. Deliberate asymmetric composition with spacious almost-black negative space on the left. Close three-quarter camera angle, slight low perspective, gateway visible completely, strong geometric silhouette.
+Palette: near-black charcoal, cool silver, muted blue, a very small amount of luminous ice cyan. No purple.
+Text: no text, letters, labels, logos, UI, symbols, watermarks or characters.
+Avoid: space stars, planets, circular portals, chrome balls, busy cyberpunk cities, rainbow gradients, generic glowing circuit boards, excessive bloom. The scene must be quiet but imposing, beautifully detailed, and visually original.

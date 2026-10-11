@@ -1,0 +1,27 @@
+{
+  "name": "@localdot/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4321 --strictPort",
+    "build": "vite build && node scripts/security-headers.mjs",
+    "build:holding": "node scripts/build-holding.mjs",
+    "preview": "vite preview --host 127.0.0.1 --port 4321 --strictPort",
+    "deploy": "pnpm build && wrangler deploy --assets ./dist",
+    "deploy:check": "pnpm build && wrangler deploy --assets ./dist --dry-run",
+    "typecheck": "wrangler types && tsc --noEmit -p tsconfig.worker.json",
+    "check:browser": "node scripts/check-experience.mjs",
+    "preview:worker": "wrangler dev --local --assets ./dist --host localhost --ip 127.0.0.1 --port 8788 --inspector-port 9237"
+  },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "axe-core": "4.13.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "wrangler": "4.141.0"
+  }
+}

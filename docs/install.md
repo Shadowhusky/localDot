@@ -1,27 +1,26 @@
 # Install localDot
 
-**Public tester downloads are not ready yet.** The app packages are built, but the computer
-images and remaining runtime checks must be completed before the public installer is published.
-Do not send testers the old raw GitHub download commands: the source repository is private.
-A browser GitHub login does not authenticate downloads made by PowerShell or `curl`, so those
-commands return **404**. No installation has started when this happens.
+The packaged alpha installs without GitHub credentials or access to the private source repository.
+App archives are signed and checked before installation; computer images are pinned by digest.
 
-Already installed? Run `localdot open` to reopen the app. For contributors with source access,
-see [development setup](development.md#development).
+## 1. Run one command
 
-## Source installer reference
+**macOS (Apple silicon) and Linux (x64)** — Terminal:
 
-The following describes the source installer for contributors, not a public tester release.
-The current source installer builds from source. Allow **10–30 minutes or longer** for the first
-computer-image build. Peak disk requirements have not yet been validated; both your installation
-disk and Docker's data disk need free space. Prebuilt distribution is not enabled yet.
+```sh
+curl -fsSL https://downloads.localdot.dev/install.sh | bash
+```
 
-### 1. Run the installer
+**Windows** — PowerShell:
 
-The one-line public commands will be added here after the packaged release is verified.
-Downloading only `install.ps1` from a private checkout is not sufficient: the source installer
-also downloads `install.sh` and the application repository. Do not put a GitHub token in a shared
-installation command. Contributors should use [development setup](development.md#development).
+```powershell
+irm https://downloads.localdot.dev/install.ps1 | iex
+```
+
+Run this as your normal user. Setup downloads prebuilt files; it does not compile the app or
+computer images. Download time depends on your connection. The current alpha supports Apple silicon
+Mac and Linux x64, including Windows through WSL 2. Clean native Windows installation has not yet
+been verified for this candidate. Intel Mac and Linux ARM64 packages are not published yet.
 
 Keep PowerShell open. Ubuntu account setup opens in a separate window; create your Linux user
 and password there. The installer closes its setup window when the account is ready and continues
@@ -33,7 +32,7 @@ distro), then click **Apply**. The Windows installer waits for Docker and contin
 when it is ready. If the WSL integration option is missing, switch Docker Desktop to Linux containers.
 If an older installer already stopped, enable integration and rerun it; Ubuntu stays installed.
 
-### 2. Finish prerequisite setup
+## 2. Finish prerequisite setup
 
 The installer reuses a working Docker Engine **28+**. If prerequisites are missing, it offers
 one setup choice before installing them:
@@ -41,9 +40,9 @@ one setup choice before installing them:
 | Platform | Automatic setup | Your part |
 | --- | --- | --- |
 | Windows | WSL 2, Ubuntu, Linux tools, verified Docker Desktop installer, restart continuation | Approve Windows prompts, create your Ubuntu user, finish Docker's first-run setup, enable WSL integration |
-| macOS | Launch Apple's tools installer if needed; download, verify and install Docker Desktop | Finish Apple's prompts, approve administrator access and complete Docker's first-run setup |
-| Native Ubuntu/Debian | Build tools and Docker Engine from Docker's signed APT repository | Approve `sudo`; sign out of all sessions or restart once after receiving Docker access, then rerun setup |
-| Other Linux distributions | Check prerequisites and give installation instructions | Install [Docker Engine](https://docs.docker.com/engine/install/) 28+, Git, curl, tar and gzip using your distribution's instructions |
+| macOS | Download, verify and install Docker Desktop | Approve administrator access and complete Docker's first-run setup |
+| Native Ubuntu/Debian | Required tools and Docker Engine from Docker's signed APT repository | Approve `sudo`; sign out of all sessions or restart once after receiving Docker access, then rerun setup |
+| Other Linux distributions | Check prerequisites and give installation instructions | Install [Docker Engine](https://docs.docker.com/engine/install/) 28+, curl, tar and gzip using your distribution's instructions |
 
 Docker Desktop's terms are presented by Docker itself; localDot does not accept them for you.
 Existing engines and container data are preserved. An old or conflicting installation is
@@ -64,7 +63,7 @@ You can always [install Docker manually](https://docs.docker.com/engine/install/
 
 [Lighter runtime alternatives and compatibility requirements](container-runtimes.md).
 
-### 3. Open localDot
+## 3. Open localDot
 
 Open the sign-in link printed at the end; the installer also tries to open your browser.
 On Windows, the installation result and link stay in the original PowerShell window.
@@ -86,7 +85,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 
 | Message or problem | What to do |
 | --- | --- |
-| `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Wait for the public packaged installer; retrying the same URL will not help. |
+| `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Use the public commands above; retrying the private URL will not help. |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
 | `docker-storage-read-only` or `read-only file system` | Docker could not write its storage. Check the host disk holding Docker's data, restart Docker, then rerun setup. If it persists, collect Docker diagnostics. Do not factory-reset Docker or delete its disk image. |
@@ -103,15 +102,15 @@ For your phone or a remote server, see [remote access](#servers-without-a-screen
 
 ## What you need
 
-- **macOS** on Apple silicon or Intel, with Docker Desktop.
-- **Linux** on x86-64 or ARM64 with glibc and systemd (Ubuntu, Debian, Fedora and similar), with
+- **macOS** on Apple silicon, with Docker Desktop.
+- **Linux** on x86-64 with glibc and systemd (Ubuntu, Debian, Fedora and similar), with
   Docker Engine 28 or newer.
 - **Windows**, through WSL 2: use a Windows version supported by
   [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/), with WSL
   integration turned on for your distro. Alternatively, Docker Engine can run inside WSL 2;
   the bootstrap requires Windows 10 build 19041 or newer.
-- git, curl, tar and gzip (inside Ubuntu/WSL on Windows). The installer brings its own Node.js and Go,
-  checked against pinned checksums,
+- curl, tar and gzip (inside Ubuntu/WSL on Windows). The installer brings its own Node.js,
+  checked against a pinned checksum,
   and kept in localDot’s own directory. Prerequisite setup can install system packages.
 - Free space for downloads, extraction and computer images. Peak usage is not yet validated;
   Docker's virtual disk and its underlying host disk are separate constraints.
@@ -164,7 +163,7 @@ Offline failures back off from five minutes to six hours. Checks are shared acro
 and preferences and pending updates survive app restarts. Check now bypasses the scheduled delay.
 Automatic checks and downloads can each be disabled. Neither shuts down a running computer.
 
-For the current source installer, checks follow your configured Git branch over HTTPS. An exact
+For source installations, checks follow your configured Git branch over HTTPS. An exact
 commit or tag stays pinned. Download adds Git objects without modifying the running checkout.
 Install update asks before shutting down the computer and rebuilding the downloaded commit;
 it preserves the branch for future checks. Linux/WSL installation runs in a separate systemd user
@@ -172,7 +171,9 @@ service so stopping the daemon cannot kill the installer. This source path is no
 release. A build can still require dependency/image downloads and take several minutes.
 Existing installations need one `localdot update` to register the updater with their service.
 
-The separate packaged-release path verifies publisher provenance, helper signatures and image
+The public testing channel checks the signed catalog, archive inventory and image digests.
+`localdot update` installs the newest testing package while keeping your settings and computer data.
+The separate signed desktop-release path verifies publisher provenance, helper signatures and image
 digests before marking a download ready. Its Install at next launch option applies a prepared
 release only after services have stopped; opening another tab or an idle conversation is not a
 restart. Failed activation uses the existing rollback transaction and does not repeat each launch.
@@ -180,10 +181,10 @@ Packaged publication/signing/installed acceptance gates remain in [release packa
 
 ## Upgrade, change settings, uninstall
 
-- `localdot update` gets the latest version of the branch you installed and restarts only what
-  changed; an unchanged key service keeps running, so it stays unlocked. Running the installer
+- `localdot update` gets the latest version of your package channel (or your branch for a source
+  install) and restarts only what changed; an unchanged key service keeps running, so it stays unlocked. Running the installer
   again does the same. Your settings are kept; options change them, for example
-  `localdot update --ref v0.2.0` or `localdot update --tailscale`.
+  `localdot update --tailscale`. Source-only `--ref` does not apply to packaged installs.
 - `localdot uninstall` (or `install.sh --uninstall`) removes the services, the `localdot`
   command and what the installer put in `~/.local/share/localdot`. It keeps your data and Docker's
   computers and images, and prints the commands that delete them. `--prefix` must name a new or
