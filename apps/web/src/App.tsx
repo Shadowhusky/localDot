@@ -143,6 +143,7 @@ import { ACTIVITY_WIDTH, CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
+import { StageExpand } from "./shell/StageExpand.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { StreamMenu } from "./shell/StreamMenu.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
@@ -1918,17 +1919,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
               />
               {!yours && !full && !focus && stageHud.live && (
-                <span className="stage-expand">
-                  <IconButton
-                    variant="glass"
-                    round
-                    size={phone ? 44 : 32}
-                    icon="expand"
-                    label="Full screen"
-                    kbd={phone ? undefined : ["F"]}
-                    onClick={fullScreen.enter}
-                  />
-                </span>
+                <StageExpand phone={phone} onEnter={fullScreen.enter} />
               )}
             </StageFrame>
           </ErrorBoundary>

@@ -495,8 +495,7 @@
   }
 }
 
-/* Full screen stays in the picture's corner. Mouse users reveal it on hover;
-   touch users need a visible target without first taking control of the computer. */
+/* Full screen appears briefly, then yields to the picture until activity reveals it again. */
 .stage-expand {
   position: absolute;
   right: calc(var(--spacing) * 3);
@@ -508,23 +507,22 @@
   -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
   backdrop-filter: blur(var(--blur-glass)) saturate(180%);
   box-shadow: var(--shadow-glass);
-  opacity: 0;
+  opacity: 1;
   transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.stage-expand[data-still] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .stage-expand:has(:focus-visible) {
   opacity: 1;
-}
-
-@media (hover: hover) {
-  .stage-box:hover .stage-expand {
-    opacity: 1;
-  }
+  pointer-events: auto;
 }
 
 @media (hover: none), (pointer: coarse) {
   .stage-expand {
-    opacity: 1;
     background-color: var(--color-glass-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
