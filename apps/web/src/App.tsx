@@ -336,7 +336,7 @@ const SENDING_HOLD_MS = 20_000;
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
-  const streamChoice = useStreamPreference();
+  const streamChoice = useStreamPreference(showToast);
   const [replayId, setReplayId] = useState<string | null>(() =>
     replayAddress(new URLSearchParams(window.location.search).get("replay")),
   );

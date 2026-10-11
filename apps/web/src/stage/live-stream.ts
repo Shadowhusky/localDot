@@ -2,7 +2,7 @@ import { qualityMessage, type StreamQualityReport } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 import { forgetOldTickets } from "./client-storage.ts";
 import { type FrameSource, tapVideoTrack } from "./frame-source.ts";
-import { streamPreference } from "./stream-preference.ts";
+import { streamPreference, streamPreferenceAdopted } from "./stream-preference.ts";
 import { framerateCeiling, QualityController, RoundTrips } from "./stream-quality.ts";
 
 export interface StreamTarget {
@@ -416,13 +416,15 @@ export class LiveStream {
   // trip the relay measured on the stream's own socket, decide the quality this viewer asks for.
   #tune(client: Client, now: number): void {
     this.#tunedAt = now;
-    this.#quality.prefer(streamPreference());
+    const preference = streamPreference();
+    this.#quality.prefer(preference);
     this.#roundTrip(client, now);
     const decoded = Math.max(client.decoded, this.#source?.delivered?.() ?? 0);
     const last = this.#counted;
     this.#counted = { client, at: now, decoded, presented: this.#presentedCount };
     if (last?.client !== client || now <= last.at) {
-      this.#report(client, { visible: true, ...this.#quality.quality }, now);
+      if (this.#report(client, { visible: true, ...this.#quality.quality }, now))
+        streamPreferenceAdopted(preference, this.#quality.quality);
       return;
     }
     const seconds = (now - last.at) / 1000;
@@ -434,7 +436,8 @@ export class LiveStream {
       decodedFps: since(decoded, last.decoded) / seconds,
       presentedFps: since(this.#presentedCount, last.presented) / seconds,
     });
-    this.#report(client, { visible: true, ...quality }, now);
+    if (this.#report(client, { visible: true, ...quality }, now))
+      streamPreferenceAdopted(preference, quality);
   }
 
   // Selkies' client keeps the numbers only once they are asked for, as its own stats panel does.
@@ -456,16 +459,21 @@ export class LiveStream {
     this.#trips.add(rtt);
   }
 
-  #report(client: Client | null, report: StreamQualityReport, now: number): void {
+  #report(client: Client | null, report: StreamQualityReport, now: number): boolean {
     const { transport } = look(client);
-    if (!client || transport?.readyState !== OPEN || typeof transport.send !== "function") return;
+    if (!client || transport?.readyState !== OPEN || typeof transport.send !== "function")
+      return false;
     const text = qualityMessage(report);
     const last = this.#reported;
-    if (last?.client === client && last.text === text && now - last.at < REPORT_EVERY_MS) return;
+    if (last?.client === client && last.text === text && now - last.at < REPORT_EVERY_MS)
+      return true;
     try {
       transport.send(text);
       this.#reported = { client, text, at: now };
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // Selkies accepts a viewer's key frame request; its encoder otherwise sends only what changed, so

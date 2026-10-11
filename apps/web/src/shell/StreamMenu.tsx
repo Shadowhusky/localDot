@@ -46,6 +46,10 @@ export function StreamMenu({ stream }: { stream: StreamPreferenceControl }) {
             </MenuItem>
           ))}
         </MenuGroup>
+        <p className="stream-menu-note" role="note">
+          All modes use full quality on a good connection. Choose what to prioritize when it slows
+          down.
+        </p>
         {!stream.saved && (
           <p className="stream-menu-note" role="status">
             Applied for this visit. This browser couldn’t save it.

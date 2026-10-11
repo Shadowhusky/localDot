@@ -1,3 +1,4 @@
+import type { StreamQuality } from "@localdot/protocol";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { STREAM_PREFERENCES, type StreamPreference } from "./stream-quality.ts";
 
@@ -39,12 +40,65 @@ export function chooseStreamPreference(next: StreamPreference): boolean {
   }
 }
 
+const names: Record<StreamPreference, string> = { auto: "Auto", sharp: "Sharp", smooth: "Smooth" };
+const details: Record<StreamPreference, string> = {
+  auto: "Adapts to your connection and device.",
+  sharp: "Prioritizes crisp text when the stream slows down.",
+  smooth: "Prioritizes fluid motion when the stream slows down.",
+};
+type Notify = (notice: { id: string; title: string; description: string }) => void;
+let pending:
+  | {
+      value: StreamPreference;
+      saved: boolean;
+      notify: Notify;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  | undefined;
+
+// Called only after the viewer has adopted the policy and can report on its live transport.
+// This confirms the viewer's preference, not an encoder acknowledgement from the server.
+export function streamPreferenceAdopted(value: StreamPreference, quality: StreamQuality): void {
+  if (!pending || pending.value !== value || value !== streamPreference()) return;
+  clearTimeout(pending.timer);
+  const { saved, notify } = pending;
+  pending = undefined;
+  notify({
+    id: "stream-preference",
+    title: `${names[value]} preference active`,
+    description: `${details[value]} Up to ${quality.framerate} fps requested. The picture may look unchanged on a good connection.${saved ? "" : " Not saved in this browser."}`,
+  });
+}
+
+function switching(value: StreamPreference, saved: boolean, notify: Notify): void {
+  clearTimeout(pending?.timer);
+  notify({
+    id: "stream-preference",
+    title: `Switching to ${names[value]}…`,
+    description: "Waiting for the live stream to use this preference.",
+  });
+  const request = {
+    value,
+    saved,
+    notify,
+    timer: setTimeout(() => {
+      if (pending !== request) return;
+      notify({
+        id: "stream-preference",
+        title: `${names[value]} preference ${saved ? "saved" : "selected"}`,
+        description: "Waiting for the live stream. It will apply when connected.",
+      });
+    }, 3000),
+  };
+  pending = request;
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-export function useStreamPreference() {
+export function useStreamPreference(notify?: Notify) {
   const value = useSyncExternalStore(subscribe, streamPreference);
   const [saved, setSaved] = useState(true);
   useEffect(() => {
@@ -58,7 +112,9 @@ export function useStreamPreference() {
     value,
     saved,
     change(next: StreamPreference) {
-      setSaved(chooseStreamPreference(next));
+      const kept = chooseStreamPreference(next);
+      setSaved(kept);
+      if (notify) switching(next, kept, notify);
     },
   };
 }
