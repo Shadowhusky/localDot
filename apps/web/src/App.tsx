@@ -144,6 +144,7 @@ import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
+import { StreamMenu } from "./shell/StreamMenu.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
@@ -1836,6 +1837,11 @@ function Theatre({ api }: { api: ApiClient }) {
                     }
                     onHover={setOverBand}
                   />
+                  {full && !focus && (
+                    <div className="fullscreen-stream-controls">
+                      <StreamMenu stream={streamChoice} />
+                    </div>
+                  )}
                   {yours && !phone && (
                     <ControlStrip
                       send={sendToComputer}
@@ -1849,6 +1855,7 @@ function Theatre({ api }: { api: ApiClient }) {
               side={
                 focus && (
                   <FocusControls
+                    stream={streamChoice}
                     take={takeState}
                     pause={shape === "task" ? pause : null}
                     stop={appStatus.actions.find((action) => action.kind === "stop-task")}

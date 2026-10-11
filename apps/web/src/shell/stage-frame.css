@@ -619,7 +619,7 @@
   z-index: var(--layer-island);
   justify-content: center;
   align-items: center;
-  padding: var(--_strip) 0 0;
+  padding: var(--_strip) 0 64px;
 }
 
 .app[data-full] .stage-col::before {
@@ -638,7 +638,7 @@
 
 .app[data-full] .stage-col > .stage-frame {
   flex: none;
-  width: min(100vw, (100dvh - var(--_strip)) * 1.6);
+  width: min(100vw, (100dvh - var(--_strip) - 64px) * 1.6);
 }
 
 .app[data-full] :is(.stage-box > .stage, .stage-rim) {
@@ -1108,4 +1108,29 @@
     width: 44px;
     height: 44px;
   }
+}
+
+/* Fullscreen viewing preferences stay outside the streamed picture and recordings. */
+.fullscreen-stream-controls {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+}
+.stream-menu {
+  width: 256px;
+  max-width: calc(100vw - 24px);
+}
+.stream-menu-name,
+.stream-menu-detail {
+  display: block;
+}
+.stream-menu-detail,
+.stream-menu-note {
+  color: var(--color-fg-2);
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
+}
+.stream-menu-note {
+  padding: 8px 12px;
 }

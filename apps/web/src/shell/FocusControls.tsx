@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import type { HudAction } from "../session/status.ts";
+import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { PauseButton } from "./HudIsland.tsx";
 import type { PauseSlot, TakeSlot } from "./island.ts";
+import { StreamMenu } from "./StreamMenu.tsx";
 
 const IDLE = "No task is running";
 
 export interface FocusControlsProps {
+  stream: StreamPreferenceControl;
   take: TakeSlot;
   // The task's Pause and Stop; without a task they stay in place, unavailable.
   pause: PauseSlot | null;
@@ -24,6 +27,7 @@ export interface FocusControlsProps {
 // buttons that never move, whatever the task does. Held upright, they line up under the picture,
 // which turning the phone sideways makes bigger.
 export function FocusControls({
+  stream,
   take,
   pause,
   stop,
@@ -77,6 +81,7 @@ export function FocusControls({
             />
           </>
         )}
+        <StreamMenu stream={stream} />
         <IconButton
           variant="filled"
           round
