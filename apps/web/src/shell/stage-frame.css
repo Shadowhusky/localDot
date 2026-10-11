@@ -446,8 +446,8 @@
 
   .app[data-focus] .stage-band {
     top: auto;
-    bottom: calc(100% + 48px);
-    height: max(0px, calc(var(--_margin) - 48px));
+    bottom: calc(100% + 24px);
+    height: max(0px, calc(var(--_margin) - 24px));
   }
 
   .app[data-focus] .stage-side {
@@ -473,7 +473,7 @@
     flex: none;
     width: 100%;
     max-width: 32rem;
-    min-height: calc(var(--text-callout--line-height) * 3);
+    min-height: var(--text-callout--line-height);
     text-align: center;
   }
 

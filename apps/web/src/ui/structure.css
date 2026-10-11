@@ -77,8 +77,8 @@
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
-    height: calc(var(--spacing) * 12);
-    padding: 0 calc(var(--spacing) * 1.5) 0 0;
+    min-height: calc(var(--spacing) * 14);
+    padding: var(--spacing) calc(var(--spacing) * 1.5) var(--spacing) 0;
     border-radius: var(--radius-md);
   }
 
@@ -1033,6 +1033,18 @@
 
     .ui-thumbnail[data-pressed] {
       scale: none;
+    }
+  }
+}
+
+/* Keep compact file actions visually light without shrinking their touch area. */
+@layer kit {
+  @media (--coarse) {
+    .ui-file-actions .ui-button[data-size="sm"] {
+      min-height: calc(var(--spacing) * 8);
+    }
+    .ui-file-actions .ui-button[data-size="sm"]::after {
+      inset: calc(var(--spacing) * -1.5) -1px;
     }
   }
 }

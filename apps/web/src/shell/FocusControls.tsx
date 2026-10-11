@@ -91,7 +91,9 @@ export function FocusControls({
           onClick={onLeave}
         />
       </div>
-      <p className="focus-hint">Turn your phone sideways for a bigger picture.</p>
+      <p className="focus-hint">
+        You’re in full screen. Turn your phone sideways for a larger view.
+      </p>
     </div>
   );
 }

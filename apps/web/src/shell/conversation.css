@@ -898,8 +898,7 @@
   display: grid;
   gap: calc(var(--spacing) * 2);
   min-width: 0;
-  padding: var(--spacing) calc(var(--spacing) * 1.5) calc(var(--spacing) * 2)
-    calc(var(--spacing) * 2);
+  padding: var(--spacing) calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 2);
 }
 
 /* Under a preview: Revise, Compare and the version, the quiet buttons' ink on the preview's edge. */

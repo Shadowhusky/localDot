@@ -281,6 +281,7 @@ export function ActivityRail({
           <Tabs
             id={`${domId}-tabs`}
             aria-label="Activity"
+            size={32}
             variant="line"
             className="activity-tabs"
             items={tabs}
@@ -318,7 +319,7 @@ export function ActivityRail({
                 <div className="activity-filter">
                   <SegmentedControl
                     aria-label="Activity filter"
-                    size={24}
+                    size={32}
                     variant="quiet"
                     items={FILTERS}
                     value={filter}
