@@ -42,8 +42,10 @@ All functions have HTML controls, >=44px touch targets, visible focus, and no ho
 Loading uses the app's actual DotView waking/thinking animation. It follows the critical poster
 and initial player, with a continue control; no fake percentage or minimum delay. Three loads
 asynchronously and cannot block the demo. Paused/reduced-motion visits don't load Three.
-Only sample-data recordings/screenshots from the isolated UI fixture are allowed; no user sessions.
-Replay metadata states whether footage is an interface demo rather than an executed agent task.
+Use purpose-created agent sessions on a separate demo computer, with invented task data or public
+sources; never publish personal user sessions. Record actual screen actions, review the selected
+footage, and disclose excerpts and playback speed. Do not substitute still-image fixtures for
+executed tasks.
 
 Target initial transfer <3MB, later media on selection; DPR <=1.5 desktop / 1.25 mobile,
 <50 draw calls, <100k triangles. Pause offscreen/hidden, dispose on pagehide, resume on pageshow.

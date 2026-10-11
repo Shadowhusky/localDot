@@ -15,25 +15,25 @@ let userPaused = false,
   hiddenPause = false;
 const phone = matchMedia("(max-width:900px)").matches;
 const mediaPath = (id, poster = false) =>
-  `/demos/${id}${phone ? "-mobile" : ""}${poster ? "-poster.webp" : ".mp4"}?v=framing2`;
+  `/demos/${id}${phone ? "-mobile" : ""}${poster ? "-poster.webp" : ".mp4"}?v=real-runs1`;
 const video = $("#demo-video"),
   loader = $("#loader"),
   motion = $("#motion-toggle");
 const demos = {
   work: {
-    name: "Make a report.",
+    name: "Build a spreadsheet.",
     src: "/demos/work.mp4",
-    copy: "A tour of the real app using a sample report: the live screen, task steps, and finished files.",
+    copy: "Watch dot enter sales figures, calculate a total, and create a chart in LibreOffice. A real task with invented data; edited at 2× speed.",
   },
   research: {
-    name: "Research a question.",
+    name: "Compare two ideas.",
     src: "/demos/research.mp4",
-    copy: "Explore a sample research task, its sources, and the steps behind an answer. Recorded in the app with sample data.",
+    copy: "Follow dot browsing public sources to compare solar and wind power. Real task footage, edited at 2× speed.",
   },
   play: {
-    name: "Draw something.",
+    name: "Draw a smile.",
     src: "/demos/play.mp4",
-    copy: "A drawing task in the real app: follow the process and explore the files it makes. Recorded with sample data.",
+    copy: "See a drawing take shape as dot uses the computer. Real task footage, edited at 2× speed.",
   },
 };
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));

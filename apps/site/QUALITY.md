@@ -28,7 +28,7 @@ or analytics are loaded.
 
 Build and Worker TypeScript checks pass. The deploy dry run validates the asset binding and
 canonical domain configuration. Public install commands point at the signed packaged channel,
-independent of access to the private source repository. Demo source data is synthetic.
+independent of access to the private source repository. Demos use actual agent recordings with invented task data and public sources.
 
 Physical iPhone/Android graphics performance, screen-reader exploration and fresh native
 Windows installation remain outside the verified coverage. The Windows installer is available
@@ -38,15 +38,18 @@ The public host initially returned complete MP4 responses for byte-range request
 adds bounded range handling only for the six owned demo clips (maximum 4 MiB). Prefix, suffix,
 open-ended, invalid/unsatisfiable and If-Range cases are checked by `check-video-ranges.mjs`.
 
-## Demo framing
+## Actual-task demos
 
-All three sample demos were recaptured for desktop (1440×900) and mobile (390×500).
-The fixture scales its source image across the entire 2560×1600 stream canvas; capture
-checks the rendered video dimensions and all four corners before recording the usable clip.
-The idle command overlay is hidden through the app’s saved preference. Startup frames are
-trimmed, and each clip returns to the screen after briefly showing its activity or sources.
+Website demos now come from three completed agent runs on a separate demo computer, with
+invented spreadsheet data, public research pages and a sample drawing. The capture pipeline
+records the actual app replay at 1440×900 and 390×500; it trims selected excerpts and plays
+them at a disclosed 2× speed. The old still-image stream is not used.
 
-The first, middle and final encoded frames of all six MP4s were visually inspected. The
-website player follows the desktop recording’s 16:10 proportions, and all three mobile
-replays were inspected at 390×844. Responsive, accessibility and fallback checks above
-passed again after this update. Recordings remain explicitly labelled sample demos.
+`node apps/site/scripts/check-demo-motion.mjs` checks visible pixel changes within the
+computer-screen region of each encoded video, so animated outer controls alone cannot pass.
+Raw recordings, excerpt timestamps, screen bounds and provenance receipts stay in ignored
+`qa/`. The published output contains only reviewed MP4s and their posters.
+
+All six encoded videos passed the screen-motion check. First, middle and final frames were
+reviewed, and the responsive/browser checks above passed again with the real-task demos.
+Desktop and mobile use the same excerpts with idle skipping disabled before recording.

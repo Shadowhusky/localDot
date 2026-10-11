@@ -24,23 +24,28 @@ available through `build:holding` for recovery.
 
 ## Demo provenance
 
-Every replay uses the real app UI with the isolated **synthetic** UI fixtures. No personal
-sessions, WeChat messages, credentials or user recordings are included. Research and drawing
-computer frames are purpose-made sample content (`scripts/demo-screen.mjs`), not evidence of
-an executed agent task. The page labels these as interface demos with sample data.
+The three demos are edited excerpts of **actual agent tasks** on a separate demo computer:
+a LibreOffice sales table and chart, browsing public research pages, and drawing in GIMP.
+Desktop and mobile variants show the real app replay, including its recorded screen and steps.
+Playback is explicitly labelled **2×**. Only invented task data and public pages are used;
+no personal sessions, messages, credentials or user recordings are published.
 
-To refresh all desktop and portrait media, from the repository root with the web build and its
-Playwright browsers available, plus FFmpeg installed:
+The previous still-image fixtures are no longer used for website media. Capture requires
+completed recordings and a private configuration containing reviewed session IDs, the local
+daemon origin, its token file path, editorial titles and excerpt ranges in seconds:
 
 ```sh
-node --import ./apps/web/node_modules/tsx/dist/loader.mjs apps/site/scripts/capture-demos.ts
-node --import ./apps/web/node_modules/tsx/dist/loader.mjs apps/site/scripts/capture-demos.ts --mobile
+node --import ./apps/web/node_modules/tsx/dist/loader.mjs apps/site/scripts/capture-demos.ts /path/to/private-capture.json
+node apps/site/scripts/check-demo-motion.mjs
 ```
 
-The fixture scales its source picture to the complete 2560 × 1600 stream. Capture checks all four
-stream corners, waits for video readiness, hides commands through the app’s saved preference, and
-trims startup from the recordings. Each loop opens on the unobstructed screen, briefly shows the
-relevant activity or sources, then returns to the screen.
+The configuration has `origin`, `tokenFile`, and `demos`; each demo has `id`, `sessionId`,
+`cellId`, `title`, `reviewed: true`, and `segments: [{from, seconds}]`. Keep it in ignored
+`qa/`, alongside raw captures and provenance receipts. Review all selected footage before
+publishing. Capture filters other computers and conversations out, and shortens only the
+editorial replay title. Recorded actions, screen pixels and tool results are not fabricated.
+The motion check compares frames **inside the computer screen**, excluding the outer UI,
+and enforces the video size limit used by the public playback Worker.
 
 Only MP4 files and WebP posters in `public/demos` are published. Capture scratch files and QA
 screenshots stay in ignored `qa/`. Vite publishes `public/` and the compiled site, not the
