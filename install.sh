@@ -234,6 +234,26 @@ user_systemd() {
   systemctl --user show-environment >/dev/null 2>&1
 }
 
+# A fresh WSL shell may have Docker's group while the long-lived user manager does not.
+# Probe from a transient service before touching an existing installation.
+service_docker_problem() {
+  local docker_bin result
+  local -a environment=("HOME=$HOME" "PATH=$PATH")
+  docker_bin=$(command -v docker) || return 0
+  [ -z "${DOCKER_HOST:-}" ] || environment+=("DOCKER_HOST=$DOCKER_HOST")
+  [ -z "${DOCKER_CONTEXT:-}" ] || environment+=("DOCKER_CONTEXT=$DOCKER_CONTEXT")
+  [ -z "${DOCKER_CONFIG:-}" ] || environment+=("DOCKER_CONFIG=$DOCKER_CONFIG")
+  if result=$(with_timeout 20 systemd-run --user --quiet --wait --pipe --collect \
+      --property=RuntimeMaxSec=15s -- env "${environment[@]}" "$docker_bin" info --format '{{.ServerVersion}}' 2>&1); then
+    return 0
+  fi
+  if [ -n "$WSL" ]; then
+    say "Docker works in this terminal but not in Ubuntu's background services. Restart this WSL distribution from PowerShell (wsl --terminate <distro>), reopen it, and rerun setup. This stops its running Linux apps; their data is kept."
+  else
+    say "Docker works in this terminal but not in your background services. Sign out of all sessions and sign back in, or restart Linux, then rerun setup. Docker and your data are kept."
+  fi
+}
+
 # Read consent from the terminal: stdin may be the curl | bash script itself.
 approve_prerequisites() {
   case "${PREREQUISITES:-ask}" in
@@ -425,6 +445,10 @@ check_prerequisites() {
     else
       problems="$problems  - A systemd user session. Sign in as $(id -un) over SSH or on the desktop (not with su), or run: sudo loginctl enable-linger $(id -un)"$'\n'
     fi
+  fi
+  if [ "$OS" = linux ] && [ -z "$problems" ]; then
+    problem=$(service_docker_problem)
+    [ -z "$problem" ] || problems="$problems  - $problem"$'\n'
   fi
   if [ -n "$problems" ]; then
     printf 'localDot needs a few things first:\n%sThen run the installer again.\n' "$problems" >&2

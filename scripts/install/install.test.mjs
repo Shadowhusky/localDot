@@ -165,6 +165,10 @@ build) [ -z "\${STUB_STORAGE_ERROR:-}" ] || { echo "$STUB_STORAGE_ERROR" >&2; ex
 esac`,
   );
   script(
+    join(stubs, "systemd-run"),
+    `${logged("systemd-run")}\nexit "\${STUB_SERVICE_DOCKER_RC:-0}"`,
+  );
+  script(
     join(stubs, "systemctl"),
     `${logged("systemctl")}\n[ "$*" != "--user show-environment" ] || exit "\${STUB_SYSTEMD_RC:-0}"`,
   );
@@ -367,6 +371,22 @@ describe.concurrent("prerequisites", { timeout: 60_000 }, () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(words);
   });
+
+  it.each(["wsl", "linux"])(
+    "catches stale service permissions on %s before changing the installation",
+    async (os) => {
+      const host = await makeHost({ os });
+      const result = await host.run([], { STUB_SERVICE_DOCKER_RC: "1" });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("Docker works in this terminal but not in");
+      expect(result.stderr).toContain(
+        os === "wsl" ? "wsl --terminate" : "Sign out of all sessions",
+      );
+      expect(host.calls().some((call) => call.startsWith("systemd-run --user"))).toBe(true);
+      expect(host.calls().some((call) => /systemctl --user (stop|restart)/.test(call))).toBe(false);
+      expect(host.calls().filter((call) => call.startsWith("curl"))).toEqual([]);
+    },
+  );
 
   it("asks a Mac to start Docker Desktop", async () => {
     const host = await makeHost({ os: "macos" });
