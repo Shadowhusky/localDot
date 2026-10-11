@@ -888,9 +888,11 @@
 
   .ui-group-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: calc(var(--spacing) * 3);
+    row-gap: var(--spacing);
     min-height: calc(var(--spacing) * 7);
     margin: 0 2px var(--spacing);
   }
@@ -903,6 +905,8 @@
 
   .ui-group-aside {
     display: flex;
+    flex-wrap: wrap;
+    max-width: 100%;
     align-items: center;
     color: var(--color-fg-3);
     font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);

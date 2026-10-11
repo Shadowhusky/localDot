@@ -150,11 +150,14 @@
 }
 
 .island-row {
+  --_label-inset: calc(var(--spacing) * 3.5);
+  width: max-content;
+  max-width: calc(100vw - 24px);
   position: relative;
   display: flex;
   align-items: center;
   height: 100%;
-  padding: 0 var(--spacing) 0 calc(var(--spacing) * 3.5);
+  padding: 0 var(--spacing) 0 var(--_label-inset);
   white-space: nowrap;
 }
 
@@ -185,9 +188,10 @@
 
 .island-label {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   align-items: center;
   gap: calc(var(--spacing) * 2);
+  justify-content: center;
   min-width: 64px;
   max-width: 200px;
   overflow: hidden;
@@ -240,7 +244,7 @@
   flex: none;
   width: 1px;
   height: 18px;
-  margin: 0 calc(var(--spacing) * 1.5);
+  margin: 0 calc(var(--spacing) * 1.5) 0 var(--_label-inset);
   background-color: var(--color-control-pressed);
 }
 
@@ -250,7 +254,8 @@
 
 @media (--phone) {
   .island-row {
-    padding: 0 calc(var(--spacing) / 2) 0 calc(var(--spacing) * 3);
+    --_label-inset: calc(var(--spacing) * 3);
+    padding: 0 calc(var(--spacing) / 2) 0 var(--_label-inset);
   }
 
   .island:is([data-shape="task"], [data-shape="control"]) .island-label {
@@ -280,7 +285,7 @@
 }
 
 .app[data-focus] .island-row {
-  padding-right: calc(var(--spacing) * 3);
+  padding-inline: calc(var(--spacing) * 3);
 }
 
 .app[data-focus] .island-controls {
@@ -288,7 +293,6 @@
 }
 
 .app[data-focus] .island .island-label {
-  justify-content: center;
   width: auto;
   max-width: min(420px, 100vw - 96px);
 }
