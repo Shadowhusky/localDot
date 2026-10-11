@@ -587,9 +587,10 @@ function Install-Command {
     Write-Warning "Another command exists at $shim; leaving it alone."
     return
   }
-  # Distro is a WSL name, never shell input. Reject metacharacters before writing a cmd file.
-  if ($Distro -notmatch '^[A-Za-z0-9._-]+$') { throw 'Unsupported WSL distribution name.' }
-  Set-Content -Encoding ASCII -Path $shim -Value "@echo off`r`n@rem localDot command`r`nwsl.exe -d `"$Distro`" -- ~/.local/bin/localdot %*`r`nexit /b %errorlevel%"
+  # cmd.exe preserves quotes around the distribution on affected WSL versions
+  # (microsoft/WSL#9792). Only emit a validated, unquoted name: never shell input.
+  if ($Distro -notmatch '\A[A-Za-z0-9][A-Za-z0-9._-]*\z') { throw 'Unsupported WSL distribution name.' }
+  Set-Content -Encoding ASCII -Path $shim -Value "@echo off`r`n@rem localDot command`r`nwsl.exe -d $Distro -- ~/.local/bin/localdot %*`r`nexit /b %errorlevel%"
   $userPath = Read-UserPath
   if (($userPath -split ';') -notcontains $bin) {
     Write-UserPath ((([string]$userPath).TrimEnd(';') + ';' + $bin).TrimStart(';'))

@@ -298,6 +298,26 @@ $vbs = Get-Content (Join-Path $env:LOCALAPPDATA "localDot/keep-running.vbs") -Ra
 Check ($vbs -match '\.Run "wsl\.exe -d Ubuntu --exec sleep infinity", 0, False') "runs the keep-alive hidden"
 $Ref = $null; $Tailscale = [switch]$false
 
+# WSL#9792: cmd.exe can pass distribution quotes literally, unlike PowerShell.
+$shimPath = Join-Path $env:LOCALAPPDATA 'localDot/bin/localdot.cmd'
+foreach ($name in @('Ubuntu', 'Ubuntu-24.04', 'my_distro.2')) {
+  $Distro = $name
+  Install-Command
+  $shim = Get-Content $shimPath -Raw
+  Check ($shim.Contains("wsl.exe -d $name -- ~/.local/bin/localdot %*")) "batch launcher passes $name without literal quotes and forwards arguments"
+  Check ($shim.Contains('exit /b %errorlevel%')) "batch launcher preserves command exit status"
+}
+$previousShim = Get-Content $shimPath -Raw
+foreach ($name in @('Ubuntu & echo unsafe', 'Ubuntu"', "Ubuntu`n", '', '-Ubuntu')) {
+  $Distro = $name
+  $message = ''
+  try { Install-Command } catch { $message = $_.Exception.Message }
+  Check ($message -eq 'Unsupported WSL distribution name.') "rejects unsafe or ambiguous distribution name"
+  Check ((Get-Content $shimPath -Raw) -eq $previousShim) "invalid distribution does not overwrite the launcher"
+}
+$Distro = 'Ubuntu'
+Install-Command
+
 Reset-Machine @{ DistroInstallCode = 3010 }
 Install-LocalDot
 Check (@($script:calls | Where-Object { $_ -like 'Registry localDotSetup*' }).Count -eq 1) "resumes when distribution installation requires a restart"
