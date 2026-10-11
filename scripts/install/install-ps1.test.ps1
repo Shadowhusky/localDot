@@ -14,7 +14,7 @@ $env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) ("localdot-ps1-" + [gui
 function Reset-Machine([hashtable]$machine) {
   $script:machine = @{
     Status = 0; Version = 0; List = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
-    InstallAdds = $null; DistroInstallCode = 0; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
+    InstallAdds = $null; DistroInstallCode = 0; DistroInstallOutput = ""; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
     SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false; ProbeTimeouts = 0; ProbeCodes = @(0)
     DockerResponses = @("29.2.0/linux"); Desktop = $null
   }
@@ -48,6 +48,7 @@ function wsl.exe {
     }
     "^--install --distribution (\S+) --web-download --no-launch$" {
       $code = $script:machine.DistroInstallCode
+      $out = $script:machine.DistroInstallOutput
       if ($code -eq 0 -and $script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds }
     }
     "--exec id -u$" { $out = $script:machine.Uid }
@@ -97,6 +98,10 @@ function Unregister-ScheduledTask { param($TaskName, $Confirm) $script:calls.Add
 function Get-CimInstance { }
 
 . $installer
+
+# Model Windows' localized system message on hosts that do not provide Win32 resources.
+$script:restartMessage = 'The requested operation is successful. Changes will not be effective until the system is rebooted.'
+function Get-WslRestartMessage { $script:restartMessage }
 
 # The actual native-process helper is tested separately; model account readiness here.
 function Get-SetupTime { $script:now }
@@ -270,6 +275,27 @@ $message = ""
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
 Check ($message -like "*Installing Ubuntu failed (exit 1)*") "reports setup failure instead of waiting forever"
 Check (-not (@($script:calls) -match "--exec bash")) "never reports an app install after failed Ubuntu setup"
+
+Reset-Machine @{ DistroInstallOutput = $script:restartMessage }
+Check (-not (Install-Distro)) "recognizes reboot-required text even when WSL exits zero"
+Check ([bool](@($script:calls) -match '^Registry localDotSetup')) "saves continuation for WSL's zero-exit reboot requirement"
+Check (-not ([bool](@($script:calls) -match 'Start-Process|Start-SetupProbe|--list'))) "does not query Ubuntu before Windows has restarted"
+Check (Test-Path (Join-Path $SetupDirectory 'resume.ps1')) "writes the restart runner before returning"
+
+$englishRestartMessage = $script:restartMessage
+# Unicode escapes keep this fixture readable by Windows PowerShell 5.1's ANSI decoder.
+$script:restartMessage = -join (@(0x8BF7,0x6C42,0x7684,0x64CD,0x4F5C,0x6210,0x529F,0x3002,0x76F4,0x5230,0x91CD,0x65B0,0x542F,0x52A8,0x7CFB,0x7EDF,0x524D,0x66F4,0x6539,0x5C06,0x4E0D,0x4F1A,0x751F,0x6548,0x3002) | ForEach-Object { [char]$_ })
+Reset-Machine @{ DistroInstallOutput = "`n$($script:restartMessage)`r`n" }
+Check (-not (Install-Distro)) "recognizes the localized Chinese restart message from the screenshot"
+Check ([bool](@($script:calls) -match '^Registry localDotSetup')) "saves restart continuation on Chinese Windows"
+$script:restartMessage = $englishRestartMessage
+Check (Test-WslRestartMessage ($englishRestartMessage.Replace('. ', ".`r`n"))) "ignores line wrapping in Windows' system message"
+Check (-not (Test-WslRestartMessage 'The operation completed successfully.')) "does not mistake ordinary success for a reboot requirement"
+
+Reset-Machine @{ DistroInstallCode = 42; DistroInstallOutput = $script:restartMessage }
+$message = ''
+try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*exit 42*' -and -not ([bool](@($script:calls) -match '^Registry localDotSetup'))) "a real failure takes precedence over restart text"
 
 # A successful download launcher with no registered distro must never start account polling.
 Reset-Machine @{}

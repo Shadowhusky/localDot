@@ -89,6 +89,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | --- | --- |
 | `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Use the public commands above; retrying the private URL will not help. |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
+| WSL says changes need a reboot | Save your work and restart Windows. The installer saves a continuation and reopens after sign-in, then installs Ubuntu. If setup does not reopen, run the same installer command again. |
 | WSL says no distributions are installed | Rerun the public installer above. It downloads Ubuntu before opening account setup. If the download fails, its WSL error stays visible in PowerShell. |
 | Stuck at “Keep this PowerShell window open” | Finish Ubuntu’s username/password prompts. If it already shows a normal shell prompt, type `exit` there. If PowerShell still does not continue, press Ctrl+C in PowerShell and rerun the public installer command above; Ubuntu is kept. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |

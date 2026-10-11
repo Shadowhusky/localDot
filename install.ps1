@@ -277,11 +277,28 @@ function Stop-SetupProbe($Probe) {
   } finally { $Probe.Process.Dispose() }
 }
 
+# WSL can print ERROR_SUCCESS_REBOOT_REQUIRED yet return 0 without installing a
+# distro (WslClient.cpp, Install). Ask Windows for that exact localized system
+# message instead of maintaining English/Chinese substring guesses.
+function Get-WslRestartMessage {
+  if ($env:OS -ne 'Windows_NT') { return $null }
+  return ([ComponentModel.Win32Exception]::new(3010)).Message
+}
+
+function Test-WslRestartMessage([string]$Text) {
+  $message = Get-WslRestartMessage
+  if ([string]::IsNullOrWhiteSpace($message)) { return $false }
+  $normalizedMessage = ($message -replace '\s', '').Trim()
+  $normalizedText = ($Text -replace "`0", '' -replace '\s', '').Trim()
+  return $normalizedText.Contains($normalizedMessage)
+}
+
 function Install-Distro {
   if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid distribution name: $Distro" }
   # Complete the download/registration in this console. A separate install window can
   # disappear with the only useful error, leaving us probing a distro that never existed.
   Write-Host "Downloading and installing $Distro. Progress and any WSL errors appear below."
+  $installOutput = [System.Collections.Generic.List[string]]::new()
   $previousPreference = $ErrorActionPreference
   $previousEncoding = [Console]::OutputEncoding
   $previousUtf8 = $env:WSL_UTF8
@@ -291,16 +308,21 @@ function Install-Distro {
     # Windows PowerShell treats native stderr as an error record, even for progress.
     $ErrorActionPreference = 'Continue'
     $PSNativeCommandUseErrorActionPreference = $false
-    & wsl.exe --install --distribution $Distro --web-download --no-launch | Out-Host
+    & wsl.exe --install --distribution $Distro --web-download --no-launch 2>&1 | ForEach-Object {
+      # Stream progress immediately and retain a bounded tail for the restart notice.
+      $installOutput.Add([string]$_)
+      if ($installOutput.Count -gt 100) { $installOutput.RemoveAt(0) }
+      $_ | Out-Host
+    }
     $installCode = $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $previousPreference
     [Console]::OutputEncoding = $previousEncoding
     $env:WSL_UTF8 = $previousUtf8
   }
-  if ($installCode -in @(3010, 1641)) {
+  if ($installCode -in @(3010, 1641) -or ($installCode -eq 0 -and (Test-WslRestartMessage ($installOutput -join "`n")))) {
     Save-SetupResume
-    Write-Host "Restart Windows to finish installing $Distro."
+    Write-Host "Windows needs a restart before it can install $Distro. Save your work, restart Windows, and sign in again; localDot setup will reopen."
     return $false
   }
   if ($installCode -ne 0) {
