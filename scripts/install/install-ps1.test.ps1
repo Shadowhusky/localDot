@@ -14,7 +14,7 @@ $env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) ("localdot-ps1-" + [gui
 function Reset-Machine([hashtable]$machine) {
   $script:machine = @{
     Status = 0; Version = 0; List = 0; Distros = @(); Uid = "1000"; Systemd = 0; Download = 0; Installer = 0
-    InstallAdds = $null; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
+    InstallAdds = $null; DistroInstallCode = 0; TaskExists = $false; Stderr = $false; Update = 0; ElevatedExit = 0
     SetupExited = $false; SetupExit = 0; ProbeUids = @("0", "1000"); ProbePending = $false; ProbeTimeouts = 0; ProbeCodes = @(0)
     DockerResponses = @("29.2.0/linux"); Desktop = $null
   }
@@ -35,13 +35,21 @@ function wsl.exe {
     }
     "^--update$" { $code = $script:machine.Update }
     "^--version$" { $code = $script:machine.Version }
+    "^--list --all --quiet$" {
+      $code = $script:machine.List
+      $out = ($script:machine.Distros | ForEach-Object { $_[0] }) -join "`n"
+    }
     "^--list --verbose$" {
       $code = $script:machine.List
+      if ($script:machine.Distros.Count -eq 0) { $code = 1 }
       # Older wsl.exe writes UTF-16, which arrives with NULs between characters.
       $text = "  NAME      STATE           VERSION`n" + (($script:machine.Distros | ForEach-Object { "* $($_[0])    Stopped         $($_[1])" }) -join "`n")
       $out = ($text.ToCharArray() | ForEach-Object { "$_`0" }) -join ""
     }
-    "^--install --distribution (\S+)$" { if ($script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds } }
+    "^--install --distribution (\S+) --web-download --no-launch$" {
+      $code = $script:machine.DistroInstallCode
+      if ($code -eq 0 -and $script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds }
+    }
     "--exec id -u$" { $out = $script:machine.Uid }
     "--exec timeout 10 docker info " {
       $out = $script:machine.DockerResponses[0]
@@ -66,7 +74,6 @@ function Start-Process {
     if ($PassThru) { [pscustomobject]@{ ExitCode = $script:machine.ElevatedExit } }
     return
   }
-  if ($script:machine.InstallAdds) { $script:machine.Distros += , $script:machine.InstallAdds }
   $process = [pscustomobject]@{ Id = 123456; HasExited = $script:machine.SetupExited; ExitCode = $script:machine.SetupExit }
   $process | Add-Member ScriptMethod Refresh { }
   $process | Add-Member ScriptMethod Dispose { }
@@ -227,11 +234,17 @@ $machine.Distros = @(@("Ubuntu", "2"), @("Debian", "1"))
 $distros = @(Get-WslDistros)
 Check ($distros.Count -eq 2 -and $distros[0].Name -eq "Ubuntu" -and $distros[1].Version -eq "1") "reads the distro list through UTF-16 NULs and the default marker"
 
+Reset-Machine @{}
+Check (@(Get-WslDistros).Count -eq 0) "recognizes a fresh WSL install with no distributions"
+Check (-not ($script:calls -contains 'wsl --list --verbose')) "avoids verbose listing's no-distributions error in any Windows language"
+
 Reset-Machine @{ Systemd = 1; InstallAdds = @("Ubuntu", "2") }
 $Ref = "v1.2.3"; $Tailscale = [switch]$true
 Install-LocalDot
 $calls = @($script:calls)
-Check (@($calls | Where-Object { $_ -like "Start-Process wsl.exe --install --distribution Ubuntu*" }).Count -eq 1) "installs Ubuntu in its own setup window"
+Check ($calls -contains 'wsl --install --distribution Ubuntu --web-download --no-launch') "downloads Ubuntu visibly without opening an interactive shell"
+Check (@($calls | Where-Object { $_ -like "Start-Process wsl.exe --distribution Ubuntu*" }).Count -eq 1) "opens account setup separately after installation"
+Check ($calls.IndexOf('wsl --install --distribution Ubuntu --web-download --no-launch') -lt $calls.IndexOf('Start-Process wsl.exe --distribution Ubuntu ')) "finishes distribution installation before launching account setup"
 Check (-not ($calls -contains "wsl --install --distribution Ubuntu")) "never blocks the installer in Ubuntu's interactive shell"
 Check (@($calls | Where-Object { $_ -eq "Start-SetupProbe -d Ubuntu --exec id -u" }).Count -eq 2) "waits until account setup replaces root with the user's account"
 Check ($calls.IndexOf("Stop-Process 123456") -lt $calls.IndexOf("wsl -d Ubuntu --cd ~ --exec mktemp .localdot-install.XXXXXX")) "closes only the owned setup window before continuing installation"
@@ -247,16 +260,34 @@ $vbs = Get-Content (Join-Path $env:LOCALAPPDATA "localDot/keep-running.vbs") -Ra
 Check ($vbs -match '\.Run "wsl\.exe -d Ubuntu --exec sleep infinity", 0, False') "runs the keep-alive hidden"
 $Ref = $null; $Tailscale = [switch]$false
 
-Reset-Machine @{ SetupExited = $true; SetupExit = 3010 }
+Reset-Machine @{ DistroInstallCode = 3010 }
 Install-LocalDot
 Check (@($script:calls | Where-Object { $_ -like 'Registry localDotSetup*' }).Count -eq 1) "resumes when distribution installation requires a restart"
 Check (-not (@($script:calls) -match '--exec bash')) "does not continue app installation before the required restart"
 
-Reset-Machine @{ SetupExited = $true; SetupExit = 1 }
+Reset-Machine @{ DistroInstallCode = 1 }
 $message = ""
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
-Check ($message -like "*Installing Ubuntu didn't finish*") "reports setup failure instead of waiting forever"
+Check ($message -like "*Installing Ubuntu failed (exit 1)*") "reports setup failure instead of waiting forever"
 Check (-not (@($script:calls) -match "--exec bash")) "never reports an app install after failed Ubuntu setup"
+
+# A successful download launcher with no registered distro must never start account polling.
+Reset-Machine @{}
+$message = ''
+try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*without registering Ubuntu*') "reports absent distribution even when download exits zero"
+Check (-not ([bool](@($script:calls) -match 'Start-Process|Start-SetupProbe'))) "never waits for an account in a nonexistent distribution"
+
+Reset-Machine @{ DistroInstallCode = 42 }
+$message = ''
+try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*exit 42*') "retains the actual distribution installation error code"
+Check (-not ([bool](@($script:calls) -match 'Start-Process|Start-SetupProbe'))) "failed download cannot launch account setup or readiness probes"
+
+Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); SetupExited = $true; SetupExit = 1 }
+$message = ''
+try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+Check ($message -like '*account setup closed with exit 1*') "distinguishes account launch failure from download failure"
 
 Reset-Machine @{ SetupExited = $true; InstallAdds = @("Ubuntu", "2") }
 Install-LocalDot
@@ -268,16 +299,16 @@ $began = Get-SetupTime
 $message = ''
 try { Install-LocalDot } catch { $message = $_.Exception.Message }
 Check ($message -like '*still starts as root (uid 0)*') "reports the actual root-user state when setup cannot finish"
-Check (((Get-SetupTime) - $began).TotalSeconds -ge 60) "gives registration a grace period rather than failing on the first probe"
+Check (((Get-SetupTime) - $began).TotalSeconds -ge 60) "gives account setup a grace period rather than failing on the first probe"
 Check (-not ([bool](@($script:calls) -match '--exec bash'))) "never installs the app as root"
 
-Reset-Machine @{ SetupExited = $true; ProbeCodes = @(1, 0); ProbeUids = @('WSL_E_DISTRO_NOT_FOUND', '1000') }
-Check (Install-Distro) "retries transient registration errors after launcher exit"
+Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); SetupExited = $true; ProbeCodes = @(1, 0); ProbeUids = @('WSL_E_DISTRO_NOT_FOUND', '1000') }
+Check (Install-Distro) "retries transient account errors after a registered distro launches"
 
-Reset-Machine @{ SetupExited = $true; ProbeCodes = @(1); ProbeUids = @('WSL_E_DISTRO_NOT_FOUND') }
+Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); SetupExited = $true; ProbeCodes = @(1); ProbeUids = @('WSL_E_DISTRO_NOT_FOUND') }
 $message = ''
 try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
-Check ($message -like '*exit 1: WSL_E_DISTRO_NOT_FOUND*') "preserves WSL diagnostics when registration never becomes ready"
+Check ($message -like '*exit 1: WSL_E_DISTRO_NOT_FOUND*') "preserves WSL diagnostics when the registered distro cannot start"
 
 Reset-Machine @{ List = 1 }
 $message = ''
@@ -299,7 +330,7 @@ Check ($script:calls -contains "Stop-SetupProbe" -and $script:calls -notcontains
 Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbeTimeouts = 1; ProbeUids = @("1000") }
 Check (Install-Distro) "continues after a timed-out WSL probe is retried"
 Check (@($script:calls | Where-Object { $_ -eq 'Start-SetupProbe -d Ubuntu --exec id -u' }).Count -eq 2) "replaces the stuck probe after its deadline"
-Check (-not ($script:calls -contains 'wsl --list --verbose')) "never blocks on a synchronous distro list while Ubuntu setup runs"
+Check (@($script:calls | Where-Object { $_ -eq 'wsl --list --verbose' }).Count -eq 1 -and $script:calls.IndexOf('wsl --list --verbose') -lt $script:calls.IndexOf('Start-Process wsl.exe --distribution Ubuntu ')) "only lists distributions before interactive account setup starts"
 Check ($script:calls -contains 'Stop-Process 123456') "closes the owned setup window only after readiness is confirmed"
 
 Reset-Machine @{ InstallAdds = @("Ubuntu", "2"); ProbeTimeouts = 200 }
@@ -373,6 +404,10 @@ if ($env:OS -eq "Windows_NT") {
   function wsl.exe { & $env:ComSpec /d /c "echo WSL is not installed. 1>&2 & exit /b 1" }
   $probe = Invoke-Wsl --status
   Check ($probe.Code -eq 1 -and $probe.Text -like "*WSL is not installed*") "real native stderr reaches the exit-code check on Windows"
+  $message = ''
+  try { Install-Distro | Out-Null } catch { $message = $_.Exception.Message }
+  Check ($message -like '*Installing Ubuntu failed (exit 1)*') "native download stderr does not skip the installation exit-code check"
+  Check ($ErrorActionPreference -eq 'Stop') "restores PowerShell error handling after failed download"
   # Compile a native .NET executable on 5.1 to exercise both streams with Chinese text. ASCII
   # source escapes also keep this test readable by Windows PowerShell's legacy script decoder.
   if ($PSVersionTable.PSVersion.Major -eq 5) {

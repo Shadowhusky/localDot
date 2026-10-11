@@ -22,7 +22,8 @@ computer images. Download time depends on your connection. The current alpha sup
 Mac and Linux x64, including Windows through WSL 2. Clean native Windows installation has not yet
 been verified for this candidate. Intel Mac and Linux ARM64 packages are not published yet.
 
-Keep PowerShell open. Ubuntu account setup opens in a separate window; create your Linux user
+Keep PowerShell open. Ubuntu downloads and installs in PowerShell first, so progress and errors
+stay visible. Once it is installed, account setup opens in a separate window; create your Linux user
 and password there. PowerShell checks readiness in the background and continues when the account
 is ready. If Ubuntu already shows a normal `user@computer` prompt but PowerShell still waits,
 type `exit` in that Ubuntu window to release setup. If Windows asks for a restart, restart
@@ -88,6 +89,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | --- | --- |
 | `irm` or `curl` returns `404` for the old raw GitHub URL | The source repository is private. Browser sign-in does not apply to terminal downloads. Use the public commands above; retrying the private URL will not help. |
 | PowerShell shows `NativeCommandError` at `wsl.exe` | Rerun the installer to get the fix. If WSL setup still fails, open PowerShell as administrator, run `wsl --install --no-distribution`, restart Windows, then rerun the installer. |
+| WSL says no distributions are installed | Rerun the public installer above. It downloads Ubuntu before opening account setup. If the download fails, its WSL error stays visible in PowerShell. |
 | Stuck at “Keep this PowerShell window open” | Finish Ubuntu’s username/password prompts. If it already shows a normal shell prompt, type `exit` there. If PowerShell still does not continue, press Ctrl+C in PowerShell and rerun the public installer command above; Ubuntu is kept. |
 | Docker is unavailable | Start Docker. On Windows, enable WSL integration for your distro. |
 | `docker-storage-read-only` or `read-only file system` | Docker could not write its storage. Check the host disk holding Docker's data, restart Docker, then rerun setup. If it persists, collect Docker diagnostics. Do not factory-reset Docker or delete its disk image. |

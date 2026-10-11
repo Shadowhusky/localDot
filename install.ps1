@@ -145,11 +145,17 @@ function Invoke-Wsl {
 }
 
 function Get-WslDistros {
+  # WSL's verbose list fails when empty. Quiet enumeration succeeds with no names,
+  # avoiding both a false service error and parsing localized diagnostic text as rows.
+  # Include all states so an in-progress registration is not mistaken for absence.
+  $names = Invoke-Wsl --list --all --quiet
+  if ($names.Code -ne 0) { throw "Could not list WSL distributions (exit $($names.Code)): $($names.Text). Check wsl --status before retrying; no distribution was installed or removed." }
+  if ([string]::IsNullOrWhiteSpace(($names.Text -replace '[\uFEFF\uFFFE]', ''))) { return }
   $list = Invoke-Wsl --list --verbose
   if ($list.Code -ne 0) { throw "Could not list WSL distributions (exit $($list.Code)): $($list.Text). Check wsl --status before retrying; no distribution was installed or removed." }
   foreach ($line in ($list.Text -split "`r?`n" | Select-Object -Skip 1)) {
     $fields = @(($line -replace '^\s*\*?\s*', '').Trim() -split '\s+')
-    if ($fields.Count -ge 3) { [pscustomobject]@{ Name = $fields[0]; Version = $fields[-1] } }
+    if ($fields.Count -ge 3 -and $fields[-1] -match '^[12]$') { [pscustomobject]@{ Name = $fields[0]; Version = $fields[-1] } }
   }
 }
 
@@ -272,14 +278,45 @@ function Stop-SetupProbe($Probe) {
 }
 
 function Install-Distro {
-  # Keep Ubuntu's normal account setup in its own window. Never synchronously list WSL
-  # distributions here: even --list can wait behind the first-run registration lock.
   if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid distribution name: $Distro" }
-  Write-Host "Installing $Distro in a setup window. Create your Linux user name and password there."
-  Write-Host "Keep this PowerShell window open. It checks account setup automatically."
+  # Complete the download/registration in this console. A separate install window can
+  # disappear with the only useful error, leaving us probing a distro that never existed.
+  Write-Host "Downloading and installing $Distro. Progress and any WSL errors appear below."
+  $previousPreference = $ErrorActionPreference
+  $previousEncoding = [Console]::OutputEncoding
+  $previousUtf8 = $env:WSL_UTF8
+  try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $env:WSL_UTF8 = '1'
+    # Windows PowerShell treats native stderr as an error record, even for progress.
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    & wsl.exe --install --distribution $Distro --web-download --no-launch | Out-Host
+    $installCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+    [Console]::OutputEncoding = $previousEncoding
+    $env:WSL_UTF8 = $previousUtf8
+  }
+  if ($installCode -in @(3010, 1641)) {
+    Save-SetupResume
+    Write-Host "Restart Windows to finish installing $Distro."
+    return $false
+  }
+  if ($installCode -ne 0) {
+    throw "Installing $Distro failed (exit $installCode). The WSL error is printed above. Account setup has not started. Fix that error, then rerun this installer; completed setup is kept."
+  }
+  # Exit 0 alone is not evidence that Ubuntu exists. Never enter account polling until
+  # registration is confirmed, and never list synchronously during interactive first run.
+  $registered = @(Get-WslDistros | Where-Object { $_.Name -eq $Distro })
+  if ($registered.Count -eq 0) {
+    throw "WSL finished without registering $Distro. Account setup has not started. Run 'wsl --update --web-download', then 'wsl --install --distribution $Distro --web-download' in this PowerShell window and check its output. Rerun localDot setup after $Distro appears in 'wsl --list --verbose'."
+  }
+  Write-Host "$Distro is installed. Opening its Linux account setup in a separate window."
+  Write-Host "Create your Linux user name and password there. Keep this PowerShell window open."
   Write-Host "If Ubuntu reaches a normal user@computer prompt but setup still waits, type exit in that Ubuntu window."
   Write-Host "Press Ctrl+C here to stop waiting; your Ubuntu installation is kept."
-  $setup = Start-Process -FilePath "wsl.exe" -ArgumentList "--install", "--distribution", $Distro -PassThru
+  $setup = Start-Process -FilePath "wsl.exe" -ArgumentList "--distribution", $Distro -PassThru
   $probe = $null
   $accountReady = $false
   $closedDeadline = $null
@@ -295,16 +332,16 @@ function Install-Distro {
         return $false
       }
       if ($setup.HasExited -and $setup.ExitCode -ne 0) {
-        throw "Installing $Distro didn't finish (exit $($setup.ExitCode)). Run this installer again."
+        throw "$Distro account setup closed with exit $($setup.ExitCode). Run 'wsl -d $Distro' in this PowerShell window to see its error, then rerun this installer."
       }
       if ($setup.HasExited -and $null -eq $closedDeadline) {
         # Successful launcher exit is not proof that registration/account setup failed.
         $closedDeadline = (Get-SetupTime).AddSeconds(60)
-        Write-Host "$Distro's installer has exited. Checking its account for up to one minute..."
+        Write-Host "$Distro's setup window has exited. Checking its account for up to one minute..."
         Write-Host "If account setup has not appeared, open $Distro from the Windows Start menu."
       }
       if (-not $probe) {
-        # A not-yet-registered distro can return an error; retry while its setup is running.
+        # WSL may still be finishing first-run setup; retry transient account errors.
         $probe = Start-SetupProbe 'wsl.exe' "-d $Distro --exec id -u"
       }
       $result = Read-SetupProbe $probe
@@ -331,7 +368,7 @@ function Install-Distro {
         Write-Host "$lastReadiness Retrying."
       }
       if ($null -ne $closedDeadline -and (Get-SetupTime) -ge $closedDeadline) {
-        throw "$Distro installation exited, but its user is still not ready. $lastReadiness Open $Distro from the Start menu to finish account setup. If that also fails, run 'wsl --list --verbose' and 'wsl -d $Distro --exec id -u' for the actual WSL error. Your existing data is kept."
+        throw "$Distro account setup exited, but its user is still not ready. $lastReadiness Open $Distro from the Start menu to finish account setup. If that also fails, run 'wsl --list --verbose' and 'wsl -d $Distro --exec id -u' for the actual WSL error. Your existing data is kept."
       }
       if ((Get-SetupTime) -ge $nextNotice) {
         Write-Host "Waiting for $Distro account setup. Finish its username/password prompts; if you already see a shell prompt, type exit there."
