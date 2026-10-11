@@ -831,7 +831,7 @@ describe.concurrent("installing on macOS", { timeout: 60_000 }, () => {
     const calls = host.calls();
     expect(calls).toContain(`launchctl bootstrap gui/${uid} ${host.plist("dev.localdot.daemon")}`);
     expect(calls).toContain(`open http://127.0.0.1:${host.port}/#code=fakecode`);
-    expect(result.stdout).toContain("Tried opening your browser");
+    expect(result.stdout).toContain("If your browser did not open, use the link above.");
     expect(result.stdout).toContain(`http://127.0.0.1:${host.port}/#code=fakecode`);
   });
 
