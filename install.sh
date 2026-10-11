@@ -1212,9 +1212,15 @@ finish() {
   wait_ready
   offer_unlock
   step "Checking the installation"
-  if ! cli doctor; then
-    die "Installation checks failed. Setup is not complete. Your data is kept; run localdot doctor, fix the reported checks, then rerun setup."
-  fi
+  local diagnostic=0
+  cli doctor || diagnostic=$?
+  case "$diagnostic" in
+  0) ;;
+  2) say "localDot is installed. Before starting a task, choose or unlock your vault passphrase:"
+     say "  localdot unlock"
+     say "Your saved keys stay protected until you do." ;;
+  *) die "Installation checks failed. Setup is not complete. Your data is kept; run localdot doctor, fix the reported checks, then rerun setup." ;;
+  esac
   step "Sign in"
   show_link
   case ":$PATH:" in

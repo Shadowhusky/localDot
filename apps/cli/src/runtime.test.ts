@@ -55,3 +55,30 @@ it("does not begin diagnostics after cancellation", async () => {
   expect(mocks.installed).not.toHaveBeenCalled();
   expect(mocks.socket).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  "keeps pending vault setup distinct from runtime failures (other failure: %s)",
+  async (otherFailure) => {
+    mocks.socket.mockReturnValue({ path: "/fixture/docker.sock", source: "fixture" });
+    mocks.doctor.mockResolvedValue({
+      ok: false,
+      checks: [
+        {
+          name: "key-vault",
+          ok: false,
+          pendingAction: "unlock-vault",
+          detail: "Run localdot unlock",
+        },
+        { name: "isolated-gateway-mode", ok: !otherFailure, detail: "isolation check" },
+      ],
+    });
+    const io = { out: vi.fn(), err: vi.fn() };
+    expect(
+      await runtime.doctor(
+        { home: "/fixture", port: 4891, signal: new AbortController().signal, env: {} },
+        io,
+      ),
+    ).toBe(otherFailure ? 1 : 2);
+    expect(io.out).toHaveBeenCalledWith(expect.stringContaining("next key-vault"));
+  },
+);

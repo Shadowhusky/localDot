@@ -478,6 +478,15 @@ describe.concurrent("installing on Linux", { timeout: 60_000 }, () => {
     expect(result.stderr).toContain("Setup is not complete");
     expect(result.stdout).not.toContain("#code=");
   });
+  it("keeps the app installed and offers unlock when only vault setup is pending", async () => {
+    const host = await makeHost();
+    const result = await host.run([], { STUB_DOCTOR_RC: "2" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("localDot is installed");
+    expect(result.stdout).toContain("localdot unlock");
+    expect(result.stdout).toContain("#code=");
+    expect(existsSync(join(host.prefix, "install.env"))).toBe(true);
+  });
   it("builds, starts user services, checks and prints a link with a way in from elsewhere", async () => {
     const host = await makeHost();
     const result = await host.run();

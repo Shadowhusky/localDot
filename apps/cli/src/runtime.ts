@@ -108,9 +108,18 @@ export const runtime: Runtime = {
       home: context.home,
     });
     for (const check of report.checks) {
-      io.out(`${check.ok ? "ok  " : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`);
+      io.out(
+        `${check.ok ? "ok  " : check.pendingAction ? "next" : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`,
+      );
     }
     // The first interrupt lets doctor drain its owned probe before the CLI returns.
-    return context.signal.aborted ? 130 : report.ok ? 0 : 1;
+    if (context.signal.aborted) return 130;
+    if (report.ok) return 0;
+    // Exit 2 means the runtime works, but the user must unlock its protected vault.
+    // This must never hide a failed isolation, image, network or key-service check.
+    const failed = report.checks.filter((check) => !check.ok);
+    return failed.length > 0 && failed.every((check) => check.pendingAction === "unlock-vault")
+      ? 2
+      : 1;
   },
 };

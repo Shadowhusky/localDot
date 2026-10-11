@@ -28,6 +28,7 @@ export interface DoctorCheck {
   name: string;
   ok: boolean;
   detail: string;
+  pendingAction?: "unlock-vault";
 }
 
 export interface DoctorReport {
@@ -108,6 +109,7 @@ export function vaultCheck(vault: KeydVault): DoctorCheck {
     return {
       name,
       ok: false,
+      pendingAction: "unlock-vault",
       detail:
         "No keyring here, so saved keys go in an encrypted file. Choose its passphrase: localdot unlock",
     };
@@ -115,6 +117,7 @@ export function vaultCheck(vault: KeydVault): DoctorCheck {
     return {
       name,
       ok: false,
+      pendingAction: "unlock-vault",
       detail: "Saved keys are locked since this machine restarted. Unlock them: localdot unlock",
     };
   if (vault.backend === "memory")
