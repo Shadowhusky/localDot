@@ -51,3 +51,12 @@ assert.equal(
 console.log(
   "Video prefix, suffix, open-ended, clamped, unsatisfiable, validator and conditional response checks passed.",
 );
+
+const unframed = new Response(Uint8Array.from([0, 1, 2, 3]));
+const partial = await demoResponse(
+  new Request("https://localdot.dev/demos/work.mp4", { headers: { range: "bytes=1-2" } }),
+  unframed,
+);
+assert.equal(partial.status, 206);
+assert.deepEqual([...new Uint8Array(await partial.arrayBuffer())], [1, 2]);
+console.log("Missing Content-Length binding response passed.");

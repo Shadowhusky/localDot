@@ -5,8 +5,8 @@ const MAX_DEMO_BYTES = 4 * 1024 * 1024;
  * need byte ranges for Safari and seeking; never buffer arbitrary paths or large assets. */
 export async function demoResponse(request: Request, response: Response): Promise<Response> {
   if (response.status !== 200 || request.method !== "GET") return response;
-  const length = Number(response.headers.get("content-length"));
-  if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_DEMO_BYTES) return response;
+  const advertisedLength = Number(response.headers.get("content-length"));
+  if (advertisedLength > MAX_DEMO_BYTES) return response;
   const headers = new Headers(response.headers);
   headers.set("accept-ranges", "bytes");
   const range = request.headers.get("range");
@@ -19,6 +19,28 @@ export async function demoResponse(request: Request, response: Response): Promis
   const match = range?.match(/^bytes=(\d*)-(\d*)$/);
   if (!matches || !match || (!match[1] && !match[2]))
     return new Response(response.body, { status: 200, headers });
+  // The binding may omit Content-Length even though the outer CDN supplies it.
+  // Read only these owned clips, with an enforced bound independent of headers.
+  const reader = response.body?.getReader();
+  if (!reader) return response;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    length += part.value.byteLength;
+    if (length > MAX_DEMO_BYTES) {
+      await reader.cancel();
+      return new Response("Demo exceeds playback size limit", { status: 502 });
+    }
+    chunks.push(part.value);
+  }
+  const data = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    data.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   const start = match[1] ? Number(match[1]) : Math.max(0, length - Number(match[2]));
   const end = match[1] && match[2] ? Math.min(Number(match[2]), length - 1) : length - 1;
   if (
@@ -27,13 +49,10 @@ export async function demoResponse(request: Request, response: Response): Promis
     start >= length ||
     start > end
   ) {
-    await response.body?.cancel();
     headers.set("content-range", `bytes */${length}`);
     headers.set("content-length", "0");
     return new Response(null, { status: 416, headers });
   }
-  const data = await response.arrayBuffer();
-  if (data.byteLength !== length) return new Response(data, { status: 200, headers });
   headers.set("content-range", `bytes ${start}-${end}/${length}`);
   headers.set("content-length", String(end - start + 1));
   return new Response(data.slice(start, end + 1), { status: 206, headers });
