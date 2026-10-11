@@ -55,6 +55,15 @@ test("real Worker relay: pairing, HTTP streaming, WebSockets, isolation and revo
       res.end("unauthorized");
       return;
     }
+    if (req.url === "/slow-response") {
+      res.setHeader("content-type", "text/plain");
+      res.flushHeaders();
+      await sleep(50);
+      res.write("first");
+      await sleep(50);
+      res.end("second");
+      return;
+    }
     if (req.url === "/download") {
       res.setHeader("content-type", "application/octet-stream");
       res.end(payload);
@@ -184,6 +193,7 @@ test("real Worker relay: pairing, HTTP streaming, WebSockets, isolation and revo
   assert.ok(cookie);
   assert.match(paired.headers.get("set-cookie") ?? "", /HttpOnly; SameSite=Strict/);
   const headers = { cookie, authorization: "Bearer test-token", origin };
+  assert.equal(await (await call("/slow-response", { headers })).text(), "firstsecond");
   assert.match(
     await (await call("/_remote/pair", { headers })).text(),
     /Connect to localDot/,

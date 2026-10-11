@@ -1,7 +1,13 @@
 # Remote access under the localDot domain
 
-Status: Worker deployed on 10 October 2026 for `*--dot.localdot.dev/*`. Wildcard DNS setup
-and public connection verification are still pending; the service is not ready for users yet.
+Status: `*--dot.localdot.dev/*` is live as of 11 October 2026, with proxied wildcard DNS
+and verified public HTTPS. Production smoke checks passed using a synthetic installation:
+pairing, authenticated HTTP, 1 MiB uploads/downloads, WebSocket first-frame delivery and binary
+echo, origin isolation, and access closure after disconnect. This check also caught and fixed a
+response-stream race: each pull now waits for its chunk before another can begin.
+
+Installations still need the service-domain configuration below, and users must opt in.
+A real phone-to-desktop session and public-launch rate limits/billing alerts remain rollout checks.
 
 **Optional, off by default.** There is no relay connection until a user enables it. Local access,
 Tailscale, and SSH continue to work independently. We never fall back to the public relay

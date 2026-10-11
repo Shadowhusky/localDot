@@ -51,6 +51,7 @@ type Pending = {
   uploaded: number;
   controller?: ReadableStreamDefaultController<Uint8Array>;
   reading?: boolean;
+  responsePull?: { promise: Promise<void>; resolve(): void };
 };
 
 // One device per object. Only live socket metadata survives hibernation; no traffic is stored.
@@ -75,6 +76,8 @@ export class DeviceRelay extends DurableObject<Env> {
       clearTimeout(p.timer);
       void p.reader?.cancel().catch(() => {});
       p.controller?.error(new Error(reason));
+      p.responsePull?.resolve();
+      p.responsePull = undefined;
       p.resolve(reply(reason));
     }
     for (const s of this.ctx.getWebSockets(id)) {
@@ -270,6 +273,8 @@ export class DeviceRelay extends DurableObject<Env> {
       if (typeof message !== "string") {
         if (!p.controller || message.byteLength > CHUNK) throw Error();
         p.controller.enqueue(new Uint8Array(message));
+        p.responsePull?.resolve();
+        p.responsePull = undefined;
       } else if (message === "pull-upload") {
         if (p.reading) throw Error();
         p.reading = true;
@@ -311,7 +316,16 @@ export class DeviceRelay extends DurableObject<Env> {
                   p.controller = controller;
                 },
                 pull: () => {
+                  // A pull remains pending until its WebSocket chunk arrives. Returning
+                  // immediately lets the edge reader issue overlapping pulls over the network.
+                  if (p.responsePull) return p.responsePull.promise;
+                  let resolve!: () => void;
+                  const promise = new Promise<void>((done) => {
+                    resolve = done;
+                  });
+                  p.responsePull = { promise, resolve };
                   socket.send("pull-response");
+                  return promise;
                 },
                 cancel: () => this.finish(tag.id),
               },
