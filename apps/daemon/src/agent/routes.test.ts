@@ -329,6 +329,44 @@ describe("agent user routes", () => {
     expect(f.settings.get()).toEqual(accepted);
     expect(f.start).not.toHaveBeenCalled();
   });
+  it("downloads model metadata on the first provider read without needing a key", async () => {
+    const f = await setup();
+    const catalog = f.deps.catalog.get();
+    const refresh = vi.fn().mockResolvedValue(catalog);
+    f.deps.catalog = { get: () => undefined, refresh };
+    (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const reply = await f.send("GET", "/api/agent/providers");
+    expect(reply.status).toBe(200);
+    const body = (await reply.json()) as {
+      catalog: unknown;
+      keys: unknown[];
+      providers: { id: string; models: unknown[] }[];
+    };
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(
+      body.providers.find((p: { id: string }) => p.id === "deepseek")?.models.length,
+    ).toBeGreaterThan(0);
+    expect(body.keys).toEqual([]);
+  });
+
+  it("keeps local and plan setup accessible when the first catalog download fails", async () => {
+    const f = await setup();
+    f.deps.catalog = {
+      get: () => undefined,
+      refresh: vi.fn().mockRejectedValue(new Error("timeout")),
+    };
+    const reply = await f.send("GET", "/api/agent/providers");
+    expect(reply.status).toBe(200);
+    const body = (await reply.json()) as {
+      catalog: unknown;
+      keys: unknown[];
+      providers: { id: string; models: unknown[] }[];
+    };
+    expect(body.catalog).toBeNull();
+    expect(body.providers.find((p: { id: string }) => p.id === "ollama")).toBeDefined();
+    expect(body.keys).toHaveLength(1);
+  });
+
   it("lists only LLM key metadata and reports keyd offline without changing the provider list", async () => {
     const f = await setup();
     const res = await f.send("GET", "/api/agent/providers");

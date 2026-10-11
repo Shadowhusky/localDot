@@ -371,6 +371,9 @@ export function CustomKeyStep({
 }
 
 export function ModelStep({
+  loading = false,
+  onRefresh,
+  catalogAvailable = false,
   kind,
   provider,
   models,
@@ -390,6 +393,9 @@ export function ModelStep({
   onPlan,
   onPrice,
 }: {
+  loading?: boolean;
+  onRefresh?(): void;
+  catalogAvailable?: boolean;
   kind: ThinkKind;
   provider: string;
   models: readonly PickerModel[];
@@ -474,8 +480,25 @@ export function ModelStep({
     return (
       <Group roomy>
         <GroupRow
-          label="No models to choose from yet"
-          detail="The model list hasn't loaded. Go back and try again in a moment."
+          label={
+            <span role="status">{loading ? "Loading models…" : "Model list unavailable"}</span>
+          }
+          detail={
+            loading
+              ? "Downloading the available models."
+              : appKind(kind)
+                ? "The model list hasn't loaded. Go back and try again in a moment."
+                : catalogAvailable
+                  ? "No compatible models are listed for this provider. Refresh the list or choose another provider."
+                  : "The model list couldn't be downloaded. Check your connection and retry. Your saved key is kept."
+          }
+          trailing={
+            onRefresh ? (
+              <Button size="sm" busy={loading} onClick={onRefresh}>
+                Retry
+              </Button>
+            ) : undefined
+          }
         />
       </Group>
     );

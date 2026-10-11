@@ -2536,6 +2536,8 @@ function Theatre({ api }: { api: ApiClient }) {
             phone={phone}
             keys={keys}
             index={settings.index}
+            modelsLoading={settings.phase === "loading" || settings.phase === "refreshing"}
+            onRefreshModels={settings.refreshModels}
             saved={settings.saved}
             onSaved={settings.reload}
             turnOn={

@@ -59,3 +59,15 @@ describe("CatalogStore", () => {
     expect(store.get()?.providers.google).toBeDefined();
   });
 });
+
+it("does not replace a usable model cache with an empty catalog", async () => {
+  const home = ownedTemp(join(tmpdir(), "ld-empty-catalog-"));
+  let empty = false;
+  const store = new CatalogStore(home, {
+    fetchImpl: async () => Response.json(empty ? {} : MODELS_DEV_FIXTURE),
+  });
+  await store.refresh();
+  empty = true;
+  await expect(store.refresh()).rejects.toThrow("no usable models");
+  expect(store.get()?.providers.deepseek).toBeDefined();
+});

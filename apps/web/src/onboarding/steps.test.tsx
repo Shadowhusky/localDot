@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { KeyStep } from "./steps.tsx";
+import { KeyStep, ModelStep } from "./steps.tsx";
 
 afterEach(cleanup);
 
@@ -25,4 +25,36 @@ it("shows the command that turns key protection back on while it is off", () => 
   expect(screen.getByText("localdot doctor")).toBeTruthy();
   view.rerender(step());
   expect(screen.queryByText("localdot doctor")).toBeNull();
+});
+
+it("offers an in-place model-list retry and distinguishes loading from failure", () => {
+  const onRefresh = vi.fn();
+  const props = {
+    kind: "api" as const,
+    provider: "deepseek",
+    models: [],
+    allModels: [],
+    subscriptionModels: [],
+    main: "",
+    typedModel: "",
+    fast: false,
+    fastAvailable: false,
+    fastModel: "",
+    plan: false,
+    price: { input: "", output: "" },
+    onMain: vi.fn(),
+    onFast: vi.fn(),
+    onFastModel: vi.fn(),
+    onPlan: vi.fn(),
+    onPrice: vi.fn(),
+    onRefresh,
+  };
+  const view = render(<ModelStep {...props} />);
+  expect(screen.getByText(/Your saved key is kept/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(onRefresh).toHaveBeenCalledTimes(1);
+  view.rerender(<ModelStep {...props} loading />);
+  expect(screen.getByRole("status").textContent).toContain("Loading models");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(onRefresh).toHaveBeenCalledTimes(1);
 });

@@ -60,6 +60,8 @@ export interface OnboardingProps {
   keys: KeysController;
   index: ProviderIndex | null;
   saved: AgentSettingsDocument | null;
+  modelsLoading?: boolean;
+  onRefreshModels?(): void;
   // The saved settings changed: read them again.
   onSaved(): void;
   // Turns the computer on; null while it is already on.
@@ -476,6 +478,9 @@ export function Onboarding(props: OnboardingProps) {
             <ModelStep
               kind={draft.kind}
               provider={draft.provider}
+              loading={catalog && props.modelsLoading}
+              onRefresh={catalog ? props.onRefreshModels : undefined}
+              catalogAvailable={!!index?.catalog}
               models={appKind(draft.kind) ? [] : models}
               allModels={allModels}
               subscriptionModels={appModels}

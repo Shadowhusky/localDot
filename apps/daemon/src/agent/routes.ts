@@ -443,7 +443,17 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   app.get(
     "/api/agent/providers",
     route(async (c) => {
-      const catalog = deps.catalog.get();
+      let catalog = deps.catalog.get();
+      // A new installation has no cache. Loading provider choices must initialise
+      // it; entering a key is unrelated to this public metadata download.
+      if (!catalog) {
+        try {
+          catalog = await deps.catalog.refresh();
+        } catch {
+          // Keep local models and plan sign-ins available when the catalog is
+          // unreachable. Setup exposes a retry for the missing remote choices.
+        }
+      }
       let keys: KeydRecord[] = [];
       let keyLayer: "online" | "offline" = "online";
       try {

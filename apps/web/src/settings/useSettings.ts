@@ -390,9 +390,10 @@ export function useSettings(
       abort.abort();
     }
   };
-  const refresh = async () => {
+  const refreshCatalogIndex = async (allowClosed = false) => {
     const owner = current.current;
-    if (!owner.open || mutating.current || document.hidden || blocked.current) return;
+    if ((!owner.open && !allowClosed) || mutating.current || document.hidden || blocked.current)
+      return;
     if (owner.phase === "error" && failed.current === "read") return read(!owner.draft);
     if (unresolved.current) return;
     const generation = owner.generation,
@@ -603,7 +604,8 @@ export function useSettings(
     purposeCheck,
     recentActivity,
     save,
-    refresh,
+    refresh: () => refreshCatalogIndex(),
+    refreshModels: () => refreshCatalogIndex(true),
     reload,
     chooseMain,
     choosePermissions,

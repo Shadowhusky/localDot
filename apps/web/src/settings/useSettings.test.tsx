@@ -310,6 +310,19 @@ describe("explicit configuration save ownership", () => {
     expect(result.current.draft?.choices.main?.model).toBe("edited");
     expect(f.state.calls).not.toContain("POST /api/agent/catalog/refresh");
   });
+  it("can refresh models from setup while the settings panel is closed", async () => {
+    const f = server();
+    const { result } = renderHook(() => useSettings(f.api));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+    expect(result.current.open).toBe(false);
+    await act(async () => {
+      await result.current.refreshModels();
+    });
+    expect(f.state.calls).toContain("POST /api/agent/catalog/refresh");
+    expect(result.current.index).toEqual(f.state.index);
+    expect(f.state.puts).toEqual([]);
+  });
+
   it("retries the catalog refresh, not a read, after a failed refresh", async () => {
     const f = server(),
       { result } = await opened(f);

@@ -20,7 +20,7 @@ export class CatalogStore {
       fetchImpl: opts.fetchImpl ?? fetch,
       source: opts.source ?? CATALOG_SOURCE,
       now: opts.now ?? (() => new Date()),
-      timeoutMs: opts.timeoutMs ?? 30_000,
+      timeoutMs: opts.timeoutMs ?? 10_000,
       maxBytes: opts.maxBytes ?? MAX_CATALOG_BYTES,
     };
     const url = new URL(this.#opts.source);
@@ -97,6 +97,10 @@ export class CatalogStore {
           this.#opts.now().toISOString(),
           this.#opts.source,
         );
+        if (
+          !Object.values(catalog.providers).some((provider) => Object.keys(provider.models).length)
+        )
+          throw new Error("catalog: no usable models in the reply");
         const saved = `${JSON.stringify(catalog)}\n`;
         if (Buffer.byteLength(saved) > this.#opts.maxBytes)
           throw new Error("catalog: normalized cache is too large");
