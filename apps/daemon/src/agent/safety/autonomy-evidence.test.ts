@@ -101,6 +101,44 @@ describe("chat permission modes", () => {
     await authorizePrepared(h.ctx, effect("files_delete"));
     expect(h.asks).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    "echo 'rm -rf /home/user/data'",
+    "grep -n 'unlink' source.py",
+    "ls /tmp/remove-example",
+    "rm -f /tmp/installer.deb",
+    "cd /tmp; rm -f installer.deb; curl -sIL https://example.test/package.deb",
+    "cd /var/tmp && rm -f package.zip && uname -m",
+    "dd if=/dev/zero of=/dev/null count=1",
+  ])(
+    "full access does not mistake scratch cleanup or quoted words for destruction: %s",
+    async (command) => {
+      const h = harness(CAREFUL_AUTONOMY);
+      h.ctx.session.permissionMode = () => "full";
+      await run(h.ctx, { id: "scratch", kind: "tool", tool: "shell", input: { command } });
+      expect(h.asks).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "rm -rf /home/user/data",
+    "rm -rf /tmp/data",
+    "rm -f /tmp/link/doc.txt",
+    "rm -f /tmp/../home/user/data",
+    "rm -f /tmp/$file",
+    "cd /tmp; rm -f package.deb; rm -rf /home/user/data",
+    "echo 'rm -rf /home/user/data' | sh",
+    "bash -c 'rm -rf /home/user/data'",
+    `python3 -c 'import os; os.remove("/home/user/data")'`,
+    "dd if=/dev/zero of=/dev/sda",
+    "git reset --hard",
+  ])("full access keeps confirmation for destructive commands: %s", async (command) => {
+    const h = harness(CAREFUL_AUTONOMY);
+    h.ctx.session.permissionMode = () => "full";
+    await run(h.ctx, { id: "destructive", kind: "tool", tool: "shell", input: { command } });
+    expect(h.asks).toHaveBeenCalledOnce();
+    expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ title: "Delete or overwrite data" });
+  });
+
   it("auto permits only a Jev approval and asks when unavailable or unsure", async () => {
     const h = harness(CAREFUL_AUTONOMY);
     h.ctx.session.permissionMode = () => "auto";

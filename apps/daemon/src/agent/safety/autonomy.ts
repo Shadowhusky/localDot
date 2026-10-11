@@ -142,18 +142,48 @@ export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDeci
 function destructive(facts: RiskFacts): boolean {
   if (facts.operation === "files_delete") return true;
   if (facts.operation !== "shell" || !facts.command) return false;
-  return commandLines(facts.command).some(({ text, runs }) => {
-    if (/\.(?:rmtree|unlink|remove|rmdir)\s*\(/.test(text)) return true;
-    return runs.some((words) => {
-      const command = [words[0]?.replace(/^.*\//, ""), ...words.slice(1)].join(" ");
-      return (
-        /\b(?:rm|rmdir|unlink|shred|mkfs(?:\.[a-z0-9]+)?|wipefs|diskutil erase\w*|dd)\b/i.test(
-          command,
-        ) ||
-        /\bgit\s+(?:clean|reset\s+--hard)\b|\b(?:drop\s+(?:table|database)|truncate\s+table)\b/i.test(
-          command,
-        )
-      );
-    });
-  });
+  // A literal cleanup at the start of a command is local scratch work. Restrict
+  // this to individual files directly in a system temp directory: no recursion,
+  // expansions, globs, traversal, or intermediate symlink directories.
+  const command = facts.command.replace(
+    /^\s*cd\s+(\/(?:tmp|var\/tmp|private\/tmp))\s*(?:&&|;)\s*rm\s+(?:-f\s+)?(?:--\s+)?([A-Za-z0-9_][A-Za-z0-9_.-]*)(?=\s*(?:;|&&|$))/,
+    (all, _directory: string, file: string) => (file === "." || file === ".." ? all : "true"),
+  );
+  return commandLines(command).some(({ runs }) =>
+    runs.some((words) => {
+      const name = words[0]?.replace(/^.*\//, "") ?? "";
+      const args = words.slice(1);
+      if (/\.(?:rmtree|unlink|remove|rmdir)\(/.test(name)) return true;
+      if (/^(?:drop|truncate)$/i.test(name) && /^(?:table|database)$/i.test(args[0] ?? ""))
+        return true;
+      if (name === "rm" || name === "unlink") {
+        const files = args.filter((arg) => arg !== "-f" && arg !== "--");
+        return !(
+          files.length > 0 &&
+          files.every((file) =>
+            /^\/(?:tmp|var\/tmp|private\/tmp)\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(file),
+          )
+        );
+      }
+      if (/^(?:rmdir|shred|mkfs(?:\.[a-z0-9]+)?|wipefs)$/.test(name)) return true;
+      if (name === "diskutil") return /^erase/.test(args[0] ?? "");
+      // Reading with dd isn't destructive; an explicit output may overwrite data.
+      if (name === "dd") return args.some((arg) => /^of=/.test(arg) && arg !== "of=/dev/null");
+      if (name === "git") {
+        let index = 0;
+        while (index < args.length && args[index]?.startsWith("-")) {
+          if (["-C", "-c", "--git-dir", "--work-tree"].includes(args[index] ?? "")) index++;
+          index++;
+        }
+        return args[index] === "clean" || (args[index] === "reset" && args.includes("--hard"));
+      }
+      // Inspect program text only when an interpreter or database client executes
+      // it. A grep pattern, filename, comment, or printed example is not an action.
+      if (/^(?:python[\d.]*|node|perl|ruby|sqlite3|psql|mysql)$/.test(name))
+        return /\.(?:rmtree|unlink|remove|rmdir)\s*\(|\b(?:drop\s+(?:table|database)|truncate\s+table)\b/i.test(
+          args.join(" "),
+        );
+      return false;
+    }),
+  );
 }

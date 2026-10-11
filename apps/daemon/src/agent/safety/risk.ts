@@ -183,6 +183,8 @@ const WORK: Readonly<Record<ActionClass, string>> = {
   network: "connections beyond websites",
 };
 export function askWhy(actionClass: ActionClass, facts: Pick<RiskFacts, "operation">): string {
+  if (actionClass === "delete" && ["shell", "files_delete"].includes(facts.operation))
+    return "This step may permanently delete or overwrite data. Check the operation before continuing.";
   if (actionClass === "unknown" && facts.operation === "navigate")
     return "This address isn't a plain web page, so dot checks with you before opening it.";
   if (facts.operation === "schedule") return "Changing when dot works needs your OK.";
@@ -206,7 +208,11 @@ export function buildApprovalCard(
   return DraftSchema.parse({
     actionClass: decision.actionClass,
     risk: decision.risk === "high" ? "high" : "medium",
-    title: facts.schedule?.title ?? titles[decision.actionClass],
+    title:
+      facts.schedule?.title ??
+      (decision.actionClass === "delete" && ["shell", "files_delete"].includes(facts.operation)
+        ? "Delete or overwrite data"
+        : titles[decision.actionClass]),
     why: askWhy(decision.actionClass, facts),
     fields,
   });
