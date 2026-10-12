@@ -249,7 +249,7 @@ describe("talking to dot from the composer", () => {
     expect(engine.open).toBeUndefined();
   });
 
-  it("is unavailable where this browser can only listen online and that is off", async () => {
+  it("explains how to enable speech without starting capture when online speech is off", async () => {
     vi.stubGlobal("webkitSpeechRecognition", class {});
     changeVoicePrefs({ language: "fr-FR" });
     render(
@@ -267,8 +267,10 @@ describe("talking to dot from the composer", () => {
       />,
     );
     const mic = screen.getByRole("button", { name: "Hold to talk" });
-    await waitFor(() => expect(mic.getAttribute("aria-disabled")).toBe("true"));
+    await act(async () => {});
+    expect(mic.getAttribute("aria-disabled")).toBeNull();
     fireEvent.pointerDown(mic, { button: 0, pointerId: 7 });
+    expect(await screen.findByRole("button", { name: "Enable online speech" })).toBeTruthy();
     expect(engine.open).toBeUndefined();
   });
 });

@@ -276,7 +276,8 @@ describe("ActivityRail", () => {
     expect(screen.queryByRole("list", { name: "Task plan" })).toBeNull();
     fireEvent.click(strip);
     expect(strip.getAttribute("aria-expanded")).toBe("true");
-    expect(container.querySelector(".plan-strip-text")).toBeNull();
+    // Expanding the overlay keeps the compact summary in place, avoiding a layout jump.
+    expect(container.querySelector(".plan-strip-text")?.textContent).toBe("Check the totals");
     expect(
       within(screen.getByRole("list", { name: "Task plan" }))
         .getAllByRole("listitem")

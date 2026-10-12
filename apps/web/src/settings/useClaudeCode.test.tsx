@@ -22,6 +22,7 @@ const signedIn = {
 };
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 function fixture(first: unknown) {
@@ -83,6 +84,8 @@ describe("Claude Code in Settings", () => {
     expect(
       screen.getByText("Uses your plan's limits. localDot never sees your Claude sign-in."),
     ).toBeTruthy();
+    // Flush the effect that removes the sign-in refocus listener after the ready render.
+    await act(async () => {});
     // Ready: coming back no longer asks.
     now.mockReturnValue(20_000);
     fireEvent.focus(window);
