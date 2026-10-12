@@ -66,8 +66,8 @@ function nativeRecoveryAdvice(
   ) {
     advice =
       saved.boot === boot.boot
-        ? "Restart this machine, run localdot up, then use Replace computer. Your saved computer data is kept."
+        ? "Run localdot doctor --fix first. If native task exit is still unconfirmed, restart this machine, run localdot up, then use Replace computer. Your saved computer data is kept."
         : "The system has restarted. Run localdot up to check recovery, then use Replace computer.";
   }
-  return `Native task exit has not been confirmed. ${advice}`;
+  return `Native task exit has not been confirmed; stopped Docker containers do not confirm host task exit. ${advice}`;
 }

@@ -82,6 +82,15 @@ export async function runCli(
         command.operation,
         io,
       );
+    if (command.kind === "doctor" && command.fix) {
+      io.out("Restarting localDot and checking its computers. Saved apps and files are kept.");
+      const service = { home: localdotHome(options.env), signal: options.signal };
+      const stopped = await runtime.down(service, io);
+      if (stopped !== 0) return stopped;
+      options.signal.throwIfAborted();
+      const started = await runtime.up(service, io);
+      if (started !== 0) return started;
+    }
     const context = await runtime.context({
       home: localdotHome(options.env),
       env: options.env,

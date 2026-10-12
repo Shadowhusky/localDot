@@ -26,11 +26,18 @@ it("reports the recovery blocker read-only, including failed replacements", () =
     });
     const path = join(home, "safety", "fences", `${cell}.json`),
       before = readFileSync(path);
-    expect(recoveryChecks(home)[0]).toMatchObject({ ok: false, pendingAction: "recover-computer" });
-    expect(recoveryChecks(home)[0]?.detail).toContain("Native task exit has not been confirmed");
+    expect(recoveryChecks(home).find((c) => c.name === "computer-recovery")).toMatchObject({
+      ok: false,
+      pendingAction: "recover-computer",
+    });
+    expect(recoveryChecks(home).find((c) => c.name === "computer-recovery")?.detail).toContain(
+      "Native task exit has not been confirmed",
+    );
     expect(readFileSync(path)).toEqual(before);
     fences.confirmNativeRetirement(cell, task);
-    expect(recoveryChecks(home)[0]?.detail).toContain("Task retirement is confirmed");
+    expect(recoveryChecks(home).find((c) => c.name === "computer-recovery")?.detail).toContain(
+      "Task retirement is confirmed",
+    );
     replacements.write({
       oldCellId: cell,
       requestId: request,
@@ -62,14 +69,20 @@ it("gives actionable reboot instructions only with a matching baseline and stays
     fences.capture(cell, task, "native");
     const path = join(home, "safety", "fences", `${cell}.json`),
       before = readFileSync(path);
-    expect(recoveryChecks(home)[0]?.detail).toContain("Restart this machine, run localdot up");
+    expect(recoveryChecks(home).find((c) => c.name === "computer-recovery")?.detail).toContain(
+      "restart this machine, run localdot up",
+    );
     vi.mocked(readNativeBoot).mockReturnValueOnce({
       ...boot,
       boot: "22222222-2222-4222-8222-222222222222",
     });
-    expect(recoveryChecks(home)[0]?.detail).toContain("The system has restarted");
+    expect(recoveryChecks(home).find((c) => c.name === "computer-recovery")?.detail).toContain(
+      "The system has restarted",
+    );
     vi.mocked(readNativeBoot).mockReturnValueOnce(undefined);
-    expect(recoveryChecks(home)[0]?.detail).toContain("No verified system-restart record");
+    expect(recoveryChecks(home).find((c) => c.name === "computer-recovery")?.detail).toContain(
+      "No verified system-restart record",
+    );
     expect(readFileSync(path)).toEqual(before);
   } finally {
     rmSync(home, { recursive: true, force: true });

@@ -11,6 +11,7 @@ import {
 } from "./cells/docker.ts";
 import type { Images } from "./cells/images.ts";
 import { gateRelay } from "./cells/relay.ts";
+import { computerContainerCheck } from "./doctor-computers.ts";
 import { imageVerdict } from "./doctor-image.ts";
 import { runDoctorNetworkProbe } from "./doctor-network.ts";
 import { recoveryChecks } from "./doctor-recovery.ts";
@@ -76,7 +77,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const checks = [...hostChecks(host), ...(await dockerChecks(deps, host))];
   if (deps.signal?.aborted) return { ok: false, checks };
   checks.push(
-    ...(deps.home ? recoveryChecks(deps.home) : []),
+    ...(deps.home
+      ? [await computerContainerCheck(deps.docker, deps.home), ...recoveryChecks(deps.home)]
+      : []),
     await portCheck(deps.port, deps.home),
     ...(deps.keyd ? await keydChecks(deps.keyd, deps.discoveryDeadlineMs, deps.signal) : []),
   );

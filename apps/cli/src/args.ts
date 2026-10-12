@@ -17,12 +17,14 @@ export type Command =
       operation: "preview" | "reset" | "status";
       requestId?: string;
     }
-  | { kind: "doctor" }
+  | { kind: "doctor"; fix?: true }
   | { kind: "unlock" };
 
 // Keep the command line finite. In particular, never accept tokens, arbitrary URLs, shell text,
 // or passthrough options. The installer and service lifecycle will extend this explicit grammar.
 export function parseArgs(args: readonly string[]): Command | undefined {
+  if (args.length === 2 && args[0] === "doctor" && args[1] === "--fix")
+    return { kind: "doctor", fix: true };
   if (args.length === 0) return { kind: "default" };
   if (args[0] === "reset-computer") {
     let cellId: string | undefined, requestId: string | undefined;
@@ -143,6 +145,7 @@ Usage:
                                 Check a reset without resuming it
   localdot down                 Shut down managed services and computers; keep data
   localdot logs [--follow]       Read recent managed service logs, optionally follow
+  localdot doctor --fix          Restart only localDot, preserve computer data, then recheck
   localdot doctor               Check the local runtime
   localdot unlock               Enter the passphrase that protects saved keys (Linux servers)
   localdot --version            Show this build's version

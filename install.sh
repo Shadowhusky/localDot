@@ -80,7 +80,8 @@ localdot: start and manage localDot
   localdot start-at-login on|off|status  Choose whether localDot starts at login
   localdot restart             Restart localDot
   localdot open [--qr]         Print a fresh, single-use sign-in link (--qr: draw it for your phone)
-  localdot doctor              Check Docker, the images, the key service and the app
+  localdot doctor              Check Docker, computers, task cleanup and the app
+  localdot doctor --fix        Restart only localDot and recheck; keep computer data
   localdot unlock              Enter the passphrase that protects your saved keys
   localdot logs [--follow]     Show recent logs
   localdot stop [--all]        Stop dot's actions (--all: every task and computer)
@@ -1396,6 +1397,20 @@ run_command() {
     show_link
     ;;
   down) stop_services; cli stop --computers ;;
+  doctor)
+    case "${COMMAND_ARGS[*]-}" in
+    --fix)
+      say "Restarting localDot and checking its computers. Saved apps and files are kept."
+      stop_services
+      cli stop --computers
+      start_services 0 0
+      wait_ready
+      cli doctor
+      ;;
+    "") cli doctor ;;
+    *) die "Usage: localdot doctor [--fix]" ;;
+    esac
+    ;;
   start-at-login) set_startup_preference "${COMMAND_ARGS[@]:-status}" ;;
   restart)
     stop_services
@@ -1409,7 +1424,7 @@ run_command() {
     *) die "Usage: localdot logs [--follow]" ;;
     esac
     ;;
-  open | doctor | unlock | stop | reset-computer) cli "$COMMAND" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"} ;;
+  open | unlock | stop | reset-computer) cli "$COMMAND" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"} ;;
   *)
     printf 'Unknown command: %s\n\n' "$COMMAND" >&2
     command_usage >&2

@@ -1217,3 +1217,38 @@ describe("the Windows bootstrap", { timeout: 120_000 }, () => {
     );
   });
 });
+
+describe("doctor repair", () => {
+  it("keeps normal diagnostics read-only and restarts only localDot for --fix", async () => {
+    const host = await makeHost();
+    expect((await host.run()).code).toBe(0);
+    host.clearCalls();
+    expect((await host.command(["doctor"])).code).toBe(0);
+    expect(
+      host.calls().some((call) => /restart|stop --computers|systemctl --user stop/.test(call)),
+    ).toBe(false);
+    host.clearCalls();
+    const result = await host.command(["doctor", "--fix"]);
+    expect(result.code).toBe(0);
+    const calls = host.calls();
+    const stopped = calls.findIndex((call) => call.includes("stop --computers"));
+    const started = calls.findIndex((call) => call.includes("start localdot-daemon.service"));
+    const checked = calls.findIndex((call) =>
+      call.startsWith("node --import tsx ../cli/src/main.ts doctor"),
+    );
+    expect(stopped).toBeGreaterThanOrEqual(0);
+    expect(started).toBeGreaterThan(stopped);
+    expect(checked).toBeGreaterThan(started);
+    expect(calls.some((call) => /docker (rm|restart|volume|system)|prune|reboot/.test(call))).toBe(
+      false,
+    );
+    expect(result.stdout).toContain("Saved apps and files are kept");
+  });
+  it("does not start services when owned-container shutdown fails", async () => {
+    const host = await makeHost();
+    expect((await host.run()).code).toBe(0);
+    host.clearCalls();
+    expect((await host.command(["doctor", "--fix"], { STUB_STOP_COMPUTERS_RC: "1" })).code).toBe(1);
+    expect(host.calls().some((call) => call.includes("start localdot-daemon.service"))).toBe(false);
+  });
+});

@@ -317,3 +317,27 @@ describe("stop everything", () => {
     expect(f.runtime.stop).toHaveBeenCalledWith(expect.objectContaining({ all: true }), f.io);
   });
 });
+
+it("doctor --fix stops localDot, starts it, then runs fresh diagnostics", async () => {
+  const f = fixture(["doctor", "--fix"]);
+  expect(await f.run()).toBe(0);
+  const calls = [f.runtime.down, f.runtime.up, f.runtime.context, f.runtime.doctor].map(
+    (fn) => fn.mock.invocationCallOrder[0],
+  );
+  expect(calls).toEqual([...calls].sort((a, b) => (a ?? 0) - (b ?? 0)));
+  expect(f.runtime.stop).not.toHaveBeenCalled();
+});
+it.each(["down", "up"] as const)("doctor --fix stops after a failed %s", async (operation) => {
+  const f = fixture(["doctor", "--fix"]);
+  f.runtime[operation].mockResolvedValue(1);
+  expect(await f.run()).toBe(1);
+  expect(f.runtime.doctor).not.toHaveBeenCalled();
+  if (operation === "down") expect(f.runtime.up).not.toHaveBeenCalled();
+});
+it("doctor requires an explicit fix flag before restarting anything", async () => {
+  const f = fixture(["doctor"]);
+  expect(await f.run()).toBe(0);
+  expect(f.runtime.down).not.toHaveBeenCalled();
+  expect(f.runtime.up).not.toHaveBeenCalled();
+  expect(parseArgs(["doctor", "--fix", "--force"])).toBeUndefined();
+});
