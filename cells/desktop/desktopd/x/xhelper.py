@@ -868,18 +868,18 @@ class Commands:
             return keysym_for_char(name)
         raise ValueError("unknown key %r" % name)
 
-    def keycodes_for_keysym(self, keysym):
+    def keycodes_for_keysym(self, keysym, recycle=False):
         codes = list(self.d.keysym_to_keycodes(keysym))
         if codes:
             kc, idx = codes[0]
             return kc, MODS_FOR_INDEX.get(idx, [])
-        return self.remap(keysym), []
+        return self.remap(keysym, recycle=recycle), []
 
     def keycode_for_name(self, name):
         return self.keycodes_for_keysym(self.keysym_for_name(name))
 
     # xdotool's trick for characters the layout lacks: bind a spare keycode to the keysym.
-    def remap(self, keysym):
+    def remap(self, keysym, recycle=False):
         if keysym in self.remapped:
             return self.remapped[keysym]
         mapping = self.d.get_keyboard_mapping(self.min_kc, self.max_kc - self.min_kc + 1)
@@ -889,6 +889,20 @@ class Commands:
             if all(s == 0 for s in mapping[i]) and (self.min_kc + i) not in self.remapped.values():
                 spare = self.min_kc + i
                 break
+        if spare is None and recycle:
+            # A long multilingual message exhausts X's few empty keycodes. Reuse an
+            # owned mapping only between character taps, never while resolving a
+            # chord (whose earlier keys may not have been pressed yet). Leave held
+            # keys and mappings changed by another client alone.
+            down = self.d.query_keymap()
+            # XKB pads the unused levels of our mapping with zeroes.
+            for old, kc in self.remapped.items():
+                if (not (down[kc // 8] & (1 << (kc % 8))) and
+                        old in mapping[kc - self.min_kc] and
+                        all(s in (0, old) for s in mapping[kc - self.min_kc])):
+                    spare = kc
+                    del self.remapped[old]
+                    break
         if spare is None:
             raise RuntimeError("no spare keycode for keysym %#x" % keysym)
         self.d.change_keyboard_mapping(spare, [[keysym] * per])
@@ -901,7 +915,7 @@ class Commands:
         return spare
 
     def cmd_char(self, a):
-        kc, mods = self.keycodes_for_keysym(keysym_for_char(a["ch"]))
+        kc, mods = self.keycodes_for_keysym(keysym_for_char(a["ch"]), recycle=True)
         self.press_combo([self.keycode_for_name(m)[0] for m in mods] + [kc])
         return {"keycode": kc, "mods": mods}
 

@@ -9,7 +9,7 @@ describe("dot's working rules", () => {
       for (const rule of [
         "Plan briefly",
         "keep going until the task is done",
-        "the shell for data, files, installs and anything scriptable",
+        "the shell for data, files and installs",
         "keyboard shortcuts, the address bar and search boxes over menus",
         "browser_read, then browser_act by ref on web pages",
         "If something fails twice, change approach",
@@ -75,8 +75,8 @@ describe("dot's working rules", () => {
 
   it("stay short and never name localDot's own parts", () => {
     for (const rules of MODES.map(workingRules)) {
-      // Includes private sign-in recovery, visible app testing and reusable experience.
-      expect(rules.length).toBeLessThan(4400);
+      // Includes private sign-in recovery, visible app testing, browser recovery and reusable experience.
+      expect(rules.length).toBeLessThan(4600);
       expect(rules).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });

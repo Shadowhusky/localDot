@@ -91,7 +91,7 @@ export class ScreenUnavailableError extends Error {
         ? "The desktop isn't ready right now. Try switching to it again in a moment."
         : starting
           ? "The web browser is still starting. Try switching to it again in a few seconds."
-          : "The web browser couldn't open. Don't sign in on the desktop's Chromium, which doesn't keep sign-ins: try the web browser later, or tell the user what you couldn't do.",
+          : "The web browser couldn't open. Don't sign in on the desktop's Chromium or launch another browser as a workaround. Retry the visible web browser once after recovery, then tell the user what you couldn't do if it still fails.",
     );
     this.name = "ScreenUnavailableError";
   }

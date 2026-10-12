@@ -161,3 +161,14 @@ create a website login. Check the existing page or connected tool first. CAPTCHA
 keys, device approval, and forms outside the verified private-input path still need an explicit
 handoff. The agent should explain the step, keep the page open, and inspect the result after
 control returns instead of restarting the browser or repeating the same failed submission.
+
+## Graphics on macOS
+
+The visible web browser runs inside Docker's Linux VM. Docker Desktop on macOS does not expose
+the Mac GPU to these containers; the browser uses software graphics. Removing a Chromium flag
+cannot enable hardware acceleration without a different host/runtime. Do not diagnose a black
+capture or a browser restart as a GPU failure without checking the input and renderer errors first.
+
+Website interaction belongs in the visible web browser, including games and pages without
+sign-in. A control failure should trigger a bounded retry after recovery, then a clear explanation
+if it persists, rather than a hidden browser or a second desktop Chromium session.

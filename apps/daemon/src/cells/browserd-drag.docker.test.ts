@@ -50,6 +50,8 @@ list.addEventListener("drop", (e) => {
   show();
 });
 volume.addEventListener("input", show);
+// Echo typed text through the page itself, so the native input test checks actual delivery.
+document.querySelector('[name=username]').addEventListener('input', e => { document.title = e.target.value; });
 show();
 </script></body></html>`;
 
@@ -389,6 +391,38 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       },
       owner(signal),
     );
+
+  it("types long multilingual messages without exhausting native key mappings", async () => {
+    const account = await element({ name: "Account" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: account.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    const text = "哈喽哈宝~ 我是阿七，刚开的桌子，等几个人一起玩呀 😄 日本語 한국어".repeat(3);
+    const result = await client.type(
+      permit,
+      tabId,
+      {
+        text,
+        masked: false,
+        injector: "xtest",
+        pace: { firstCount: 0, firstMs: 0, restMs: 0 },
+      },
+      owner(),
+      () => {},
+    );
+    expect(result.count).toBe([...text].length);
+    expect(await title()).toBe(text);
+    expect((await client.health(owner())).ready).toBe(true);
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
+  }, 120_000);
 
   it("shows a full-page canvas in the agent image while masking password fields", async () => {
     const password = await element({ name: "Protected field" });
