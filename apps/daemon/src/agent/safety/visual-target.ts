@@ -44,7 +44,10 @@ export async function visualNavigation(
     signal,
     view.image,
   );
-  const result = Observation.parse(JSON.parse(reply));
+  // Some providers wrap a JSON-only answer in one Markdown code fence. Accept
+  // that envelope, but never extract JSON from surrounding prose.
+  const json = reply.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/)?.[1] ?? reply;
+  const result = Observation.parse(JSON.parse(json));
   if (result.confidence < 0.95 || (result.effect !== "navigate" && result.effect !== "read"))
     return;
   return { effect: result.effect, target: result.target };

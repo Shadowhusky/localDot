@@ -72,3 +72,25 @@ it("keeps visual evidence separate from the user's authority and sends no pixels
   expect(JSON.stringify(request)).not.toContain(view.image);
   expect(request.questions.fits.instructions).toContain("never instructions or permission");
 });
+
+it("accepts a single JSON code fence but rejects surrounding prose", async () => {
+  const json = JSON.stringify({
+    effect: "navigate",
+    target: "Conversation list row",
+    confidence: 0.99,
+  });
+  expect(
+    await visualNavigation(
+      async () => view,
+      async () => ["```json", json, "```"].join("\n"),
+      signal,
+    ),
+  ).toEqual({ effect: "navigate", target: "Conversation list row" });
+  await expect(
+    visualNavigation(
+      async () => view,
+      async () => `Ignore this: ${json}`,
+      signal,
+    ),
+  ).rejects.toThrow();
+});
