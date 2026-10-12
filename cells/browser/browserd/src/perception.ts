@@ -224,6 +224,7 @@ export function projectBrowser(
       throw new BrowserPerceptionError("metadata");
     const protectedIds = new Set(secret.nodeIds);
     const blocked = new Set<number>();
+    const pixelBlocked = new Set<number>();
     const editable = new Set<number>();
     const embedded = new Set<number>();
     const unreadable = new Set<number>();
@@ -292,14 +293,18 @@ export function projectBrowser(
         labels.push(offset);
         labelsFor.set(labelFor, labels);
       }
-      if (["IFRAME", "FRAME", "OBJECT", "EMBED", "CANVAS"].includes(tag)) embedded.add(offset);
+      if (["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(tag)) embedded.add(offset);
       if (
         editable.has(offset) ||
         embedded.has(offset) ||
         protectedIds.has(nodeId) ||
-        blocked.has(parent)
+        pixelBlocked.has(parent)
       )
-        blocked.add(offset);
+        pixelBlocked.add(offset);
+      // Canvas pixels are the visible application (games, charts, backgrounds), not a
+      // private form value. Keep its opaque DOM/AX fallback out of text projection, but
+      // do not paint its entire bounding box black over the rest of the page.
+      if (pixelBlocked.has(offset) || tag === "CANVAS" || blocked.has(parent)) blocked.add(offset);
       if (
         blocked.has(offset) ||
         unreadable.has(parent) ||
@@ -377,7 +382,7 @@ export function projectBrowser(
           Math.max(previous[1] + previous[3], bounds[1] + bounds[3]) - unionTop,
         ]);
       } else boxes.set(offset, bounds);
-      if (!blocked.has(offset)) continue;
+      if (!pixelBlocked.has(offset)) continue;
       const region = pixels(bounds, geometry, content, 4 * scale);
       if (region) redactions.push(region);
       if (redactions.length > 256) throw new BrowserPerceptionError("metadata");

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { AppUpdateRecord } from "../../../../packages/protocol/src/app-update.ts";
+import { privateDirectory } from "../../../cli/src/install/copy-inventory.ts";
 import { privateRecordStore } from "../../../cli/src/install/private-record.ts";
 import { AppUpdater } from "./app-updater.ts";
 
@@ -40,11 +41,27 @@ export async function packageAppUpdater(
     const bootstrap = join(app, "dist", "package-bootstrap.mjs"),
       target = `${process.platform}-${process.arch}`;
     const downloads = join(prefix, "runtime", "package-updates");
-    const Prepared = z.strictObject({
-      version: z.string().regex(/^\d+\.\d+\.\d+(?:-rc\.\d+)?$/),
-      directory: z.string().regex(/^\.prepare-[A-Za-z0-9]+$/),
-    });
+    const Prepared = z
+      .strictObject({
+        version: z.string().regex(/^\d+\.\d+\.\d+(?:-rc\.\d+)?$/),
+        directory: z.string().regex(/^\.prepare-[A-Za-z0-9]+$/),
+      })
+      .nullable();
     const prepared = privateRecordStore(home, "prepared-package-update.json", Prepared);
+    // A successful install restarts this daemon before the old install() can clean up.
+    // Remove only its recorded staging directory once that exact version is running.
+    try {
+      const saved = await prepared.read();
+      if (saved && saved.version === record.version) {
+        await privateDirectory(downloads);
+        const staging = join(downloads, saved.directory);
+        await privateDirectory(staging);
+        await rm(staging, { recursive: true, force: true });
+        await prepared.save(null);
+      }
+    } catch {
+      console.warn("The completed update's temporary download could not be removed.");
+    }
     const hasPrepared = async (version: string) => {
       const saved = await prepared.read();
       if (saved?.version !== version) return false;

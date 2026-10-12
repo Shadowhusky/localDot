@@ -78,6 +78,40 @@ export async function verifyDistribution(directory: string) {
           !`${helper.stdout}${helper.stderr}`.includes("Usage of keyd:")
         )
           throw new Error("Packaged native helper could not execute.");
+        // Recovery depends on this exact packaged helper, not merely a runnable older keyd.
+        const native = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+          detached: true,
+          stdio: "ignore",
+          env: environment,
+        });
+        const nativeStopped = new Promise<void>((r) => native.once("close", () => r()));
+        const observe = (args: string[]) =>
+          JSON.parse(
+            execFileSync(join(cwd, "keyd"), ["native-process", ...args], {
+              env: environment,
+              timeout: 5000,
+              encoding: "utf8",
+            }),
+          );
+        let identity: { state: string; start: string };
+        try {
+          await new Promise<void>((resolve, reject) => {
+            native.once("spawn", resolve);
+            native.once("error", reject);
+          });
+          identity = observe(["identity", String(native.pid)]);
+          if (
+            identity.state !== "owned" ||
+            !identity.start ||
+            observe(["status", String(native.pid), identity.start]).state !== "alive"
+          )
+            throw new Error("Packaged helper cannot identify an owned native task.");
+        } finally {
+          native.kill("SIGKILL");
+          await nativeStopped;
+        }
+        if (observe(["status", String(native.pid), identity.start]).state !== "exited")
+          throw new Error("Packaged helper cannot verify native task exit.");
         const probe = createServer();
         await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
         const address = probe.address();
@@ -126,6 +160,7 @@ export async function verifyDistribution(directory: string) {
       cli: true,
       nativeImageModule: true,
       helper: true,
+      nativeRecovery: true,
       daemon: true,
       webAssets: true,
       testedAt: new Date().toISOString(),

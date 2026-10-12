@@ -104,7 +104,7 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | Docker works in the terminal but localDot reports access denied | Linux may still be running background services with old group permissions. Save work in Ubuntu, run `wsl --terminate Ubuntu` in PowerShell, then reopen Ubuntu and rerun setup. On native Linux, sign out of all sessions or restart. Your installed apps and data are kept. |
 | `docker-storage-read-only` or `read-only file system` | Docker could not write its storage. Check the host disk holding Docker's data, restart Docker, then rerun setup. If it persists, collect Docker diagnostics. Do not factory-reset Docker or delete its disk image. |
 | `docker-storage-full` or `no space left on device` | Check space on both the host disk and Docker's virtual disk. Free space without deleting localDot's computer data, then rerun setup. |
-| `next computer-recovery` | The app is installed, but a previous task did not shut down cleanly. Run `localdot doctor --fix` to stop localDot’s services and containers, preserve their data, and start the app again. This interrupts a running task. If native task exit is still unconfirmed, restart the Mac or Windows PC (the Linux host on native Linux), run `localdot up`, then choose **Replace computer**. Recovery keeps the saved apps and files. Do not delete the safety records or reset Docker. |
+| `next computer-recovery` | A previous task did not shut down cleanly. Run `localdot doctor --fix` to stop localDot’s services and containers, preserve their data, and recheck. New native tasks save process identities, so recovery can confirm their exit without restarting the host. Then choose **Replace computer** to recover saved apps and files. For older tasks without process evidence, follow the confirmation steps below. Do not delete safety records or reset Docker. |
 | Final installation checks failed | Setup is not complete. Run `localdot doctor`, fix the reported checks, and rerun the installer. A running web server alone is not a successful installation. |
 | `go: command not found` while building the gate image | Rerun the latest installer. It supplies Go automatically; no separate Go installation is needed. |
 | A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
@@ -114,6 +114,22 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | Something else failed | Run `localdot doctor`; use `localdot logs --follow` for details. |
 
 For your phone or a remote server, see [remote access](#servers-without-a-screen).
+
+For an older task whose native process is no longer running, first stop localDot and independently
+check that the task and its child processes have exited. Then record that confirmation using the
+computer ID printed by `doctor`:
+
+```sh
+localdot down
+localdot recover --cell COMPUTER_ID --confirm-native-exit
+localdot up
+```
+
+Choose **Replace computer** in the app. This preserves the computer’s saved apps and files.
+The confirmation is recorded locally; it does not kill an unknown process or reset Docker.
+Recovery refuses the confirmation if a recorded task process is still running. If you cannot
+confirm an older task has exited, restarting the host is an alternative when `doctor` has a
+matching record of the task’s original system boot.
 
 ## What you need
 
@@ -221,6 +237,7 @@ Packaged publication/signing/installed acceptance gates remain in [release packa
 | `localdot restart` | Restart localDot |
 | `localdot open [--qr]` | Print a fresh, single-use sign-in link; `--qr` also draws it for your phone |
 | `localdot doctor` | Check Docker, computer container states, task recovery, and the app |
+| `localdot recover --cell ID` | Show the confirmation command for an older interrupted native task |
 | `localdot doctor --fix` | Stop localDot services and containers, preserve their data, restart the app, and check again. Interrupts running tasks; does not restart Docker. |
 | `localdot unlock` | Enter the passphrase that protects your saved keys |
 | `localdot logs [--follow]` | Show recent logs |

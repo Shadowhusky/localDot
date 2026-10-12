@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { finished } from "node:stream/promises";
 import {
   BrowserNavigateResult,
@@ -156,6 +157,7 @@ export class DesktopdTools {
     scope: Scope,
     body?: NonNullable<Parameters<typeof fetch>[1]>["body"],
     contentType?: string,
+    headers?: Record<string, string>,
   ): Promise<Response> {
     scope.signal.throwIfAborted();
     const response = await untilAborted(
@@ -164,6 +166,7 @@ export class DesktopdTools {
         headers: {
           authorization: `Bearer ${this.endpoint.token}`,
           ...(contentType ? { "content-type": contentType } : {}),
+          ...headers,
         },
         body,
         signal: scope.signal,
@@ -216,11 +219,41 @@ export class DesktopdTools {
     const input = ShellRequest.parse(req);
     signal?.throwIfAborted();
     this.#lifetime.signal.throwIfAborted();
-    const scope = this.#scope(input.timeoutMs + 10_000, signal);
+    // Do not abort this response on a user handoff: it carries proof of command cleanup.
+    const scope = this.#scope(input.timeoutMs + 10_000);
+    const id = randomUUID();
+    let cancellation: (() => void) | undefined;
+    let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
+    let completed = false;
+    const abort = () => {
+      cancellationTimer ??= setTimeout(() => scope.abort(), 5000);
+      cancellation?.();
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let protocolFailure: DesktopdError | undefined;
     try {
-      const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json");
+      const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json", {
+        "x-localdot-shell-id": id,
+      });
+      let cancellationSent = false;
+      cancellation = () => {
+        if (cancellationSent) return;
+        cancellationSent = true;
+        if (res.headers.get("x-localdot-shell-cancel") !== "1") return scope.abort();
+        const cancelScope = this.#scope(2000);
+        void this.#send("/shell/cancel", cancelScope, JSON.stringify({ id }), "application/json")
+          .then(async (reply) => {
+            await textBody(reply, cancelScope.signal, 4096);
+            // 404 may race with an already-ended command. Only the original stream's
+            // valid terminal result below is proof; this acknowledgement never is.
+            if (reply.status !== 204 && reply.status !== 404) scope.abort();
+          })
+          .catch(() => scope.abort())
+          .finally(() => cancelScope.abort());
+      };
+      if (signal?.aborted) cancellation();
       if (!res.ok) {
         await textBody(res, scope.signal, 4096);
         protocolFailure = new DesktopdError(res.status, "command request refused", "/shell");
@@ -260,20 +293,32 @@ export class DesktopdTools {
             const output = ShellChunk.strict().parse(value);
             outputBytes += Buffer.byteLength(output.chunk);
             if (outputBytes > input.maxOutputBytes) throw new ShellExecutionUncertainError();
-            await untilAborted(Promise.resolve(onChunk(output)), scope.signal);
+            if (!signal?.aborted) {
+              try {
+                await untilAborted(Promise.resolve(onChunk(output)), scope.signal);
+              } catch (error) {
+                if (!signal?.aborted) throw error;
+                // An in-flight callback may observe the retired generation. Still drain
+                // the command's cleanup result, without delivering any further output.
+              }
+            }
             scope.signal.throwIfAborted();
           }
         }
         if (chunk.done) break;
       }
       if (pending.trim() || !result) throw new ShellExecutionUncertainError();
+      completed = true;
+      signal?.throwIfAborted();
       return result;
     } catch (error) {
       // Only failures created from this response are trusted. An output consumer can throw
       // an arbitrary DesktopdError after the command has already run.
-      if (protocolFailure !== undefined && error === protocolFailure) throw error;
+      if (completed || (protocolFailure !== undefined && error === protocolFailure)) throw error;
       throw new ShellExecutionUncertainError();
     } finally {
+      signal?.removeEventListener("abort", abort);
+      clearTimeout(cancellationTimer);
       scope.abort();
       if (reader) {
         void reader.cancel().catch(() => {});

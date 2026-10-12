@@ -56,7 +56,7 @@ import type { KeydMonitor } from "../keyd/monitor.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
-import { ClaudeCodeDriver } from "./claude-code/driver.ts";
+import { ClaudeCodeCleanupError, ClaudeCodeDriver } from "./claude-code/driver.ts";
 import { claudeCodeInstructions } from "./claude-code/instructions.ts";
 import { localdotServer } from "./claude-code/mcp-server.ts";
 import { claudeCodeOptions } from "./claude-code/options.ts";
@@ -86,6 +86,7 @@ import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
+import { NativeTasks } from "./safety/native-tasks.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession, BrainGeneration } from "./session.ts";
@@ -487,7 +488,13 @@ export function createAgent(d: AgentWiringDeps) {
       lease.finish();
     }
   };
+  const nativeTasks = new NativeTasks(d.home);
   const nativeRetired = (sessionId: string) => {
+    try {
+      nativeTasks.confirmed(sessionId);
+    } catch {
+      throw new ClaudeCodeCleanupError();
+    }
     for (const record of d.fences?.records() ?? [])
       if (record.sessionId === sessionId && record.executor === "native")
         d.fences?.confirmNativeRetirement(record.cellId, sessionId);
@@ -588,7 +595,16 @@ export function createAgent(d: AgentWiringDeps) {
         onRetired: nativeRetired,
         query: (params) => claudeQuery(params),
         launch: () => claudeSetup.launch(),
-        spawn: spawnClaudeCode,
+        spawn: (options, session) =>
+          nativeTasks.spawn(session.cellId, session.id, () =>
+            spawn(options.command, options.args, {
+              cwd: options.cwd,
+              env: options.env,
+              signal: options.signal,
+              detached: true,
+              stdio: ["pipe", "pipe", "ignore"],
+            }),
+          ),
         dispatch: async (session, generation, name, callId, input, signal) =>
           (
             await dispatchTool(

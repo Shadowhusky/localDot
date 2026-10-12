@@ -16,6 +16,7 @@ import { runLogs } from "./install/logs.ts";
 import { runStartAtLogin } from "./install/start-at-login.ts";
 import { runUp, type UpOptions } from "./install/up.ts";
 import { runUpdate, type UpdateContext } from "./install/update.ts";
+import { runRecoverComputer } from "./recover-computer.ts";
 import { runResetComputer } from "./reset-computer.ts";
 import { runStopComputers } from "./stop-computers.ts";
 import { passphraseRecord, runUnlock, terminalPrompt } from "./unlock.ts";
@@ -61,6 +62,10 @@ export interface Runtime {
     context: RuntimeContext & { cellId: string; operation: "reset" | "status"; requestId?: string },
     io: ConsoleIO,
   ): Promise<number>;
+  recover(
+    context: RuntimeContext & { cellId: string; confirmNativeExit?: true },
+    io: ConsoleIO,
+  ): Promise<number>;
   doctor(context: RuntimeContext, io: ConsoleIO): Promise<number>;
   unlock(context: Pick<RuntimeContext, "home" | "signal">, io: ConsoleIO): Promise<number>;
 }
@@ -86,6 +91,7 @@ export const runtime: Runtime = {
     ),
   stop: (context, io) => (context.computers ? runStopComputers(context, io) : runStop(context, io)),
   resetComputer: runResetComputer,
+  recover: runRecoverComputer,
   unlock: (context, io) =>
     runUnlock(
       context.signal,

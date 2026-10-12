@@ -23,6 +23,7 @@ function fixture(args: string[], env: NodeJS.ProcessEnv = {}) {
     stop: vi.fn(async () => 0),
     resetComputer: vi.fn(async () => 0),
     doctor: vi.fn(async () => 0),
+    recover: vi.fn(async () => 0),
     unlock: vi.fn(async () => 0),
   };
   return {
@@ -340,4 +341,21 @@ it("doctor requires an explicit fix flag before restarting anything", async () =
   expect(f.runtime.down).not.toHaveBeenCalled();
   expect(f.runtime.up).not.toHaveBeenCalled();
   expect(parseArgs(["doctor", "--fix", "--force"])).toBeUndefined();
+});
+
+it("requires an exact computer identity and explicit native exit confirmation", () => {
+  const id = "01M4PT514STKGMY0HC4Y0AGQCY";
+  expect(parseArgs(["recover", "--cell", id])).toEqual({ kind: "recover", cellId: id });
+  expect(parseArgs(["recover", "--cell", id, "--confirm-native-exit"])).toEqual({
+    kind: "recover",
+    cellId: id,
+    confirmNativeExit: true,
+  });
+  for (const args of [
+    ["recover"],
+    ["recover", "--cell", "all"],
+    ["recover", "--cell", id, "--force"],
+    ["recover", "--cell", id, "--confirm-native-exit", "extra"],
+  ])
+    expect(parseArgs(args)).toBeUndefined();
 });

@@ -53,7 +53,7 @@ export interface ClaudeCodeDriverDeps {
   readonly query: QueryFn;
   // The user's own signed-in Claude Code, checked again for each run.
   readonly launch: () => Promise<ClaudeCodeLaunch>;
-  readonly spawn: (options: SpawnOptions) => SpawnedProcess;
+  readonly spawn: (options: SpawnOptions, session: AgentSession) => SpawnedProcess;
   readonly dispatch: (
     session: AgentSession,
     generation: BrainGeneration,
@@ -770,7 +770,7 @@ export class ClaudeCodeDriver {
       ]);
       const spawn = (options: SpawnOptions): SpawnedProcess => {
         if (fenced) throw new Error("The Claude Code run was retired.");
-        const child = d.spawn(options);
+        const child = d.spawn(options, session);
         const exited = new Promise<void>((resolve) => {
           if (child.exitCode !== null || child.signalCode) return resolve();
           child.once("exit", () => resolve());

@@ -119,6 +119,15 @@ export async function runCli(
         },
         io,
       );
+    if (command.kind === "recover")
+      return await runtime.recover(
+        {
+          ...context,
+          cellId: command.cellId,
+          ...(command.confirmNativeExit ? { confirmNativeExit: true } : {}),
+        },
+        io,
+      );
     return await runtime.doctor(context, io);
   } catch {
     io.err(

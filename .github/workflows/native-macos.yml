@@ -28,3 +28,7 @@ jobs:
       - name: Complete app and installer regression suite
         run: pnpm test --maxWorkers=3
       - run: pnpm test:native-macos
+      - name: Native recovery after abrupt daemon exit
+        run: |
+          (cd keyd && go build -trimpath -o "$RUNNER_TEMP/localdot-keyd-recovery" ./cmd/keyd)
+          node scripts/check-native-recovery.mjs "$RUNNER_TEMP/localdot-keyd-recovery"

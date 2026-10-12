@@ -391,7 +391,7 @@ describe("private browser perception projection", () => {
         scale,
       );
       expect(result.mask.content).toEqual([20 * scale, 100 * scale, 1000 * scale, 600 * scale]);
-      expect(result.mask.redactions).toHaveLength(6);
+      expect(result.mask.redactions).toHaveLength(5);
       expect(result.mask.redactions[0]).toEqual([
         Math.floor(32.5 * scale) - 4 * scale,
         Math.floor(187.5 * scale) - 4 * scale,
@@ -518,7 +518,7 @@ describe("private browser perception projection", () => {
     root.layout.nodeIndex.push(4);
     root.layout.bounds.push([300, 30175, 50, 75]);
     const result = projectBrowser(source.snapshot, source.accessibility, "root", geometry(), 2);
-    expect(result.mask.redactions).toHaveLength(7);
+    expect(result.mask.redactions).toHaveLength(6);
     expect(result.mask.redactions.at(-1)).toEqual([332, 367, 66, 91]);
     expect(result.targets[1]?.bbox).toEqual({ x: 32.5, y: 187.5, w: 162.5, h: 37.5 });
   });
@@ -982,3 +982,25 @@ describe("leased browser observation", () => {
     await fixture.control.close();
   });
 });
+
+it.each([1, 2] as const)(
+  "keeps a full-page canvas visible while masking form fields at scale %i",
+  (scale) => {
+    const source = metadata(scale);
+    const page = required(source.snapshot.documents[0]);
+    const g = geometry(scale);
+    page.layout.bounds[7] = [0, g.scrollY * g.factor, g.width * g.factor, g.height * g.factor];
+    const projection = projectBrowser(source.snapshot, source.accessibility, "root", g, scale);
+    expect(projection.mask.redactions).toHaveLength(5);
+    expect(projection.mask.redactions).not.toContainEqual(projection.mask.content);
+    expect(projection.targets.find((target) => target.name === "Continue")).toBeDefined();
+    expect(JSON.stringify(projection)).not.toContain(privateCanary);
+    // A canvas explicitly identified as a protected field is still protected.
+    page.nodes.attributes[9] = [
+      source.snapshot.strings.push("contenteditable") - 1,
+      source.snapshot.strings.push("true") - 1,
+    ];
+    const protectedCanvas = projectBrowser(source.snapshot, source.accessibility, "root", g, scale);
+    expect(protectedCanvas.mask.redactions).toContainEqual(protectedCanvas.mask.content);
+  },
+);

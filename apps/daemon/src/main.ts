@@ -40,6 +40,7 @@ import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
 import { StreamTuning } from "./cells/stream-tuning.ts";
 import { monotonicClock } from "./clock.ts";
+import { timestampLogs } from "./daemon-log.ts";
 import { deliverablesFor } from "./deliverables/wiring.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
@@ -95,6 +96,7 @@ import { sourceAppUpdater } from "./updates/source-updater.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
 import { installedSpeech } from "./voice/speech.ts";
 
+timestampLogs();
 const port = portFromEnv();
 publicOriginFromEnv();
 const keydPorts = keydPortsFromEnv();

@@ -1,3 +1,4 @@
+import { ULID_PATTERN } from "../../../packages/protocol/src/ids.ts";
 import { RELEASE_VERSION } from "../../../packages/protocol/src/release.ts";
 
 export type Command =
@@ -18,6 +19,7 @@ export type Command =
       requestId?: string;
     }
   | { kind: "doctor"; fix?: true }
+  | { kind: "recover"; cellId: string; confirmNativeExit?: true }
   | { kind: "unlock" };
 
 // Keep the command line finite. In particular, never accept tokens, arbitrary URLs, shell text,
@@ -25,6 +27,18 @@ export type Command =
 export function parseArgs(args: readonly string[]): Command | undefined {
   if (args.length === 2 && args[0] === "doctor" && args[1] === "--fix")
     return { kind: "doctor", fix: true };
+  if (
+    args[0] === "recover" &&
+    args[1] === "--cell" &&
+    args[2] &&
+    ULID_PATTERN.test(args[2]) &&
+    (args.length === 3 || (args.length === 4 && args[3] === "--confirm-native-exit"))
+  )
+    return {
+      kind: "recover",
+      cellId: args[2],
+      ...(args.length === 4 ? { confirmNativeExit: true as const } : {}),
+    };
   if (args.length === 0) return { kind: "default" };
   if (args[0] === "reset-computer") {
     let cellId: string | undefined, requestId: string | undefined;
@@ -145,6 +159,9 @@ Usage:
                                 Check a reset without resuming it
   localdot down                 Shut down managed services and computers; keep data
   localdot logs [--follow]       Read recent managed service logs, optionally follow
+  localdot recover --cell <id>  Explain recovery for an old native task
+  localdot recover --cell <id> --confirm-native-exit
+                                Record your confirmation that the old native task is gone
   localdot doctor --fix          Restart only localDot, preserve computer data, then recheck
   localdot doctor               Check the local runtime
   localdot unlock               Enter the passphrase that protects saved keys (Linux servers)

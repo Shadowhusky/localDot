@@ -1,5 +1,15 @@
 import { EventEmitter } from "node:events";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -123,4 +133,47 @@ it("checks and installs through the bundled verifier and new channel after a leg
     "https://downloads.localdot.dev/channels/releases.json",
   );
   f.child.emit("close", 0);
+});
+
+it("removes only the recorded staging download after that version has started", async () => {
+  const f = await fixture();
+  await (await f.create()).check();
+  const record = JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"));
+  const downloads = join(f.prefix, "runtime/package-updates");
+  await mkdir(join(downloads, ".prepare-unrelated"));
+  await writeFile(
+    join(f.prefix, "app/package-release.json"),
+    JSON.stringify({
+      version: record.version,
+      channel: "https://downloads.localdot.dev/channels/releases.json",
+    }),
+    { mode: 0o600 },
+  );
+  await f.create();
+  await expect(stat(join(downloads, record.directory))).rejects.toThrow();
+  expect((await stat(join(downloads, ".prepare-unrelated"))).isDirectory()).toBe(true);
+  expect(JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"))).toBe(
+    null,
+  );
+});
+it("does not follow a replaced staging directory during post-update cleanup", async () => {
+  const f = await fixture();
+  await (await f.create()).check();
+  const record = JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"));
+  const staging = join(f.prefix, "runtime/package-updates", record.directory);
+  await rm(staging, { recursive: true });
+  await symlink(f.home, staging);
+  await writeFile(
+    join(f.prefix, "app/package-release.json"),
+    JSON.stringify({
+      version: record.version,
+      channel: "https://downloads.localdot.dev/channels/releases.json",
+    }),
+    { mode: 0o600 },
+  );
+  await f.create();
+  expect((await stat(f.home)).isDirectory()).toBe(true);
+  expect(JSON.parse(await readFile(join(f.home, "prepared-package-update.json"), "utf8"))).toEqual(
+    record,
+  );
 });

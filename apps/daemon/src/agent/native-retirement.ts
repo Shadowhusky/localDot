@@ -38,9 +38,14 @@ export class NativeRetirement {
     const record = this.#records.get(id);
     return !!record && !record.active && record.pending === 0 && !record.failed;
   }
-  #publish(id: string, record: { notified: boolean }): void {
+  #publish(id: string, record: { notified: boolean; failed: boolean }): void {
     if (record.notified || !this.confirmed(id)) return;
-    record.notified = true;
-    this.retired(id);
+    try {
+      this.retired(id);
+      record.notified = true;
+    } catch (error) {
+      record.failed = true;
+      throw error;
+    }
   }
 }

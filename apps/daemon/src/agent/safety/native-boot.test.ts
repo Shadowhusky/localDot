@@ -41,9 +41,9 @@ it("migrates a legacy fence without guessing whether its old process exited", ()
   const h = fixture();
   new ComputerFences(h.home).capture(h.cell, h.task, "native");
   expect(h.start().record(h.cell)?.nativeRetired).toBe(false);
-  expect(new NativeBootRecords(h.home).read(h.cell)).toMatchObject({ ...boot, sessionId: h.task });
+  expect(new NativeBootRecords(h.home).read(h.cell)).toBeUndefined();
   expect(h.start().record(h.cell)?.nativeRetired).toBe(false);
-  expect(h.start(reboot).record(h.cell)?.nativeRetired).toBe(true);
+  expect(h.start(reboot).record(h.cell)?.nativeRetired).toBe(false);
 });
 it("does not treat another machine or unavailable OS identity as proof", () => {
   const h = fixture();

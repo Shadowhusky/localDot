@@ -156,6 +156,7 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
       c.req.method === "POST" &&
       [
         "/shell",
+        "/shell/cancel",
         "/files/read",
         "/files/write",
         "/files/edit",

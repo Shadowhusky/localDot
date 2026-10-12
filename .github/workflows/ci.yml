@@ -72,3 +72,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: python3 apps/daemon/src/keyd/testing/test_canary_scan.py
       - run: LOCALDOT_KEYD_TESTS=1 pnpm test:keyd
+      - name: Native recovery after abrupt daemon exit
+        run: |
+          (cd keyd && go build -trimpath -o "$RUNNER_TEMP/localdot-keyd-recovery" ./cmd/keyd)
+          node scripts/check-native-recovery.mjs "$RUNNER_TEMP/localdot-keyd-recovery"

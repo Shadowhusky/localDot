@@ -10,7 +10,7 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   DesktopUploadInspect,
   DesktopUploadRead,
@@ -107,6 +107,17 @@ function transferPath(c: Context): string | Response {
 }
 
 export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
+  // Cancellation stops an owned command without discarding its terminal cleanup receipt.
+  const commands = new Map<string, AbortController>();
+  const CancelShell = z.strictObject({ id: z.string().uuid() });
+  app.post("/shell/cancel", async (c) => {
+    const req = await body(c, CancelShell, 1024);
+    if (req instanceof Response) return req;
+    const command = commands.get(req.id);
+    if (!command) return c.text("command already ended or unknown", 404);
+    command.abort(new Error("command cancelled by its owner"));
+    return c.body(null, 204);
+  });
   app.post("/files/upload-info", async (c) => {
     const request = await body(c, DesktopUploadInspect, 8192);
     if (request instanceof Response) return request;
@@ -157,8 +168,15 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
     } catch {
       return c.text("working directory must be inside the home", 400);
     }
+    const id = c.req.header("x-localdot-shell-id");
+    if (id !== undefined && !CancelShell.shape.id.safeParse(id).success)
+      return c.text("invalid command identity", 400);
+    if (id && (commands.has(id) || commands.size >= 64)) return c.text("command unavailable", 409);
     const stopped = new AbortController();
+    const cancel = new AbortController();
+    if (id) commands.set(id, cancel);
     const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
+    const execution = AbortSignal.any([signal, cancel.signal]);
     const encoder = new TextEncoder();
     const output = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -174,9 +192,11 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
               timeoutMs: req.timeoutMs,
               maxOutputBytes: req.maxOutputBytes,
               env: shellEnv(deps.env, deps.home),
-              signal,
+              signal: execution,
             },
-            send,
+            (chunk) => {
+              if (!execution.aborted) send(chunk);
+            },
           );
           send(done);
         } catch (error) {
@@ -191,6 +211,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
             } else send({ error: "shell command failed", status: 500 });
           }
         } finally {
+          if (id) commands.delete(id);
           try {
             controller.close();
           } catch {
@@ -202,7 +223,10 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
         stopped.abort(new Error("shell response cancelled"));
       },
     });
-    return c.body(output, 200, { "content-type": "application/x-ndjson" });
+    return c.body(output, 200, {
+      "content-type": "application/x-ndjson",
+      ...(id ? { "x-localdot-shell-cancel": "1" } : {}),
+    });
   });
 
   app.post("/files/read", async (c) => {

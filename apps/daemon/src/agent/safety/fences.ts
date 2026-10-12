@@ -2,6 +2,7 @@ import { ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
 import { sessionEnded } from "../../event-file.ts";
 import { NativeBoot, NativeBootRecords } from "./native-boot.ts";
+import { interruptedNativeTasks, nativeTaskState } from "./native-tasks.ts";
 import { PrivateRecords } from "./private-records.ts";
 import { SafetyIntentStore } from "./store.ts";
 
@@ -23,6 +24,7 @@ export class ComputerFences {
   #records?: PrivateRecords<FenceRecord>;
   #boots?: NativeBootRecords;
   #unavailable = false;
+  #recovering = true;
   constructor(
     home: string,
     private readonly additionalFence: (id: string) => boolean = () => false,
@@ -57,8 +59,19 @@ export class ComputerFences {
         if (!intent.cellId) throw new Error("unattributable safety intent");
         this.capture(intent.cellId, intent.sessionId, "native");
       }
+      for (const task of interruptedNativeTasks(home))
+        this.capture(task.cellId, task.sessionId, "native");
+      for (const record of this.#held.values())
+        if (
+          record.executor === "native" &&
+          !record.nativeRetired &&
+          nativeTaskState(home, record.cellId, record.sessionId) === "exited"
+        )
+          this.confirmNativeRetirement(record.cellId, record.sessionId);
     } catch {
       this.#unavailable = true;
+    } finally {
+      this.#recovering = false;
     }
   }
   closeAdmission(): void {
@@ -115,17 +128,18 @@ export class ComputerFences {
       if (this.#unavailable || !this.#records) throw new Error("fence records unavailable");
       this.#records.write(cellId, record);
       this.#durable.add(cellId);
-      this.#reconcileBoot(record);
+      this.#reconcileBoot(record, !this.#recovering);
     } catch {
       this.#unavailable = true;
     }
   }
-  #reconcileBoot(record: FenceRecord): void {
+  #reconcileBoot(record: FenceRecord, capturedNow = false): void {
     if (!this.boot || !this.#boots || record.executor !== "native" || record.nativeRetired) return;
     const before = this.#boots.read(record.cellId);
     if (!before) {
-      // Legacy fences have no process/boot receipt. Establish a baseline now; never
-      // infer an exit from a missing receipt, an app restart or an old file timestamp.
+      // A legacy fence has an unknown original boot. Do not invent a capture-time boot
+      // while loading it; a later user confirmation is explicit and audited.
+      if (!capturedNow) return;
       this.#boots.write(record.cellId, {
         ...this.boot,
         cellId: record.cellId,

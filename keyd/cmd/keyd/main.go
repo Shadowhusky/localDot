@@ -36,6 +36,7 @@ import (
 	_ "github.com/shadowhusky/localdot/keyd/internal/keydinfo"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
+	"github.com/shadowhusky/localdot/keyd/internal/nativepid"
 	"github.com/shadowhusky/localdot/keyd/internal/nativewatch"
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
 	"github.com/shadowhusky/localdot/keyd/internal/servicelease"
@@ -72,6 +73,9 @@ func main() {
 }
 
 func run(args []string, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "native-process" {
+		return nativepid.Run(args[1:], os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "native-lock" {
 		return nativewatch.RunResourceLock(args[1:], os.NewFile(3, "native-resource-lease"), os.Stdout)
 	}

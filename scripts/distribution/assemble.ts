@@ -27,9 +27,15 @@ export async function assemble(input: {
         check.version !== receipt.version ||
         check.target !== receipt.target ||
         check.sha512 !== receipt.artifact.sha512 ||
-        ["inventory", "cli", "nativeImageModule", "helper", "daemon", "webAssets"].some(
-          (field) => check[field] !== true,
-        )
+        [
+          "inventory",
+          "cli",
+          "nativeImageModule",
+          "helper",
+          "nativeRecovery",
+          "daemon",
+          "webAssets",
+        ].some((field) => check[field] !== true)
       )
         throw new Error("A package is missing matching runtime verification.");
       const bytes = await readFile(join(dir, basename(new URL(receipt.artifact.url).pathname)));

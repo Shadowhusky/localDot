@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Point, ulid } from "@localdot/protocol";
+import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { evalCellOptions } from "../agent/evals/cell.ts";
 import { BrowserClient, BrowserClientError, type BrowserScope } from "../browser/client.ts";
@@ -26,10 +27,13 @@ li { height: 60px; line-height: 60px; margin: 0 0 10px; padding-left: 16px; back
 #login { position: absolute; left: 800px; top: 100px; width: 250px; }
 #login input, #login button { display: block; margin: 10px; height: 35px; width: 220px; }
 </style></head><body>
+<canvas id="background" width="1280" height="800" style="position:fixed;inset:0;width:100vw;height:100vh;z-index:-1"></canvas>
 <form id="login" method="post" action="/session"><input name="username" aria-label="Account" autocomplete="username"><input name="password" aria-label="Password" type="password" autocomplete="current-password"><button>Sign in</button></form>
 <input id="volume" aria-label="Volume" type="range" min="0" max="100" value="0">
 <ul id="list"><li draggable="true">Alpha</li><li draggable="true">Beta</li><li draggable="true">Gamma</li></ul>
 <script>
+const paint = document.getElementById("background").getContext("2d");
+paint.fillStyle = "rgb(20,180,210)"; paint.fillRect(0,0,1280,800);
 const volume = document.getElementById("volume");
 const list = document.getElementById("list");
 const show = () => {
@@ -358,6 +362,25 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       },
       owner(signal),
     );
+
+  it("shows a full-page canvas in the agent image while masking password fields", async () => {
+    const password = await element({ name: "Protected field" });
+    const { frame } = await client.observe(permit, tabId, owner());
+    const { data, info } = await sharp(Buffer.from(frame.image, "base64"))
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const pixel = (point: Point) => {
+      const offset = (Math.floor(point.y) * info.width + Math.floor(point.x)) * info.channels;
+      return [...data.subarray(offset, offset + 3)];
+    };
+    // An uncovered patch of the page must retain the painted canvas. The old blanket
+    // canvas redaction made the entire content area black, including ordinary HTML.
+    const background = pixel({ x: info.width * 0.5, y: info.height * 0.8 });
+    expect(background[1]).toBeGreaterThan(140);
+    expect(background[2]).toBeGreaterThan(170);
+    expect(pixel(password.at).every((channel) => channel < 15)).toBe(true);
+  });
 
   it("lands a drag on the page where its points are, through the page's own geometry", async () => {
     expect(await title()).toBe("range 0 order ABG");

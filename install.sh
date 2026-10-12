@@ -82,6 +82,7 @@ localdot: start and manage localDot
   localdot open [--qr]         Print a fresh, single-use sign-in link (--qr: draw it for your phone)
   localdot doctor              Check Docker, computers, task cleanup and the app
   localdot doctor --fix        Restart only localDot and recheck; keep computer data
+  localdot recover --cell <id> Explain recovery for an old native task
   localdot unlock              Enter the passphrase that protects your saved keys
   localdot logs [--follow]     Show recent logs
   localdot stop [--all]        Stop dot's actions (--all: every task and computer)
@@ -1424,7 +1425,7 @@ run_command() {
     *) die "Usage: localdot logs [--follow]" ;;
     esac
     ;;
-  open | unlock | stop | reset-computer) cli "$COMMAND" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"} ;;
+  open | unlock | stop | reset-computer | recover) cli "$COMMAND" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"} ;;
   *)
     printf 'Unknown command: %s\n\n' "$COMMAND" >&2
     command_usage >&2

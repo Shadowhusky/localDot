@@ -60,3 +60,14 @@ it("a real cleanup failure never becomes a retirement receipt", async () => {
   expect(tracker.confirmed(id)).toBe(false);
   expect(retired).not.toHaveBeenCalled();
 });
+
+it("never reports confirmed retirement when its durable callback fails", () => {
+  const tracker = new NativeRetirement(() => {
+    throw new Error("descendant still alive");
+  });
+  const id = ulid();
+  tracker.begin(id);
+  expect(() => tracker.end(id)).toThrow("descendant still alive");
+  expect(tracker.confirmed(id)).toBe(false);
+  expect(() => tracker.begin(id)).toThrow("cleanup is pending");
+});
