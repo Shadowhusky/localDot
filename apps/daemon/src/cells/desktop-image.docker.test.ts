@@ -17,7 +17,7 @@ import {
   waitFor,
 } from "./testing/docker-cli.ts";
 
-export const DESKTOP_IMAGE = "localdot/desktop:dev";
+export const DESKTOP_IMAGE = process.env.LOCALDOT_DESKTOP_IMAGE || "localdot/desktop:dev";
 const C = "localdot-test-desktop-tools";
 const OUT = fileURLToPath(new URL("./testing/out/", import.meta.url));
 
@@ -115,12 +115,18 @@ function startDesktop(name: string, scale: 1 | 2): { port: number; desktopd: num
     "--shm-size=1g",
     "--cap-drop",
     "NET_RAW",
+    "--tmpfs",
+    "/run/localdot-desktop-browser:rw,nosuid,nodev,noexec,size=256m,uid=1000,gid=1000,mode=0700",
     "-p",
     "127.0.0.1:0:3000",
     "-p",
     "127.0.0.1:0:7700",
     "-v",
     `${HOME_VOLUME}:/config`,
+    "-e",
+    "PUID=1000",
+    "-e",
+    "PGID=1000",
     "-e",
     `PASSWORD=${STREAM_PASSWORD}`,
     "-e",
@@ -398,8 +404,8 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(settings.video_fullcolor).toMatchObject({ value: false, locked: true });
     expect(settings.manual_resolution).toMatchObject({ value: true, locked: true });
     expect(settings.scaling_dpi).toMatchObject({ value: "96", locked: true });
-    // A range is locked when its span is one value, an enum when it allows one item.
-    expect(settings.framerate).toMatchObject({ value: [60, 60], min: 60, max: 60 });
+    // Frame rate can adapt within the server's bounded range; encoder choice stays locked.
+    expect(settings.framerate).toMatchObject({ value: [10, 60], min: 10, max: 60 });
     expect(settings.encoder).toMatchObject({ value: "h264enc", allowed: ["h264enc"] });
     // No client message sets the clipboard or file-transfer policy, so Selkies gives them no lock.
     expect(settings.enable_clipboard?.value).toBe("false");

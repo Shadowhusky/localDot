@@ -445,7 +445,18 @@ describe("App token states", () => {
     expect(memoryReads).toHaveLength(1);
   });
 
-  it("keeps Shut down in Settings on a phone, where the sheet covers the page", async () => {
+  it("keeps Shut down in Settings on a phone, where the sheet covers the page", async ({
+    onTestFinished,
+  }) => {
+    const restore = fakeChromium();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    onTestFinished(() => {
+      restore();
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    });
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: /width < (700|1100)px/.test(query),
       media: query,

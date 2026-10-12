@@ -273,8 +273,9 @@ it("keeps an open download decision, in one scroller, when a task starts", async
   expect(screen.getByRole("alertdialog")).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Files 1" }).getAttribute("aria-selected")).toBe("true");
   expect(f.fetchImpl.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
-  expect(view.container.querySelectorAll(".ui-scroll-area")).toHaveLength(1);
-  expect(
-    view.container.querySelector(".ui-scroll-area")?.contains(screen.getByTestId("download-row")),
-  ).toBe(true);
+  const panel = screen.getByRole("tabpanel", { name: "Files 1" });
+  expect(panel.querySelectorAll(".ui-scroll-area")).toHaveLength(1);
+  expect(panel.querySelector(".ui-scroll-area")?.contains(screen.getByTestId("download-row"))).toBe(
+    true,
+  );
 });

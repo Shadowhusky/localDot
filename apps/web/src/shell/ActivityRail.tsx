@@ -378,8 +378,15 @@ export function ActivityRail({
               </div>
             </ScrollArea>
           </TabPanel>
-          {tabValues.includes("files") && (
-            <TabPanel tabsId={`${domId}-tabs`} value="files" selected={tab} swipe={phone}>
+          {/* Keep downloads mounted so their count can reveal Files before its first selection.
+              A panel absent from the swipe list must stay hidden even on a phone. */}
+          {(tabValues.includes("files") || (cellId && !replay)) && (
+            <TabPanel
+              tabsId={`${domId}-tabs`}
+              value="files"
+              selected={tab}
+              swipe={phone && tabValues.includes("files")}
+            >
               <ScrollArea className="activity-scroll">
                 <div className="activity-content">
                   {handed > 0 && sessionId && (
