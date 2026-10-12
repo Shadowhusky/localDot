@@ -1,6 +1,7 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
 import { sessionEnded } from "../../event-file.ts";
+import { NativeBoot, NativeBootRecords } from "./native-boot.ts";
 import { PrivateRecords } from "./private-records.ts";
 import { SafetyIntentStore } from "./store.ts";
 
@@ -20,12 +21,18 @@ export class ComputerFences {
   readonly #durable = new Set<string>();
   readonly #listeners = new Set<(id: string) => void>();
   #records?: PrivateRecords<FenceRecord>;
+  #boots?: NativeBootRecords;
   #unavailable = false;
   constructor(
     home: string,
     private readonly additionalFence: (id: string) => boolean = () => false,
+    private readonly boot?: NativeBoot,
   ) {
     try {
+      if (boot) {
+        NativeBoot.parse(boot);
+        this.#boots = new NativeBootRecords(home);
+      }
       this.#records = new PrivateRecords(home, "fences", (raw, id) => {
         const record = FenceRecord.parse(raw);
         if (record.cellId !== id) throw new Error("fence owner mismatch");
@@ -35,6 +42,7 @@ export class ComputerFences {
         this.#held.set(record.cellId, Object.freeze(record));
         this.#durable.add(record.cellId);
       }
+      for (const record of this.#held.values()) this.#reconcileBoot(record);
       // A crashed unsettled Pause is deny-only recovery. No recorded snapshot can mint a Resume permit.
       // An intent left by a task that recorded its end is stale: that task settled its own tools.
       const { intents, refused } = new SafetyIntentStore(home).scan();
@@ -107,9 +115,31 @@ export class ComputerFences {
       if (this.#unavailable || !this.#records) throw new Error("fence records unavailable");
       this.#records.write(cellId, record);
       this.#durable.add(cellId);
+      this.#reconcileBoot(record);
     } catch {
       this.#unavailable = true;
     }
+  }
+  #reconcileBoot(record: FenceRecord): void {
+    if (!this.boot || !this.#boots || record.executor !== "native" || record.nativeRetired) return;
+    const before = this.#boots.read(record.cellId);
+    if (!before) {
+      // Legacy fences have no process/boot receipt. Establish a baseline now; never
+      // infer an exit from a missing receipt, an app restart or an old file timestamp.
+      this.#boots.write(record.cellId, {
+        ...this.boot,
+        cellId: record.cellId,
+        sessionId: record.sessionId,
+        revision: record.revision,
+      });
+      return;
+    }
+    if (before.sessionId !== record.sessionId || before.revision !== record.revision)
+      throw new Error("native boot task mismatch");
+    if (before.host === this.boot.host && before.boot !== this.boot.boot)
+      this.confirmNativeRetirement(record.cellId, record.sessionId);
+    // The permanent fence remains. Replacement still retires the containers, browser,
+    // streams and key grants independently before copying the saved computer data.
   }
   confirmNativeRetirement(cellId: string, sessionId: string): void {
     const before = this.record(cellId);

@@ -24,6 +24,7 @@ export class PrivateRecords<T> {
     home: string,
     name:
       | "fences"
+      | "native-boots"
       | "replacements"
       | "computer-resets"
       | "computer-reset-holds"
