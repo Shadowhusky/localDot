@@ -186,7 +186,7 @@ describe("independent capture ownership and retirement", () => {
       for (let offset = 0; offset < packet.length; offset += MAX_BROWSER_CAPTURE_CHUNK) {
         peer.output.write(packet.subarray(offset, offset + MAX_BROWSER_CAPTURE_CHUNK));
       }
-      await expect(pending).resolves.toEqual(encoded);
+      expect((await pending).equals(encoded)).toBe(true);
       expect(peer.capture.alive).toBe(true);
       expect(peer.fatal).not.toHaveBeenCalled();
     } finally {

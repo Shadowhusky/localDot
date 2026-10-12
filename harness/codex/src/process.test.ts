@@ -362,7 +362,9 @@ describe("harmless owned Node process acceptance", () => {
     const actual = JSON.parse(out);
     // On this Mac a child has a system text-encoding value in addition to the explicit env.
     if (process.platform === "darwin") {
-      expect(actual.__CF_USER_TEXT_ENCODING).toMatch(/^0x[0-9a-fA-F]+:[0-9]+:[0-9]+$/);
+      expect(actual.__CF_USER_TEXT_ENCODING).toMatch(
+        /^0x[0-9a-fA-F]+:(?:0x[0-9a-fA-F]+|[0-9]+):(?:0x[0-9a-fA-F]+|[0-9]+)$/,
+      );
       delete actual.__CF_USER_TEXT_ENCODING;
     }
     expect(actual).toEqual({ PATH: "/usr/bin:/bin", HOME: "/tmp" });

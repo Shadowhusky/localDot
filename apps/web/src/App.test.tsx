@@ -356,10 +356,17 @@ describe("App Replay mode", () => {
     });
     render(<App fetchImpl={fixture.fetchImpl} />);
     await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
-    for (let index = 0; index <= 300; index++)
-      fireEvent.keyDown(window, { key: index % 2 ? "j" : "l" });
-    expect(screen.getByRole("main", { name: "Replay" })).toBeTruthy();
-    expect(writes).toBeLessThan(10);
+    // Hold the throttle clock still: rendering 301 events takes longer on CI runners.
+    const now = performance.now();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(now);
+    try {
+      for (let index = 0; index <= 300; index++)
+        fireEvent.keyDown(window, { key: index % 2 ? "j" : "l" });
+      expect(screen.getByRole("main", { name: "Replay" })).toBeTruthy();
+      expect(writes).toBeLessThan(10);
+    } finally {
+      clock.mockRestore();
+    }
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("t")).toBe("10000"));
   });
   it("keeps Watch working when no session exists", async () => {

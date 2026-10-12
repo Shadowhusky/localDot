@@ -15,6 +15,7 @@ import {
 } from "./testing/docker-cli.ts";
 
 const GATE_DIR = fileURLToPath(new URL("../../../../cells/gate", import.meta.url));
+const GATE_IMAGE = process.env.LOCALDOT_GATE_IMAGE || "localdot/gate:dev";
 const PROBE_IMAGE = "localdot/probe:test";
 const PROBE_DOCKERFILE = `FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 RUN apk add --no-cache curl busybox-extras && mkdir -p /www && echo cell-ok > /www/index.html
@@ -45,9 +46,10 @@ const curl = (container: string, url: string) =>
 describe.skipIf(!DOCKER_TESTS)("gate image", () => {
   beforeAll(async () => {
     removeAll(names);
-    execFileSync("docker", ["build", "-q", "-t", "localdot/gate:dev", GATE_DIR], {
-      stdio: "ignore",
-    });
+    if (!process.env.LOCALDOT_GATE_IMAGE)
+      execFileSync("docker", ["build", "-q", "-t", GATE_IMAGE, GATE_DIR], {
+        stdio: "ignore",
+      });
     execFileSync("docker", ["build", "-q", "-t", PROBE_IMAGE, "-"], {
       input: PROBE_DOCKERFILE,
       stdio: ["pipe", "ignore", "ignore"],
@@ -55,15 +57,23 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
     listener = new Worker(HOST_LISTENER, { eval: true });
     await once(listener, "message");
 
+    // Reserve unused subnets with Docker, then declare them explicitly: older engines
+    // reject static --ip assignments on networks using automatic IPAM configuration.
+    for (const name of names.networks) docker("network", "create", name);
+    const internalSubnet = subnetOf(names.networks[0]);
+    const egressSubnet = subnetOf(names.networks[1]);
+    for (const name of names.networks) docker("network", "rm", name);
     docker(
       "network",
       "create",
+      "--subnet",
+      internalSubnet,
       "--internal",
       "-o",
       "com.docker.network.bridge.gateway_mode_ipv4=isolated",
       "localdot-test-sbx",
     );
-    docker("network", "create", "localdot-test-egress");
+    docker("network", "create", "--subnet", egressSubnet, "localdot-test-egress");
     gateInternal = hostAddress(subnetOf("localdot-test-sbx"), 10);
     cell = hostAddress(subnetOf("localdot-test-sbx"), 11);
     gateEgress = hostAddress(subnetOf("localdot-test-egress"), 10);
@@ -105,7 +115,7 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
       `LD_DESKTOP_ADDR=${cell}`,
       "-e",
       `LD_KEYD_PORT=${KEYD_PORT}`,
-      "localdot/gate:dev",
+      GATE_IMAGE,
     );
     docker("network", "connect", "--ip", gateInternal, "localdot-test-sbx", "localdot-test-gate");
     docker(
