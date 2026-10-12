@@ -1,4 +1,12 @@
-import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  memo,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction, Status } from "../session/status.ts";
@@ -192,15 +200,7 @@ export function HudIsland({
           {badge && <PresenceSlot name="badge" className="island-badge" />}
           <span className="island-label">
             {islandAttention(status) && <span className="island-attention" aria-hidden="true" />}
-            <span
-              className="island-label-text"
-              data-testid="hud-status"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              <span key={status.label}>{status.label}</span>
-            </span>
+            <StatusLabel text={status.label} />
           </span>
           {task && (
             <span className="island-elapsed num" data-testid="hud-elapsed" aria-live="off">
@@ -436,3 +436,38 @@ export function PauseButton({
     />
   );
 }
+
+// Clock ticks and equivalent status objects leave the text and its animation untouched.
+const StatusLabel = memo(function StatusLabel({ text }: { text: string }) {
+  const [line, setLine] = useState({ text, previous: null as string | null, revision: 0 });
+  if (line.text !== text) {
+    setLine({ text, previous: line.text, revision: line.revision + 1 });
+  }
+  return (
+    <span className="island-label-text">
+      {line.previous !== null && (
+        <span
+          key={`old-${line.revision}`}
+          className="island-text-leaving"
+          aria-hidden="true"
+          onAnimationEnd={() =>
+            setLine((current) =>
+              current.revision === line.revision ? { ...current, previous: null } : current,
+            )
+          }
+        >
+          {line.previous}
+        </span>
+      )}
+      <span role="status" aria-live="polite" aria-atomic="true" data-testid="hud-status">
+        <span
+          key={line.revision}
+          className="island-text-current"
+          data-entering={line.revision > 0 || undefined}
+        >
+          {line.text}
+        </span>
+      </span>
+    </span>
+  );
+});
