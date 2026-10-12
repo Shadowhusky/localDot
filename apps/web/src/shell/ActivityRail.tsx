@@ -313,18 +313,6 @@ export function ActivityRail({
             {onHide && <IconButton icon="x" label="Hide activity" size={28} onClick={onHide} />}
           </div>
         )}
-        {onSteps && started && entries.length > 0 && (
-          <div className="activity-filter">
-            <SegmentedControl
-              aria-label="Activity filter"
-              size={32}
-              variant="quiet"
-              items={FILTERS}
-              value={filter}
-              onValueChange={(value) => setFilter(value as ActivityFilter)}
-            />
-          </div>
-        )}
       </div>
       {plan.length > 0 && (
         <div className="activity-plan">
@@ -334,6 +322,18 @@ export function ActivityRail({
       <div className="activity-body">
         <SwipePanels enabled={phone} value={tab} values={tabValues} onValueChange={choose}>
           <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab} swipe={phone}>
+            {started && entries.length > 0 && (
+              <div className="activity-filter">
+                <SegmentedControl
+                  aria-label="Activity filter"
+                  size={32}
+                  variant="quiet"
+                  items={FILTERS}
+                  value={filter}
+                  onValueChange={(value) => setFilter(value as ActivityFilter)}
+                />
+              </div>
+            )}
             <ScrollArea
               ref={follow.ref}
               className="activity-scroll"

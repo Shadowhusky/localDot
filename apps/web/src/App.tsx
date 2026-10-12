@@ -149,6 +149,7 @@ import { StageFrame } from "./shell/StageFrame.tsx";
 import { StreamMenu } from "./shell/StreamMenu.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
+import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { WorkOverlay } from "./shell/WorkOverlay.tsx";
 import { backgroundStep, requestShowCommands } from "./shell/work-overlay.ts";
@@ -658,6 +659,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
   const phone = layout === "phone";
+  const mobileScreen = useMobileScreen(phone);
   const panelsButton = useRef<HTMLButtonElement>(null);
   const { panels, update: updatePanels } = usePanelPreferences();
   const railView = panels.view;
@@ -1624,7 +1626,7 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const { focus, leave: leaveFocus } = useFocusMode(
     !curtain.up && !replayId,
-    !!question,
+    !!question || mobileScreen.minimized,
     fullScreen.on && phone,
   );
   const touchStill = useStill(focus);
@@ -1668,6 +1670,7 @@ function Theatre({ api }: { api: ApiClient }) {
       ref={page}
       className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
+      data-screen-minimized={mobileScreen.minimized || undefined}
       data-chat-hidden={!chatVisible || undefined}
       data-activity-hidden={wide || undefined}
       data-replaying={replayId ? "" : undefined}
@@ -1726,7 +1729,19 @@ function Theatre({ api }: { api: ApiClient }) {
         }
       />
       <div className="watch" hidden={!!replayId} inert={!!replayId}>
-        <main className="stage-col" aria-label="Computer">
+        {mobileScreen.minimized && (
+          <div className="mobile-screen-restore">
+            <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
+              Show screen
+            </Button>
+          </div>
+        )}
+        <main
+          ref={mobileScreen.ref}
+          className="stage-col"
+          aria-label="Computer"
+          inert={mobileScreen.minimized}
+        >
           <ErrorBoundary>
             <StageFrame
               overlay={
@@ -1922,7 +1937,11 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
               />
               {!yours && !full && !focus && stageHud.live && (
-                <StageExpand phone={phone} onEnter={fullScreen.enter} />
+                <StageExpand
+                  phone={phone}
+                  onEnter={fullScreen.enter}
+                  onMinimize={phone ? () => mobileScreen.setMinimized(true) : undefined}
+                />
               )}
             </StageFrame>
           </ErrorBoundary>
@@ -2070,11 +2089,19 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: requestShowCommands,
                       },
                       {
+                        label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
+                        icon: mobileScreen.minimized ? "monitor" : "chevron-up",
+                        run: () => mobileScreen.setMinimized(!mobileScreen.minimized),
+                      },
+                      {
                         label: "Full screen",
                         icon: "expand",
                         disabledReason:
                           curtain.up || replayId ? "Turn on your computer first" : undefined,
-                        run: () => fullScreen.enter(),
+                        run: () => {
+                          mobileScreen.setMinimized(false);
+                          fullScreen.enter();
+                        },
                       },
                       {
                         label: "Stop everything",
@@ -2542,7 +2569,7 @@ function Theatre({ api }: { api: ApiClient }) {
       {showDot.value && (
         <ErrorBoundary quiet>
           <PresenceLayer
-            place={place}
+            place={mobileScreen.minimized && !replayId && !onboarding.open ? null : place}
             feed={
               onboarding.open
                 ? {

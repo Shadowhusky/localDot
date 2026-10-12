@@ -140,18 +140,21 @@ export function PictureView({
     pointers.current.set(event.pointerId, local(event));
     const zoomed = zoomedIn(view.current, natural, stage);
     if (pointers.current.size === 1 && !zoomed) {
-      pointers.current.clear();
+      // Retain the first contact so the next one can start a pinch from Fit.
+      // It may still bubble to file paging until a second finger joins.
       return;
     }
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    // Let the viewer see the second contact so it cancels single-finger paging.
+    if (pointers.current.size === 1) event.stopPropagation();
+    for (const id of pointers.current.keys()) event.currentTarget.setPointerCapture(id);
     begin();
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const g = gesture.current;
-    if (!g || !natural || !pointers.current.has(event.pointerId)) return;
-    event.stopPropagation();
+    if (!pointers.current.has(event.pointerId)) return;
     pointers.current.set(event.pointerId, local(event));
+    const g = gesture.current;
+    if (!g || !natural) return;
+    event.stopPropagation();
     const [a, b] = [...pointers.current.values()];
     if (!a) return;
     const mid = b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : a;
@@ -183,7 +186,7 @@ export function PictureView({
     let next = zoomAt(view.current, clamped, g.from.x, g.from.y);
     const first = g.moves[0];
     const last = g.moves.at(-1);
-    if (first && last && last.t > first.t) {
+    if (event.type !== "pointercancel" && first && last && last.t > first.t) {
       const ms = last.t - first.t;
       next = {
         ...next,
@@ -285,6 +288,7 @@ export function PictureView({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerEnd}
           onPointerCancel={onPointerEnd}
+          onLostPointerCapture={onPointerEnd}
           onDoubleClick={(event) => {
             if (!natural) return;
             const at = local(event);
