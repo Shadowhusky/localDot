@@ -13,7 +13,7 @@ export function runtimeCandidateSpec(input: RuntimeUpdateJournal, role: Role) {
   const spec =
     role === "gate"
       ? gateSpec(j.source, j.images.gate)
-      : desktopSpec(j.source, j.images.desktop, { fullcolor: j.fullcolor });
+      : desktopSpec(j.source, j.systemImage ?? j.images.desktop, { fullcolor: j.fullcolor });
   return { ...spec, Labels: { ...spec.Labels, "localdot.runtime-update": j.operationId } };
 }
 

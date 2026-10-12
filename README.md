@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme/dot.png" width="80" alt="dot, a small white ball with two dark eyes">
+  <img width="80" src="docs/readme/dot.png" alt="dot, a small white ball with two dark eyes">
 </p>
 
 <h1 align="center">localDot</h1>
@@ -60,7 +60,7 @@ relying on it.
   <source media="(max-width: 600px)" srcset="docs/readme/capabilities-mobile.svg" type="image/svg+xml">
   <source media="(max-width: 600px)" srcset="docs/readme/capabilities-mobile.png">
   <source srcset="docs/readme/capabilities.svg" type="image/svg+xml">
-  <img src="docs/readme/capabilities.png" alt="Pencil sketch of eleven things dot can do: use the screen, a web browser that keeps your sign-ins, a terminal, files, web search for web, images and news, deep research with numbered sources and a cited report, voice, your apps as tools, routines on a schedule, a memory you can edit, and asking you before it acts as you.">
+  <img width="100%" src="docs/readme/capabilities.png" alt="Pencil sketch of eleven things dot can do: use the screen, a web browser that keeps your sign-ins, a terminal, files, web search for web, images and news, deep research with numbered sources and a cited report, voice, your apps as tools, routines on a schedule, a memory you can edit, and asking you before it acts as you.">
 </picture>
 
 [Open the full-size drawing](docs/readme/capabilities.svg).
@@ -80,7 +80,7 @@ The tour below shows the interface. Links below each image open the full-size ve
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/readme/watch-mobile.png">
-  <img src="docs/readme/watch.png" width="880" alt="The live computer, task progress and chat; phones show the phone layout">
+  <img width="100%" src="docs/readme/watch.png" alt="The live computer, task progress and chat; phones show the phone layout">
 </picture>
 
 [Open desktop screenshot](docs/readme/watch.png) · [Open phone screenshot](docs/readme/watch-mobile.png).
@@ -93,25 +93,26 @@ are saved in your browser. Background commands appear in a floating **command wi
 you can move, minimize or hide. It shows the existing activity feed and stays outside the
 computer recording.
 
-<a href="docs/readme/work.png"><img src="docs/readme/work.png" alt="The floating command window over the app shows command output; pictured with sample test output"></a>
+<a href="docs/readme/work.png"><img width="100%" src="docs/readme/work.png" alt="The floating command window over the app shows command output; pictured with sample test output"></a>
 
-<a href="docs/readme/panels.png"><img src="docs/readme/panels.png" alt="The Panels menu offers Hide chat and Hide activity; Files is selected in the resizable Activity panel"></a>
+<a href="docs/readme/panels.png"><img width="100%" src="docs/readme/panels.png" alt="The Panels menu offers Hide chat and Hide activity; Files is selected in the resizable Activity panel"></a>
 
 While dot is running, the empty message box shows **Stop**. Start typing and it changes to
 **Send**. New messages wait until the current task finishes; choose **Steer now** on a queued
-message to send it immediately. Stopping also cancels queued messages.
+message to send it immediately, or **Edit** to move it back to the input before resending.
+Stopping also cancels queued messages.
 
-<a href="docs/readme/queue.png"><img src="docs/readme/queue.png" width="400" alt="A queued message marked After this task, with a Steer now button and Stop in the empty composer"></a>
+<a href="docs/readme/queue.png"><img width="100%" src="docs/readme/queue.png" alt="A queued message marked After this task, with a Steer now button and Stop in the empty composer"></a>
 
 Open earlier conversations from the history menu, or use each conversation’s actions menu
 to delete it. History remains available while you hold control. Sending a new instruction
 hands control back to dot.
 
-<a href="docs/readme/conversations.png"><img src="docs/readme/conversations.png" alt="Recent conversations with a separate actions menu offering Open conversation and Delete conversation"></a>
+<a href="docs/readme/conversations.png"><img width="100%" src="docs/readme/conversations.png" alt="Recent conversations with a separate actions menu offering Open conversation and Delete conversation"></a>
 
 ### Activity
 
-<a href="docs/readme/activity.png"><img src="docs/readme/activity.png" alt="The Activity tab: a compact plan strip reading 1 of 4 with the current and next item, Steps and Files tabs, the step list with timings and results, and a usage line with the model and tokens"></a>
+<a href="docs/readme/activity.png"><img width="100%" src="docs/readme/activity.png" alt="The Activity tab: a compact plan strip reading 1 of 4 with the current and next item, Steps and Files tabs, the step list with timings and results, and a usage line with the model and tokens"></a>
 
 The plan shows the current step and progress. Open **Steps** for recorded actions, timings,
 errors and blocked requests. **Files** lists task outputs; research tasks also have **Sources**.
@@ -122,7 +123,7 @@ it to reset, or focus it and use the arrow keys. localDot remembers the width.
 
 ### Search, read and research
 
-<a href="docs/readme/research.png"><img src="docs/readme/research.png" alt="Two Activity panels from a research task. Left: steps such as Searched the web for air source heat pump performance, Read energysavingtrust.org.uk, Reading a PDF from nrel.gov and Searched the news. Right: the Sources tab with six numbered sources, their sites and passages, 6 of 20 read, and Wrap up now"></a>
+<a href="docs/readme/research.png"><img width="100%" src="docs/readme/research.png" alt="Two Activity panels from a research task. Left: steps such as Searched the web for air source heat pump performance, Read energysavingtrust.org.uk, Reading a PDF from nrel.gov and Searched the news. Right: the Sources tab with six numbered sources, their sites and passages, 6 of 20 read, and Wrap up now"></a>
 
 dot can search the web, images and news, and read pages without opening a browser window.
 These requests use public sources without your browser sign-ins. Pages and search results
@@ -136,7 +137,7 @@ as Markdown and as a PDF, with the passages it quoted from each source.
 
 ### Models and usage
 
-<a href="docs/readme/models.png"><img src="docs/readme/models.png" alt="Left: the model menu from the message box, grouped as Anthropic, OpenAI, Claude Code and ChatGPT plan, with Manage models at the bottom. Right: a finished turn's line, Claude Sonnet 5.5 · 25.1K tokens, opened to show each model's tokens in and out"></a>
+<a href="docs/readme/models.png"><img width="100%" src="docs/readme/models.png" alt="Left: the model menu from the message box, grouped as Anthropic, OpenAI, Claude Code and ChatGPT plan, with Manage models at the bottom. Right: a finished turn's line, Claude Sonnet 5.5 · 25.1K tokens, opened to show each model's tokens in and out"></a>
 
 The chip in the message box names the model doing the work. Open it to pick from every model
 you've set up, grouped by provider and plan; **Manage models…** at the bottom takes you to
@@ -148,7 +149,7 @@ Open a reply’s metadata to see its model, token usage and cost. Estimates are 
 
 ### Talk to it
 
-<a href="docs/readme/voice.png"><img src="docs/readme/voice.png" width="400" alt="Settings, Voice: speech to text on this device after a one-time download, language, allow online speech (off), read replies aloud (off), and a note that your voice is never saved"></a>
+<a href="docs/readme/voice.png"><img width="100%" src="docs/readme/voice.png" alt="Settings, Voice: speech to text on this device after a one-time download, language, allow online speech (off), read replies aloud (off), and a note that your voice is never saved"></a>
 
 Hold the mic in the message box, or press ⌥Space (Ctrl+Shift+Space off a Mac), and talk. Your
 words land in the message so you can check them before you send. The speech is turned into text
@@ -159,7 +160,7 @@ return to the message controls. localDot does not save the microphone recording.
 
 ### Permissions and sign-in
 
-<a href="docs/readme/approval.png"><img src="docs/readme/approval.png" alt="An approval card over the computer: Send this as you? with the target, the site, and buttons for Don't send and Send"></a>
+<a href="docs/readme/approval.png"><img width="100%" src="docs/readme/approval.png" alt="An approval card over the computer: Send this as you? with the target, the site, and buttons for Don't send and Send"></a>
 
 The shield in the message box opens **Permissions**:
 
@@ -167,13 +168,13 @@ The shield in the message box opens **Permissions**:
 - **Auto** lets Jev review routine actions, asking you when it cannot approve them.
 - **Full access** runs actions without routine confirmation, while destructive actions still ask.
 
-<a href="docs/readme/permissions.png"><img src="docs/readme/permissions.png" width="400" alt="Permissions menu in the chat composer: Custom, Auto and Full access, each with a short explanation"></a>
+<a href="docs/readme/permissions.png"><img width="100%" src="docs/readme/permissions.png" alt="Permissions menu in the chat composer: Custom, Auto and Full access, each with a short explanation"></a>
 
 Under the default Custom/Balanced settings, sending as you, paying, uploads and account changes
 ask first. The card says what will happen, and eligible answers can cover this once, the task,
 the site or always. Network isolation and private credential handling apply in every mode.
 
-<a href="docs/readme/ask.png"><img src="docs/readme/ask.png" alt="dot asks for a sign-in inside the chat: username and password fields, with a note that dot types the password into the site and never sees it"></a>
+<a href="docs/readme/ask.png"><img width="100%" src="docs/readme/ask.png" alt="dot asks for a sign-in inside the chat: username and password fields, with a note that dot types the password into the site and never sees it"></a>
 
 When dot needs a sign-in, the form shows up in the chat (or as a sheet on your phone). You type
 your account and password. localDot saves supported browser logins in its protected local
@@ -187,7 +188,7 @@ separate: dot uses the access already available for the kind of work requested. 
 
 ### Take over any time
 
-<a href="docs/readme/control.png"><img src="docs/readme/control.png" alt="You're in control: the island shows Hand back, dot waits under the picture, and a toolbar offers keys, typing and full screen"></a>
+<a href="docs/readme/control.png"><img width="100%" src="docs/readme/control.png" alt="You're in control: the island shows Hand back, dot waits under the picture, and a toolbar offers keys, typing and full screen"></a>
 
 Press **Take control** to use the mouse, keyboard or paste text. Agent interaction and
 recording pause until you hand control back. Full screen is one
@@ -195,7 +196,7 @@ click away when you want the whole display. Conversation history stays available
 
 ### Connectors
 
-<a href="docs/readme/connectors.png"><img src="docs/readme/connectors.png" width="760" alt="Settings, Connectors: GitHub with its tools listed one by one, each set to Just runs, Asks first or Off, and Linear waiting for a sign-in"></a>
+<a href="docs/readme/connectors.png"><img width="100%" src="docs/readme/connectors.png" alt="Settings, Connectors: GitHub with its tools listed one by one, each set to Just runs, Asks first or Off, and Linear waiting for a sign-in"></a>
 
 Connect GitHub, Linear, Notion, Sentry, Brave Search, or DeepWiki in **Settings → Connectors**.
 You can also add an MCP server by URL or command. dot can then call its tools directly.
@@ -207,7 +208,7 @@ to your host files.
 
 ### On your phone
 
-<a href="docs/readme/phone.png"><img src="docs/readme/phone.png" alt="Three phone screens: watching a task, a sign-in sheet, and Replay with the plan strip and step list"></a>
+<a href="docs/readme/phone.png"><img width="100%" src="docs/readme/phone.png" alt="Three phone screens: watching a task, a sign-in sheet, and Replay with the plan strip and step list"></a>
 
 The phone layout has a compact message box and full-screen computer view. Connect through
 Tailscale or enable the optional relay in Settings. Notifications depend on your browser and
@@ -215,7 +216,7 @@ notification permissions.
 
 ### Replay and export
 
-<a href="docs/readme/export.png"><img src="docs/readme/export.png" alt="Replay with the Export video sheet: a preview with dot under the picture, a filmstrip with trim handles, and the Quality, Fast and Showcase presets"></a>
+<a href="docs/readme/export.png"><img width="100%" src="docs/readme/export.png" alt="Replay with the Export video sheet: a preview with dot under the picture, a filmstrip with trim handles, and the Quality, Fast and Showcase presets"></a>
 
 Computer tasks are recorded locally, except while you hold control. Scrub through a recording,
 compare the screen before and after a step, or skip idle time. Trim a section and export it with
@@ -224,7 +225,7 @@ run on the host computer and continue if you close the browser tab.
 
 ### Files and revisions
 
-<a href="docs/readme/done.png"><img src="docs/readme/done.png" alt="A finished task: the summary, two files with inline previews, a start and an end screenshot, Watch replay, and a quiet line with the model and tokens"></a>
+<a href="docs/readme/done.png"><img width="100%" src="docs/readme/done.png" alt="A finished task: the summary, two files with inline previews, a start and an end screenshot, Watch replay, and a quiet line with the model and tokens"></a>
 
 Files appear in the conversation with previews for images, documents, code, spreadsheets,
 audio, and video. Use **Revise** to request a change; earlier versions remain available to
@@ -235,7 +236,7 @@ remain downloadable; a failed preview offers **Try again**.
 
 ### Routines
 
-<a href="docs/readme/routines.png"><img src="docs/readme/routines.png" alt="Left: dot proposes a routine called Morning bills in the chat. Right: the Routines list with schedules"></a>
+<a href="docs/readme/routines.png"><img width="100%" src="docs/readme/routines.png" alt="Left: dot proposes a routine called Morning bills in the chat. Right: the Routines list with schedules"></a>
 
 Schedule recurring tasks, such as checking a set of sites each weekday. You can create a
 routine yourself or ask dot to set one up. Routines require localDot to be running and use
@@ -243,12 +244,12 @@ your permission settings, including how to handle requests while you are away.
 
 ### First run and Settings
 
-<a href="docs/readme/onboarding.png"><img src="docs/readme/onboarding.png" alt="The welcome screen: Hi, I'm dot, with three promises and a Get started button"></a>
+<a href="docs/readme/onboarding.png"><img width="100%" src="docs/readme/onboarding.png" alt="The welcome screen: Hi, I'm dot, with three promises and a Get started button"></a>
 
 Setup walks you through a model, a key or a sign-in, how careful dot should be, and turning the
 computer on. You can skip setup and return to it in Settings.
 
-<a href="docs/readme/settings.png"><img src="docs/readme/settings.png" alt="Settings: models, autonomy, always allow, spending, appearance, voice, notifications, what dot knows, accounts, connectors, keys and your computer"></a>
+<a href="docs/readme/settings.png"><img width="100%" src="docs/readme/settings.png" alt="Settings: models, autonomy, always allow, spending, appearance, voice, notifications, what dot knows, accounts, connectors, keys and your computer"></a>
 
 Settings has the rest: models, autonomy, the things you've always allowed, research limits,
 spending limits (off until you want them), voice, what dot remembers about you (all of it
@@ -256,16 +257,16 @@ editable and deletable), the sites you're signed in to, your apps, and your keys
 
 ### The computer itself
 
-<a href="docs/readme/computer.png"><img src="docs/readme/computer.png" alt="dot's computer: a macOS-style menu bar and dock, with Chromium showing a travel article"></a>
+<a href="docs/readme/computer.png"><img width="100%" src="docs/readme/computer.png" alt="dot's computer: a macOS-style menu bar and dock, with Chromium showing a travel article"></a>
 
 The desktop includes Chromium, LibreOffice, GIMP, a code editor, and a terminal, with a menu
 bar, dock, and app launcher. Sign-ins in its web
 browser are retained across restarts and new tasks, though sites may ask you to sign in again. If the web browser stops
 answering, localDot attempts to restart it with the saved profile.
 
-<a href="docs/readme/computer-launcher.png"><img src="docs/readme/computer-launcher.png" alt="The launcher open over LibreOffice Calc, with calc typed in the search field"></a>
+<a href="docs/readme/computer-launcher.png"><img width="100%" src="docs/readme/computer-launcher.png" alt="The launcher open over LibreOffice Calc, with calc typed in the search field"></a>
 
-<a href="docs/readme/starting.png"><img src="docs/readme/starting.png" width="600" alt="Starting your computer: dot over a dark curtain, 0:14 · Waiting for the desktop, and a progress bar"></a>
+<a href="docs/readme/starting.png"><img width="100%" src="docs/readme/starting.png" alt="Starting your computer: dot over a dark curtain, 0:14 · Waiting for the desktop, and a progress bar"></a>
 
 Startup progress shows which service is being prepared: networking, desktop, or streaming.
 The status survives a page refresh and is shared across browser tabs.
@@ -273,14 +274,14 @@ The status survives a page refresh and is shared across browser tabs.
 ## Meet dot
 
 <p align="center">
-  <img src="docs/readme/dot-sequence.gif" width="820" alt="dot working through a task, its tool changing with each step: thinking, opening a web page, waiting for it to load, clicking, typing">
+  <img width="100%" src="docs/readme/dot-sequence.gif" alt="dot working through a task, its tool changing with each step: thinking, opening a web page, waiting for it to load, clicking, typing">
 </p>
 
 dot’s pose changes with the current action: a keyboard for typing, a terminal for commands,
 or a magnifier for inspection. Its caption describes the current step or tells you when
 input is needed.
 
-<a href="docs/readme/dot-poses.png"><img src="docs/readme/dot-poses.png" alt="Every one of dot's poses at hero and dock size: typing, terminal, browsing, clicking, dragging, looking, thinking, waiting, needs you, sending, saving, remembering, done and something failed"></a>
+<a href="docs/readme/dot-poses.png"><img width="100%" src="docs/readme/dot-poses.png" alt="Every one of dot's poses at hero and dock size: typing, terminal, browsing, clicking, dragging, looking, thinking, waiting, needs you, sending, saving, remembering, done and something failed"></a>
 
 ## How it works
 
@@ -288,7 +289,7 @@ input is needed.
   <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.svg" type="image/svg+xml">
   <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.png">
   <source srcset="docs/readme/system.svg" type="image/svg+xml">
-  <img src="docs/readme/system.png" alt="Pencil sketch: your browser and phone talk to the localDot daemon on your machine. The daemon runs an isolated computer made of four containers: desktop, web browser, brain and gate. The gate leads to keyd, which holds the real keys and adds them on the way out to model providers, the web and your apps. Web search and page reads go from the daemon to keyd with no sign-ins or keys, and your apps go through keyd too, each app that runs as a program in an app cell of its own.">
+  <img width="100%" src="docs/readme/system.png" alt="Pencil sketch: your browser and phone talk to the localDot daemon on your machine. The daemon runs an isolated computer made of four containers: desktop, web browser, brain and gate. The gate leads to keyd, which holds the real keys and adds them on the way out to model providers, the web and your apps. Web search and page reads go from the daemon to keyd with no sign-ins or keys, and your apps go through keyd too, each app that runs as a program in an app cell of its own.">
 </picture>
 
 [Open the full-size drawing](docs/readme/system.svg).
@@ -308,7 +309,7 @@ input is needed.
   <source media="(max-width: 600px)" srcset="docs/readme/task-loop-mobile.svg" type="image/svg+xml">
   <source media="(max-width: 600px)" srcset="docs/readme/task-loop-mobile.png">
   <source srcset="docs/readme/task-loop.svg" type="image/svg+xml">
-  <img src="docs/readme/task-loop.png" alt="Pencil sketch of one task: ask, plan, act, look, narrate, replay. Act, look and narrate repeat until the task is done; when dot needs you it asks in the chat.">
+  <img width="100%" src="docs/readme/task-loop.png" alt="Pencil sketch of one task: ask, plan, act, look, narrate, replay. Act, look and narrate repeat until the task is done; when dot needs you it asks in the chat.">
 </picture>
 
 [Open the full-size drawing](docs/readme/task-loop.svg).
@@ -324,7 +325,7 @@ up in the same step list.
   <source media="(max-width: 600px)" srcset="docs/readme/safety-mobile.svg" type="image/svg+xml">
   <source media="(max-width: 600px)" srcset="docs/readme/safety-mobile.png">
   <source srcset="docs/readme/safety.svg" type="image/svg+xml">
-  <img src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Searching, reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
+  <img width="100%" src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Searching, reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
 </picture>
 
 [Open the full-size drawing](docs/readme/safety.svg).

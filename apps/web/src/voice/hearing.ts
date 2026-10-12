@@ -61,9 +61,8 @@ async function browserHearing(
 ): Promise<Hearing> {
   const Recognition = speechRecognition();
   if (!Recognition) throw new VoiceError("unavailable");
-  // The mic is asked for first, so the one permission prompt covers both, and it drives the
-  // waveform: speech recognition does not say how loud anything is.
-  const capture = await openCapture(false);
+  // Start within the user's gesture. Recognition owns its microphone; a second capture
+  // competes for it on mobile and an awaited permission prompt loses user activation.
   const recognition = new Recognition();
   recognition.lang = language;
   recognition.continuous = true;
@@ -74,18 +73,22 @@ async function browserHearing(
   let begun = false;
   let ended = false;
   let settle: (() => void) | null = null;
+  let rejectStart: ((error: Error) => void) | undefined;
+  let startTimer = 0;
   recognition.onresult = (event) => {
     text = Array.from(event.results, (result) => result[0].transcript).join("");
     events.partial(text);
   };
   recognition.onend = () => {
     ended = true;
-    capture.close();
+    if (!begun) rejectStart?.(new VoiceError("no-speech"));
     if (settle) settle();
     else if (begun) events.ended();
   };
   try {
     await new Promise<void>((resolve, reject) => {
+      rejectStart = reject;
+      startTimer = window.setTimeout(() => reject(new VoiceError("unavailable")), 15_000);
       recognition.onstart = () => {
         begun = true;
         resolve();
@@ -99,12 +102,13 @@ async function browserHearing(
       recognition.start();
     });
   } catch (error) {
-    capture.close();
     recognition.abort();
     throw error;
+  } finally {
+    window.clearTimeout(startTimer);
   }
   return {
-    level: () => capture.level(),
+    level: () => -1,
     finish() {
       if (ended) return Promise.resolve(text);
       return new Promise<string>((resolve) => {
@@ -122,7 +126,6 @@ async function browserHearing(
     abort() {
       settle = () => {};
       recognition.abort();
-      capture.close();
     },
   };
 }

@@ -25,6 +25,7 @@ const mock = vi.hoisted(() => ({
   docker: vi.fn(),
   update: vi.fn(),
   contain: vi.fn(),
+  migrate: vi.fn(),
 }));
 vi.mock("./container-containment.ts", async (original) => ({
   ...(await original<typeof import("./container-containment.ts")>()),
@@ -39,6 +40,12 @@ vi.mock("./promote-release.ts", () => ({ readInstalledRelease: mock.release }));
 vi.mock("./image-client.ts", () => ({ installImageClient: mock.images }));
 vi.mock("./runtime-client.ts", () => ({ installRuntimeClient: mock.docker }));
 vi.mock("./update-journal.ts", () => ({ updateJournalStore: () => ({ read: mock.update }) }));
+vi.mock("../../../daemon/src/cells/system-migration.ts", async (original) => ({
+  ...(await original<typeof import("../../../daemon/src/cells/system-migration.ts")>()),
+  SystemMigration: class {
+    prepare = mock.migrate;
+  },
+}));
 const homes: string[] = [];
 afterEach(async () => {
   for (const fn of Object.values(mock)) fn.mockReset();
@@ -122,11 +129,27 @@ async function fixture(count = 1, fullcolor = false) {
     if (!manifest) throw new Error("unanchored release");
     return { record: { identity: id }, manifest: structuredClone(manifest) };
   });
+  const migrated = new Map<string, { Id: string; Config: { Labels: Record<string, string> } }>();
+  mock.migrate.mockImplementation(async (record: CellRecord, target: string) => {
+    expect(held).toBe(true);
+    const Id = `sha256:${required(record.ownership?.desktop)}`;
+    migrated.set(Id, {
+      Id,
+      Config: {
+        Labels: {
+          "localdot.system-base": target,
+          "localdot.system-source": required(record.ownership?.desktop),
+        },
+      },
+    });
+    return Id;
+  });
   const image = (ref: string) => ({
     Id: ref.slice(ref.indexOf("@") + 1),
     Os: "linux",
     Architecture: "arm64",
     RepoDigests: [ref],
+    ...migrated.get(ref),
   });
   const engine = vi.fn(async () => ({
     id: "fixture-engine",
@@ -241,12 +264,12 @@ async function fixture(count = 1, fullcolor = false) {
       objects.set(key, {
         Id: id,
         Name: `/${r.query?.name}`,
-        Image: spec.Image.split("@")[1],
+        Image: spec.Image.startsWith("sha256:") ? spec.Image : spec.Image.split("@")[1],
         Config: {
           Image: spec.Image,
           Env: spec.Env,
           User: "User" in spec ? spec.User : undefined,
-          Labels: spec.Labels,
+          Labels: { ...migrated.get(spec.Image)?.Config.Labels, ...spec.Labels },
         },
         HostConfig: structuredClone(spec.HostConfig),
         State: { ...off },
@@ -314,9 +337,11 @@ it("finishes an interrupted candidate before preparing all computers for rollbac
   await f.run(f.old);
   for (const source of f.sources) {
     const saved = await f.saved(source.id);
-    expect(f.objects.get(`/containers/${saved.ownership?.desktop}`)?.Config?.Image).toBe(
-      imageRef(f.previous.images.desktop),
-    );
+    expect(
+      f.objects.get(`/containers/${saved.ownership?.desktop}`)?.Config?.Labels?.[
+        "localdot.system-base"
+      ] ?? f.previous.images.desktop.digest,
+    ).toBe(f.previous.images.desktop.digest);
   }
   expect(
     f.mutations.every(
@@ -330,7 +355,7 @@ it("moves a computer still streaming 4:4:4 to 4:2:0 even when its images already
   await f.run(f.old);
   expect(f.mutations).toHaveLength(4);
   expect((await f.desktop(source.id))?.Config).toMatchObject({
-    Image: imageRef(f.previous.images.desktop),
+    Labels: expect.objectContaining({ "localdot.system-base": f.previous.images.desktop.digest }),
     Env: expect.arrayContaining(["SELKIES_VIDEO_FULLCOLOR=false|locked"]),
   });
   await f.run(f.old);
@@ -410,9 +435,11 @@ it("rolls back a batch containing both completed and interrupted computer migrat
   await f.run(f.old);
   for (const source of f.sources) {
     const saved = await f.saved(source.id);
-    expect(f.objects.get(`/containers/${saved.ownership?.desktop}`)?.Config?.Image).toBe(
-      imageRef(f.previous.images.desktop),
-    );
+    expect(
+      f.objects.get(`/containers/${saved.ownership?.desktop}`)?.Config?.Labels?.[
+        "localdot.system-base"
+      ] ?? f.previous.images.desktop.digest,
+    ).toBe(f.previous.images.desktop.digest);
     expect(f.objects.get(`/volumes/${saved.docker.homeVolume}`)?.Sentinel).toMatch(/^files-/);
   }
 });

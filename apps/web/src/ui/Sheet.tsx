@@ -24,8 +24,6 @@ import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
 import { attachSheetDrag, detentStops, type SheetDetent } from "./sheet-drag.ts";
 
-const CURRENT_BODY =
-  ".ui-sheet-page:not([data-held], [data-leaving]) > .ui-sheet-main > .ui-sheet-body";
 const FIT: readonly SheetDetent[] = ["fit"];
 
 // A phone keeps its keyboard down until a field is chosen.
@@ -342,7 +340,6 @@ function SheetLayer({
     return attachSheetDrag({
       panel: sheet,
       scrim: scrimRef.current,
-      body: () => sheet.querySelector<HTMLElement>(CURRENT_BODY),
       stops: () => detentStops(resting.current.detents),
       rest: (index) => {
         const { detents: names, setDetent: show } = resting.current;
@@ -468,7 +465,7 @@ function SheetPage({
       data-direction={view.direction}
       inert={held || leaving}
     >
-      <header className="ui-sheet-header ui-sheet-handle">
+      <header className="ui-sheet-header">
         <div className="ui-sheet-heading">
           {view.back && (
             <Button

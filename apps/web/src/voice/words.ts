@@ -28,7 +28,9 @@ export function routeDetail(route: VoiceRoute): string {
     case "none":
       switch (route.why) {
         case "checking":
-          return "";
+          return "Checking speech support…";
+        case "insecure":
+          return "Microphone access needs HTTPS. Open your secure remote link, or use localhost on the computer running localDot.";
         case "download":
           return "This browser can do it on this device after a one-time download.";
         case "online-off":
@@ -41,10 +43,12 @@ export function routeDetail(route: VoiceRoute): string {
 
 // Why the mic can't be used, as its tooltip says it.
 export function routeBlocked(route: VoiceRoute): string | undefined {
-  if (route.kind !== "none" || route.why === "checking" || route.why === "download")
-    return undefined;
+  if (route.kind !== "none" || route.why === "download") return undefined;
+  if (route.why === "checking")
+    return "Checking speech support. Try the microphone again in a moment.";
+  if (route.why === "insecure") return routeDetail(route);
   return route.why === "online-off"
-    ? "Allow online speech in Settings › Voice to talk here."
+    ? "To use voice here, allow your browser’s online speech service to receive your audio."
     : "This browser can't turn speech into text.";
 }
 

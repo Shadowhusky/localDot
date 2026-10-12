@@ -426,3 +426,28 @@ it("admits only locally recorded system snapshots derived from the installed rel
     "does not match",
   );
 });
+
+it("admits a preserved system only when its actual image records the installed base", async () => {
+  const f = fixture();
+  const migrated = `sha256:${hex(12)}`;
+  const base = f.manifests.desktop.Id;
+  const labels = { "localdot.system-base": base, "localdot.system-source": hex(2) };
+  f.containers.desktop.Image = migrated;
+  f.containers.desktop.Config.Image = migrated;
+  Object.assign(f.containers.desktop.Config.Labels, labels);
+  const request = f.request.getMockImplementation();
+  if (!request) throw new Error("missing mock");
+  f.request.mockImplementation(async <T>(req: DockerRequest): Promise<T> => {
+    if (req.path === `/images/${encodeURIComponent(migrated)}/json`)
+      return {
+        Id: migrated,
+        Os: "linux",
+        Architecture: "arm64",
+        Config: { Labels: { ...labels } },
+      } as T;
+    return request(req) as Promise<T>;
+  });
+  await expect(verifyDesktopRuntimeImages(f.docker, f.record, images)).resolves.toBeUndefined();
+  labels["localdot.system-base"] = `sha256:${hex(13)}`;
+  await expect(verifyDesktopRuntimeImages(f.docker, f.record, images)).rejects.toThrow("does not match");
+});

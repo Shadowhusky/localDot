@@ -1,11 +1,13 @@
 import { type ReactNode, useEffect, useRef } from "react";
+import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isApple } from "../ui/Kbd.tsx";
 import { REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
 import { awayFrom } from "./machine.ts";
+import { changeVoicePrefs } from "./prefs.ts";
 import { HOLD_KEYS, type Voice } from "./useVoice.ts";
-import { routeBlocked, routeLabel } from "./words.ts";
+import { routeLabel } from "./words.ts";
 
 const now = () => performance.now();
 
@@ -13,8 +15,8 @@ const now = () => performance.now();
 // cancel; a tap keeps it listening until the next tap. While it listens, a halo behind it breathes
 // with the voice.
 export function VoiceButton({ voice, size }: { voice: Voice; size: 28 | 36 }) {
-  const { state, route } = voice;
-  const blocked = voice.enabled ? routeBlocked(route) : "Not available right now";
+  const { state } = voice;
+  const blocked = voice.enabled ? undefined : "Not available right now";
   const pointer = useRef<{ id: number; rect: DOMRect } | null>(null);
   const active = state.phase !== "idle";
   const away = (state.phase === "starting" || state.phase === "listening") && state.away;
@@ -90,6 +92,18 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
       <p className="voice-notice" role="status">
         <Icon name="circle-alert" size={12} />
         <span>{notice}</span>
+        {route.kind === "none" && route.why === "online-off" && (
+          <Button
+            size="sm"
+            variant="quiet"
+            onClick={() => {
+              changeVoicePrefs({ online: true });
+              voice.dismiss();
+            }}
+          >
+            Enable online speech
+          </Button>
+        )}
         <IconButton label="Dismiss voice notice" icon="x" size={24} onClick={voice.dismiss} />
       </p>
     ) : (

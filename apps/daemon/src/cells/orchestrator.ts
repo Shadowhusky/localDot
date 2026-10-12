@@ -36,6 +36,7 @@ import {
   NAME_PREFIX,
 } from "./spec.ts";
 import type { CellStore } from "./store.ts";
+import { SystemMigrationConflict } from "./system-migration-plan.ts";
 import { ComputerSystemState } from "./system-state.ts";
 import {
   type CellEndpoints,
@@ -752,7 +753,13 @@ export class CellOrchestrator {
       if (back) this.#detach(id, this.#waitReady(old));
       else if (this.#current(id, stopping))
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
-      throw new CellControlConflict(back ? refusal : UPDATE_STOPPED);
+      throw new CellControlConflict(
+        back
+          ? error instanceof SystemMigrationConflict
+            ? error.message
+            : refusal
+          : UPDATE_STOPPED,
+      );
     }
     if (!this.#current(id, stopping)) return;
     try {

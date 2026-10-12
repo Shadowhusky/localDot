@@ -44,7 +44,7 @@ describe("where speech becomes text", () => {
     expect(routeLabel({ kind: "device" })).toBe("On this device");
     expect(routeLabel({ kind: "mac" })).toBe("On your Mac");
     expect(routeLabel({ kind: "online" })).toBe("Online");
-    expect(routeBlocked({ kind: "none", why: "checking" })).toBeUndefined();
+    expect(routeBlocked({ kind: "none", why: "checking" })).toContain("Checking speech support");
     expect(routeBlocked({ kind: "none", why: "download" })).toBeUndefined();
     expect(routeBlocked({ kind: "none", why: "unsupported" })).toBe(
       "This browser can't turn speech into text.",
@@ -87,4 +87,13 @@ describe("where speech becomes text", () => {
     expect(await macSpeech(api({ onMac: { available: false } }))).toBeNull();
     expect(await macSpeech(api(new Error("404")))).toBeNull();
   });
+});
+
+it("explains insecure remote links before attempting to open the microphone", () => {
+  vi.stubGlobal("isSecureContext", false);
+  expect(voiceRoute({ browser: "online", mac: "all" }, true, "en-US")).toEqual({
+    kind: "none",
+    why: "insecure",
+  });
+  vi.unstubAllGlobals();
 });

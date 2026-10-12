@@ -1417,3 +1417,33 @@ it("acknowledges normal task Stop only after the runner has released it", async 
   expect((await request).status).toBe(204);
   expect(f.deps.runner.stopRun).toHaveBeenCalledWith(SESSION);
 });
+
+it("withdraws queued messages atomically for editing, with an idempotent receipt", async () => {
+  const f = await setup();
+  await f.send("POST", `/api/agent/sessions/${SESSION}/messages`, {
+    kind: "followup",
+    text: "Edit this later",
+  });
+  const message = f.events.find((e) => e.type === "message.user")?.data as { messageId: string };
+  const path = `/api/agent/sessions/${SESSION}/messages/${message.messageId}`;
+  for (let i = 0; i < 2; i++) {
+    const reply = await f.send("POST", `${path}/edit`);
+    expect(reply.status).toBe(200);
+    expect(await reply.json()).toEqual({ text: "Edit this later" });
+  }
+  expect((await f.send("POST", `${path}/steer`)).status).toBe(404);
+  expect((await f.session.inbox(0, 0)).items).toEqual([]);
+  expect(f.events.filter((e) => e.type === "message.delivery")).toHaveLength(1);
+});
+it("does not withdraw a queued message that already reached the model", async () => {
+  const f = await setup();
+  await f.send("POST", `/api/agent/sessions/${SESSION}/messages`, {
+    kind: "followup",
+    text: "Already sent",
+  });
+  const message = f.events.find((e) => e.type === "message.user")?.data as { messageId: string };
+  const path = `/api/agent/sessions/${SESSION}/messages/${message.messageId}`;
+  expect((await f.send("POST", `${path}/steer`)).status).toBe(204);
+  expect((await f.send("POST", `${path}/edit`)).status).toBe(409);
+  expect((await f.session.inbox(0, 0)).items).toHaveLength(1);
+});

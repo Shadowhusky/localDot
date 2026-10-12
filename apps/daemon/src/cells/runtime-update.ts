@@ -9,6 +9,7 @@ import {
   type RuntimeUpdateStore,
   runtimeSource,
 } from "./runtime-update-store.ts";
+import { verifyMigratedImage } from "./system-migration.ts";
 import { requireUnmodifiedSystem } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -26,6 +27,7 @@ export interface RuntimeUpdateHost {
   docker: Pick<DockerClient, "request">;
   journal: Pick<RuntimeUpdateStore, "read" | "write">;
   signal?: AbortSignal;
+  migrateSystem?(record: CellRecord, target: string): Promise<string>;
   readCell(id: string): CellRecord | undefined;
   saveCell(record: CellRecord): void | Promise<void>;
   /** Must prove exclusive update ownership, closed admission, drained executors and absent
@@ -78,7 +80,15 @@ async function prepare(
     await retained(fresh);
     // A fresh update cannot invent missing originals; only durable intent permits retrying retirement.
     for (const role of roles) if (!(await original(fresh, role))) throw failure();
-    await requireUnmodifiedSystem(host.docker, current.ownership?.desktop ?? "");
+    if (host.migrateSystem) {
+      fresh.systemImage = await host.migrateSystem(current, images.desktop);
+      await verifyMigratedImage(
+        host.docker,
+        fresh.systemImage,
+        images.desktop,
+        current.ownership?.desktop,
+      );
+    } else await requireUnmodifiedSystem(host.docker, current.ownership?.desktop ?? "");
     await host.assertQuiescent(input.cellId);
     host.signal?.throwIfAborted();
     if (
@@ -119,7 +129,14 @@ async function prepare(
   if (active.phase === "retiring") {
     // Validate both before the first DELETE, then freshly validate each exact stopped identity.
     for (const role of roles) await original(active, role);
-    if (await original(active, "desktop"))
+    if (active.systemImage)
+      await verifyMigratedImage(
+        host.docker,
+        active.systemImage,
+        active.images.desktop,
+        active.source.ownership?.desktop,
+      );
+    else if (await original(active, "desktop"))
       await requireUnmodifiedSystem(host.docker, active.source.ownership?.desktop ?? "");
     for (const role of roles) {
       await beforeMutation();

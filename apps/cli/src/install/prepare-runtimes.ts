@@ -12,6 +12,7 @@ import {
 import { RuntimeUpdateStore } from "../../../daemon/src/cells/runtime-update-store.ts";
 import { desktopEnv, streamOptions } from "../../../daemon/src/cells/spec.ts";
 import { decodeRecord } from "../../../daemon/src/cells/store.ts";
+import { SystemMigration } from "../../../daemon/src/cells/system-migration.ts";
 import type { CellRecord, StoredCellRecord } from "../../../daemon/src/cells/types.ts";
 import { containInstalledContainers, readContainerInventory } from "./container-containment.ts";
 import { installImageClient } from "./image-client.ts";
@@ -160,6 +161,13 @@ export async function prepareInstalledRuntimes(
         }
         const host: RuntimeUpdateHost = {
           docker,
+          async migrateSystem(record, target) {
+            const image = await docker.request<{ Id: string }>({
+              method: "GET",
+              path: `/images/${encodeURIComponent(target)}/json`,
+            });
+            return new SystemMigration(docker, home).prepare(record, image.Id);
+          },
           journal,
           signal,
           readCell: (id) => {
@@ -209,7 +217,7 @@ export async function prepareInstalledRuntimes(
           if (!current) throw failure();
           let matching = false;
           try {
-            await verifyDesktopRuntimeImages(docker, current, target);
+            await verifyDesktopRuntimeImages(docker, current, target, home);
             matching = await streamMatches(current);
           } catch {
             signal.throwIfAborted();
@@ -223,7 +231,7 @@ export async function prepareInstalledRuntimes(
             remember(id);
           }
           await stable();
-          await verifyDesktopRuntimeImages(docker, host.readCell(id) as CellRecord, target);
+          await verifyDesktopRuntimeImages(docker, host.readCell(id) as CellRecord, target, home);
         }
         await stable();
       },

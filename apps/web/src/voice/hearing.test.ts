@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { VoiceError } from "./capture.ts";
 import { type HearingEvents, speechFailure, startHearing } from "./hearing.ts";
 import type { SpeechRecognitionLike, SpeechResultLike } from "./support.ts";
 
@@ -95,7 +94,7 @@ describe("hearing in the browser", () => {
     expect(recognition.stopped).toBe(1);
     recognition.onend?.();
     await expect(words).resolves.toBe("明日の天気");
-    expect(mic.closed).toBe(1);
+    expect(mic.closed).toBe(0);
   });
 
   it("goes online only for the online route", async () => {
@@ -106,18 +105,13 @@ describe("hearing in the browser", () => {
     await opening;
   });
 
-  it("refuses to start when the mic or the engine says no", async () => {
-    mic.refuse = new VoiceError("denied");
-    await expect(
-      startHearing({ kind: "device" }, { api: api(), language: "en-US" }, events()),
-    ).rejects.toMatchObject({ failure: "denied" });
-    mic.refuse = undefined;
+  it("refuses to start when the engine says no", async () => {
     const opening = startHearing({ kind: "device" }, { api: api(), language: "en-US" }, events());
     await vi.waitFor(() => expect(made).toHaveLength(1));
     made[0]?.onerror?.({ error: "language-not-supported" });
     await expect(opening).rejects.toMatchObject({ failure: "unavailable" });
     expect(made[0]?.aborted).toBe(1);
-    expect(mic.closed).toBe(1);
+    expect(mic.closed).toBe(0);
   });
 
   it("reports a failure or an end the engine reached by itself", async () => {
@@ -183,4 +177,20 @@ describe("hearing on the computer", () => {
     );
     await expect(busy.finish()).rejects.toMatchObject({ failure: "busy" });
   });
+});
+
+it("starts recognition synchronously in the user gesture without opening a second microphone", async () => {
+  mic.refuse = new Error("A second microphone must not be opened");
+  const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, events());
+  expect(made).toHaveLength(1);
+  made[0]?.onstart?.();
+  const hearing = await opening;
+  hearing.abort();
+  expect(made[0]?.aborted).toBe(1);
+  expect(mic.closed).toBe(0);
+});
+it("settles if recognition closes before it starts", async () => {
+  const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, events());
+  made[0]?.onend?.();
+  await expect(opening).rejects.toMatchObject({ failure: "no-speech" });
 });

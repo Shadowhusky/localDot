@@ -35,6 +35,10 @@ const Journal = z
     operationId: z.uuid(),
     source: z.unknown().transform(runtimeSource),
     images: RuntimeImages,
+    systemImage: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/)
+      .optional(),
     fullcolor: z.boolean(),
     phase: z.enum(["retiring", "creating", "prepared"]),
     candidates: z.strictObject({ gate: identity.nullable(), desktop: identity.nullable() }),

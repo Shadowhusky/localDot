@@ -674,6 +674,18 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.body(null, 204);
     }),
   );
+  app.post(
+    "/api/agent/sessions/:id/messages/:messageId/edit",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const messageId = c.req.param("messageId") ?? "";
+      if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
+      check(c.req.raw.signal);
+      const text = s.withdrawQueued(messageId);
+      if (text === undefined) throw new RouteError(409, "message is no longer queued");
+      return c.json({ text });
+    }),
+  );
   // The user's word on a research task's budget: wrap up now, or keep going for longer.
   app.post(
     "/api/agent/sessions/:id/research",

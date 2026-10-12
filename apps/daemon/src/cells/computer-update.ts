@@ -17,6 +17,7 @@ import {
 import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
+import { SYSTEM_BASE, SYSTEM_SOURCE } from "./system-migration.ts";
 import { requireUnmodifiedSystem } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -43,6 +44,7 @@ export const ComputerUpdateRecord = z.strictObject({
   images: z.strictObject({ gate: ImageId, desktop: ImageId }),
   candidates: z.strictObject({ gate: ContainerId.nullable(), desktop: ContainerId.nullable() }),
   phase: z.enum(PHASES),
+  preservedSystem: z.boolean().optional(),
 });
 export type ComputerUpdateRecord = z.infer<typeof ComputerUpdateRecord>;
 
@@ -82,6 +84,7 @@ export class ComputerUpdateStore {
       if (
         !equal(before.previous, next.previous) ||
         !equal(before.images, next.images) ||
+        before.preservedSystem !== next.preservedSystem ||
         (to !== from && to !== from + 1) ||
         (next.phase !== "creating" && !full(next)) ||
         ROLES.some(
@@ -115,12 +118,14 @@ export interface ComputerUpdatesDeps {
   // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
   relay?: () => Promise<GateRelay>;
   everyMs?: number;
+  migrateSystem?(record: CellRecord, target: string): Promise<string>;
 }
 
 // Whether a computer runs older images than its configured tags name now, and the swap that
 // moves it onto them. Image IDs are compared, never tags: a rebuilt image keeps its tag.
 export class ComputerUpdates {
   readonly #docker: Docker;
+  readonly #migrate: ComputerUpdatesDeps["migrateSystem"];
   readonly #images: Images;
   readonly #relay: () => Promise<GateRelay>;
   readonly #stream: StreamOptions;
@@ -132,6 +137,7 @@ export class ComputerUpdates {
 
   constructor(deps: ComputerUpdatesDeps) {
     this.#docker = deps.docker;
+    this.#migrate = deps.migrateSystem;
     this.#images = deps.images;
     this.#relay = deps.relay ?? (() => Promise.resolve(HOST_RELAY));
     this.#stream = deps.stream;
@@ -200,7 +206,7 @@ export class ComputerUpdates {
     this.#store();
     if (this.pending(record.id)) return;
     const owned = ownedContainers(record);
-    await requireUnmodifiedSystem(this.#docker, owned.desktop);
+    if (!this.#migrate) await requireUnmodifiedSystem(this.#docker, owned.desktop);
     if (!(await this.#targets())) throw new CellControlConflict(NOT_HERE);
   }
 
@@ -218,7 +224,8 @@ export class ComputerUpdates {
       this.#available.set(record.id, false);
       return record;
     }
-    await requireUnmodifiedSystem(this.#docker, previous.desktop);
+    if (this.#migrate) images.desktop = await this.#migrate(record, images.desktop);
+    else await requireUnmodifiedSystem(this.#docker, previous.desktop);
     // The gate's token follows the gate image: a computer made before the gate captured apps that
     // ignore the proxy gets one, and one going onto a gate image that can't capture gives it up.
     // It is kept before anything is made, so the new containers match it from their first start.
@@ -235,6 +242,7 @@ export class ComputerUpdates {
       images,
       candidates: { gate: null, desktop: null },
       phase: "creating",
+      ...(this.#migrate ? { preservedSystem: true } : {}),
     };
     this.#write(entry);
     try {
@@ -242,7 +250,7 @@ export class ComputerUpdates {
         const spec =
           role === "gate"
             ? gateSpec(record, this.#images.gate, await this.#relay())
-            : desktopSpec(record, this.#images.desktop, this.#stream);
+            : desktopSpec(record, images.desktop, this.#stream);
         await this.#docker
           .request({
             method: "POST",
@@ -344,7 +352,12 @@ export class ComputerUpdates {
     if (!gate || !desktop || !record.ownership) throw new Lasting();
     if (entry.phase === "creating") step("retiring");
     if (entry.phase === "retiring") {
-      if (await this.#container(entry.previous.desktop))
+      if (entry.preservedSystem) {
+        const image = await this.#read<{ Config?: { Labels?: Record<string, string> } }>(
+          `/images/${encodeURIComponent(entry.images.desktop)}/json`,
+        );
+        if (image?.Config?.Labels?.[SYSTEM_SOURCE] !== entry.previous.desktop) throw new Lasting();
+      } else if (await this.#container(entry.previous.desktop))
         await requireUnmodifiedSystem(this.#docker, entry.previous.desktop);
       await retireExactContainers(
         this.#docker,
@@ -421,7 +434,13 @@ export class ComputerUpdates {
     for (const role of ROLES) {
       const raw = await this.#container(record.ownership[role]);
       if (!raw || !ImageId.safeParse(raw.Image).success) return false;
-      if (raw.Image !== images[role]) return true;
+      if (raw.Image !== images[role]) {
+        if (role !== "desktop") return true;
+        const image = await this.#read<{ Config?: { Labels?: Record<string, string> } }>(
+          `/images/${encodeURIComponent(ImageId.parse(raw.Image))}/json`,
+        );
+        if (image?.Config?.Labels?.[SYSTEM_BASE] !== images[role]) return true;
+      }
     }
     return false;
   }

@@ -8,6 +8,7 @@ import { Conversation } from "./Conversation.tsx";
 import { OPENING_ROWS } from "./earlier.ts";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
 import { Outbox } from "./outbox.ts";
+import { onQueuedDraft } from "./queued-draft.ts";
 import { threadItems } from "./thread.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
@@ -509,4 +510,42 @@ it("steers the existing queued message by ID without posting its text again", as
   );
   expect(screen.queryByRole("button", { name: "Steer now" })).toBeNull();
   expect(screen.getAllByText("Use the latest numbers")).toHaveLength(1);
+});
+
+it("moves a queued message to the composer only after withdrawal is confirmed", async () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  let reply: (r: Response) => void = () => {};
+  const fetch = vi.fn(
+    async () =>
+      new Promise<Response>((resolve) => {
+        reply = resolve;
+      }),
+  );
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: fetch });
+  const receive = vi.fn(() => true);
+  const unsubscribe = onQueuedDraft(receive);
+  try {
+    render(
+      <Conversation
+        items={items([
+          { ...message(messageId, "Preview"), queued: true, sessionId, kind: "followup" },
+        ])}
+        truncated={false}
+        api={api}
+        sessionId={sessionId}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Edit$/ }));
+    expect(receive).not.toHaveBeenCalled();
+    await act(async () =>
+      reply(new Response(JSON.stringify({ text: "Complete queued message" }), { status: 200 })),
+    );
+    await waitFor(() =>
+      expect(receive).toHaveBeenCalledWith(sessionId, messageId, "Complete queued message"),
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    unsubscribe();
+  }
 });

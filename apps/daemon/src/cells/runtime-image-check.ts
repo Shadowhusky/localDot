@@ -1,5 +1,6 @@
 import type { DockerClient } from "./docker.ts";
 import { RuntimeImages, runtimeSource } from "./runtime-update-store.ts";
+import { SYSTEM_BASE, verifyMigratedImage } from "./system-migration.ts";
 import { ComputerSystemState } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -39,6 +40,20 @@ export async function verifyDesktopRuntimeImages(
         );
         expected = snapshot.image;
       }
+      let migrated: string | undefined;
+      if (
+        role === "desktop" &&
+        !snapshot &&
+        object(before) &&
+        typeof before.Image === "string" &&
+        object(before.Config) &&
+        object(before.Config.Labels) &&
+        before.Config.Labels[SYSTEM_BASE]
+      ) {
+        await verifyMigratedImage(docker, before.Image, images.desktop);
+        expected = before.Image;
+        migrated = before.Image;
+      }
       const valid = (raw: unknown, imageId?: unknown) =>
         object(raw) &&
         raw.Id === record.ownership?.[role] &&
@@ -64,8 +79,11 @@ export async function verifyDesktopRuntimeImages(
         !Array.isArray(image.RepoDigests) ||
         !image.RepoDigests.includes(images[role]) ||
         !(snapshot ? snapshot.baseImage === image.Id : true) ||
-        !valid(before, snapshot?.image ?? image.Id) ||
-        !valid(await docker.request({ method: "GET", path }), snapshot?.image ?? image.Id)
+        !valid(before, snapshot?.image ?? migrated ?? image.Id) ||
+        !valid(
+          await docker.request({ method: "GET", path }),
+          snapshot?.image ?? migrated ?? image.Id,
+        )
       )
         throw failure();
     }

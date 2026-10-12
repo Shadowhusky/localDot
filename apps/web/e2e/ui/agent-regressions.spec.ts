@@ -290,3 +290,29 @@ for (const screen of ["desktop", "browser"] as const) {
     await ui.picture();
   });
 }
+
+test("queued Edit restores the draft and resends the edited message once", async ({ page, ui }) => {
+  await ui.open("running");
+  const form = page.getByRole("form", { name: "Message dot" });
+  const field = form.getByRole("textbox", { name: "Message", exact: true });
+  await field.fill("Original queued request");
+  await form.getByRole("button", { name: "Queue message" }).click();
+  const original = page
+    .getByRole("article", { name: "You", exact: true })
+    .filter({ hasText: "Original queued request" });
+  await expect(original.getByText("After this task")).toBeVisible();
+  await field.fill("My existing draft");
+  await original.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(field).toHaveValue("My existing draft\n\nOriginal queued request");
+  await expect(field).toBeFocused();
+  await expect(original.getByText("Moved to draft")).toBeVisible();
+  await expect(original.getByRole("button", { name: "Steer now" })).toHaveCount(0);
+  await field.fill("Revised queued request");
+  await form.getByRole("button", { name: "Queue message" }).click();
+  const revised = page
+    .getByRole("article", { name: "You", exact: true })
+    .filter({ hasText: "Revised queued request" });
+  await expect(revised).toHaveCount(1);
+  await expect(revised.getByText("After this task")).toBeVisible();
+  await expect(field).toHaveValue("");
+});

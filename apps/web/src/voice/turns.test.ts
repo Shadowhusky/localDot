@@ -209,7 +209,9 @@ describe("voice turns", () => {
     const off = setup({ route: { kind: "none", why: "online-off" } });
     off.turns.send({ type: "press", at: 0 });
     expect(off.turns.state.phase).toBe("idle");
-    expect(off.notices.at(-1)).toBe("Allow online speech in Settings › Voice to talk here.");
+    expect(off.notices.at(-1)).toBe(
+      "To use voice here, allow your browser’s online speech service to receive your audio.",
+    );
     const later = setup({ route: { kind: "none", why: "download" } });
     later.turns.send({ type: "press", at: 0 });
     expect(later.download).toHaveBeenCalledTimes(1);

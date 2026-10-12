@@ -638,7 +638,7 @@ export function purposeWords(
 }
 
 function digest(purpose: Purpose): string {
-  return createHash("sha256").update(JSON.stringify(purpose.request)).digest("hex");
+  return createHash("sha256").update(JSON.stringify(purpose)).digest("hex");
 }
 
 function timed<T>(work: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, ms: number) {
@@ -698,7 +698,7 @@ export interface PurposeGateDeps {
 
 // Decides, per task, whether private data the task has read may go to a host. Only a tainted
 // task sending something to a host outside its purpose asks, and one nothing names always asks.
-// The judge's answer is kept per host, so a host is judged once; a host the user allows never
+// Judgments are kept for the exact action and purpose, not a whole host; a host the user allows never
 // asks again in the task.
 export class PurposeGate {
   readonly #allowed = new Set<string>();
@@ -831,13 +831,26 @@ export class PurposeGate {
       return undefined;
     const overlaps = taint.overlap(outbound.text).overlaps;
     const refusal = overlaps ? "carries" : "unrelated";
-    const known = this.#judged.get(host);
+    const judgmentKey = createHash("sha256")
+      .update(
+        JSON.stringify([
+          key,
+          host,
+          outbound.kind,
+          outbound.app,
+          outbound.text,
+          taint.kinds,
+          overlaps,
+        ]),
+      )
+      .digest("hex");
+    const known = this.#judged.get(judgmentKey);
     if (known !== undefined) return known ? undefined : refusal;
     if (this.#now < this.#downUntil) return "unavailable";
     try {
       const derived = await this.#derivedHosts(judge, purpose, key, signal);
       if (derived.some((named) => covers(named, host))) {
-        this.#judged.set(host, true);
+        this.#judged.set(judgmentKey, true);
         return undefined;
       }
       const p = await timed(
@@ -861,7 +874,7 @@ export class PurposeGate {
       );
       signal.throwIfAborted();
       const fits = Number.isFinite(p) && p >= FITS_THRESHOLD;
-      this.#judged.set(host, fits);
+      this.#judged.set(judgmentKey, fits);
       return fits ? undefined : refusal;
     } catch {
       signal.throwIfAborted();

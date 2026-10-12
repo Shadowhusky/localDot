@@ -2192,3 +2192,22 @@
   gap: calc(var(--spacing) * 2);
   max-width: 100%;
 }
+
+.thread-foot {
+  min-height: 0;
+  max-height: 100%;
+}
+.thread-foot > .thread-dock {
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.thread-foot .thread-live {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.thread-foot .thread-toolbar {
+  flex: none;
+}

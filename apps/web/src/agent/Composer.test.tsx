@@ -10,6 +10,7 @@ import { withAttachments } from "./attachments.ts";
 import { Composer, type ComposerProps, type ReplyOutcome } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
+import { restoreQueuedDraft } from "./queued-draft.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn() }));
@@ -1311,4 +1312,20 @@ describe("revising a result file", () => {
     expect(await screen.findByText("Wait for dot to finish, then revise v1.")).toBeTruthy();
     expect(f.requests).toEqual([]);
   });
+});
+
+it("restores a queued message without losing a newer draft, and resends only on Send", async () => {
+  const f = setup();
+  f.input("My newer draft");
+  act(() => expect(restoreQueuedDraft(sessionId, "queued-id", "Original queued words")).toBe(true));
+  expect(f.field.value).toBe("My newer draft\n\nOriginal queued words");
+  expect(document.activeElement).toBe(f.field);
+  expect(f.requests).toHaveLength(0);
+  act(() => restoreQueuedDraft(sessionId, "queued-id", "Original queued words"));
+  expect(f.field.value).toBe("My newer draft\n\nOriginal queued words");
+  act(() => expect(restoreQueuedDraft(otherSession, "other", "Wrong conversation")).toBe(false));
+  f.input("Edited queued words");
+  f.submit();
+  await waitFor(() => expect(f.requests).toHaveLength(1));
+  expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "Edited queued words" });
 });

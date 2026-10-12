@@ -18,7 +18,7 @@ export type VoiceRoute =
   | { readonly kind: "device" | "mac" | "online" }
   | {
       readonly kind: "none";
-      readonly why: "checking" | "download" | "online-off" | "unsupported";
+      readonly why: "checking" | "download" | "online-off" | "unsupported" | "insecure";
     };
 
 export function voiceRoute(
@@ -26,6 +26,7 @@ export function voiceRoute(
   online: boolean,
   language: string,
 ): VoiceRoute {
+  if (globalThis.isSecureContext === false) return { kind: "none", why: "insecure" };
   if (!support) return { kind: "none", why: "checking" };
   if (support.browser === "local") return { kind: "device" };
   if (support.mac === "all" || (support.mac === "en" && modelLanguage(language) === "en"))

@@ -42,6 +42,7 @@ import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
+import { onQueuedDraft } from "./queued-draft.ts";
 import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
 import { looksLikeResearch, onResearchRequest, researchWait } from "./research.ts";
@@ -437,6 +438,28 @@ export function Composer(props: ComposerProps) {
         input.setSelectionRange(input.value.length, input.value.length);
       }),
     [measure],
+  );
+  const restoredQueue = useRef(new Set<string>());
+  useEffect(
+    () =>
+      onQueuedDraft((sessionId, messageId, text) => {
+        if (sessionId !== props.agent.sessionId) return false;
+        const input = form.current?.querySelector("textarea");
+        if (!input || input.readOnly) return false;
+        const key = `${sessionId}:${messageId}`;
+        if (!restoredQueue.current.has(key)) {
+          // Preserve an in-progress draft and the original attachment references.
+          input.value = input.value ? `${input.value}\n\n${text}` : text;
+          restoredQueue.current.add(key);
+          revision.current += 1;
+          measure(input);
+          setProblem(null);
+        }
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        return true;
+      }),
+    [measure, props.agent.sessionId],
   );
   // A key taken out, or discarded, changes the text under the composer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a notice's change is the trigger.

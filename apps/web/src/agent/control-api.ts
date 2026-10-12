@@ -292,3 +292,33 @@ export function steerQueuedMessage(
     () => {},
   );
 }
+
+export function editQueuedMessage(
+  api: ApiClient,
+  sessionId: string,
+  messageId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(messageId))
+    return Promise.reject(new ControlFailure(false));
+  return controlRequest(
+    api,
+    `${sessionPath(sessionId)}/messages/${messageId}/edit`,
+    undefined,
+    200,
+    signal,
+    (body) => {
+      const value: unknown = JSON.parse(body);
+      if (
+        !value ||
+        typeof value !== "object" ||
+        !("text" in value) ||
+        typeof value.text !== "string"
+      )
+        throw new ControlFailure(true);
+      return value.text;
+    },
+    "POST",
+    262_144,
+  );
+}

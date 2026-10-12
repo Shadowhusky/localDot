@@ -125,7 +125,9 @@ export async function startFakeDocker(
   const mounts = (c: FakeContainer) =>
     ((c.body.HostConfig.Mounts as { Source?: string }[] | undefined) ?? []).map((m) => m.Source);
   const DEFAULT_IMAGE = `sha256:${"a".repeat(64)}`;
-  const imageId = (reference: string) => state.imageIds.get(reference) ?? DEFAULT_IMAGE;
+  const imageId = (reference: string) =>
+    state.imageIds.get(reference) ??
+    (/^sha256:[a-f0-9]{64}$/.test(reference) ? reference : DEFAULT_IMAGE);
   const idOf = (c: FakeContainer) => c.id ?? `id-${c.name}`;
   const containerJson = (c: FakeContainer) => ({
     Id: idOf(c),

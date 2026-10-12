@@ -27,7 +27,7 @@
   --_jump-room: calc(var(--spacing) * 12);
 }
 
-.activity-body:has(> .activity-jump) > .activity-scroll {
+.activity-body:has(> .activity-jump) .activity-scroll {
   scroll-padding-bottom: var(--_jump-room);
 }
 
@@ -868,4 +868,21 @@ button.activity-usage-trigger:active {
   z-index: 3;
   flex: none;
   background: var(--rail-surface);
+}
+
+/* Each tab owns its vertical position; the surrounding pager owns horizontal swipes. */
+.activity-body .ui-swipe-panels .activity-scroll {
+  margin-inline: 0;
+  overscroll-behavior-y: contain;
+  overscroll-behavior-x: auto;
+}
+
+.activity-plan {
+  flex: none;
+  min-height: 0;
+}
+.activity-plan .plan-list {
+  max-height: min(200px, 24dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }

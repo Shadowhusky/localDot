@@ -32,7 +32,7 @@ test("earlier Activity and work steps remain reachable without paging or moving 
     await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
   const rail = page.locator(".activity-rail");
   await expect.poll(() => rail.locator(".activity-row").count()).toBe(103);
-  const scroller = rail.locator(".activity-scroll");
+  const scroller = rail.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
   await scroller.dispatchEvent("wheel", { deltaY: -500 });
   await scroller.evaluate((node) => {
     node.scrollTop = 0;
@@ -58,4 +58,21 @@ test("earlier Activity and work steps remain reachable without paging or moving 
     ),
   );
   await page.screenshot({ path: test.info().outputPath("complete-history.png") });
+});
+
+test("expanding work keeps the composer inside a short viewport", async ({ page, ui }) => {
+  await ui.open("running");
+  const work = page.locator(".thread-live .thread-work");
+  for (const height of [620, 480]) {
+    await page.setViewportSize({ width: page.viewportSize()?.width ?? 390, height });
+    const toggle = work.getByRole("button", { expanded: false });
+    if (await toggle.count()) await toggle.click();
+    await ui.settle();
+    const field = page.getByRole("textbox", { name: "Message", exact: true });
+    await expect(field).toBeInViewport();
+    const box = await page.locator(".thread-toolbar").boundingBox();
+    if (!box) throw new Error("Missing composer geometry");
+    expect(box.y + box.height).toBeLessThanOrEqual(height + 1);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+  }
 });

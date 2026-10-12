@@ -335,7 +335,7 @@ export const MessageUser = event(
 );
 export const MessageDelivery = event(
   "message.delivery",
-  z.object({ messageId: MessageId, state: z.enum(["sent", "steering", "cancelled"]) }),
+  z.object({ messageId: MessageId, state: z.enum(["sent", "steering", "cancelled", "withdrawn"]) }),
 );
 export const MessageDelta = event(
   "message.delta",

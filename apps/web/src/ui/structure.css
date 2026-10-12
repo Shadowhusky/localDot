@@ -1093,3 +1093,43 @@
     white-space: normal;
   }
 }
+
+@layer kit {
+  .ui-swipe-panels {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .ui-swipe-panels > [role="tabpanel"] {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 100%;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+  }
+  .ui-swipe-panels > [hidden] {
+    display: none;
+  }
+  .ui-swipe-panels[data-swipe] {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .ui-swipe-panels[data-swipe]::-webkit-scrollbar {
+    display: none;
+  }
+  .ui-swipe-panels[data-swipe] > [role="tabpanel"] {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+}
+
+@layer kit {
+  .ui-swipe-panels .ui-scroll-area {
+    overscroll-behavior-x: auto;
+  }
+}

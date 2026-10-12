@@ -39,6 +39,7 @@ import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
 import { StreamTuning } from "./cells/stream-tuning.ts";
+import { SystemMigration } from "./cells/system-migration.ts";
 import { monotonicClock } from "./clock.ts";
 import { timestampLogs } from "./daemon-log.ts";
 import { deliverablesFor } from "./deliverables/wiring.ts";
@@ -161,7 +162,15 @@ let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
 const stream = streamOptions(process.env);
 const images = imagesFromEnv();
-const updates = new ComputerUpdates({ home, docker, images, stream, relay });
+const migration = new SystemMigration(docker, home);
+const updates = new ComputerUpdates({
+  home,
+  docker,
+  images,
+  stream,
+  relay,
+  migrateSystem: (record, target) => migration.prepare(record, target),
+});
 const orchestrator = new CellOrchestrator({
   updates,
   diagnosticAdmission: (id) => live.admitIdleOperation(id),

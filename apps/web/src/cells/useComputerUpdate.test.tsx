@@ -165,3 +165,17 @@ it("updates from the notice", async () => {
   fireEvent.click(within(screen.getByRole("listitem")).getByRole("button", { name: "Update" }));
   expect(calls).toHaveLength(1);
 });
+
+it("keeps a confirmed update busy when a remote proxy times out", async () => {
+  const { api, answer } = control();
+  const view = render(<Shell api={api} computer={cell({ updateAvailable: true })} idle={false} />);
+  fireEvent.click(screen.getByRole("button", { name: "Update" }));
+  view.rerender(
+    <Shell api={api} computer={cell({ updateAvailable: true, updating: true })} idle={false} />,
+  );
+  await act(async () => answer(new Response(null, { status: 504 })));
+  expect(screen.getByTestId("error").textContent).toBe("");
+  expect(screen.getByRole("button").textContent).toBe("Updating your computer…");
+  await settle();
+  expect(toasts().join()).toContain("still updating");
+});

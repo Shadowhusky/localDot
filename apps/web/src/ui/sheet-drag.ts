@@ -67,8 +67,6 @@ export function velocityOf(samples: readonly Sample[]): number {
 export interface SheetDragHost {
   panel: HTMLElement;
   scrim: HTMLElement | null;
-  // The one scroller of the page on show: a drag starts there only from its top, moving down.
-  body(): HTMLElement | null;
   // Where each of its detents rests, as an offset below the highest.
   stops(): readonly number[];
   // Called as a release settles into the detent at this index.
@@ -83,7 +81,6 @@ interface Press {
   id: number;
   x: number;
   y: number;
-  fromBody: boolean;
   dragging: boolean;
   // Where the sheet was when the finger landed: it then moves exactly as far as the finger does.
   from: number;
@@ -188,16 +185,12 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   const onPointerDown = (event: PointerEvent) => {
     if (press || (event.pointerType === "mouse" && event.button !== 0)) return;
     const target = event.target instanceof Element ? event.target : null;
-    const body = host.body();
     const inHandle = Boolean(target?.closest(".ui-sheet-handle"));
-    const fromBody = Boolean(body && target && body.contains(target));
-    if (!inHandle && !fromBody) return;
-    if (!inHandle && (event.pointerType === "mouse" || (body?.scrollTop ?? 0) > 0)) return;
+    if (!inHandle) return;
     press = {
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-      fromBody,
       dragging: false,
       from: frame ? offset : presented(),
       stretch: Number.parseFloat(getComputedStyle(panel).paddingBottom) || 1,
@@ -214,7 +207,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
       const dx = event.clientX - current.x;
       const dy = event.clientY - current.y;
       if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
-      if (Math.abs(dx) > Math.abs(dy) || (current.fromBody && dy < 0)) {
+      if (Math.abs(dx) > Math.abs(dy)) {
         press = undefined;
         return;
       }
@@ -237,12 +230,9 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
     release(event.type === "pointercancel" || still ? 0 : velocityOf(current.samples));
   };
 
-  // A drag that starts in the scroller would otherwise also pull at the page.
+  // Only the handle owns this gesture. Content keeps native scrolling in either direction.
   const onTouchMove = (event: TouchEvent) => {
-    if (press?.dragging || (press?.fromBody && (host.body()?.scrollTop ?? 0) <= 0)) {
-      const touch = event.touches[0];
-      if (press.dragging || (touch && touch.clientY > press.y)) event.preventDefault();
-    }
+    if (press?.dragging) event.preventDefault();
   };
 
   // A press is followed on the window: before the drag takes the pointer, the first moves can

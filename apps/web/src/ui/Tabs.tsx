@@ -32,19 +32,29 @@ export interface TabPanelProps {
   tabsId: string;
   value: string;
   selected: string;
+  swipe?: boolean;
   className?: string;
   children: ReactNode;
 }
 
 // A hidden panel stays mounted, so switching tabs never rebuilds what it holds.
-export function TabPanel({ tabsId, value, selected, className, children }: TabPanelProps) {
+export function TabPanel({
+  tabsId,
+  value,
+  selected,
+  className,
+  children,
+  swipe = false,
+}: TabPanelProps) {
   return (
     <div
       role="tabpanel"
       id={part(tabsId, value, "panel")}
       aria-labelledby={part(tabsId, value, "tab")}
       className={className}
-      hidden={value !== selected}
+      hidden={!swipe && value !== selected}
+      inert={value !== selected}
+      aria-hidden={value !== selected || undefined}
     >
       {children}
     </div>

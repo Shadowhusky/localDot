@@ -1036,7 +1036,11 @@ function Theatre({ api }: { api: ApiClient }) {
     session.clock,
   );
   const task = shownTask ? taskHud(session.model, now, facts) : null;
-  const foot = footWork(task);
+  const work = footWork(task);
+  const foot =
+    work && atWork(work.row)
+      ? { ...work, label: narrationLine(work.row, work.caption, session.model, now) }
+      : work;
   // The daemon refuses an Update in these cases too; the button says so before it is pressed.
   const updateWait =
     agent.snapshot?.holder === true || yours

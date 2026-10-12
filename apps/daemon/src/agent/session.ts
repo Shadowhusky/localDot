@@ -255,6 +255,7 @@ export class AgentSession {
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
   readonly #queued = new Map<string, string>();
+  readonly #withdrawn = new Map<string, string>();
   // Notes to dot that are not the user's words: they never wake a task waiting for them.
   readonly #notes = new Set<number>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
@@ -1012,6 +1013,18 @@ export class AgentSession {
     this.#deliverInbox("steer", text, messageId, false);
     this.#queued.delete(messageId);
     return true;
+  }
+  // Withdrawal and inbox delivery are synchronous: a message can only take one path.
+  // Keep the receipt so a lost HTTP reply can be retried without delivering it again.
+  withdrawQueued(messageId: string): string | undefined {
+    const previous = this.#withdrawn.get(messageId);
+    if (previous !== undefined) return previous;
+    const text = this.#queued.get(messageId);
+    if (text === undefined || this.stopped) return undefined;
+    this.append("message.delivery", { messageId, state: "withdrawn" });
+    this.#queued.delete(messageId);
+    this.#withdrawn.set(messageId, text);
+    return text;
   }
   #flushQueued(): void {
     for (const [messageId, text] of this.#queued) {

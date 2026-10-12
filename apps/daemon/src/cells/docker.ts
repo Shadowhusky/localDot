@@ -24,6 +24,8 @@ export interface DockerRequest {
   query?: Record<string, string>;
   body?: unknown;
   timeoutMs?: number;
+  // Bounded binary replies for archives and multiplexed helper logs.
+  response?: "buffer";
   // Binary archive uploads never pass through JSON or UTF-8 encoding.
   raw?: { contentType: string; data: Buffer };
 }
@@ -113,13 +115,22 @@ export class DockerClient {
           },
           (res) => {
             const chunks: Buffer[] = [];
-            res.on("data", (c: Buffer) => chunks.push(c));
+            let received = 0;
+            res.on("data", (c: Buffer) => {
+              received += c.length;
+              if (req.response === "buffer" && received > 256 * 1024 * 1024) {
+                res.destroy(new Error("Docker archive exceeded the migration limit"));
+                return;
+              }
+              chunks.push(c);
+            });
             // Node reports a reply cut off mid-body only to an "error" listener; without one, this
             // promise never settles.
             res.on("error", unreachable);
             res.on("end", () => {
-              const text = Buffer.concat(chunks).toString("utf8");
+              const buffer = Buffer.concat(chunks);
               const status = res.statusCode ?? 0;
+              const text = req.response === "buffer" && status < 300 ? "" : buffer.toString("utf8");
               // 304: the container was already started or stopped, so there was nothing to do.
               if (status === 304) {
                 resolve(undefined as T);
@@ -127,6 +138,10 @@ export class DockerClient {
               }
               if (status >= 300) {
                 reject(new DockerError(status, messageOf(text), req.path));
+                return;
+              }
+              if (req.response === "buffer") {
+                resolve(buffer as T);
                 return;
               }
               const isJson = (res.headers["content-type"] ?? "").includes("application/json");

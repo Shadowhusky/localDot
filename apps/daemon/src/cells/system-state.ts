@@ -71,7 +71,7 @@ export class ComputerSystemState {
       source.Config.Labels?.["localdot.role"] !== "desktop"
     )
       throw failure();
-    let baseImage = source.Image;
+    let baseImage = source.Config.Labels?.["localdot.system-base"] ?? source.Image;
     const priorId = source.Config.Labels?.["localdot.snapshot"];
     if (priorId) {
       const prior = await this.read(priorId);

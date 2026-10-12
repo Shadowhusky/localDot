@@ -28,13 +28,14 @@ import { SentFiles } from "./Attachments.tsx";
 import { answerSummary } from "./ask-form.ts";
 import { fileName, splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
-import { steerQueuedMessage } from "./control-api.ts";
+import { editQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult, AgentWords } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
+import { restoreQueuedDraft } from "./queued-draft.ts";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
@@ -151,13 +152,15 @@ const MessageCard = memo(function MessageCard({
     </span>
   );
   const tag =
-    message.delivery === "cancelled"
-      ? "Not sent — task stopped"
-      : message.kind === "steer"
-        ? "Sent while working"
-        : message.queued
-          ? "After this task"
-          : undefined;
+    message.delivery === "withdrawn"
+      ? "Moved to draft"
+      : message.delivery === "cancelled"
+        ? "Not sent — task stopped"
+        : message.kind === "steer"
+          ? "Sent while working"
+          : message.queued
+            ? "After this task"
+            : undefined;
   return (
     <article
       className="thread-message"
@@ -175,9 +178,16 @@ const MessageCard = memo(function MessageCard({
           {tag && (
             <div className="thread-queue">
               <p className="thread-tag">{tag}</p>
-              {message.queued && queue && message.sessionId === queue.sessionId && (
-                <SteerMessage messageId={message.id} queue={queue} announce={announce} />
-              )}
+              {(message.queued || message.delivery === "withdrawn") &&
+                queue &&
+                message.sessionId === queue.sessionId && (
+                  <SteerMessage
+                    messageId={message.id}
+                    queued={!!message.queued}
+                    queue={queue}
+                    announce={announce}
+                  />
+                )}
             </div>
           )}
         </>
@@ -218,15 +228,17 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
 
 function SteerMessage({
   messageId,
+  queued,
   queue,
   announce,
 }: {
   messageId: string;
+  queued: boolean;
   queue: QueueActions;
   announce(text: string): void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
   useEffect(() => () => lifetime.current?.abort(), []);
@@ -235,20 +247,27 @@ function SteerMessage({
       <Button
         variant="quiet"
         size="sm"
-        busy={busy}
+        disabledReason={busy ? "Moving message…" : undefined}
         onClick={() => {
           if (pending.current) return;
           pending.current = true;
           setBusy(true);
-          setError(false);
+          setError(null);
           const abort = new AbortController();
           lifetime.current = abort;
-          void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
-            .then(() => {
-              if (!abort.signal.aborted) announce("Message sent to steer dot.");
+          void editQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+            .then((text) => {
+              if (!restoreQueuedDraft(queue.sessionId, messageId, text))
+                setError(
+                  "Message removed from the queue. Tap Edit again to open it in the composer.",
+                );
+              else announce("Message moved to the composer. Edit it, then send when ready.");
             })
             .catch(() => {
-              if (!abort.signal.aborted) setError(true);
+              if (!abort.signal.aborted)
+                setError(
+                  "Couldn't move this message to the composer. It may have started already. Try again.",
+                );
             })
             .finally(() => {
               pending.current = false;
@@ -256,11 +275,39 @@ function SteerMessage({
             });
         }}
       >
-        Steer now
+        Edit
       </Button>
+      {queued && (
+        <Button
+          variant="quiet"
+          size="sm"
+          busy={busy}
+          onClick={() => {
+            if (pending.current) return;
+            pending.current = true;
+            setBusy(true);
+            setError(null);
+            const abort = new AbortController();
+            lifetime.current = abort;
+            void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+              .then(() => {
+                if (!abort.signal.aborted) announce("Message sent to steer dot.");
+              })
+              .catch(() => {
+                if (!abort.signal.aborted) setError("Couldn't confirm steering. Try again.");
+              })
+              .finally(() => {
+                pending.current = false;
+                if (!abort.signal.aborted) setBusy(false);
+              });
+          }}
+        >
+          Steer now
+        </Button>
+      )}
       {error && (
         <span className="thread-note" role="alert">
-          Couldn't confirm steering. Try again.
+          {error}
         </span>
       )}
     </>

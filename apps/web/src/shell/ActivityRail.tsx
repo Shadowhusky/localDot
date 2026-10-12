@@ -32,11 +32,14 @@ import type { StepRowView } from "../session/session-view.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { useMediaQuery } from "../ui/media.ts";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
+import { SwipePanels } from "../ui/SwipePanels.tsx";
 import { TabPanel, Tabs } from "../ui/Tabs.tsx";
 import { activityTabs as chosenTabs } from "./activity-tabs.ts";
+import { HANDHELD } from "./layout.ts";
 import "../agent/activity.css";
 
 export interface ActivityRailProps {
@@ -110,6 +113,7 @@ export function ActivityRail({
   planSnapshot,
   onHide,
 }: ActivityRailProps) {
+  const phone = useMediaQuery(HANDHELD);
   const replay = asOfMs !== undefined;
   const model = agent ?? EMPTY;
   const ended = !!model.ended;
@@ -172,8 +176,10 @@ export function ActivityRail({
       : []),
     ...(research ? [{ value: "sources", label: "Sources", count: research.sources.length }] : []),
   ];
+  const tabKey = tabs.map((item) => item.value).join(",");
+  const tabValues = useMemo(() => tabKey.split(","), [tabKey]);
   const onSteps = tab === "steps";
-  const follow = useFollowScroll(`${owner}:${filter}:${tab}`, !replay && started && onSteps);
+  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
@@ -320,110 +326,124 @@ export function ActivityRail({
           </div>
         )}
       </div>
+      {plan.length > 0 && (
+        <div className="activity-plan">
+          <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+        </div>
+      )}
       <div className="activity-body">
-        <ScrollArea
-          ref={follow.ref}
-          className="activity-scroll"
-          onScroll={(event) => {
-            if (!follow.onScroll()) {
-              history.freeze();
-              if (onSteps && history.hasOlder && event.currentTarget.scrollTop < 32) older();
-            }
-          }}
-          onWheel={interrupt}
-          onTouchStart={interrupt}
-          onPointerDown={interrupt}
-          onKeyDown={interrupt}
-        >
-          <div className="activity-content">
-            <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab}>
-              {plan.length > 0 && (
-                <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
-              )}
-              {!started && (
-                <p className="activity-empty">Plan and steps appear here once dot starts.</p>
-              )}
-              {history.hasOlder && (
-                <Button className="activity-page" size="sm" variant="quiet" onClick={older}>
-                  Earlier steps
-                </Button>
-              )}
-              {started && (
-                <section ref={timeline} className="activity-timeline" aria-label="Recorded steps">
-                  {sessionId && history.rows.map(renderEntry)}
-                </section>
-              )}
-              {started && (!sessionId || !selected.length) && (
-                <p className="activity-empty">
-                  {sessionId && entries.length
-                    ? "No steps match this filter."
-                    : (empty ??
-                      (replay
-                        ? "No steps to show for this recording."
-                        : "Steps appear here as dot works."))}
-                </p>
-              )}
-              {model.historyTruncated && (
-                <p className="activity-note">Older activity is kept in the task log.</p>
-              )}
+        <SwipePanels enabled={phone} value={tab} values={tabValues} onValueChange={choose}>
+          <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab} swipe={phone}>
+            <ScrollArea
+              ref={follow.ref}
+              className="activity-scroll"
+              onScroll={(event) => {
+                if (!follow.onScroll()) {
+                  history.freeze();
+                  if (onSteps && history.hasOlder && event.currentTarget.scrollTop < 32) older();
+                }
+              }}
+              onWheel={interrupt}
+              onTouchStart={interrupt}
+              onPointerDown={interrupt}
+              onKeyDown={interrupt}
+            >
+              <div className="activity-content">
+                {!started && (
+                  <p className="activity-empty">Plan and steps appear here once dot starts.</p>
+                )}
+                {history.hasOlder && (
+                  <Button className="activity-page" size="sm" variant="quiet" onClick={older}>
+                    Earlier steps
+                  </Button>
+                )}
+                {started && (
+                  <section ref={timeline} className="activity-timeline" aria-label="Recorded steps">
+                    {sessionId && history.rows.map(renderEntry)}
+                  </section>
+                )}
+                {started && (!sessionId || !selected.length) && (
+                  <p className="activity-empty">
+                    {sessionId && entries.length
+                      ? "No steps match this filter."
+                      : (empty ??
+                        (replay
+                          ? "No steps to show for this recording."
+                          : "Steps appear here as dot works."))}
+                  </p>
+                )}
+                {model.historyTruncated && (
+                  <p className="activity-note">Older activity is kept in the task log.</p>
+                )}
+              </div>
+            </ScrollArea>
+          </TabPanel>
+          {tabValues.includes("files") && (
+            <TabPanel tabsId={`${domId}-tabs`} value="files" selected={tab} swipe={phone}>
+              <ScrollArea className="activity-scroll">
+                <div className="activity-content">
+                  {handed > 0 && sessionId && (
+                    <section className="activity-section" aria-labelledby={`${domId}-handed`}>
+                      <div className="activity-section-head">
+                        <h3 id={`${domId}-handed`}>Handed over</h3>
+                        <span className="activity-section-meta num">{handed}</span>
+                      </div>
+                      <HandedOverFiles
+                        api={api}
+                        sessionId={sessionId}
+                        results={model.results}
+                        onMac={isLoopbackPage()}
+                      />
+                    </section>
+                  )}
+                  {cellId && !replay && (
+                    <BrowserDownloads
+                      key={cellId}
+                      api={api}
+                      cellId={cellId}
+                      releaseReady={releaseReady}
+                      onCount={setDownloads}
+                    />
+                  )}
+                  {fileChanges.length > 0 && (
+                    <section className="activity-section" aria-labelledby={`${domId}-changed`}>
+                      <div className="activity-section-head">
+                        <h3 id={`${domId}-changed`}>Changed</h3>
+                        <span className="activity-section-meta num">{fileChanges.length}</span>
+                      </div>
+                      {fileChanges.map(changeRow)}
+                    </section>
+                  )}
+                  {memoryChanges.length > 0 && (
+                    <section className="activity-section" aria-labelledby={`${domId}-memory`}>
+                      <div className="activity-section-head">
+                        <h3 id={`${domId}-memory`}>Memory</h3>
+                        <span className="activity-section-meta num">{memoryChanges.length}</span>
+                      </div>
+                      {memoryChanges.map(changeRow)}
+                    </section>
+                  )}
+                  {!files && <p className="activity-empty">Files dot hands over appear here.</p>}
+                </div>
+              </ScrollArea>
             </TabPanel>
-            <TabPanel tabsId={`${domId}-tabs`} value="files" selected={tab}>
-              {handed > 0 && sessionId && (
-                <section className="activity-section" aria-labelledby={`${domId}-handed`}>
-                  <div className="activity-section-head">
-                    <h3 id={`${domId}-handed`}>Handed over</h3>
-                    <span className="activity-section-meta num">{handed}</span>
-                  </div>
-                  <HandedOverFiles
+          )}
+          {research && sessionId && (
+            <TabPanel tabsId={`${domId}-tabs`} value="sources" selected={tab} swipe={phone}>
+              <ScrollArea className="activity-scroll">
+                <div className="activity-content">
+                  <ResearchSources
+                    research={research}
+                    nowMs={replay ? asOfMs : nowMs}
+                    working={!replay && !ended && WORKING.has(model.state?.state ?? "")}
                     api={api}
                     sessionId={sessionId}
-                    results={model.results}
-                    onMac={isLoopbackPage()}
                   />
-                </section>
-              )}
-              {cellId && !replay && (
-                <BrowserDownloads
-                  key={cellId}
-                  api={api}
-                  cellId={cellId}
-                  releaseReady={releaseReady}
-                  onCount={setDownloads}
-                />
-              )}
-              {fileChanges.length > 0 && (
-                <section className="activity-section" aria-labelledby={`${domId}-changed`}>
-                  <div className="activity-section-head">
-                    <h3 id={`${domId}-changed`}>Changed</h3>
-                    <span className="activity-section-meta num">{fileChanges.length}</span>
-                  </div>
-                  {fileChanges.map(changeRow)}
-                </section>
-              )}
-              {memoryChanges.length > 0 && (
-                <section className="activity-section" aria-labelledby={`${domId}-memory`}>
-                  <div className="activity-section-head">
-                    <h3 id={`${domId}-memory`}>Memory</h3>
-                    <span className="activity-section-meta num">{memoryChanges.length}</span>
-                  </div>
-                  {memoryChanges.map(changeRow)}
-                </section>
-              )}
-              {!files && <p className="activity-empty">Files dot hands over appear here.</p>}
+                </div>
+              </ScrollArea>
             </TabPanel>
-            {research && sessionId && (
-              <TabPanel tabsId={`${domId}-tabs`} value="sources" selected={tab}>
-                <ResearchSources
-                  research={research}
-                  nowMs={replay ? asOfMs : nowMs}
-                  working={!replay && !ended && WORKING.has(model.state?.state ?? "")}
-                  api={api}
-                  sessionId={sessionId}
-                />
-              </TabPanel>
-            )}
-          </div>
-        </ScrollArea>
+          )}
+        </SwipePanels>
         {!replay && started && onSteps && (
           <button
             {...pressHandlers}

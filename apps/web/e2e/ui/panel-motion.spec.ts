@@ -13,7 +13,7 @@ test("Activity tabs and filters remain below the header while scrolling", async 
   const rail = phone ? page.locator(".activity-sheet") : page.locator(".rail-chat");
   const controls = rail.locator(".activity-controls");
   await expect(controls).toBeVisible();
-  const scroller = rail.locator(".activity-scroll");
+  const scroller = rail.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
   if (phone) {
     const header = await page
       .getByRole("dialog", { name: "Activity" })
