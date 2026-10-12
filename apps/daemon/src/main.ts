@@ -104,24 +104,27 @@ if (serviceIdentity) retainManagedDaemonLease(process.env, serviceIdentity);
 let serviceReadiness: ManagedServiceReadiness | undefined;
 const releaseLock = lockHome(join(home, "daemon.lock"));
 process.on("exit", releaseLock);
-const shutdown: (() => void | Promise<void>)[] = [];
+const shutdown: { name: string; stop: () => void | Promise<void> }[] = [];
 let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    console.error(`daemon shutdown requested (${signal})`);
     serviceReadiness?.stopping();
     const code = 128 + constants.signals[signal];
+    let stoppingComponent = "startup";
     const deadline = setTimeout(() => {
-      console.error("daemon shutdown deadline exceeded");
+      console.error(`daemon shutdown deadline exceeded during ${stoppingComponent}`);
       process.exit(code);
     }, 15_000);
     void (async () => {
-      for (const stop of shutdown) {
+      for (const { name, stop } of shutdown) {
+        stoppingComponent = name;
         try {
           await stop();
-        } catch {
-          console.error("daemon cleanup did not complete");
+        } catch (error) {
+          console.error(`daemon cleanup failed: ${name} (${describeStartupError(error)})`);
         }
       }
       clearTimeout(deadline);
@@ -478,7 +481,10 @@ void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
     if (shuttingDown) return;
     routineScheduler.start();
     const records = () => orchestrator.list().flatMap((cell) => orchestrator.record(cell.id) ?? []);
-    shutdown.unshift(updates.watch(records, (id) => orchestrator.notify(id)));
+    shutdown.unshift({
+      name: "image updates",
+      stop: updates.watch(records, (id) => orchestrator.notify(id)),
+    });
   });
 const keydEvents = new KeydEventRouter({
   keyd,
@@ -491,26 +497,29 @@ const keydEvents = new KeydEventRouter({
 const sweepAsks = setInterval(() => void agent.connections.sweep(), 15_000);
 sweepAsks.unref();
 shutdown.push(
-  () => clearInterval(sweepAsks),
-  () => keydEvents.stop(),
-  () => keydMonitor.stop(),
-  () => browserWarmer.dispose(),
-  () => browserRecovery.close(),
-  () => routineScheduler.stop(),
-  () => {
-    routineLauncher.cancelAll();
+  { name: "connection sweep", stop: () => clearInterval(sweepAsks) },
+  { name: "key events", stop: () => keydEvents.stop() },
+  { name: "key monitor", stop: () => keydMonitor.stop() },
+  { name: "browser warmer", stop: () => browserWarmer.dispose() },
+  { name: "browser recovery", stop: () => browserRecovery.close() },
+  { name: "routine scheduler", stop: () => routineScheduler.stop() },
+  {
+    name: "routine launcher",
+    stop: () => {
+      routineLauncher.cancelAll();
+    },
   },
-  () => agent?.close(),
-  () => routineStore.close(),
-  () => orchestrator.dispose(),
-  () => registry.dispose(),
-  () => recorder.stopAll(SHUTDOWN_FINALIZE_MS),
-  () => browserStreams.dispose(),
-  () => sessionIndex?.close(),
-  () => stopSearchFeed(),
-  () => searchIndex.close(),
-  () => notify.close(),
-  () => eventLog.close(),
+  { name: "agent", stop: () => agent?.close() },
+  { name: "routine store", stop: () => routineStore.close() },
+  { name: "computers", stop: () => orchestrator.dispose() },
+  { name: "desktop registry", stop: () => registry.dispose() },
+  { name: "recordings", stop: () => recorder.stopAll(SHUTDOWN_FINALIZE_MS) },
+  { name: "browser streams", stop: () => browserStreams.dispose() },
+  { name: "session index", stop: () => sessionIndex?.close() },
+  { name: "search feed", stop: () => stopSearchFeed() },
+  { name: "search index", stop: () => searchIndex.close() },
+  { name: "notifications", stop: () => notify.close() },
+  { name: "event log", stop: () => eventLog.close() },
 );
 keydMonitor.start();
 keydEvents.start();
@@ -518,7 +527,7 @@ const exportJobs = new ExportJobs({
   store: new ExportStore(home),
   renderer: new ChromeRenderer({ origin: `http://127.0.0.1:${port}`, token }),
 });
-shutdown.push(() => exportJobs.close());
+shutdown.push({ name: "video exports", stop: () => exportJobs.close() });
 const installCodes = new InstallCodes(token, port);
 const remoteAccess = new RemoteAccess(home, port, configuredRemoteDomain(home), installCodes);
 const installWait = () => {
@@ -538,7 +547,7 @@ const appUpdater = serviceIdentity
   ? installedAppUpdater(home, serviceIdentity, installWait, installSettled)
   : await sourceAppUpdater(home, process.env.LOCALDOT_INSTALL_PREFIX, installWait, installSettled);
 appUpdater.start();
-shutdown.unshift(() => appUpdater.close());
+shutdown.unshift({ name: "app updater", stop: () => appUpdater.close() });
 const accessLinks = new AccessLinks(port);
 void accessLinks.read().catch(() => {});
 const app = createApp({
@@ -668,10 +677,13 @@ attachUpgradeRouter(server as Server, { port, token }, [
   desktopStreamRoute(browserViewer, "browser"),
   appEventsRoute(appEvents, notify.presence),
 ]);
-shutdown.unshift(() => {
-  remoteAccess.close();
-  server.close();
-  tuning.close();
+shutdown.unshift({
+  name: "HTTP and remote access",
+  stop: () => {
+    remoteAccess.close();
+    server.close();
+    tuning.close();
+  },
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);

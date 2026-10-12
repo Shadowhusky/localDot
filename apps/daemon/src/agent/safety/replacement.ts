@@ -234,13 +234,9 @@ export class ReplacementOwner {
       throw new ReplacementConflict("the computer already has a replacement");
     const d = this.deps.forCell(oldCellId),
       current = d.current();
-    if (
-      current.cellId !== oldCellId ||
-      !current.fenced ||
-      !current.taskEnded ||
-      current.revision !== body.oldRevision
-    )
+    if (current.cellId !== oldCellId || !current.fenced || current.revision !== body.oldRevision)
       throw new ReplacementConflict("replacement not admitted");
+    if (!current.taskEnded) throw new ReplacementConflict("previous task retirement unconfirmed");
     // Reserve the global request identity before queued persistence or effects can yield.
     // Keep the reservation after uncertain writes: another cell must never reuse that identity.
     this.#requestOwners.set(body.requestId, { cellId: oldCellId, revision: body.oldRevision });

@@ -5,7 +5,7 @@ import { PrivateRecords } from "./private-records.ts";
 import { SafetyIntentStore } from "./store.ts";
 
 const Id = z.string().regex(ULID_PATTERN);
-const FenceRecord = z.strictObject({
+export const FenceRecord = z.strictObject({
   cellId: Id,
   sessionId: Id,
   revision: z.number().int().positive().safe(),

@@ -13,6 +13,7 @@ import type { Images } from "./cells/images.ts";
 import { gateRelay } from "./cells/relay.ts";
 import { imageVerdict } from "./doctor-image.ts";
 import { runDoctorNetworkProbe } from "./doctor-network.ts";
+import { recoveryChecks } from "./doctor-recovery.ts";
 import { type RelayProbeDeps, type RelayVerdict, runRelayProbe } from "./doctor-relay.ts";
 import type { DockerSocket } from "./doctor-socket.ts";
 import type { KeydClient } from "./keyd/client.ts";
@@ -75,6 +76,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const checks = [...hostChecks(host), ...(await dockerChecks(deps, host))];
   if (deps.signal?.aborted) return { ok: false, checks };
   checks.push(
+    ...(deps.home ? recoveryChecks(deps.home) : []),
     await portCheck(deps.port, deps.home),
     ...(deps.keyd ? await keydChecks(deps.keyd, deps.discoveryDeadlineMs, deps.signal) : []),
   );

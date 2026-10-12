@@ -15,6 +15,7 @@ export class ControlFailure extends Error {
   constructor(
     readonly uncertain: boolean,
     readonly status?: number,
+    readonly detail?: string,
   ) {
     super(uncertain ? "Action delivery could not be confirmed." : "The action was refused.");
   }
@@ -86,6 +87,9 @@ export async function controlRequest<T>(
       throw new ControlFailure(
         ![400, 401, 403, 404, 409, 413, 415, 422].includes(response.status),
         response.status,
+        response.headers.get("x-localdot-recovery") === "task-retirement"
+          ? "The previous task has not finished shutting down. Recovery is blocked until its cleanup is confirmed. Run localdot doctor for details."
+          : undefined,
       );
     }
     const length = response.headers.get("content-length");

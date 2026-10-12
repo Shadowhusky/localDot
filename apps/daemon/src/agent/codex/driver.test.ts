@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 function fixture(
   task = "Find the weather",
-  extra: Pick<CodexDriverDeps, "waitForAuthResume" | "heartbeatMs"> = {},
+  extra: Pick<CodexDriverDeps, "waitForAuthResume" | "heartbeatMs" | "onRetired"> = {},
 ) {
   const home = mkdtempSync("/tmp/ld10-"),
     transcript = new TranscriptStore(home),
@@ -922,8 +922,9 @@ describe("Codex startup, storage and failure containment", () => {
     expect(f.endpoints).toHaveLength(0);
     expect(f.session.generation).toBeUndefined();
   });
-  it("does not release a failed holder or admit replacement after the cleanup deadline", async () => {
-    const f = fixture(),
+  it("confirms late cleanup for recovery but never resumes the timed-out native task", async () => {
+    const retired = vi.fn();
+    const f = fixture("Find the weather", { onRetired: retired }),
       gate = deferred<void>(),
       run = f.run(),
       c = await f.fake.nextLaunch(1);
@@ -939,12 +940,16 @@ describe("Codex startup, storage and failure containment", () => {
     await vi.advanceTimersByTimeAsync(2001);
     await failed;
     expect(f.fake.activeLeases).toBe(1);
+    expect(f.driver.retirementConfirmed(f.session.id)).toBe(false);
+    expect(retired).not.toHaveBeenCalled();
     expect(f.fake.launches).toHaveLength(1);
     await expect(
       f.driver.run(f.session, { model: "gpt-6-astra", resume: true }),
     ).rejects.toBeInstanceOf(CodexCleanupError);
     gate.resolve();
     await vi.advanceTimersByTimeAsync(1);
+    expect(f.driver.retirementConfirmed(f.session.id)).toBe(true);
+    expect(retired).toHaveBeenCalledExactlyOnceWith(f.session.id);
     await expect(
       f.driver.run(f.session, { model: "gpt-6-astra", resume: true }),
     ).rejects.toBeInstanceOf(CodexCleanupError);

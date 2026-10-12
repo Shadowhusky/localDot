@@ -86,6 +86,11 @@ export function cellRoutes(
       try {
         return c.json(await replacement.owner.replace(id, parsed.data));
       } catch (error) {
+        if (
+          error instanceof ReplacementConflict &&
+          error.message === "previous task retirement unconfirmed"
+        )
+          c.header("x-localdot-recovery", "task-retirement");
         return c.text(
           error instanceof ReplacementConflict
             ? error.message

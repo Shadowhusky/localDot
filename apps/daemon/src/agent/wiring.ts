@@ -487,9 +487,15 @@ export function createAgent(d: AgentWiringDeps) {
       lease.finish();
     }
   };
+  const nativeRetired = (sessionId: string) => {
+    for (const record of d.fences?.records() ?? [])
+      if (record.sessionId === sessionId && record.executor === "native")
+        d.fences?.confirmNativeRetirement(record.cellId, sessionId);
+  };
   const driver =
     auth && roots
       ? new CodexDriver({
+          onRetired: nativeRetired,
           auth,
           transcripts,
           openEndpoint: (input) =>
@@ -579,6 +585,7 @@ export function createAgent(d: AgentWiringDeps) {
     : undefined;
   const claudeDriver = claudeSetup
     ? new ClaudeCodeDriver({
+        onRetired: nativeRetired,
         query: (params) => claudeQuery(params),
         launch: () => claudeSetup.launch(),
         spawn: spawnClaudeCode,

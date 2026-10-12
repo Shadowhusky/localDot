@@ -84,6 +84,7 @@ export function useSafety(props: SafetyProps) {
   const [replacing, setReplacing] = useState(false);
   const [replacementRetry, setReplacementRetry] = useState(false);
   const replacementSending = useRef<object | null>(null);
+  const replacementRefusal = useRef<string | null>(null);
   const [allowed, setAllowed] = useState<AllowedChoice | null>(null);
   const undoing = useRef<AbortController | null>(null);
   const replacementRequest = useRef<ReplacementRequest | null>(null);
@@ -112,6 +113,7 @@ export function useSafety(props: SafetyProps) {
     if (old.api !== props.api || old.cell !== props.cell?.id) {
       replacementAbort.current?.abort();
       replacementRequest.current = null;
+      replacementRefusal.current = null;
       replacementSending.current = null;
       setReplacementRetry(false);
       replacementAttempt.current = null;
@@ -491,7 +493,8 @@ export function useSafety(props: SafetyProps) {
           setReplacing(false);
           setError(
             failure instanceof ControlFailure && failure.status === 404
-              ? "The replacement hasn't started. Try Replace computer again."
+              ? (replacementRefusal.current ??
+                  "The replacement hasn't started. Try Replace computer again.")
               : "Couldn't check the replacement. You can retry the same request.",
           );
         }
@@ -528,6 +531,7 @@ export function useSafety(props: SafetyProps) {
     const attempt = {};
     replacementAttempt.current = attempt;
     replacementSending.current = attempt;
+    replacementRefusal.current = null;
     setReplacementRetry(false);
     replacingRef.current = true;
     setReplacing(true);
@@ -598,7 +602,7 @@ export function useSafety(props: SafetyProps) {
         setError(null);
       }
       return true;
-    } catch {
+    } catch (failure) {
       if (
         replacementAttempt.current !== attempt ||
         !mounted.current ||
@@ -607,9 +611,12 @@ export function useSafety(props: SafetyProps) {
         current.current.cell.fenced?.revision !== revision
       )
         return false;
+      replacementRefusal.current =
+        failure instanceof ControlFailure ? (failure.detail ?? null) : null;
       if (mounted.current)
         setError(
-          "Replacement completion is unconfirmed. Checking the saved request; the old computer stays unavailable.",
+          replacementRefusal.current ??
+            "Replacement completion is unconfirmed. Checking the saved request; the old computer stays unavailable.",
         );
       setReplacementRetry(!!replacementRequest.current);
       replacementAttempt.current = null;

@@ -22,6 +22,7 @@ import {
   ulid,
 } from "@localdot/protocol";
 import { z } from "zod";
+import { NativeRetirement } from "../native-retirement.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import type { TranscriptStore } from "../transcript.ts";
@@ -146,6 +147,7 @@ export interface CodexDriverDeps {
   readonly redactorFor?: (session: AgentSession) => Redactor;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly heartbeatMs?: number;
+  readonly onRetired?: (sessionId: string) => void;
   // Daemon-owned mutation cursor preserves an explicit Resume posted during cleanup.
   readonly waitForAuthResume?: (session: AgentSession) => Promise<void>;
 }
@@ -189,13 +191,13 @@ export class CodexDriver {
   readonly #owners = new Map<string, DriverOwner>();
   readonly #pauseReceipts = new WeakMap<AgentSession, NativePauseReceipt>();
   readonly #resumeNotes = new WeakMap<AgentSession, string>();
+  readonly #retirement: NativeRetirement;
   constructor(deps: CodexDriverDeps) {
     this.#deps = Object.freeze({ ...deps });
+    this.#retirement = new NativeRetirement(deps.onRetired);
   }
   retirementConfirmed(sessionId: string): boolean {
-    return (
-      !this.#running.has(sessionId) && !this.#owners.has(sessionId) && !this.#blocked.has(sessionId)
-    );
+    return this.#retirement.confirmed(sessionId);
   }
   async pauseAtBoundary(
     session: AgentSession,
@@ -285,6 +287,7 @@ export class CodexDriver {
       this.#state(session, "error", "The ChatGPT model selection is invalid.");
       return CODEX_GAVE_UP;
     }
+    this.#retirement.begin(session.id);
     this.#running.add(session.id);
     const owner: DriverOwner = { session, admission: Promise.resolve() };
     this.#owners.set(session.id, owner);
@@ -313,10 +316,13 @@ export class CodexDriver {
           lease = await readonlyAwait(acquiring, session.abort.signal);
         } catch (cause) {
           if (!session.stopped) throw cause;
-          void acquiring
-            .then(
-              (late) => this.#release(session, late),
-              () => {},
+          void this.#retirement
+            .track(
+              session.id,
+              acquiring.then(
+                (late) => late.release(),
+                () => {},
+              ),
             )
             .catch(() => {
               this.#blocked.add(session.id);
@@ -499,6 +505,7 @@ export class CodexDriver {
       admission?.resolve();
       this.#owners.delete(session.id);
       this.#running.delete(session.id);
+      this.#retirement.end(session.id);
     }
   }
   #state(session: AgentSession, state: "paused" | "idle" | "error", reason: string): void {
@@ -508,7 +515,7 @@ export class CodexDriver {
   }
   async #release(session: AgentSession, lease: CodexDriverLease): Promise<void> {
     try {
-      await retirementDeadline(lease.release());
+      await retirementDeadline(this.#retirement.track(session.id, lease.release()));
     } catch {
       this.#blocked.add(session.id);
       throw new CodexCleanupError();
@@ -1133,7 +1140,7 @@ export class CodexDriver {
       ]);
     });
     try {
-      await retirementDeadline(cleanup);
+      await retirementDeadline(this.#retirement.track(session.id, cleanup));
       // Remove only this exact cycle after cleanup, before publishing a resumable receipt.
       const owner = this.#owners.get(session.id);
       if (owner?.active?.pauseAtBoundary === pauseAtBoundary) {

@@ -1057,10 +1057,14 @@ export class AgentRunner {
     }
   }
   // Handler uncertainty cannot skip containment merely because it already fenced the session.
-  contain(session: AgentSession, _reason: string): Promise<void> {
+  contain(session: AgentSession, reason: string): Promise<void> {
     const rt = this.#runtime.get(session.id);
     session.stop();
     this.#blockedCells.add(session.cellId);
+    if (!this.deps.fences?.record(session.cellId))
+      console.error(
+        `computer recovery required: ${session.cellId}, task ${session.id} (${/^[a-z_]{1,64}$/.test(reason) ? reason : "cleanup_uncertain"})`,
+      );
     this.deps.fences?.capture(
       session.cellId,
       session.id,

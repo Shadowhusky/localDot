@@ -1049,3 +1049,24 @@ it("uses the fence's saved request to follow a completed replacement instead of 
   await waitFor(() => expect(selectRecovery).toHaveBeenCalledWith(candidate), { timeout: 2500 });
   expect(fetchImpl.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 });
+
+it("keeps the actual replacement refusal visible through missing status polls", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+    if (String(url).endsWith("/fence")) return Response.json({ revision: 4 });
+    if (init?.method === "POST")
+      return new Response("private details must not be shown", {
+        status: 409,
+        headers: { "x-localdot-recovery": "task-retirement" },
+      });
+    return new Response("missing", { status: 404 });
+  });
+  const f = fixture(fetchImpl, null);
+  f.update({ cell: { ...f.props.cell!, fenced: { revision: 4 } } });
+  await act(async () => {
+    await f.result.current.replace();
+  });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  expect(f.result.current.error).toContain("previous task has not finished");
+  expect(f.result.current.error).not.toContain("private details");
+  expect(f.result.current.error).not.toContain("Try Replace computer again");
+});

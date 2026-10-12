@@ -19,6 +19,7 @@ import {
 } from "@localdot/protocol";
 import { connectorDescriptors, type McpCallResult, toCallToolResult } from "../codex/mcp-tools.ts";
 import type { NativePauseReceipt } from "../codex/native-pause.ts";
+import { NativeRetirement } from "../native-retirement.ts";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import type { TranscriptStore } from "../transcript.ts";
@@ -71,6 +72,7 @@ export interface ClaudeCodeDriverDeps {
   readonly redactorFor?: (session: AgentSession) => Redactor;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly heartbeatMs?: number;
+  readonly onRetired?: (sessionId: string) => void;
   readonly startupMs?: number;
   readonly exitMs?: number;
 }
@@ -167,13 +169,13 @@ export class ClaudeCodeDriver {
   readonly #owners = new Map<string, { session: AgentSession; active?: ActiveCycle }>();
   readonly #pauseReceipts = new WeakMap<AgentSession, NativePauseReceipt>();
   readonly #resumeNotes = new WeakMap<AgentSession, string>();
+  readonly #retirement: NativeRetirement;
   constructor(deps: ClaudeCodeDriverDeps) {
     this.#deps = Object.freeze({ ...deps });
+    this.#retirement = new NativeRetirement(deps.onRetired);
   }
   retirementConfirmed(sessionId: string): boolean {
-    return (
-      !this.#running.has(sessionId) && !this.#owners.has(sessionId) && !this.#blocked.has(sessionId)
-    );
+    return this.#retirement.confirmed(sessionId);
   }
   async pauseAtBoundary(
     session: AgentSession,
@@ -250,6 +252,7 @@ export class ClaudeCodeDriver {
       this.#state(session, "error", "The Claude Code model selection is invalid.");
       return CLAUDE_CODE_GAVE_UP;
     }
+    this.#retirement.begin(session.id);
     this.#running.add(session.id);
     const owner: { session: AgentSession; active?: ActiveCycle } = { session };
     this.#owners.set(session.id, owner);
@@ -360,6 +363,7 @@ export class ClaudeCodeDriver {
       session.abort.signal.removeEventListener("abort", stopped);
       this.#owners.delete(session.id);
       this.#running.delete(session.id);
+      this.#retirement.end(session.id);
     }
   }
   #state(
@@ -836,7 +840,7 @@ export class ClaudeCodeDriver {
       await Promise.all([calls.catch(() => {}), session.toolsSettled()]);
     })();
     try {
-      await within(cleanup, exitMs * 2 + 2000);
+      await within(this.#retirement.track(session.id, cleanup), exitMs * 2 + 2000);
       owner.retire();
       retired.resolve();
     } catch {

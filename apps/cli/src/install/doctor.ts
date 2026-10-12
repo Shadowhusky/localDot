@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
 import { IMAGE_ROLES } from "../../../../packages/protocol/src/release.ts";
 import type { DoctorCheck } from "../../../daemon/src/doctor.ts";
+import { recoveryChecks } from "../../../daemon/src/doctor-recovery.ts";
 import type { ConsoleIO, RuntimeContext } from "../runtime.ts";
 import { readContainerInventory } from "./container-containment.ts";
 import { inspectDoctorImages } from "./doctor-images.ts";
@@ -33,7 +34,7 @@ const failure = () => new Error("The managed installation changed or requires re
 export async function runInstalledDoctor(context: RuntimeContext, io: ConsoleIO): Promise<number> {
   const { home, signal } = context;
   const input = context.installed && structuredClone(context.installed);
-  const checks: DoctorCheck[] = [];
+  const checks: DoctorCheck[] = recoveryChecks(home);
   try {
     signal.throwIfAborted();
     const uid = process.getuid?.(),

@@ -628,3 +628,30 @@ describe("Claude Code driver", () => {
     expect(f.dispatch).toHaveBeenCalledTimes(1);
   });
 });
+
+it("keeps late tool cleanup as a recovery receipt without resuming the timed-out task", async () => {
+  const retired = vi.fn(),
+    f = fixture({ onRetired: retired });
+  const drain = Promise.withResolvers<void>();
+  const run = f.run();
+  const fake = await f.started();
+  vi.spyOn(f.session, "toolsSettled").mockReturnValue(drain.promise);
+  vi.useFakeTimers();
+  try {
+    f.session.stop();
+    const failed = expect(run).rejects.toThrow("safely retired");
+    await vi.advanceTimersByTimeAsync(2201);
+    await failed;
+    expect(fake.child.killed).toBe(true);
+    expect(f.driver.retirementConfirmed(f.session.id)).toBe(false);
+    expect(retired).not.toHaveBeenCalled();
+    drain.resolve();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.driver.retirementConfirmed(f.session.id)).toBe(true);
+    expect(retired).toHaveBeenCalledExactlyOnceWith(f.session.id);
+    await expect(f.run(true)).rejects.toThrow("safely retired");
+  } finally {
+    drain.resolve();
+    vi.useRealTimers();
+  }
+});
