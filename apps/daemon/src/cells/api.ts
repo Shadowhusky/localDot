@@ -13,6 +13,7 @@ import {
 } from "./orchestrator.ts";
 import type { createComputerResetController } from "./reset-controller.ts";
 import type { TicketRegistry } from "./secrets.ts";
+import { SystemUpdateBlocked } from "./system-state.ts";
 
 export interface CellApiDeps {
   cells: CellApi;
@@ -189,6 +190,7 @@ async function withDocker(c: Context, fn: () => Promise<Response>): Promise<Resp
   try {
     return await fn();
   } catch (err) {
+    if (err instanceof SystemUpdateBlocked) return c.text(err.message, 409);
     if (err instanceof CellControlConflict) return c.text(err.message, 409);
     if (err instanceof UnknownCellError) return c.text("unknown cell", 404);
     if (err instanceof SkippedCellsError) return c.text(err.message, 409);

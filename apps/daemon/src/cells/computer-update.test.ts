@@ -162,7 +162,7 @@ describe("CellOrchestrator.update", () => {
       { Path: "/var/lib/dpkg/status", Kind: 0 },
     ];
     const before = fake.state.calls.length;
-    await expect(orchestrator.update(id)).rejects.toThrow("would discard");
+    await expect(orchestrator.update(id)).rejects.toThrow("cannot preserve yet");
     expect(desktop.running).toBe(true);
     expect(
       fake.state.calls

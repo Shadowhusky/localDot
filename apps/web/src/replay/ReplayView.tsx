@@ -264,6 +264,9 @@ function Library({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const matches = useTaskSearch(api, search);
+  const exportState = useHostExports(hostExports);
+  const libraryLoading =
+    (tasks.loading && tasks.cards.length === 0) || exportState.loading === true;
   const shown = shownCards(tasks.cards, search, filter, matches);
   const card = shown.find((entry) => entry.id === chosen) ?? shown[0] ?? null;
   useEscape(visible, onGoLive);
@@ -300,26 +303,32 @@ function Library({
             </span>
           )}
         </div>
-        <ScrollArea className="replay-library-scroll" fade="bottom">
-          {search.trim() === "" && filter === "all" && (
-            <ExportsList
-              api={api}
-              host={hostExports}
-              cover={(id) => tasks.cards.find((entry) => entry.id === id)?.coverFrameId ?? null}
-            />
+        <ScrollArea className="replay-library-scroll" fade="bottom" aria-busy={libraryLoading}>
+          {libraryLoading ? (
+            <DotLoader className="replay-loading" label="Loading your recordings" />
+          ) : (
+            <>
+              {search.trim() === "" && filter === "all" && (
+                <ExportsList
+                  api={api}
+                  host={hostExports}
+                  cover={(id) => tasks.cards.find((entry) => entry.id === id)?.coverFrameId ?? null}
+                />
+              )}
+              <TaskList
+                api={api}
+                index={tasks}
+                search={search}
+                filter={filter}
+                matches={matches}
+                selectedId={roomy ? (card?.id ?? null) : null}
+                onSelect={roomy ? onChoose : onOpen}
+                onDeleted={onDeleted}
+                continueTask={continueTask}
+                variant={phone ? "phone" : "library"}
+              />
+            </>
           )}
-          <TaskList
-            api={api}
-            index={tasks}
-            search={search}
-            filter={filter}
-            matches={matches}
-            selectedId={roomy ? (card?.id ?? null) : null}
-            onSelect={roomy ? onChoose : onOpen}
-            onDeleted={onDeleted}
-            continueTask={continueTask}
-            variant={phone ? "phone" : "library"}
-          />
         </ScrollArea>
       </main>
       {roomy && (

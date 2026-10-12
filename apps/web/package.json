@@ -19,6 +19,7 @@
     "@localdot/protocol": "workspace:*",
     "@localdot/providers": "workspace:*",
     "@localdot/stage": "workspace:*",
+    "@tanstack/react-virtual": "3.13.12",
     "clsx": "2.1.1",
     "mediabunny": "1.61.0",
     "pdfjs-dist": "6.3.289",

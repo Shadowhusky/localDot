@@ -50,11 +50,36 @@ function sendFile(c: Context, jobs: ExportJobs, id: string): Response {
   if (!found) return c.text("not found", 404);
   const info = lstatSync(found.path, { throwIfNoEntry: false });
   if (!info?.isFile()) return c.text("not found", 404);
-  const stream = Readable.toWeb(createReadStream(found.path)) as ReadableStream<Uint8Array>;
-  return c.body(stream, 200, {
+  const range = c.req.header("range");
+  let start = 0,
+    end = info.size - 1;
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match || (!match[1] && !match[2]))
+      return c.body(null, 416, { "content-range": `bytes */${info.size}` });
+    start = match[1] ? Number(match[1]) : Math.max(0, info.size - Number(match[2]));
+    end = match[1] && match[2] ? Math.min(Number(match[2]), end) : end;
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start > end ||
+      start < 0 ||
+      start >= info.size
+    )
+      return c.body(null, 416, { "content-range": `bytes */${info.size}` });
+  }
+  const stream = Readable.toWeb(
+    createReadStream(found.path, range ? { start, end } : undefined),
+  ) as ReadableStream<Uint8Array>;
+  return c.body(stream, range ? 206 : 200, {
     "content-type": TYPES[found.record.request.format],
-    "content-length": String(info.size),
-    "content-disposition": disposition(found.record.name),
+    "content-length": String(range ? end - start + 1 : info.size),
+    "accept-ranges": "bytes",
+    ...(range ? { "content-range": `bytes ${start}-${end}/${info.size}` } : {}),
+    "content-disposition":
+      c.req.query("preview") === "1"
+        ? disposition(found.record.name).replace(/^attachment/, "inline")
+        : disposition(found.record.name),
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",

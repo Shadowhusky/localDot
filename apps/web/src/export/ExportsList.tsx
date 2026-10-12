@@ -1,8 +1,12 @@
 import type { HostExport } from "@localdot/protocol";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { MediaView } from "../deliverables/viewer/MediaView.tsx";
+import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { HANDHELD } from "../shell/layout.ts";
+import { Sheet } from "../ui/Sheet.tsx";
+import "../deliverables/viewer/viewer.css";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -29,14 +33,23 @@ export function ExportsList({
   // The picture a recording's row shows, to show beside its videos.
   cover(sessionId: string): string | null;
 }) {
-  const { exports } = useHostExports(host);
+  const { exports, failed: loadFailed } = useHostExports(host);
   const phone = useMediaQuery(HANDHELD);
   const [all, setAll] = useState(false);
+  const [preview, setPreview] = useState<{ record: HostExport; open: boolean } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const heading = useId();
   const rest = useId();
   const now = useMemo(() => new Date(), []);
-  if (exports.length === 0) return null;
+  if (exports.length === 0)
+    return loadFailed ? (
+      <p className="replay-tasks-note" role="alert">
+        Exported videos couldn’t load.{" "}
+        <Button size="sm" variant="quiet" onClick={host.refresh}>
+          Try again
+        </Button>
+      </p>
+    ) : null;
   const act = (id: string, work: Promise<unknown>) => {
     setFailed(null);
     void work.catch(() => setFailed(id));
@@ -50,6 +63,7 @@ export function ExportsList({
       now={now}
       failed={failed === record.id}
       phone={phone}
+      onPreview={() => setPreview({ record, open: true })}
       onSave={() =>
         act(
           record.id,
@@ -62,29 +76,40 @@ export function ExportsList({
     />
   );
   return (
-    <section className="replay-day export-list" aria-labelledby={heading}>
-      <h3 id={heading} className="replay-day-title">
-        Exported videos
-      </h3>
-      <ul className="replay-day-list">{exports.slice(0, SHOWN).map(row)}</ul>
-      {exports.length > SHOWN && (
-        <>
-          <Collapse open={all} id={rest}>
-            <ul className="replay-day-list">{exports.slice(SHOWN).map(row)}</ul>
-          </Collapse>
-          <Button
-            size="sm"
-            variant="quiet"
-            className="export-list-more"
-            aria-expanded={all}
-            aria-controls={rest}
-            onClick={() => setAll((open) => !open)}
-          >
-            {all ? "Show fewer" : `Show all ${exports.length}`}
-          </Button>
-        </>
+    <>
+      <section className="replay-day export-list" aria-labelledby={heading}>
+        <h3 id={heading} className="replay-day-title">
+          Exported videos
+        </h3>
+        <ul className="replay-day-list">{exports.slice(0, SHOWN).map(row)}</ul>
+        {exports.length > SHOWN && (
+          <>
+            <Collapse open={all} id={rest}>
+              <ul className="replay-day-list">{exports.slice(SHOWN).map(row)}</ul>
+            </Collapse>
+            <Button
+              size="sm"
+              variant="quiet"
+              className="export-list-more"
+              aria-expanded={all}
+              aria-controls={rest}
+              onClick={() => setAll((open) => !open)}
+            >
+              {all ? "Show fewer" : `Show all ${exports.length}`}
+            </Button>
+          </>
+        )}
+      </section>
+      {preview && (
+        <ExportPreview
+          key={preview.record.id}
+          record={preview.record}
+          open={preview.open}
+          host={host}
+          onClose={() => setPreview((value) => value && { ...value, open: false })}
+        />
       )}
-    </section>
+    </>
   );
 }
 
@@ -95,6 +120,7 @@ function ExportRow({
   now,
   failed,
   phone,
+  onPreview,
   onSave,
   onCancel,
   onRetry,
@@ -107,6 +133,7 @@ function ExportRow({
   failed: boolean;
   // A phone swipes a row away instead of showing its trash button.
   phone: boolean;
+  onPreview(): void;
   onSave(): void;
   onCancel(): void;
   onRetry(): void;
@@ -118,6 +145,7 @@ function ExportRow({
     <li className="export-row" data-phase={record.phase}>
       <ListRow
         title={record.name}
+        onSelect={record.phase === "done" ? onPreview : undefined}
         thumbnail={
           <>
             <ReplayImage api={api} sessionId={record.sessionId} frameId={cover} />
@@ -184,5 +212,92 @@ function ExportRow({
         }
       />
     </li>
+  );
+}
+
+function ExportPreview({
+  open,
+  record,
+  host,
+  onClose,
+}: {
+  record: HostExport;
+  open: boolean;
+  host: HostExports;
+  onClose(): void;
+}) {
+  const media = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) media.current?.querySelector("video")?.pause();
+  }, [open]);
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry starts a fresh preview request.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setFailed(false);
+    setUrl(null);
+    void host.link(record.id).then(
+      (href) => {
+        if (active) setUrl(`${href}?preview=1`);
+      },
+      () => {
+        if (active) setFailed(true);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [host, record.id, attempt, open]);
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={record.name}
+      size="wide"
+      modal
+      className="export-preview"
+      footer={
+        <Button
+          icon="download"
+          onClick={() => {
+            void host
+              .link(record.id)
+              .then((href) => downloadFile(href, record.name))
+              .catch(() => setFailed(true));
+          }}
+        >
+          Download video
+        </Button>
+      }
+    >
+      {failed ? (
+        <div role="alert" className="export-preview-error">
+          <p>The video couldn’t load. Try again, or download it to watch.</p>
+          <Button
+            onClick={() => {
+              setUrl(null);
+              setAttempt((value) => value + 1);
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : url ? (
+        <div ref={media} className="export-preview-media">
+          <MediaView
+            key={url}
+            url={url}
+            kind="video"
+            name={record.name}
+            onError={() => setFailed(true)}
+          />
+        </div>
+      ) : (
+        <DotLoader label="Opening video" />
+      )}
+    </Sheet>
   );
 }

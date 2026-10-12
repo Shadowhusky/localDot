@@ -222,7 +222,7 @@
 
 .conversations-body {
   flex: 1 1 auto;
-  min-height: 160px;
+  min-height: 240px;
   overflow-y: auto;
   overscroll-behavior: contain;
   margin-inline: calc(var(--spacing) * -2);
@@ -231,7 +231,7 @@
 }
 
 .conversations-body > :is(.ui-empty, .conversations-loading) {
-  min-height: 160px;
+  min-height: 240px;
 }
 
 .conversations-day {
@@ -335,7 +335,8 @@
 .conversations-sheet .conversations-body {
   margin-inline: 0;
   padding-inline: 0;
-  overflow: visible;
+  overflow-y: auto;
+  max-height: min(60dvh, 520px);
 }
 
 .conversations-sheet .conversations-row {
@@ -366,4 +367,29 @@
 
 .rail-panel[hidden] {
   display: none;
+}
+
+.conversations-body {
+  height: min(50dvh, 360px);
+  flex: 1 1 auto;
+}
+.conversations-loading {
+  height: 100%;
+}
+.conversations-foot[data-loading] {
+  visibility: hidden;
+}
+.conversations-list {
+  animation: conversation-list-in var(--dur-fade) var(--ease-standard) both;
+}
+@keyframes conversation-list-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conversations-list {
+    animation: none;
+  }
 }

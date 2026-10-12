@@ -784,12 +784,19 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
   return (
     <>
       {props.appUpdate && <AppUpdateSettings update={props.appUpdate} />}
+      {update && (
+        <div>
+          <GroupHead title="Computer updates" />
+          <Group>
+            <UpdateRow update={update} />
+          </Group>
+        </div>
+      )}
       {props.remoteApi && <AccessLinksSettings api={props.remoteApi} />}
       {props.remoteApi && <RemoteAccessSettings api={props.remoteApi} />}
-      {(update || login || stream) && (
+      {(login || stream) && (
         <div>
           <Group>
-            {update && <UpdateRow update={update} />}
             {login && (
               <Switch
                 className="ui-group-row"
@@ -875,7 +882,7 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
         update.error && !update.busy ? (
           <span className="settings-computer-error">{update.error}</span>
         ) : (
-          "Files and sign-ins stay. Takes about a minute."
+          "Updates the computer environment. Your files and sign-ins are kept."
         )
       }
       trailing={

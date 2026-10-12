@@ -60,7 +60,7 @@ it("opens no socket to a daemon that can't make videos in the background", async
   const { api } = daemon(() => new Response("not found", { status: 404 }));
   const exports = createHostExports(api);
   await settle();
-  expect(exports.view()).toEqual({ host: null, exports: [] });
+  expect(exports.view()).toEqual({ host: null, exports: [], failed: true, loading: false });
   expect(FakeWebSocket.instances).toHaveLength(0);
   expect(hostCanMake(exports.view())).toBe(false);
 });

@@ -13,6 +13,7 @@ export const UPDATE_READY = "A new version of your computer is ready";
 // The daemon's own answers that are already plain words (apps/daemon/src/cells/computer-update.ts
 // and orchestrator.ts); anything else stays out of sight.
 const PLAIN = new Set([
+  "This computer has installed apps or system changes that this update cannot preserve yet. Your computer is unchanged; you can keep using it. Updating localDot itself is separate.",
   "This computer can't be updated right now.",
   "Your computer is already updating.",
   "Your computer is up to date.",

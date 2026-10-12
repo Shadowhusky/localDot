@@ -13,6 +13,8 @@ import { openSocket, type SocketHandle } from "../lib/socket.ts";
 export interface HostExportsView {
   // null until the host has answered; one that never answers can't make videos.
   host: ExportHost | null;
+  loading?: boolean;
+  failed?: boolean;
   // Newest first.
   exports: readonly HostExport[];
 }
@@ -34,7 +36,7 @@ export interface HostExports {
   dispose(): void;
 }
 
-const EMPTY: HostExportsView = { host: null, exports: [] };
+const EMPTY: HostExportsView = { host: null, exports: [], loading: true };
 
 export function hostCanMake(view: HostExportsView): boolean {
   return view.host?.state === "ready";
@@ -79,7 +81,9 @@ export function createHostExports(
           },
         });
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!disposed) set({ ...view, loading: false, failed: true });
+      })
       .finally(() => {
         asking = false;
       });

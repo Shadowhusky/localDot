@@ -9,6 +9,7 @@ import { ComputerUpdateRefused } from "./computer-update.ts";
 import { DockerError } from "./docker.ts";
 import { SkippedCellsError } from "./orchestrator.ts";
 import { TicketRegistry } from "./secrets.ts";
+import { SYSTEM_UPDATE_BLOCKED, SystemUpdateBlocked } from "./system-state.ts";
 import { FakeOrchestrator } from "./testing/fake-orchestrator.ts";
 import type { CellSummary } from "./types.ts";
 
@@ -179,6 +180,11 @@ describe("cell API", () => {
     const refused = await post(app);
     expect(refused.status).toBe(409);
     expect(await refused.text()).toBe("Hand back the computer first.");
+
+    update.mockRejectedValueOnce(new SystemUpdateBlocked());
+    const preserved = await post(app);
+    expect(preserved.status).toBe(409);
+    expect(await preserved.text()).toBe(SYSTEM_UPDATE_BLOCKED);
 
     update.mockRejectedValueOnce(new DockerError(0, "ECONNREFUSED", "/containers/create"));
     expect((await post(app)).status).toBe(502);

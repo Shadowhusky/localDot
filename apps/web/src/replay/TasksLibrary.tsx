@@ -2,6 +2,7 @@ import { type SearchHit, type SessionCard, SessionIndexPage } from "@localdot/pr
 import {
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
   useCallback,
   useEffect,
@@ -22,6 +23,7 @@ import { ListRow } from "../ui/ListRow.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { Highlight } from "./Highlight.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import {
@@ -213,9 +215,36 @@ export function TaskList({
   const [folding, setFolding] = useState<ReadonlySet<string>>(new Set());
   const now = useMemo(() => new Date(), []);
   const searching = search.trim() !== "" || filter !== "all";
-  const shown = shownCards(index.cards, search, filter, matches);
+  const shown = useMemo(
+    () => shownCards(index.cards, search, filter, matches),
+    [index.cards, search, filter, matches],
+  );
   const notes = search.trim() && filter === "all" ? (matches?.notes ?? []) : [];
   const { more, loading, failed, loadMore, forget } = index;
+  const flat = useMemo(
+    () =>
+      byDay(shown, now).flatMap(({ day, cards }) => [
+        { key: day, day, card: null as SessionCard | null },
+        ...cards.map((card) => ({ key: card.id, day, card })),
+      ]),
+    [shown, now],
+  );
+  const windowed = useVirtualRows(
+    list,
+    useMemo(() => flat.map((row) => row.key), [flat]),
+    (at) => (flat[at]?.card ? (variant === "rail" ? 76 : 100) : 40),
+  );
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusKey) return;
+    const button = list.current?.querySelector<HTMLElement>(
+      `[data-task="${CSS.escape(focusKey)}"] .ui-list-row-select`,
+    );
+    if (button) {
+      button.focus({ preventScroll: true });
+      setFocusKey(null);
+    }
+  });
 
   // A search looks through every task, so it reads the pages a scroll has not reached yet. A page
   // that failed waits for Try again.
@@ -248,18 +277,25 @@ export function TaskList({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const rows = list.current ? rowButtons(list.current) : [];
-    const at = rows.indexOf(event.target as HTMLElement);
+    const target = event.target as HTMLElement;
+    if (!target.matches(".ui-list-row-select")) return;
+    const at = shown.findIndex(
+      (item) => item.id === target.closest<HTMLElement>("[data-task]")?.dataset.task,
+    );
     if (at < 0) return;
-    const go = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: rows.length - 1 }[event.key];
+    const go = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: shown.length - 1 }[event.key];
     if (go !== undefined) {
       event.preventDefault();
-      rows[Math.max(0, Math.min(rows.length - 1, go))]?.focus();
+      const next = shown[Math.max(0, Math.min(shown.length - 1, go))];
+      if (next) {
+        windowed.scrollTo(flat.findIndex((row) => row.key === next.id));
+        setFocusKey(next.id);
+      }
     } else if (event.key === "Backspace" || event.key === "Delete") {
-      const card = shown.find((item) => item.id === rows[at]?.closest("li")?.dataset.task);
+      const card = shown[at];
       if (!card) return;
       event.preventDefault();
-      ask(card, rows[at] ?? null);
+      ask(card, target);
     }
   };
 
@@ -292,25 +328,42 @@ export function TaskList({
         title={search.trim() ? `No recordings match “${search.trim()}”` : "No recordings here"}
       />
     );
+  else if (shown.length === 0 && (loading || matches?.pending))
+    body = <DotLoader className="replay-loading" label="Searching recordings" />;
   else
-    body = byDay(shown, now).map(({ day, cards }) => (
-      <Day key={day} day={day}>
-        {cards.map((card) => (
-          <TaskRow
-            key={card.id}
-            api={api}
-            card={card}
-            variant={variant}
-            selected={variant !== "phone" && card.id === selectedId}
-            folding={folding.has(card.id)}
-            continueTask={variant === "rail" ? undefined : continueTask}
-            match={matchesSearch(card, search) ? undefined : matches?.tasks.get(card.id)}
-            onSelect={() => onSelect(card.id)}
-            onDelete={(trigger) => ask(card, trigger)}
-          />
-        ))}
-      </Day>
-    ));
+    body = (
+      <ul className="replay-day-list replay-window" aria-label="Recordings">
+        <li aria-hidden="true" style={{ height: windowed.before }} />
+        {windowed.indexes.map((at) => {
+          const item = flat[at];
+          if (!item) return null;
+          const card = item.card;
+          if (!card)
+            return (
+              <li key={item.key} role="presentation" data-index={at} ref={windowed.measure}>
+                <h3 className="replay-day-title">{item.day}</h3>
+              </li>
+            );
+          return (
+            <TaskRow
+              measure={windowed.measure}
+              virtualIndex={at}
+              key={card.id}
+              api={api}
+              card={card}
+              variant={variant}
+              selected={variant !== "phone" && card.id === selectedId}
+              folding={folding.has(card.id)}
+              continueTask={variant === "rail" ? undefined : continueTask}
+              match={matchesSearch(card, search) ? undefined : matches?.tasks.get(card.id)}
+              onSelect={() => onSelect(card.id)}
+              onDelete={(trigger) => ask(card, trigger)}
+            />
+          );
+        })}
+        <li aria-hidden="true" style={{ height: windowed.after }} />
+      </ul>
+    );
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the rows' own buttons take the keys; the list only moves focus between them.
@@ -382,6 +435,8 @@ function NoteMatches({ notes, now }: { notes: readonly SearchHit[]; now: Date })
 }
 
 function TaskRow({
+  measure,
+  virtualIndex,
   api,
   card,
   variant,
@@ -392,6 +447,8 @@ function TaskRow({
   onSelect,
   onDelete,
 }: {
+  measure?: Ref<HTMLLIElement>;
+  virtualIndex?: number;
   api: ApiClient;
   card: SessionCard;
   variant: "library" | "phone" | "rail";
@@ -408,7 +465,13 @@ function TaskRow({
   const phone = variant === "phone";
   const wide = variant === "library";
   return (
-    <li className="replay-task" data-task={card.id} data-folding={folding ? "" : undefined}>
+    <li
+      ref={measure}
+      data-index={virtualIndex}
+      className="replay-task"
+      data-task={card.id}
+      data-folding={folding ? "" : undefined}
+    >
       <div className="replay-task-fold">
         <ListRow
           title={title}

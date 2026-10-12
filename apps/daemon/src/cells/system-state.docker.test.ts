@@ -63,7 +63,9 @@ it.skipIf(process.env.LOCALDOT_DOCKER_TESTS !== "1")(
         ownership: { desktop: source.Id },
         docker: { homeVolume: sourceHome },
       } as CellRecord;
-      await expect(requireUnmodifiedSystem(docker, source.Id)).rejects.toThrow("would discard");
+      await expect(requireUnmodifiedSystem(docker, source.Id)).rejects.toThrow(
+        "cannot preserve yet",
+      );
       await state.capture(record);
       snapshot = (await state.read(sourceId)).image;
       await docker.request({
@@ -93,7 +95,9 @@ it.skipIf(process.env.LOCALDOT_DOCKER_TESTS !== "1")(
         },
       });
       containers.push(restored.Id);
-      await expect(requireUnmodifiedSystem(docker, restored.Id)).rejects.toThrow("would discard");
+      await expect(requireUnmodifiedSystem(docker, restored.Id)).rejects.toThrow(
+        "cannot preserve yet",
+      );
       await run(restored.Id);
     } finally {
       for (const id of containers)

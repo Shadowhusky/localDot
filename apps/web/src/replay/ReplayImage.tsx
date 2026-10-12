@@ -61,12 +61,28 @@ export function ReplayImage({
   full?: boolean;
   alt?: string;
 }) {
+  const picture = useRef<HTMLSpanElement>(null);
+  const [near, setNear] = useState(full || typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    if (full || near || !picture.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setNear(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(picture.current);
+    return () => observer.disconnect();
+  }, [full, near]);
   const [image, setImage] = useState<{ sessionId: string; url: string } | null>(null);
   const shown = useRef<string | null>(null);
   const kind = full ? "frames" : "thumbs";
   const key = `${sessionId}/${kind}/${frameId}`;
   useEffect(() => {
-    if (!frameId) return;
+    if (!frameId || !near) return;
     const controller = new AbortController();
     void load(api, kind, key, controller.signal)
       .then((blob) => {
@@ -78,7 +94,7 @@ export function ReplayImage({
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [api, kind, key, sessionId, frameId]);
+  }, [api, kind, key, sessionId, frameId, near]);
   useEffect(
     () => () => {
       if (shown.current) URL.revokeObjectURL(shown.current);
@@ -88,6 +104,11 @@ export function ReplayImage({
   return frameId && image?.sessionId === sessionId ? (
     <img src={image.url} alt={alt} draggable={false} />
   ) : (
-    <span className="replay-image-empty" role="img" aria-label={alt || "No screenshot"} />
+    <span
+      ref={picture}
+      className="replay-image-empty"
+      role="img"
+      aria-label={alt || "No screenshot"}
+    />
   );
 }

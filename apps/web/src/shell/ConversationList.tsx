@@ -31,6 +31,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 import { TextField } from "../ui/TextField.tsx";
+import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import "./rails.css";
 
 export interface ConversationListProps {
@@ -105,6 +106,19 @@ export function ConversationList({
     ordered[0];
   const optionId = (row: ConversationRow) => `${listId}-${row.entry.sessionId}`;
   const list = useRef<HTMLDivElement>(null);
+  const flat = useMemo(
+    () =>
+      groups.flatMap((group) => [
+        { key: group.label, label: group.label, row: null as ConversationRow | null },
+        ...group.rows.map((row) => ({ key: row.entry.sessionId, label: group.label, row })),
+      ]),
+    [groups],
+  );
+  const windowed = useVirtualRows(
+    list,
+    useMemo(() => flat.map((item) => item.key), [flat]),
+    (index) => (flat[index]?.row ? 52 : 36),
+  );
   const activeKey = activeRow?.entry.sessionId;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the active row is the trigger.
   useEffect(() => {
@@ -132,7 +146,10 @@ export function ConversationList({
     if (to !== undefined) {
       event.preventDefault();
       const next = ordered[Math.max(0, Math.min(ordered.length - 1, to))];
-      if (next) setActive(next.entry.sessionId);
+      if (next) {
+        windowed.scrollTo(flat.findIndex((item) => item.key === next.entry.sessionId));
+        setActive(next.entry.sessionId);
+      }
     } else if (event.key === "Enter" && activeRow) {
       event.preventDefault();
       pick(activeRow);
@@ -161,7 +178,9 @@ export function ConversationList({
       </EmptyState>
     );
   else if (ordered.length === 0)
-    body = matches.pending ? null : (
+    body = matches.pending ? (
+      <DotLoader className="conversations-loading" label="Searching conversations" />
+    ) : (
       <EmptyState layout="start" icon="search" title={`No conversations match “${query.trim()}”`} />
     );
   else
@@ -171,72 +190,81 @@ export function ConversationList({
         id={listId}
         role="grid"
         aria-label="Recent conversations"
+        aria-rowcount={ordered.length}
         className="conversations-list"
       >
-        {groups.map((group) => (
-          <div
-            key={group.label}
-            role="rowgroup"
-            aria-labelledby={`${listId}-${group.label}`}
-            className="conversations-group"
-          >
-            <div id={`${listId}-${group.label}`} role="presentation" className="conversations-day">
-              {group.label}
-            </div>
-            {group.rows.map((row) => {
-              const id = row.entry.sessionId;
-              const isCurrent = id === current;
-              return (
-                <div
-                  key={id}
-                  id={optionId(row)}
-                  role="row"
-                  aria-selected={row === activeRow}
-                  aria-current={isCurrent || undefined}
-                  aria-disabled={(!!reason && !isCurrent) || undefined}
-                  className="conversations-row"
-                  data-active={row === activeRow || undefined}
-                  data-current={isCurrent || undefined}
-                  onPointerMove={() => {
-                    if (id !== activeKey) setActive(id);
-                  }}
+        <div aria-hidden="true" style={{ height: windowed.before }} />
+        {windowed.indexes.map((index) => {
+          const item = flat[index];
+          if (!item) return null;
+          const row = item.row;
+          if (!row)
+            return (
+              <div
+                key={item.key}
+                ref={windowed.measure}
+                data-index={index}
+                role="presentation"
+                className="conversations-day"
+              >
+                {item.label}
+              </div>
+            );
+          const id = row.entry.sessionId;
+          const isCurrent = id === current;
+          return (
+            <div
+              key={id}
+              ref={windowed.measure}
+              data-index={index}
+              aria-rowindex={ordered.indexOf(row) + 1}
+              id={optionId(row)}
+              role="row"
+              aria-selected={row === activeRow}
+              aria-current={isCurrent || undefined}
+              aria-disabled={(!!reason && !isCurrent) || undefined}
+              className="conversations-row"
+              data-active={row === activeRow || undefined}
+              data-current={isCurrent || undefined}
+              onPointerMove={() => {
+                if (id !== activeKey) setActive(id);
+              }}
+            >
+              <div role="gridcell" className="conversations-main">
+                <Button
+                  variant="quiet"
+                  className="conversations-pick"
+                  disabledReason={!isCurrent ? reason : undefined}
+                  onClick={() => pick(row)}
                 >
-                  <div role="gridcell" className="conversations-main">
-                    <Button
-                      variant="quiet"
-                      className="conversations-pick"
-                      disabledReason={!isCurrent ? reason : undefined}
-                      onClick={() => pick(row)}
-                    >
-                      <span
-                        className="conversations-status"
-                        data-status={row.status}
-                        role="img"
-                        aria-label={STATUS_LABEL[row.status]}
-                      />
-                      <span className="conversations-title">{row.title}</span>
-                      <time className="conversations-when num" dateTime={row.entry.startedAt}>
-                        {whenLabel(row.entry.startedAt, now)}
-                      </time>
-                    </Button>
-                  </div>
-                  <div role="gridcell">
-                    <IconButton
-                      icon="more-horizontal"
-                      size={28}
-                      label={`Actions for ${row.title}`}
-                      {...triggerProps("menu", action?.entry.sessionId === id)}
-                      onClick={(event) => {
-                        actionAnchor.current = event.currentTarget;
-                        setAction(row);
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                  <span
+                    className="conversations-status"
+                    data-status={row.status}
+                    role="img"
+                    aria-label={STATUS_LABEL[row.status]}
+                  />
+                  <span className="conversations-title">{row.title}</span>
+                  <time className="conversations-when num" dateTime={row.entry.startedAt}>
+                    {whenLabel(row.entry.startedAt, now)}
+                  </time>
+                </Button>
+              </div>
+              <div role="gridcell">
+                <IconButton
+                  icon="more-horizontal"
+                  size={28}
+                  label={`Actions for ${row.title}`}
+                  {...triggerProps("menu", action?.entry.sessionId === id)}
+                  onClick={(event) => {
+                    actionAnchor.current = event.currentTarget;
+                    setAction(row);
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+        <div aria-hidden="true" style={{ height: windowed.after }} />
       </div>
     );
 
@@ -265,7 +293,9 @@ export function ConversationList({
         onKeyDown={onKeyDown}
       />
       {reason && <p className="conversations-note">{reason}</p>}
-      <div className="conversations-body">{body}</div>
+      <div className="conversations-body" aria-busy={recent.loading || matches.pending}>
+        {body}
+      </div>
       <Menu
         open={action !== null}
         onClose={() => setAction(null)}
@@ -323,7 +353,7 @@ export function ConversationList({
           Delete
         </Button>
       </Dialog>
-      <div className="conversations-foot">
+      <div className="conversations-foot" data-loading={recent.loading || undefined}>
         <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
           See all in Replay
         </Button>

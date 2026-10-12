@@ -4,6 +4,14 @@ import { PrivateRecords } from "../agent/safety/private-records.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import type { CellRecord } from "./types.ts";
 
+export const SYSTEM_UPDATE_BLOCKED =
+  "This computer has installed apps or system changes that this update cannot preserve yet. Your computer is unchanged; you can keep using it. Updating localDot itself is separate.";
+export class SystemUpdateBlocked extends Error {
+  constructor() {
+    super(SYSTEM_UPDATE_BLOCKED);
+  }
+}
+
 const Snapshot = z.strictObject({
   cellId: z.string().regex(ULID_PATTERN),
   container: z.string().min(1).max(200),
@@ -230,8 +238,6 @@ export async function requireUnmodifiedSystem(docker: Docker, container: string)
     path: `${path(container)}/changes`,
   });
   if (source.Config?.Labels?.["localdot.snapshot"] || !Array.isArray(changes) || changes.length) {
-    throw new Error(
-      "This computer has system changes. Updating would discard them, so it has been kept unchanged. A system-preserving update is required.",
-    );
+    throw new SystemUpdateBlocked();
   }
 }

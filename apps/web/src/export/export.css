@@ -724,3 +724,14 @@
   color: var(--color-fg-2);
   font-variant-numeric: tabular-nums;
 }
+
+.export-preview .ui-sheet-body {
+  display: grid;
+  min-height: min(60dvh, 420px);
+}
+.export-preview-error {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: calc(var(--spacing) * 4);
+}

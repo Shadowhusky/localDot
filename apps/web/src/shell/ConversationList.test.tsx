@@ -87,11 +87,11 @@ it("lists conversations by day, each with its status and the current one marked"
     facts: { live: running.sessionId, needsYou: new Set() },
   });
   const list = await screen.findByRole("grid", { name: "Recent conversations" });
-  expect(
-    within(list)
-      .getAllByRole("rowgroup")
-      .map((group) => group.getAttribute("aria-labelledby")),
-  ).toHaveLength(3);
+  expect([...list.querySelectorAll(".conversations-day")].map((head) => head.textContent)).toEqual([
+    "Today",
+    "Yesterday",
+    "Earlier",
+  ]);
   expect(list.textContent).toMatch(/^Today.*Yesterday.*Earlier/);
   expect(rows().map((row) => within(row).getByRole("img").getAttribute("aria-label"))).toEqual([
     "Running",

@@ -1048,3 +1048,48 @@
     }
   }
 }
+
+@layer kit {
+  .settings-body .ui-group-head {
+    margin: 0 calc(var(--spacing) * 3.5) calc(var(--spacing) * 2);
+  }
+  .settings-body .ui-group-title {
+    color: var(--color-fg-2);
+    font-weight: var(--font-weight-semibold);
+    text-transform: none;
+  }
+  .settings-body .ui-group-note {
+    margin: calc(var(--spacing) * 2) calc(var(--spacing) * 3.5) 0;
+  }
+  .settings-body .ui-group-row {
+    padding-block: calc(var(--spacing) * 3);
+  }
+  .settings-body .ui-group-row-detail {
+    margin-top: var(--spacing);
+  }
+  .settings-body .settings-role > .ui-group-head {
+    margin-bottom: 0;
+  }
+}
+
+@layer kit {
+  @media (--phone) {
+    .settings-body .ui-group-head {
+      margin-inline: calc(var(--spacing) * 3);
+    }
+    .settings-body .ui-group-note {
+      margin-inline: calc(var(--spacing) * 3);
+    }
+  }
+}
+
+@layer kit {
+  /* Instructions and failure recovery must stay readable, including beside an action. */
+  .settings-body :is(.ui-group-row-detail, .ui-group-row .ui-choice-note) {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    white-space: normal;
+  }
+}

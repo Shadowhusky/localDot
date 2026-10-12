@@ -117,6 +117,26 @@ describe("export routes", () => {
     expect(direct.status).toBe(200);
   });
 
+  it("streams an inline preview in byte ranges without exposing the install token", async () => {
+    const { call, finished } = await fixture();
+    const job = await finished(new Uint8Array([1, 2, 3, 4, 5]));
+    const linked = await call(`/api/exports/${job.id}/link`, { method: "POST", headers: AUTH });
+    const { href } = (await linked.json()) as { href: string };
+    const probe = await call(`${href}?preview=1`, { headers: { range: "bytes=0-1" } });
+    expect(probe.status).toBe(206);
+    expect(probe.headers.get("content-range")).toBe("bytes 0-1/5");
+    expect(probe.headers.get("content-disposition")).toMatch(/^inline;/);
+    expect([...new Uint8Array(await probe.arrayBuffer())]).toEqual([1, 2]);
+    const tail = await call(`${href}?preview=1`, { headers: { range: "bytes=-2" } });
+    expect(tail.status).toBe(206);
+    expect([...new Uint8Array(await tail.arrayBuffer())]).toEqual([4, 5]);
+    for (const range of ["bytes=8-", "bytes=4-2", "bytes=-0", "bytes=0-1,3-4", "bytes=-"]) {
+      const response = await call(href, { headers: { range } });
+      expect(response.status).toBe(416);
+      expect(response.headers.get("content-range")).toBe("bytes */5");
+    }
+  });
+
   it("refuse unknown, malformed and stale links", async () => {
     const { call, finished } = await fixture();
     const job = await finished(new Uint8Array([1]));

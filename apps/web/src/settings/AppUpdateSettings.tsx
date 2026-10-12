@@ -17,7 +17,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
     status.phase === "installing"
       ? "Installing update… Reconnecting shortly"
       : !status.supported
-        ? "Development build"
+        ? "Update localDot manually"
         : status.phase === "checking"
           ? "Checking for updates…"
           : status.phase === "downloading"
@@ -43,7 +43,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
   ];
   return (
     <div>
-      <GroupHead title="Software update" />
+      <GroupHead title="localDot updates" />
       <Group>
         <GroupRow
           leading={<IconTile icon="download" />}
@@ -55,7 +55,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
           detail={
             status.supported
               ? `Installed ${status.currentVersion.length === 40 ? `build ${status.currentVersion.slice(0, 8)}` : `version ${status.currentVersion}`}`
-              : "Automatic updates are available in the installed app."
+              : "This copy can’t update itself. Run localdot update in Terminal, or rebuild it if you run from source."
           }
           trailing={
             status.supported && (

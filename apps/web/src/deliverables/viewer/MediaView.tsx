@@ -7,12 +7,18 @@ export function MediaView({
   url,
   kind,
   name,
+  onError,
 }: {
   url: string;
   kind: "audio" | "video";
   name: string;
+  onError?(): void;
 }) {
   const [failed, setFailed] = useState(false);
+  const fail = () => {
+    setFailed(true);
+    onError?.();
+  };
   if (failed)
     return (
       <ViewerMessage name={name} title="Can't play this here">
@@ -30,7 +36,7 @@ export function MediaView({
           playsInline
           preload="metadata"
           aria-label={name}
-          onError={() => setFailed(true)}
+          onError={fail}
         />
       ) : (
         <div className="viewer-audio">
@@ -38,13 +44,7 @@ export function MediaView({
             {name.slice(name.lastIndexOf(".") + 1, name.lastIndexOf(".") + 5).toUpperCase()}
           </span>
           {/* biome-ignore lint/a11y/useMediaCaption: A sound file dot made has no captions to offer. */}
-          <audio
-            src={url}
-            controls
-            preload="metadata"
-            aria-label={name}
-            onError={() => setFailed(true)}
-          />
+          <audio src={url} controls preload="metadata" aria-label={name} onError={fail} />
         </div>
       )}
     </div>

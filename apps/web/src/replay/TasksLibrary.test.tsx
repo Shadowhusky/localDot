@@ -83,10 +83,12 @@ const row = (name: string) => screen.findByRole("button", { name });
 it("groups recordings by day under plain headings, with a verdict and a length on each row", async () => {
   const { api } = daemon([[card("Today's report", 0), card("Yesterday's sort", DAY)]]);
   render(<Library api={api} />);
-  const today = await screen.findByRole("region", { name: "Today" });
-  expect(within(today).getByRole("button", { name: "Today's report" })).toBeTruthy();
-  const yesterday = screen.getByRole("region", { name: "Yesterday" });
-  const item = within(yesterday).getByRole("listitem");
+  await screen.findByRole("heading", { name: "Today" });
+  expect(screen.getByRole("button", { name: "Today's report" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Yesterday" })).toBeTruthy();
+  const item = screen
+    .getByRole("button", { name: "Yesterday's sort" })
+    .closest("li") as HTMLElement;
   expect(within(item).getByRole("button", { name: "Yesterday's sort" })).toBeTruthy();
   expect(item.textContent).toContain("1:01");
   expect(item.textContent).toContain("1 step");
