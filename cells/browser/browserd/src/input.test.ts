@@ -32,6 +32,7 @@ async function setup(scale: 1 | 2 = 2) {
     protectedNode: false,
     origin: "https://github.com/login",
     passwordType: "password",
+    placeholder: "",
     focusedNode: 10,
     autocomplete: "current-password",
     stale: false,
@@ -180,7 +181,14 @@ async function setup(scale: 1 | 2 = 2) {
       return {
         node: {
           nodeName: "INPUT",
-          attributes: ["type", state.passwordType, "autocomplete", state.autocomplete],
+          attributes: [
+            "type",
+            state.passwordType,
+            "autocomplete",
+            state.autocomplete,
+            "placeholder",
+            state.placeholder,
+          ],
         },
       };
     if (method === "Accessibility.getFullAXTree")
@@ -956,6 +964,34 @@ describe("private browser password delivery", () => {
         .join(""),
     ).toBe("123456");
     expect(f.commands.at(-1)).toMatchObject({ name: "keys", args: { combo: ["Return"] } });
+  });
+  it("fills a plain invitation field privately without treating it as a saved password", async () => {
+    const f = await setup();
+    f.state.passwordType = "text";
+    f.state.autocomplete = "off";
+    f.state.placeholder = "Your Early Access Code";
+    const code = "Invite-ab.1234";
+    expect(await f.input.secret(permit, "tab", { ...request, text: code }, f.abort.signal)).toEqual(
+      { filled: true, rememberable: false, submitted: true },
+    );
+    expect(
+      f.commands
+        .filter((c) => c.name === "char")
+        .map((c) => c.args.ch)
+        .join(""),
+    ).toBe(code);
+    expect(f.commands.at(-1)).toMatchObject({ name: "keys", args: { combo: ["Return"] } });
+  });
+  it("refuses delivery if an invitation field becomes a plain search field", async () => {
+    const f = await setup();
+    f.state.passwordType = "text";
+    f.state.autocomplete = "off";
+    f.state.placeholder = "Invitation code";
+    f.hooks.set("native.click:1", () => {
+      f.state.placeholder = "Search";
+    });
+    await expect(f.input.secret(permit, "tab", request, f.abort.signal)).rejects.toThrow();
+    expect(f.commands.filter((c) => c.name === "char")).toHaveLength(0);
   });
   it("waits for the password click's focus update before delivering any characters", async () => {
     const f = await setup();

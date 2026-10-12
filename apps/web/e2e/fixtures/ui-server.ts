@@ -2523,6 +2523,19 @@ const ASK_FORMS: Record<string, AskForm> = {
     ],
     submit: "Enter PIN",
   },
+  invitation: {
+    question: "Enter the invitation code from your email.",
+    fields: [
+      {
+        id: "invite",
+        kind: "code",
+        label: "Invitation code",
+        target: { screen: "browser", point: { x: 640, y: 400 }, site: "example.test" },
+      },
+    ],
+    submit: "Continue",
+    decline: "Not now",
+  },
   code: {
     question: "Enter the code the site sent to your phone.",
     fields: [{ id: "code", kind: "code", label: "Code", length: 6 }],

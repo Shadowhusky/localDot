@@ -1117,40 +1117,41 @@ describe("session-owned screen authority", () => {
     expect(JSON.stringify(f.log.read(f.id))).not.toContain(secret);
   });
 
-  it("delivers a code privately without reading or updating saved logins", async () => {
-    const f = fixture();
-    await f.browser();
-    const h = tools(f);
-    f.client.lookup.mockImplementation((async () => ({
-      target: {
-        point: { x: 400, y: 300 },
-        source: "dom",
-        role: "textbox",
-        name: "Protected field",
-        url: "https://github.com/sessions/two-factor",
-        secret: true,
-      },
-      window: 0,
-      ms: 1,
-    })) as never);
-    h.tools.logins = { login: vi.fn(), saveLogin: vi.fn() };
-    // Even a mistaken rememberable reply cannot turn a code into a saved password.
-    const asking = h.callTool("ask_user", {
-      question: "Enter your authenticator code",
-      fields: [
-        { id: "code", kind: "code", label: "Authentication code", length: 6, target: [400, 300] },
-      ],
-    });
-    await until(() => f.session.pendingAsk !== undefined);
-    f.session.answerFields(f.session.pendingAsk!, { code: "739125" }, (text) => text);
-    const answer = await asking;
-    expect(answer.result.ok).toBe(true);
-    expect(h.tools.logins.login).not.toHaveBeenCalled();
-    expect(h.tools.logins.saveLogin).not.toHaveBeenCalled();
-    expect(f.deps.fenceRecording).toHaveBeenCalled();
-    expect(JSON.stringify(answer)).not.toContain("739125");
-    expect(JSON.stringify(f.log.read(f.id))).not.toContain("739125");
-  });
+  it.each(["739125", "Invite-Abc.123-XYZ"])(
+    "delivers code %s privately without reading or updating saved logins",
+    async (code) => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.lookup.mockImplementation((async () => ({
+        target: {
+          point: { x: 400, y: 300 },
+          source: "dom",
+          role: "textbox",
+          name: "Protected field",
+          url: "https://github.com/sessions/two-factor",
+          secret: true,
+        },
+        window: 0,
+        ms: 1,
+      })) as never);
+      h.tools.logins = { login: vi.fn(), saveLogin: vi.fn() };
+      // Even a mistaken rememberable reply cannot turn a code into a saved password.
+      const asking = h.callTool("ask_user", {
+        question: "Enter your authenticator code",
+        fields: [{ id: "code", kind: "code", label: "Access code", target: [400, 300] }],
+      });
+      await until(() => f.session.pendingAsk !== undefined);
+      f.session.answerFields(f.session.pendingAsk!, { code }, (text) => text);
+      const answer = await asking;
+      expect(answer.result.ok).toBe(true);
+      expect(h.tools.logins.login).not.toHaveBeenCalled();
+      expect(h.tools.logins.saveLogin).not.toHaveBeenCalled();
+      expect(f.deps.fenceRecording).toHaveBeenCalled();
+      expect(JSON.stringify(answer)).not.toContain(code);
+      expect(JSON.stringify(f.log.read(f.id))).not.toContain(code);
+    },
+  );
 
   it.each([false, true])(
     "asks for a replacement after a rejected login (already saved: %s)",

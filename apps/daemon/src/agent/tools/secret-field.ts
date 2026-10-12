@@ -143,8 +143,8 @@ export function findSecretField(
         : "No text field has keyboard focus. Click the field first, or give its point as target.";
     if (found.target.secret !== true)
       return at
-        ? "The field at that target shows what is typed, so a secret can't go there. Point at the password box, or hand the computer to the user."
-        : "The field with keyboard focus shows what is typed, so a secret can't go there. Give the password box's point as target, or hand the computer to the user.";
+        ? "The field at that target shows what is typed, so a secret can't go there. Do not hand over control just to collect a value. For a website access or verification code, open the same page with browser_navigate, locate its protected code field, then retry ask_user with a code field. For a password, locate the password box."
+        : "The field with keyboard focus shows what is typed, so a secret can't go there. Do not hand over control just to collect a value. For a website access or verification code, open the same page with browser_navigate, locate its protected code field, then retry ask_user with a code field. For a password, give the password box's point as target.";
     let loginOrigin: string | undefined;
     if (screen.name === "browser" && screen.device.secret && found.target.url) {
       const url = new URL(found.target.url);

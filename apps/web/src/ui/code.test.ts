@@ -15,6 +15,11 @@ describe("code cells", () => {
     expect(enterCode("123", 1, " ", 6)).toEqual({ code: "123", focus: 1 });
   });
 
+  it("preserves letters, case and a literal hyphen within the expected length", () => {
+    expect(enterCode("", 0, "Ab-123", 6)).toEqual({ code: "Ab-123", focus: 5 });
+    expect(enterCode("Ab", 2, "-", 6)).toEqual({ code: "Ab-", focus: 3 });
+  });
+
   it("steps back on Backspace", () => {
     expect(eraseCode("123", 1)).toEqual({ code: "13", focus: 1 });
     expect(eraseCode("123", 4)).toEqual({ code: "12", focus: 2 });

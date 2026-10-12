@@ -89,7 +89,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "before consequential steps. For a quick choice, give up to six short options, and set allow_text to " +
     "accept a free answer. " +
     "To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short " +
-    "label): text, longtext, secret (a password, PIN or recovery code), code (a one-time code; length if you know " +
+    "label): text, longtext, secret (a password, PIN or recovery code), code (a verification or access code; length only if you know " +
     "it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a " +
     "file and you get its path) or qr (shows value as a QR code for the user's other device). Name the buttons " +
     'with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the ' +

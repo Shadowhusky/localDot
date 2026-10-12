@@ -21,7 +21,7 @@ import { loginForm } from "./login-form.ts";
 import type { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
 import type { BrowserSecrets } from "./secrets.ts";
-import { verificationField } from "./secrets.ts";
+import { privateCodeField } from "./secrets.ts";
 import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
 export const BROWSER_INPUT_TIMEOUT_MS = 120_000;
@@ -896,7 +896,7 @@ export class BrowserInput {
         scope.check(first.document);
         if (hit.frameId !== frame.id) throw new BrowserInputError("target");
         this.#options.targets.rememberNodes?.(first.document, [hit.backendNodeId]);
-        let oneTimeCode = false;
+        let privateCode = false;
         const inspect = async (focused: boolean) => {
           await checkOrigin();
           const geometry = await this.#geometry(tabId, scope);
@@ -921,14 +921,14 @@ export class BrowserInput {
           const attrs = new Map<string, string>();
           for (let i = 0; i < node.attributes.length; i += 2)
             attrs.set((node.attributes[i] ?? "").toLowerCase(), node.attributes[i + 1] ?? "");
-          // Only password fields or explicitly identified verification-code fields.
+          // Only password fields or explicitly identified verification or access-code fields.
           // Code values use the private channel and are never saved as a login.
-          oneTimeCode = verificationField(attrs);
+          privateCode = privateCodeField(attrs);
           const inputType = (attrs.get("type") ?? "text").toLowerCase();
           if (
             node.nodeName !== "INPUT" ||
             (inputType !== "password" &&
-              !(oneTimeCode && ["text", "tel", "number"].includes(inputType))) ||
+              !(privateCode && ["text", "tel", "number"].includes(inputType))) ||
             attrs.has("disabled") ||
             attrs.has("readonly")
           )
@@ -976,7 +976,7 @@ export class BrowserInput {
               throw new BrowserInputError("focus");
           }
           return (
-            !oneTimeCode &&
+            !privateCode &&
             !/(?:new-password|one-time-code)/iu.test(attrs.get("autocomplete") ?? "") &&
             !/(?:otp|totp|2fa|mfa|passcode|verification|security.code)/iu.test(
               [attrs.get("name"), attrs.get("id"), attrs.get("aria-label")].join(" "),
@@ -1152,7 +1152,7 @@ export class BrowserInput {
         } catch (error) {
           // Some verification forms navigate as the final digit lands. All
           // characters have native receipts; never send Return into the new page.
-          if (!oneTimeCode) throw error;
+          if (!privateCode) throw error;
           scope.check();
           // The code was delivered, but we did not send a separate submit. The
           // caller must inspect the new page instead of replaying the answer.
@@ -1177,7 +1177,7 @@ export class BrowserInput {
           );
           return { filled: true, rememberable, submitted: true };
         }
-        if (oneTimeCode) {
+        if (privateCode) {
           // This same verified input receives Return; no ordinary agent typing or
           // replay of the code is needed to finish a verification form.
           await this.#press(

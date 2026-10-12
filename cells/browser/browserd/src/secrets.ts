@@ -73,6 +73,20 @@ export function verificationField(attributes: ReadonlyMap<string, string>): bool
   );
 }
 
+// Access gates often use an ordinary text input. Recognize the field's own metadata,
+// not arbitrary page text, and protect it exactly like a verification code.
+export function accessCodeField(attributes: ReadonlyMap<string, string>): boolean {
+  return ["name", "id", "aria-label", "placeholder"].some((key) =>
+    /(?:^|[^a-z])(?:invite|invitation|access|early[-_ ]?access|activation|registration)[-_ ]?(?:code|key)(?:[^a-z]|$)/iu.test(
+      (attributes.get(key) ?? "").replace(/([a-z])([A-Z])/gu, "$1 $2"),
+    ),
+  );
+}
+
+export function privateCodeField(attributes: ReadonlyMap<string, string>): boolean {
+  return verificationField(attributes) || accessCodeField(attributes);
+}
+
 function sensitive(tag: string, attributes: ReadonlyMap<string, string>): boolean {
   if (
     tag === "INPUT" &&
@@ -104,7 +118,7 @@ function sensitive(tag: string, attributes: ReadonlyMap<string, string>): boolea
   )
     return true;
   return (
-    verificationField(attributes) ||
+    privateCodeField(attributes) ||
     ["name", "id", "aria-label"].some((key) => /password/iu.test(attributes.get(key) ?? ""))
   );
 }

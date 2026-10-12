@@ -47,7 +47,9 @@ export function CodeField({
           id={index === 0 ? control.id : undefined}
           className="ui-code-cell"
           value={chars[index] ?? ""}
-          inputMode="numeric"
+          inputMode="text"
+          autoCapitalize="none"
+          spellCheck={false}
           autoComplete={index === 0 ? "one-time-code" : "off"}
           enterKeyHint={index === length - 1 ? "done" : "next"}
           aria-label={`${label}, ${index + 1} of ${length}`}

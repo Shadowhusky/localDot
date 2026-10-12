@@ -17,7 +17,7 @@ export interface AskField {
   // A choice's last row takes free text ("Something else…").
   readonly other: boolean;
   // A code's cell count.
-  readonly length: number;
+  readonly length?: number;
   // What a QR code holds.
   readonly value?: string;
   // A secret's site: whose page the field it is typed into is on.
@@ -33,7 +33,6 @@ export interface Draft {
 }
 
 export const OTHER = "other";
-export const CODE_LENGTH = 6;
 const PLAIN = "answer";
 const FREE_TEXT = new Set<AskFieldKind>([
   "text",
@@ -56,7 +55,7 @@ export function askFields(question: AgentQuestion): readonly AskField[] {
       ...(field.hint ? { hint: field.hint } : {}),
       options: field.options ?? [],
       other: field.kind === "choice",
-      length: field.length ?? CODE_LENGTH,
+      ...(field.length ? { length: field.length } : {}),
       ...(field.value ? { value: field.value } : {}),
       ...(field.target?.site ? { site: field.target.site } : {}),
     }));
@@ -67,7 +66,6 @@ export function askFields(question: AgentQuestion): readonly AskField[] {
       label: "Your answer",
       options: question.options.map((option) => option.text),
       other: question.options.length > 0 && question.allowText,
-      length: CODE_LENGTH,
     },
   ];
 }

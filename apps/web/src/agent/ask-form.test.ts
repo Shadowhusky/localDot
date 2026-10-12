@@ -44,12 +44,12 @@ describe("askFields", () => {
     expect(askFields({ ...plain, options: [] })[0]?.kind).toBe("longtext");
   });
 
-  it("gives a code six cells unless dot says how many", () => {
+  it("does not invent a code length when the page has not specified it", () => {
     const code = (length?: number): AgentQuestion => ({
       ...login,
       fields: [{ id: "code", kind: "code", label: "Code", ...(length ? { length } : {}) }],
     });
-    expect(askFields(code())[0]?.length).toBe(6);
+    expect(askFields(code())[0]?.length).toBeUndefined();
     expect(askFields(code(8))[0]?.length).toBe(8);
   });
 });

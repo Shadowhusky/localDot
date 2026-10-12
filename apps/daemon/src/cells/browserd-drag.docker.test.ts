@@ -97,13 +97,15 @@ class Gate(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         fields = urllib.parse.parse_qs(self.rfile.read(int(self.headers.get("content-length", "0"))).decode())
         ok = fields.get("username") == ["fixture-account"] and fields.get("password") == ["fixture-Private-密碼"]
-        if fields.get("username") in (["fixture-mfa"], ["fixture-mfa-auto"], ["fixture-backup"]) and fields.get("password") == ["fixture-Private-密碼"]:
+        if fields.get("username") in (["fixture-mfa"], ["fixture-mfa-auto"], ["fixture-backup"], ["fixture-invite"]) and fields.get("password") == ["fixture-Private-密碼"]:
             result = b'<html><head><title>verification required</title></head><body><p>Enter the authentication code from your authenticator app.</p><form method="post" action="/verify"><input autofocus name="otp" autocomplete="one-time-code" aria-label="Authentication code"><button>Verify</button></form></body></html>'
             if fields.get("username") == ["fixture-backup"]:
                 result = result.replace(b'name="otp" autocomplete="one-time-code"', b'name="backup_code"').replace(b'authenticator app', b'saved recovery codes')
+            if fields.get("username") == ["fixture-invite"]:
+                result = result.replace(b'name="otp" autocomplete="one-time-code" aria-label="Authentication code"', b'name="entry" placeholder="Your Early Access Code"').replace(b'authenticator app', b'invitation email')
             if fields.get("username") == ["fixture-mfa-auto"]:
                 result = result.replace(b'</body>', b'<script>document.querySelector("input").addEventListener("input", e => { if(e.target.value.length === 6) e.target.form.requestSubmit(); });</script></body>')
-        elif ok or fields.get("otp") == ["123456"] or fields.get("backup_code") == ["A1B2C3"]:
+        elif ok or fields.get("otp") == ["123456"] or fields.get("backup_code") == ["A1B2C3"] or fields.get("entry") == ["Invite-Abc.123-XYZ"]:
             result = b"<html><head><title>signed in</title></head><body>Signed in</body></html>"
         else:
             result = page.replace(b'<form id="login"', b'<p role="alert">Incorrect username or password.</p><form id="login"').replace(b'<button>Sign in</button>', b'<button disabled>Sign in</button>').replace(b'show();\\n</script>', b'show(); document.title = "wrong password"; document.querySelector("[name=password]").addEventListener("input", () => { document.querySelector("#login button").disabled = false; });\\n</script>')
@@ -461,7 +463,7 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       /fixture-wrong-password|fixture-Private/,
     );
   });
-  it.each(["manual", "automatic", "backup"])(
+  it.each(["manual", "automatic", "backup", "invitation"])(
     "reads an autofocused verification page and submits its code once (%s)",
     async (mode) => {
       await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
@@ -472,11 +474,13 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
         {
           origin: "https://drag.localdot.test",
           username:
-            mode === "backup"
-              ? "fixture-backup"
-              : mode === "automatic"
-                ? "fixture-mfa-auto"
-                : "fixture-mfa",
+            mode === "invitation"
+              ? "fixture-invite"
+              : mode === "backup"
+                ? "fixture-backup"
+                : mode === "automatic"
+                  ? "fixture-mfa-auto"
+                  : "fixture-mfa",
           at: (await element({ name: "Protected field" })).at,
           text: "fixture-Private-密碼",
         },
@@ -484,7 +488,13 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       );
       for (let i = 0; i < 40 && (await title()) !== "verification required"; i++) await sleep(250);
       const page = await client.read(permit, tabId, { maxChars: 2000 }, owner());
-      expect(page.text).toContain(mode === "backup" ? "saved recovery codes" : "authenticator app");
+      expect(page.text).toContain(
+        mode === "invitation"
+          ? "invitation email"
+          : mode === "backup"
+            ? "saved recovery codes"
+            : "authenticator app",
+      );
       expect(await client.observe(permit, tabId, owner())).toHaveProperty("frame");
       const field = await client.lookup(permit, tabId, { kind: "focused" }, owner());
       expect(field.target?.secret).toBe(true);
@@ -498,7 +508,15 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
         await client.secret(
           permit,
           tabId,
-          { ...request, text: mode === "backup" ? "A1B2C3" : "123456" },
+          {
+            ...request,
+            text:
+              mode === "invitation"
+                ? "Invite-Abc.123-XYZ"
+                : mode === "backup"
+                  ? "A1B2C3"
+                  : "123456",
+          },
           owner(),
         ),
       ).toMatchObject({

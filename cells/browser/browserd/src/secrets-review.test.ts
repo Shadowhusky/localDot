@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserControl } from "./control.ts";
 import type { BrowserNative } from "./native.ts";
-import { BrowserSecrets, secretMetadata, verificationField } from "./secrets.ts";
+import {
+  accessCodeField,
+  BrowserSecrets,
+  privateCodeField,
+  secretMetadata,
+  verificationField,
+} from "./secrets.ts";
 import type { BrowserDocument } from "./targets.ts";
 
 function snapshot(tag: string, attributes: Record<string, string>, value: string) {
@@ -153,4 +159,34 @@ describe("shared private verification-field detection", () => {
       expect(verificationField(new Map([["name", name]]))).toBe(false);
     },
   );
+});
+
+describe("private access-code fields", () => {
+  it.each([
+    "invite_code",
+    "invitationCode",
+    "Your Early Access Code",
+    "activation-key",
+    "registration code",
+  ])("protects %s before and after filling", (label) => {
+    const attrs = { type: "text", placeholder: label };
+    expect(accessCodeField(new Map(Object.entries(attrs)))).toBe(true);
+    expect(privateCodeField(new Map(Object.entries(attrs)))).toBe(true);
+    expect(verificationField(new Map(Object.entries(attrs)))).toBe(false);
+    expect(secretMetadata(snapshot("INPUT", attrs, ""))).toEqual({ filled: false, nodeIds: [1] });
+    expect(secretMetadata(snapshot("INPUT", attrs, "fixture-Invite.Abc123"))).toEqual({
+      filled: true,
+      nodeIds: [1],
+    });
+  });
+  it.each([
+    "postal_code",
+    "couponCode",
+    "code editor",
+    "Search",
+    "accessibility",
+    "invite_message",
+  ])("does not classify %s as a private code", (name) => {
+    expect(privateCodeField(new Map([["name", name]]))).toBe(false);
+  });
 });

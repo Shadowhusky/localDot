@@ -299,14 +299,28 @@ function AskFieldControl({
     case "code":
       return (
         <Field {...common}>
-          <CodeField
-            label={label}
-            length={field.length}
-            value={text}
-            unavailable={!!reason}
-            onChange={(value) => draft.set(field.id, value)}
-            onBlur={leave}
-          />
+          {field.length ? (
+            <CodeField
+              label={label}
+              length={field.length}
+              value={text}
+              unavailable={!!reason}
+              onChange={(value) => draft.set(field.id, value)}
+              onBlur={leave}
+            />
+          ) : (
+            <TextField
+              aria-label={label}
+              value={text}
+              maxLength={32}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              readOnly={!!reason}
+              onChange={(event) => draft.set(field.id, event.currentTarget.value)}
+              onBlur={leave}
+            />
+          )}
         </Field>
       );
     case "choice":

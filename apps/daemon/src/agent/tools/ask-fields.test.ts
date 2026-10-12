@@ -262,6 +262,8 @@ describe("ask_user with fields", () => {
       const { result } = await h.call(ask);
       expect(result.ok).toBe(false);
       expect(textOf(result)).toContain("shows what is typed, so a secret can't go there");
+      expect(textOf(result)).toContain("retry ask_user with a code field");
+      expect(textOf(result)).not.toContain("hand the computer to the user");
       expect(h.session.pendingAsk).toBeUndefined();
       expect(h.events().some((e) => e.type === "ask.request")).toBe(false);
     }

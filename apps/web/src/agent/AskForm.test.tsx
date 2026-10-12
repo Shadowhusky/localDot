@@ -65,7 +65,7 @@ it("fills every code cell from one paste and offers the text message's code", ()
   const cells = screen.getAllByRole("textbox", { name: /^Code, \d of 6$/ }) as HTMLInputElement[];
   expect(cells).toHaveLength(6);
   expect(cells[0]?.getAttribute("autocomplete")).toBe("one-time-code");
-  expect(cells[0]?.getAttribute("inputmode")).toBe("numeric");
+  expect(cells[0]?.getAttribute("inputmode")).toBe("text");
   fireEvent.paste(cells[2] as HTMLInputElement, { clipboardData: { getData: () => "481 516" } });
   expect(cells.map((cell) => cell.value).join("")).toBe("481516");
   expect(f.draft.state().draft.values.code).toBe("481516");
@@ -220,3 +220,28 @@ it("offers to move a key pasted into a field to Keys", () => {
   expect(received).toEqual([key]);
   expect(draft.state().found).toBeNull();
 });
+
+it.each(["thread", "sheet"] as const)(
+  "accepts a complete unknown-length invitation code in the %s form",
+  async (layout) => {
+    const f = mount(
+      {
+        ...login,
+        fields: [{ id: "invite", kind: "code", label: "Invitation code" }],
+        submit: "Continue",
+      },
+      layout,
+    );
+    const input = screen.getByRole("textbox", { name: "Invitation code" }) as HTMLInputElement;
+    const code = "Invite-Abc.123-XYZ";
+    fireEvent.change(input, { target: { value: code } });
+    expect(input.value).toBe(code);
+    expect(input.getAttribute("autocapitalize")).toBe("none");
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form"));
+    });
+    expect(f.answer).toHaveBeenCalledExactlyOnceWith({ askId: ASK, fields: { invite: code } });
+    expect(input.value).toBe("");
+    expect(f.container.innerHTML).not.toContain(code);
+  },
+);

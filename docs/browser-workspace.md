@@ -138,6 +138,14 @@ Connected apps and saved browser accounts are used before requesting another sig
 
 An empty, focused password or verification field no longer hides the page from dot. Filled secrets remain excluded from page reads and screenshots. One-time codes use the private answer channel, are submitted to the identified verification field once, and are never saved as passwords or included in the conversation. Dot keeps the verification page open and explains whether the code comes from an authenticator, email or SMS.
 
+Invitation, early-access and activation codes also use the private conversation form. A normal
+text input can still contain a private code: localDot recognizes these fields from their own
+metadata and protects them from page reads and recordings. Unknown-length codes use one pasteable
+field; a fixed number of boxes is shown only when the page specifies the length. Codes are not
+saved in task memory or over an existing password. The browser keeps the resulting session.
+If the page opened in desktop Chromium, dot opens it in the managed browser before requesting the
+code. A missing code alone is not a reason to hand over the computer.
+
 App testing should open the app's preview on the streamed computer and exercise its visible flows. Command-line tests supplement that view. What dot knows refreshes while Settings is open; lasting user-provided facts are saved separately from recent task history, without credentials or transient task details.
 
 The same structured input flow handles missing account details, rejected passwords, verification
