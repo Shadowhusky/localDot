@@ -63,6 +63,18 @@ describe.skipIf(!DOCKER_TESTS)("desktopd: the X helper inside the image", () => 
     removeAll({ containers: [C] });
   });
 
+  it("keeps the virtual display awake without synthetic input or keepalive polling", () => {
+    const probe = dockerExecAs(
+      C,
+      "abc",
+      "/usr/bin/python3",
+      "-c",
+      "from Xlib import display; d=display.Display(); s=d.get_screen_saver(); print(s.timeout, s.interval)",
+    );
+    expect(probe.status, probe.out).toBe(0);
+    expect(probe.out.trim()).toBe("0 0");
+  });
+
   it("shares CLOCK_MONOTONIC with Node in the cell", async () => {
     const pong = await x.call<{ mono: number }>("ping");
     const probe = dockerExec(C, "node", "-e", "console.log(Number(process.hrtime.bigint()) / 1e6)");

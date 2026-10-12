@@ -506,11 +506,22 @@ class RootShm:
         return (ctypes.c_char * (stride * height)).from_address(self.segment.shmaddr), stride
 
 
+def keep_display_awake(connection):
+    # Xvfb defaults to blanking after ten minutes without X input. Browser/CDP
+    # work and watching a stream do not reset that timer, so a healthy capture
+    # can send a black screen forever. The virtual display has no monitor to
+    # save power on; viewer visibility controls the encoder's idle work instead.
+    connection.set_screen_saver(0, 0, X.DontPreferBlanking, X.AllowExposures)
+    connection.force_screen_saver(X.ScreenSaverReset)
+    connection.sync()
+
+
 class Commands:
     pause = staticmethod(time.sleep)
 
     def __init__(self, screen):
         self.d = display.Display()
+        keep_display_awake(self.d)
         self.root = self.d.screen().root
         self.screen = screen
         self.shm = None
