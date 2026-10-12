@@ -21,7 +21,7 @@ const MESSAGES: Record<Exclude<SignInState, "checking">, string> = {
 };
 
 const HOME_SCREEN =
-  "In Safari, open localDot, then Settings › Notifications › Copy sign-in link. Paste it here within a minute.";
+  "Open localDot in the browser where you’re already signed in. Go to Settings › Notifications › Copy sign-in link, then paste it here.";
 
 // homeScreen: opened from the Home Screen, which keeps its own storage and so signs in by itself.
 export function SignIn({

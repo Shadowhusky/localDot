@@ -30,7 +30,7 @@ describe("Home Screen sign-in", () => {
     expect(go).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        "That isn't a localDot sign-in link for this address. Copy a fresh one in Safari.",
+        "That isn't a localDot sign-in link for this address. Create a fresh link in the browser where you’re signed in.",
       ),
     ).toBeTruthy();
   });
@@ -46,7 +46,9 @@ describe("Home Screen sign-in", () => {
   it("explains an expired link", () => {
     render(<HomeScreenSignIn origin={ORIGIN} go={vi.fn()} rejected />);
     expect(
-      screen.getByText("That link has expired or was already used. Copy a fresh one in Safari."),
+      screen.getByText(
+        "That link has expired or was already used. Create a fresh link in the browser where you’re signed in.",
+      ),
     ).toBeTruthy();
   });
 });

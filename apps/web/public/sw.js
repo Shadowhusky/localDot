@@ -35,7 +35,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(copy.title, {
       body: title ?? copy.body,
       tag: `${kind ?? "other"}:${sessionId ?? "none"}`,
-      icon: "/icons/icon-192.png",
+      icon: "/icons/icon-192.png?v=mascot-1",
       data: { sessionId },
     }),
   );

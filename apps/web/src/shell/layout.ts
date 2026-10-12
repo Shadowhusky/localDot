@@ -23,16 +23,20 @@ const KEYBOARD_PX = 120;
 
 function keyboardUp(): boolean {
   const view = window.visualViewport;
-  return !!view && window.innerHeight - view.height > KEYBOARD_PX;
+  return !!view && view.scale === 1 && window.innerHeight - view.height > KEYBOARD_PX;
 }
 
 const onViewport = (onChange: () => void) => {
   const view = window.visualViewport;
   view?.addEventListener("resize", onChange);
   view?.addEventListener("scroll", onChange);
+  window.addEventListener("resize", onChange);
+  window.addEventListener("pageshow", onChange);
   return () => {
     view?.removeEventListener("resize", onChange);
     view?.removeEventListener("scroll", onChange);
+    window.removeEventListener("resize", onChange);
+    window.removeEventListener("pageshow", onChange);
   };
 };
 
@@ -43,19 +47,21 @@ export function useKeyboardUp(): boolean {
   return handheld && up;
 }
 
-// While the keyboard is up the page fits the part of the screen the keyboard leaves, so the stage
-// stays where it was and the toolbar rides on the keyboard. iOS pans the page rather than resizing
-// it, so the page moves back by what it panned.
-export function useKeyboardFit(page: { current: HTMLElement | null }, up: boolean): void {
+// Keep handheld layouts fitted to the visible viewport, including Home Screen launches and
+// keyboard dismissal. Restricting this to an open keyboard can leave stale browser-chrome space.
+// Pinch zoom is a viewing operation and must not reflow the app.
+export function useViewportFit(page: { current: HTMLElement | null }, up: boolean): void {
+  const handheld = useMediaQuery(HANDHELD);
   useLayoutEffect(() => {
     const element = page.current;
     const view = window.visualViewport;
-    if (!element || !view || !up) return;
+    if (!element || !view || !handheld) return;
     let frame = 0;
     const fit = () => {
       frame = 0;
+      if (view.scale !== 1) return;
       const height = `${view.height}px`;
-      const top = `${view.offsetTop}px`;
+      const top = `${up ? view.offsetTop : 0}px`;
       if (element.style.getPropertyValue("--_visible-h") !== height)
         element.style.setProperty("--_visible-h", height);
       if (element.style.getPropertyValue("--_visible-top") !== top)
@@ -72,13 +78,15 @@ export function useKeyboardFit(page: { current: HTMLElement | null }, up: boolea
       element.style.removeProperty("--_visible-h");
       element.style.removeProperty("--_visible-top");
     };
-  }, [page, up]);
+  }, [page, up, handheld]);
 }
 
 // How much of the page's foot the on-screen keyboard covers, so a sheet can rest on top of it.
 function keyboardInset(): number {
   const view = window.visualViewport;
-  return view ? Math.max(0, Math.round(window.innerHeight - view.height - view.offsetTop)) : 0;
+  return view && view.scale === 1
+    ? Math.max(0, Math.round(window.innerHeight - view.height - view.offsetTop))
+    : 0;
 }
 
 export function useKeyboardInset(): number {

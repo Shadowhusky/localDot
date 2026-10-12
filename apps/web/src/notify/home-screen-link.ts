@@ -14,7 +14,7 @@ export class LinkNotCopied extends Error {
 
 export type LinkClipboard = Pick<Clipboard, "writeText"> & Partial<Pick<Clipboard, "write">>;
 
-// A Home Screen app on iPhone keeps its own storage, so it starts signed out. Safari (signed in)
+// A Home Screen app on iPhone keeps its own storage, so it starts signed out. A signed-in browser
 // copies a one-minute, one-use sign-in link; the Home Screen app takes it from a paste.
 // Call straight from the click: Safari copies only within the tap, so the copy starts at once and
 // the link fills it when the daemon has made it.

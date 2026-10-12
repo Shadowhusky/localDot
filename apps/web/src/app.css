@@ -143,6 +143,7 @@
    top, dot and its line sit under it, the thread is the one scroller and the toolbar is its foot. */
 @media (--phone) {
   .app {
+    height: var(--_visible-h, 100dvh);
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     padding-right: 0;

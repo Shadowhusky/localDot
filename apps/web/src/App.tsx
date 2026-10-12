@@ -134,7 +134,7 @@ import {
   takeReason,
   takeSlot,
 } from "./shell/island.ts";
-import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
@@ -1662,7 +1662,7 @@ function Theatre({ api }: { api: ApiClient }) {
         ? NEW_TITLE
         : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
-  useKeyboardFit(page, keyboard);
+  useViewportFit(page, keyboard);
   return (
     <div
       ref={page}

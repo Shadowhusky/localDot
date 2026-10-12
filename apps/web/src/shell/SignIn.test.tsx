@@ -41,8 +41,12 @@ it("signs the Home Screen app in from a pasted link instead of Terminal", () => 
   const view = render(<SignIn state="first" homeScreen />);
   expect(screen.queryByText("localdot open")).toBeNull();
   expect(screen.getByLabelText("Sign-in link")).toBeTruthy();
+  expect(screen.getByText(/browser where you’re already signed in/)).toBeTruthy();
+  expect(screen.queryByText(/Safari/)).toBeNull();
   view.rerender(<SignIn state="expired" homeScreen />);
   expect(
-    screen.getByText("That link has expired or was already used. Copy a fresh one in Safari."),
+    screen.getByText(
+      "That link has expired or was already used. Create a fresh link in the browser where you’re signed in.",
+    ),
   ).toBeTruthy();
 });
