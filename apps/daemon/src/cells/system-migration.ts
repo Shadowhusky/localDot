@@ -9,7 +9,7 @@ import {
   SCAN_SYSTEM,
   verifyMigration,
 } from "./system-migration-plan.ts";
-import { ComputerSystemState } from "./system-state.ts";
+import { ComputerSystemState, snapshotOf } from "./system-state.ts";
 import { tar } from "./tar.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -54,9 +54,9 @@ export class SystemMigration {
     )
       throw failure();
     let base = source.Config.Labels?.[SYSTEM_BASE] ?? source.Image;
-    const snapshot = source.Config.Labels?.["localdot.snapshot"];
+    const snapshot = snapshotOf(source.Config.Labels);
     if (snapshot)
-      base = (await new ComputerSystemState(this.home, this.docker, target).read(snapshot))
+      base = (await new ComputerSystemState(this.home, this.docker, target).readImage(snapshot))
         .baseImage;
     imageId.parse(base);
     // Image config is the migration authority, not an editable container label.
@@ -142,6 +142,9 @@ export class SystemMigration {
             ...((image.Config.Labels as Record<string, string>) ?? {}),
             [SYSTEM_BASE]: target,
             [SYSTEM_SOURCE]: sourceId,
+            // Commit merges in the clone's labels; a migrated system is no longer that snapshot.
+            "localdot.snapshot": "",
+            "localdot.snapshot-source": "",
           },
         },
       });

@@ -1,7 +1,7 @@
 import type { DockerClient } from "./docker.ts";
 import { RuntimeImages, runtimeSource } from "./runtime-update-store.ts";
 import { SYSTEM_BASE, verifyMigratedImage } from "./system-migration.ts";
-import { ComputerSystemState } from "./system-state.ts";
+import { ComputerSystemState, snapshotOf } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -27,16 +27,13 @@ export async function verifyDesktopRuntimeImages(
       const before = await docker.request<unknown>({ method: "GET", path });
       let expected = images[role];
       let snapshot: { image: string; baseImage: string } | undefined;
-      if (
-        role === "desktop" &&
-        home &&
-        object(before) &&
-        object(before.Config) &&
-        object(before.Config.Labels) &&
-        typeof before.Config.Labels["localdot.snapshot"] === "string"
-      ) {
-        snapshot = await new ComputerSystemState(home, docker, images.desktop).read(
-          before.Config.Labels["localdot.snapshot"],
+      const snapshotId =
+        role === "desktop" && object(before) && object(before.Config)
+          ? snapshotOf(before.Config.Labels as Record<string, string> | undefined)
+          : undefined;
+      if (home && snapshotId) {
+        snapshot = await new ComputerSystemState(home, docker, images.desktop).readImage(
+          snapshotId,
         );
         expected = snapshot.image;
       }

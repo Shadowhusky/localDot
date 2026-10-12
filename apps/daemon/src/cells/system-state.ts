@@ -27,6 +27,13 @@ const failure = () =>
     "Your computer's system data could not be preserved. Recovery has stopped without creating a clean computer.",
   );
 
+// The snapshot a desktop's system descends from, if any. A migrated image inherits the labels of
+// the snapshot it was built from, so its system-base label wins and an empty value counts as none.
+export function snapshotOf(labels: Record<string, string> | undefined): string | undefined {
+  if (labels?.["localdot.system-base"]) return undefined;
+  return labels?.["localdot.snapshot"] || undefined;
+}
+
 // A recovery checkpoint retains the entire root filesystem, including package databases and
 // dependencies. /config is a volume, which Docker commit excludes; copy it separately. Never
 // substitute a base image when either half is missing. Snapshots remain for recovery/retry.
@@ -72,9 +79,9 @@ export class ComputerSystemState {
     )
       throw failure();
     let baseImage = source.Config.Labels?.["localdot.system-base"] ?? source.Image;
-    const priorId = source.Config.Labels?.["localdot.snapshot"];
+    const priorId = snapshotOf(source.Config.Labels);
     if (priorId) {
-      const prior = await this.read(priorId);
+      const prior = await this.readImage(priorId);
       if (prior.image !== source.Image) throw failure();
       baseImage = prior.baseImage;
     }
@@ -114,22 +121,38 @@ export class ComputerSystemState {
     return value;
   }
 
+  // The snapshot's system image only. Its base and image are all an update or a later capture
+  // needs; the snapshot's home volume may since have been purged with its retired computer.
+  async readImage(cellId: string): Promise<Snapshot> {
+    const value = this.records.read(cellId);
+    if (!value) throw failure();
+    await this.verifyImage(value);
+    return value;
+  }
+
   private async verify(value: Snapshot): Promise<void> {
-    const image = await this.docker.request<{
-      Id: string;
-      Config: { Labels?: Record<string, string> };
-    }>({ method: "GET", path: `/images/${encodeURIComponent(value.image)}/json` });
+    await this.verifyImage(value);
     const volume = await this.docker.request<{ Name: string; Labels?: Record<string, string> }>({
       method: "GET",
       path: `/volumes/${encodeURIComponent(value.homeVolume)}`,
     });
     if (
-      image.Id !== value.image ||
-      image.Config.Labels?.["localdot.snapshot"] !== value.cellId ||
-      image.Config.Labels?.["localdot.snapshot-source"] !== value.container ||
       volume.Name !== value.homeVolume ||
       volume.Labels?.["localdot.cell"] !== value.cellId ||
       volume.Labels?.["localdot.role"] !== "home"
+    )
+      throw failure();
+  }
+
+  private async verifyImage(value: Snapshot): Promise<void> {
+    const image = await this.docker.request<{
+      Id: string;
+      Config: { Labels?: Record<string, string> };
+    }>({ method: "GET", path: `/images/${encodeURIComponent(value.image)}/json` });
+    if (
+      image.Id !== value.image ||
+      image.Config.Labels?.["localdot.snapshot"] !== value.cellId ||
+      image.Config.Labels?.["localdot.snapshot-source"] !== value.container
     )
       throw failure();
   }
