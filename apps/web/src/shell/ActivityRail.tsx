@@ -185,8 +185,7 @@ export function ActivityRail({
           return last && viewOf(last).state === "doing" ? last.key : undefined;
         })();
   const openKey = opened?.owner === owner ? opened.key : null;
-  // A phone's sheet scrolls Activity whole, out of the rail's own following, so it brings the live
-  // step into view itself once there is one.
+  // When embedded without its own scroll constraint, bring the live step into the outer scroller.
   const placed = useRef(false);
   useLayoutEffect(() => {
     const pane = timeline.current?.closest<HTMLElement>(".activity-scroll");
@@ -273,9 +272,6 @@ export function ActivityRail({
         <h2>Activity</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
-      {plan.length > 0 && (
-        <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
-      )}
       <div className="activity-controls">
         {(started || tabs.length > 1 || onHide) && (
           <div className="activity-tabs-row">
@@ -326,6 +322,9 @@ export function ActivityRail({
         >
           <div className="activity-content">
             <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab}>
+              {plan.length > 0 && (
+                <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+              )}
               {!started && (
                 <p className="activity-empty">Plan and steps appear here once dot starts.</p>
               )}

@@ -44,27 +44,44 @@ export function observeTextAreaSize(area: HTMLTextAreaElement): () => void {
   document.body.append(mirror);
   let frame = 0;
   let disposed = false;
+  let metricsDirty = true;
+  let metrics: { adjustment: number; minimum: number; maximum: number } | undefined;
   const fit = () => {
     frame = 0;
-    if (disposed || !area.isConnected || !area.getClientRects().length) return;
-    const css = getComputedStyle(area);
-    for (const metric of METRICS) mirror.style.setProperty(metric, css.getPropertyValue(metric));
+    if (disposed || !area.isConnected) return;
+    // Font and box metrics change on resize or a rendered prop change, not on each
+    // character. Keep the input path to one isolated text measurement.
+    if (metricsDirty) {
+      if (!area.getClientRects().length) return;
+      const css = getComputedStyle(area);
+      for (const metric of METRICS) mirror.style.setProperty(metric, css.getPropertyValue(metric));
+      mirror.style.whiteSpace = css.whiteSpace;
+      mirror.wrap = area.wrap;
+      const padding = Number.parseFloat(css.paddingTop) + Number.parseFloat(css.paddingBottom);
+      const border =
+        Number.parseFloat(css.borderTopWidth) + Number.parseFloat(css.borderBottomWidth);
+      metrics = {
+        adjustment: css.boxSizing === "border-box" ? border : -padding,
+        minimum: Number.parseFloat(css.minHeight) || 0,
+        maximum: Number.parseFloat(css.maxHeight) || Number.POSITIVE_INFINITY,
+      };
+      metricsDirty = false;
+    }
+    if (!metrics) return;
     // An empty field stays one line, regardless of its placeholder's length.
-    mirror.style.whiteSpace = area.value ? css.whiteSpace : "pre-wrap";
-    mirror.wrap = area.wrap;
     mirror.value = area.value || " ";
-    const padding = Number.parseFloat(css.paddingTop) + Number.parseFloat(css.paddingBottom);
-    const border = Number.parseFloat(css.borderTopWidth) + Number.parseFloat(css.borderBottomWidth);
-    const height = mirror.scrollHeight + (css.boxSizing === "border-box" ? border : -padding);
+    const height = mirror.scrollHeight + metrics.adjustment;
     // Drafts and credentials have one owner. The measuring field keeps no copy between frames.
     mirror.value = "";
-    const minimum = Number.parseFloat(css.minHeight) || 0;
-    const maximum = Number.parseFloat(css.maxHeight) || Number.POSITIVE_INFINITY;
-    const next = `${Math.max(minimum, Math.min(maximum, height))}px`;
+    const next = `${Math.max(metrics.minimum, Math.min(metrics.maximum, height))}px`;
     if (area.style.height !== next) area.style.height = next;
   };
   const schedule = () => {
     if (!frame) frame = requestAnimationFrame(fit);
+  };
+  const invalidate = () => {
+    metricsDirty = true;
+    schedule();
   };
   // Width and font changes (rotation, panel resizing, text scaling) also change wrapping.
   let width = -1;
@@ -75,14 +92,14 @@ export function observeTextAreaSize(area: HTMLTextAreaElement): () => void {
           const next = entries[0]?.contentRect.width;
           if (next !== undefined && next !== width) {
             width = next;
-            schedule();
+            invalidate();
           }
         });
   observer?.observe(area);
   area.addEventListener("input", schedule);
-  resizers.set(area, schedule);
-  window.addEventListener("resize", schedule);
-  document.fonts?.addEventListener("loadingdone", schedule);
+  resizers.set(area, invalidate);
+  window.addEventListener("resize", invalidate);
+  document.fonts?.addEventListener("loadingdone", invalidate);
   fit();
   return () => {
     disposed = true;
@@ -90,8 +107,8 @@ export function observeTextAreaSize(area: HTMLTextAreaElement): () => void {
     observer?.disconnect();
     area.removeEventListener("input", schedule);
     resizers.delete(area);
-    window.removeEventListener("resize", schedule);
-    document.fonts?.removeEventListener("loadingdone", schedule);
+    window.removeEventListener("resize", invalidate);
+    document.fonts?.removeEventListener("loadingdone", invalidate);
     mirror.value = "";
     mirror.remove();
   };

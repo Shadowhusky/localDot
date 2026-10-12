@@ -1701,6 +1701,14 @@
     --_toolbar: color-mix(in srgb, var(--color-void) 78%, transparent);
   }
 
+  /* Keep the keyboard's typing surface opaque: streaming content behind a live blur
+     otherwise has to be composited again while the user edits. */
+  .thread-toolbar:focus-within {
+    --_toolbar: var(--color-void);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   .thread-toolbar::before {
     content: "";
     position: absolute;
@@ -2141,6 +2149,9 @@
 }
 
 .permission-menu-name {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
   font-weight: var(--font-weight-medium);
 }
 

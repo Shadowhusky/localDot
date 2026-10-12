@@ -51,14 +51,24 @@ export function useKeyboardFit(page: { current: HTMLElement | null }, up: boolea
     const element = page.current;
     const view = window.visualViewport;
     if (!element || !view || !up) return;
+    let frame = 0;
     const fit = () => {
-      element.style.setProperty("--_visible-h", `${view.height}px`);
-      element.style.setProperty("--_visible-top", `${view.offsetTop}px`);
+      frame = 0;
+      const height = `${view.height}px`;
+      const top = `${view.offsetTop}px`;
+      if (element.style.getPropertyValue("--_visible-h") !== height)
+        element.style.setProperty("--_visible-h", height);
+      if (element.style.getPropertyValue("--_visible-top") !== top)
+        element.style.setProperty("--_visible-top", top);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(fit);
     };
     fit();
-    const stop = onViewport(fit);
+    const stop = onViewport(schedule);
     return () => {
       stop();
+      cancelAnimationFrame(frame);
       element.style.removeProperty("--_visible-h");
       element.style.removeProperty("--_visible-top");
     };

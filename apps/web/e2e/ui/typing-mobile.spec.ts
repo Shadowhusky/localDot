@@ -51,7 +51,20 @@ for (const fallback of [false, true]) {
     await box.evaluate((field) => {
       const samples: number[] = [];
       const writes: string[] = [];
-      Object.assign(window, { inputSamples: samples, inputWrites: writes });
+      const work = { styleReads: 0, viewportWrites: 0 };
+      Object.assign(window, { inputSamples: samples, inputWrites: writes, inputWork: work });
+      const readStyle = window.getComputedStyle.bind(window);
+      window.getComputedStyle = (element, pseudo) => {
+        if (element === field) work.styleReads++;
+        return readStyle(element, pseudo);
+      };
+      const app = document.querySelector(".app");
+      if (app)
+        new MutationObserver((records) => {
+          work.viewportWrites += records.filter(
+            (record) => record.attributeName === "style",
+          ).length;
+        }).observe(app, { attributes: true });
       new MutationObserver((records) => {
         for (const record of records)
           if (record.attributeName === "style") writes.push((field as HTMLElement).style.height);
@@ -69,6 +82,13 @@ for (const fallback of [false, true]) {
       );
     });
     // Mobile keyboards can send input without a keydown. Include wrapping, deletion and a long draft.
+    await page.evaluate(() => {
+      // iOS sends repeated viewport events as the caret and keyboard settle.
+      for (let i = 0; i < 12; i++) {
+        window.visualViewport?.dispatchEvent(new Event("resize"));
+        window.visualViewport?.dispatchEvent(new Event("scroll"));
+      }
+    });
     for (const word of ["hello", " world", "\n", "下一步", "检查页面"])
       await page.keyboard.insertText(word);
     await box.pressSequentially(" and keep the existing changes", { delay: 40 });
@@ -76,12 +96,14 @@ for (const fallback of [false, true]) {
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
     const after = await cdp?.send("Performance.getMetrics");
     const stats = await page.evaluate(() => {
-      const { inputSamples, inputWrites } = window as unknown as {
+      const { inputSamples, inputWrites, inputWork } = window as unknown as {
         inputSamples: number[];
         inputWrites: string[];
+        inputWork: { styleReads: number; viewportWrites: number };
       };
       const sorted = inputSamples.toSorted((a, b) => a - b);
       return {
+        ...inputWork,
         samples: sorted.length,
         p95: sorted[Math.ceil(sorted.length * 0.95) - 1],
         max: sorted.at(-1),
@@ -108,6 +130,9 @@ for (const fallback of [false, true]) {
     await cdp?.detach();
     await expect(box).toBeFocused();
     await expect(box).toHaveValue(/下一步检查页面 and keep the existing change$/);
+    console.log("mobile typing", test.info().project.name, { fallback, ...stats, ...metrics });
+    expect(stats.styleReads).toBeLessThan(5);
+    expect(stats.viewportWrites).toBe(0);
     expect(stats.samples).toBe(36);
     expect(stats.p95).toBeLessThan(150);
     // A full field must stay put while typing, rather than collapse and re-expand for every key.

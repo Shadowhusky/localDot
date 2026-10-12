@@ -4,16 +4,26 @@ runAt("c14", "c39", "w39");
 
 test("Activity tabs and filters remain below the header while scrolling", async ({ page, ui }) => {
   const phone = (page.viewportSize()?.width ?? 0) < 700;
-  if (!phone) await page.setViewportSize({ width: 2000, height: 650 });
+  if (!phone) await page.setViewportSize({ width: 2000, height: 400 });
   await ui.open("done");
   await ui.picture();
   if (phone) await page.getByRole("button", { name: "Activity", exact: true }).click();
   const rail = phone ? page.locator(".activity-sheet") : page.locator(".rail-activity");
   const controls = rail.locator(".activity-controls");
   await expect(controls).toBeVisible();
-  const scroller = phone
-    ? page.getByRole("dialog", { name: "Activity" }).locator(".ui-sheet-body")
-    : rail.locator(".activity-scroll");
+  const scroller = rail.locator(".activity-scroll");
+  if (phone) {
+    const header = await page
+      .getByRole("dialog", { name: "Activity" })
+      .locator(".ui-sheet-header")
+      .boundingBox();
+    const tabs = await controls.boundingBox();
+    if (!header || !tabs) throw new Error("Missing Activity header or tabs");
+    expect(Math.abs(tabs.y - header.y - header.height)).toBeLessThanOrEqual(1);
+  }
+  await expect
+    .poll(() => scroller.evaluate((node) => node.scrollHeight - node.clientHeight))
+    .toBeGreaterThan(0);
   await scroller.evaluate((node) => {
     node.scrollTop = node.scrollHeight;
   });
@@ -28,8 +38,9 @@ test("Activity tabs and filters remain below the header while scrolling", async 
       .locator(".ui-sheet-header")
       .boundingBox();
     if (!header) throw new Error("Missing header");
-    expect(bounds.y).toBeGreaterThanOrEqual(header.y + header.height - 1);
+    expect(Math.abs(bounds.y - header.y - header.height)).toBeLessThanOrEqual(1);
   }
+  await page.screenshot({ path: test.info().outputPath("activity-header.png") });
   // Both controls must remain hittable, not merely present behind the sheet header.
   await rail.getByRole("radio", { name: "Tools", exact: true }).click();
   await expect(rail.getByRole("radio", { name: "Tools", exact: true })).toBeChecked();

@@ -2523,7 +2523,9 @@ function Theatre({ api }: { api: ApiClient }) {
           open={activityOpen}
           onClose={() => setActivityOpen(false)}
           title="Activity"
+          className="activity-dialog"
           doneLabel="Done"
+          flush
           detents={ACTIVITY_DETENTS}
         >
           <div className="activity-sheet">{activity}</div>

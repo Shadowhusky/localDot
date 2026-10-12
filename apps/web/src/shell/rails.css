@@ -181,11 +181,24 @@
   justify-content: flex-end;
 }
 
-/* Activity in a phone's sheet: the sheet is its one scroller, and its sticky heads take the sheet's
-   own surface. */
+/* A compact navigation header keeps its full touch target without a second band of padding. */
+.ui-sheet.activity-dialog[data-side="bottom"] .ui-sheet-header {
+  min-height: 44px;
+  padding-block: 0;
+}
+
+/* The tabs meet the sheet header; only the content below them scrolls. */
 .activity-sheet {
   --rail-surface: var(--color-overlay);
-  margin-inline: calc(var(--spacing) * -1.5);
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0 calc(var(--spacing) * 4) env(safe-area-inset-bottom);
+}
+
+.activity-sheet > .activity-rail {
+  flex: 1;
+  min-width: 0;
 }
 
 /* The recent conversations: a search over rows by day (design-v2 §10.9, §10.12). Each row is a grid,

@@ -1,12 +1,25 @@
 import { useRef, useState } from "react";
+import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 
 const modes = {
-  custom: { name: "Custom", detail: "Follow your permissions in Settings." },
-  auto: { name: "Auto", detail: "Jev approves routine actions. You decide when it’s unsure." },
-  full: { name: "Full access", detail: "Act without asking, except for destructive actions." },
+  custom: {
+    name: "Custom",
+    icon: "sliders-horizontal",
+    detail: "Follow your permissions in Settings.",
+  },
+  auto: {
+    name: "Auto",
+    icon: "shield",
+    detail: "Jev approves routine actions. You decide when it’s unsure.",
+  },
+  full: {
+    name: "Full access",
+    icon: "bolt",
+    detail: "Act without asking, except for destructive actions.",
+  },
 } as const;
 
 export function PermissionChip({
@@ -24,7 +37,7 @@ export function PermissionChip({
     <>
       <IconButton
         ref={anchor}
-        icon="shield"
+        icon={modes[value].icon}
         size={28}
         className="composer-permissions"
         data-mode={value}
@@ -53,7 +66,10 @@ export function PermissionChip({
               if (mode !== value) onChoose(mode);
             }}
           >
-            <span className="permission-menu-name">{modes[mode].name}</span>
+            <span className="permission-menu-name">
+              <Icon name={modes[mode].icon} />
+              {modes[mode].name}
+            </span>
             <span className="permission-menu-detail">{modes[mode].detail}</span>
           </MenuItem>
         ))}

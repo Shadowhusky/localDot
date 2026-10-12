@@ -295,6 +295,7 @@ export const ICONS = {
     ["path", { d: "M12 2.5v7.5" }],
     ["path", { d: "M12.6 3.1a6.6 6.6 0 0 1 5.8 6.4H12.6z", ...FILLED }],
   ],
+  bolt: [["path", { d: "m13 2-10 12h8l-1 8 11-12h-8z" }]],
   shield: [
     [
       "path",

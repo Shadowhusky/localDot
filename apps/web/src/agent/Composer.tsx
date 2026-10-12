@@ -407,8 +407,9 @@ export function Composer(props: ComposerProps) {
     return false;
   }, [delivery, messages]);
 
-  const measure = useCallback((input: HTMLTextAreaElement) => {
-    resizeTextArea(input);
+  const measure = useCallback((input: HTMLTextAreaElement, nativeInput = false) => {
+    // Native input already schedules sizing. Imperative paste, voice and clearing need it here.
+    if (!nativeInput) resizeTextArea(input);
     const next = shapeOf(input);
     if (next.blank === shown.current.blank && next.length === shown.current.length) return;
     shown.current = next;
@@ -769,7 +770,7 @@ export function Composer(props: ComposerProps) {
       onInput: (event) => {
         revision.current += 1;
         guardOwner.current.input(event.currentTarget, event.nativeEvent);
-        measure(event.currentTarget);
+        measure(event.currentTarget, true);
         weigh(event.currentTarget);
         if (problemShown.current !== null) setProblem(null);
       },
