@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { demoResponse } from "../src/worker.ts";
+
 const response = () =>
   new Response(
     Uint8Array.from({ length: 20 }, (_, i) => i),

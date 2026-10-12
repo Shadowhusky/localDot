@@ -18,11 +18,11 @@
 </head>
 <body>
 <a class="skip" href="#hello">Skip demo and meet dot</a>
-<div id="loader" class="loader" hidden aria-label="Loading the demo">
+<section id="loader" class="loader" hidden aria-label="Loading the demo">
   <span id="loading-dot" class="dot" style="--dot-size:128px" aria-hidden="true"></span>
   <p id="loading-status" role="status">dot is getting ready.</p>
   <button id="skip-loading" class="text-button" type="button">Continue to the page <span aria-hidden="true">↗</span></button>
-</div>
+</section>
 <div class="world" aria-hidden="true"><canvas id="world-canvas"></canvas><div class="studio-halo"></div></div>
 <header class="site-header">
   <a href="#watch" class="brand" aria-label="localDot home"><img src="/dot.png" width="36" height="36" alt="" /><span>localDot</span></a>
@@ -77,7 +77,7 @@
 <section id="possibilities" class="chapter" aria-labelledby="possibilities-title">
 <div class="scene-panel story-panel">
   <div class="story-copy"><p class="eyebrow">02 / TASKS AND TOOLS</p><h2 id="possibilities-title">Browse. Build.<br /><em>Try things.</em></h2><p class="lead" id="feature-title">Apps, files, and a terminal.</p><p class="body-copy" id="feature-copy">dot can use desktop apps, read websites, and run code. Files appear in the conversation for you to open or revise. Connect your apps to give it more tools.</p>
-    <div class="feature-options" role="group" aria-label="Explore dot’s capabilities"><button type="button" data-feature="work" aria-pressed="true">Make things</button><button type="button" data-feature="memory" aria-pressed="false">Learn as you go</button><button type="button" data-feature="routines" aria-pressed="false">Set a routine</button></div>
+    <fieldset class="feature-options" aria-label="Explore dot’s capabilities"><button type="button" data-feature="work" aria-pressed="true">Make things</button><button type="button" data-feature="memory" aria-pressed="false">Learn as you go</button><button type="button" data-feature="routines" aria-pressed="false">Set a routine</button></fieldset>
     <a href="#watch" class="text-link" id="feature-demo">See it in the app <span aria-hidden="true">↗</span></a>
   </div>
   <div class="character-fallback"><img src="/dot.png" width="320" height="320" alt="" /></div>
@@ -88,7 +88,7 @@
 <section id="yours" class="chapter" aria-labelledby="yours-title">
 <div class="scene-panel story-panel">
   <div class="story-copy"><p class="eyebrow">03 / MODELS AND PERMISSIONS</p><h2 id="yours-title">Choose a model.<br /><em>Set its limits.</em></h2><p class="lead">A separate computer.<br />Still under your control.</p><p class="body-copy">The desktop, files, and recordings stay on your machine. Use an API key, a supported plan, or a local model. Hosted models receive screenshots and task context. API keys are kept in a local vault.</p>
-    <div class="permission-demo"><div class="permission-label">You choose how much dot asks.</div><div class="permission-options" role="group" aria-label="Permission mode examples"><button type="button" data-permission="ask" aria-pressed="false">Ask</button><button type="button" data-permission="auto" aria-pressed="true">Auto</button><button type="button" data-permission="full" aria-pressed="false">Full access</button></div><p id="permission-copy">Automatic review handles routine approvals. You stay involved when a decision needs you.</p></div>
+    <div class="permission-demo"><div class="permission-label">You choose how much dot asks.</div><fieldset class="permission-options" aria-label="Permission mode examples"><button type="button" data-permission="ask" aria-pressed="false">Ask</button><button type="button" data-permission="auto" aria-pressed="true">Auto</button><button type="button" data-permission="full" aria-pressed="false">Full access</button></fieldset><p id="permission-copy">Automatic review handles routine approvals. You stay involved when a decision needs you.</p></div>
   </div>
   <div class="character-fallback"><img src="/dot.png" width="320" height="320" alt="" /></div>
   <div class="scene-note"><span class="coordinate">03 — YOURS</span><span>Take over. Stop a task.<br />Replay any moment.</span></div>
@@ -98,7 +98,7 @@
 <div class="scene-panel story-panel final-panel">
   <div class="story-copy"><p class="eyebrow">04 / INSTALL</p><h2 id="get-title">Try <em>localDot.</em></h2><p class="lead">On your computer.<br />Within reach of your phone.</p><p class="body-copy">The installer sets up the app and its desktop. Open the link it prints, choose a model, and send your first task. This is an alpha; expect bugs.</p>
     <div class="release-card"><span class="release-status"><i></i> Alpha · open for testing</span>
-      <div class="install-platforms" role="group" aria-label="Choose your system"><button type="button" data-os="mac" aria-pressed="true">macOS</button><button type="button" data-os="windows" aria-pressed="false">Windows</button><button type="button" data-os="linux" aria-pressed="false">Linux</button></div>
+      <fieldset class="install-platforms" aria-label="Choose your system"><button type="button" data-os="mac" aria-pressed="true">macOS</button><button type="button" data-os="windows" aria-pressed="false">Windows</button><button type="button" data-os="linux" aria-pressed="false">Linux</button></fieldset>
       <p id="install-help">Apple silicon Mac. Paste this in Terminal.</p>
       <div class="install-command"><code id="install-command">curl -fsSL https://downloads.localdot.dev/install.sh | bash</code><button type="button" id="copy-install" aria-label="Copy installation command">Copy</button></div>
       <noscript><p>Windows PowerShell: <code>irm https://downloads.localdot.dev/install.ps1 | iex</code></p></noscript><p id="install-feedback" role="status" aria-live="polite">Setup guides you through Docker if it is missing.</p>

@@ -1534,3 +1534,10 @@ html:not(.enhanced) #copy-install {
     --demo-library-width: 190px;
   }
 }
+
+fieldset {
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+}

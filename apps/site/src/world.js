@@ -255,8 +255,12 @@ export async function createWorld(canvas, readState) {
         if (o.geometry) geometries.add(o.geometry);
         if (o.material) materials.add(o.material);
       });
-      geometries.forEach((g) => g.dispose());
-      materials.forEach((m) => m.dispose());
+      geometries.forEach((g) => {
+        g.dispose();
+      });
+      materials.forEach((m) => {
+        m.dispose();
+      });
       shadowTexture.dispose();
       renderer.dispose();
     },

@@ -1,6 +1,7 @@
-import { chromium, webkit } from "@playwright/test";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chromium, webkit } from "@playwright/test";
+
 const origin = process.env.SITE_URL || "http://127.0.0.1:4321";
 const out = new URL("../qa/", import.meta.url);
 await mkdir(out, { recursive: true });

@@ -1,4 +1,5 @@
 import { DotView } from "../../web/src/dot/render/DotView.ts";
+
 const $ = (s) => document.querySelector(s),
   $$ = (s) => [...document.querySelectorAll(s)];
 const root = document.documentElement,
@@ -169,7 +170,9 @@ async function selectDemo(id) {
   if (!demo) return;
   userPaused = false;
   video.pause();
-  $$("[data-demo]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.demo === id)));
+  $$("[data-demo]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.demo === id));
+  });
   setReplayName(demo.name);
   setReplayDescription(demo.copy);
   message("Loading replay…");
@@ -178,7 +181,9 @@ async function selectDemo(id) {
   video.load();
   playerState();
 }
-$$("[data-demo]").forEach((b) => b.addEventListener("click", () => selectDemo(b.dataset.demo)));
+$$("[data-demo]").forEach((b) => {
+  b.addEventListener("click", () => selectDemo(b.dataset.demo));
+});
 $("#play-toggle").addEventListener("click", () => {
   userPaused = !video.paused;
   if (video.paused) tryPlay();
@@ -312,17 +317,19 @@ const setFeatureCopy = stableText(
   "#feature-copy",
   Object.values(features).map((f) => f[1]),
 );
-$$("[data-feature]").forEach((b, i) =>
+$$("[data-feature]").forEach((b, i) => {
   b.addEventListener("click", () => {
     const [title, copy, a, c] = features[b.dataset.feature];
     setFeatureTitle(title);
     setFeatureCopy(copy);
     $("#window-label-one").textContent = a;
     $("#window-label-two").textContent = c;
-    $$("[data-feature]").forEach((v) => v.setAttribute("aria-pressed", String(v === b)));
+    $$("[data-feature]").forEach((v) => {
+      v.setAttribute("aria-pressed", String(v === b));
+    });
     world?.feature(i);
-  }),
-);
+  });
+});
 $("#feature-demo").addEventListener("click", () => selectDemo("work"));
 const permissions = {
   ask: "Review actions when your permission is needed. dot keeps the request next to the task.",
@@ -330,12 +337,14 @@ const permissions = {
   full: "Let routine work proceed. Destructive actions still require your confirmation.",
 };
 const setPermissionCopy = stableText("#permission-copy", Object.values(permissions));
-$$("[data-permission]").forEach((b) =>
+$$("[data-permission]").forEach((b) => {
   b.addEventListener("click", () => {
-    $$("[data-permission]").forEach((v) => v.setAttribute("aria-pressed", String(v === b)));
+    $$("[data-permission]").forEach((v) => {
+      v.setAttribute("aria-pressed", String(v === b));
+    });
     setPermissionCopy(permissions[b.dataset.permission]);
-  }),
-);
+  });
+});
 motion.hidden = false;
 motion.addEventListener("click", () => {
   paused = !paused;
@@ -404,15 +413,17 @@ const setInstallFeedback = stableText("#install-feedback", [
   "Copied. Paste it into your terminal to begin.",
   "Select and copy the command above.",
 ]);
-$$("[data-os]").forEach((b) =>
+$$("[data-os]").forEach((b) => {
   b.addEventListener("click", () => {
     const [command, help] = installers[b.dataset.os];
     setInstallCommand(command);
     setInstallHelp(help);
     setInstallFeedback("Setup guides you through Docker if it is missing.");
-    $$("[data-os]").forEach((v) => v.setAttribute("aria-pressed", String(v === b)));
-  }),
-);
+    $$("[data-os]").forEach((v) => {
+      v.setAttribute("aria-pressed", String(v === b));
+    });
+  });
+});
 $("#copy-install").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText($("#install-command .copy-stack > span").textContent);
