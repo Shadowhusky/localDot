@@ -762,7 +762,14 @@
   white-space: pre;
 }
 
+.thread-work-scroll {
+  max-height: min(280px, 32dvh);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
 .thread-work-list {
+  margin: 0;
   display: grid;
   gap: var(--spacing);
   padding: var(--spacing) 0 calc(var(--spacing) * 2);

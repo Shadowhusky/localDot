@@ -1,20 +1,10 @@
-import {
-  createContext,
-  lazy,
-  type ReactNode,
-  Suspense,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import type { AgentResult } from "../../agent/model.ts";
 import type { ResultDownloads } from "../../agent/ResultFiles.tsx";
 import type { ApiClient } from "../../lib/api.ts";
 import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
-import { Sheet } from "../../ui/Sheet.tsx";
 import { showToast } from "../../ui/Toast.tsx";
-import { ViewerLoading } from "./states.tsx";
+import { FileViewer } from "./FileViewer.tsx";
 
 type ResultFile = AgentResult["files"][number];
 // One file a list shows, by the result that handed it over and the task whose copy it is.
@@ -33,9 +23,6 @@ export interface ShownVersion {
 export const entryKey = (entry: Pick<ViewerEntry, "resultId" | "file">) =>
   `${entry.resultId}/${entry.file.name}`;
 
-const FileViewer = lazy(() =>
-  import("./FileViewer.tsx").then((module) => ({ default: module.FileViewer })),
-);
 const Context = createContext<((key: string, shown?: ShownVersion) => void) | null>(null);
 
 // Opens the full preview of a file in the nearest list of files, or null outside one.
@@ -44,7 +31,7 @@ export function useFileViewer(): ((key: string, shown?: ShownVersion) => void) |
 }
 
 // A list of files whose rows open the full preview, which then moves between the list's files.
-// The previewer's code loads the first time a file is opened.
+// The sheet shell is always ready; heavy document renderers load inside it.
 export function FileViewerScope({
   api,
   entries,
@@ -81,28 +68,20 @@ export function FileViewerScope({
       {children}
       {viewing && index >= 0 && (
         <ErrorBoundary floating>
-          <Suspense
-            fallback={
-              <Sheet open={viewing.open} title="Opening file" onClose={() => setViewing(null)}>
-                <ViewerLoading label="Loading the file viewer" />
-              </Sheet>
-            }
-          >
-            <FileViewer
-              api={api}
-              entries={entries}
-              index={index}
-              shown={viewing.shown && { key: viewing.key, ...viewing.shown }}
-              open={viewing.open}
-              downloads={downloads}
-              onMac={onMac}
-              onIndex={(next) => {
-                const key = keys[next];
-                if (key) setViewing({ open: true, key });
-              }}
-              onClose={() => setViewing((was) => was && { ...was, open: false })}
-            />
-          </Suspense>
+          <FileViewer
+            api={api}
+            entries={entries}
+            index={index}
+            shown={viewing.shown && { key: viewing.key, ...viewing.shown }}
+            open={viewing.open}
+            downloads={downloads}
+            onMac={onMac}
+            onIndex={(next) => {
+              const key = keys[next];
+              if (key) setViewing({ open: true, key });
+            }}
+            onClose={() => setViewing((was) => was && { ...was, open: false })}
+          />
         </ErrorBoundary>
       )}
     </Context.Provider>

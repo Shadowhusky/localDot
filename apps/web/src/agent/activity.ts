@@ -82,7 +82,11 @@ export function foldKeyUses(rows: readonly TimelineRow<ActivityStep>[]): Activit
 }
 
 export function isScreenStep(row: TimelineRow<ActivityStep>): boolean {
-  return row.kind === "step" && (!!row.computer || row.agent?.kind === "gui");
+  return (
+    row.kind === "step" &&
+    ((!!row.computer && (!row.computer.stepKind || row.computer.stepKind === "gui")) ||
+      row.agent?.kind === "gui")
+  );
 }
 
 export function matchesFilter(row: TimelineRow<ActivityStep>, filter: ActivityFilter): boolean {
@@ -217,7 +221,7 @@ export function entryView(
       : computer && !(ended && computer.status === "doing")
         ? COMPUTER_STATES[computer.status]
         : agentState({ id: row.id, output: [], outputTruncated: false }, ended);
-  const kind = agent?.kind ?? (computer ? "gui" : undefined);
+  const kind = agent?.kind ?? computer?.stepKind ?? (computer ? "gui" : undefined);
   const durationMs =
     computer?.durationMs ??
     (agent?.startedAt !== undefined && agent.endedAt !== undefined
@@ -248,7 +252,7 @@ export function entryView(
         diffStat(own.map((change) => change.patch)),
       );
   return {
-    testId: computer ? "step-row" : "tool-row",
+    testId: isScreenStep(row) ? "step-row" : "tool-row",
     title,
     meta: reason ? asSentence(reason) : where,
     time: durationMs === null ? "" : stepTime(durationMs),

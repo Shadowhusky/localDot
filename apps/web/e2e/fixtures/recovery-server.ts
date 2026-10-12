@@ -342,6 +342,14 @@ export async function fixture(
     runner: realRunner ?? {
       get: (key) => (key === id ? session : undefined),
       start: unused,
+      stopRun: async (taskId) => {
+        if (taskId !== id) return false;
+        session.cancel();
+        live.stop(id);
+        await live.settled(id);
+        effects.push("task-stop");
+        return true;
+      },
       selectionOf: () => models,
       raiseBudget: async (taskId, ceiling) => {
         if (taskId !== id || kind === "chatgpt" || session.stopped || session.controlHeld)

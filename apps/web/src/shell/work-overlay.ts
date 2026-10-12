@@ -62,6 +62,16 @@ export function workTranscript(model: Pick<AgentModel, "steps" | "changes">) {
         title: (step.tool?.title || step.intent || "Background work")
           .replace(/\s+/g, " ")
           .slice(0, 240),
+        intent: step.intent?.replace(/\s+/g, " ").trim(),
+        kind:
+          step.kind === "shell"
+            ? "Terminal"
+            : step.kind === "file"
+              ? "File"
+              : step.kind === "browser"
+                ? "Web"
+                : "App",
+        exitCode: step.tool?.exitCode,
         text: output,
         status: step.status,
         shortened: text.length > output.length || step.outputTruncated,

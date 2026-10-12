@@ -49,7 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("preserves selected Activity text while a reader scrolls within the current page and one live step arrives", () => {
+it("preserves selected Activity text while a reader scrolls within the current history and one live step arrives", () => {
   const v = render(rail(180));
   const pane = screen
     .getByRole("complementary", { name: "Plan and steps" })
@@ -76,23 +76,23 @@ it("preserves selected Activity text while a reader scrolls within the current p
       "copy selection must survive without requiring an Older action first",
     )
     .toBe("Reading step 80");
-  expect(screen.getAllByTestId("step-row")).toHaveLength(100);
+  expect(screen.getAllByTestId("step-row")).toHaveLength(101);
 });
 
-it("positive control: explicitly paging Older retains Activity node and selection through a live addition", () => {
+it("the earliest Activity row retains its node and selection through a live addition", () => {
   const v = render(rail(180));
-  fireEvent.click(screen.getByRole("button", { name: "Older steps" }));
+  fireEvent.click(screen.getByRole("button", { name: "Earlier steps" }));
   const selected = screen.getByText("Reading step 0");
   select(selected);
   v.rerender(rail(181));
   expect(screen.getByText("Reading step 0")).toBe(selected);
   expect(window.getSelection()?.toString()).toBe("Reading step 0");
-  expect(screen.getAllByTestId("step-row")).toHaveLength(100);
+  expect(screen.getAllByTestId("step-row")).toHaveLength(181);
 });
 
-it("an Activity owner change discards the previous explicit reading page even when IDs overlap", () => {
+it("an Activity owner change replaces the complete list even when IDs overlap", () => {
   const v = render(rail(180));
-  fireEvent.click(screen.getByRole("button", { name: "Older steps" }));
+  fireEvent.click(screen.getByRole("button", { name: "Earlier steps" }));
   expect(screen.getByText("Reading step 0")).toBeTruthy();
   v.rerender(rail(140, "task-b", "Replacement step"));
   expect(screen.queryByText("Reading step 0")).toBeNull();

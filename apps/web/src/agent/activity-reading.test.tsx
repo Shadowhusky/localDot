@@ -33,7 +33,7 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
 });
 for (const method of ["pointer", "selection"] as const)
-  it(`keeps the selected live-page row during ${method} reading and returns only after Newer`, () => {
+  it(`keeps the selected row during ${method} reading while appending newer steps`, () => {
     const v = render(rail(180));
     const row = screen.getByText("Read row 80");
     const range = document.createRange();
@@ -46,9 +46,8 @@ for (const method of ["pointer", "selection"] as const)
     v.rerender(rail(181));
     expect(screen.getByText("Read row 80")).toBe(row);
     expect(window.getSelection()?.toString()).toBe("Read row 80");
-    expect(screen.getAllByTestId("step-row")).toHaveLength(100);
-    fireEvent.click(screen.getByRole("button", { name: "Newer steps" }));
-    expect(screen.queryByText("Read row 80")).toBeNull();
+    expect(screen.getAllByTestId("step-row")).toHaveLength(101);
+    expect(screen.getByText("Read row 80")).toBeTruthy();
     expect(screen.getByText("Read row 180")).toBeTruthy();
     v.rerender(rail(182));
     expect(screen.getByText("Read row 181")).toBeTruthy();

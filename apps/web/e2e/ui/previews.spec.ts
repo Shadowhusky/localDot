@@ -156,3 +156,44 @@ test("the preview link reads only that task's own files", async ({ page }) => {
     await fixture.close();
   }
 });
+
+test("a slow first picture opens one stable sheet and fades in after fitting", async ({ page }) => {
+  const fixture = await startUiFixture(
+    { QA_SCENARIO: "running", QA_NOW: FIXTURE_START },
+    "ui-first-picture",
+  );
+  let release = () => {};
+  const loading = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    await page.request.post(`${fixture.origin}/__qa/previews`);
+    await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+    await page.route("**/file-previews/**/chart.png*", async (route) => {
+      await loading;
+      await route.continue();
+    });
+    const card = page.getByRole("region", { name: "Task result" }).last();
+    await card.getByRole("button", { name: "Open chart.png", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "chart.png" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("progressbar", { name: "Loading picture" })).toBeVisible();
+    const shell = await sheet.elementHandle();
+    await sheet.evaluate((node) =>
+      Promise.all(node.getAnimations().map((a) => a.finished.catch(() => null))),
+    );
+    const before = await sheet.boundingBox();
+    release();
+    await expect(sheet.locator(".viewer-canvas")).toHaveAttribute("data-ready", "true");
+    expect(await sheet.evaluate((node, initial) => node === initial, shell)).toBe(true);
+    const after = await sheet.boundingBox();
+    if (!before || !after) throw new Error("Missing file viewer geometry");
+    expect(Math.abs(before.height - after.height)).toBeLessThan(2);
+    expect(Math.abs(before.width - after.width)).toBeLessThan(2);
+    await expect(sheet.getByRole("progressbar", { name: "Loading picture" })).toBeHidden();
+    await page.screenshot({ path: test.info().outputPath("first-picture.png") });
+  } finally {
+    release();
+    await fixture.close();
+  }
+});

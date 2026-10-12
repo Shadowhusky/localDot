@@ -1,5 +1,4 @@
-// Loaded on its own, so it names the schema setting the entries load first: it then shares their
-// chunk, and no schema is built before it (zod would otherwise probe Function() against the CSP).
+// Configure schemas before importing them: zod must not probe Function() against the CSP.
 import "@localdot/protocol/csp";
 import {
   canOpenOnMac,
@@ -350,7 +349,14 @@ export function FileViewer({
     <Sheet
       open={open}
       onClose={onClose}
-      title={<FileName name={item.name} />}
+      title={
+        <>
+          <span className="sr-only">{item.name}</span>
+          <span aria-hidden="true">
+            <FileName name={item.name} />
+          </span>
+        </>
+      }
       description={meta}
       className="file-viewer"
       size="wide"

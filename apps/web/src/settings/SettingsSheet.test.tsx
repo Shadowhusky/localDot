@@ -278,10 +278,10 @@ describe("settings inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
-  it("shows a footer only for what keeps edits from saving, or a save that failed", () => {
+  it("keeps save feedback in the footer and explains invalid or failed saves", () => {
     const p = props();
     const view = render(<SettingsSheet {...p} dirty />);
-    expect(document.querySelector(".settings-footer")).toBeNull();
+    expect(document.querySelector(".settings-footer")).not.toBeNull();
     view.rerender(
       <SettingsSheet
         {...p}
@@ -299,7 +299,7 @@ describe("settings inspector", () => {
     view.rerender(<SettingsSheet {...p} dirty error="Settings couldn't be saved. Try again." />);
     expect(screen.getByRole("alert").textContent).toBe("Settings couldn't be saved. Try again.");
     view.rerender(<SettingsSheet {...p} />);
-    expect(document.querySelector(".settings-footer")).toBeNull();
+    expect(document.querySelector(".settings-footer")).not.toBeNull();
   });
   it("holds Keys as a section: Add key from a role opens its form for that provider", () => {
     const p = props();

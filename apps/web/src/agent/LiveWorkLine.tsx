@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
+import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { clock } from "./activity.ts";
 import type { WorkStep } from "./thread.ts";
+import { useFollowScroll } from "./useFollowScroll.ts";
 
 export interface LiveWork {
   phase: "running" | "waiting" | "finished";
@@ -20,8 +22,6 @@ const PAUSED = new Set<TaskRow | undefined>(["pausing", "paused", "resuming", "r
 
 // Each line stays at least this long, so quick steps never flicker past unread.
 export const HOLD_MS = 1000;
-// The work list shows the latest steps; the rest are in Activity.
-const SHOWN_STEPS = 12;
 
 interface Line {
   id: number;
@@ -83,7 +83,6 @@ export function LiveWorkLine({
   const said = useRef(live?.label ?? "");
   if (running && live) said.current = live.label;
   const { lines, retire } = useHeldLines(said.current);
-  const shown = steps.slice(-SHOWN_STEPS);
   const summary = running
     ? "Working"
     : waiting
@@ -152,26 +151,40 @@ export function LiveWorkLine({
         open={open}
         onOpenChange={setOpen}
       >
-        {shown.length ? (
-          <ol className="thread-work-list" aria-label="Steps in this turn">
-            {shown.map((step) => (
-              <li key={step.key} className="thread-work-step">
-                <StatusGlyph state={step.state} />
-                <span className="thread-work-title">{step.title}</span>
-                {step.time && <span className="thread-work-time num">{step.time}</span>}
-              </li>
-            ))}
-          </ol>
+        {steps.length ? (
+          <WorkHistory steps={steps} startMs={startMs} />
         ) : (
           <p className="thread-note">No steps yet.</p>
         )}
-        {steps.length > shown.length && (
-          <p className="thread-note">
-            {count(steps.length - shown.length, "earlier step is", "earlier steps are")} in
-            Activity.
-          </p>
-        )}
       </Disclosure>
     </div>
+  );
+}
+
+function WorkHistory({ steps, startMs }: { steps: readonly WorkStep[]; startMs: number | null }) {
+  const follow = useFollowScroll(String(startMs), true, { glide: false });
+  return (
+    <ScrollArea
+      className="thread-work-scroll"
+      ref={follow.ref}
+      tabIndex={0}
+      role="region"
+      aria-label="Work history"
+      onScroll={follow.onScroll}
+      onWheel={follow.interrupt}
+      onTouchStart={follow.interrupt}
+      onPointerDown={follow.interrupt}
+      onKeyDown={follow.interrupt}
+    >
+      <ol className="thread-work-list" aria-label="Steps in this turn">
+        {steps.map((step) => (
+          <li key={step.key} data-anchor className="thread-work-step">
+            <StatusGlyph state={step.state} />
+            <span className="thread-work-title">{step.title}</span>
+            {step.time && <span className="thread-work-time num">{step.time}</span>}
+          </li>
+        ))}
+      </ol>
+    </ScrollArea>
   );
 }

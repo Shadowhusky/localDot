@@ -86,7 +86,11 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
       const originalFetch = window.fetch.bind(window);
       window.fetch = (input, init) => {
         const url = input instanceof Request ? input.url : String(input);
-        if (init?.method === "POST" && /\/api\/sessions\/[^/]+\/stop$/.test(url) && timing.clickAt)
+        if (
+          init?.method === "POST" &&
+          /\/api\/agent\/sessions\/[^/]+\/stop$/.test(url) &&
+          timing.clickAt
+        )
           timing.dispatchMs = performance.now() - timing.clickAt;
         return originalFetch(input, init);
       };
@@ -129,7 +133,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     f.session.append("tool.start", { tool: "shell", title: "New Activity marker" }, incomingStep);
     f.session.append("tool.end", { ok: true, exitCode: 0 }, incomingStep);
     f.session.append("step.end", { status: "ok" }, incomingStep);
-    await expect(page.getByRole("button", { name: "Newer steps", exact: true })).toBeVisible();
+    await expect(page.getByTestId("tool-row").last()).toContainText("New Activity marker");
     expect(await selectedStep.textContent()).toBe(selectedStepText);
     expect(await page.evaluate(() => getSelection()?.toString())).toBe(selectedStepText);
     expect(
@@ -138,8 +142,11 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
           node === (window as unknown as { selectedActivityNode: Element }).selectedActivityNode,
       ),
     ).toBe(true);
-    expect((await counts(page)).steps).toBe(100);
-    await page.getByRole("button", { name: "Newer steps", exact: true }).click();
+    expect((await counts(page)).steps).toBe(101);
+    await page
+      .locator(".activity-rail")
+      .getByRole("button", { name: "Jump to latest", exact: true })
+      .click();
     await expect(page.getByTestId("tool-row").last()).toContainText("New Activity marker");
     await showChat(page);
     await page.getByRole("button", { name: "Show earlier messages", exact: true }).focus();
@@ -210,7 +217,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     });
     const stopReplay = p.replay();
     await page.getByTestId("hud-stop-session").click();
-    await expect.poll(() => f.effects.includes("pause")).toBe(true);
+    await expect.poll(() => f.effects.includes("task-stop")).toBe(true);
     const timing = await page.evaluate(
       () =>
         (window as unknown as { stopTiming: { clickAt: number; dispatchMs: number } }).stopTiming,
@@ -268,7 +275,7 @@ for (const width of [390, 640])
       await activity.focus();
       await page.keyboard.press("Enter");
       const sheet = page.getByRole("dialog", { name: "Activity" });
-      await sheet.getByRole("button", { name: "Older steps", exact: true }).focus();
+      await sheet.getByRole("button", { name: "Earlier steps", exact: true }).focus();
       await page.keyboard.press("Enter");
       await expect(sheet.getByTestId("tool-row").first()).toContainText("Replay command 101");
       await page.keyboard.press("Escape");

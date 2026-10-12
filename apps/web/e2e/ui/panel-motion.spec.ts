@@ -8,7 +8,9 @@ test("Activity tabs and filters remain below the header while scrolling", async 
   await ui.open("done");
   await ui.picture();
   if (phone) await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const rail = phone ? page.locator(".activity-sheet") : page.locator(".rail-activity");
+  else
+    await page.locator(".rail-chat").getByRole("radio", { name: "Activity", exact: true }).click();
+  const rail = phone ? page.locator(".activity-sheet") : page.locator(".rail-chat");
   const controls = rail.locator(".activity-controls");
   await expect(controls).toBeVisible();
   const scroller = rail.locator(".activity-scroll");
@@ -72,4 +74,10 @@ test("work window animates without replacing its output", async ({ page, ui }) =
   expect(
     await output?.evaluate((node) => node === document.querySelector(".work-overlay-output")),
   ).toBe(true);
+  await panel.evaluate(async (node) => {
+    await Promise.all(
+      node.getAnimations().map((animation) => animation.finished.catch(() => null)),
+    );
+  });
+  await page.screenshot({ path: test.info().outputPath("work-details.png") });
 });

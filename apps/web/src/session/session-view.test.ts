@@ -151,3 +151,21 @@ it("says plainly that a drag cancelled after its press dropped nothing", () => {
     });
   }
 });
+
+it("retains old tool summaries without needing the bounded rich-output projection", () => {
+  const model = foldEvents(
+    emptyModel(),
+    Array.from({ length: 300 }, (_, i) => [
+      ev("step.start", i * 10, { kind: "shell", intent: `Checking file ${i}` }, `tool-${i}`),
+      ev("step.end", i * 10 + 5, { status: "ok" }, `tool-${i}`),
+    ]).flat(),
+  );
+  const rows = stepRows(model);
+  expect(rows).toHaveLength(300);
+  expect(rows[0]).toMatchObject({
+    id: "tool-0",
+    stepKind: "shell",
+    label: "Checking file 0",
+    status: "ok",
+  });
+});

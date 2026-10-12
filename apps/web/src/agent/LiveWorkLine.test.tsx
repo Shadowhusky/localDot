@@ -106,3 +106,14 @@ it("keeps cost out of the steps summary because it belongs in turn metadata", ()
   expect(summary()).not.toContain("$");
   expect(summary()).toContain("3 steps");
 });
+
+it("keeps all earlier steps in the scrollable work block", () => {
+  const history = Array.from({ length: 140 }, (_, i) => step(String(i), i * 1000));
+  render(<LiveWorkLine steps={history} startMs={0} live={live("Reading the page")} />);
+  fireEvent.click(screen.getByRole("button", { expanded: false }));
+  const scroll = screen.getByRole("region", { name: "Work history" });
+  expect(scroll.querySelectorAll("li")).toHaveLength(140);
+  expect(screen.getByText("Step 0")).toBeTruthy();
+  expect(screen.getByText("Step 139")).toBeTruthy();
+  expect(screen.queryByText(/earlier steps are/)).toBeNull();
+});

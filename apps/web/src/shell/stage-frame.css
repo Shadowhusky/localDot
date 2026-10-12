@@ -1039,7 +1039,7 @@
   height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5) calc(var(--spacing) * 4);
+  padding: 0 calc(var(--spacing) * 3) calc(var(--spacing) * 3);
   border-top: 1px solid var(--color-separator);
   background: var(--color-console);
   scrollbar-width: thin;
@@ -1051,22 +1051,38 @@
 }
 .work-overlay-entry-heading {
   position: sticky;
-  top: -12px;
+  top: 0;
   z-index: 1;
-  padding-block: calc(var(--spacing) * 2);
-  background: var(--color-console);
-  display: flex;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  margin-inline: calc(var(--spacing) * -3);
+  border-bottom: 1px solid var(--color-separator);
+  background: var(--color-overlay);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: calc(var(--spacing) * 3);
+  gap: var(--spacing) calc(var(--spacing) * 3);
   margin-bottom: calc(var(--spacing) * 2);
 }
 .work-overlay-command {
-  flex: 1;
+  grid-column: 1 / -1;
   min-width: 0;
   margin: 0;
-  font-weight: 600;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
   overflow-wrap: anywhere;
   color: var(--color-fg-2);
+}
+.work-overlay-kind {
+  flex: 1;
+  font-weight: 600;
+}
+.work-overlay-intent {
+  grid-column: 1 / -1;
+  margin: 0 0 var(--spacing);
+  line-height: var(--text-body--line-height);
 }
 .work-overlay pre {
   margin: 0;

@@ -391,7 +391,17 @@ export function SettingsSheet(props: SettingsSheetProps) {
           />
         )}
       </div>
-    ) : undefined;
+    ) : (
+      <div className="settings-footer">
+        <p className="settings-footer-status" role="status">
+          {props.loading
+            ? "Loading settings…"
+            : saving || props.busy || pending
+              ? "Saving changes…"
+              : "Changes save automatically."}
+        </p>
+      </div>
+    );
 
   const keysPanel = props.keysPanel && (
     <KeysPanel

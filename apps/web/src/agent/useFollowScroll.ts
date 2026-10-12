@@ -185,6 +185,9 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       element = t.element;
     if (!element) return t.pinned;
     t.top = element.scrollTop;
+    // A streamed row can arrive before the next animation frame. Keep the old anchor at
+    // its new scroll position until pickAnchor chooses the first visible row.
+    if (t.anchor?.isConnected) t.anchorTop = topOf(t.anchor, element);
     const below = element.scrollHeight - element.clientHeight - element.scrollTop;
     // Rows that arrived before their resize was observed moved the end, not the reader; a reader who
     // scrolled back further than they grew is reading.
@@ -232,6 +235,10 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       t.jumping = false;
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       t.glide = null;
+      // A resize and the reader's first scroll can arrive in the same frame. Stop following
+      // before that resize, or it can pull the list back down over the reader's gesture.
+      setPin(false);
+      pickAnchor();
     },
     // Following the end, an element whose top the end would hide is brought to the top of the view,
     // this far below it, and held there instead. Says whether it was.

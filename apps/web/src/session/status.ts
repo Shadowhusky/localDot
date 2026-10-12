@@ -394,6 +394,14 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
       : finished("ready", "Ready", "Ready for a follow-up.");
 
   const control = state !== undefined && WORKING.has(state);
+  const step = stepAt(model, nowMs);
+  const stepRunning = step && (step.endT === undefined || step.endT > nowMs);
+  // Tool work does not emit screen action intents. Use the same recorded description in live
+  // status and Replay, without letting a completed tool masquerade as a running one.
+  if (stepRunning && (step.kind !== "gui" || !acting)) {
+    const description = (step.intent || step.title || "").replace(/\s+/g, " ").trim();
+    if (description) return running("acting", progressive(description), description, control);
+  }
   if (current && acting)
     return running("acting", progressive(current.label), current.label, control);
   if (current?.resultT !== undefined && current.ok && !current.cancel) {

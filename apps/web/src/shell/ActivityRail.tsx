@@ -21,7 +21,7 @@ import { PlanStrip } from "../agent/PlanStrip.tsx";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
-import { usePagedRows } from "../agent/usePagedRows.ts";
+import { useStepHistory } from "../agent/useStepHistory.ts";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
@@ -74,9 +74,9 @@ const FILTERS = [
   { value: "screen", label: "Screen" },
   { value: "tools", label: "Tools" },
 ] as const;
-const entryKey = (entry: ActivityEntry) => entry.key;
 // Long enough for a row's detail to finish opening before it is brought into view.
 const REVEAL_AFTER = 300;
+const entryKey = (entry: ActivityEntry) => entry.key;
 const EMPTY = emptyAgentModel();
 // dot is still at the task, so the user can still change how far it reads.
 const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
@@ -125,7 +125,7 @@ export function ActivityRail({
     () => entries.filter((entry) => matchesFilter(entry.row, filter)),
     [entries, filter],
   );
-  const page = usePagedRows(selected, entryKey, `${owner}:${filter}`);
+  const history = useStepHistory(selected, entryKey, `${owner}:${filter}`);
   // Views come from the whole history, so a failure says what dot did next even when the filter
   // or the page hides that step.
   const views = useMemo(() => {
@@ -194,21 +194,40 @@ export function ActivityRail({
     if (pane.scrollHeight > pane.clientHeight + 1) return;
     timeline.current?.querySelector("[data-current]")?.scrollIntoView?.({ block: "nearest" });
   }, [currentKey]);
-  useEffect(() => {
-    const pane = timeline.current;
-    const preserveSelection = () => {
-      const selection = window.getSelection();
-      if (!pane || !selection || selection.isCollapsed || !selection.rangeCount) return;
-      if (selection.getRangeAt(0).intersectsNode(pane)) page.freeze();
-    };
-    document.addEventListener("selectionchange", preserveSelection);
-    return () => document.removeEventListener("selectionchange", preserveSelection);
-  }, [page.freeze]);
 
   useEffect(() => {
     if (!replay || !currentKey) return;
     reveal(timeline.current?.querySelector("[data-current]") ?? null);
   }, [replay, currentKey]);
+
+  const older = () => {
+    const pane = timeline.current?.closest<HTMLElement>(".activity-scroll");
+    const top = pane?.getBoundingClientRect().top ?? 0;
+    const anchor = [
+      ...(timeline.current?.querySelectorAll<HTMLElement>("[data-anchor]") ?? []),
+    ].find((row) => row.getBoundingClientRect().bottom > top);
+    if (anchor) follow.anchorTo(anchor);
+    history.older();
+  };
+  const interrupt = () => {
+    follow.interrupt();
+    history.freeze();
+  };
+  useEffect(() => {
+    const freezeSelection = () => {
+      const selection = window.getSelection();
+      if (
+        timeline.current &&
+        selection &&
+        !selection.isCollapsed &&
+        selection.rangeCount &&
+        selection.getRangeAt(0).intersectsNode(timeline.current)
+      )
+        history.freeze();
+    };
+    document.addEventListener("selectionchange", freezeSelection);
+    return () => document.removeEventListener("selectionchange", freezeSelection);
+  }, [history.freeze]);
 
   const toggleKey = (key: string, trigger: HTMLButtonElement) => {
     const row = trigger.closest(".activity-row");
@@ -306,19 +325,15 @@ export function ActivityRail({
           ref={follow.ref}
           className="activity-scroll"
           onScroll={(event) => {
-            // Only the reader leaving the live end holds the page; the rail's own glides do not.
-            const pane = event.currentTarget;
-            if (
-              onSteps &&
-              !follow.onScroll() &&
-              pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32
-            )
-              page.freeze();
+            if (!follow.onScroll()) {
+              history.freeze();
+              if (onSteps && history.hasOlder && event.currentTarget.scrollTop < 32) older();
+            }
           }}
-          onWheel={follow.interrupt}
-          onTouchStart={follow.interrupt}
-          onPointerDown={follow.interrupt}
-          onKeyDown={follow.interrupt}
+          onWheel={interrupt}
+          onTouchStart={interrupt}
+          onPointerDown={interrupt}
+          onKeyDown={interrupt}
         >
           <div className="activity-content">
             <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab}>
@@ -328,30 +343,17 @@ export function ActivityRail({
               {!started && (
                 <p className="activity-empty">Plan and steps appear here once dot starts.</p>
               )}
-              {page.hasOlder && (
-                <Button variant="quiet" size="sm" className="activity-page" onClick={page.older}>
-                  Older steps
+              {history.hasOlder && (
+                <Button className="activity-page" size="sm" variant="quiet" onClick={older}>
+                  Earlier steps
                 </Button>
               )}
               {started && (
-                <section
-                  ref={timeline}
-                  className="activity-timeline"
-                  aria-label="Recorded steps"
-                  onPointerDownCapture={() => page.freeze()}
-                >
-                  {sessionId && page.rows.map(renderEntry)}
+                <section ref={timeline} className="activity-timeline" aria-label="Recorded steps">
+                  {sessionId && history.rows.map(renderEntry)}
                 </section>
               )}
-              {page.hasNewer && (
-                <Button variant="quiet" size="sm" className="activity-page" onClick={page.newer}>
-                  Newer steps
-                </Button>
-              )}
-              {page.retained && (
-                <p className="activity-note">This page stays put while dot keeps working.</p>
-              )}
-              {started && (!sessionId || !page.rows.length) && (
+              {started && (!sessionId || !selected.length) && (
                 <p className="activity-empty">
                   {sessionId && entries.length
                     ? "No steps match this filter."
@@ -430,7 +432,6 @@ export function ActivityRail({
             data-shown={!follow.pinned || undefined}
             inert={follow.pinned}
             onClick={() => {
-              page.latest();
               follow.jump();
             }}
           >

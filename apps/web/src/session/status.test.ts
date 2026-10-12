@@ -1161,3 +1161,15 @@ describe("a message just sent", () => {
     expect(withSending(asking, true)).toBe(asking);
   });
 });
+
+it("shows active tool intent even when the provider still reports thinking, then clears it at completion", () => {
+  const model = foldEvents(emptyModel(), [
+    ev("session.start", 0, { screen: { w: 1280, h: 800, scale: 1 }, os: "linux", title: "Test" }),
+    ev("agent.state", 1, { state: "thinking" }),
+    ev("step.start", 10, { kind: "shell", intent: "Checking the installed applications" }, "tool"),
+    ev("tool.start", 11, { tool: "shell", title: "command -v firefox" }, "tool"),
+  ]);
+  expect(taskHud(model, 100).label).toBe("Checking the installed applications");
+  foldEvents(model, [ev("step.end", 200, { status: "ok" }, "tool")]);
+  expect(taskHud(model, 300).label).toBe("Thinking…");
+});

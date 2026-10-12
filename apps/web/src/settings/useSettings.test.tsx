@@ -160,7 +160,7 @@ describe("explicit configuration save ownership", () => {
     expect(f.state.puts).toEqual([]);
     expect(result.current.draft?.choices.main?.model).toBe("second");
   });
-  it("keeps newer edits when an old PUT finishes and requires reconciliation before another save", async () => {
+  it("keeps newer edits when an old PUT finishes, then saves the newest choice without a false uncertainty", async () => {
     const f = server(),
       { result } = await opened(f);
     const held = Promise.withResolvers<Response>();
@@ -177,12 +177,16 @@ describe("explicit configuration save ownership", () => {
       await saving;
     });
     expect(result.current.draft?.choices.main?.model).toBe("second");
-    expect(result.current.uncertain).toBe(true);
-    expect(result.current.mainReady).toBe(false);
+    expect(result.current.saved?.main?.model).toBe("first");
+    expect(result.current.uncertain).toBe(false);
+    expect(result.current.saveEnabled).toBe(true);
+    f.state.put = undefined;
     await act(async () => {
       await result.current.save();
     });
-    expect(f.state.puts).toHaveLength(1);
+    expect(f.state.puts).toHaveLength(2);
+    expect(result.current.saved?.main?.model).toBe("second");
+    expect(result.current.dirty).toBe(false);
   });
   it("cannot overwrite a reopened draft with an old save response", async () => {
     const f = server(),

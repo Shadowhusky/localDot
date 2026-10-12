@@ -9,7 +9,7 @@ import {
 } from "react";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
-import { ViewerBar, ViewerMessage } from "./states.tsx";
+import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
 import {
   centred,
   dragged,
@@ -224,7 +224,7 @@ export function PictureView({
   }, [natural, apply]);
 
   const percent = `${Math.round(scale * 100)}%`;
-  const ready = natural !== null;
+  const ready = natural !== null && stage.w > 0 && stage.h > 0;
   return (
     <>
       <ViewerBar
@@ -317,6 +317,7 @@ export function PictureView({
               onError={() => setFailed(true)}
             />
           </div>
+          {!ready && <ViewerLoading label="Loading picture" />}
           {caption && <p className="viewer-caption">{caption}</p>}
         </div>
       )}

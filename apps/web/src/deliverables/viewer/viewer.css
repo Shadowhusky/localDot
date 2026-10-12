@@ -125,8 +125,9 @@
   background-color: var(--color-well);
 }
 
+/* The kit bar fills its grid track; give that track an intrinsic width. */
 .viewer-progress {
-  width: 160px;
+  min-width: 160px;
 }
 
 .viewer-loading-note {

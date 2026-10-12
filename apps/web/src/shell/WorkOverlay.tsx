@@ -266,10 +266,29 @@ export function WorkOverlay({
               {transcript.entries.map((entry) => (
                 <div className="work-overlay-entry" key={entry.id}>
                   <div className="work-overlay-entry-heading">
-                    <p className="work-overlay-command">{entry.title}</p>
+                    <span className="work-overlay-kind">{entry.kind}</span>
                     <span className="work-overlay-result" data-status={entry.status}>
-                      {entry.status === "ok" ? "Finished" : entry.status || "Running"}
+                      {entry.status === "ok"
+                        ? "Finished"
+                        : entry.status === "failed"
+                          ? "Failed"
+                          : entry.status === "cancelled"
+                            ? "Cancelled"
+                            : entry.status === "blocked"
+                              ? "Blocked"
+                              : working
+                                ? "Running"
+                                : "Stopped"}
+                      {entry.exitCode !== undefined &&
+                        entry.exitCode !== 0 &&
+                        ` · Exit ${entry.exitCode}`}
                     </span>
+                    {entry.intent && entry.intent !== entry.title && (
+                      <p className="work-overlay-intent">{entry.intent}</p>
+                    )}
+                    <p className="work-overlay-command" title={entry.title}>
+                      {entry.title}
+                    </p>
                   </div>
                   {entry.text ? (
                     <pre>{entry.text}</pre>

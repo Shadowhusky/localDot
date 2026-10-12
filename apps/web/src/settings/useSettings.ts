@@ -378,15 +378,15 @@ export function useSettings(
     setBusy(true);
     setError(null);
     let sent = false;
-    const live = () =>
+    const sameVisit = () =>
       mounted.current &&
       current.current.api === api &&
       current.current.open &&
       current.current.generation === generation &&
-      current.current.revision === revision &&
-      current.current.draft === captured &&
       !document.hidden &&
       !blocked.current;
+    const live = () =>
+      sameVisit() && current.current.revision === revision && current.current.draft === captured;
     try {
       const fresh = await loadProviderIndex(api, abort.signal);
       if (!live() || abort.signal.aborted) return;
@@ -397,17 +397,21 @@ export function useSettings(
       sent = true;
       writing.current = true;
       const next = await saveSettings(api, checked.document, abort.signal);
-      if (!live() || abort.signal.aborted) {
+      if (!sameVisit() || abort.signal.aborted) {
         if (mounted.current && current.current.api === api) {
           unresolved.current = true;
           setUncertain(true);
         }
         return;
       }
+      // The server acknowledged this document. A newer edit is still a draft, not an unknown
+      // save: retain it and let autosave serialize the next write against this baseline.
       owner.saved = next;
-      owner.draft = formOf(next);
       setSaved(next);
-      setDraft(owner.draft);
+      if (live()) {
+        owner.draft = formOf(next);
+        setDraft(owner.draft);
+      }
       setError(null);
       setPhase("ready");
     } catch (failure) {

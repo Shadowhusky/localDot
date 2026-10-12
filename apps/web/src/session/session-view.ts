@@ -1,9 +1,10 @@
-import type { Rect } from "@localdot/protocol";
+import type { EventOf, Rect } from "@localdot/protocol";
 import type { ActionState, SessionModel } from "@localdot/stage";
 import { past, progressive } from "./status.ts";
 
 export interface StepRowView {
   id: string;
+  stepKind?: EventOf<"step.start">["data"]["kind"];
   label: string;
   verb?: string;
   startT: number;
@@ -90,17 +91,44 @@ export function stepRows(model: SessionModel): StepRowView[] {
         : {}),
     });
   }
+  for (const step of model.steps) {
+    if (rows.has(step.id)) continue;
+    rows.set(step.id, {
+      id: step.id,
+      stepKind: step.kind as StepRowView["stepKind"],
+      startT: step.startT,
+      label:
+        step.intent ||
+        step.title ||
+        ({ shell: "Terminal", file: "File", browser: "Browser", gui: "Screen step", app: "App" }[
+          step.kind
+        ] ??
+          "Step"),
+      intent: step.intent,
+      status:
+        step.endT === undefined
+          ? "doing"
+          : step.status === "ok"
+            ? "ok"
+            : step.status === "cancelled"
+              ? "cancelled"
+              : "failed",
+      durationMs: step.endT === undefined ? null : Math.max(0, step.endT - step.startT),
+    });
+  }
   // The frame a step ends with is the observe appended inside it; the model keeps observes by
   // step through the actions' order: the latest observe at or before the result belongs to it.
-  return [...rows.values()].map((row) => {
-    const index = model.stepIndex.get(row.id);
-    const intent = index === undefined ? undefined : model.steps[index]?.intent;
-    return {
-      ...row,
-      ...(frameFor(model, row.id) ? { frameId: frameFor(model, row.id) } : {}),
-      ...(intent ? { intent } : {}),
-    };
-  });
+  return [...rows.values()]
+    .sort((a, b) => a.startT - b.startT)
+    .map((row) => {
+      const index = model.stepIndex.get(row.id);
+      const intent = index === undefined ? undefined : model.steps[index]?.intent;
+      return {
+        ...row,
+        ...(frameFor(model, row.id) ? { frameId: frameFor(model, row.id) } : {}),
+        ...(intent ? { intent } : {}),
+      };
+    });
 }
 
 function frameFor(model: SessionModel, step: string): string | undefined {
