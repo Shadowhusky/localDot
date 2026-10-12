@@ -60,5 +60,6 @@ test("home-screen sign-in explains where to create a link without requiring Safa
   await expect(page.getByText(/browser where you’re already signed in/)).toBeVisible();
   await expect(page.getByPlaceholder("Paste a fresh sign-in link")).toBeVisible();
   await expect(page.getByText(/Safari/)).toHaveCount(0);
+  await expect(page.locator(".sign-in-body")).toHaveCSS("opacity", "1");
   await page.screenshot({ path: test.info().outputPath("home-screen-sign-in.png") });
 });
