@@ -10,6 +10,7 @@ afterEach(cleanup);
 // search, for the Combobox's search field.
 const PLANNED: IconName[] = [
   "search",
+  "bolt",
   "check",
   "x",
   // Not in the plan's list: the Back of a sheet's nested page (T08).

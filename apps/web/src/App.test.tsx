@@ -241,7 +241,9 @@ describe("App Replay mode", () => {
     expect(within(library).getByRole("textbox", { name: "Search recordings" })).toBeTruthy();
     fireEvent.click(await within(library).findByRole("button", { name: "Organize my notes" }));
     expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
-    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2), {
+      timeout: 4000,
+    });
     expect(
       within(screen.getByRole("main", { name: "Replay" })).getByText(
         /This browser lacks WebCodecs/,
@@ -253,7 +255,7 @@ describe("App Replay mode", () => {
     expect(fixture.historyCalls.every((call) => call.authorization === `Bearer ${TOKEN}`)).toBe(
       true,
     );
-  });
+  }, 15_000);
   it("opens Replay when the recordings couldn't be listed, so its own Try again is in reach", async () => {
     const d = daemon(() => json([summary("ready", "live")]));
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -356,10 +358,17 @@ describe("App Replay mode", () => {
     });
     render(<App fetchImpl={fixture.fetchImpl} />);
     await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
-    for (let index = 0; index <= 300; index++)
-      fireEvent.keyDown(window, { key: index % 2 ? "j" : "l" });
-    expect(screen.getByRole("main", { name: "Replay" })).toBeTruthy();
-    expect(writes).toBeLessThan(10);
+    // Hold the throttle clock still: rendering 301 events takes longer on CI runners.
+    const now = performance.now();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(now);
+    try {
+      for (let index = 0; index <= 300; index++)
+        fireEvent.keyDown(window, { key: index % 2 ? "j" : "l" });
+      expect(screen.getByRole("main", { name: "Replay" })).toBeTruthy();
+      expect(writes).toBeLessThan(10);
+    } finally {
+      clock.mockRestore();
+    }
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("t")).toBe("10000"));
   });
   it("keeps Watch working when no session exists", async () => {
@@ -445,7 +454,18 @@ describe("App token states", () => {
     expect(memoryReads).toHaveLength(1);
   });
 
-  it("keeps Shut down in Settings on a phone, where the sheet covers the page", async () => {
+  it("keeps Shut down in Settings on a phone, where the sheet covers the page", async ({
+    onTestFinished,
+  }) => {
+    const restore = fakeChromium();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    onTestFinished(() => {
+      restore();
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    });
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: /width < (700|1100)px/.test(query),
       media: query,

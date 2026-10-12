@@ -422,6 +422,33 @@ describe("CellOrchestrator with keyd", () => {
     expect(keyd.cells.has(cell.id)).toBe(false);
   });
 
+  it("contains a new isolation failure after Ready without restarting the computer", async () => {
+    let broken = false;
+    const { orchestrator, store, stateOf } = await setup({
+      probe: () =>
+        broken
+          ? {
+              ...healthy,
+              ok: false,
+              selftest: {
+                ok: false,
+                ms: 1,
+                checks: [{ id: "dns", kind: "isolation", ok: false, detail: "unexpected route" }],
+              },
+            }
+          : healthy,
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    broken = true;
+    const failed = await stateOf(cell.id, "failed");
+    expect(failed.error).toContain("network isolation check failed");
+    const desktop = docker.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
+    expect(desktop?.running).toBe(false);
+    expect(desktop?.starts).toBe(1);
+    expect(keyd.cells.has(cell.id)).toBe(false);
+  });
+
   it("names the failing self-test check when a cell never gets ready", async () => {
     const stuck: DesktopdHealth = {
       ...healthy,
