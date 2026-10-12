@@ -324,6 +324,21 @@ function checkRole(
   }
   return next;
 }
+// Object insertion order and absent optional properties are not user edits.
+export function sameSettingsValue(a: unknown, b: unknown): boolean {
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([, item]) => item !== undefined)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, stable(item)]),
+      );
+    return value;
+  };
+  return JSON.stringify(stable(a)) === JSON.stringify(stable(b));
+}
 export function sameDraft(a: SettingsDraft, b: SettingsDraft): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return sameSettingsValue(a, b);
 }

@@ -119,3 +119,50 @@ test("a finger swipe switches Activity tabs without moving the sheet", async ({
   expect(Math.abs((await bounds(sheet)).y - before.y)).toBeLessThan(1);
   await cdp.detach();
 });
+
+test("opening the pinned plan preserves the steps viewport and scroll position", async ({
+  page,
+  ui,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await ui.open("done");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await expect(sheet).toBeVisible();
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => null)),
+    ),
+  );
+  const pane = sheet.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
+  await pane.dispatchEvent("touchstart");
+  await pane.evaluate((n) => {
+    n.scrollTop = 60;
+  });
+  const before = await pane.evaluate((n) => ({
+    y: n.getBoundingClientRect().y,
+    height: n.clientHeight,
+    scroll: n.scrollTop,
+  }));
+  const toggle = sheet.locator(".activity-plan .ui-disclosure-trigger");
+  for (const expanded of [true, false]) {
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", String(expanded));
+    const samples = await pane.evaluate(async (n) => {
+      const frames = [];
+      for (let i = 0; i < 35; i++) {
+        await new Promise(requestAnimationFrame);
+        frames.push({
+          y: n.getBoundingClientRect().y,
+          height: n.clientHeight,
+          scroll: n.scrollTop,
+        });
+      }
+      return frames;
+    });
+    for (const sample of samples) expect(sample).toEqual(before);
+  }
+});

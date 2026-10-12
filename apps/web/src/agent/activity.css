@@ -878,6 +878,8 @@ button.activity-usage-trigger:active {
 }
 
 .activity-plan {
+  position: relative;
+  z-index: 4;
   flex: none;
   min-height: 0;
 }
@@ -885,4 +887,17 @@ button.activity-usage-trigger:active {
   max-height: min(200px, 24dvh);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* Opening the pinned plan must not resize the virtualized step viewport. */
+.activity-plan .plan-strip-overlay {
+  position: relative;
+}
+.activity-plan .plan-strip-overlay > .ui-collapse {
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  background: var(--rail-surface);
+  border-radius: 0 0 var(--radius-group) var(--radius-group);
+  box-shadow: var(--shadow-overlay);
 }

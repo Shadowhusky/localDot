@@ -1,6 +1,6 @@
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { formOf, needsPrice, priceOf, validateForm } from "./settings-form.ts";
+import { formOf, needsPrice, priceOf, sameSettingsValue, validateForm } from "./settings-form.ts";
 import { providerFixture } from "./testing.ts";
 
 const custom = () =>
@@ -497,4 +497,14 @@ it("explicit autonomy save preserves fixed protected-input rules and applies onl
   if (!result.ok) throw new Error("valid future-task settings required");
   expect(result.document.autonomy).toEqual({ ...DEFAULT_AUTONOMY, send: "handoff" });
   expect(saved.autonomy).toEqual(DEFAULT_AUTONOMY);
+});
+
+it("compares saved settings independently of property order and omitted optional fields", () => {
+  expect(
+    sameSettingsValue(
+      { provider: "anthropic", model: "saved", key: undefined },
+      { model: "saved", provider: "anthropic" },
+    ),
+  ).toBe(true);
+  expect(sameSettingsValue({ model: "saved" }, { model: "changed" })).toBe(false);
 });

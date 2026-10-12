@@ -328,7 +328,7 @@ export function ActivityRail({
       </div>
       {plan.length > 0 && (
         <div className="activity-plan">
-          <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+          <PlanStrip overlay plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
         </div>
       )}
       <div className="activity-body">

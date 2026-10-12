@@ -28,6 +28,7 @@ import {
   type SettingsDraft,
   type SpendingDraft,
   sameDraft,
+  sameSettingsValue,
   validateForm,
 } from "./settings-form.ts";
 import { useChatgpt } from "./useChatgpt.ts";
@@ -298,7 +299,14 @@ export function useSettings(
         subscriptionModels,
       );
       const previous = checked.ok ? checked.document[role] : undefined;
-      if (previous) {
+      // Merely visiting another provider must not add the saved choice to history.
+      // It is already available for restoration, and duplicating it makes a round trip dirty.
+      const known = [
+        current.current.saved?.[role],
+        ...(models ?? []),
+        ...(current.current.saved?.models ?? []),
+      ];
+      if (previous && !known.some((choice) => sameSettingsValue(choice, previous))) {
         models = [
           ...(models ?? []).filter(
             (model) =>
@@ -394,6 +402,16 @@ export function useSettings(
       setIndex(fresh);
       const checked = validateForm(captured, previous, fresh, subscriptionModels);
       if (!checked.ok) return;
+      // Keep the previous saved model when a replacement is actually committed, not
+      // when the user merely browses providers and returns to the saved choice.
+      for (const role of ["main", "fast", "local"] as const) {
+        const old = previous[role];
+        if (old && !sameSettingsValue(old, checked.document[role])) {
+          const models = checked.document.models ?? [];
+          if (!models.some((choice) => sameSettingsValue(choice, old)))
+            checked.document.models = [...models, old].slice(-100);
+        }
+      }
       sent = true;
       writing.current = true;
       const next = await saveSettings(api, checked.document, abort.signal);
