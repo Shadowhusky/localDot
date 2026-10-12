@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "add1c24e8a6246cb7317c324fef08845b605fbab06bdfa10cc84e4ed07528cb2",
+  "inputSha256": "488487a0f8029e32bd4214014036134fa6ffb333c2d547daf577dd93b798fbb4",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -830,12 +830,12 @@
     "harness/codex/src/launch.ts": "fb02bfd25e25679ca8d74084075130f4c19fa2b56fe5b377f8859c76776ffec0",
     "harness/codex/src/native-check.test.ts": "2dd2107ace43b5438d886a514726d84ad4a7b6ff964a19d48459f62c48886a18",
     "harness/codex/src/native-check.ts": "f5b8e54456b2b6576c3ddf086b3a9bc413584df439cad5609446ce47ac87d0f1",
-    "harness/codex/src/native-recovery-live.test.ts": "489c690ad0546a266ceaa522534483f3f7c723241a49a3a03070232f0f7ec2fc",
+    "harness/codex/src/native-recovery-live.test.ts": "1248a6744fb3248322323ec7a8c3f4f3245b76b57fa104f01229923129e75de3",
     "harness/codex/src/native-supervisor.test.ts": "edeec5eaf5cfe632b86ddc7bc942be529193d2f721787a1f585b8c24813b8f38",
     "harness/codex/src/native-supervisor.ts": "a7bb981501644cd67635cfa0e1faa8dafd561d159fbf5e19a1a1c36ecb712251",
     "harness/codex/src/paths.ts": "7354f68319419f06aef73ca165486478a35f4bdec441d7980565267645e6cede",
-    "harness/codex/src/process.test.ts": "de210f408528adbd7d139c3803eab8a2d507a598de5db82691037e87bd508b5c",
-    "harness/codex/src/process.ts": "e158cc8a18e9f8bd6f10c5e21d15149bccad9aa008583baa8e4eb974d05ee77a",
+    "harness/codex/src/process.test.ts": "e301d50e5791aee5600c4fa55f81e4a1cbfaf5bc9d0868ed1e139e98be4aa8bf",
+    "harness/codex/src/process.ts": "1eeef67f2e292b921af3d2dcd14eae274dc7259102422169ef900c3135ce3676",
     "harness/codex/src/profile.test.ts": "002a2653efab268a9dc085287552311f2fd594ef6325f2414bfbff373a97bfe4",
     "harness/codex/src/profile.ts": "6c31ee42c29cc2cd58cc7aea0adf28817e52dbf497ec908d3af3212080ef2782",
     "harness/codex/src/protocol.test.ts": "140d6450d34d1ac66e730cc9f865c57adb4af6edf1a5934595d20938a6d20166",
@@ -1031,7 +1031,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "72d8a6469e2d38973bc2f59096ab8609b65c91965395095885fc0c4fedb8528d",
+  "reportSha256": "7ee1f93614d7798047f8f5859f1c4b0f8fde38834ac7be0775f38003284825b5",
   "exit": {
     "code": 0,
     "signal": null

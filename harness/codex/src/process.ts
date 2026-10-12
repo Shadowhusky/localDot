@@ -108,7 +108,9 @@ export function spawnCodex(input: SpawnCodexInput): CodexProcess {
         groupGone = true;
         return true;
       }
-      signalFault = true;
+      // A failed existence probe is not proof of retirement. Keep polling for ESRCH
+      // until the existing deadline (Darwin can report EPERM while reaping a group).
+      // Actual TERM/KILL failures remain sticky in signalGroup below.
       return false;
     }
   };

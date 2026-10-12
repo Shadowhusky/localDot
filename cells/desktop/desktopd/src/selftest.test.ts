@@ -446,8 +446,10 @@ describe("nodeProbes", () => {
     expect(await probes.tcpConnect("127.0.0.1", port, 1000)).toBe("ECONNREFUSED");
     const reset = createServer((s) => s.resetAndDestroy()).listen(0, "127.0.0.1");
     await once(reset, "listening");
-    expect(await probes.tcpConnect("127.0.0.1", (reset.address() as AddressInfo).port, 1000)).toBe(
-      "closed",
+    // An immediate RST can reach the client before its connect callback on macOS.
+    // Keep the raw pre-connect error; production isolation checks remain fail-closed.
+    expect(["closed", "ECONNRESET"]).toContain(
+      await probes.tcpConnect("127.0.0.1", (reset.address() as AddressInfo).port, 1000),
     );
     reset.close();
     const banner = createServer((s) => s.write("220 ready\r\n")).listen(0, "127.0.0.1");
