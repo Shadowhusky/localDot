@@ -67,3 +67,12 @@ export function CommandsButton({ unavailable }: { unavailable?: string }) {
     />
   );
 }
+
+export function CommandsMenuItem() {
+  const hidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
+  return (
+    <MenuItem icon="terminal" onSelect={hidden ? requestShowCommands : requestHideCommands}>
+      {hidden ? "Show commands" : "Hide commands"}
+    </MenuItem>
+  );
+}

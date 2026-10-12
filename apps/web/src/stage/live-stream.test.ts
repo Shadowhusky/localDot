@@ -126,7 +126,7 @@ it("tells its relay each second what this viewer can take, from the round trip t
     send.mockClear();
     visibility = "hidden";
     await vi.advanceTimersByTimeAsync(250);
-    expect(send.mock.calls).toEqual([[qualityMessage({ visible: false })]]);
+    expect(send.mock.calls).toEqual([[qualityMessage({ visible: false })], ["STOP_VIDEO"]]);
   } finally {
     Reflect.deleteProperty(document, "visibilityState");
     restore();
@@ -208,30 +208,23 @@ it("tells its relay it asks for nothing once no stage shows it, unless a stage t
   }
 });
 
-it("keeps its client when the page comes back after a long time hidden, unless its socket died", async () => {
+it("releases hidden clients even when the visibility event was missed, and resumes once", async () => {
   let visibility: DocumentVisibilityState = "visible";
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
   const { stream, minted, transport, restore } = await relayClient();
+  const close = vi.fn();
+  Object.assign(transport, { close });
   try {
-    expect(minted()).toBe(1);
     visibility = "hidden";
     await vi.advanceTimersByTimeAsync(250);
-    // A backgrounded phone runs no timers at all.
-    vi.setSystemTime(Date.now() + STALE_MS * 3);
+    expect(close).toHaveBeenCalledOnce();
+    expect(clients()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(STALE_MS * 3);
+    expect(minted()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
     visibility = "visible";
     stream.refresh();
     await vi.advanceTimersByTimeAsync(500);
-    expect(minted()).toBe(1);
-    visibility = "hidden";
-    await vi.advanceTimersByTimeAsync(250);
-    vi.setSystemTime(Date.now() + STALE_MS * 3);
-    visibility = "visible";
-    // A timer that fires before the page hears it is visible again changes nothing either.
-    await vi.advanceTimersByTimeAsync(250);
-    expect(minted()).toBe(1);
-    transport.readyState = 3;
-    stream.refresh();
-    await vi.advanceTimersByTimeAsync(0);
     expect(minted()).toBe(2);
   } finally {
     Reflect.deleteProperty(document, "visibilityState");
@@ -394,5 +387,53 @@ it("does not attach a ticket that finishes after the page hides", async () => {
     expect(vi.getTimerCount()).toBe(0);
   } finally {
     Reflect.deleteProperty(document, "visibilityState");
+  }
+});
+
+it("recovers a silent open stream, and closes each retired viewer during repeated reconnects", async () => {
+  const { stream, send, minted, transport, restore } = await relayClient();
+  const close = vi.fn();
+  Object.assign(transport, { close });
+  try {
+    stream.presented(1);
+    await vi.advanceTimersByTimeAsync(STALE_MS + 250);
+    expect(send).toHaveBeenCalledWith("REQUEST_KEYFRAME");
+    expect(minted()).toBe(1);
+    await vi.advanceTimersByTimeAsync(TAP_STALL_MS);
+    expect(minted()).toBe(2);
+    for (let n = 0; n < 5; n++) {
+      const next = clients().at(-1)!;
+      playInClient(next, `fresh-${n}`);
+      const nextClose = vi.fn();
+      Object.assign(next.contentWindow!, {
+        selkiesTransport: { readyState: 1, send: vi.fn(), close: nextClose },
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      stream.presented(n + 2);
+      expect(clients()).toHaveLength(1);
+      stream.replace();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(clients()).toHaveLength(2);
+    }
+    expect(close).toHaveBeenCalledOnce();
+  } finally {
+    restore();
+  }
+});
+
+it("keeps a still screen when it answers the keyframe probe", async () => {
+  const { stream, send, minted, restore } = await relayClient();
+  try {
+    const frame = clients()[0]!;
+    stream.presented(1);
+    await vi.advanceTimersByTimeAsync(STALE_MS + 250);
+    expect(send).toHaveBeenCalledWith("REQUEST_KEYFRAME");
+    Object.assign(frame.contentWindow!, { videoChunksReceived: 1 });
+    stream.presented(2);
+    await vi.advanceTimersByTimeAsync(TAP_STALL_MS + 250);
+    expect(minted()).toBe(1);
+    expect(stream.picture).toBe("live");
+  } finally {
+    restore();
   }
 });

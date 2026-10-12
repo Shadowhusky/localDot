@@ -7,7 +7,7 @@ import {
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
@@ -138,7 +138,7 @@ import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
-import { CommandsButton, PanelMenu } from "./shell/PanelMenu.tsx";
+import { CommandsButton, CommandsMenuItem, PanelMenu } from "./shell/PanelMenu.tsx";
 import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
 import { CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
@@ -152,7 +152,13 @@ import { useTabAttention } from "./shell/tab-attention.ts";
 import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { WorkOverlay } from "./shell/WorkOverlay.tsx";
-import { backgroundStep, requestShowCommands } from "./shell/work-overlay.ts";
+import {
+  backgroundStep,
+  commandsHidden,
+  onCommandsVisibility,
+  requestHideCommands,
+  requestShowCommands,
+} from "./shell/work-overlay.ts";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -340,6 +346,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 const SENDING_HOLD_MS = 20_000;
 
 function Theatre({ api }: { api: ApiClient }) {
+  const workHidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
   const appearance = useAppearance();
   const showDot = useShowDot();
   const streamChoice = useStreamPreference(showToast);
@@ -727,6 +734,7 @@ function Theatre({ api }: { api: ApiClient }) {
     () =>
       !phone && (
         <RowMenu label="More" size={32}>
+          <CommandsMenuItem />
           <MenuItem icon="repeat" onSelect={() => showRoutines.current()}>
             Routines
           </MenuItem>
@@ -1754,7 +1762,6 @@ function Theatre({ api }: { api: ApiClient }) {
                   <WorkOverlay
                     key={session.sessionId}
                     model={agent.model}
-                    restoreInMenu={phone || full || focus}
                     working={!!appStatus.control && !yours && !agent.model.ended}
                   />
                 ) : undefined
@@ -2074,7 +2081,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       },
                       { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
                       {
-                        label: "Show commands",
+                        label: workHidden ? "Show commands" : "Hide commands",
                         icon: "terminal",
                         disabledReason:
                           curtain.up ||
@@ -2086,7 +2093,7 @@ function Theatre({ api }: { api: ApiClient }) {
                           ![...agent.model.steps.values()].some(backgroundStep)
                             ? "No commands available for this computer yet"
                             : undefined,
-                        run: requestShowCommands,
+                        run: workHidden ? requestShowCommands : requestHideCommands,
                       },
                       {
                         label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
