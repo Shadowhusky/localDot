@@ -12,6 +12,7 @@ import {
   isSafari,
   Matrix,
   Rectangle,
+  RendererType,
   RenderTexture,
   Sprite,
   Texture,
@@ -52,6 +53,8 @@ export class PixiPresenter implements Presenter {
   readonly #painted = new FrameRate(performance.now());
   warned = false;
   #source: ImageSource | null = null;
+  // Canvas2D redraws its source on every render; a closed VideoFrame cannot be retained.
+  #softwareFrame: OffscreenCanvas | null = null;
   // The newest frame, uploaded at the next render; one it supersedes is closed unseen.
   #next: VideoFrame | null = null;
   #latestSize: { w: number; h: number } | null = null;
@@ -120,10 +123,20 @@ export class PixiPresenter implements Presenter {
     this.video.visible = true;
     const w = frame.displayWidth;
     const h = frame.displayHeight;
+    let resource: VideoFrame | OffscreenCanvas = frame;
+    if (this.app.renderer.type === RendererType.CANVAS) {
+      if (!this.#softwareFrame) this.#softwareFrame = new OffscreenCanvas(w, h);
+      if (this.#softwareFrame.width !== w) this.#softwareFrame.width = w;
+      if (this.#softwareFrame.height !== h) this.#softwareFrame.height = h;
+      const context = this.#softwareFrame.getContext("2d");
+      if (!context) throw new Error("Cannot create the software video surface.");
+      context.drawImage(frame, 0, 0, w, h);
+      resource = this.#softwareFrame;
+    }
     if (!this.#source || this.#frameSize?.w !== w || this.#frameSize?.h !== h) {
       this.#source?.destroy();
       this.#source = new ImageSource({
-        resource: frame,
+        resource,
         width: w,
         height: h,
         alphaMode: "premultiplied-alpha",
@@ -134,7 +147,7 @@ export class PixiPresenter implements Presenter {
       this.#frameSize = { w, h };
       this.#place();
     } else {
-      this.#source.resource = frame;
+      this.#source.resource = resource;
       this.#source.update();
     }
   }
@@ -160,6 +173,7 @@ export class PixiPresenter implements Presenter {
     this.video.texture = Texture.EMPTY;
     this.#source?.destroy();
     this.#source = null;
+    this.#softwareFrame = null;
     this.#frameSize = null;
     this.#latestSize = null;
   }

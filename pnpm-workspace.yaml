@@ -9,6 +9,7 @@ packages:
   - "harness/*"
 
 patchedDependencies:
+  'pixi.js@8.21.0': patches/pixi.js@8.21.0.patch
   '@anthropic-ai/sandbox-runtime@0.0.78': patches/sandbox-runtime-0.0.78.patch
 
 minimumReleaseAge: 20160

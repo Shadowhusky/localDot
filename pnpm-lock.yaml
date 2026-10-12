@@ -8,6 +8,9 @@ patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.78':
     hash: ca43296255c0b8e728e47f90639bae5b51f8eb26b032aec00a2df48364ac4e66
     path: patches/sandbox-runtime-0.0.78.patch
+  pixi.js@8.21.0:
+    hash: aedf1b13e3a2878e19772be9ed09395b1db2d854fb25113bfe158810193e6873
+    path: patches/pixi.js@8.21.0.patch
 
 importers:
 
@@ -149,7 +152,7 @@ importers:
         version: 6.3.289
       pixi.js:
         specifier: 8.21.0
-        version: 8.21.0
+        version: 8.21.0(patch_hash=aedf1b13e3a2878e19772be9ed09395b1db2d854fb25113bfe158810193e6873)
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -4428,7 +4431,7 @@ snapshots:
 
   picomatch@4.0.7: {}
 
-  pixi.js@8.21.0:
+  pixi.js@8.21.0(patch_hash=aedf1b13e3a2878e19772be9ed09395b1db2d854fb25113bfe158810193e6873):
     dependencies:
       '@pixi/colord': 2.9.6
       '@types/earcut': 3.0.0

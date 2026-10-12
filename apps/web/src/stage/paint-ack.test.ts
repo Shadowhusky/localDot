@@ -31,6 +31,7 @@ vi.mock("./pixi-presenter.ts", () => ({
 }));
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.resetModules();
 });
 
@@ -49,6 +50,8 @@ it.each([false, true])(
       onmessage: null,
       postMessage: (message) => posted.push(message),
     };
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
     let tick: FrameRequestCallback | undefined;
     vi.stubGlobal("self", scope);
     vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => {
@@ -90,6 +93,11 @@ it.each([false, true])(
         expect(posted.some((m) => m.type === "stats" && m.sourceId === 2)).toBe(false);
         expect(posted.some((m) => m.type === "error")).toBe(true);
         state.failRender = false;
+        // A failed renderer now backs off before retrying; no acknowledgement during that wait.
+        now = 500;
+        tick?.(now);
+        expect(posted.some((m) => m.type === "stats" && m.sourceId === 2)).toBe(false);
+        now = 1000;
       }
       tick?.(16);
       expect(state.painted).toBe("new");

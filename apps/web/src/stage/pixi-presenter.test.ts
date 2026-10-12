@@ -55,6 +55,7 @@ vi.mock("pixi.js", () => {
     async init() {}
   }
   return {
+    RendererType: { CANVAS: 4 },
     Application,
     Container,
     Sprite,
@@ -123,4 +124,39 @@ it("counts the frames it paints, not those a newer one superseded", async () => 
   expect(p.received).toBe(33);
   expect(p.presented).toBe(16);
   expect(p.fps).toBe(16);
+});
+
+it("keeps a reusable software surface after the decoded frame closes", async () => {
+  const copied: unknown[] = [];
+  class SoftwareCanvas {
+    constructor(
+      public width: number,
+      public height: number,
+    ) {}
+    getContext() {
+      return { drawImage: (frame: unknown) => copied.push(frame) };
+    }
+  }
+  vi.stubGlobal("OffscreenCanvas", SoftwareCanvas);
+  try {
+    const p = await presenter();
+    Object.assign(p.app.renderer, { type: 4 });
+    const first = frame(1280, 800);
+    p.present(first as unknown as VideoFrame);
+    p.render();
+    const surface = p.video.texture.source.resource;
+    expect(surface).toBeInstanceOf(SoftwareCanvas);
+    expect(first.closed).toBe(true);
+    p.render();
+    expect(copied).toEqual([first]);
+    const second = frame(2560, 1600);
+    p.present(second as unknown as VideoFrame);
+    p.render();
+    expect(p.video.texture.source.resource).toBe(surface);
+    expect(surface).toMatchObject({ width: 2560, height: 1600 });
+    expect(copied).toEqual([first, second]);
+    expect(second.closed).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
