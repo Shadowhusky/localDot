@@ -117,6 +117,7 @@ export class ScreenController {
   #userReady = false;
   readonly #active = new Set<Promise<void>>();
   readonly #leases = new WeakSet<ScreenLease>();
+  readonly #tabs = new WeakMap<ScreenLease, string>();
   #holding: Promise<void> | undefined;
   #regranting: Promise<void> | undefined;
   #containment: Promise<void> | undefined;
@@ -181,6 +182,8 @@ export class ScreenController {
       },
     });
     this.#leases.add(lease);
+    if (selection.screen === "browser" && this.#browser?.tabId)
+      this.#tabs.set(lease, this.#browser.tabId);
     return lease;
   }
 
@@ -205,7 +208,25 @@ export class ScreenController {
       !owner.tabId
     )
       throw new ScreenControlError();
-    return { client: owner.client, permit: owner.permit, tabId: owner.tabId };
+    return {
+      client: owner.client,
+      permit: owner.permit,
+      tabId: this.#tabs.get(lease) ?? owner.tabId,
+    };
+  }
+
+  // A read follows the visible tab, including popup sign-in windows. Input stays pinned to
+  // the tab admitted for its lease; discovering a popup must never replay an old click there.
+  async refreshBrowser(lease: ScreenLease): Promise<void> {
+    if (!this.#leases.has(lease)) throw new ScreenControlError();
+    lease.check();
+    if (lease.selection.screen !== "browser") return;
+    const owner = this.#browser;
+    if (!owner?.permit) throw new ScreenControlError();
+    const tabId = await this.#foreground(owner, this.#browserScope(owner, lease));
+    lease.check();
+    owner.tabId = tabId;
+    this.#tabs.set(lease, tabId);
   }
 
   async switchTo(screen: ScreenName, raw: ScreenScope): Promise<ScreenSwitchData> {
@@ -752,7 +773,10 @@ export class ScreenController {
       scope.check();
       if (!listing.tabs.length || listing.tabs.some((tab) => !tab.ready))
         throw new ScreenControlError();
-      for (const tab of listing.tabs) {
+      const ordered = [...listing.tabs].sort(
+        (a, b) => Number(b.id === owner.tabId) - Number(a.id === owner.tabId),
+      );
+      for (const tab of ordered) {
         try {
           // The admitted clock request first resolves BrowserGeometry: unique root
           // URL across all tabs, native active window, and two matching surfaces.

@@ -29,6 +29,7 @@ li { height: 60px; line-height: 60px; margin: 0 0 10px; padding-left: 16px; back
 </style></head><body>
 <canvas id="background" width="1280" height="800" style="position:fixed;inset:0;width:100vw;height:100vh;z-index:-1"></canvas>
 <form id="login" method="post" action="/session"><input name="username" aria-label="Account" autocomplete="username"><input name="password" aria-label="Password" type="password" autocomplete="current-password"><button>Sign in</button></form>
+<button id="popup" style="position:absolute;left:500px;top:180px" onclick="window.open('http://drag.localdot.test/popup', 'signin', 'popup,width=600,height=600')">Open sign-in window</button>
 <input id="volume" aria-label="Volume" type="range" min="0" max="100" value="0">
 <ul id="list"><li draggable="true">Alpha</li><li draggable="true">Beta</li><li draggable="true">Gamma</li></ul>
 <script>
@@ -528,4 +529,40 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       expect(JSON.stringify(await client.observe(permit, tabId, owner()))).not.toContain("123456");
     },
   );
+  it("reads a sign-in popup after opening it from the page", async () => {
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    await title();
+    const button = { at: { x: 580, y: 277 } };
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: button.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    let popup = "";
+    for (let i = 0; i < 40 && !popup; i++) {
+      popup = (await client.tabs(owner())).tabs.find((t) => t.id !== tabId && t.ready)?.id ?? "";
+      if (!popup) await sleep(250);
+    }
+    expect(popup).not.toBe("");
+    await expect
+      .poll(
+        async () => {
+          try {
+            await client.clock(permit, popup, owner());
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 10000 },
+      )
+      .toBe(true);
+    expect((await client.read(permit, popup, { maxChars: 500 }, owner())).title).toMatch(/^range/);
+    expect(await client.observe(permit, popup, owner())).toHaveProperty("frame");
+  });
 });

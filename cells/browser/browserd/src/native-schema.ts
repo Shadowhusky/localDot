@@ -184,7 +184,12 @@ const replies = {
             frame: schema.tuple([coordinate, coordinate, dimension, dimension]),
             active: schema.boolean(),
           })
-          .transform(({ id, frame, active }) => ({ id, frame, active })),
+          .transform(({ id, frame, active, x, y, w, h }) => ({
+            id,
+            frame,
+            active,
+            client: [x, y, w, h] as const,
+          })),
       )
       .max(256),
   }),

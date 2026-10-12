@@ -66,6 +66,37 @@ function setup(scale: 1 | 2 = 2) {
 }
 
 describe("browser measured geometry", () => {
+  it("matches a decorated popup's native client bounds without weakening frame checks", async () => {
+    const peer = setup();
+    peer.targets.window.mockResolvedValue({
+      left: 0,
+      top: 12,
+      width: 1280,
+      height: 788,
+      windowState: "maximized",
+    });
+    peer.nativeCommand.mockImplementation(async (method) =>
+      method === "windows"
+        ? {
+            windows: [
+              { id: 8, active: true, frame: [0, 0, 2560, 1600], client: [0, 24, 2560, 1576] },
+            ],
+          }
+        : { window: 8, page: peer.page },
+    );
+    await expect(peer.geometry.read("tab", peer.controller.signal)).resolves.toHaveProperty(
+      "document",
+    );
+    peer.targets.window.mockResolvedValue({
+      left: 0,
+      top: 24,
+      width: 1280,
+      height: 776,
+      windowState: "maximized",
+    });
+    await expect(peer.geometry.read("tab", peer.controller.signal)).rejects.toThrow("unavailable");
+  });
+
   it.each(["horizontal", "vertical"])(
     "refuses document rounding before fractional %s scroll",
     async (axis) => {

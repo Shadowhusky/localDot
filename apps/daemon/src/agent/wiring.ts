@@ -463,6 +463,7 @@ export function createAgent(d: AgentWiringDeps) {
     };
     try {
       screen = session.screens ? session.screenLease(lease) : undefined;
+      if (screen) await session.screens?.refreshBrowser(screen);
       const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
       if (screen && !binding) throw new AgentError(409, "The selected screen is unavailable.");
       const observationSignal = screen

@@ -123,7 +123,9 @@ describe("browser private native protocol", () => {
       ],
     });
     const result = await pending;
-    expect(result).toEqual({ windows: [{ id: 5, frame: [0, 0, 2560, 1600], active: true }] });
+    expect(result).toEqual({
+      windows: [{ id: 5, frame: [0, 0, 2560, 1600], client: [0, 20, 2560, 1580], active: true }],
+    });
     expect(JSON.stringify(result)).not.toContain("private canary");
     expect(JSON.stringify(result)).not.toContain("Chromium");
   });

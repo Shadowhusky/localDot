@@ -1,5 +1,6 @@
 import {
   type BrowserNavigateInput,
+  type ComputerAction,
   clipText,
   isConnectorToolName,
   isToolName,
@@ -312,6 +313,11 @@ async function dispatchAdmitted(
         activeLease.check();
         screen.check();
       };
+      if (
+        name === "browser_read" ||
+        (name === "computer" && (frozen as ComputerAction).action === "screenshot")
+      )
+        await session.screens.refreshBrowser(screen);
       if (!deps.tools.bindScreen) throw new Error("The selected screen is unavailable.");
       ctx.nativeScreen = deps.tools.bindScreen(session, screen);
       if (

@@ -402,6 +402,53 @@ describe("session screen coordinator", () => {
     await f.controller.close();
   });
 
+  it("refreshes a read onto a popup while keeping previously admitted input pinned", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    const previous = f.controller.lease(f.scope);
+    const popup = randomUUID();
+    f.client.tabs.mockResolvedValue({
+      tabs: [
+        { id: f.tabId, ready: true },
+        { id: popup, ready: true },
+      ],
+    });
+    f.client.clock.mockImplementation(async (_permit, id, scope) => {
+      scope.check();
+      if (id !== popup) throw new BrowserClientError("unavailable");
+      return { mono: 50 };
+    });
+    const read = f.controller.lease(f.scope);
+    await f.controller.refreshBrowser(read);
+    expect(f.controller.browserAccess(read).tabId).toBe(popup);
+    expect(f.controller.browserAccess(previous).tabId).toBe(f.tabId);
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    read.finish();
+    previous.finish();
+    const next = f.controller.lease(f.scope);
+    expect(f.controller.browserAccess(next).tabId).toBe(popup);
+    next.finish();
+    await f.controller.close();
+  });
+
+  it("cannot refresh a read after the user takes control", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    const lease = f.controller.lease(f.scope);
+    const popup = randomUUID();
+    f.client.tabs.mockResolvedValue({ tabs: [{ id: popup, ready: true }] });
+    const held = Promise.withResolvers<{ mono: number }>();
+    f.client.clock.mockReturnValue(held.promise);
+    const pending = f.controller.refreshBrowser(lease);
+    const result = expect(pending).rejects.toThrow();
+    const taking = f.controller.takeOver();
+    held.resolve({ mono: 50 });
+    await result;
+    lease.finish();
+    await taking;
+    await f.controller.close();
+  });
+
   it("says the web browser is starting only while it is", async () => {
     const f = fixture();
     vi.mocked(f.deps.browser.start).mockRejectedValue(new Error("synthetic start failure"));
