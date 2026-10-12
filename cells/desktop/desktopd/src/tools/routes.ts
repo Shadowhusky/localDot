@@ -7,6 +7,7 @@ import {
   FileWriteRequest,
   type ShellFailure,
   ShellRequest,
+  ShellStopRequest,
   webUrl,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
@@ -148,6 +149,8 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
       return failure(c, error);
     }
   });
+  // Named runs that /shell/stop may end while their response stays open to report the result.
+  const runs = new Map<string, AbortController>();
   app.post("/shell", async (c) => {
     const req = await body(c, ShellRequest);
     if (req instanceof Response) return req;
@@ -157,7 +160,12 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
     } catch {
       return c.text("working directory must be inside the home", 400);
     }
+    if (req.id !== undefined && runs.has(req.id)) return c.text("shell run id is in use", 409);
     const stopped = new AbortController();
+    const requested = new AbortController();
+    if (req.id !== undefined) runs.set(req.id, requested);
+    // `signal` is the response's lifetime. A requested stop ends only the command, so its
+    // confirmed result is still sent.
     const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
     const encoder = new TextEncoder();
     const output = new ReadableStream<Uint8Array>({
@@ -174,7 +182,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
               timeoutMs: req.timeoutMs,
               maxOutputBytes: req.maxOutputBytes,
               env: shellEnv(deps.env, deps.home),
-              signal,
+              signal: AbortSignal.any([signal, requested.signal]),
             },
             send,
           );
@@ -191,6 +199,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
             } else send({ error: "shell command failed", status: 500 });
           }
         } finally {
+          if (req.id !== undefined && runs.get(req.id) === requested) runs.delete(req.id);
           try {
             controller.close();
           } catch {
@@ -203,6 +212,14 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
       },
     });
     return c.body(output, 200, { "content-type": "application/x-ndjson" });
+  });
+  app.post("/shell/stop", async (c) => {
+    const req = await body(c, ShellStopRequest);
+    if (req instanceof Response) return req;
+    const run = runs.get(req.id);
+    if (!run) return c.text("no running shell with that id", 404);
+    run.abort(new Error("shell stop requested"));
+    return c.body(null, 204);
   });
 
   app.post("/files/read", async (c) => {
