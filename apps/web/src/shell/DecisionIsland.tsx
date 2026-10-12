@@ -47,6 +47,7 @@ export function ApprovalDecision({
 }: ApprovalDecisionProps) {
   const value = CardSchema.safeParse(card);
   const heading = useRef<HTMLHeadingElement>(null);
+  const offeredFocus = useRef(false);
   const [now, setNow] = useState(Date.now());
   const [whole, setWhole] = useState<ReadonlyMap<number, string>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -63,7 +64,13 @@ export function ApprovalDecision({
     };
   }, []);
   useEffect(() => {
-    if (enabled && !document.hidden) heading.current?.focus({ preventScroll: true });
+    if (!enabled || offeredFocus.current) return;
+    offeredFocus.current = true;
+    // This non-modal prompt arrives in the background. Keep the user's current control and
+    // caret, and never take focus again just because the task reconnects.
+    const active = document.activeElement;
+    if (!document.hidden && (!active || active === document.body))
+      heading.current?.focus({ preventScroll: true });
   }, [enabled]);
   const partial = new Map(value.data?.partial?.map(({ field, length }) => [field, length]));
   if (

@@ -47,6 +47,37 @@ it("asks in the action's own verb and moves focus to the question", () => {
   expect(screen.getByText(/always needs your OK/)).toBeTruthy();
 });
 
+it("preserves a draft's focus and selection when an approval arrives or reconnects", () => {
+  const view = render(<textarea aria-label="Message" defaultValue="Keep typing this draft" />);
+  const field = screen.getByRole("textbox") as HTMLTextAreaElement;
+  field.focus();
+  field.setSelectionRange(5, 11);
+  const show = (enabled: boolean) =>
+    view.rerender(
+      <>
+        <textarea aria-label="Message" defaultValue="Keep typing this draft" />
+        {decision({ enabled })}
+      </>,
+    );
+  show(true);
+  expect(document.activeElement).toBe(field);
+  show(false);
+  show(true);
+  expect(document.activeElement).toBe(field);
+  expect([field.selectionStart, field.selectionEnd]).toEqual([5, 11]);
+  expect(field.value).toBe("Keep typing this draft");
+});
+
+it("does not refocus an approval after the user leaves it and the task reconnects", () => {
+  const view = render(decision());
+  const title = screen.getByRole("heading", { name: "Send this email?" });
+  expect(document.activeElement).toBe(title);
+  title.blur();
+  view.rerender(decision({ enabled: false }));
+  view.rerender(decision());
+  expect(document.activeElement).toBe(document.body);
+});
+
 it.each([
   ["not enabled", { enabled: false }],
   ["pending", { pending: true }],
