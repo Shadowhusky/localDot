@@ -117,6 +117,70 @@ class BrowserSurfaceTests(unittest.TestCase):
         result = inspect_surface(peer.commands, 8, peer.atspi, clock=lambda: next(ticks))
         self.assertIsNone(result['page'])
 
+    def test_focus_budget_exhaustion_keeps_verified_page_geometry(self):
+        peer = setup()
+        peer.document.children = [Node('section', [Node('section') for _ in range(100)])
+                                  for _ in range(20)]
+        page = peer.inspect()['page']
+        self.assertIsNotNone(page)
+        self.assertEqual(page['focus'], 'unknown')
+
+    def test_focus_timeout_keeps_geometry_only_within_overall_deadline(self):
+        for elapsed in [0.4, 1.0]:
+            peer = setup()
+            now = [0.0]
+            def state():
+                now[0] = elapsed
+                return SimpleNamespace(contains=lambda _state: False)
+            peer.field.get_state_set = state
+            result = inspect_surface(peer.commands, 8, peer.atspi,
+                                     read_executable=lambda _path: '/usr/lib/chromium/chromium',
+                                     clock=lambda: now[0])
+            if elapsed < 0.9:
+                self.assertEqual(result['page']['focus'], 'unknown')
+            else:
+                self.assertIsNone(result['page'])
+
+    def test_focus_budget_does_not_skip_final_window_check(self):
+        peer = setup()
+        peer.document.children = [Node('section', [Node('section') for _ in range(100)])
+                                  for _ in range(20)]
+        identities = iter([8, 9])
+        peer.commands.active_window = lambda: next(identities)
+        self.assertIsNone(peer.inspect()['page'])
+
+    def collection(self, peer, matches):
+        peer.atspi.MatchRule = SimpleNamespace(new=lambda *args: object())
+        peer.atspi.StateSet = SimpleNamespace(new=lambda states: states)
+        peer.atspi.CollectionMatchType = SimpleNamespace(ALL=0)
+        peer.atspi.CollectionSortOrder = SimpleNamespace(CANONICAL=0)
+        def get_matches(rule, order, count, traverse):
+            self.assertEqual(count, 2)
+            self.assertTrue(traverse)
+            return matches
+        peer.document.get_collection_iface = lambda: SimpleNamespace(get_matches=get_matches)
+
+    def test_native_collection_finds_offscreen_editor_focus(self):
+        peer = setup()
+        peer.field.states.remove('showing')
+        peer.field.get_parent = lambda: peer.document
+        self.collection(peer, [peer.field])
+        peer.document.get_child_count = lambda: self.fail('should not walk page children')
+        self.assertEqual(peer.inspect()['page']['focus'], 'page')
+
+    def test_document_itself_can_hold_focus(self):
+        peer = setup()
+        peer.document.states.add('focused')
+        self.collection(peer, [])
+        self.assertEqual(peer.inspect()['page']['focus'], 'page')
+
+    def test_native_collection_rejects_ambiguous_or_unrelated_focus(self):
+        for count in [0, 1, 2]:
+            peer = setup()
+            peer.field.get_parent = lambda: None
+            self.collection(peer, [peer.field] * count)
+            self.assertEqual(peer.inspect()['page']['focus'], 'unknown')
+
     def test_refuses_missing_document_attribute_without_exposing_exception_text(self):
         peer = setup()
         peer.document.url = ''

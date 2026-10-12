@@ -528,7 +528,8 @@ export function projectBrowser(
           ...(checked ? { checked } : {}),
         }),
       );
-      if (targets.length > 512) throw new BrowserPerceptionError("metadata");
+      // The validated snapshot already bounds this work by MAX_SECRET_NODES.
+      // Keep all targets for hit testing; only the agent-facing element list is capped.
       const target = targets.at(-1);
       if (!target) throw new BrowserPerceptionError("metadata");
       projected.set(nodeId, target);

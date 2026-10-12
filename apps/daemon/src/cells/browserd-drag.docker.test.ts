@@ -70,6 +70,28 @@ const JS_PAGE = PAGE.replace(
   </script></body>`,
   );
 
+// A dense page whose editor keeps focus in a zero-height, offscreen element, as web apps do.
+const LARGE_FOCUS_PAGE = PAGE.replace(
+  "</body>",
+  `<script>
+const dense = document.createElement('div');
+dense.style.cssText = 'position:absolute;left:450px;top:450px;width:700px';
+for(let group=0;group<20;group++) {
+  const row = document.createElement('div');
+  for(let cell=0;cell<50;cell++) {
+    const button = document.createElement('button');
+    button.textContent = 'Cell'; button.style.cssText = 'width:6px;height:6px;padding:0;font-size:1px';
+    row.append(button);
+  }
+  dense.append(row);
+}
+document.body.append(dense);
+const editor = document.createElement('div');
+editor.tabIndex=0; editor.style.cssText='position:absolute;left:-10000px;top:10000px;width:10000px;height:0;overflow:hidden';
+document.body.append(editor); editor.focus({preventScroll:true});
+</script></body>`,
+);
+
 const gateScript = (cert: string, key: string) => `
 import http.server, ssl, urllib.parse
 open("/tmp/test-cert.pem", "w").write(${JSON.stringify(cert)})
@@ -78,6 +100,7 @@ tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 tls.load_cert_chain("/tmp/test-cert.pem", "/tmp/test-key.pem")
 page = ${JSON.stringify(PAGE)}.encode()
 js_page = ${JSON.stringify(JS_PAGE)}.encode()
+large_page = ${JSON.stringify(LARGE_FOCUS_PAGE)}.encode()
 class Gate(http.server.BaseHTTPRequestHandler):
     def do_CONNECT(self):
         self.send_response(200)
@@ -89,7 +112,8 @@ class Gate(http.server.BaseHTTPRequestHandler):
         self.close_connection = False
         self.handle_one_request()
     def do_GET(self):
-        content = js_page if self.path == "/javascript" else page
+        path = urllib.parse.urlsplit(self.path).path
+        content = large_page if path == "/large-focus" else js_page if path == "/javascript" else page
         self.send_response(200)
         self.send_header("content-type", "text/html; charset=utf-8")
         self.send_header("content-length", str(len(content)))
@@ -529,6 +553,32 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       expect(JSON.stringify(await client.observe(permit, tabId, owner()))).not.toContain("123456");
     },
   );
+  it("reads, captures and clicks a dense page with an offscreen focused editor", async () => {
+    await client.navigate(permit, tabId, "http://drag.localdot.test/large-focus", owner());
+    expect(await title()).toMatch(/^range/);
+    const frame = await client.observe(permit, tabId, owner());
+    expect(frame.frame.image.length).toBeGreaterThan(1000);
+    const slider = await element({ role: "slider" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: {
+          kind: "click",
+          at: { x: slider.box.x + slider.box.w / 2, y: slider.at.y },
+          button: "left",
+          count: 1,
+        },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    expect(await title()).not.toMatch(/^range 0 /);
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    expect(await title()).toMatch(/^range 0 /);
+  });
+
   it("reads a sign-in popup after opening it from the page", async () => {
     await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
     await title();
