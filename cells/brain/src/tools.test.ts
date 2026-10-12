@@ -101,8 +101,9 @@ describe("the model's advertised tools and instructions", () => {
         [],
         new Date("2026-10-09T00:00:00Z"),
       );
-      // Includes account reuse, verification steps, visible app testing and navigation recovery.
-      expect(prompt.length).toBeLessThan(6000);
+      // Includes account reuse, verification, visible app testing and browser-control recovery.
+      // workingRules budgets 200 additional characters for the visible-browser guidance.
+      expect(prompt.length).toBeLessThan(6200);
       expect(prompt).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });
