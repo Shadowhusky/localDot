@@ -191,6 +191,19 @@ test("a slow first picture opens one stable sheet and fades in after fitting", a
     expect(Math.abs(before.height - after.height)).toBeLessThan(2);
     expect(Math.abs(before.width - after.width)).toBeLessThan(2);
     await expect(sheet.getByRole("progressbar", { name: "Loading picture" })).toBeHidden();
+    await sheet.evaluate((node) =>
+      Promise.all(
+        node
+          .getAnimations({ subtree: true })
+          .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+          .map((a) => a.finished.catch(() => null)),
+      ),
+    );
+    expect(
+      await sheet
+        .locator(".ui-visually-hidden")
+        .evaluate((node) => node.getBoundingClientRect().height),
+    ).toBeLessThanOrEqual(1);
     await page.screenshot({ path: test.info().outputPath("first-picture.png") });
   } finally {
     release();

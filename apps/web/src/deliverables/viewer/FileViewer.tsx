@@ -351,7 +351,7 @@ export function FileViewer({
       onClose={onClose}
       title={
         <>
-          <span className="sr-only">{item.name}</span>
+          <span className="ui-visually-hidden">{item.name}</span>
           <span aria-hidden="true">
             <FileName name={item.name} />
           </span>
