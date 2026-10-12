@@ -28,7 +28,7 @@ function fixture() {
     images: { arm64: pins, x64: pins },
     platforms: {
       "darwin-arm64": {
-        url: "https://github.com/Shadowhusky/localdot-downloads/releases/download/v0.1.0-rc.1/localdot-0.1.0-rc.1-darwin-arm64.tgz",
+        url: "https://github.com/Shadowhusky/localdot/releases/download/v0.1.0-rc.1/localdot-0.1.0-rc.1-darwin-arm64.tgz",
         sha512: "c".repeat(128),
         bytes: 100,
         files,
@@ -50,6 +50,19 @@ describe("public distribution trust", () => {
       .publicKey.export({ format: "pem", type: "spki" })
       .toString();
     expect(() => authenticatedCatalog(envelope(fixture()), other)).toThrow("signature");
+  });
+  it("accepts the signed legacy bridge without trusting other repositories", () => {
+    const legacy = fixture();
+    legacy.platforms["darwin-arm64"].url = legacy.platforms["darwin-arm64"].url.replace(
+      "/localdot/",
+      "/localdot-downloads/",
+    );
+    expect(authenticatedCatalog(envelope(legacy), pub)).toEqual(legacy);
+    legacy.platforms["darwin-arm64"].url = legacy.platforms["darwin-arm64"].url.replace(
+      "/localdot-downloads/",
+      "/another-repo/",
+    );
+    expect(() => authenticatedCatalog(envelope(legacy), pub)).toThrow("download");
   });
   it("rejects tampered metadata before using download URLs", () => {
     const signed = JSON.parse(envelope(fixture()));

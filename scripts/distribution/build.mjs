@@ -103,11 +103,13 @@ export async function buildDistribution({
     },
   });
   const bootstrapSHA256 = hash("sha256", await readFile(bootstrap));
+  // Include the new verifier inside the signed inventory so old installations can migrate.
+  await copyFile(bootstrap, join(app, "dist", "package-bootstrap.mjs"));
   let installer = await readFile(join(root, "install.sh"), "utf8");
   installer = installer
     .replace(
       'DEFAULT_PACKAGE_CHANNEL=""',
-      'DEFAULT_PACKAGE_CHANNEL="https://downloads.localdot.dev/channels/testing.json"',
+      'DEFAULT_PACKAGE_CHANNEL="https://downloads.localdot.dev/channels/releases.json"',
     )
     .replace('PACKAGE_BOOTSTRAP_SHA256=""', `PACKAGE_BOOTSTRAP_SHA256="${bootstrapSHA256}"`);
   await writeFile(join(out, "install.sh"), installer, { mode: 0o700 });
@@ -192,7 +194,7 @@ export async function buildDistribution({
   await rename(join(out, packed.filename), join(out, filename));
   const archive = await readFile(join(out, filename));
   const artifact = {
-    url: `https://github.com/Shadowhusky/localdot-downloads/releases/download/v${version}/${filename}`,
+    url: `https://github.com/Shadowhusky/localdot/releases/download/v${version}/${filename}`,
     sha512: hash("sha512", archive),
     bytes: archive.length,
     files: Object.fromEntries(

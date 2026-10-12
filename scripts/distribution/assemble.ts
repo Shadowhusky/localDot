@@ -10,6 +10,9 @@ export async function assemble(input: {
   images: unknown;
   key: string;
   output: string;
+  // Freeze the old channel at the bridge release; do not strand older verifiers.
+  legacyCatalog?: string;
+  migrationBridge?: boolean;
 }) {
   const st = await lstat(input.key);
   if (!st.isFile() || st.isSymbolicLink() || st.mode & 0o077 || st.uid !== process.getuid?.())
@@ -74,11 +77,40 @@ export async function assemble(input: {
     images: input.images,
     platforms: Object.fromEntries(entries.map(({ receipt: r }) => [r.target, r.artifact])),
   });
-  const payload = Buffer.from(JSON.stringify(catalog));
-  const signed = JSON.stringify({
-    payload: payload.toString("base64"),
-    signature: sign(null, payload, key).toString("base64"),
-  });
+  const signedCatalog = (value: unknown) => {
+    const payload = Buffer.from(JSON.stringify(validateCatalog(value)));
+    return JSON.stringify({
+      payload: payload.toString("base64"),
+      signature: sign(null, payload, key).toString("base64"),
+    });
+  };
+  const signed = signedCatalog(catalog);
+  if (!!input.migrationBridge === !!input.legacyCatalog)
+    throw new Error("Preserve the legacy catalog, or explicitly publish the migration bridge.");
+  const legacy = input.migrationBridge
+    ? signedCatalog({
+        ...catalog,
+        platforms: Object.fromEntries(
+          Object.entries(catalog.platforms).map(([target, artifact]) => [
+            target,
+            {
+              ...artifact,
+              url: artifact.url.replace("/localdot/releases/", "/localdot-downloads/releases/"),
+            },
+          ]),
+        ),
+      })
+    : await readFile(input.legacyCatalog ?? "", "utf8");
+  const legacyRelease = authenticatedCatalog(
+    legacy,
+    createPublicKey(key).export({ type: "spki", format: "pem" }).toString(),
+  );
+  if (
+    Object.values(legacyRelease.platforms).some(
+      (a) => !a.url.includes("/localdot-downloads/releases/"),
+    )
+  )
+    throw new Error("Legacy installers require the original repository URLs.");
   authenticatedCatalog(
     signed,
     createPublicKey(key).export({ type: "spki", format: "pem" }).toString(),
@@ -86,7 +118,8 @@ export async function assemble(input: {
   await mkdir(input.output, { mode: 0o700 });
   await mkdir(join(input.output, "channels"));
   await mkdir(join(input.output, "bootstrap"));
-  await writeFile(join(input.output, "channels", "testing.json"), signed);
+  await writeFile(join(input.output, "channels", "testing.json"), legacy);
+  await writeFile(join(input.output, "channels", "releases.json"), signed);
   for (const name of ["install.sh", "install.ps1"])
     await copyFile(join(first.dir, name), join(input.output, name));
   await copyFile(

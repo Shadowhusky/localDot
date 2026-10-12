@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -132,5 +133,68 @@ printf '%s' "$PACKAGE_CHANNEL"`,
       encoding: "utf8",
     },
   );
-  expect(result).toBe("https://downloads.localdot.dev/channels/testing.json");
+  expect(result).toBe("https://downloads.localdot.dev/channels/releases.json");
 });
+
+it("moves a saved legacy channel to the main repository channel", () => {
+  const f = fixture();
+  writeFileSync(
+    join(f.root, "install.env"),
+    '# Managed by localDot\'s install.sh\nLOCALDOT_PACKAGE_CHANNEL="https://downloads.localdot.dev/channels/testing.json"\n',
+  );
+  const channel = execFileSync(
+    "/bin/bash",
+    [
+      "-c",
+      'source "$INSTALLER"; parse_args --prefix "$TEST_ROOT"; resolve_settings; printf "%s" "$PACKAGE_CHANNEL"',
+    ],
+    {
+      env: {
+        ...process.env,
+        HOME: f.root,
+        TEST_ROOT: f.root,
+        INSTALLER: join(process.cwd(), "install.sh"),
+      },
+      encoding: "utf8",
+    },
+  );
+  expect(channel).toBe("https://downloads.localdot.dev/channels/releases.json");
+});
+
+it.each([false, true])(
+  "checks the new verifier pin before using an older installation (corrupt=%s)",
+  (corrupt) => {
+    const f = fixture();
+    mkdirSync(join(f.root, "app", "dist"));
+    writeFileSync(join(f.root, "app", "bootstrap.mjs"), "legacy verifier");
+    writeFileSync(join(f.root, "app", "dist", "package-bootstrap.mjs"), "stale verifier");
+    mkdirSync(join(f.root, "node", "bin"), { recursive: true });
+    writeFileSync(
+      join(f.root, "node", "bin", "node"),
+      '#!/bin/bash\nprintf "%s" "$1" > "$TEST_ROOT/selected-verifier"\nexit 1\n',
+      { mode: 0o700 },
+    );
+    const payload = "new pinned verifier";
+    writeFileSync(join(f.root, "incoming"), corrupt ? "wrong bytes" : payload);
+    const script = `source "$INSTALLER"
+PREFIX=$TEST_ROOT APP=$TEST_ROOT/app RUNTIME=$TEST_ROOT/runtime NODE_DIR=$TEST_ROOT/node
+OPT_PACKAGE_VERSION=""
+PACKAGE_BOOTSTRAP_SHA256=$PIN PACKAGE_CHANNEL=https://downloads.localdot.dev/channels/releases.json NODE_PLATFORM=darwin-arm64
+curl() { while [ "$1" != -o ]; do shift; done; cp "$TEST_ROOT/incoming" "$2"; }
+prepare_package`;
+    expect(() =>
+      execFileSync("/bin/bash", ["-c", script], {
+        env: {
+          ...process.env,
+          TEST_ROOT: f.root,
+          PIN: createHash("sha256").update(payload).digest("hex"),
+          INSTALLER: join(process.cwd(), "install.sh"),
+        },
+        stdio: "pipe",
+      }),
+    ).toThrow();
+    if (corrupt) expect(existsSync(join(f.root, "selected-verifier"))).toBe(false);
+    else expect(f.read("selected-verifier")).toBe(join(f.root, "runtime", "bootstrap.mjs"));
+    expect(f.read("app/identity")).toBe("previous");
+  },
+);

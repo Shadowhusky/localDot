@@ -13,17 +13,13 @@ import {
 export function PanelMenu({
   buttonRef,
   chat,
-  activity,
   onChat,
-  onActivity,
   commandsUnavailable,
 }: {
   buttonRef?: RefObject<HTMLButtonElement | null>;
   commandsUnavailable?: string;
   chat: boolean;
-  activity: boolean;
   onChat(): void;
-  onActivity(): void;
 }) {
   const hidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
   const [open, setOpen] = useState(false);
@@ -43,9 +39,6 @@ export function PanelMenu({
         <MenuItem icon={chat ? "eye-off" : "eye"} onSelect={onChat}>
           {chat ? "Hide chat" : "Show chat"}
         </MenuItem>
-        <MenuItem icon={activity ? "eye-off" : "eye"} onSelect={onActivity}>
-          {activity ? "Hide activity" : "Show activity"}
-        </MenuItem>
         <MenuItem
           icon="terminal"
           disabledReason={commandsUnavailable}
@@ -55,5 +48,22 @@ export function PanelMenu({
         </MenuItem>
       </Menu>
     </>
+  );
+}
+
+// Fullscreen keeps the command-window toggle beside the other screen controls.
+export function CommandsButton({ unavailable }: { unavailable?: string }) {
+  const hidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
+  return (
+    <IconButton
+      icon="terminal"
+      label={hidden ? "Show commands" : "Hide commands"}
+      size={44}
+      round
+      variant="filled"
+      disabledReason={unavailable}
+      aria-pressed={!hidden}
+      onClick={hidden ? requestShowCommands : requestHideCommands}
+    />
   );
 }

@@ -554,8 +554,12 @@ resolve_settings() {
   # A published installer must not silently fall back to a private Git checkout on upgrade.
   [ -z "$DEFAULT_PACKAGE_CHANNEL" ] || [ -n "$PACKAGE_CHANNEL" ] || PACKAGE_CHANNEL=$DEFAULT_PACKAGE_CHANNEL
   [ -z "$OPT_PACKAGE_CHANNEL" ] || PACKAGE_CHANNEL=$OPT_PACKAGE_CHANNEL
+  # The legacy channel is frozen at the repository-migration release.
+  if [ "$PACKAGE_CHANNEL" = https://downloads.localdot.dev/channels/testing.json ]; then
+    PACKAGE_CHANNEL=https://downloads.localdot.dev/channels/releases.json
+  fi
   case "$PACKAGE_CHANNEL" in
-  "" | https://downloads.localdot.dev/channels/testing.json | https://downloads.localdot.dev/channels/stable.json) ;;
+  "" | https://downloads.localdot.dev/channels/releases.json | https://downloads.localdot.dev/channels/stable.json) ;;
   *) die "Use an official localDot package channel." ;;
   esac
   WAS_TAILSCALE=$TAILSCALE OLD_PORT=$PORT
@@ -1418,8 +1422,9 @@ run_command() {
 # developer installs. Only immutable, signed, already-built payloads enter this path.
 prepare_package() {
   mkdir -p "$RUNTIME"
-  local bootstrap=$APP/bootstrap.mjs scratch
-  if [ ! -f "$bootstrap" ]; then
+  local bootstrap=$APP/dist/package-bootstrap.mjs scratch
+  # Use only the verifier pinned by this installer, including when upgrading older installs.
+  if [ ! -f "$bootstrap" ] || [ -z "$PACKAGE_BOOTSTRAP_SHA256" ] || [ "$(sha256_of "$bootstrap")" != "$PACKAGE_BOOTSTRAP_SHA256" ]; then
     [ -n "$PACKAGE_BOOTSTRAP_SHA256" ] || die "This installer has no packaged bootstrap. Download it from https://downloads.localdot.dev/install.sh."
     bootstrap=$RUNTIME/bootstrap.mjs
     curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 --max-time 120 \

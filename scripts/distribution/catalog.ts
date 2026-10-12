@@ -48,8 +48,11 @@ export function validateCatalog(input: unknown): Catalog {
     const artifact = object(input);
     if (
       typeof artifact.url !== "string" ||
-      artifact.url !==
-        `https://github.com/Shadowhusky/localdot-downloads/releases/download/v${value.version}/localdot-${value.version}-${target}.tgz` ||
+      !["localdot", "localdot-downloads"].some(
+        (repo) =>
+          artifact.url ===
+          `https://github.com/Shadowhusky/${repo}/releases/download/v${value.version}/localdot-${value.version}-${target}.tgz`,
+      ) ||
       !hex(artifact.sha512, 128) ||
       !bounded(artifact.bytes, 256 * 1024 * 1024) ||
       artifact.bytes < 18

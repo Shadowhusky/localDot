@@ -1,17 +1,17 @@
 # Packaged tester downloads
 
-This channel lets testers install localDot without access to the private source repository.
+This channel installs prebuilt localDot packages from the public repository.
 It is separate from the production native installer and its signing/notarization acceptance gates.
 Do not advertise a tester command until its channel and all referenced packages are public and verified.
 
 ## Delivery
 
 - `downloads.localdot.dev` serves the small shell/PowerShell installers, immutable bootstrap files,
-  and signed `channels/testing.json` metadata through an assets-only Cloudflare Worker.
-- `Shadowhusky/localdot-downloads` contains download documentation and release assets. Never push
-  the application checkout, a Git archive, source maps, credentials, or build receipts there.
+  and signed `channels/releases.json` metadata through an assets-only Cloudflare Worker.
+- `Shadowhusky/localdot` contains the source, documentation and packaged releases.
+  Release assets contain compiled app files; never upload credentials or private build receipts.
 - GHCR contains the four prebuilt computer images, with an immutable digest for each architecture.
-  Make these new packages public independently of the private source repository.
+  Check anonymous access to each image before publishing.
 - The app archive includes bundled JavaScript, native dependencies, the compiled key service,
   assets and license notices. JavaScript and runtime scripts remain readable, as in any shipped
   web/Node application; this packaging does not claim to prevent reverse engineering.
@@ -54,10 +54,11 @@ silicon/Intel hardware, prerequisites and live computer startup have been exerci
 1. Build and test all four computer images for each advertised architecture. Publish only clean
    image builds from the reviewed Dockerfiles, never commits of a user's computer. Record registry
    manifest digests, not local image IDs. Verify anonymous access after making packages public.
-2. Upload only `localdot-<version>-<target>.tgz` to a prerelease in the downloads repository.
+2. Upload only `localdot-<version>-<target>.tgz` to a prerelease in `Shadowhusky/localdot`.
    Release notes state which actual platforms were tested and any remaining limitations.
 3. Create an input JSON with `packages` (candidate directories), `images` (architecture → role →
-   GHCR digest), `key` (private signing key path), and `output` (new static site directory).
+   GHCR digest), `key` (private signing key path), `output` (new static site directory),
+   and `legacyCatalog` (the previously published, signed `channels/testing.json`).
 4. Run `node --experimental-transform-types scripts/distribution/assemble.ts /path/to/input.json`.
    Assembly requires matching verification receipts, unchanged archives and bootstrap hashes,
    matching release identities and the correct compiled-in public key. It signs only a testing
@@ -81,3 +82,16 @@ reuses Docker's completed image layers. A package installation lock prevents con
 No update or recovery path should reset Docker or delete computer volumes to make a check pass.
 
 See [release acceptance](release-acceptance.md) for the larger clean-machine and stable-release gates.
+
+## Repository migration
+
+Older installed verifiers only accept `localdot-downloads` release URLs. Version 0.1.0-rc.12
+is the final bridge release, published with identical packages in both repositories. Its signed
+`channels/testing.json` remains available unchanged. Build the bridge with `migrationBridge: true`
+instead of `legacyCatalog`; later releases must preserve that catalog.
+
+New installers use `channels/releases.json` and download from `Shadowhusky/localdot`. The bridge
+includes the current verifier in its signed app inventory. After installing it, both Settings and
+`localdot update` use the new channel, even if their previous installation recorded the old one.
+Keep the archived downloads repository and immutable bootstrap URLs available for older installs.
+The Cloudflare Worker keeps its existing name; it is separate from the GitHub repository.

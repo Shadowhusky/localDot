@@ -30,10 +30,14 @@ export async function packageAppUpdater(
     const record = JSON.parse(await readFile(recordFile, "utf8"));
     if (
       !/^\d+\.\d+\.\d+(?:-rc\.\d+)?$/.test(record.version) ||
-      !/^https:\/\/downloads\.localdot\.dev\/channels\/(testing|stable)\.json$/.test(record.channel)
+      !/^https:\/\/downloads\.localdot\.dev\/channels\/(testing|releases|stable)\.json$/.test(
+        record.channel,
+      )
     )
       throw new Error("Invalid package channel");
-    const bootstrap = join(app, "bootstrap.mjs"),
+    // The signed app carries its verifier; the root bootstrap may predate this release.
+    const channel = record.channel.replace("/channels/testing.json", "/channels/releases.json");
+    const bootstrap = join(app, "dist", "package-bootstrap.mjs"),
       target = `${process.platform}-${process.arch}`;
     const downloads = join(prefix, "runtime", "package-updates");
     const Prepared = z.strictObject({
@@ -59,7 +63,7 @@ export async function packageAppUpdater(
       async latest(signal) {
         const { stdout } = await deps.exec(
           process.execPath,
-          [bootstrap, "check", record.channel, target, downloads],
+          [bootstrap, "check", channel, target, downloads],
           { signal, timeout: 30_000, maxBuffer: 1024 },
         );
         const version = stdout.trim();
@@ -73,7 +77,7 @@ export async function packageAppUpdater(
         try {
           await deps.exec(
             process.execPath,
-            [bootstrap, "prepare", record.channel, target, staging, join(staging, "app"), version],
+            [bootstrap, "prepare", channel, target, staging, join(staging, "app"), version],
             { signal, timeout: 10 * 60_000, maxBuffer: 8192 },
           );
           const previous = await prepared.read();
@@ -105,7 +109,7 @@ export async function packageAppUpdater(
             "--prefix",
             prefix,
             "--package-channel",
-            record.channel,
+            channel,
             "--package-version",
             version,
             "--no-prerequisites",

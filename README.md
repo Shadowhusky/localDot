@@ -37,7 +37,7 @@ Already installed? `localdot update` installs the latest release and keeps your 
 is not found. The current alpha includes Apple silicon Mac and Linux x64 packages; Windows uses
 the Linux package through WSL 2. Clean native Windows installation remains to be verified.
 
-[Installation guide](docs/install.md) · [Public downloads](https://github.com/Shadowhusky/localdot-downloads) ·
+[Installation guide](docs/install.md) · [Releases](https://github.com/Shadowhusky/localdot/releases) ·
 [Use your phone or a server](docs/install.md#servers-without-a-screen) · [Run from source](docs/development.md#development)
 
 ## About

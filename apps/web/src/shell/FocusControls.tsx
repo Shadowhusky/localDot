@@ -10,6 +10,7 @@ const IDLE = "No task is running";
 
 export interface FocusControlsProps {
   stream: StreamPreferenceControl;
+  commands?: ReactNode;
   take: TakeSlot;
   // The task's Pause and Stop; without a task they stay in place, unavailable.
   pause: PauseSlot | null;
@@ -28,6 +29,7 @@ export interface FocusControlsProps {
 // which turning the phone sideways makes bigger.
 export function FocusControls({
   stream,
+  commands,
   take,
   pause,
   stop,
@@ -81,6 +83,7 @@ export function FocusControls({
             />
           </>
         )}
+        {commands}
         <StreamMenu stream={stream} />
         <IconButton
           variant="filled"

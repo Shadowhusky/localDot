@@ -138,9 +138,9 @@ import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
-import { PanelMenu } from "./shell/PanelMenu.tsx";
+import { CommandsButton, PanelMenu } from "./shell/PanelMenu.tsx";
 import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
-import { ACTIVITY_WIDTH, CHAT_WIDTH } from "./shell/panel-width.ts";
+import { CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
@@ -662,7 +662,6 @@ function Theatre({ api }: { api: ApiClient }) {
   const { panels, update: updatePanels } = usePanelPreferences();
   const railView = panels.view;
   const setRailView = (view: RailView) => updatePanels({ view, chat: true });
-  const activityVisible = layout === "wide" && panels.activity;
   const chatVisible = phone || panels.chat;
   // A phone shows Activity in a sheet over the thread.
   const [activityOpen, setActivityOpen] = useState(false);
@@ -889,8 +888,7 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     if (browserProblem) showToast({ id: "screen", title: browserProblem, tone: "danger" });
   }, [browserProblem]);
-  const shownView: RailView =
-    (railView === "activity" && layout === "wide") || phone ? "chat" : railView;
+  const shownView: RailView = phone ? "chat" : railView;
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -1297,6 +1295,15 @@ function Theatre({ api }: { api: ApiClient }) {
     working: taskWorking,
     onChoose: (option: ModelOption) => void chooseModel(option),
   };
+  const commandsUnavailable =
+    curtain.up ||
+    viewedConversation ||
+    switching ||
+    !stageHud.live ||
+    !session.sessionId ||
+    ![...agent.model.steps.values()].some(backgroundStep)
+      ? "No commands available for this computer yet"
+      : undefined;
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -1304,7 +1311,7 @@ function Theatre({ api }: { api: ApiClient }) {
       label: "Chat",
       attention: shownView !== "chat" && !!agent.model.pendingAsk,
     },
-    ...(wide || phone ? [] : [{ value: "activity", label: "Activity" }]),
+    ...(phone ? [] : [{ value: "activity", label: "Activity" }]),
     ...(phone ? [] : [{ value: "routines", label: "Routines" }]),
   ];
   showRoutines.current = () => {
@@ -1317,12 +1324,7 @@ function Theatre({ api }: { api: ApiClient }) {
         phone
           ? undefined
           : () => {
-              if (activityVisible)
-                updatePanels({
-                  activity: false,
-                  ...(railView === "activity" ? { view: "chat" } : {}),
-                });
-              else setRailView("chat");
+              setRailView("chat");
               panelsButton.current?.focus();
             }
       }
@@ -1388,7 +1390,7 @@ function Theatre({ api }: { api: ApiClient }) {
         approval: !!approval && sheetsClosed,
         connection: !!approval && !stepApproval,
         question: !!question && !agent.model.ended && sheetsClosed,
-        chatShown: shownView === "chat" || wide || phone,
+        chatShown: shownView === "chat" || phone,
       });
   const approvalView = approval && decision === "approval" && (
     <ApprovalDecision
@@ -1663,7 +1665,7 @@ function Theatre({ api }: { api: ApiClient }) {
       className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
       data-chat-hidden={!chatVisible || undefined}
-      data-activity-hidden={(wide && !activityVisible) || undefined}
+      data-activity-hidden={wide || undefined}
       data-replaying={replayId ? "" : undefined}
       data-focus={focus ? "" : undefined}
       data-full={full ? "" : undefined}
@@ -1710,29 +1712,11 @@ function Theatre({ api }: { api: ApiClient }) {
           !replayId && (
             <PanelMenu
               buttonRef={panelsButton}
-              commandsUnavailable={
-                curtain.up ||
-                viewedConversation ||
-                switching ||
-                !stageHud.live ||
-                !session.sessionId ||
-                ![...agent.model.steps.values()].some(backgroundStep)
-                  ? "No commands available for this computer yet"
-                  : undefined
-              }
+              commandsUnavailable={commandsUnavailable}
               chat={chatVisible}
-              activity={activityVisible || (chatVisible && shownView === "activity")}
               onChat={() =>
                 updatePanels({ chat: !chatVisible, ...(!chatVisible ? { view: "chat" } : {}) })
               }
-              onActivity={() => {
-                if (wide)
-                  updatePanels({
-                    activity: !activityVisible,
-                    ...(railView === "activity" ? { view: "chat" } : {}),
-                  });
-                else setRailView(chatVisible && shownView === "activity" ? "chat" : "activity");
-              }}
             />
           )
         }
@@ -1751,7 +1735,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   <WorkOverlay
                     key={session.sessionId}
                     model={agent.model}
-                    restoreInMenu={phone}
+                    restoreInMenu={phone || full || focus}
                     working={!!appStatus.control && !yours && !agent.model.ended}
                   />
                 ) : undefined
@@ -1845,10 +1829,19 @@ function Theatre({ api }: { api: ApiClient }) {
                   />
                   {full && !focus && (
                     <div className="fullscreen-stream-controls">
+                      {yours && !phone && (
+                        <ControlStrip
+                          send={sendToComputer}
+                          blocked={inputBlocked}
+                          full
+                          onFullScreen={fullScreen.toggle}
+                        />
+                      )}
+                      <CommandsButton unavailable={commandsUnavailable} />
                       <StreamMenu stream={streamChoice} />
                     </div>
                   )}
-                  {yours && !phone && (
+                  {yours && !phone && !full && (
                     <ControlStrip
                       send={sendToComputer}
                       blocked={inputBlocked}
@@ -1861,6 +1854,7 @@ function Theatre({ api }: { api: ApiClient }) {
               side={
                 focus && (
                   <FocusControls
+                    commands={<CommandsButton unavailable={commandsUnavailable} />}
                     stream={streamChoice}
                     take={takeState}
                     pause={shape === "task" ? pause : null}
@@ -1929,19 +1923,6 @@ function Theatre({ api }: { api: ApiClient }) {
             </StageFrame>
           </ErrorBoundary>
         </main>
-        {activityVisible && (
-          <RailPanel label="Activity" className="rail-activity">
-            <ErrorBoundary>{activity}</ErrorBoundary>
-          </RailPanel>
-        )}
-        {activityVisible && (
-          <ResizeHandle
-            panel={ACTIVITY_WIDTH}
-            property="--activity-w"
-            label="Activity width"
-            className="rail-resize-activity"
-          />
-        )}
         {chatVisible && (wide || layout === "laptop") && (
           <ResizeHandle
             panel={CHAT_WIDTH}
@@ -2116,14 +2097,12 @@ function Theatre({ api }: { api: ApiClient }) {
               cover={
                 !phone && (
                   <>
-                    {!wide && (
-                      <div
-                        className="rail-cover-activity"
-                        data-shown={shownView === "activity" || undefined}
-                      >
-                        {activity}
-                      </div>
-                    )}
+                    <div
+                      className="rail-cover-activity"
+                      data-shown={shownView === "activity" || undefined}
+                    >
+                      {activity}
+                    </div>
                     <div
                       className="rail-cover-routines"
                       data-shown={shownView === "routines" || undefined}

@@ -101,3 +101,26 @@ it("does not adopt a writable installed-package record", async () => {
   expect((await (await f.create()).status()).supported).toBe(false);
   expect(f.exec).not.toHaveBeenCalled();
 });
+
+it("checks and installs through the bundled verifier and new channel after a legacy upgrade", async () => {
+  const f = await fixture();
+  const updater = await f.create();
+  await updater.check();
+  expect(f.exec.mock.calls[0]?.[1].slice(0, 3)).toEqual([
+    join(f.prefix, "app", "dist", "package-bootstrap.mjs"),
+    "check",
+    "https://downloads.localdot.dev/channels/releases.json",
+  ]);
+  expect(f.exec.mock.calls[1]?.[1].slice(0, 3)).toEqual([
+    join(f.prefix, "app", "dist", "package-bootstrap.mjs"),
+    "prepare",
+    "https://downloads.localdot.dev/channels/releases.json",
+  ]);
+  await updater.install();
+  await vi.waitFor(() => expect(f.spawn).toHaveBeenCalledOnce());
+  const args = (f.spawn.mock.calls[0] as unknown as [string, string[]])[1];
+  expect(args[args.indexOf("--package-channel") + 1]).toBe(
+    "https://downloads.localdot.dev/channels/releases.json",
+  );
+  f.child.emit("close", 0);
+});
