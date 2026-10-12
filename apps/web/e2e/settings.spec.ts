@@ -192,6 +192,8 @@ test.beforeAll(async () => {
   origin = `http://127.0.0.1:${address.port}`;
 });
 test.beforeEach(() => {
+  // put({}) deliberately remembers previous models; each viewport needs a fresh fixture.
+  rmSync(join(home, "agent.json"), { force: true });
   settings.put({});
   keys = [];
   calls = [];
@@ -285,7 +287,22 @@ for (const width of [1280, 390])
       output = main.getByRole("textbox", { name: "Output price", exact: true });
     await expect(input).toHaveValue("");
     await expect(output).toHaveValue("");
-    await main.getByRole("button", { name: "Add key", exact: true }).click();
+    if (width < 700) {
+      await sheet.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator(".ui-sheet-prompt[data-shown]")).toHaveCount(0);
+      await expect(sheet.getByText("Before this can be saved:")).toBeVisible();
+    }
+    try {
+      await main.getByRole("button", { name: "Add key", exact: true }).click({ timeout: 5000 });
+    } catch (error) {
+      await page.screenshot({ path: info.outputPath("settings-add-key.png") });
+      await info.attach("settings-add-key", {
+        body: await page.locator("body").ariaSnapshot(),
+        contentType: "text/plain",
+      });
+      throw error;
+    }
     // Keys is a section of Settings: on the same page beside a wide screen, pushed on a phone.
     const keySheet = nestedKeys(page);
     await expect(keySheet.getByRole("combobox", { name: "Provider" })).toHaveText(

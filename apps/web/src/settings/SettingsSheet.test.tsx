@@ -680,3 +680,57 @@ describe("settings inspector", () => {
     expect(within(page).getByRole("radiogroup", { name: "Stream quality" })).toBeTruthy();
   });
 });
+
+describe("Settings Done", () => {
+  it("keeps invalid changes and explains them instead of offering to discard", () => {
+    onPhone();
+    const p = {
+      ...props(),
+      dirty: true,
+      save: { enabled: false, run: vi.fn() },
+      validation: ["Choose a main provider and model."],
+    };
+    render(<SettingsSheet {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(asking()).toBe(false);
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(p.save.run).not.toHaveBeenCalled();
+    expect(screen.getByText("Choose a main provider and model.")).toBeTruthy();
+  });
+  it("waits for a busy save and closes only after changes are saved", () => {
+    onPhone();
+    const p = { ...props(), dirty: true, busy: true, save: { enabled: false, run: vi.fn() } };
+    const view = render(<SettingsSheet {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(asking()).toBe(false);
+    expect(p.onClose).not.toHaveBeenCalled();
+    view.rerender(<SettingsSheet {...p} busy={false} dirty={false} />);
+    expect(p.onClose).toHaveBeenCalledOnce();
+  });
+  it("saves a valid change immediately without waiting for autosave", async () => {
+    onPhone();
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const p = {
+      ...props(),
+      dirty: true,
+      save: {
+        enabled: true,
+        run: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              finish = resolve;
+            }),
+        ),
+      },
+    };
+    const view = render(<SettingsSheet {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(asking()).toBe(false);
+    expect(p.save.run).toHaveBeenCalledOnce();
+    expect(p.onClose).not.toHaveBeenCalled();
+    view.rerender(<SettingsSheet {...p} dirty={false} />);
+    await act(async () => finish());
+    expect(p.onClose).toHaveBeenCalledOnce();
+  });
+});

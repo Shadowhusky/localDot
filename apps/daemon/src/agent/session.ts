@@ -201,6 +201,7 @@ export class AgentSession {
       facts?: unknown;
     },
     signal: AbortSignal,
+    observe?: () => Promise<import("./safety/visual-target.ts").TargetObservation>,
   ) => Promise<boolean>;
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly taskAutonomy: TaskAutonomy;

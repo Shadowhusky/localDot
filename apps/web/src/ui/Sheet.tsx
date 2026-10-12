@@ -82,6 +82,8 @@ export interface SheetProps {
   sidebar?: ReactNode;
   // A bottom sheet closes with this word at its trailing edge, its title centred, instead of ×.
   doneLabel?: string;
+  // An explicit completion action may save instead of dismissing unsaved edits.
+  onDone?(): void;
   // Wide holds one large thing, such as a file's preview, in an inspector up to 1120 px.
   size?: "regular" | "wide";
   // The body has no padding or scroll of its own: what it holds fills it and scrolls itself.
@@ -122,6 +124,7 @@ function SheetLayer({
   detents = FIT,
   sidebar,
   doneLabel,
+  onDone,
   size = "regular",
   flush = false,
   className,
@@ -361,6 +364,7 @@ function SheetLayer({
   const pageProps = {
     closeLabel,
     onClose: requestClose,
+    onDone,
     asking,
     sidebar: placement === "inspector" ? sidebar : undefined,
     doneLabel: placement === "bottom" ? doneLabel : undefined,
@@ -435,6 +439,7 @@ interface SheetPageProps {
   descriptionId?: string;
   closeLabel: string;
   onClose(): void;
+  onDone?(): void;
   asking: boolean;
   sidebar?: ReactNode;
   doneLabel?: string;
@@ -449,6 +454,7 @@ function SheetPage({
   descriptionId,
   closeLabel,
   onClose,
+  onDone,
   asking,
   sidebar,
   doneLabel,
@@ -485,7 +491,7 @@ function SheetPage({
           )}
         </div>
         {doneLabel ? (
-          <Button variant="quiet" className="ui-sheet-done" onClick={onClose}>
+          <Button variant="quiet" className="ui-sheet-done" onClick={onDone ?? onClose}>
             {doneLabel}
           </Button>
         ) : (

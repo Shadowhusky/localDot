@@ -39,8 +39,10 @@ async function native(
   ctx: ToolCallContext,
   action: ComputerAction,
   identity: NativeActionIdentity,
+  extra: Partial<ToolDeps> = {},
 ) {
   const deps = {
+    scaleOf: () => 1,
     gateway: {
       run: async (
         context: { authorizeAgent(r: unknown): Promise<unknown> },
@@ -54,6 +56,7 @@ async function native(
         return permit ? { ok: true } : { ok: false, cancelled: "user" };
       },
     },
+    ...extra,
   } as unknown as ToolDeps;
   return computerTool(deps, ctx, action);
 }
@@ -422,4 +425,52 @@ describe("consequential steps still stop under Balanced", () => {
     );
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 1]);
   });
+});
+
+describe("visual click target freshness", () => {
+  it.each([false, true])(
+    "rechecks observed pixels before clicking (changed: %s)",
+    async (changed) => {
+      const h = harness(CAREFUL_AUTONOMY);
+      h.ctx.session.permissionMode = () => "auto";
+      h.ctx.session.taskAutonomy.signIn("desktop");
+      const observe = vi.fn(async () => ({ frameId: "fresh", pointer: { x: 200, y: 288 } }));
+      let crops = 0;
+      const png = vi.fn(async (_session: string, _frame: string, region?: unknown) => {
+        if (!region) return Buffer.from("screen");
+        crops++;
+        return Buffer.from(changed && crops > 1 ? "changed target" : "same target");
+      });
+      h.ctx.session.autoPermit = async (_action, _signal, read) => {
+        expect(await read?.()).toEqual({
+          image: Buffer.from("screen").toString("base64"),
+          point: { x: 100, y: 144 },
+        });
+        return true;
+      };
+      const run = vi.fn(
+        async (context: { authorizeAgent(r: unknown): Promise<unknown> }, action: unknown) => {
+          const permit = await context.authorizeAgent({
+            action,
+            identity: { target: null, window: 1, point: { x: 200, y: 288 } },
+            revalidate: async () => true,
+          });
+          return permit ? { ok: true } : { ok: false, cancelled: "user" };
+        },
+      );
+      const result = await native(
+        h.ctx,
+        { action: "click", point: { x: 100, y: 144 } },
+        { target: null, window: 1, point: { x: 200, y: 288 } },
+        {
+          scaleOf: () => 2,
+          png: { png },
+          gateway: { run, observe } as unknown as ToolDeps["gateway"],
+        },
+      );
+      expect(h.asks).not.toHaveBeenCalled();
+      expect(result.ok).toBe(!changed);
+      expect(crops).toBe(2);
+    },
+  );
 });

@@ -298,6 +298,7 @@ export async function runInput(
     (action.verb === "key" && action.holdMs) || action.verb === "drag" || action.verb === "wait"
       ? untilPaused(session, ctx.signal)
       : undefined;
+  let visualChanged: string | undefined;
   let needsUser = false;
   let secret = false;
   const nativeContext: ActionContext = {
@@ -313,12 +314,52 @@ export async function runInput(
       ctx.check();
       const facts = factsOf(request.action, request.identity);
       const approved = decideAutonomy(ctx, facts).actionClass;
+      let observed: Buffer | undefined;
+      const point = request.identity.point;
+      const scale = ctx.nativeScreen?.scale ?? deps.scaleOf(session.cellId) ?? 1;
+      const modelPoint = point ? { x: point.x / scale, y: point.y / scale } : undefined;
+      const region = modelPoint
+        ? { x: modelPoint.x - 64, y: modelPoint.y - 48, w: 128, h: 96 }
+        : undefined;
+      const canObserve =
+        request.action.verb === "click" &&
+        request.action.button === "left" &&
+        request.action.count === 1 &&
+        !request.action.mods?.length &&
+        !!modelPoint;
       const prepared = {
         tool: "computer" as const,
         input: { toolInput: a, action: request.action },
         target: request.identity,
         facts,
-        revalidate: request.revalidate,
+        ...(canObserve && modelPoint
+          ? {
+              observeTarget: async () => {
+                const frame = await deps.gateway.observe(selected);
+                ctx.check();
+                observed = await deps.png.png(session.id, frame.frameId, region, ctx.signal);
+                return {
+                  image: (
+                    await deps.png.png(session.id, frame.frameId, undefined, ctx.signal)
+                  ).toString("base64"),
+                  point: modelPoint,
+                };
+              },
+            }
+          : {}),
+        revalidate: async () => {
+          if (!(await request.revalidate())) return false;
+          if (observed) {
+            const frame = await deps.gateway.observe(selected);
+            const fresh = await deps.png.png(session.id, frame.frameId, region, ctx.signal);
+            ctx.check();
+            if (!observed.equals(fresh)) {
+              visualChanged = frame.frameId;
+              return false;
+            }
+          }
+          return true;
+        },
       };
       const identity = request.identity;
       if (options.refuseSecret && (identity.target?.secret || identity.drop?.target?.secret)) {
@@ -375,6 +416,13 @@ export async function runInput(
     hold?.end();
   }
   ctx.check();
+  if (visualChanged)
+    return {
+      ok: false,
+      notes: [text(CHANGED_WHILE_DECIDING)],
+      frameId: visualChanged,
+      stale: true,
+    };
   if (needsUser) return { ok: false, notes: [], needsUser: true };
   if (secret && options.refuseSecret) return fail(options.refuseSecret);
   if (outcome.cancelled === "preflight" && outcome.error === ELEMENT_GONE)

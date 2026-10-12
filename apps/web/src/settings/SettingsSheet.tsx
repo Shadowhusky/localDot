@@ -248,6 +248,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [holding, setHolding] = useState(false);
+  const [doneBlocked, setDoneBlocked] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const runSave = useRef(() => {});
   runSave.current = () => {
@@ -281,6 +282,8 @@ export function SettingsSheet(props: SettingsSheetProps) {
     props.checkIns?.value,
     props.research?.value,
     props.manualPrices,
+    props.purposeCheck?.on,
+    props.recentActivity?.on,
   ]);
   const canSave = !!props.save?.enabled && !props.error;
   // biome-ignore lint/correctness/useExhaustiveDependencies: each edit starts the wait again
@@ -291,7 +294,23 @@ export function SettingsSheet(props: SettingsSheetProps) {
   }, [props.open, props.dirty, canSave, saving, props.busy, leaving, edits]);
 
   // Closing waits for an edit on its way to be saved; only edits that can't be saved ask first.
-  const pending = props.dirty && (canSave || saving);
+  const pending = props.dirty && (canSave || saving || props.busy);
+  const done = () => {
+    // Done is also an explicit retry after a confirmed failed save. Uncertain
+    // saves keep save.enabled false until the saved state has been reloaded.
+    if (!holding && props.dirty && props.error && props.save?.enabled && !saving && !props.busy) {
+      setDoneBlocked(false);
+      setLeaving(true);
+      runSave.current();
+      return;
+    }
+    if (holding || (props.dirty && !pending)) {
+      setDoneBlocked(true);
+      return;
+    }
+    setDoneBlocked(false);
+    close();
+  };
   const close = () => {
     if (pending || props.busy) setLeaving(true);
     else props.onClose();
@@ -340,13 +359,20 @@ export function SettingsSheet(props: SettingsSheetProps) {
 
   const shown = shownSections(props, phone);
   const problems = props.dirty && props.validation?.length ? props.validation : null;
+  const doneProblem = doneBlocked
+    ? holding
+      ? "Save or cancel the key you are editing before finishing."
+      : props.dirty && !pending && !props.error && !problems
+        ? "Your changes have not been saved yet. Wait for settings to finish loading, then try Done again."
+        : null
+    : null;
   const footer =
-    !props.loading && (props.error || problems) ? (
+    !props.loading && (props.error || problems || doneProblem) ? (
       <div className="settings-footer">
-        {props.error ? (
+        {props.error || doneProblem ? (
           <p className="settings-footer-status" role="alert" data-error="">
             <Icon name="circle-alert" size={12} />
-            {props.error}
+            {props.error || doneProblem}
           </p>
         ) : (
           <div className="settings-footer-status" role="status">
@@ -384,6 +410,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
       <Sheet
         open={props.open}
         onClose={close}
+        onDone={done}
         dirty={holding || (props.dirty && !pending)}
         title={page ? sectionTitle(page) : "Settings"}
         page={page ?? "root"}

@@ -58,11 +58,18 @@ import { ResearchLog } from "./research.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
 import { gatewayCompletion } from "./safety/judge-model.ts";
-import { jevApprovalRequest, jevFits, jevJudge, modelJudge } from "./safety/judges.ts";
+import {
+  jevApprovalRequest,
+  jevFits,
+  jevJudge,
+  jevNavigationRequest,
+  modelJudge,
+} from "./safety/judges.ts";
 import { judgeChoice, PurposeGate, type PurposeJudge, unreadableJudge } from "./safety/purpose.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { taintMemory } from "./safety/taint.ts";
+import { visualNavigation } from "./safety/visual-target.ts";
 import { AgentSession, abortable, SessionStoppedError } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
@@ -488,13 +495,37 @@ export class AgentRunner {
           return "custom";
         }
       };
-      session.autoPermit = async (action, signal) => {
+      session.autoPermit = async (action, signal, observe) => {
         const keys = await this.deps.keyd.secrets();
         const choice = judgeChoice("auto", keys, false);
         if (choice?.kind !== "jev" || !this.deps.jev) return false;
+        let evidence: { effect: "navigate" | "read"; target: string } | undefined;
+        if (
+          action.tool === "computer" &&
+          action.operation === "click" &&
+          action.actionClass === "unknown" &&
+          observe &&
+          rt.selection.kind === "api"
+        ) {
+          const role = rt.selection.roles.find((r) => r.role === "main" && r.model.vision);
+          if (role && rt.brain) {
+            evidence = await visualNavigation(
+              observe,
+              gatewayCompletion(
+                () => (rt.brain ? bindingOf(role, rt.brain.surrogates) : undefined),
+                () =>
+                  rt.brain ? { port: rt.brain.keydPort, token: rt.brain.proxyToken } : undefined,
+              ),
+              AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+            );
+            if (!evidence) return false;
+          }
+        }
         const reply = await this.deps.jev(
           choice.secretId,
-          jevApprovalRequest(session.currentPurpose, action),
+          evidence
+            ? jevNavigationRequest(session.currentPurpose, evidence)
+            : jevApprovalRequest(session.currentPurpose, action),
           AbortSignal.any([signal, AbortSignal.timeout(5000)]),
         );
         return jevFits(reply) >= 0.9;

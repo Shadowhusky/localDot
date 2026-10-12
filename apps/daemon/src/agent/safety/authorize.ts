@@ -32,6 +32,7 @@ export interface PreparedEffect {
   readonly target: unknown;
   readonly facts: RiskFacts;
   readonly upload?: UploadApproval;
+  observeTarget?: () => Promise<import("./visual-target.ts").TargetObservation>;
   revalidate(): Promise<boolean>;
 }
 export function freezeExecutionInput<T>(input: T): T {
@@ -213,6 +214,7 @@ export async function authorizePrepared(
           facts: actingFacts(ctx, prepared.facts),
         },
         ctx.signal,
+        prepared.observeTarget,
       )
       .catch(() => false);
     ctx.check();

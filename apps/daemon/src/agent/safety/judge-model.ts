@@ -21,7 +21,12 @@ const texts = (parts: unknown, key = "text"): string =>
     : "";
 
 // One short answer from the fast model, in its provider's own API, as the brain asks it.
-export function completionCall(b: ModelBinding, system: string, prompt: string): Call {
+export function completionCall(
+  b: ModelBinding,
+  system: string,
+  prompt: string,
+  image?: string,
+): Call {
   const key = b.surrogate ?? "";
   const bearer: Record<string, string> = key ? { authorization: `Bearer ${key}` } : {};
   switch (b.client) {
@@ -37,7 +42,20 @@ export function completionCall(b: ModelBinding, system: string, prompt: string):
           model: b.model,
           max_tokens: OUTPUT_TOKENS,
           system,
-          messages: [{ role: "user", content: prompt }],
+          messages: [
+            {
+              role: "user",
+              content: image
+                ? [
+                    { type: "text", text: prompt },
+                    {
+                      type: "image",
+                      source: { type: "base64", media_type: "image/png", data: image },
+                    },
+                  ]
+                : prompt,
+            },
+          ],
         },
         read: (reply) => texts((reply as { content?: unknown }).content),
       };
@@ -47,7 +65,15 @@ export function completionCall(b: ModelBinding, system: string, prompt: string):
         headers: { "x-goog-api-key": key },
         body: {
           systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                ...(image ? [{ inlineData: { mimeType: "image/png", data: image } }] : []),
+              ],
+            },
+          ],
           generationConfig: { maxOutputTokens: OUTPUT_TOKENS },
         },
         read: (reply) =>
@@ -65,7 +91,17 @@ export function completionCall(b: ModelBinding, system: string, prompt: string):
         body: {
           model: b.model,
           instructions: system,
-          input: prompt,
+          input: image
+            ? [
+                {
+                  role: "user",
+                  content: [
+                    { type: "input_text", text: prompt },
+                    { type: "input_image", image_url: `data:image/png;base64,${image}` },
+                  ],
+                },
+              ]
+            : prompt,
           max_output_tokens: OUTPUT_TOKENS,
           store: false,
         },
@@ -83,7 +119,15 @@ export function completionCall(b: ModelBinding, system: string, prompt: string):
           max_tokens: OUTPUT_TOKENS,
           messages: [
             { role: "system", content: system },
-            { role: "user", content: prompt },
+            {
+              role: "user",
+              content: image
+                ? [
+                    { type: "text", text: prompt },
+                    { type: "image_url", image_url: { url: `data:image/png;base64,${image}` } },
+                  ]
+                : prompt,
+            },
           ],
         },
         read: (reply) => {
@@ -132,11 +176,16 @@ export function gatewayCompletion(
   listener: () => { port: number; token: string } | undefined,
   fetch: typeof undiciFetch = undiciFetch,
 ) {
-  return async (system: string, prompt: string, signal: AbortSignal): Promise<string> => {
+  return async (
+    system: string,
+    prompt: string,
+    signal: AbortSignal,
+    image?: string,
+  ): Promise<string> => {
     const b = binding();
     const at = listener();
     if (!b || !at) throw new Error("the fast model is not running");
-    const call = completionCall(b, system, prompt);
+    const call = completionCall(b, system, prompt, image);
     const agent = new ProxyAgent({
       uri: `http://127.0.0.1:${at.port}`,
       token: `Basic ${Buffer.from(`brain:${at.token}`).toString("base64")}`,

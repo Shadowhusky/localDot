@@ -92,3 +92,23 @@ describe("the fast model as judge", () => {
     );
   });
 });
+
+describe("visual target requests", () => {
+  it.each([
+    "anthropic",
+    "anthropic-compatible",
+    "google",
+    "openai",
+    "azure",
+    "xai",
+    "deepseek",
+  ] as const)("attaches PNG evidence in %s's native format", (client) => {
+    const b = { ...binding(client), vision: true };
+    const call = completionCall(b, "sys", "target", "cGl4ZWxz");
+    const body = JSON.stringify(call.body);
+    expect(body).toContain("cGl4ZWxz");
+    expect(body).toContain("target");
+    expect(body).toContain("image");
+    expect(call.headers).not.toHaveProperty("image");
+  });
+});
