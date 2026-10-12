@@ -1013,7 +1013,7 @@ export function createAgent(d: AgentWiringDeps) {
       const setupClosed = setup?.close();
       const authClosed = auth?.close();
       const containments = [...runner.sessions.values()].map((session) =>
-        runner.contain(session, "shutdown"),
+        runner.stopForShutdown(session),
       );
       const activeClients = [...clients.values()];
       clients.clear();

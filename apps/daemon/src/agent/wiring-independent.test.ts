@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
 import { type BootConfig, DEFAULT_AGENT_LIMITS, ulid } from "@localdot/protocol";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { type CellRecord, type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
@@ -275,6 +275,48 @@ it("lost scripted preparation replies fence the computer and cannot replay on an
   expect(beforeRun).not.toHaveBeenCalled();
   expect(fences.isFenced(h.cellId)).toBe(true);
   expect(new ComputerFences(h.home).isFenced(h.cellId)).toBe(true);
+});
+
+it("a confirmed service shutdown leaves the computer available across restart", async () => {
+  const h = setup(undefined, (home) => ({ fences: new ComputerFences(home) }));
+  await h.agent.start();
+  const id = h.log.createSession("completed work");
+  const session = new AgentSession(id, h.cellId, "task", h.log);
+  h.agent.runner.sessions.set(id, session);
+  vi.spyOn(h.deps.killSwitch, "stopSession").mockResolvedValue({
+    revoked: true,
+    paused: true,
+    closed: false,
+    stopped: false,
+    errors: [],
+  });
+  await h.agent.close();
+  expect(session.stopped).toBe(true);
+  expect(new ComputerFences(h.home).isFenced(h.cellId)).toBe(false);
+});
+
+it("an unconfirmed service shutdown still fences the computer", async () => {
+  const h = setup(undefined, (home) => ({ fences: new ComputerFences(home) }));
+  await h.agent.start();
+  const id = h.log.createSession("interrupted work");
+  h.agent.runner.sessions.set(id, new AgentSession(id, h.cellId, "task", h.log));
+  const stop = vi.spyOn(h.deps.killSwitch, "stopSession").mockResolvedValue({
+    revoked: false,
+    paused: false,
+    closed: false,
+    stopped: false,
+    errors: ["unconfirmed"],
+  });
+  await expect(h.agent.close()).rejects.toThrow("shutdown cleanup");
+  expect(new ComputerFences(h.home).isFenced(h.cellId)).toBe(true);
+  // afterEach may await the already rejected shutdown.
+  fixtures.splice(
+    fixtures.findIndex((f) => f.home === h.home),
+    1,
+  );
+  stop.mockRestore();
+  h.log.close();
+  rmSync(h.home, { recursive: true, force: true });
 });
 
 it("shutdown still contains every session and closes clients when Stop journal publication fails", async () => {

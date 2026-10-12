@@ -1009,6 +1009,22 @@ export class AgentRunner {
     }
     this.#changed();
   }
+  // A service restart retires task execution, but does not retire the computer identity.
+  // Only an unconfirmed stop needs the durable failure fence.
+  async stopForShutdown(session: AgentSession): Promise<void> {
+    session.cancel();
+    try {
+      const outcome = await this.deps.stopSession(session.id);
+      if (outcome && (!outcome.revoked || !(outcome.paused || (outcome.closed && outcome.stopped))))
+        throw new CleanupUncertain("shutdown stop could not be confirmed");
+      await this.deps.live.settled(session.id);
+      await session.toolsSettled();
+      await session.screensSettled();
+    } catch (error) {
+      await this.contain(session, "shutdown_cleanup_uncertain").catch(() => {});
+      throw error;
+    }
+  }
   // Handler uncertainty cannot skip containment merely because it already fenced the session.
   contain(session: AgentSession, _reason: string): Promise<void> {
     const rt = this.#runtime.get(session.id);
