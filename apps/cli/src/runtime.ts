@@ -118,7 +118,12 @@ export const runtime: Runtime = {
     if (report.ok) return 0;
     // Exit 2 means the runtime works, but the user must unlock its protected vault.
     // This must never hide a failed isolation, image, network or key-service check.
-    const failed = report.checks.filter((check) => !check.ok);
+    // A stopped computer needs attention, but it must not roll back a healthy app update.
+    // The computer remains fenced; its recovery notice is still printed above.
+    const failed = report.checks.filter(
+      (check) => !check.ok && check.pendingAction !== "recover-computer",
+    );
+    if (failed.length === 0) return 0;
     return failed.length > 0 && failed.every((check) => check.pendingAction === "unlock-vault")
       ? 2
       : 1;

@@ -25,6 +25,7 @@ export function recoveryChecks(home: string): DoctorCheck[] {
       .map((record) => ({
         name: "computer-recovery",
         ok: false,
+        pendingAction: "recover-computer" as const,
         detail: `Computer ${record.cellId}, task ${record.sessionId}: earlier cleanup was not confirmed. ${
           record.executor === "native" && !record.nativeRetired
             ? "Native task exit has not been confirmed. Keep the saved computer data; share this diagnostic before retrying recovery."
@@ -36,6 +37,7 @@ export function recoveryChecks(home: string): DoctorCheck[] {
       {
         name: "computer-recovery",
         ok: false,
+        pendingAction: "recover-computer" as const,
         detail:
           "Recovery records could not be read. Keep the safety and computer folders intact; share this diagnostic.",
       },

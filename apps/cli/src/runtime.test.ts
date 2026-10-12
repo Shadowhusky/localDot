@@ -82,3 +82,39 @@ it.each([false, true])(
     expect(io.out).toHaveBeenCalledWith(expect.stringContaining("next key-vault"));
   },
 );
+
+it.each(["none", "vault", "isolation"])(
+  "keeps existing computer recovery separate from app startup (%s)",
+  async (other) => {
+    mocks.socket.mockReturnValue({ path: "/fixture/docker.sock", source: "fixture" });
+    mocks.doctor.mockResolvedValue({
+      ok: false,
+      checks: [
+        {
+          name: "computer-recovery",
+          ok: false,
+          pendingAction: "recover-computer",
+          detail: "Native task exit has not been confirmed. Keep the saved computer data.",
+        },
+        ...(other === "none"
+          ? []
+          : [
+              {
+                name: other,
+                ok: false,
+                ...(other === "vault" ? { pendingAction: "unlock-vault" } : {}),
+                detail: "needs attention",
+              },
+            ]),
+      ],
+    });
+    const io = { out: vi.fn(), err: vi.fn() };
+    expect(
+      await runtime.doctor(
+        { home: "/fixture", port: 4891, signal: new AbortController().signal, env: {} },
+        io,
+      ),
+    ).toBe(other === "none" ? 0 : other === "vault" ? 2 : 1);
+    expect(io.out).toHaveBeenCalledWith(expect.stringContaining("next computer-recovery"));
+  },
+);

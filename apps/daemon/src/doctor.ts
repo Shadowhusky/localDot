@@ -30,7 +30,7 @@ export interface DoctorCheck {
   name: string;
   ok: boolean;
   detail: string;
-  pendingAction?: "unlock-vault";
+  pendingAction?: "unlock-vault" | "recover-computer";
 }
 
 export interface DoctorReport {

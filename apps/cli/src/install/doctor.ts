@@ -364,8 +364,10 @@ export async function runInstalledDoctor(context: RuntimeContext, io: ConsoleIO)
     });
     signal.throwIfAborted();
     for (const check of checks)
-      io.out(`${check.ok ? "ok  " : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`);
-    return checks.every((check) => check.ok) ? 0 : 1;
+      io.out(
+        `${check.ok ? "ok  " : check.pendingAction ? "next" : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`,
+      );
+    return checks.every((check) => check.ok || check.pendingAction === "recover-computer") ? 0 : 1;
   } catch {
     io.err(
       signal.aborted

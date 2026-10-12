@@ -25,6 +25,7 @@ it("reports the recovery blocker read-only, including failed replacements", () =
     });
     const path = join(home, "safety", "fences", `${cell}.json`),
       before = readFileSync(path);
+    expect(recoveryChecks(home)[0]).toMatchObject({ ok: false, pendingAction: "recover-computer" });
     expect(recoveryChecks(home)[0]?.detail).toContain("Native task exit has not been confirmed");
     expect(readFileSync(path)).toEqual(before);
     fences.confirmNativeRetirement(cell, task);
