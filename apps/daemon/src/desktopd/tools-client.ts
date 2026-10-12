@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { finished } from "node:stream/promises";
 import {
   BrowserNavigateResult,
@@ -26,6 +27,9 @@ import { inspectDesktopUpload, readDesktopUpload } from "./upload-client.ts";
 
 export const MAX_TRANSFER_BYTES = 100 * 1024 * 1024;
 const JSON_BYTES = 32 * 1024 * 1024;
+// After a caller abort, how long a stopped command has to report its confirmed result.
+const SHELL_STOP_GRACE_MS = 15_000;
+const SHELL_STOP_REQUEST_MS = 5_000;
 const PutResult = z.strictObject({
   path: z.string().max(1024),
   bytes: z.number().int().nonnegative(),
@@ -213,10 +217,26 @@ export class DesktopdTools {
     onChunk: (c: ShellChunk) => void | Promise<void>,
     signal?: AbortSignal,
   ): Promise<ShellDone> {
-    const input = ShellRequest.parse(req);
+    const id = req.id ?? randomUUID();
+    const input = ShellRequest.parse({ ...req, id });
     signal?.throwIfAborted();
     this.#lifetime.signal.throwIfAborted();
-    const scope = this.#scope(input.timeoutMs + 10_000, signal);
+    // The caller's signal does not cancel the response. Cancelling leaves the command's end
+    // unconfirmable, so a caller abort asks desktopd to stop the run and still reads its result.
+    // Only a refused stop (e.g. an older desktopd) or the grace deadline cancels the response.
+    const scope = this.#scope(input.timeoutMs + 10_000);
+    let stopping = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const onStop = () => {
+      if (stopping) return;
+      stopping = true;
+      void this.#stopShell(id).then((accepted) => {
+        if (!accepted) return scope.abort();
+        grace = setTimeout(() => scope.abort(), SHELL_STOP_GRACE_MS);
+        grace.unref();
+      });
+    };
+    signal?.addEventListener("abort", onStop, { once: true });
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let protocolFailure: DesktopdError | undefined;
     try {
@@ -260,6 +280,8 @@ export class DesktopdTools {
             const output = ShellChunk.strict().parse(value);
             outputBytes += Buffer.byteLength(output.chunk);
             if (outputBytes > input.maxOutputBytes) throw new ShellExecutionUncertainError();
+            // A stopping caller no longer owns output; only the final result matters.
+            if (stopping) continue;
             await untilAborted(Promise.resolve(onChunk(output)), scope.signal);
             scope.signal.throwIfAborted();
           }
@@ -274,11 +296,32 @@ export class DesktopdTools {
       if (protocolFailure !== undefined && error === protocolFailure) throw error;
       throw new ShellExecutionUncertainError();
     } finally {
+      signal?.removeEventListener("abort", onStop);
+      clearTimeout(grace);
       scope.abort();
       if (reader) {
         void reader.cancel().catch(() => {});
         reader.releaseLock();
       }
+    }
+  }
+
+  // True only when desktopd accepted the stop; then the /shell response reports the outcome.
+  async #stopShell(id: string): Promise<boolean> {
+    const scope = this.#scope(SHELL_STOP_REQUEST_MS);
+    try {
+      const res = await this.#send(
+        "/shell/stop",
+        scope,
+        JSON.stringify({ id }),
+        "application/json",
+      );
+      void res.body?.cancel().catch(() => {});
+      return res.status === 204;
+    } catch {
+      return false;
+    } finally {
+      scope.abort();
     }
   }
 
