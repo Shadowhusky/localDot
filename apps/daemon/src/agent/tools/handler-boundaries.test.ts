@@ -368,6 +368,33 @@ describe("taint and containment", () => {
     expect(result.result).toMatchObject({ ok: false, final: true });
     expect(h.session.stopped).toBe(true);
   });
+  it("hands over without containment when a stopped shell reports its result", async () => {
+    const h = setup();
+    const desktop = required(h.tools.desktop(h.session.cellId));
+    h.tools.desktop = () => desktop;
+    const running = vi.spyOn(desktop, "shell").mockImplementation(
+      (_req, _onChunk, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener("abort", () =>
+            resolve({
+              done: true,
+              exitCode: null,
+              signal: "SIGKILL",
+              timedOut: false,
+              truncated: false,
+              ms: 1,
+            }),
+          );
+        }),
+    );
+    const stop = vi.spyOn(h.tools, "stopForUncertainty");
+    const call = h.call("shell", { command: "sleep 30" });
+    await until(() => running.mock.calls.length > 0);
+    h.session.takeControl();
+    expect((await call).result.ok).toBe(false);
+    expect(stop).not.toHaveBeenCalled();
+    expect(h.session.stopped).toBe(false);
+  });
   it("stays fenced when containment rejects", async () => {
     const h = setup();
     const desktop = required(h.tools.desktop(h.session.cellId));

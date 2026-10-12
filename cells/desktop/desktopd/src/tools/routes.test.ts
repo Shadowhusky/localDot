@@ -56,6 +56,41 @@ describe("desktopd's tool routes", () => {
     expect(lines.at(-1)).toMatchObject({ done: true, exitCode: 0 });
   });
 
+  it("stops a named shell run and still reports its confirmed result", async () => {
+    const { post } = setup();
+    const id = "run-0123456789abcdef";
+    const running = post("/shell", { command: "echo started; sleep 30", id });
+    let stop = await post("/shell/stop", { id });
+    for (let i = 0; stop.status === 404 && i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      stop = await post("/shell/stop", { id });
+    }
+    expect(stop.status).toBe(204);
+    const lines = (await (await running).text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.at(-1)).toMatchObject({ done: true, exitCode: null, signal: "SIGKILL" });
+    expect((await post("/shell/stop", { id })).status).toBe(404);
+  });
+
+  it("refuses an unknown or duplicate shell run id", async () => {
+    const { post } = setup();
+    const id = "run-fedcba9876543210";
+    expect((await post("/shell/stop", { id })).status).toBe(404);
+    expect((await post("/shell/stop", { id: "bad id" })).status).toBe(400);
+    const running = post("/shell", { command: "sleep 30", id });
+    let duplicate = await post("/shell", { command: "true", id });
+    for (let i = 0; duplicate.status !== 409 && i < 100; i++) {
+      await duplicate.text();
+      await new Promise((r) => setTimeout(r, 20));
+      duplicate = await post("/shell", { command: "true", id });
+    }
+    expect(duplicate.status).toBe(409);
+    expect((await post("/shell/stop", { id })).status).toBe(204);
+    await (await running).text();
+  });
+
   it("refuses a shell working directory outside the home", async () => {
     const { post } = setup();
     expect((await post("/shell", { command: "ls", cwd: "/etc" })).status).toBe(400);

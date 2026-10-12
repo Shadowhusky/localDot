@@ -7,10 +7,11 @@ import {
   FileWriteRequest,
   type ShellFailure,
   ShellRequest,
+  ShellStopRequest,
   webUrl,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
-import { z } from "zod";
+import type { z } from "zod";
 import {
   DesktopUploadInspect,
   DesktopUploadRead,
@@ -109,9 +110,8 @@ function transferPath(c: Context): string | Response {
 export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
   // Cancellation stops an owned command without discarding its terminal cleanup receipt.
   const commands = new Map<string, AbortController>();
-  const CancelShell = z.strictObject({ id: z.string().uuid() });
-  app.post("/shell/cancel", async (c) => {
-    const req = await body(c, CancelShell, 1024);
+  app.post("/shell/stop", async (c) => {
+    const req = await body(c, ShellStopRequest, 1024);
     if (req instanceof Response) return req;
     const command = commands.get(req.id);
     if (!command) return c.text("command already ended or unknown", 404);
@@ -168,9 +168,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
     } catch {
       return c.text("working directory must be inside the home", 400);
     }
-    const id = c.req.header("x-localdot-shell-id");
-    if (id !== undefined && !CancelShell.shape.id.safeParse(id).success)
-      return c.text("invalid command identity", 400);
+    const id = req.id;
     if (id && (commands.has(id) || commands.size >= 64)) return c.text("command unavailable", 409);
     const stopped = new AbortController();
     const cancel = new AbortController();
@@ -223,10 +221,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
         stopped.abort(new Error("shell response cancelled"));
       },
     });
-    return c.body(output, 200, {
-      "content-type": "application/x-ndjson",
-      ...(id ? { "x-localdot-shell-cancel": "1" } : {}),
-    });
+    return c.body(output, 200, { "content-type": "application/x-ndjson" });
   });
 
   app.post("/files/read", async (c) => {

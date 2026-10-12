@@ -13,8 +13,18 @@ export const ShellRequest = z.object({
     .min(1024)
     .max(4 * 1024 * 1024)
     .default(1024 * 1024),
+  // Names the run for /shell/stop. Older desktopd strips it and the caller falls back to cancel.
+  id: z
+    .string()
+    .regex(/^[A-Za-z0-9-]{16,64}$/)
+    .optional(),
 });
 export type ShellRequest = z.input<typeof ShellRequest>;
+
+// Stops a named run but keeps its /shell response open, so the caller still receives the
+// confirmed ShellDone (or ShellFailure) instead of an unconfirmable cancellation.
+export const ShellStopRequest = z.object({ id: ShellRequest.shape.id.unwrap() });
+export type ShellStopRequest = z.infer<typeof ShellStopRequest>;
 
 // NDJSON lines on /shell: output chunks in order, then one ShellDone or ShellFailure.
 export const ShellChunk = z.object({

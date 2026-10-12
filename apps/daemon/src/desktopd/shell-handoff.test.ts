@@ -53,8 +53,8 @@ it("Take control stops an active command and drains its cleanup result without q
   await started.promise;
   const reason = new Error("user took control");
   stop.abort(reason);
-  expect(await caught).toBe(reason);
-  expect(f.requests).toEqual(["/shell", "/shell/cancel"]);
+  expect(await caught).toMatchObject({ done: true, exitCode: null, signal: "SIGKILL" });
+  expect(f.requests).toEqual(["/shell", "/shell/stop"]);
   expect(output).toHaveBeenCalledOnce();
   await f.tools.close();
 });
@@ -76,7 +76,7 @@ it("handles cancellation before response headers arrive", async () => {
   await vi.waitFor(() => expect(f.requests).toContain("/shell"));
   stop.abort(new Error("control"));
   release.resolve();
-  expect(await caught).toBe(stop.signal.reason);
+  expect(await caught).toMatchObject({ done: true, exitCode: null, signal: "SIGKILL" });
   expect(output).not.toHaveBeenCalled();
   await tools.close();
   await f.tools.close();
@@ -89,7 +89,7 @@ it.each(["lost receipt", "failed cleanup"])(
     const tools = new DesktopdTools({ baseUrl: "http://desktop.test", token: "fixture" }, (async (
       url,
     ) => {
-      if (new URL(String(url)).pathname === "/shell/cancel") {
+      if (new URL(String(url)).pathname === "/shell/stop") {
         if (failure === "failed cleanup")
           response.enqueue(
             new TextEncoder().encode(
@@ -106,7 +106,6 @@ it.each(["lost receipt", "failed cleanup"])(
             response = controller;
           },
         }),
-        { headers: { "x-localdot-shell-cancel": "1" } },
       );
     }) as typeof fetch);
     const work = tools.shell({ command: "sleep 30" }, () => {}, stop.signal);
@@ -124,7 +123,7 @@ it("cancellation cannot target an unregistered or malformed command identity", a
     ["not-an-id", 400],
     ["11111111-1111-4111-8111-111111111111", 404],
   ] as const) {
-    const reply = await f.app.request("/shell/cancel", {
+    const reply = await f.app.request("/shell/stop", {
       method: "POST",
       body: JSON.stringify({ id }),
       headers: { "content-type": "application/json" },

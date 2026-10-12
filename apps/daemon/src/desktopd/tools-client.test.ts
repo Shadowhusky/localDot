@@ -239,6 +239,46 @@ describe("tool transport ownership", () => {
   }, 10_000);
 });
 
+describe("shell stop on caller abort", () => {
+  it("stops the run and returns its confirmed result instead of uncertainty", async () => {
+    const { tools } = setup();
+    const stop = new AbortController();
+    const output: string[] = [];
+    const result = await tools.shell(
+      { command: "echo started; sleep 30; echo late" },
+      (c) => {
+        output.push(c.chunk);
+        stop.abort();
+      },
+      stop.signal,
+    );
+    expect(result).toMatchObject({ done: true, exitCode: null, signal: "SIGKILL" });
+    expect(output).toEqual(["started\n"]);
+  });
+  it("falls back to cancellation when desktopd cannot stop the run", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "localdot-tools-")));
+    homes.push(home);
+    const app = new Hono();
+    app.post("/shell/stop", (c) => c.text("not found", 404));
+    addToolRoutes(app, {
+      home,
+      env: { PATH: process.env.PATH },
+      browser: {
+        page: async () => ({ url: "about:blank" }),
+        read: async () => {
+          throw new NoPageError();
+        },
+        navigate: async (url) => ({ url, title: "", loaded: true }),
+      },
+    });
+    const tools = client(((input, init) => app.fetch(new Request(input, init))) as typeof fetch);
+    const stop = new AbortController();
+    await expect(
+      tools.shell({ command: "echo started; sleep 30" }, () => stop.abort(), stop.signal),
+    ).rejects.toBeInstanceOf(ShellExecutionUncertainError);
+  }, 10_000);
+});
+
 describe("shell NDJSON boundary", () => {
   it("decodes split UTF-8 and awaits output consumers", async () => {
     const encoded = bytes(lines({ stream: "stdout", chunk: "你好" }, done));
@@ -370,7 +410,7 @@ describe("tool cancellation across every body owner", () => {
       expect(cancel).toHaveBeenCalled();
     });
   }
-  it("handles an abort plus rejected output callback without an unhandled rejection", async () => {
+  it("drains a confirmed result when takeover rejects an in-flight output callback", async () => {
     const stop = new AbortController();
     const tools = client(answer(new Response(lines({ stream: "stdout", chunk: "x" }, done))));
     await expect(
@@ -382,7 +422,7 @@ describe("tool cancellation across every body owner", () => {
         },
         stop.signal,
       ),
-    ).rejects.toBeInstanceOf(ShellExecutionUncertainError);
+    ).resolves.toEqual(done);
   });
   it("bounds outbound bytes even when the peer accepts oversized input", async () => {
     const tools = client(

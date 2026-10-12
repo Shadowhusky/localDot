@@ -157,7 +157,6 @@ export class DesktopdTools {
     scope: Scope,
     body?: NonNullable<Parameters<typeof fetch>[1]>["body"],
     contentType?: string,
-    headers?: Record<string, string>,
   ): Promise<Response> {
     scope.signal.throwIfAborted();
     const response = await untilAborted(
@@ -166,7 +165,6 @@ export class DesktopdTools {
         headers: {
           authorization: `Bearer ${this.endpoint.token}`,
           ...(contentType ? { "content-type": contentType } : {}),
-          ...headers,
         },
         body,
         signal: scope.signal,
@@ -216,15 +214,14 @@ export class DesktopdTools {
     onChunk: (c: ShellChunk) => void | Promise<void>,
     signal?: AbortSignal,
   ): Promise<ShellDone> {
-    const input = ShellRequest.parse(req);
+    const id = req.id ?? randomUUID();
+    const input = ShellRequest.parse({ ...req, id });
     signal?.throwIfAborted();
     this.#lifetime.signal.throwIfAborted();
     // Do not abort this response on a user handoff: it carries proof of command cleanup.
     const scope = this.#scope(input.timeoutMs + 10_000);
-    const id = randomUUID();
     let cancellation: (() => void) | undefined;
     let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
-    let completed = false;
     const abort = () => {
       cancellationTimer ??= setTimeout(() => scope.abort(), 5000);
       cancellation?.();
@@ -234,16 +231,13 @@ export class DesktopdTools {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let protocolFailure: DesktopdError | undefined;
     try {
-      const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json", {
-        "x-localdot-shell-id": id,
-      });
+      const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json");
       let cancellationSent = false;
       cancellation = () => {
         if (cancellationSent) return;
         cancellationSent = true;
-        if (res.headers.get("x-localdot-shell-cancel") !== "1") return scope.abort();
         const cancelScope = this.#scope(2000);
-        void this.#send("/shell/cancel", cancelScope, JSON.stringify({ id }), "application/json")
+        void this.#send("/shell/stop", cancelScope, JSON.stringify({ id }), "application/json")
           .then(async (reply) => {
             await textBody(reply, cancelScope.signal, 4096);
             // 404 may race with an already-ended command. Only the original stream's
@@ -308,13 +302,11 @@ export class DesktopdTools {
         if (chunk.done) break;
       }
       if (pending.trim() || !result) throw new ShellExecutionUncertainError();
-      completed = true;
-      signal?.throwIfAborted();
       return result;
     } catch (error) {
       // Only failures created from this response are trusted. An output consumer can throw
       // an arbitrary DesktopdError after the command has already run.
-      if (completed || (protocolFailure !== undefined && error === protocolFailure)) throw error;
+      if (protocolFailure !== undefined && error === protocolFailure) throw error;
       throw new ShellExecutionUncertainError();
     } finally {
       signal?.removeEventListener("abort", abort);
