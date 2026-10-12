@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "cb83a62c8d16519980bac576b82236567bc4c74d3650cec497018500baa5c25e",
+  "inputSha256": "d149d0d77a4e59437b592ab3b81b14160b0944de1e690185d58d869769987b19",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -407,8 +407,8 @@
     "apps/daemon/src/cells/reset-store.ts": "659ea3a61175eeb101752d667165649596329881658ffc1d2d7b446b4722ef09",
     "apps/daemon/src/cells/reset-thaw.test.ts": "f33269ec2a334b08cd0393b11e49f93cbb06959f16394e3f17e3197241c109d0",
     "apps/daemon/src/cells/runtime-admission-startup.test.ts": "6acc5cf55049f0d3c340f9f6220480efd517acdd36c73b1d8ad9dd7bed72c339",
-    "apps/daemon/src/cells/runtime-admission.test.ts": "35524c367fd6b47762e631ddc3710f89aa9de50fac88b6ca45fe080b8377ed6b",
-    "apps/daemon/src/cells/runtime-image-check.ts": "274a960370a1645097056a2bb0f74e1bfe2bbfd66302bf7ab4e0b66d15250889",
+    "apps/daemon/src/cells/runtime-admission.test.ts": "c5fcc37076bdb6475074c946dfa87d8d24d6e0e33fa82755bd540040e0380d60",
+    "apps/daemon/src/cells/runtime-image-check.ts": "067e2d20510d611a8cb7564cb6b94deeb14253ff83ca4846632b9d48466e2163",
     "apps/daemon/src/cells/runtime-update-admission.ts": "4e2e54e4a79f09d6a3f5ddc4aff7c26398c1354dc4587a02aa9b73d14b257e83",
     "apps/daemon/src/cells/runtime-update-candidate.ts": "38adb1809142bb38dacafc630d2ca67bf818d843a6ebe83b64a1d7e98a44a5a6",
     "apps/daemon/src/cells/runtime-update-store.ts": "562b5639a6eef7c653de9e9b42dc5b5cc5bdbba3d8870590a47e1cbc07b2e1f9",
@@ -435,9 +435,10 @@
     "apps/daemon/src/cells/stream-tuning.ts": "5515977b94dd568a34d8817fa12f0bc7c4437f60351be02eb9c440b6273dbe44",
     "apps/daemon/src/cells/system-migration-plan.test.ts": "994bb90f7b50b83c2ec15283c455bec01ae83f59d4198846179f845143da4450",
     "apps/daemon/src/cells/system-migration-plan.ts": "fdf5bf2f706ee0417cb78f00c521eee81fffd46543f857ed6eca059e9047a47f",
-    "apps/daemon/src/cells/system-migration.ts": "5098ff0e72ae34198d0da8a5b888502efd928aa2aea05b20067c769cc1e85d95",
+    "apps/daemon/src/cells/system-migration.ts": "60b4eadf6fb588aaeebe80c364d5cce79eb19d81c814feda7651a285967b1905",
+    "apps/daemon/src/cells/system-state-labels.test.ts": "f0e676e3640f3eac4f5584fc5b056490dd510c34070b6b4ad874edc5d752c523",
     "apps/daemon/src/cells/system-state.docker.test.ts": "bfba95e60cf2216b0807439ac47e93f2e5b4aa7ba239aaed04d93c8a9db7607c",
-    "apps/daemon/src/cells/system-state.ts": "c9628f5e58c25286ce6e30d43ee635c4bd0a190700b56e865f5876863d1f4c2b",
+    "apps/daemon/src/cells/system-state.ts": "d69d9f21686f24b0667669620a96eeb8f9884097c97450e8b396a2e44c2980cd",
     "apps/daemon/src/cells/tar.test.ts": "6a3cb1e28226320e943ad9665603ed1aa31d9a6c093cbaa63fe44c6425b7dab8",
     "apps/daemon/src/cells/tar.ts": "15e5ae64db10de21e2fbaeb9d56e7e0573f7bed000ca2422c340da9e73a8b254",
     "apps/daemon/src/cells/testing/browser-docker.ts": "c5f1c532250833cc30c2a751dfc56a4771fc7fbc6ccc85199fc9e6e668d04efe",
@@ -1030,7 +1031,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "5f5961d3ce9600ee4a811fd3e0bd97fb1a0643e321d589f4ae781068bef46a24",
+  "reportSha256": "a1ff65738f2a0ac14e66502edf915e65e576520711feaeaac43bc31a1b97be71",
   "exit": {
     "code": 0,
     "signal": null
