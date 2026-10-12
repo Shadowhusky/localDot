@@ -188,6 +188,17 @@
     --_fg-hover: var(--color-danger-fg);
   }
 
+  /* Confirmation actions need a visible face. Quiet red text stays available for
+     secondary actions elsewhere, while an enabled delete reads as a button. */
+  :is(.decision-actions, .ui-dialog-actions) > .ui-button[data-variant="destructive"] {
+    --_bg: var(--color-danger-fg);
+    --_bg-hover: color-mix(in srgb, var(--color-danger-fg) 88%, var(--color-fg-1));
+    --_bg-pressed: color-mix(in srgb, var(--color-danger-fg) 86%, var(--color-void));
+    --_fg: var(--color-porcelain-ink);
+    --_fg-hover: var(--color-porcelain-ink);
+    font-weight: var(--font-weight-semibold);
+  }
+
   /* On the island over the picture: a lighter face that reads on glass. */
   .ui-button[data-variant="glass"] {
     --_bg: var(--color-glass-hover);

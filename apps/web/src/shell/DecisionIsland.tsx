@@ -239,7 +239,7 @@ export function ApprovalDecision({
             {words.secondary}
           </Button>
           <Button
-            variant="primary"
+            variant={data.actionClass === "delete" ? "destructive" : "primary"}
             size={sheet ? "xxl" : "md"}
             disabledReason={
               held("approve") ?? (unread ? "Show all of the text before you approve." : undefined)
