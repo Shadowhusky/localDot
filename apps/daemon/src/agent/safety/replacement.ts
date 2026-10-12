@@ -160,7 +160,15 @@ export class ReplacementOwner {
             continue;
           const state = await d.inspectFresh(record.newCellId);
           if (state === "foreign") throw new Error("foreign replacement candidate");
-          if (record.phase === "ready" && state === "ready" && current.taskEnded) {
+          // Once published, the successor is the user's computer. A normal stop,
+          // paused desktop or restarted key service must not turn it back into a
+          // disposable partial allocation. Release the recovery hold and let the
+          // normal computer lifecycle reconcile readiness without deleting data.
+          if (
+            record.phase === "ready" &&
+            (state === "ready" || state === "owned") &&
+            current.taskEnded
+          ) {
             sameOwner(d, current);
             this.deps.store.write(record);
             sameOwner(d, current);

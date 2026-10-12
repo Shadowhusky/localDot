@@ -158,6 +158,28 @@ describe("durable replacement ownership and restart", () => {
     await expect(o.replace(h.oldCellId, { ...h.body, requestId: ulid() })).rejects.toThrow();
     expect(h.d.allocateId).not.toHaveBeenCalled();
   });
+  it("preserves a completed replacement when its computer is paused or stopped at restart", async () => {
+    const h = fixture();
+    const record = {
+      requestId: h.requestId,
+      oldCellId: h.oldCellId,
+      revision: 3,
+      phase: "ready" as const,
+      newCellId: h.candidate,
+    };
+    h.store.write(record);
+    h.d.inspectFresh.mockResolvedValue("owned");
+    const onReady = vi.fn();
+    const owner = new ReplacementOwner({ store: h.store, forCell: () => h.d, onReady });
+    await owner.start();
+    expect(await owner.status(h.oldCellId, h.requestId)).toEqual(record);
+    expect(onReady).toHaveBeenCalledExactlyOnceWith(record);
+    expect(h.d.retireFresh).not.toHaveBeenCalled();
+    expect(h.d.createFresh).not.toHaveBeenCalled();
+    await expect(owner.replace(h.oldCellId, { ...h.body, requestId: ulid() })).rejects.toThrow(
+      "already has a replacement",
+    );
+  });
   it("a confirmed Ready candidate is reconciled without create or retirement", async () => {
     const h = fixture();
     h.store.write({
