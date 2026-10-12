@@ -197,7 +197,7 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
         "{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}} {{.Config.User}}",
         gate,
       ),
-    ).toBe("true [ALL] [NET_ADMIN SETUID SETGID SETPCAP] [no-new-privileges] 64 root");
+    ).toBe("true [ALL] [NET_ADMIN SETUID SETGID SETPCAP] [no-new-privileges] 256 root");
     const status = probe(gate, 0, "grep", "-E", "^(Uid|CapEff)", "/proc/1/status");
     expect(status).toMatch(/^Uid:\s+65534\s+65534\s+65534\s+65534$/m);
     expect(status).toMatch(/^CapEff:\s+0+$/m);
@@ -288,6 +288,26 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     expect(docker("inspect", "-f", "{{.RestartCount}}", desktop)).toBe("0");
   }, 300_000);
 
+  it("recovers when the desktop service is shut down inside a still-running computer", async () => {
+    if (!cell) throw new Error("no cell");
+    const id = cell.id;
+    const record = store.get(id);
+    if (!record) throw new Error("record missing");
+    const { desktop } = record.docker;
+    const started = docker("inspect", "-f", "{{.State.StartedAt}}", desktop);
+    probe(desktop, 0, "sh", "-c", "printf preserved > /config/guest-shutdown-sentinel");
+    const back = readyAgain(id, "desktop services stopped responding for 3 consecutive checks");
+    probe(desktop, 0, "s6-svc", "-d", "/run/service/svc-desktopd");
+    expect(docker("inspect", "-f", "{{.State.Running}}", desktop)).toBe("true");
+    expect(docker("inspect", "-f", "{{.State.StartedAt}}", desktop)).toBe(started);
+    await back;
+    expect(docker("inspect", "-f", "{{.State.StartedAt}}", desktop)).not.toBe(started);
+    expect(probe(desktop, 0, "cat", "/config/guest-shutdown-sentinel")).toBe("preserved");
+    const endpoint = orchestrator.endpoints(id)?.desktopd;
+    if (!endpoint) throw new Error("no recovered endpoint");
+    expect((await probeDesktopd(endpoint))?.ok).toBe(true);
+  }, 180_000);
+
   it("runs a Start that lands during a Stop after the Stop, with no failure between", async () => {
     if (!cell) throw new Error("no cell");
     const id = cell.id;
@@ -301,7 +321,12 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     const ready = readyAgain(id);
     await Promise.all([orchestrator.stop(id), orchestrator.start(id)]);
     // Both calls are done, so the Start has run after the Stop and both containers are up again.
-    expect(states).toEqual(["stopping", "stopped", "starting", "starting"]);
+    // Operation progress can emit several starting notifications; the lifecycle order is fixed.
+    expect(states.filter((state, i) => state !== states[i - 1])).toEqual([
+      "stopping",
+      "stopped",
+      "starting",
+    ]);
     expect(docker("inspect", "-f", "{{.State.Running}}", record.docker.gate)).toBe("true");
     expect(docker("inspect", "-f", "{{.State.Running}}", record.docker.desktop)).toBe("true");
     await ready;

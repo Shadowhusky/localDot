@@ -535,10 +535,11 @@ describe("CellOrchestrator operations", () => {
     });
     expect(orchestrator.get(cell.id)).not.toHaveProperty("operation");
     clock.now += 60_000;
+    const startedAt = clock.now;
     await orchestrator.start(cell.id);
     await waitUntil(() => orchestrator.get(cell.id)?.state === "ready");
     expect(changes.slice(from).find((c) => c.operation?.kind === "start")?.operation).toMatchObject(
-      { startedAt: clock.now - BOOT_MS, expectedMs: 20_000 },
+      { startedAt, expectedMs: 20_000 },
     );
     expect(new CellStore(home).timings(cell.id)).toEqual({
       "first-start": BOOT_MS,
@@ -590,6 +591,102 @@ describe("CellOrchestrator operations", () => {
 });
 
 describe("CellOrchestrator restarts", () => {
+  it.each(["desktop", "stream"])(
+    "recycles a running container after its %s service shuts down",
+    async (service) => {
+      let broken = false;
+      let desktopName = "";
+      const recovered = () => !broken || (fake.state.containers.get(desktopName)?.starts ?? 0) > 1;
+      const { orchestrator, store, stateOf, changes } = await setup({
+        probeDesktopd: async () => (service === "desktop" && !recovered() ? undefined : healthy),
+        stream: () => service !== "stream" || recovered(),
+      });
+      const cell = await orchestrator.create({ scale: 2 });
+      await stateOf(cell.id, "ready");
+      const record = store.get(cell.id);
+      if (!record) throw new Error("missing cell");
+      desktopName = record.docker.desktop;
+      const desktop = fake.state.containers.get(desktopName);
+      if (!desktop) throw new Error("missing desktop");
+      broken = true;
+      expect(desktop.running).toBe(true);
+      await waitUntil(() => desktop.starts === 2 && orchestrator.get(cell.id)?.state === "ready");
+      expect(desktop.starts).toBe(2);
+      expect(fake.state.containers.get(record.docker.gate)?.starts).toBe(2);
+      expect(callsTo(`POST /containers/${desktopName}/stop`)).toBe(1);
+      expect(changes.some((c) => c.error?.includes("3 consecutive checks"))).toBe(true);
+      expect(store.get(cell.id)?.docker.homeVolume).toBe(record.docker.homeVolume);
+    },
+  );
+
+  it("resets the health failure count after a successful probe", async () => {
+    let checks = 0;
+    let watching = false;
+    const { orchestrator, store, stateOf } = await setup({
+      probeDesktopd: async () => {
+        if (!watching) return healthy;
+        checks += 1;
+        return checks % 3 === 0 ? healthy : undefined;
+      },
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    watching = true;
+    await waitUntil(() => checks >= 9);
+    expect(checks).toBeGreaterThanOrEqual(9);
+    expect(orchestrator.get(cell.id)?.state).toBe("ready");
+    expect(fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "")?.starts).toBe(1);
+  });
+
+  it.each(["stop", "pause"] as const)(
+    "a pending unhealthy probe cannot undo user %s",
+    async (action) => {
+      const answer = Promise.withResolvers<DesktopdHealth | undefined>();
+      let watching = false;
+      let entered = false;
+      const { orchestrator, store, stateOf } = await setup({
+        probeDesktopd: async () => {
+          if (!watching) return healthy;
+          entered = true;
+          return answer.promise;
+        },
+      });
+      const cell = await orchestrator.create({ scale: 2 });
+      await stateOf(cell.id, "ready");
+      watching = true;
+      await waitUntil(() => entered);
+      expect(entered).toBe(true);
+      await orchestrator[action](cell.id);
+      answer.resolve(undefined);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const desktop = fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
+      if (!desktop) throw new Error("missing desktop");
+      expect(desktop.starts).toBe(1);
+      if (action === "stop") expect(orchestrator.get(cell.id)?.state).toBe("stopped");
+      else expect(desktop.paused).toBe(true);
+    },
+  );
+
+  it("allows a user start to recycle unhealthy services after the recovery budget is exhausted", async () => {
+    let broken = false;
+    let desktopName = "";
+    const { orchestrator, store, stateOf } = await setup({
+      restartBackoffMs: [],
+      probeDesktopd: async () =>
+        broken && (fake.state.containers.get(desktopName)?.starts ?? 0) < 2 ? undefined : healthy,
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    desktopName = store.get(cell.id)?.docker.desktop ?? "";
+    broken = true;
+    await waitUntil(() => orchestrator.get(cell.id)?.state === "failed");
+    expect(orchestrator.get(cell.id)?.error).toContain("gave up after 0 restarts");
+    await orchestrator.start(cell.id);
+    await waitUntil(() => orchestrator.get(cell.id)?.state === "ready");
+    expect(orchestrator.get(cell.id)?.state).toBe("ready");
+    expect(fake.state.containers.get(desktopName)?.starts).toBe(2);
+  });
+
   it("a user start() during a restart's backoff leaves exactly one watch loop", async () => {
     const held: (() => void)[] = [];
     const { orchestrator, store, stateOf } = await setup({
@@ -630,39 +727,42 @@ describe("CellOrchestrator restarts", () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(desktop?.starts).toBe(3);
   });
-  it("restarts an exited desktop with backoff and keeps the gate's published ports", async () => {
-    const { orchestrator, store, stateOf, changes } = await setup();
-    const cell = await orchestrator.create({ scale: 2 });
-    await stateOf(cell.id, "ready");
-    const before = orchestrator.endpoints(cell.id);
-    const record = store.get(cell.id);
-    const desktop = fake.state.containers.get(record?.docker.desktop ?? "");
-    if (desktop) {
-      desktop.running = false;
-      desktop.exitCode = 137;
-    }
-    await new Promise<void>((resolve) => {
-      const check = () =>
-        changes.some(
-          (c) =>
-            c.id === cell.id &&
-            c.state === "starting" &&
-            (c.error ?? "").includes("restarting (attempt 1 of 2)"),
-        )
-          ? resolve()
-          : setTimeout(check, 5);
-      check();
-    });
-    await new Promise<void>((resolve) => {
-      const check = () =>
-        desktop?.starts === 2 && orchestrator.get(cell.id)?.state === "ready"
-          ? resolve()
-          : setTimeout(check, 5);
-      check();
-    });
-    expect(orchestrator.endpoints(cell.id)).toEqual(before);
-    expect(orchestrator.get(cell.id)?.error).toBeUndefined();
-  });
+  it.each([0, 137])(
+    "restarts a desktop exiting with %s and keeps the gate's published ports",
+    async (exitCode) => {
+      const { orchestrator, store, stateOf, changes } = await setup();
+      const cell = await orchestrator.create({ scale: 2 });
+      await stateOf(cell.id, "ready");
+      const before = orchestrator.endpoints(cell.id);
+      const record = store.get(cell.id);
+      const desktop = fake.state.containers.get(record?.docker.desktop ?? "");
+      if (desktop) {
+        desktop.running = false;
+        desktop.exitCode = exitCode;
+      }
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          changes.some(
+            (c) =>
+              c.id === cell.id &&
+              c.state === "starting" &&
+              (c.error ?? "").includes("restarting (attempt 1 of 2)"),
+          )
+            ? resolve()
+            : setTimeout(check, 5);
+        check();
+      });
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          desktop?.starts === 2 && orchestrator.get(cell.id)?.state === "ready"
+            ? resolve()
+            : setTimeout(check, 5);
+        check();
+      });
+      expect(orchestrator.endpoints(cell.id)).toEqual(before);
+      expect(orchestrator.get(cell.id)?.error).toBeUndefined();
+    },
+  );
 
   it("restarts an exited gate with backoff and reads its new published ports", async () => {
     const { orchestrator, store, stateOf } = await setup();

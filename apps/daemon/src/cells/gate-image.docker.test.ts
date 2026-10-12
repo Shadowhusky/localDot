@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hostAddress } from "./ipv4.ts";
+import { gateRelay, gateRelayEnv, gateRelayMounts, makeRelayDirs } from "./relay.ts";
 import {
   DOCKER_TESTS,
   docker,
@@ -27,13 +31,17 @@ const names = {
 };
 const KEYD_PORT = 4799;
 // The keyd stand-in answers from its own thread: dockerExec blocks this one until curl exits.
-const HOST_LISTENER = `const { parentPort } = require("node:worker_threads");
+const HOST_LISTENER = `const { parentPort, workerData } = require("node:worker_threads");
 require("node:http")
   .createServer((_req, res) => res.end("host-ok\\n"))
-  .listen(${KEYD_PORT}, "127.0.0.1", () => parentPort.postMessage("listening"));
+  .listen(workerData.socket ? { path: workerData.socket } : { port: ${KEYD_PORT}, host: "127.0.0.1" }, () => {
+    if (workerData.socket) require("node:fs").chmodSync(workerData.socket, 0o666);
+    parentPort.postMessage("listening");
+  });
 `;
 
 let listener: Worker;
+let relayHome: string | undefined;
 let gateInternal = "";
 let gateEgress = "";
 let cell = "";
@@ -54,7 +62,15 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
       input: PROBE_DOCKERFILE,
       stdio: ["pipe", "ignore", "ignore"],
     });
-    listener = new Worker(HOST_LISTENER, { eval: true });
+    relayHome = mkdtempSync(join(tmpdir(), "localdot-gate-relay-"));
+    const relay = gateRelay(JSON.parse(docker("info", "--format", "{{json .}}")), relayHome);
+    if (relay.kind === "socket") makeRelayDirs(relayHome);
+    listener = new Worker(HOST_LISTENER, {
+      eval: true,
+      workerData: {
+        socket: relay.kind === "socket" ? join(relay.keydDir, `${KEYD_PORT}.sock`) : undefined,
+      },
+    });
     await once(listener, "message");
 
     // Reserve unused subnets with Docker, then declare them explicitly: older engines
@@ -115,6 +131,11 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
       `LD_DESKTOP_ADDR=${cell}`,
       "-e",
       `LD_KEYD_PORT=${KEYD_PORT}`,
+      ...gateRelayEnv(relay, KEYD_PORT, false).flatMap((value) => ["-e", value]),
+      ...(gateRelayMounts(relay, false).Mounts ?? []).flatMap((mount) => [
+        "--mount",
+        `type=bind,src=${mount.Source},dst=${mount.Target},readonly`,
+      ]),
       GATE_IMAGE,
     );
     docker("network", "connect", "--ip", gateInternal, "localdot-test-sbx", "localdot-test-gate");
@@ -135,9 +156,10 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
   afterAll(async () => {
     removeAll(names);
     await listener?.terminate();
+    if (relayHome) rmSync(relayHome, { recursive: true, force: true });
   });
 
-  it("relays the cell to the host listener bound to 127.0.0.1", () => {
+  it("relays the cell through the platform’s private host transport", () => {
     expect(curl("localdot-test-cell", `http://${gateInternal}:3128/`).out).toContain("host-ok");
   });
 

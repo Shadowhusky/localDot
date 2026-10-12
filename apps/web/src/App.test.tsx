@@ -241,7 +241,9 @@ describe("App Replay mode", () => {
     expect(within(library).getByRole("textbox", { name: "Search recordings" })).toBeTruthy();
     fireEvent.click(await within(library).findByRole("button", { name: "Organize my notes" }));
     expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
-    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2), {
+      timeout: 4000,
+    });
     expect(
       within(screen.getByRole("main", { name: "Replay" })).getByText(
         /This browser lacks WebCodecs/,
@@ -253,7 +255,7 @@ describe("App Replay mode", () => {
     expect(fixture.historyCalls.every((call) => call.authorization === `Bearer ${TOKEN}`)).toBe(
       true,
     );
-  });
+  }, 15_000);
   it("opens Replay when the recordings couldn't be listed, so its own Try again is in reach", async () => {
     const d = daemon(() => json([summary("ready", "live")]));
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) =>

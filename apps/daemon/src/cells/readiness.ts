@@ -11,10 +11,12 @@ export const SELFTEST_TIMEOUT_MS = 8000;
 export async function probeDesktopd(
   endpoint: DesktopdEndpoint,
   timeoutMs = 3000,
+  options: { selftest?: boolean } = {},
 ): Promise<DesktopdHealth | undefined> {
   const health = await getJson(endpoint, "/healthz", timeoutMs);
   if (!isHealth(health)) return undefined;
-  if (!health.ok) return health;
+  // Ongoing liveness polling checks the desktop, without rerunning the boot network probes.
+  if (!health.ok || options.selftest === false) return health;
   const parsed = SelfTestReport.safeParse(
     await getJson(endpoint, "/selftest", SELFTEST_TIMEOUT_MS),
   );
