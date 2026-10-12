@@ -449,5 +449,65 @@ it("admits a preserved system only when its actual image records the installed b
   });
   await expect(verifyDesktopRuntimeImages(f.docker, f.record, images)).resolves.toBeUndefined();
   labels["localdot.system-base"] = `sha256:${hex(13)}`;
-  await expect(verifyDesktopRuntimeImages(f.docker, f.record, images)).rejects.toThrow("does not match");
+  await expect(verifyDesktopRuntimeImages(f.docker, f.record, images)).rejects.toThrow(
+    "does not match",
+  );
+});
+
+it("admits a migrated system that still carries the labels of the snapshot it came from", async () => {
+  const f = fixture();
+  const migrated = `sha256:${hex(12)}`;
+  const base = f.manifests.desktop.Id;
+  // Docker commit merges the source snapshot's labels into the migrated image. Its system-base
+  // label is the authority, so neither a stale snapshot record nor its purged home is consulted.
+  const labels = {
+    "localdot.system-base": base,
+    "localdot.system-source": hex(2),
+    "localdot.snapshot": other,
+    "localdot.snapshot-source": hex(13),
+  };
+  f.containers.desktop.Image = migrated;
+  f.containers.desktop.Config.Image = migrated;
+  Object.assign(f.containers.desktop.Config.Labels, labels);
+  const request = f.request.getMockImplementation();
+  if (!request) throw new Error("missing mock");
+  f.request.mockImplementation(async <T>(req: DockerRequest): Promise<T> => {
+    if (req.path === `/images/${encodeURIComponent(migrated)}/json`)
+      return {
+        Id: migrated,
+        Os: "linux",
+        Architecture: "arm64",
+        Config: { Labels: { ...labels } },
+      } as T;
+    return request(req) as Promise<T>;
+  });
+  await expect(
+    verifyDesktopRuntimeImages(f.docker, f.record, images, f.home),
+  ).resolves.toBeUndefined();
+});
+
+it("admits a snapshot computer after the snapshot's own home volume was purged", async () => {
+  const f = fixture();
+  const snapshotImage = `sha256:${hex(12)}`;
+  const labels = { "localdot.snapshot": other, "localdot.snapshot-source": hex(13) };
+  new ComputerSystemState(f.home, f.docker, images.desktop).records.write(other, {
+    cellId: other,
+    container: hex(13),
+    image: snapshotImage,
+    baseImage: f.containers.desktop.Image,
+    homeVolume: "purged-home",
+  });
+  f.containers.desktop.Image = snapshotImage;
+  f.containers.desktop.Config.Image = snapshotImage;
+  Object.assign(f.containers.desktop.Config.Labels, labels);
+  const original = f.request.getMockImplementation();
+  if (!original) throw new Error("Missing Docker fixture");
+  f.request.mockImplementation(async <T>(req: DockerRequest): Promise<T> => {
+    if (req.path === `/images/${encodeURIComponent(snapshotImage)}/json`)
+      return { Id: snapshotImage, Config: { Labels: labels } } as T;
+    return (await original(req)) as T;
+  });
+  await expect(
+    verifyDesktopRuntimeImages(f.docker, f.record, images, f.home),
+  ).resolves.toBeUndefined();
 });
