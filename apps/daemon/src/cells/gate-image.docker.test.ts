@@ -60,8 +60,8 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
     // Reserve unused subnets with Docker, then declare them explicitly: older engines
     // reject static --ip assignments on networks using automatic IPAM configuration.
     for (const name of names.networks) docker("network", "create", name);
-    const internalSubnet = subnetOf(names.networks[0]);
-    const egressSubnet = subnetOf(names.networks[1]);
+    const internalSubnet = subnetOf("localdot-test-sbx");
+    const egressSubnet = subnetOf("localdot-test-egress");
     for (const name of names.networks) docker("network", "rm", name);
     docker(
       "network",

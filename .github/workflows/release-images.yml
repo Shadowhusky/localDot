@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   images:
-    if: github.ref == 'refs/heads/main'
+    # Test a repair branch without publishing; publishing remains restricted to main.
+    if: ${{ !inputs.publish || github.ref == 'refs/heads/main' }}
     strategy:
       fail-fast: false
       matrix:
