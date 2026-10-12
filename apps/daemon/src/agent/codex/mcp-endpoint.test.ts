@@ -582,8 +582,7 @@ it("accepts byte-bounded chunked UTF8 frames and drops invalid UTF8", async () =
     mid = bytes.indexOf(Buffer.from("中")) + 1;
   f.c.sock.write(bytes.subarray(0, mid));
   f.c.sock.write(bytes.subarray(mid));
-  await tick();
-  expect(f.c.messages.some((m) => m.id === id && "result" in m)).toBe(true);
+  await vi.waitFor(() => expect(f.c.messages.some((m) => m.id === id && "result" in m)).toBe(true));
   const c = client(f.ep.socket);
   await c.ready();
   c.sock.write(Buffer.from([0xc3, 0x28, 0x0a]));

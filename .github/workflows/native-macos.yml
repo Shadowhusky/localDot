@@ -25,6 +25,15 @@ jobs:
           cache: false
       - run: npm install --global pnpm@10.29.3
       - run: pnpm install --frozen-lockfile
+      # Installer fixtures intentionally build offline; a fresh runner has no module cache.
+      - name: Prepare Go dependencies and build cache for offline test builds
+        working-directory: keyd
+        run: |
+          go mod download
+          echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+          go build -o "$RUNNER_TEMP/localdot-keyd-fixture" ./cmd/keyd
+      - name: Warm the system Python used by desktop helper tests
+        run: /usr/bin/python3 -c "import json, pathlib"
       - name: Complete app and installer regression suite
         run: pnpm test --maxWorkers=3
       - run: pnpm test:native-macos

@@ -49,6 +49,18 @@ describe("probeDesktopd", () => {
     expect(seen).toEqual([{ url: "/healthz", authorization: "Bearer t0ken" }]);
   });
 
+  it("checks ongoing desktop health without repeating the boot self-test", async () => {
+    const seen: string[] = [];
+    const health = { ...notReady, ok: true };
+    const baseUrl = await serve((req, res) => {
+      seen.push(req.url ?? "");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(health));
+    });
+    expect(await probeDesktopd({ baseUrl, token: "t" }, 3000, { selftest: false })).toEqual(health);
+    expect(seen).toEqual(["/healthz"]);
+  });
+
   it("gives no answer when desktopd refuses the token, whatever the refusal carries", async () => {
     const baseUrl = await serve((_req, res) => {
       res.writeHead(401, { "content-type": "application/json" });
