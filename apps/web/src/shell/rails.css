@@ -181,12 +181,6 @@
   justify-content: flex-end;
 }
 
-/* A compact navigation header keeps its full touch target without a second band of padding. */
-.ui-sheet.activity-dialog[data-side="bottom"] .ui-sheet-header {
-  min-height: 44px;
-  padding-block: 0;
-}
-
 /* The tabs meet the sheet header; only the content below them scrolls. */
 .activity-sheet {
   --rail-surface: var(--color-overlay);

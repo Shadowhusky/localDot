@@ -949,9 +949,9 @@
   width: min(420px, calc(100% - 16px));
   height: min(262px, calc(75% - 8px));
   transition:
-    width 200ms var(--ease-standard),
-    height 200ms var(--ease-standard),
-    border-radius 200ms var(--ease-standard);
+    width var(--dur-dim) var(--ease-standard),
+    height var(--dur-dim) var(--ease-standard),
+    border-radius var(--dur-dim) var(--ease-standard);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1042,7 +1042,7 @@
   min-height: 0;
   overflow: hidden;
   opacity: 1;
-  transition: opacity 140ms var(--ease-standard);
+  transition: opacity var(--dur-fade) var(--ease-standard);
 }
 .work-overlay[data-compact] .work-overlay-body {
   opacity: 0;

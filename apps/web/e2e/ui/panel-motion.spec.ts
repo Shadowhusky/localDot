@@ -19,6 +19,7 @@ test("Activity tabs and filters remain below the header while scrolling", async 
       .boundingBox();
     const tabs = await controls.boundingBox();
     if (!header || !tabs) throw new Error("Missing Activity header or tabs");
+    expect(header.height).toBeLessThanOrEqual(45);
     expect(Math.abs(tabs.y - header.y - header.height)).toBeLessThanOrEqual(1);
   }
   await expect

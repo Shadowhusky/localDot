@@ -476,6 +476,12 @@
     padding-bottom: calc(var(--spacing) * 2);
   }
 
+  /* Activity's tabs already supply the next row: no extra band below the title. */
+  .ui-sheet.activity-dialog[data-side="bottom"] .ui-sheet-header {
+    min-height: 44px;
+    padding-block: 0;
+  }
+
   .ui-sheet[data-under-top] .ui-sheet-header {
     border-bottom-color: var(--color-hairline);
   }
