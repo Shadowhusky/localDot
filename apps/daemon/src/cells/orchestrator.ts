@@ -36,7 +36,7 @@ import {
   NAME_PREFIX,
 } from "./spec.ts";
 import type { CellStore } from "./store.ts";
-import { SystemMigrationConflict } from "./system-migration-plan.ts";
+import { SystemBaseMissing, SystemMigrationConflict } from "./system-migration-plan.ts";
 import { ComputerSystemState } from "./system-state.ts";
 import {
   type CellEndpoints,
@@ -702,7 +702,11 @@ export class CellOrchestrator {
   // Stops the computer, moves it onto the images its tags name now and starts it again. Its home,
   // networks, addresses, tokens and keyd port stay; an update that fails before the old containers
   // go brings the computer back as it was.
-  update(id: string): Promise<void> {
+  async update(id: string): Promise<void> {
+    // Refuse missing prerequisites before #withBrowser fences and stops the user's browser.
+    // #update repeats this check after acquiring the lifecycle queue.
+    if (!this.deps.updates) throw new CellControlConflict("Updates are unavailable.");
+    await this.deps.updates.prepare(this.#require(id));
     return this.#withBrowser(id, () => this.#update(id));
   }
 
@@ -733,6 +737,7 @@ export class CellOrchestrator {
       this.#step(id, "install");
       next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
     } catch (error) {
+      console.error(`computer update ${id} failed:`, error);
       this.#updating.delete(id);
       if (!this.#current(id, stopping)) throw error;
       if (updates.pending(id)) {
@@ -755,7 +760,7 @@ export class CellOrchestrator {
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
       throw new CellControlConflict(
         back
-          ? error instanceof SystemMigrationConflict
+          ? error instanceof SystemMigrationConflict || error instanceof SystemBaseMissing
             ? error.message
             : refusal
           : UPDATE_STOPPED,

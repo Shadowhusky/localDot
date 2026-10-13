@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { DockerClient } from "./docker.ts";
+import { type DockerClient, DockerError } from "./docker.ts";
 import {
   ARCHIVE_SYSTEM,
   Manifest,
   migrationPlan,
   PREPARE_SYSTEM,
   SCAN_SYSTEM,
+  SystemBaseMissing,
   verifyMigration,
 } from "./system-migration-plan.ts";
 import { ComputerSystemState, snapshotOf } from "./system-state.ts";
@@ -37,7 +38,13 @@ export class SystemMigration {
     private readonly home: string,
   ) {}
 
-  async prepare(record: CellRecord, target: string): Promise<string> {
+  // Check while the desktop is still running. Repeat under the stopped-container check before
+  // copying anything, since Docker images can also be removed outside localDot.
+  async preflight(record: CellRecord, target: string): Promise<void> {
+    await this.#inspect(record, target, false);
+  }
+
+  async #inspect(record: CellRecord, target: string, stopped: boolean) {
     imageId.parse(target);
     const sourceId = record.ownership?.desktop;
     if (!sourceId) throw failure();
@@ -47,7 +54,7 @@ export class SystemMigration {
     });
     if (
       source.Id !== sourceId ||
-      source.State.Running ||
+      (stopped && source.State.Running) ||
       source.State.Paused ||
       source.Config.Labels?.["localdot.cell"] !== record.id ||
       source.Config.Labels?.["localdot.role"] !== "desktop"
@@ -67,19 +74,38 @@ export class SystemMigration {
       });
       if (image.Config.Labels?.[SYSTEM_BASE] !== base) throw failure();
     }
-    const docker = this.docker;
-    const operation = randomUUID();
-    const helpers: string[] = [];
     const image = await this.docker.request<{
       Id: string;
       Config: Record<string, unknown>;
       Architecture: string;
     }>({ method: "GET", path: `/images/${encodeURIComponent(target)}/json` });
-    const previous = await this.docker.request<{ Architecture: string }>({
-      method: "GET",
-      path: `/images/${encodeURIComponent(base)}/json`,
-    });
-    if (image.Id !== target || image.Architecture !== previous.Architecture) throw failure();
+    const previous = await this.docker
+      .request<{ Id: string; Architecture: string }>({
+        method: "GET",
+        path: `/images/${encodeURIComponent(base)}/json`,
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DockerError && error.status === 404) throw new SystemBaseMissing(base);
+        throw error;
+      });
+    if (previous.Id !== base || image.Id !== target || image.Architecture !== previous.Architecture)
+      throw failure();
+    // Rebuilding a development tag must not make a live computer's migration base dangling.
+    // Keep both the old base and the new one under content-addressed local tags.
+    for (const id of new Set([base, target]))
+      await this.docker.request({
+        method: "POST",
+        path: `/images/${encodeURIComponent(id)}/tag`,
+        query: { repo: "localdot/system-base", tag: id.slice("sha256:".length) },
+      });
+    return { sourceId, base, image };
+  }
+
+  async prepare(record: CellRecord, target: string): Promise<string> {
+    const { sourceId, base, image } = await this.#inspect(record, target, true);
+    const docker = this.docker;
+    const operation = randomUUID();
+    const helpers: string[] = [];
     const checkpoint = await this.docker.request<{ Id: string }>({
       method: "POST",
       path: "/commit",
