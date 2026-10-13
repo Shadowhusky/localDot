@@ -85,7 +85,15 @@ export function VoiceButton({ voice, size }: { voice: Voice; size: 28 | 36 }) {
 
 // Where the composer's hint sits: while the user talks, the time, a live waveform and where the
 // words are made; after a turn that went wrong, one line on why. Otherwise what it held before.
-export function VoiceStrip({ voice, children }: { voice: Voice; children?: ReactNode }) {
+export function VoiceStrip({
+  voice,
+  children,
+  compact = false,
+}: {
+  voice: Voice;
+  children?: ReactNode;
+  compact?: boolean;
+}) {
   const { state, notice, route } = voice;
   if (state.phase === "idle")
     return notice ? (
@@ -112,7 +120,7 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
   const away = (state.phase === "starting" || state.phase === "listening") && state.away;
   return (
     <div className="voice-strip" data-phase={state.phase} data-away={away || undefined}>
-      {
+      {!compact && (
         <IconButton
           className="voice-cancel"
           label="Cancel"
@@ -121,9 +129,11 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
           kbd={["Escape"]}
           onClick={voice.dismiss}
         />
-      }
+      )}
       <Waveform voice={voice} since={state.phase === "listening" ? state.since : null} />
-      <span className="voice-tail">{away ? "Let go to cancel" : routeLabel(route)}</span>
+      {!compact && (
+        <span className="voice-tail">{away ? "Let go to cancel" : routeLabel(route)}</span>
+      )}
     </div>
   );
 }

@@ -2205,8 +2205,27 @@
 }
 .thread-foot .thread-live {
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
+}
+/* The inline Working disclosure owns its scroll. Pass the available footer
+   height through the disclosure instead of nesting a second clipped scroller. */
+.thread-foot .thread-live > .ui-collapse-inner,
+.thread-live .thread-work,
+.thread-live .thread-work-steps,
+.thread-live .thread-work-steps > .ui-collapse > .ui-collapse-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.thread-live .thread-work-now,
+.thread-live .ui-disclosure-trigger {
+  flex: none;
+}
+.thread-live .thread-work-steps > .ui-collapse {
+  min-height: 0;
+}
+.thread-live .thread-work-scroll {
+  flex: 0 1 auto;
 }
 .thread-foot .thread-toolbar {
   flex: none;

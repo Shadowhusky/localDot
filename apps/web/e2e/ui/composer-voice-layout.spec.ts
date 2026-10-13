@@ -3,10 +3,7 @@ import { composer, expect, runAt, test } from "./harness.ts";
 runAt("c14", "w14", "c39", "w39");
 
 for (const width of [320, 390, 1440]) {
-  test(`microphone and Send stay separate through recording at ${width}px`, async ({
-    page,
-    ui,
-  }) => {
+  test(`compact long-press voice input at ${width}px`, async ({ page, ui }) => {
     await page.setViewportSize({ width, height: 900 });
     // Exercise real composer transitions without recording the tester's microphone.
     await page.addInitScript(() => {
@@ -39,42 +36,43 @@ for (const width of [320, 390, 1440]) {
     await ui.open("running");
     await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
     const card = await composer(page);
-    const mic = card.locator(".voice-mic > button");
     const send = card.locator(".composer-send");
-    const separate = async () => {
-      const m = await mic.boundingBox();
-      const s = await send.boundingBox();
-      expect(m && s && Math.max(s.x - m.x - m.width, s.y - m.y - m.height)).toBeGreaterThanOrEqual(
-        8,
-      );
-      for (const button of [mic, send]) {
-        expect(
-          await button.evaluate((element) => {
-            const r = element.getBoundingClientRect();
-            return [0.1, 0.5, 0.9].every((x) =>
-              element.contains(document.elementFromPoint(r.x + r.width * x, r.y + r.height / 2)),
-            );
-          }),
-        ).toBe(true);
-      }
-      const halo = await card.locator(".voice-mic-halo").boundingBox();
-      expect(halo && s && (halo.x + halo.width <= s.x || halo.y + halo.height <= s.y)).toBe(true);
-    };
-    await expect(mic).not.toHaveAttribute("aria-disabled", "true");
-    await mic.hover();
+    await expect(card.locator(".voice-mic")).toHaveCount(0);
+    await expect(card.getByText("Hold to speak", { exact: true })).toBeVisible();
+    const idle = await card.boundingBox();
+    expect(idle?.height).toBeLessThanOrEqual(110);
+    const initialLabel = await send.getAttribute("aria-label");
     await page.screenshot({ path: test.info().outputPath("idle.png") });
-
-    await separate();
-    await mic.click();
-    await expect(card.locator(".voice-mic")).toHaveAttribute("data-voice", "listening");
-    await expect(mic).toHaveAccessibleName("Tap to finish");
-    await separate();
+    // A real pointer sequence includes the synthesized click on release.
+    const target = await send.boundingBox();
+    if (!target) throw new Error("Missing Send button");
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+    await page.mouse.down();
+    await expect(send).toHaveAccessibleName("Finish speaking");
+    await page.mouse.up();
+    await expect(send).toHaveAccessibleName("Finish speaking");
+    const recording = await card.boundingBox();
+    expect(recording?.height).toBe(idle?.height);
+    await expect(card.locator(".composer-model")).toBeHidden();
+    const waveform = card.locator(".voice-strip");
+    await expect(waveform).toHaveAttribute("data-phase", "listening");
+    const wave = await waveform.boundingBox();
+    const finish = await send.boundingBox();
+    expect(wave && finish && wave.x + wave.width <= finish.x).toBe(true);
+    expect(
+      await send.evaluate((node) => {
+        const r = node.getBoundingClientRect();
+        return node.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+      }),
+    ).toBe(true);
     await page.screenshot({ path: test.info().outputPath("recording.png") });
-    await mic.click();
-    await expect(card.locator(".voice-mic")).toHaveAttribute("data-voice", "finishing");
-    await separate();
+    await send.click();
+    await expect(send).toHaveAccessibleName("Transcribing speech");
     await page.evaluate(() => window.dispatchEvent(new Event("finish-test-speech")));
-    await expect(card.locator(".voice-mic")).not.toHaveAttribute("data-voice");
-    await separate();
+    await expect(send).toHaveAccessibleName(initialLabel ?? "Stop");
+    await expect(card.locator(".composer-model")).toBeHidden(); // Empty speech notice occupies the row.
+    await card.getByRole("button", { name: "Dismiss voice notice" }).click();
+    await expect(card.locator(".composer-model")).toBeVisible();
+    expect((await card.boundingBox())?.height).toBe(idle?.height);
   });
 }

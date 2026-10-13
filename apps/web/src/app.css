@@ -421,3 +421,11 @@
     transition: opacity var(--dur-fade) var(--ease-standard);
   }
 }
+
+/* On short phones, opening the detailed work list needs more than a sliver
+   above the composer. Its own heading already supplies the current narration. */
+@media (width < 700px) and (height < 650px) {
+  .app:has(.thread-live .thread-work-steps[data-open]) .stage-band {
+    display: none;
+  }
+}

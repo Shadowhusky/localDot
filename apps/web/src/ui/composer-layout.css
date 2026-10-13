@@ -40,15 +40,15 @@
   .composer-card[data-layout="pill"] {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    row-gap: calc(var(--spacing) * 2);
     padding: calc(var(--spacing) * 2);
+    gap: 0;
   }
 
   .composer-card[data-layout="pill"] > .composer-field {
     order: 0;
     width: 100%;
-    padding-inline: var(--spacing) calc(var(--spacing) * 14);
-    min-height: 44px;
+    padding: var(--spacing);
+    min-height: 32px;
     max-height: 144px;
   }
 
@@ -70,58 +70,73 @@
     height: 44px;
   }
 
-  /* On phones, reserve a full 44px slot beside the field, above Send. Keep
-     the card as its containing block when recording changes toolbar styles. */
-  .composer-card[data-layout="pill"] .composer-pop {
-    position: absolute;
-    top: calc(var(--spacing) * 2);
-    right: calc(var(--spacing) * 2);
-  }
-
-  .composer-card[data-layout="pill"][data-voice] > .composer-bar {
-    position: static;
-  }
-
-  .composer-bar > .composer-pop:has(> .voice-mic) {
-    margin-inline: var(--spacing);
-  }
-
-  .composer-card[data-layout="pill"] .composer-pop:has(> .voice-mic) {
-    margin-inline: 0;
-  }
-
-  .voice-mic > .ui-icon-button::after {
-    inset: 0;
-  }
-
-  /* The listening pulse stays inside its own hit area, away from Send. */
-  .voice-mic[data-voice] > .voice-mic-halo {
-    scale: calc(0.85 + var(--_level, 0) * 0.15);
-  }
-
-  .composer-card[data-voice]:not([data-layout="pill"]) .composer-hint {
-    right: 80px;
-  }
-
-  .composer-card[data-layout="pill"][data-voice] .composer-hint {
-    inset: 8px 60px 60px 8px;
-    height: auto;
-    border-radius: inherit;
-  }
-
   .composer-card[data-layout="pill"] .composer-effort {
     display: none;
   }
 
   .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button,
-  .composer-card[data-layout="pill"] .voice-mic > .ui-icon-button {
+  .composer-card[data-layout="pill"] .composer-send {
     width: 44px;
     height: 44px;
   }
 
-  .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button::after,
-  .composer-card[data-layout="pill"] .voice-mic > .ui-icon-button::after {
+  .composer-bar > .ui-icon-button::after,
+  .composer-send::after {
     inset: 0;
+  }
+
+  .composer-send-wrap {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+  }
+
+  /* Recording occupies the existing control row, leaving the draft in place. */
+  .composer-card[data-voice] .composer-bar {
+    position: relative;
+  }
+
+  .composer-card[data-voice] .composer-bar > :not(.composer-send-wrap):not(.composer-hint) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .composer-card[data-voice] .composer-hint {
+    position: absolute;
+    inset: 0 calc(32px + var(--spacing) * 2) 0 0;
+    height: auto;
+    display: flex;
+    border-radius: 0;
+    padding: 0;
+    background: var(--color-raised);
+  }
+
+  .composer-card[data-layout="pill"][data-voice] .composer-hint {
+    inset: 0 calc(44px + var(--spacing) * 2) 0 0;
+  }
+
+  .composer-voice-hint {
+    position: absolute;
+    bottom: calc(100% + var(--spacing) * 2);
+    right: 0;
+    z-index: 4;
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    border-radius: var(--radius-row);
+    background: var(--color-popover);
+    box-shadow: var(--shadow-overlay);
+    color: var(--color-fg-1);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .composer-voice-hint::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    right: calc(var(--spacing) * 4);
+    border: var(--spacing) solid transparent;
+    border-top-color: var(--color-popover);
   }
 
   .composer-count {

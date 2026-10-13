@@ -25,7 +25,6 @@ import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
-import { afterMotion } from "../ui/finished.ts";
 import { focusWithoutScroll } from "../ui/focus.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -36,7 +35,8 @@ import { TextArea, type TextAreaProps } from "../ui/TextArea.tsx";
 import { resizeTextArea } from "../ui/textarea-size.ts";
 import "../ui/composer-layout.css";
 import { useVoice } from "../voice/useVoice.ts";
-import { VoiceButton, VoiceStrip } from "../voice/VoiceControls.tsx";
+import { VoiceStrip } from "../voice/VoiceControls.tsx";
+import { VoiceSendButton } from "../voice/VoiceSendButton.tsx";
 import { AttachmentChips } from "./Attachments.tsx";
 import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
@@ -215,26 +215,6 @@ const ComposerField = memo(function ComposerField({
     />
   );
 });
-
-// A control that comes and goes along the row: it grows in where it sits, and on its way out it
-// shrinks away still showing what it last did, out of reach.
-function Pop({ shown, children }: { shown: boolean; children: ReactNode }) {
-  const root = useRef<HTMLSpanElement>(null);
-  const [kept, setKept] = useState(shown);
-  if (shown && !kept) setKept(true);
-  const last = useRef(children);
-  if (shown) last.current = children;
-  useEffect(() => {
-    if (shown || !kept) return;
-    return afterMotion([root.current], () => setKept(false));
-  }, [shown, kept]);
-  if (!shown && !kept) return null;
-  return (
-    <span ref={root} className="composer-pop" data-leaving={shown ? undefined : ""} inert={!shown}>
-      {shown ? children : last.current}
-    </span>
-  );
-}
 
 export function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
@@ -1030,7 +1010,7 @@ export function Composer(props: ComposerProps) {
           {props.model}
           {props.permissions}
           <div className="composer-hint">
-            <VoiceStrip voice={voice}>
+            <VoiceStrip voice={voice} compact>
               {note && <span className="composer-note">{note}</span>}
             </VoiceStrip>
           </div>
@@ -1072,10 +1052,8 @@ export function Composer(props: ComposerProps) {
               </MenuItem>
             )}
           </Menu>
-          <Pop shown={!pill || text.blank || talking || !!voice.notice}>
-            <VoiceButton voice={voice} size={pill ? 36 : 28} />
-          </Pop>
-          <IconButton
+          <VoiceSendButton
+            voice={voice}
             type={taskAction ? "button" : "submit"}
             onClick={taskAction?.run}
             className="composer-send"
