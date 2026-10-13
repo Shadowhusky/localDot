@@ -66,6 +66,17 @@ function setup(limit?: number) {
 }
 
 describe("DesktopdTools real routes", () => {
+  it("reads capability metadata through the authenticated desktop route", async () => {
+    const { tools } = setup();
+    const result = await tools.capabilities();
+    expect(result).toMatchObject({ version: 1, search: "service_path" });
+    expect(result.programs.git).toMatch(/available|not_on_path|unknown/);
+  });
+  it("keeps a missing capability endpoint distinguishable for older computers", async () => {
+    await expect(
+      client(answer(new Response("missing", { status: 404 }))).capabilities(),
+    ).rejects.toMatchObject({ status: 404, path: "/capabilities" });
+  });
   it("streams stdout/stderr and a nonzero exit", async () => {
     const { tools } = setup();
     const output: string[] = [];

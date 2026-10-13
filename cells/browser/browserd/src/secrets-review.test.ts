@@ -4,6 +4,7 @@ import type { BrowserNative } from "./native.ts";
 import {
   accessCodeField,
   BrowserSecrets,
+  codeFieldClassification,
   privateCodeField,
   secretMetadata,
   verificationField,
@@ -188,5 +189,133 @@ describe("private access-code fields", () => {
     "invite_message",
   ])("does not classify %s as a private code", (name) => {
     expect(privateCodeField(new Map([["name", name]]))).toBe(false);
+  });
+});
+
+describe("public identifiers and ambiguous invitation fields", () => {
+  it("recognizes the room-code field without treating its URL-populated value as a credential", () => {
+    const attrs = {
+      type: "text",
+      id: "invite-code",
+      "aria-label": "房间码",
+      placeholder: "输入 6 位房间码",
+      autocomplete: "off",
+    };
+    const classification = codeFieldClassification(new Map(Object.entries(attrs)));
+    expect(classification).toEqual({ purpose: "public", secret: false });
+    expect(Object.isFrozen(classification)).toBe(true);
+    expect(privateCodeField(new Map(Object.entries(attrs)))).toBe(false);
+    expect(accessCodeField(new Map(Object.entries(attrs)))).toBe(false);
+    expect(secretMetadata(snapshot("INPUT", attrs, "ABC123"))).toEqual({
+      filled: false,
+      nodeIds: [],
+    });
+  });
+
+  it.each([
+    "Room code",
+    "Enter a lobby code",
+    "Game invitation code",
+    "Table invite code",
+    "Match code",
+    "Referral code",
+    "Public share code",
+    "Public invitation code",
+    "房间码",
+    "房間邀請碼",
+    "游戏编号",
+    "遊戲碼",
+    "对局码",
+    "牌桌加入码",
+    "公开分享码",
+    "推薦碼",
+  ])("uses the field's explicit %s purpose to disambiguate an invitation identifier", (label) => {
+    for (const key of ["aria-label", "placeholder"]) {
+      const attrs = { name: "invitationCode", [key]: label };
+      expect(codeFieldClassification(new Map(Object.entries(attrs)))).toEqual({
+        purpose: "public",
+        secret: false,
+      });
+      expect(secretMetadata(snapshot("INPUT", attrs, "ordinary-room-value"))).toEqual({
+        filled: false,
+        nodeIds: [],
+      });
+    }
+  });
+
+  it.each<Record<string, string>>([
+    { type: "password" },
+    { autocomplete: "section-signin one-time-code" },
+    { autocomplete: "current-password" },
+    { autocomplete: "new-password" },
+    { name: "security_code" },
+    { name: "device_code" },
+    { name: "account_pin" },
+    { name: "access_code" },
+    { name: "activationCode" },
+    { name: "registration_key" },
+    { placeholder: "Enter your verification code" },
+    { placeholder: "Authentication code" },
+    { placeholder: "Authorization code" },
+    { placeholder: "Challenge code" },
+    { placeholder: "Secret room code" },
+    { placeholder: "Private share code" },
+    { placeholder: "Room password" },
+    { placeholder: "验证码" },
+    { placeholder: "安全碼" },
+    { placeholder: "授權碼" },
+    { placeholder: "私密房间码" },
+    { placeholder: "房間密碼" },
+    { placeholder: "Gift code" },
+    { placeholder: "License key" },
+    { placeholder: "Payment code" },
+    { placeholder: "Redemption code" },
+    { placeholder: "兑换码" },
+  ])(
+    "preserves strong or conflicting credential signals despite a room-code label: %j",
+    (extra) => {
+      const attrs = { id: "invite-code", "aria-label": "Room code", ...extra };
+      expect(privateCodeField(new Map(Object.entries(attrs)))).toBe(true);
+      expect(secretMetadata(snapshot("INPUT", attrs, "private-credential-canary"))).toEqual({
+        filled: true,
+        nodeIds: [1],
+      });
+    },
+  );
+
+  it.each<Record<string, string>>([
+    { autocomplete: "off" },
+    { "data-purpose": "Room code" },
+    { title: "Room code" },
+    { name: "room_code" },
+    { "aria-label": "Join code" },
+    { "aria-label": "Invite code" },
+    { "aria-label": "Share code" },
+    { "aria-label": "Code" },
+  ])("keeps ambiguous invitations private without explicit public field labels: %j", (extra) => {
+    const attrs = { id: "invite-code", ...extra };
+    expect(codeFieldClassification(new Map(Object.entries(attrs)))).toEqual({
+      purpose: "invitation",
+      secret: true,
+    });
+    expect(secretMetadata(snapshot("INPUT", attrs, "private-credential-canary"))).toEqual({
+      filled: true,
+      nodeIds: [1],
+    });
+  });
+
+  it("redacts hidden server state and still protects a genuine password beside the room field", () => {
+    expect(
+      secretMetadata(
+        snapshot(
+          "INPUT",
+          { type: "hidden", id: "invite-code", "aria-label": "Room code" },
+          "state",
+        ),
+      ),
+    ).toEqual({ filled: false, nodeIds: [1] });
+    expect(
+      secretMetadata(snapshot("INPUT", { type: "password", "aria-label": "Room code" }, "secret")),
+    ).toEqual({ filled: true, nodeIds: [1] });
   });
 });

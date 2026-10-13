@@ -55,7 +55,7 @@ export interface ToolDeps {
         | "browserRead"
         | "browserNavigate"
       > &
-        Partial<Pick<DesktopdTools, "elements">>)
+        Partial<Pick<DesktopdTools, "elements" | "capabilities">>)
     | undefined;
   launcher(
     cellId: string,
@@ -87,7 +87,7 @@ export interface ToolDeps {
     saveLogin(origin: string, username: string, password: string): Promise<void>;
   };
   routines?: import("./routine.ts").RoutineToolPort;
-  connectors?: Pick<ConnectorHub, "access" | "check" | "call">;
+  connectors?: Pick<ConnectorHub, "access" | "check" | "call" | "observation">;
   // The web tools' own way out, through keyd, without the screen or the user's sign-ins.
   web?: WebAccess;
 }

@@ -143,6 +143,19 @@ export class ScreenController {
     return this.#selection;
   }
 
+  availability(): {
+    desktop: boolean;
+    browser: "attached" | "not_open" | "unavailable";
+    selected: ScreenName;
+  } {
+    return {
+      desktop: this.deps.desktopReady(),
+      browser:
+        this.#closed || this.#failed ? "unavailable" : this.#browser ? "attached" : "not_open",
+      selected: this.#selection.screen,
+    };
+  }
+
   lease(raw: ScreenScope): ScreenLease {
     const scope = this.#scope(raw);
     const epoch = this.#epoch;
@@ -272,6 +285,7 @@ export class ScreenController {
     if (!owner?.client.manual || !permit) throw new ScreenControlError();
     const send = owner.client.manual.bind(owner.client);
     const selection = this.#selection;
+    const epoch = this.#epoch;
     const signal = AbortSignal.any([scope.signal, this.#manual.signal]);
     let finished = false;
     const check = () => {
@@ -316,6 +330,38 @@ export class ScreenController {
         finished = true;
         this.#active.delete(done.promise);
         done.resolve();
+      },
+      // Recovery outlives the input lease. A fresh user grant drains the old browser
+      // actions before acknowledging it, without reading private fields, replaying
+      // uncertain input, reloading the page, or returning control to the agent.
+      confirm: async () => {
+        const current = () => {
+          if (
+            epoch !== this.#epoch ||
+            selection !== this.#selection ||
+            owner !== this.#browser ||
+            !this.#held ||
+            !this.#userReady ||
+            this.#returning ||
+            this.#pending ||
+            this.#closed ||
+            this.#failed ||
+            !this.deps.desktopReady()
+          )
+            throw new ScreenControlError();
+          this.#checkBrowser(owner);
+        };
+        current();
+        await this.#revoke();
+        current();
+        await owner.client.health(
+          this.#browserScope(owner, {
+            signal: AbortSignal.any([this.#manual.signal, AbortSignal.timeout(5000)]),
+            check: current,
+          }),
+        );
+        current();
+        if (!owner.manualPermit) throw new ScreenControlError();
       },
     };
   }
@@ -386,6 +432,15 @@ export class ScreenController {
       this.#held = false;
       this.#holding = undefined;
       return result;
+    } catch (error) {
+      // A cancelled hand-back must not leave the user's input signal aborted.
+      // Re-establish physical user ownership before reopening manual admission.
+      this.#returning = false;
+      if (epoch === this.#epoch && !this.#closed && !this.#failed) {
+        this.#holding = undefined;
+        await this.takeOver();
+      }
+      throw error;
     } finally {
       this.#returning = false;
     }

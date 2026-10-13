@@ -358,6 +358,24 @@ function fixture(downloads?: ScreenControllerDeps["downloads"]) {
 }
 
 describe("session screen coordinator", () => {
+  it("reports screen availability without launching or granting browser control", async () => {
+    const f = fixture();
+    expect(f.controller.availability()).toEqual({
+      desktop: true,
+      browser: "not_open",
+      selected: "desktop",
+    });
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+    expect(f.client.control).not.toHaveBeenCalled();
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.controller.availability()).toEqual({
+      desktop: true,
+      browser: "attached",
+      selected: "browser",
+    });
+    await f.controller.close();
+    expect(f.controller.availability().browser).toBe("unavailable");
+  });
   it("hands the running browser to the next task with a newer control revision", async () => {
     const f = fixture();
     let counted = 0;
@@ -548,6 +566,60 @@ describe("session screen coordinator", () => {
     await returning;
     expect(f.holder()).toBe("agent");
     expect(() => f.controller.manualAccess(f.scope)).toThrow();
+    await f.controller.close();
+  });
+
+  it("confirms delivery after the input lease ends, but never after a browser replacement", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    const abort = new AbortController();
+    const manual = f.controller.manualAccess({
+      signal: abort.signal,
+      check: () => abort.signal.throwIfAborted(),
+    });
+    manual.finish();
+    abort.abort();
+    expect(() => manual.check()).toThrow();
+    await manual.confirm();
+    expect(f.holder()).toBe("user");
+    expect(f.client.manual).not.toHaveBeenCalled();
+    f.replace();
+    const calls = f.client.control.mock.calls.length;
+    await expect(manual.confirm()).rejects.toThrow(ScreenControlError);
+    expect(f.client.control).toHaveBeenCalledTimes(calls);
+    await f.controller.close();
+  });
+
+  it("does not confirm browser input when control ends during recovery", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    const manual = f.controller.manualAccess(f.scope);
+    manual.finish();
+    const barrier = Promise.withResolvers<void>();
+    f.controlBarrier.mockImplementationOnce(async () => barrier.promise);
+    const recovery = manual.confirm();
+    const rejected = expect(recovery).rejects.toThrow(ScreenControlError);
+    const closing = f.controller.close();
+    barrier.resolve();
+    await rejected;
+    await closing;
+  });
+
+  it("restores user input when the hand-back request is cancelled", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    const abort = new AbortController();
+    const returning = f.controller.handback({ ...f.scope, signal: abort.signal });
+    abort.abort();
+    await expect(returning).rejects.toThrow(ScreenControlError);
+    expect(f.holder()).toBe("user");
+    const manual = f.controller.manualAccess(f.scope);
+    await manual.input({ kind: "text", text: "x" });
+    manual.finish();
+    await f.controller.handback(f.scope);
     await f.controller.close();
   });
 

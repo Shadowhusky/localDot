@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConnectorDraft, KeydRecord } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConnectorHub, resultText } from "./hub.ts";
+import { ConnectorHub, plainProblem, resultText } from "./hub.ts";
 import { ConnectorStore } from "./store.ts";
 import { type FakeTool, fakeApp } from "./testing/fake-app.ts";
 
@@ -146,6 +146,7 @@ describe("ConnectorHub", () => {
     expect(await hub.call(entry, {}, new AbortController().signal)).toEqual({
       ok: false,
       text: "No such page",
+      recovery: { kind: "tool_error", surface: "connector", retry: "verify_first" },
     });
   });
 
@@ -209,5 +210,49 @@ describe("resultText", () => {
     expect(resultText({ content: [{ type: "text", text: "x".repeat(30_000) }] })).toContain(
       "more characters cut",
     );
+  });
+});
+
+describe("connector failure semantics", () => {
+  it("does not equate permission refusal with expired authentication", () => {
+    const { hub } = setup();
+    const config = hub.add(linear);
+    expect(
+      plainProblem(Object.assign(new Error("forbidden"), { code: 403 }), config),
+    ).toMatchObject({ status: "failed", causeKind: "permission" });
+    expect(
+      plainProblem(Object.assign(new Error("unauthorized"), { code: 401 }), config),
+    ).toMatchObject({ causeKind: "authentication" });
+    expect(plainProblem(new Error("request timed out"), config)).toMatchObject({
+      causeKind: "timeout",
+    });
+  });
+  it("returns structured recovery without interpreting the application's error prose", async () => {
+    const { hub } = setup([
+      { name: "list_issues", reply: () => ({ text: "401 please log in again", isError: true }) },
+    ]);
+    const config = hub.add(linear);
+    await hub.refresh(config.id);
+    const entry = hub.forTask().get("linear__list_issues");
+    if (!entry) throw new Error("missing tool");
+    const result = await hub.call(entry, {}, new AbortController().signal);
+    expect(result).toMatchObject({
+      ok: false,
+      recovery: { kind: "tool_error", retry: "verify_first" },
+    });
+    expect((await hub.views())[0]?.status).toBe("ready");
+  });
+  it("keeps a forbidden connector distinct from a missing key when reconnecting", async () => {
+    const { hub, app } = setup();
+    const config = hub.add(linear);
+    await hub.refresh(config.id);
+    const entry = hub.forTask().get("linear__list_issues");
+    if (!entry) throw new Error("missing tool");
+    await hub.disconnect(config.id);
+    app.state.fail = Object.assign(new Error("forbidden"), { code: 403 });
+    expect(await hub.call(entry, { team: "one" }, new AbortController().signal)).toMatchObject({
+      ok: false,
+      recovery: { kind: "permission", retry: "never" },
+    });
   });
 });

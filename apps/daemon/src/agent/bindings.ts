@@ -3,6 +3,7 @@ import {
   type ClientKind,
   type KeydRecord,
   type ModelBinding,
+  type ModelOptions,
   SURROGATE_PATTERN,
   type TaskModelSelection,
   TaskPricing,
@@ -16,6 +17,7 @@ import {
   isOpenRouterRouterId,
   keydRouteModel,
   localModel,
+  modelOptionsProblem,
   providerById,
   routeFor,
   usableAs,
@@ -36,6 +38,8 @@ export class BindingError extends Error {
 }
 export const OUTPUT_CAP_TOKENS = 16_000;
 export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
+  const problem = modelOptionsProblem(choice.provider, choice.model, choice.options);
+  if (problem) throw new BindingError(role, problem);
   if (role !== "main") throw new BindingError(role, "the ChatGPT plan can only be the main model");
   if (choice.key !== undefined) throw new BindingError(role, "the ChatGPT plan needs no key");
   if (choice.price !== undefined) throw new BindingError(role, "the ChatGPT plan needs no price");
@@ -43,6 +47,8 @@ export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
     throw new BindingError(role, "unknown ChatGPT model");
 }
 export function checkClaudeCodeChoice(role: Role, choice: RoleChoice): void {
+  const problem = modelOptionsProblem(choice.provider, choice.model, choice.options);
+  if (problem) throw new BindingError(role, problem);
   if (role !== "main")
     throw new BindingError(role, "Claude Code (your plan) can only be the main model");
   if (choice.key !== undefined) throw new BindingError(role, "Claude Code needs no key");
@@ -63,6 +69,7 @@ export function unpriced(m: CatalogModel): boolean {
 }
 export interface ResolvedRole {
   role: Role;
+  options?: ModelOptions;
   providerId: string;
   client: ClientKind;
   route: string;
@@ -86,6 +93,8 @@ export function resolveRole(
   const parsed = RoleChoice.safeParse(raw);
   if (!parsed.success) throw new BindingError(role, "invalid model selection or price");
   const choice = parsed.data;
+  const optionsProblem = modelOptionsProblem(choice.provider, choice.model, choice.options);
+  if (optionsProblem) throw new BindingError(role, optionsProblem);
   const provider = providerById(choice.provider);
   if (!provider) throw new BindingError(role, `unknown provider ${choice.provider}`);
   if (role === "local" && !provider.local)
@@ -189,11 +198,19 @@ export function resolveRole(
   } catch {
     throw new BindingError(role, "the model has an unsupported price or token limit");
   }
+  const budgetProblem = modelOptionsProblem(
+    choice.provider,
+    choice.model,
+    choice.options,
+    Math.min(model.maxOutputTokens, OUTPUT_CAP_TOKENS),
+  );
+  if (budgetProblem) throw new BindingError(role, budgetProblem);
   const capability = capabilityOf(provider, model);
   if (!usableAs(role, capability)) throw new BindingError(role, `${model.name} cannot call tools`);
   return immutable({
     role,
     providerId: provider.id,
+    ...(choice.options ? { options: choice.options } : {}),
     client: provider.client,
     route,
     model,
@@ -211,7 +228,12 @@ export function planOnly(roles: readonly ResolvedRole[]): boolean {
 export function taskSelection(roles: readonly ResolvedRole[]): TaskModelSelection {
   return {
     kind: "api",
-    roles: roles.map((r) => ({ role: r.role, provider: r.providerId, model: r.model.id })),
+    roles: roles.map((r) => ({
+      role: r.role,
+      provider: r.providerId,
+      model: r.model.id,
+      ...(r.options ? { options: r.options } : {}),
+    })),
     ...(planOnly(roles) ? { plan: true as const } : {}),
   };
 }
@@ -221,6 +243,8 @@ export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): 
     throw new BindingError(r.role, "the task's key is not ready to use; choose the key again");
   return immutable({
     route: r.route,
+    provider: r.providerId,
+    ...(r.options ? { options: r.options } : {}),
     client: r.client,
     model: r.model.id,
     ...(surrogate ? { surrogate } : {}),

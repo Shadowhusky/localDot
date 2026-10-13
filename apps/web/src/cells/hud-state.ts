@@ -179,6 +179,18 @@ export function hudFor({
     : hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
 }
 
+// A separate browser owns the picture's health, while lifecycle actions still target its
+// desktop. Only the desktop's stream states yield to that screen: failures, containment,
+// pause and lifecycle operations always remain authoritative.
+export function withScreenHud(parent: HudState, screen?: HudState): HudState {
+  if (
+    !screen ||
+    (parent.phase !== "live" && parent.phase !== "connecting" && parent.phase !== "reconnecting")
+  )
+    return parent;
+  return { ...screen, action: parent.action };
+}
+
 const STOP_FAILED = "stop failed: ";
 // A DockerError's message: "docker <status|unreachable> on <path>: <Docker's message>".
 const DOCKER_ERROR = /^docker (unreachable|\d+) on /;

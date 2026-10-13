@@ -137,6 +137,93 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(view(noResult, 9500).task).toMatchObject({ row: "ready", label: "Ready" });
   });
 
+  it("shows unfinished work honestly while idle and after retirement, live and in replay", () => {
+    const blocked = [
+      ...typed(),
+      ev("task.result", 1600, {
+        outcome: "blocked",
+        summary: "The game is unavailable.",
+        files: [],
+      }),
+      ev("agent.state", 1700, { state: "idle", reason: "blocked" }),
+    ];
+    const unfinished = {
+      row: "failed",
+      phase: "finished",
+      label: "Couldn’t finish",
+      control: false,
+    };
+    expect(view(blocked, 2000).task).toMatchObject(unfinished);
+    expect(replay(blocked, 2000)).toMatchObject(unfinished);
+    for (const reason of ["stopped", "done"]) {
+      const ended = [...blocked, ev("session.end", 3000, { reason })];
+      expect(view(ended, 4000).task).toMatchObject(unfinished);
+      expect(replay(ended, 4000)).toMatchObject(unfinished);
+      expect(replay(ended, 1500).phase).toBe("running");
+    }
+    // A caller's generic done state cannot override an explicit unsuccessful result.
+    const beforeRetirement = [
+      ...blocked.slice(0, -1),
+      ev("agent.state", 1650, { state: "thinking" }),
+      ev("agent.state", 1700, { state: "done" }),
+    ];
+    expect(view(beforeRetirement, 2000).task).toMatchObject(unfinished);
+  });
+
+  it.each(["complete", undefined] as const)(
+    "clears a blocked result on resumed work and accepts a later %s completion",
+    (outcome) => {
+      const blocked = [
+        ...typed(),
+        ev("task.result", 1600, {
+          outcome: "blocked",
+          summary: "The game is unavailable.",
+          files: [],
+        }),
+        ev("agent.state", 1700, { state: "idle", reason: "blocked" }),
+        ev("message.user", 2100, {
+          messageId: `${ID}followup`,
+          text: "Try again",
+          kind: "followup",
+        }),
+        ev("agent.state", 2200, { state: "thinking" }),
+      ];
+      expect(facts(blocked)).toMatchObject({ result: false, outcome: undefined });
+      expect(view(blocked, 2300).task).toMatchObject({ row: "thinking", phase: "running" });
+      expect(replay(blocked, 2300)).toMatchObject({ row: "thinking", phase: "running" });
+      const completed = [
+        ...blocked,
+        ev("task.result", 2600, {
+          ...(outcome ? { outcome } : {}),
+          summary: "The game finished.",
+          files: [],
+        }),
+        ev("agent.state", 2700, { state: "done" }),
+        ev("session.end", 3000, { reason: "done" }),
+      ];
+      expect(facts(completed)).toMatchObject({ result: true, outcome: "complete" });
+      expect(view(completed, 4000).task).toMatchObject({ row: "done", label: "Done" });
+      expect(replay(completed, 4000)).toMatchObject({ row: "done", label: "Done" });
+    },
+  );
+
+  it("does not reuse an earlier successful result when a follow-up gives up", () => {
+    const events = [
+      ...typed(),
+      ev("task.result", 1600, { summary: "First task finished.", files: [] }),
+      ev("agent.state", 1700, { state: "done" }),
+      ev("agent.state", 2200, { state: "thinking" }),
+      ev("agent.state", 2700, { state: "idle", reason: "gave up" }),
+    ];
+    expect(view(events, 2800).task).toMatchObject({ row: "ready", label: "Ready" });
+    expect(
+      view([...events, ev("session.end", 3000, { reason: "stopped" })], 4000).task,
+    ).toMatchObject({
+      row: "stopped",
+      label: "Task stopped",
+    });
+  });
+
   it("puts a question first, keeps the task's Stop and counts the wait from the question", () => {
     const asked = [
       ...typed(),

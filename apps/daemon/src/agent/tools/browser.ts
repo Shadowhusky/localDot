@@ -23,6 +23,26 @@ import {
 import { ELEMENTS_HEADER, elementLine, pageElement } from "./elements.ts";
 import { sourceLine } from "./research.ts";
 
+// A successful control/read operation is not proof that an application is open. Classify
+// browser-owned URLs, never page prose (which is untrusted and can describe any state).
+function pageStatus(url: string): "blank" | "error" | "page" {
+  if (/^about:blank(?:[?#]|$)/i.test(url) || /^chrome(?:-search)?:\/\/newtab\//i.test(url))
+    return "blank";
+  if (/^chrome-error:\/\//i.test(url)) return "error";
+  return "page";
+}
+
+function pageStatusNote(url: string): string {
+  switch (pageStatus(url)) {
+    case "blank":
+      return "Browser status: reachable; no site URL is open in this tab. This is a blank starting page, not a browser failure. Use browser_navigate with the intended app or preview URL; it selects the visible browser for that address. Switching screens or taking a screenshot does not open or test the app.\n\n";
+    case "error":
+      return "Browser status: reachable; Chromium is displaying an error page. The target app has not been verified. Inspect the error and the requested address before retrying; do not treat this as a completed interactive test.\n\n";
+    case "page":
+      return "";
+  }
+}
+
 function selectedBrowser(ctx: ToolCallContext) {
   screenContext(ctx);
   if (ctx.screen?.selection.screen !== "browser") return undefined;
@@ -90,7 +110,8 @@ export async function browserReadTool(
     ok: true,
     content: [
       text(
-        (source.line ?? "") +
+        pageStatusNote(page.url) +
+          (source.line ?? "") +
           untrusted(
             `web page ${ctx.redact(page.url)}`,
             ctx.redact(
@@ -141,19 +162,36 @@ export async function browserNavigateTool(
     title: `Opening ${url.host}`.slice(0, 200),
   });
   let result: BrowserNavigateResult | undefined;
+  let download = false;
+  let verificationNote = "";
   if (browser) {
-    await browser.client.navigate(browser.permit, browser.tabId, url.href, ctx);
+    const navigation = await browser.client.navigate(browser.permit, browser.tabId, url.href, ctx);
+    download = navigation.download === true;
     ctx.check();
-    // The page opened; one that keeps changing as it settles may not be readable yet.
-    const page = await browser.client
-      .read(browser.permit, browser.tabId, { maxChars: 500 }, ctx)
-      .catch((error: unknown) => {
-        ctx.check();
-        if (!(error instanceof BrowserClientError)) throw error;
-        return undefined;
-      });
-    ctx.check();
-    result = { url: page?.url ?? url.href, title: page?.title ?? "", loaded: true };
+    if (download) {
+      // A download receipt is not a document navigation. Reading the previous page cannot
+      // verify that receipt and must not turn it into a false navigation failure.
+      result = { url: url.href, title: "", loaded: true };
+    } else {
+      const page = await browser.client
+        .read(browser.permit, browser.tabId, { maxChars: 500 }, ctx)
+        .catch((error: unknown) => {
+          ctx.check();
+          // A changing document can reject a read while navigation is settling. Connection,
+          // ownership and protected-input failures must retain their real failure reason.
+          if (!(error instanceof BrowserClientError) || error.code !== "refused") throw error;
+          return undefined;
+        });
+      ctx.check();
+      result = {
+        url: page?.url ?? url.href,
+        title: page?.title ?? "",
+        loaded: !!page && pageStatus(page.url) === "page",
+      };
+      if (!page)
+        verificationNote =
+          "Navigation was acknowledged, but the page is still changing and could not be read. Read or observe the current page before deciding whether it loaded; do not repeat navigation just to check.";
+    }
   } else if (desktop) {
     try {
       result = await desktop.browserNavigate(url.href, ctx.signal);
@@ -184,24 +222,60 @@ export async function browserNavigateTool(
   }
   ctx.check();
   if (!result) throw new Error("The browser did not open in time");
-  const o = await deps.gateway.observe(screenContext(ctx));
-  ctx.check();
-  const image = await frame(deps, ctx, o.frameId);
-  ctx.check();
+  if (!download && pageStatus(result.url) !== "page") result.loaded = false;
+  if (!download && !result.loaded && !verificationNote)
+    verificationNote =
+      pageStatusNote(result.url) ||
+      "Navigation has not finished loading. Inspect the current page before deciding whether the app is ready; do not repeat navigation just to check.";
+  let image: Awaited<ReturnType<typeof frame>> | undefined;
+  try {
+    const o = await deps.gateway.observe(screenContext(ctx));
+    ctx.check();
+    image = await frame(deps, ctx, o.frameId);
+    ctx.check();
+  } catch (error) {
+    ctx.check();
+    if (!download) throw error;
+    // The download already has a receipt. An unavailable/protected screenshot of the
+    // previous page must not erase it and invite another navigation/download.
+    verificationNote =
+      "The download was acknowledged, but a fresh screenshot is unavailable. Check Activity > Downloads for its status; do not repeat navigation to start another copy.";
+  }
   append(ctx, "tool.end", { ok: result.loaded });
   append(ctx, "step.end", { status: result.loaded ? "ok" : "failed" });
   return {
-    ok: true,
+    ok: result.loaded,
+    ...(!result.loaded
+      ? {
+          recovery: {
+            kind: "stale" as const,
+            surface: "browser" as const,
+            retry: "after_observation" as const,
+          },
+        }
+      : {}),
+    ...(download
+      ? {
+          recovery: {
+            kind: "download_pending" as const,
+            surface: "browser" as const,
+            retry: "never" as const,
+          },
+        }
+      : {}),
     content: [
+      ...(verificationNote ? [text(verificationNote.trim())] : []),
       text(
         untrusted(
           "navigation result",
           ctx.redact(
-            `${result.loaded ? "Opened" : "Still loading"}: ${result.title} (${result.url})`,
+            download
+              ? `Download started from ${url.href}. The current page remains open. Downloads wait in Activity > Downloads for the user to Review before they reach the computer.`
+              : `${result.loaded ? "Opened" : "Page not verified"}: ${result.title} (${result.url})`,
           ),
         ),
       ),
-      image,
+      ...(image ? [image] : []),
     ],
   };
 }

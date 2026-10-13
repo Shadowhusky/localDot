@@ -99,8 +99,12 @@ function fixture(
   };
   const driver = new CodexDriver(deps),
     running: Promise<number>[] = [];
-  const run = (resume = false) => {
-    const promise = driver.run(session, { model: "gpt-6-astra", resume });
+  const run = (resume = false, effort?: "low" | "high") => {
+    const promise = driver.run(session, {
+      model: "gpt-6-astra",
+      resume,
+      options: effort ? { reasoningEffort: effort } : undefined,
+    });
     running.push(promise);
     void promise.catch(() => {});
     return promise;
@@ -146,6 +150,80 @@ function fixture(
   };
 }
 describe("owned Codex task driver", () => {
+  it("keeps the native turn alive when done returns an answered input request without final", async () => {
+    const f = fixture();
+    const run = f.run();
+    const conn = await f.fake.nextLaunch(1);
+    await conn.waitFor("turn/start");
+    const context = f.context();
+    f.endpoints[0]?.input.onResult?.(
+      "done",
+      {
+        ok: true,
+        content: [
+          { type: "text", text: "The public client ID was provided. Continue verification." },
+        ],
+      },
+      context,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.endpoints[0]?.closed).toBe(false);
+    expect(f.endpoints[0]?.epoch).toBe(context.turnEpoch);
+    expect(f.session.generation).toBe(context.generation);
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+  });
+
+  it("keeps the native owner alive across external waits and subsequent action results", async () => {
+    const f = fixture();
+    const run = f.run();
+    const conn = await f.fake.nextLaunch(1);
+    await conn.waitFor("turn/start");
+    const context = f.context();
+    for (let n = 0; n < 3; n++) {
+      f.endpoints[0]?.input.onResult?.(
+        "done",
+        {
+          ok: true,
+          content: [{ type: "text", text: "Wait ended. Inspect the current state and continue." }],
+        },
+        context,
+      );
+      f.endpoints[0]?.input.onResult?.(
+        "browser_read",
+        {
+          ok: true,
+          content: [{ type: "text", text: "The requested outcome remains pending" }],
+        },
+        context,
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.endpoints[0]?.closed).toBe(false);
+      expect(f.endpoints[0]?.epoch).toBe(context.turnEpoch);
+      expect(f.session.generation).toBe(context.generation);
+    }
+    f.endpoints[0]?.input.onResult?.(
+      "browser_act",
+      {
+        ok: true,
+        content: [{ type: "text", text: "Action applied after the external state changed" }],
+      },
+      context,
+    );
+    expect(f.fake.launches).toHaveLength(1);
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+  });
+
+  it("carries the selected effort into the explicit native turn", async () => {
+    const f = fixture(),
+      run = f.run(false, "high"),
+      conn = await f.fake.nextLaunch(1);
+    expect((await conn.waitFor("turn/start")).params).toMatchObject({ effort: "high" });
+    f.done();
+    expect(await run).toBe(CODEX_DONE);
+  });
+
   it("submits the full PNG in the explicit turn, keeps its frame ID in daemon metadata, and registers one lease", async () => {
     const f = fixture(),
       run = f.run(),
@@ -225,6 +303,8 @@ describe("Codex conversation and durable input recovery", () => {
     const second = await f.fake.nextLaunch(2),
       nudge = await second.waitFor("turn/start");
     expect(JSON.stringify(nudge.params)).toContain("call the localdot done tool");
+    expect(JSON.stringify(nudge.params)).toContain("completion.status waiting");
+    expect(JSON.stringify(nudge.params)).toContain("Waiting is not completion or a blocker.");
     second.complete();
     expect(await run).toBe(CODEX_GAVE_UP);
     expect(f.events).toContainEqual({
@@ -233,6 +313,52 @@ describe("Codex conversation and durable input recovery", () => {
     });
     expect(f.fake.launches).toHaveLength(2);
   });
+  it("resets the no-tool nudge after a successful wait, but still stops consecutive empty turns", async () => {
+    const f = fixture();
+    const run = f.run();
+    const first = await f.fake.nextLaunch(1);
+    await first.waitFor("turn/start");
+    first.complete();
+    const second = await f.fake.nextLaunch(2);
+    await second.waitFor("turn/start");
+    f.endpoints[1]?.input.onResult?.(
+      "done",
+      {
+        ok: true,
+        content: [{ type: "text", text: "Wait ended; inspect and continue." }],
+      },
+      f.context(),
+    );
+    second.complete();
+    const third = await f.fake.nextLaunch(3);
+    const continuation = await third.waitFor("turn/start");
+    expect(JSON.stringify(continuation.params)).toContain("completion.status waiting");
+    third.complete();
+    expect(await run).toBe(CODEX_GAVE_UP);
+    expect(f.fake.launches).toHaveLength(3);
+  });
+
+  it("does not renew the no-tool nudge after a refused or failed tool", async () => {
+    const f = fixture();
+    const run = f.run();
+    const first = await f.fake.nextLaunch(1);
+    await first.waitFor("turn/start");
+    first.complete();
+    const second = await f.fake.nextLaunch(2);
+    await second.waitFor("turn/start");
+    f.endpoints[1]?.input.onResult?.(
+      "browser_act",
+      {
+        ok: false,
+        content: [{ type: "text", text: "Action refused. Do not retry unchanged." }],
+      },
+      f.context(),
+    );
+    second.complete();
+    expect(await run).toBe(CODEX_GAVE_UP);
+    expect(f.fake.launches).toHaveLength(2);
+  });
+
   it("persists and acknowledges a steer before sending it, and queues a follow-up", async () => {
     const f = fixture(),
       run = f.run(),

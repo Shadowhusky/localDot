@@ -9,6 +9,28 @@ const custom = () =>
     codexDenyRead: ["/private/fixture"],
   });
 describe("configuration validation before explicit save", () => {
+  it("round-trips options through the settings form and preserves reset to defaults", () => {
+    const saved = {
+      main: {
+        provider: "openai-responses-compatible",
+        model: "gpt-6.1-sol",
+        key: "gateway",
+        price: { inputUSDPerMTok: 2, outputUSDPerMTok: 10 },
+        options: { reasoningEffort: "high" as const },
+      },
+    };
+    const form = formOf(saved);
+    const result = validateForm(form, saved, providerFixture());
+    expect(result).toMatchObject({
+      ok: true,
+      document: { main: { options: { reasoningEffort: "high" } } },
+    });
+    if (!form.choices.main) throw new Error("Missing main");
+    form.choices.main.options = undefined;
+    const reset = validateForm(form, saved, providerFixture());
+    expect(reset.ok).toBe(true);
+    if (reset.ok) expect(reset.document.main?.options).toBeUndefined();
+  });
   it("refuses conflicting manual rates for the same route/model across active roles", () => {
     const d = custom();
     d.choices.fast = { provider: "openai-compatible", model: "custom", key: "gateway" };

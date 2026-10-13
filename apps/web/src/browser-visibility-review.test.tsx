@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { type LocalDotEvent, ulid } from "@localdot/protocol";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
@@ -78,6 +78,7 @@ describe("review: selected physical browser visibility", () => {
         if (path === "/api/clock") return json({ nowMicros: 0 });
         if (path === `/api/sessions/${sessionId}/clock`) return json({ originMicros: 0 });
         if (path === "/api/session-index") return json({ sessions: [], next: null });
+        if (path === "/api/conversation") return json({ sessions: [sessionId], more: false });
         if (path === "/api/keys") return json({ keys: [] });
         if (path === "/api/agent/settings") return json({});
         if (path === "/api/agent/providers") return json(providerFixture());
@@ -144,6 +145,85 @@ describe("review: selected physical browser visibility", () => {
       );
       expect(container.querySelector(".stage > canvas")).not.toBeNull();
       expect(container.querySelector(".stage")?.classList.contains("lit")).toBe(true);
+      // The task stays attached to the browser while idle. Its completed verdict must
+      // follow that live screen, even after the unused desktop relay loses all viewers.
+      act(() => {
+        feed.onmessage?.({
+          data: JSON.stringify({
+            v: 1,
+            id: ulid(),
+            seq: 2,
+            t: 2,
+            agent: "main",
+            type: "task.result",
+            data: { summary: "Visible browser checked", files: [] },
+          }),
+        });
+        feed.onmessage?.({
+          data: JSON.stringify({
+            v: 1,
+            id: ulid(),
+            seq: 3,
+            t: 3,
+            agent: "main",
+            type: "agent.state",
+            data: { state: "idle" },
+          }),
+        });
+        parentStatus.onmessage?.({
+          data: JSON.stringify({
+            ...parent,
+            stream: { connection: "none", viewers: 0, lastUpstreamAt: null },
+          }),
+        });
+      });
+      await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Done"));
+      expect(document.title).toBe("localDot — Done");
+      act(() =>
+        browserStatus.onmessage?.({
+          data: JSON.stringify({
+            ...browser,
+            stream: { ...browser.stream, connection: "stalled" },
+          }),
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("hud-status").textContent).toBe("Reconnecting…"),
+      );
+      act(() => browserStatus.onmessage?.({ data: JSON.stringify(browser) }));
+      await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Done"));
+      // Selecting the desktop makes its own stream authoritative again.
+      act(() => {
+        parentStatus.onmessage?.({
+          data: JSON.stringify({
+            ...parent,
+            stream: { connection: "live", viewers: 1, lastUpstreamAt: null },
+          }),
+        });
+        feed.onmessage?.({
+          data: JSON.stringify({
+            v: 1,
+            id: ulid(),
+            seq: 4,
+            t: 4,
+            agent: "main",
+            type: "screen.switch",
+            data: { ...selection, screen: "desktop", cellId: parentId, revision: 2, by: "daemon" },
+          }),
+        });
+      });
+      await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Done"));
+      act(() =>
+        parentStatus.onmessage?.({
+          data: JSON.stringify({
+            ...parent,
+            stream: { connection: "stalled", viewers: 1, lastUpstreamAt: null },
+          }),
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("hud-status").textContent).toBe("Reconnecting…"),
+      );
     });
   }
 });

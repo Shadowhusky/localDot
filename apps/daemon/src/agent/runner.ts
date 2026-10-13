@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
+import type { ModelOptions } from "@localdot/protocol";
 import {
   type AgentLimits,
   type AutonomyPolicy,
@@ -194,8 +195,8 @@ export interface AgentRunnerDeps {
 // "none": the user's own hold on the computer, which no model works on.
 type ModelSelection =
   | { kind: "api"; roles: readonly ResolvedRole[]; pricing: TaskPricing; initialBudget?: number }
-  | { kind: "chatgpt"; model: string; denyRead: readonly string[] }
-  | { kind: "claude-code"; model: string }
+  | { kind: "chatgpt"; model: string; options?: ModelOptions; denyRead: readonly string[] }
+  | { kind: "claude-code"; model: string; options?: ModelOptions }
   | { kind: "none" };
 interface Runtime {
   session: AgentSession;
@@ -207,6 +208,7 @@ interface Runtime {
   brainOpening?: Promise<void>;
   initialized: boolean;
   failure?: { reason?: string; detail?: string };
+  completion?: "complete" | "blocked";
   providerNotice?: string;
   serial: Promise<void>;
   pause?: "budget" | "keyd" | "model" | "auth";
@@ -262,6 +264,7 @@ export class AgentRunner {
         rt.pause = "budget";
         rt.budgetScope = event.data.scope;
       }
+      if (event.type === "task.result") rt.completion = event.data.outcome ?? "complete";
       if (event.type !== "agent.state") return;
       if (event.data.state === "error") rt.failure = event.data;
       else if (["thinking", "acting", "observing", "done"].includes(event.data.state))
@@ -406,7 +409,11 @@ export class AgentRunner {
         signal?.throwIfAborted();
         if (status.state !== "signed_in")
           throw new AgentError(400, status.reason ?? "Claude Code isn't ready.");
-        selection = { kind: "claude-code", model: settings.main.model };
+        selection = {
+          kind: "claude-code",
+          model: settings.main.model,
+          options: settings.main.options,
+        };
       } else if (settings.main?.provider === CHATGPT) {
         const codex = this.deps.codex;
         if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
@@ -420,6 +427,7 @@ export class AgentRunner {
         selection = {
           kind: "chatgpt",
           model: settings.main.model,
+          options: settings.main.options,
           denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
         };
       } else {
@@ -932,7 +940,11 @@ export class AgentRunner {
     const selection = this.#runtime.get(id)?.selection;
     if (!selection || selection.kind === "none") return undefined;
     return selection.kind === "chatgpt" || selection.kind === "claude-code"
-      ? { kind: selection.kind, model: selection.model }
+      ? {
+          kind: selection.kind,
+          model: selection.model,
+          ...(selection.options ? { options: selection.options } : {}),
+        }
       : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
@@ -1263,13 +1275,19 @@ export class AgentRunner {
         session.connectors = this.deps.connectors?.() ?? NO_CONNECTORS;
         const epoch = rt.epoch;
         let code: number | undefined;
+        rt.completion = undefined;
         try {
           code =
             rt.selection.kind === "chatgpt"
-              ? await this.deps.codex?.driver.run(session, { model: rt.selection.model, resume })
+              ? await this.deps.codex?.driver.run(session, {
+                  model: rt.selection.model,
+                  options: rt.selection.options,
+                  resume,
+                })
               : rt.selection.kind === "claude-code"
                 ? await this.deps.claudeCode?.driver.run(session, {
                     model: rt.selection.model,
+                    options: rt.selection.options,
                     resume,
                   })
                 : await this.#brainRun(rt, skills, resume);
@@ -1306,13 +1324,20 @@ export class AgentRunner {
         }
         if (code === BRAIN_DONE || code === BRAIN_GAVE_UP) {
           crashes = 0;
+          // Retiring an idle caller is not proof the task finished. Preserve its latest
+          // outcome through idle expiry/release, and reset it if a follow-up later finishes.
+          const complete =
+            code === BRAIN_DONE && !session.actionLimitReached && rt.completion !== "blocked";
+          reason = complete ? "done" : "stopped";
           session.append(
             "agent.state",
             session.actionLimitReached
               ? { state: "idle", reason: STALL.actionLimit }
-              : code === BRAIN_DONE
-                ? { state: "done" }
-                : { state: "idle", reason: "gave up" },
+              : rt.completion === "blocked"
+                ? { state: "idle", reason: "blocked" }
+                : complete
+                  ? { state: "done" }
+                  : { state: "idle", reason: "gave up" },
           );
           session.setStatus("idle");
           const idleWait = new AbortController();

@@ -31,7 +31,6 @@ import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { IconButton } from "../ui/IconButton.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
@@ -43,7 +42,6 @@ import { HANDHELD } from "./layout.ts";
 import "../agent/activity.css";
 
 export interface ActivityRailProps {
-  onHide?(): void;
   rows: TimelineRow<StepRowView>[];
   keyUses?: readonly KeyUseState[];
   sessionId: string | null;
@@ -111,7 +109,6 @@ export function ActivityRail({
   historyLoaded = false,
   onSelect,
   planSnapshot,
-  onHide,
 }: ActivityRailProps) {
   const phone = useMediaQuery(HANDHELD);
   const replay = asOfMs !== undefined;
@@ -298,7 +295,7 @@ export function ActivityRail({
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
       <div className="activity-controls">
-        {(started || tabs.length > 1 || onHide) && (
+        {(started || tabs.length > 1) && (
           <div className="activity-tabs-row">
             <Tabs
               id={`${domId}-tabs`}
@@ -310,7 +307,6 @@ export function ActivityRail({
               value={tab}
               onValueChange={choose}
             />
-            {onHide && <IconButton icon="x" label="Hide activity" size={28} onClick={onHide} />}
           </div>
         )}
       </div>

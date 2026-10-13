@@ -805,6 +805,13 @@ export function createAgent(d: AgentWiringDeps) {
         if (!access) throw new AgentError(503, "manual browser control is unavailable");
         return {
           ...access,
+          confirm: async () => {
+            unchanged();
+            if (!access.confirm)
+              throw new AgentError(503, "manual browser recovery is unavailable");
+            await access.confirm();
+            unchanged();
+          },
           release: () => {
             try {
               access.release();

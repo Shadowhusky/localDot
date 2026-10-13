@@ -8,7 +8,12 @@ import {
   DEFAULT_RESEARCH_BUDGET,
   ResearchBudget,
 } from "@localdot/protocol";
-import { isOpenRouterRouterId, providerById, routeFor } from "@localdot/providers";
+import {
+  isOpenRouterRouterId,
+  modelOptionsProblem,
+  providerById,
+  routeFor,
+} from "@localdot/providers";
 import {
   type ModelRole,
   matchingKeys,
@@ -233,6 +238,8 @@ function checkRole(
   accounting: Map<string, string>,
 ): RoleChoice | string {
   if (providerById(value.provider)?.notOffered) return "choose a provider that is available here.";
+  const optionsProblem = modelOptionsProblem(value.provider, value.model, value.options);
+  if (optionsProblem) return optionsProblem;
   if (modelIdProblem(value.model)) return "choose a valid model ID.";
   if (value.provider === "chatgpt") {
     if (
@@ -246,7 +253,11 @@ function checkRole(
     const unchanged = saved.main?.provider === "chatgpt" && saved.main.model === value.model;
     if (!model && !unchanged)
       return "set up the ChatGPT plan and choose one of its available account models.";
-    return { provider: value.provider, model: value.model };
+    return {
+      provider: value.provider,
+      model: value.model,
+      ...(value.options ? { options: value.options } : {}),
+    };
   }
   if (value.provider === "claude-code") {
     if (
@@ -259,7 +270,11 @@ function checkRole(
     const model = subscriptionModels.find((m) => m.id === value.model);
     const unchanged = saved.main?.provider === "claude-code" && saved.main.model === value.model;
     if (!model && !unchanged) return "set up Claude Code and choose one of its models.";
-    return { provider: value.provider, model: value.model };
+    return {
+      provider: value.provider,
+      model: value.model,
+      ...(value.options ? { options: value.options } : {}),
+    };
   }
   const provider = providerById(value.provider);
   if (!provider || !providerAllowed(role, provider))
@@ -273,7 +288,11 @@ function checkRole(
     return "this model is unavailable. Refresh the catalog or choose another model.";
   if (!provider.custom && model && !modelAllowed(role, model))
     return "this model cannot call the required tools.";
-  const next: RoleChoice = { provider: value.provider, model: value.model };
+  const next: RoleChoice = {
+    provider: value.provider,
+    model: value.model,
+    ...(value.options ? { options: value.options } : {}),
+  };
   const flat = onPlan(value);
   if (provider.custom) {
     const context = value.contextTokens;

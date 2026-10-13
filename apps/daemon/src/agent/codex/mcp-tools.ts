@@ -16,8 +16,9 @@ import {
   type ToolResult,
   WEB_FETCH_TOOL_DESCRIPTION,
   WEB_SEARCH_TOOL_DESCRIPTION,
+  WORK_CONTEXT_DESCRIPTION,
 } from "@localdot/protocol";
-import { HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
+import { DONE_TOOL_DESCRIPTION, HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
 import { z } from "zod";
 
 // The tools Codex sees: exactly the v1 table (spec "Tools"), the same schemas the daemon checks.
@@ -54,6 +55,7 @@ export const COMPUTER_DESCRIPTION =
   "instead of sending the same image. Use zoom to read small details.";
 
 export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
+  work_context: WORK_CONTEXT_DESCRIPTION,
   computer: `${COMPUTER_DESCRIPTION} Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.`,
   shell:
     "Run one bash command in the virtual computer's terminal, as its user, in their home. Returns the " +
@@ -72,7 +74,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "(text; submit presses Return after), select (text: the option to choose), check, uncheck, press " +
     '(text: keys such as "Return", after clicking the element), or scroll (scroll_direction, scroll_amount). ' +
     "The element is found again wherever it is now; give coordinate {x, y} too as a fallback for when the ref " +
-    "is stale. Password fields are never filled: ask with an ask_user secret field.",
+    "is stale. device_code privately enters and submits a CLI device-pairing code you already received (first code-box ref, text, exact HTTPS origin; no coordinate fallback). Read the result and verify CLI authentication. Passwords and user-held verification codes need ask_user. Password fields are never filled: ask with an ask_user secret field.",
   web_search: WEB_SEARCH_TOOL_DESCRIPTION,
   web_fetch: WEB_FETCH_TOOL_DESCRIPTION,
   find:
@@ -99,8 +101,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "the verified sign-in form. Check the tool result before acting; do not submit again when it already did. " +
     "A code answer is delivered privately to the verification box at target and submitted once, never saved. " +
     "Read the current page and ask for a replacement password or a verification code as it requires; keep it open while waiting. " +
-    "Answers come back by field id. If the user declines, carry on " +
-    "without it. " +
+    "Answers come back by field id. If the user declines, respect that choice and state which requested work remains incomplete. " +
     HUMAN_INPUT_GUIDANCE,
   request_takeover:
     "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
@@ -113,7 +114,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Search the user's earlier tasks and daily notes (titles, their messages, your replies, steps, result file names); returns up to 8 dated matches as untrusted text. Use it before asking the user about something they did with you before. After a search, remember is refused until the user replies.",
   people:
     "The people the user reaches through you. op find with query (a name, app or handle) returns matches with the app, handle and when they were last reached, as untrusted text: use it before asking the user how to reach someone. op save with name and app (plus handle and a short note when known) after you message, call or email someone for the user, or when the user tells you how to reach someone; save only people the user named.",
-  done: "Finish the task: a summary for the user, the paths of any files in the home to hand over (a revised file keeps its name), and what you checked about them.",
+  done: DONE_TOOL_DESCRIPTION,
   routine: ROUTINE_TOOL_DESCRIPTION,
   follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
   research: RESEARCH_TOOL_DESCRIPTION,

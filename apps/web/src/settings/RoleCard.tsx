@@ -19,6 +19,7 @@ import {
 } from "./choices.ts";
 import { subscription } from "./chooser.ts";
 import { ModelChooser, modelNote, providerNote } from "./ModelChooser.tsx";
+import { ModelOptionsFields } from "./ModelOptionsFields.tsx";
 
 const ROLE: Record<ModelRole, { title: string; description: string }> = {
   main: { title: "Main model", description: "Does the work" },
@@ -119,6 +120,16 @@ export function RoleCard({
         describedBy={notes.length ? notesId : undefined}
         onChange={onChange}
       />
+      {value?.model && (
+        <ModelOptionsFields
+          choice={value}
+          onChange={onChange}
+          outputLimit={
+            providers.find((p) => p.id === value.provider)?.models.find((m) => m.id === value.model)
+              ?.maxOutputTokens
+          }
+        />
+      )}
       {value && provider && !provider.notOffered && (
         <RoleDetails
           modelRole={role}

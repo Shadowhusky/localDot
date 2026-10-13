@@ -81,7 +81,7 @@ describe("browser_read", () => {
     const text = textOf(body);
     expect(text).toContain('e12 textbox "Email" value "a@b.c" [50, 40, 150, 60]');
     expect(text).toContain('e13 checkbox "Remember me" unchecked [50, 40, 150, 60]');
-    expect(text).toContain('e14 textbox "Password" password [50, 40, 150, 60]');
+    expect(text).toContain('e14 textbox "Password" protected input [50, 40, 150, 60]');
     expect(h.requests).toEqual([{ page: true, limit: 150 }]);
     expect([...(h.session.pageRefs?.elements.keys() ?? [])]).toEqual(["e12", "e13", "e14"]);
     expect(h.session.pageRefs).toMatchObject({

@@ -243,7 +243,7 @@ describe("owned root navigation", () => {
     { frameId: "different", loaderId: "new-loader" },
     { frameId: "root", loaderId: "old-loader" },
     { frameId: "root", loaderId: "new-loader", errorText: "private failure" },
-    { frameId: "root", loaderId: "new-loader", isDownload: true },
+
     { frameId: "root", loaderId: 7 },
     {},
   ])("refuses malformed, old or unsuccessful acknowledgement %#", async (acknowledgement) => {
@@ -256,6 +256,51 @@ describe("owned root navigation", () => {
     expect(fixture.fatal).toHaveBeenCalledTimes(1);
     expect(fixture.targets.closed).toBe(true);
   });
+
+  it.each([undefined, "net::ERR_ABORTED"])(
+    "keeps control after a download (%s)",
+    async (errorText) => {
+      const f = await setup();
+      const result = f.targets.navigate(f.tabId, "https://example.test/source.zip");
+      await settle();
+      f.reply(f.navigation(), {
+        frameId: "root",
+        loaderId: "download-loader",
+        isDownload: true,
+        errorText,
+      });
+      await expect(result).resolves.toBe("download");
+      expect(f.targets.closed).toBe(false);
+      expect(f.fatal).not.toHaveBeenCalled();
+      const next = f.targets.navigate(f.tabId, destination);
+      await settle();
+      f.cross();
+      f.load();
+      f.reply(f.navigation(), { frameId: "root", loaderId: "new-loader" });
+      await expect(next).resolves.toBeUndefined();
+    },
+  );
+
+  it.each(["frame", "loader", "url", "event", "error"])(
+    "refuses a download with changed %s",
+    async (kind) => {
+      const f = await setup();
+      const result = f.targets.navigate(f.tabId, destination);
+      const refused = expect(result).rejects.toThrow();
+      await settle();
+      if (kind === "frame") f.setFrame({ ...initialFrame, id: "other" });
+      if (kind === "loader") f.setFrame({ ...initialFrame, loaderId: "other" });
+      if (kind === "url") f.setFrame({ ...initialFrame, url: destination });
+      if (kind === "event") f.cross();
+      f.reply(f.navigation(), {
+        frameId: "root",
+        isDownload: true,
+        ...(kind === "error" ? { errorText: "net::ERR_FAILED" } : {}),
+      });
+      await refused;
+      expect(f.fatal).toHaveBeenCalledOnce();
+    },
+  );
 
   it.each(["second-root", "wrong-loader", "wrong-root", "unexpected-fragment"])(
     "retires ambiguous root events: %s",

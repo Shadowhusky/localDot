@@ -10,10 +10,12 @@ import { RecallInput } from "./tools/recall.ts";
 import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 import { WebFetchInput, WebSearchInput } from "./tools/web.ts";
 import { WINDOW_ACTIONS } from "./window-control.ts";
+import { ToolRecovery, WorkContextInput } from "./work-context.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
 // daemon's tool API runs, including M7's isolated browser screen.
 export const TOOL_NAMES = [
+  "work_context",
   "computer",
   "shell",
   "files",
@@ -235,9 +237,11 @@ export type BrowserUploadInput = z.infer<typeof BrowserUploadInput>;
 // browser_act: one element of the page browser_read listed, by its ref ("e12"). Its coordinate,
 // in the computer tool's space, is where to act instead when the ref is stale or not given.
 export const BrowserActInput = z.object({
-  action: z.enum(["click", "fill", "select", "check", "uncheck", "press", "scroll"]),
+  action: z.enum(["click", "fill", "select", "check", "uncheck", "press", "scroll", "device_code"]),
   ref: z.string().min(2).max(24).optional(),
   coordinate: z.array(z.number()).length(2).optional(),
+  // device_code: exact HTTPS origin of the CLI verification page.
+  origin: z.string().max(2048).optional(),
   // fill: the text. select: the option's text. press: keys such as "Return" or "ctrl+a".
   text: z.string().max(4000).optional(),
   // fill: press Return after typing.
@@ -346,6 +350,40 @@ export const RememberInput = z.object({
 export type RememberInput = z.infer<typeof RememberInput>;
 
 export const DoneInput = z.object({
+  completion: z
+    .object({
+      status: z
+        .enum(["complete", "waiting", "blocked"])
+        .describe(
+          "complete: the original requested outcome is verified; waiting: an external actor, process or timer is unfinished and no user input is needed; blocked: a demonstrated nonrecoverable blocker or user-declined/waived work. An ordinary opponent turn is waiting, never blocked.",
+        ),
+      evidence: z
+        .string()
+        .trim()
+        .min(1)
+        .max(500)
+        .describe(
+          "Observed evidence supporting this status for the user's original request. Partial actions or passing some checks do not prove completion. Do not include secrets.",
+        ),
+      wait_seconds: z
+        .number()
+        .int()
+        .min(1)
+        .max(30)
+        .optional()
+        .describe(
+          "For waiting: seconds before inspecting fresh state, normally 10–30; default 15. This wait keeps the task open and can be stopped.",
+        ),
+    })
+    .optional()
+    .describe(
+      "Assess the whole requested outcome before finishing; waiting returns control for another check instead of completing.",
+    ),
+  input_request: AskUserInput.nullable()
+    .optional()
+    .describe(
+      "Required completion check: if requested work still needs missing user information, provide the question/form here (same schema as ask_user). This waits for the answer and resumes work; it does not finish. Use null only when no such input is needed, including when the user already declined or waived that work. Never put credentials in text fields.",
+    ),
   experience: LearnedExperience.nullable()
     .optional()
     .describe(
@@ -361,13 +399,18 @@ export const DoneInput = z.object({
     .optional(),
 });
 export type DoneInput = z.infer<typeof DoneInput>;
-// New models choose a lesson or null in their existing completion call. The host still
-// accepts older clients that omit it; learning must never hold task completion open.
-export const DoneModelInput = DoneInput.required({ experience: true });
+// Models explicitly assess completion, missing input and a reusable lesson. The host accepts
+// older clients that omit these fields; it cannot infer task status from summary prose.
+export const DoneModelInput = DoneInput.required({
+  completion: true,
+  experience: true,
+  input_request: true,
+});
 
 // The daemon validates a call's input with these; the brain declares the same schemas (the
 // computer tool's own shape differs per provider and is normalized to ComputerAction first).
 export const TOOL_INPUTS = {
+  work_context: WorkContextInput,
   computer: ComputerAction,
   shell: ShellInput,
   files: FilesInput,
@@ -414,6 +457,7 @@ export const ToolContent = z.discriminatedUnion("type", [
 export type ToolContent = z.infer<typeof ToolContent>;
 
 export const ToolResult = z.object({
+  recovery: ToolRecovery.optional(),
   ok: z.boolean(),
   content: z.array(ToolContent),
   // The task is over (done) or the user stopped it: the brain ends its loop.

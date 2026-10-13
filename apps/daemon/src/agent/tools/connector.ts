@@ -59,6 +59,7 @@ export async function connectorTool(
   });
   return {
     ok: outcome.ok,
+    ...(outcome.recovery ? { recovery: outcome.recovery } : {}),
     content: [text(untrusted(`${entry.app}, a connected app`, ctx.redact(said)))],
   };
 }

@@ -1027,7 +1027,7 @@ export function Composer(props: ComposerProps) {
               onToggle={() => setResearch((on) => !on)}
             />
           )}
-          {!pill && props.model}
+          {props.model}
           {props.permissions}
           <div className="composer-hint">
             <VoiceStrip voice={voice}>

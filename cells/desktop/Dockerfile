@@ -253,6 +253,10 @@ COPY desktopd/x/native.py /opt/localdot/native.py
 COPY desktopd/place-download.py /opt/localdot/place-download.py
 COPY desktopd/desktop-browser.py /opt/localdot/desktop-browser.py
 RUN chmod 644 /opt/localdot/desktopd.mjs /opt/localdot/place-download.py /opt/localdot/desktop-browser.py
+# Repository work should not require an agent to bootstrap GitHub CLI mid-task.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git gh \
+ && rm -rf /var/lib/apt/lists/*
 # The apt proxy must land after every build-time apt-get invocation.
 COPY desktopd/dist/forwarder.mjs /opt/localdot/forwarder.mjs
 COPY cell/apt-proxy.conf /etc/apt/apt.conf.d/95localdot-proxy

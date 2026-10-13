@@ -66,25 +66,84 @@ export function verificationField(attributes: ReadonlyMap<string, string>): bool
   return (
     /(?:^|\s)one-time-code(?:\s|$)/iu.test(attributes.get("autocomplete") ?? "") ||
     ["name", "id", "aria-label"].some((key) =>
-      /(?:passcode|(?:^|[^a-z])(?:otp|totp|2fa|mfa|pin)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|auth|recovery|backup)[-_ ]?code)/iu.test(
+      /(?:passcode|(?:^|[^a-z])(?:otp|totp|2fa|mfa|pin)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|auth|recovery|backup|user|device)[-_ ]?code)/iu.test(
         attributes.get(key) ?? "",
       ),
     )
   );
 }
 
-// Access gates often use an ordinary text input. Recognize the field's own metadata,
-// not arbitrary page text, and protect it exactly like a verification code.
+export interface CodeFieldClassification {
+  readonly purpose: "verification" | "access" | "invitation" | "public" | "unidentified";
+  readonly secret: boolean;
+}
+
+const codeMetadata = ["name", "id", "aria-label", "placeholder"] as const;
+const visibleCodeMetadata = ["aria-label", "placeholder"] as const;
+const accessCode =
+  /(?:^|[^a-z])(?:access|early[-_ ]?access|activation|registration)[-_ ]?(?:code|key)(?:[^a-z]|$)/iu;
+const invitationCode = /(?:^|[^a-z])(?:invite|invitation)[-_ ]?(?:code|key)(?:[^a-z]|$)/iu;
+// A website may reuse an "invite-code" id for a game room. Only the field's own
+// explicit public-purpose label can resolve that ambiguity, never page prose,
+// its current value, an autocomplete=off hint, or a site-specific exception.
+const publicCode =
+  /(?:^|[^a-z])(?:(?:room|lobby|game|table|match)[-_ ]?(?:(?:join|invite|invitation)[-_ ]?)?(?:code|id)|referral[-_ ]?code|public[-_ ]?(?:(?:share|sharing|invite|invitation)[-_ ]?)?code)(?:[^a-z]|$)|(?:房间|房間|游戏|遊戲|大厅|大廳|棋局|对局|對局|牌桌)(?:邀请|邀請|加入|分享)?(?:码|碼|编号|編號)|(?:公开|公開)(?:分享|邀请|邀請)?(?:码|碼)|(?:推荐|推薦)(?:码|碼)/iu;
+// Conflicting credential labels win over public-purpose hints. This also keeps
+// a room *password*, security code or paid redemption key out of ordinary input.
+const credentialCode =
+  /password|passcode|(?:^|[^a-z])(?:otp|totp|2fa|mfa|pin|private|secret)(?:[^a-z]|$)|(?:one[-_ ]?time|verification|security|challenge|auth(?:entication|orization|orisation)?|recovery|backup|access|activation|registration|licen[cs]e|gift|payment|redeem|redemption)[-_ ]?(?:code|key)|密码|密碼|口令|验证码|驗證碼|认证码|認證碼|安全码|安全碼|授权码|授權碼|访问码|訪問碼|激活码|啟用碼|注册码|註冊碼|兑换码|兌換碼|支付码|支付碼|私密|秘密/iu;
+
+function codeText(attributes: ReadonlyMap<string, string>, key: string): string {
+  return (attributes.get(key) ?? "").replace(/([a-z])([A-Z])/gu, "$1 $2");
+}
+
+export function codeFieldClassification(
+  attributes: ReadonlyMap<string, string>,
+): CodeFieldClassification {
+  if (verificationField(attributes))
+    return Object.freeze({ purpose: "verification", secret: true });
+  if (codeMetadata.some((key) => accessCode.test(codeText(attributes, key))))
+    return Object.freeze({ purpose: "access", secret: true });
+  const invitation = codeMetadata.some((key) => invitationCode.test(codeText(attributes, key)));
+  const credential =
+    attributes.get("type")?.toLowerCase() === "password" ||
+    /(?:^|\s)(?:current-password|new-password)(?:\s|$)/iu.test(
+      attributes.get("autocomplete") ?? "",
+    ) ||
+    codeMetadata.some((key) => credentialCode.test(codeText(attributes, key)));
+  if (!credential && visibleCodeMetadata.some((key) => publicCode.test(codeText(attributes, key))))
+    return Object.freeze({ purpose: "public", secret: false });
+  if (invitation) return Object.freeze({ purpose: "invitation", secret: true });
+  return Object.freeze({ purpose: "unidentified", secret: false });
+}
+
+// Access gates often use ordinary text inputs. Ambiguous invitation fields stay
+// private unless their own labels identify a public room/share/referral code.
 export function accessCodeField(attributes: ReadonlyMap<string, string>): boolean {
-  return ["name", "id", "aria-label", "placeholder"].some((key) =>
-    /(?:^|[^a-z])(?:invite|invitation|access|early[-_ ]?access|activation|registration)[-_ ]?(?:code|key)(?:[^a-z]|$)/iu.test(
-      (attributes.get(key) ?? "").replace(/([a-z])([A-Z])/gu, "$1 $2"),
-    ),
-  );
+  const { purpose } = codeFieldClassification(attributes);
+  return purpose === "access" || purpose === "invitation";
 }
 
 export function privateCodeField(attributes: ReadonlyMap<string, string>): boolean {
-  return verificationField(attributes) || accessCodeField(attributes);
+  return codeFieldClassification(attributes).secret;
+}
+
+// Device pairing codes come from a CLI, not an authenticator or a password manager.
+export function deviceCodeField(attributes: ReadonlyMap<string, string>): boolean {
+  return ["name", "id", "aria-label"].some((key) =>
+    /(?:^|[^a-z])(?:user|device)[-_ ]?code(?:[^a-z]|$)/iu.test(attributes.get(key) ?? ""),
+  );
+}
+
+// GitHub renders the hyphen as a readonly input labelled "User code 4".
+// It is decoration, but a live value other than the fixed hyphen remains protected.
+export function codeSeparatorField(attributes: ReadonlyMap<string, string>): boolean {
+  return (
+    privateCodeField(attributes) &&
+    ["text", "tel"].includes((attributes.get("type") ?? "text").toLowerCase()) &&
+    (attributes.has("readonly") || attributes.has("disabled")) &&
+    attributes.get("value") === "-"
+  );
 }
 
 function sensitive(tag: string, attributes: ReadonlyMap<string, string>): boolean {
@@ -108,7 +167,9 @@ function sensitive(tag: string, attributes: ReadonlyMap<string, string>): boolea
     ].includes(attributes.get("type")?.toLowerCase() ?? "")
   )
     return false;
-  if (attributes.get("type")?.toLowerCase() === "password") return true;
+  // Hidden fields carry server-side form state, including auth tokens. Always
+  // redact them even if their names do not resemble a password or code.
+  if (["password", "hidden"].includes(attributes.get("type")?.toLowerCase() ?? "")) return true;
   if (
     attributes
       .get("autocomplete")
@@ -149,6 +210,7 @@ export function secretMetadata(raw: unknown): BrowserSecretMetadata {
       )
         throw new BrowserSecretError("inspection");
       const present = new Set<number>();
+      const nonSeparator = new Set<number>();
       for (const column of [nodes.inputValue, nodes.textValue]) {
         if (column.index.length !== column.value.length) throw new BrowserSecretError("inspection");
         let previous = -1;
@@ -158,7 +220,9 @@ export function secretMetadata(raw: unknown): BrowserSecretMetadata {
           if (node === undefined || value === undefined || node <= previous || node >= length)
             throw new BrowserSecretError("inspection");
           previous = node;
-          if (valueAt(value).length !== 0) present.add(node);
+          const text = valueAt(value);
+          if (text.length !== 0) present.add(node);
+          if (text !== "" && text !== "-") nonSeparator.add(node);
         }
       }
       for (let position = 0; position < length; position += 1) {
@@ -184,6 +248,12 @@ export function secretMetadata(raw: unknown): BrowserSecretMetadata {
         }
         if (!["INPUT", "TEXTAREA"].includes(tag) || !sensitive(tag, attributes)) continue;
         secrets.add(backendNodeId);
+        // Non-renderable form state is not entered input on the visible page.
+        // Consent and reauthentication pages retain codes, tokens and auth flags
+        // in hidden inputs. Redact every such node without blocking observation.
+        // A hidden attribute/CSS on a text/password field does not qualify.
+        if (tag === "INPUT" && attributes.get("type")?.toLowerCase() === "hidden") continue;
+        if (codeSeparatorField(attributes) && !nonSeparator.has(position)) continue;
         if (present.has(position) || (attributes.get("value") ?? "").length !== 0) filled = true;
       }
     }

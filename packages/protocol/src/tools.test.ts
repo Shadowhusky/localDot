@@ -14,6 +14,8 @@ import {
 } from "./tool-api.ts";
 import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
 import {
+  DoneInput,
+  DoneModelInput,
   GenericComputerInput,
   isToolName,
   offeredTools,
@@ -28,6 +30,7 @@ const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0M";
 describe("the v1 tool table", () => {
   it("names exactly the tools, including M7 screen switching and approved browser upload", () => {
     expect([...TOOL_NAMES]).toEqual([
+      "work_context",
       "computer",
       "shell",
       "files",
@@ -227,6 +230,105 @@ describe("the v1 tool table", () => {
         options: ["a", "b", "c", "d", "e", "f", "g"],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("whole-task completion contract", () => {
+  const legacy = { summary: "Reported result", checked: "Opened the output" };
+  const model = { ...legacy, experience: null, input_request: null };
+
+  it("keeps legacy host calls compatible while requiring explicit assessment from models", () => {
+    expect(DoneInput.parse(legacy)).toEqual(legacy);
+    expect(DoneModelInput.safeParse(model).success).toBe(false);
+    expect(
+      DoneModelInput.safeParse({
+        ...model,
+        completion: { status: "complete", evidence: "The requested final result is visible." },
+      }).success,
+    ).toBe(true);
+    expect(z.toJSONSchema(DoneModelInput)).toMatchObject({
+      required: expect.arrayContaining(["summary", "completion", "experience", "input_request"]),
+      properties: {
+        completion: {
+          type: "object",
+          required: ["status", "evidence"],
+          properties: {
+            status: { enum: ["complete", "waiting", "blocked"] },
+            wait_seconds: { type: "integer", minimum: 1, maximum: 30 },
+          },
+        },
+      },
+    });
+  });
+
+  it.each(["complete", "waiting", "blocked"])("requires bounded evidence for %s", (status) => {
+    for (const evidence of ["Observed state", "x".repeat(500)])
+      expect(DoneInput.safeParse({ ...legacy, completion: { status, evidence } }).success).toBe(
+        true,
+      );
+    for (const evidence of [undefined, "", "   ", "x".repeat(501)])
+      expect(DoneInput.safeParse({ ...legacy, completion: { status, evidence } }).success).toBe(
+        false,
+      );
+    expect(
+      DoneInput.parse({
+        ...legacy,
+        completion: { status, evidence: "  Observed state  " },
+      }).completion?.evidence,
+    ).toBe("Observed state");
+  });
+
+  it("keeps waiting bounded and does not conflate missing input with external progress", () => {
+    const completion = { status: "waiting", evidence: "The external job is still running." };
+    expect(DoneInput.parse({ ...legacy, completion }).completion).toEqual(completion);
+    for (const wait_seconds of [1, 10, 15, 30])
+      expect(
+        DoneInput.safeParse({ ...legacy, completion: { ...completion, wait_seconds } }).success,
+      ).toBe(true);
+    for (const wait_seconds of [0, 31, 1.5, "15", null])
+      expect(
+        DoneInput.safeParse({ ...legacy, completion: { ...completion, wait_seconds } }).success,
+      ).toBe(false);
+    for (const status of ["done", "pending", "failed", null])
+      expect(
+        DoneInput.safeParse({ ...legacy, completion: { ...completion, status } }).success,
+      ).toBe(false);
+    expect(DoneInput.safeParse({ ...legacy, completion: null }).success).toBe(false);
+
+    const input_request = {
+      question: "Which public Client ID should the preview use?",
+      fields: [{ id: "client_id", kind: "text", label: "Client ID" }],
+    };
+    expect(
+      DoneModelInput.parse({
+        ...model,
+        completion: { status: "blocked", evidence: "Configuration needs the user's answer." },
+        input_request,
+      }).input_request,
+    ).toEqual(input_request);
+    expect(
+      DoneModelInput.safeParse({
+        ...model,
+        completion,
+        input_request: {
+          question: "Client ID?",
+          fields: [{ id: "bad id", kind: "text", label: "ID" }],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("records truthful terminal outcomes while retaining old event compatibility", () => {
+    const data = { summary: "Result", files: [] };
+    expect(parseEvent({ ...base, type: "task.result", data }).data).toEqual(data);
+    for (const outcome of ["complete", "blocked"])
+      expect(parseEvent({ ...base, type: "task.result", data: { ...data, outcome } }).data).toEqual(
+        { ...data, outcome },
+      );
+    for (const outcome of ["waiting", "done", null])
+      expect(() =>
+        parseEvent({ ...base, type: "task.result", data: { ...data, outcome } }),
+      ).toThrow();
   });
 });
 

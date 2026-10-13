@@ -11,6 +11,7 @@ import {
   ThoughtDelta,
 } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { ModelOptions } from "./model-options.ts";
 import { RECENT_TASKS, RecentLine } from "./recent-activity.ts";
 import { ResearchBudget } from "./research.ts";
 import { SessionRun } from "./routines.ts";
@@ -52,6 +53,8 @@ export const ClientKind = z.enum([
 export type ClientKind = z.infer<typeof ClientKind>;
 
 export const ModelBinding = z.object({
+  provider: z.string().optional(),
+  options: ModelOptions.optional(),
   route: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
   client: ClientKind,
   model: z.string().min(1).max(128),

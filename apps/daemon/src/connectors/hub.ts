@@ -16,6 +16,7 @@ import {
   sanitizeToolSchema,
   sanitizeToolText,
   type ToolAccessView,
+  type ToolRecovery,
   toolAccess,
 } from "@localdot/protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -67,6 +68,7 @@ export const NO_CONNECTORS: TaskConnectors = Object.freeze({ specs: [], get: () 
 export interface CallOutcome {
   readonly ok: boolean;
   readonly text: string;
+  readonly recovery?: ToolRecovery;
 }
 
 const IDLE_MS = 5 * 60_000;
@@ -82,16 +84,28 @@ interface Live {
   idle?: ReturnType<typeof setTimeout>;
 }
 
-function plainProblem(error: unknown, config: ConnectorConfig, stderr?: string): ConnectorProblem {
+export function plainProblem(
+  error: unknown,
+  config: ConnectorConfig,
+  stderr?: string,
+): ConnectorProblem {
   if (error instanceof ConnectorProblem) return error;
   const code = (error as { code?: unknown })?.code;
   const message = error instanceof Error ? error.message : String(error);
-  if (code === 401 || code === 403 || /\b(?:401|403)\b|unauthori[sz]ed/i.test(message)) {
+  if (code === 403 || /\b403\b|insufficient[_ ]scope/i.test(message))
+    return new ConnectorProblem(
+      "failed",
+      "The app refused access to this operation. Check account permissions or required scopes; signing in again may not help.",
+      "permission",
+    );
+  if (code === 401 || /\b401\b|unauthori[sz]ed/i.test(message)) {
     const oauth = config.server.kind === "remote" && config.server.auth.kind === "oauth";
     return oauth
       ? new ConnectorProblem("needs_sign_in", "Sign in again to use this app.")
       : new ConnectorProblem("needs_key", "The app didn't accept the key. Add a new one.");
   }
+  if (/abort|timed? ?out/i.test(message))
+    return new ConnectorProblem("failed", "The app took too long to answer.", "timeout");
   if (config.server.kind === "local") {
     const said = sanitizeToolText(stderr?.split("\n").filter(Boolean).at(-1), 160);
     return new ConnectorProblem(
@@ -99,8 +113,6 @@ function plainProblem(error: unknown, config: ConnectorConfig, stderr?: string):
       said ? `The app stopped: ${said}` : "The app didn't start. Check its command.",
     );
   }
-  if (/abort|timed? ?out/i.test(message))
-    return new ConnectorProblem("failed", "The app took too long to answer.");
   return new ConnectorProblem("failed", "Couldn't reach the app. Check its address.");
 }
 
@@ -467,6 +479,18 @@ export class ConnectorHub {
     return toolAccess(tool, config.tools[entry.tool]?.access);
   }
 
+  // Local observations only: cached tools do not prove current server health or authentication.
+  // No connection, credential read or tool invocation is performed by discovery.
+  observation(entry: TaskConnectorTool): {
+    connection: ConnectorStatus | "not_checked";
+    toolsListedAt: number | null;
+  } {
+    return {
+      connection: this.#live.get(entry.connectorId)?.status ?? "not_checked",
+      toolsListedAt: this.#tools[entry.connectorId]?.at ?? null,
+    };
+  }
+
   // The problem with these arguments, by the schema dot was shown.
   check(entry: TaskConnectorTool, args: unknown): string | undefined {
     if (!args || typeof args !== "object" || Array.isArray(args))
@@ -485,7 +509,12 @@ export class ConnectorHub {
     signal: AbortSignal,
   ): Promise<CallOutcome> {
     const config = this.config(entry.connectorId);
-    if (!config?.enabled) return { ok: false, text: `${entry.app} is turned off.` };
+    if (!config?.enabled)
+      return {
+        ok: false,
+        text: `${entry.app} is turned off.`,
+        recovery: { kind: "permission", surface: "connector", retry: "never" },
+      };
     const live = this.#state(config.id);
     live.calls++;
     clearTimeout(live.idle);
@@ -503,13 +532,35 @@ export class ConnectorHub {
         content?: unknown;
         structuredContent?: unknown;
       };
-      return { ok: answer.isError !== true, text: resultText(answer) };
+      return {
+        ok: answer.isError !== true,
+        text: resultText(answer),
+        ...(answer.isError
+          ? {
+              recovery: {
+                kind: "tool_error" as const,
+                surface: "connector" as const,
+                retry: "verify_first" as const,
+              },
+            }
+          : {}),
+      };
     } catch (error) {
       signal.throwIfAborted();
       // The app answered, with an error of its own: dot reads it and tries another way.
       if (error instanceof McpError && error.code !== ErrorCode.ConnectionClosed)
         return {
           ok: false,
+          recovery: {
+            kind:
+              error.code === ErrorCode.RequestTimeout
+                ? "timeout"
+                : error.code === ErrorCode.InvalidParams
+                  ? "invalid_input"
+                  : "tool_error",
+            surface: "connector",
+            retry: "verify_first",
+          },
           text:
             error.code === ErrorCode.RequestTimeout
               ? "The app took too long to answer."
@@ -523,7 +574,20 @@ export class ConnectorHub {
         live.status = problem.status;
         live.problem = problem.message;
       }
-      return { ok: false, text: problem.message };
+      return {
+        ok: false,
+        text: problem.message,
+        recovery: {
+          kind: problem.causeKind,
+          surface: "connector",
+          retry:
+            problem.causeKind === "permission"
+              ? "never"
+              : problem.causeKind === "timeout"
+                ? "verify_first"
+                : "after_change",
+        },
+      };
     } finally {
       live.calls--;
       this.#rest(config.id);

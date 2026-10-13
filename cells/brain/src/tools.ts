@@ -29,8 +29,10 @@ import {
   WEB_SEARCH_TOOL_DESCRIPTION,
   WebFetchInput,
   WebSearchInput,
+  WORK_CONTEXT_DESCRIPTION,
+  WorkContextInput,
 } from "@localdot/protocol";
-import { HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
+import { DONE_TOOL_DESCRIPTION, HUMAN_INPUT_GUIDANCE } from "@localdot/protocol/guidance";
 import { asSchema, jsonSchema, type ToolSet, tool } from "ai";
 
 const GENERIC_ACTIONS =
@@ -83,6 +85,7 @@ export function toolSet(
       ]),
     ),
     ...(computer ? { computer } : {}),
+    work_context: tool({ description: WORK_CONTEXT_DESCRIPTION, inputSchema: WorkContextInput }),
     shell: tool({
       description:
         "Run a bash command in the computer (Ubuntu, your home is ~). Output is returned; long output is cut to its end. Use it for files, installs, data work and anything faster than the GUI.",
@@ -100,7 +103,7 @@ export function toolSet(
     }),
     browser_act: tool({
       description:
-        'Act on an element browser_read listed, by its ref: click; fill (text, which replaces what the field holds; submit presses Return after); select (text: the option to choose in a list); check or uncheck; press (text: keys such as "Return" or "ctrl+a", after clicking the element); scroll (scroll_direction, scroll_amount). The element is found wherever it is now, so there is no pixel hunting; give its coordinate too as a fallback for when the page changed. Returns a screenshot. Password fields are never filled: ask the user with an ask_user secret field.',
+        'Act on an element browser_read listed, by its ref: click; fill (text, which replaces what the field holds; submit presses Return after); select (text: the option to choose in a list); check or uncheck; press (text: keys such as "Return" or "ctrl+a", after clicking the element); scroll (scroll_direction, scroll_amount). The element is found wherever it is now, so there is no pixel hunting; give its coordinate too as a fallback for when the page changed. Returns a screenshot. device_code privately enters and submits a CLI device-pairing code you already received (first code-box ref, text, exact HTTPS origin; no coordinate fallback). Read the result and verify CLI authentication. Passwords and user-held verification codes need ask_user. Password fields are never filled: ask the user with an ask_user secret field.',
       inputSchema: BrowserActInput,
     }),
     ...(computer ? { find: findTool } : {}),
@@ -128,7 +131,7 @@ export function toolSet(
     }),
     ask_user: tool({
       description:
-        'Ask the user a question and wait for the answer. Only when you cannot continue without the user\'s information or a choice that would change the result; otherwise pick a sensible default and mention it in your summary. Never ask for permission: the safety system asks the user before consequential steps. For a quick choice, offer up to six short options. To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short label): text, longtext, secret (a password, PIN or recovery code), code (a verification or access code; length only if you know it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a file and you get its path) or qr (shows value as a QR code for the user\'s other device). Name the buttons with submit, such as "Sign in", and decline, such as "Not now". A code answer is delivered privately into the verification box at target, submitted once, and never saved; you only learn that it was provided. Ask for the code from the authenticator app, email or SMS as the current page specifies, and keep that page open. A secret answer is typed straight into the password box at target ([x, y] in the computer tool\'s coordinates), or into the password box that has keyboard focus when there is no target; you only learn that it was provided. For a combined sign-in page, use username/email and secret fields; for a staged sign-in ask only for the current step. localDot securely saves and reuses the login, fills both fields and submits the verified sign-in form. Check the tool result before acting; do not submit again when it already did. Read the resulting page: if it says the username or password is incorrect, tell the user and ask for a replacement with a new secret field at the current password target. Never replay rejected credentials, click the password box through ordinary tools, or hand over control just because a password was wrong. Answers come back by field id. If the user declines, carry on without it.' +
+        'Ask the user a question and wait for the answer. Only when you cannot continue without the user\'s information or a choice that would change the result; otherwise pick a sensible default and mention it in your summary. Never ask for permission: the safety system asks the user before consequential steps. For a quick choice, offer up to six short options. To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short label): text, longtext, secret (a password, PIN or recovery code), code (a verification or access code; length only if you know it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a file and you get its path) or qr (shows value as a QR code for the user\'s other device). Name the buttons with submit, such as "Sign in", and decline, such as "Not now". A code answer is delivered privately into the verification box at target, submitted once, and never saved; you only learn that it was provided. Ask for the code from the authenticator app, email or SMS as the current page specifies, and keep that page open. A secret answer is typed straight into the password box at target ([x, y] in the computer tool\'s coordinates), or into the password box that has keyboard focus when there is no target; you only learn that it was provided. For a combined sign-in page, use username/email and secret fields; for a staged sign-in ask only for the current step. localDot securely saves and reuses the login, fills both fields and submits the verified sign-in form. Check the tool result before acting; do not submit again when it already did. Read the resulting page: if it says the username or password is incorrect, tell the user and ask for a replacement with a new secret field at the current password target. Never replay rejected credentials, click the password box through ordinary tools, or hand over control just because a password was wrong. Answers come back by field id. If the user declines, respect that choice and state which requested work remains incomplete.' +
         " " +
         HUMAN_INPUT_GUIDANCE,
       inputSchema: AskUserInput,
@@ -154,8 +157,7 @@ export function toolSet(
       inputSchema: PeopleInput,
     }),
     done: tool({
-      description:
-        "Finish the task: a summary for the user, the paths of any files in the computer they should get (a revised file keeps its name), and what you checked about them.",
+      description: DONE_TOOL_DESCRIPTION,
       // Advertise the reflection choice, but tolerate older/weak models that omit it.
       // Failing validation here would prevent the daemon from completing the task.
       inputSchema: jsonSchema(asSchema(DoneModelInput).jsonSchema, {

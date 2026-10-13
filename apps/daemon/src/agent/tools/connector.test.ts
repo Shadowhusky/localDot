@@ -78,6 +78,30 @@ async function setup(opts: Parameters<typeof toolHarness>[0] = {}) {
 }
 
 describe("a connected app's tools", () => {
+  it("discovers existing connector access separately from CLI and browser sign-ins", async () => {
+    const { h, hub, app, id } = await setup();
+    await h.call("linear__list_issues", { query: "login" });
+    const calls = app.calls.length;
+    const context = await h.call("work_context", { goal: "app", app: "Linear" });
+    const body = JSON.parse(
+      (context.body.content[0]?.text ?? "").split("\n").slice(1, -1).join("\n"),
+    );
+    expect(body.connectors).toContainEqual(
+      expect.objectContaining({ tool: "linear__list_issues", access: "read", connection: "ready" }),
+    );
+    expect(body.recentResults).toContainEqual(
+      expect.objectContaining({ tool: "linear__list_issues", ok: true }),
+    );
+    expect(body.desktop.cliAuthentication).toBe("not_checked");
+    expect(body.browser.websiteAuthentication).toBe("not_checked");
+    expect(app.calls).toHaveLength(calls);
+    expect(h.desktop.shellCalls).toEqual([]);
+    await hub.update(id, { enabled: false });
+    const next = await h.call("work_context", { app: "Linear" });
+    expect(
+      JSON.parse((next.body.content[0]?.text ?? "").split("\n").slice(1, -1).join("\n")).connectors,
+    ).toEqual([]);
+  });
   it("run a read-only tool at once and hand its answer back as untrusted data that taints the task", async () => {
     const { h, app } = await setup();
     const res = await h.call("linear__list_issues", {

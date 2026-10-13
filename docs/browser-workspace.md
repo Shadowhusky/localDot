@@ -3,6 +3,9 @@
 This guide describes the current development UI. Older installed builds may not contain all
 of these controls.
 
+For implementation contracts and the comparison with other agents, see
+[Agent capability discovery and recovery](agent-runtime.md).
+
 ## Two screens for one task
 
 The isolated computer has a **Desktop** and a separate **Web browser**. dot uses the web browser
@@ -18,6 +21,23 @@ immediate. If it is still starting, dot's switch waits for it rather than failin
 that stops answering, or can no longer be controlled, is started again: at once when dot switches
 to it, otherwise within about half a minute. Why a start failed goes to the daemon's log. A local
 address such as localhost opens on the desktop, and the screen switches back to it.
+
+## Starting a page and checking the visible result
+
+A new browser may correctly show `about:blank`. Selecting **Web browser** only selects its
+screen; it does not navigate to the task's website. dot opens the task URL before diagnosing a
+blank-page blocker. Public URLs use the isolated web browser; localhost previews use the
+Chromium window on the desktop. Reads and actions target the visible tab, and refuse ambiguous
+or changed tab ownership instead of silently choosing a background tab.
+
+The status above the stage follows the selected screen's stream. A hidden desktop stream does
+not make a live web browser say **Reconnecting**. Computer lifecycle problems and Stop still
+have priority, and their controls continue to operate on the computer.
+
+A readable page establishes navigation, not that an application's interactive flow passed.
+dot must perform the requested interactions and inspect their visible result before claiming
+that a flow was tested. A confirmed download remains a download even if its optional screenshot
+cannot be captured; that failure must not cause dot to start another copy.
 
 ## Sign in once
 
@@ -46,6 +66,12 @@ button in one operation. Staged password pages can use Next or Continue; recogni
 form structure and field metadata, not a particular website. Ordinary model
 clicks and typing still cannot enter a password field. The model sees the result, never the
 password, and credentials are excluded from conversation events.
+
+For a CLI device login you requested, dot can enter the pairing code that the CLI itself
+prints, using the same private channel in the visible browser. It keeps that CLI process alive,
+completes the requested authorization and checks the CLI's sign-in status. This does not share
+connector credentials with the CLI. Passwords and codes from your authenticator, phone or email
+still use private user input.
 
 Supported logins are saved in keyd's protected store (Keychain, keyring or encrypted file,
 depending on the installation), bound to the exact HTTPS origin. One account is saved per origin;
@@ -138,7 +164,8 @@ Connected apps and saved browser accounts are used before requesting another sig
 
 An empty, focused password or verification field no longer hides the page from dot. Filled secrets remain excluded from page reads and screenshots. One-time codes use the private answer channel, are submitted to the identified verification field once, and are never saved as passwords or included in the conversation. Dot keeps the verification page open and explains whether the code comes from an authenticator, email or SMS.
 
-Invitation, early-access and activation codes also use the private conversation form. A normal
+Private invitation, early-access and activation codes also use the private conversation form.
+Clearly labelled ordinary room/referral/public-share codes stay ordinary input. A normal
 text input can still contain a private code: localDot recognizes these fields from their own
 metadata and protects them from page reads and recordings. Unknown-length codes use one pasteable
 field; a fixed number of boxes is shown only when the page specifies the length. Codes are not
@@ -172,3 +199,56 @@ capture or a browser restart as a GPU failure without checking the input and ren
 Website interaction belongs in the visible web browser, including games and pages without
 sign-in. A control failure should trigger a bounded retry after recovery, then a clear explanation
 if it persists, rather than a hidden browser or a second desktop Chromium session.
+
+## Distinguishing private input from ordinary codes
+
+The board-game failure in run `01M4V4XAD570T55B6Z4PRH28QX` was a false positive:
+the requested room link populated a text field named `invite-code`, labelled `房间码`
+(room code), with `autocomplete=off`. The old invite/access-code regex classified the
+room code as a credential. The filled-secret guard then refused navigation's observation,
+page reads and screenshots; the agent incorrectly described ordinary prefilled game state
+as private input needing a user handoff.
+
+Code classification now considers the field's purpose. Password types, password/OTP
+autocomplete and explicit authentication/access/activation evidence retain priority.
+Clear room/lobby/game/table invitation semantics can disambiguate a generic invitation
+identifier, including English and Chinese labels. Unknown invitation fields remain protected;
+there is no domain allowlist or page-text instruction that switches protection off. All
+editable values still receive the existing text/AX exclusion and screenshot masking.
+
+The remaining genuine-secret guard is deliberate: allowing a masked read alone is not proof
+that raw recording is safe, or that a page has not reflected a credential elsewhere. This
+change does not remove that guard, change the private entry channel, or silently clear/reload
+an ordinary game field. Classification is deterministic and testable; it is not a claim that
+an LLM can perfectly infer whether every arbitrary page field is sensitive.
+
+The design was checked against current primary documentation:
+
+- [OpenAI Computer Use safety guidance](https://learn.chatgpt.com/docs/computer-use#safety-guidance)
+  describes user oversight for sensitive flows and target-specific control.
+- [Anthropic browser-use security considerations](https://platform.claude.com/docs/en/agents-and-tools/tool-use/browser-use-tool#security-considerations)
+  recommend isolation, limiting credentials, visible-page observations and human confirmation
+  for consequential actions.
+- [Browser Use credential handling](https://browser-use.com/enterprise) describes model-visible
+  placeholders with credentials supplied privately and scoped to domains.
+
+These sources support keeping secrets separate from model observations. They do not establish
+that every invite/room code should block an entire page, nor do they disclose the full internal
+classifiers of closed-source products. The concrete behavior here is validated by local
+positive and negative regression cases rather than a claim of equivalence to those products.
+
+Verification for this change: 371 tests passed across 8 combined browser protection suites,
+including composed observation/control regressions; browserd typecheck, scoped Biome and
+`git diff --check` passed. The `localdot/browser:dev` image was rebuilt successfully.
+Activation waited until every game run ended and no live/manual-control session remained,
+as requested. The supported daemon restart activated the rebuilt browser image on 13 October.
+Live verification `01M4V7FKQJJ6WT274Z1740HFQQ` then filled the game's room-code field with
+synthetic `ABC123`, successfully read and captured the page while filled, and cleared it.
+No room was joined or created and no game moves were made. The same test exercised an
+interruptible completion wait followed by a fresh page read. The temporary activation
+heartbeat was disabled after activation.
+
+Current limits: the public-purpose exception reads the field's own `aria-label` and
+`placeholder`, with English and Chinese patterns. Other languages or an external `<label>`
+alone can still leave a generic invitation field classified as private. This is a tested
+correction to the deterministic classifier, not a replacement for the entire privacy system.

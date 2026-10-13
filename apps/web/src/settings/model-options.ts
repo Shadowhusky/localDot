@@ -47,7 +47,13 @@ export function modelGroups(
   );
   const offered = Object.entries(plans).flatMap(([provider, account]) => {
     const models = account.ready
-      ? account.models.map((model) => ({ provider, model: model.id }))
+      ? account.models.map((model) =>
+          current.provider === provider && current.model === model.id
+            ? current
+            : (saved.models?.find(
+                (choice) => choice.provider === provider && choice.model === model.id,
+              ) ?? { provider, model: model.id }),
+        )
       : [];
     return provider === current.provider && !models.some((row) => row.model === current.model)
       ? [current, ...models]

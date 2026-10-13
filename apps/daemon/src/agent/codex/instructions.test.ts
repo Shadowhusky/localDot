@@ -1,5 +1,5 @@
 import { offeredTools } from "@localdot/protocol";
-import { researchSection, workingRules } from "@localdot/protocol/guidance";
+import { DONE_TOOL_DESCRIPTION, researchSection, workingRules } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { codexInstructions } from "./instructions.ts";
 import { CODEX_TOOL_DESCRIPTIONS, codexTools } from "./mcp-tools.ts";
@@ -86,8 +86,8 @@ describe("Codex developer instructions", () => {
     for (const rule of [
       "do whatever the task needs without asking: install packages, write and run scripts, open and use apps",
       "The safety system asks the user before consequential steps such as sending, posting, buying, deleting online data, uploading files or changing account settings, so never ask the user for permission yourself.",
-      "Use ask_user only when you cannot continue without the user's information or a choice that would change the result.",
-      "pick sensible defaults for small details and mention them in your summary",
+      "Missing required configuration/information: check context safely, then ask_user and wait, not done.",
+      "Otherwise choose defaults.",
       "Use request_takeover only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
       "a secret field whose target is the password box",
       "Never ask for passwords, card numbers or other secrets in a plain message or a text field",
@@ -98,6 +98,8 @@ describe("Codex developer instructions", () => {
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain(
       "Only when you cannot continue without the user's information or a choice that would change the result",
     );
+    expect(CODEX_TOOL_DESCRIPTIONS.done).toBe(DONE_TOOL_DESCRIPTION);
+    expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("non-secret client IDs");
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("Never ask for permission");
     expect(CODEX_TOOL_DESCRIPTIONS.ask_user).toContain("you only learn that it was provided");
     expect(CODEX_TOOL_DESCRIPTIONS.request_takeover).toContain(

@@ -496,6 +496,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
             inputUSDPerMTok: model.inputUSDPerMTok,
             outputUSDPerMTok: model.outputUSDPerMTok,
             ...capabilityOf(provider, model),
+            maxOutputTokens: model.maxOutputTokens,
           })),
         })),
       });

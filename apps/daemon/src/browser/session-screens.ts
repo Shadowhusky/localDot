@@ -183,6 +183,7 @@ export class SessionScreens {
         }
       },
       release: access.finish,
+      confirm: access.confirm,
       client: {
         input: async (request, signal) => {
           const result = await access.input(ManualInput.parse(request.input), signal);

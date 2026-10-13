@@ -5,6 +5,7 @@ import {
   BrainEvents,
   ComputerAction,
   computerWorkMs,
+  DoneInput,
   InboxReply,
   MODEL_SCREEN,
   PauseSnapshot,
@@ -238,6 +239,9 @@ export class ToolClient {
   }
 
   tool(name: string, callId: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
+    // A completion carrying missing input runs through the daemon's normal ask_user path.
+    const completion = name === "done" ? DoneInput.safeParse(input) : undefined;
+    const effectiveName = completion?.success && completion.data.input_request ? "ask_user" : name;
     let timeoutMs: number | undefined = TOOL_WORK_MS;
     if (name === "shell") timeoutMs = ((ShellInput.parse(input).timeout_sec ?? 120) + 10) * 1000;
     else if (name === "computer") {
@@ -246,9 +250,10 @@ export class ToolClient {
     }
     // The user has thirty minutes, or a routine's own window; a secret answer is then typed into
     // its field.
-    else if (name === "ask_user") timeoutMs = Math.max(30 * 60_000, this.#runWindowMs) + 60_000;
+    else if (effectiveName === "ask_user")
+      timeoutMs = Math.max(30 * 60_000, this.#runWindowMs) + 60_000;
     else if (name === "request_takeover") timeoutMs = undefined;
-    if (timeoutMs !== undefined && WAITS_ON_USER.has(name))
+    if (timeoutMs !== undefined && WAITS_ON_USER.has(effectiveName))
       timeoutMs += Math.max(APPROVAL_TIMEOUT_MS, this.#runWindowMs);
     return this.#json(
       "POST",

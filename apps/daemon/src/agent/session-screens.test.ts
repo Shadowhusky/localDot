@@ -22,7 +22,7 @@ import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
-import { sendManualInput } from "./manual-input.ts";
+import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { AgentSession, ControlHeldError } from "./session.ts";
 import { toolHarness } from "./testing/harness.ts";
 import { dispatchTool } from "./tools/index.ts";
@@ -159,9 +159,16 @@ function fixture(
     type: vi.fn(async () => {
       throw new Error("unused");
     }),
-    navigate: vi.fn(async (_permit: unknown, _tab: string, _url: string, _scope: BrowserScope) => ({
-      done: true as const,
-    })),
+    navigate: vi.fn(
+      async (
+        _permit: unknown,
+        _tab: string,
+        _url: string,
+        _scope: BrowserScope,
+      ): Promise<{ done: true; download?: true }> => ({
+        done: true as const,
+      }),
+    ),
   };
   const deps: ScreenControllerDeps = {
     sessionId: id,
@@ -675,6 +682,77 @@ describe("session-owned screen authority", () => {
     await taking;
   });
 
+  it("recovers an uncertain browser input with a fresh user grant, without replaying private text", async () => {
+    const f = fixture();
+    await f.browser();
+    const taking = f.session.takeover("login", "fixture login");
+    await until(() => f.session.manualControl === "ready");
+    const requestId = f.session.pendingTakeover!;
+    const confirmed = Promise.withResolvers<void>();
+    f.grant.mockImplementationOnce(async () => confirmed.promise);
+    f.client.manual.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    const send = () =>
+      sendManualInput(
+        f.session,
+        { requestId, input: { kind: "text", text: "private密碼" } },
+        new AbortController().signal,
+        f.factory.manual.bind(f.factory),
+      );
+    await expect(send()).rejects.toBeInstanceOf(ManualInputUncertain);
+    expect(f.session.manualControl).toBe("unconfirmed");
+    await expect(send()).rejects.toBeInstanceOf(ControlHeldError);
+    expect(f.holder()).toBe("user");
+    expect(f.client.manual).toHaveBeenCalledOnce();
+    confirmed.resolve();
+    await until(() => f.session.manualControl === "ready");
+    expect(f.grant.mock.calls.at(-1)?.[0].holder).toBe("user");
+    expect(f.client.read).not.toHaveBeenCalled();
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.client.manual).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.log.read(f.id))).not.toContain("private密碼");
+    await send();
+    expect(f.client.manual).toHaveBeenCalledTimes(2);
+    expect(await f.session.handback(requestId, undefined)).toBe(true);
+    await taking;
+  });
+
+  it("retries browser delivery recovery after a failed acknowledgement", async () => {
+    const f = fixture();
+    await f.browser();
+    const taking = f.session.takeover("login", "fixture login");
+    await until(() => f.session.manualControl === "ready");
+    const requestId = f.session.pendingTakeover!;
+    f.client.manual.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    f.grant.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    await expect(
+      sendManualInput(
+        f.session,
+        { requestId, input: { kind: "text", text: "private" } },
+        new AbortController().signal,
+        f.factory.manual.bind(f.factory),
+      ),
+    ).rejects.toBeInstanceOf(ManualInputUncertain);
+    await vi.waitFor(() => expect(f.session.manualControl).toBe("ready"));
+    expect(f.holder()).toBe("user");
+    expect(f.client.manual).toHaveBeenCalledOnce();
+    expect(await f.session.handback(requestId, undefined)).toBe(true);
+    await taking;
+  });
+
+  it("allows another hand-back attempt after the screen rejects the first one", async () => {
+    const f = fixture();
+    await f.browser();
+    const taking = f.session.takeover("login", "fixture login");
+    await until(() => f.session.manualControl === "ready");
+    const requestId = f.session.pendingTakeover!;
+    vi.spyOn(f.screens, "handback").mockRejectedValueOnce(new Error("temporary failure"));
+    expect(await f.session.handback(requestId, undefined)).toBe(false);
+    expect(f.session.manualControl).toBe("ready");
+    expect(f.holder()).toBe("user");
+    expect(await f.session.handback(requestId, undefined)).toBe(true);
+    await taking;
+  });
+
   it("lets typing already on its way land before the browser goes back to dot", async () => {
     const f = fixture();
     await f.browser();
@@ -1016,22 +1094,181 @@ describe("session-owned screen authority", () => {
     expect(desktop).not.toHaveBeenCalled();
   });
 
-  // A page that keeps changing as it settles can't be read yet; the page did open.
-  it("opens a page the web browser can't read yet", async () => {
+  it("reports a download without claiming its URL became a page", async () => {
+    const f = fixture();
+    await f.browser();
+    f.client.navigate.mockResolvedValueOnce({ done: true, download: true });
+    const h = tools(f);
+    const result = await h.callTool("browser_navigate", { url: "https://example.test/source.zip" });
+    expect(result.result.ok).toBe(true);
+    const text = result.result.content
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join(" ");
+    expect(text).toContain("Download started");
+    expect(text).toContain("Downloads");
+    expect(text).not.toContain("Opened:");
+    expect(f.client.read).not.toHaveBeenCalled();
+    expect(result.result.recovery?.kind).toBe("download_pending");
+  });
+
+  it.each(["observe", "frame"] as const)(
+    "keeps an acknowledged download when its follow-up %s is unavailable",
+    async (failure) => {
+      const f = fixture();
+      await f.browser();
+      f.client.navigate.mockResolvedValueOnce({ done: true, download: true });
+      const h = tools(f);
+      if (failure === "observe")
+        vi.spyOn(h.tools.gateway, "observe").mockRejectedValueOnce(
+          new BrowserClientError("protected_input"),
+        );
+      else vi.spyOn(h.tools.png, "png").mockRejectedValueOnce(new Error("frame unavailable"));
+      const result = await h.callTool("browser_navigate", {
+        url: "https://example.test/source.zip",
+      });
+      expect(result.result).toMatchObject({
+        ok: true,
+        recovery: { kind: "download_pending", retry: "never" },
+      });
+      expect(result.result.content.some((c) => c.type === "image")).toBe(false);
+      expect(result.result.content).toContainEqual({
+        type: "text",
+        text: expect.stringContaining("Download started"),
+      });
+      expect(f.client.navigate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("distinguishes a healthy blank starting tab from a browser failure and can open the app", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    const context = await h.callTool("work_context", { goal: "app" });
+    const inventory = context.result.content
+      .map((c) => (c.type === "text" ? c.text : ""))
+      .join(" ");
+    expect(inventory).toContain('"available":true');
+    expect(inventory).toContain('"state":"not_open"');
+    expect(inventory).toContain('"health":"not_checked"');
+    expect(inventory).toContain('"page":"not_inspected"');
+    await h.callTool("switch_screen", { screen: "browser" });
+    f.client.read.mockResolvedValueOnce({
+      url: "about:blank",
+      title: "",
+      text: "",
+      outline: "",
+      truncated: false,
+    });
+    const read = await h.callTool("browser_read", {});
+    expect(read.result.ok).toBe(true);
+    expect(read.result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("blank starting page, not a browser failure"),
+    });
+    expect(read.result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("browser_navigate"),
+    });
+    expect(f.client.navigate).not.toHaveBeenCalled();
+    expect(f.session.workProgress.snapshot()).toContainEqual(
+      expect.objectContaining({
+        tool: "browser_read",
+        ok: true,
+      }),
+    );
+    const opened = await h.callTool("browser_navigate", { url: "https://example.test/" });
+    expect(opened.result.ok).toBe(true);
+    expect(f.client.navigate).toHaveBeenCalledOnce();
+    expect(opened.result.content).toContainEqual(
+      expect.objectContaining({
+        type: "text",
+        text: expect.stringContaining("Opened: Owned browser page"),
+      }),
+    );
+  });
+
+  it("does not misclassify a loaded page that describes itself as blank", async () => {
     const f = fixture();
     await f.browser();
     const h = tools(f);
-    f.client.read.mockRejectedValueOnce(new BrowserClientError("unavailable"));
-    const navigated = await h.callTool("browser_navigate", { url: "https://example.test/game" });
-    expect(navigated.result.ok).toBe(true);
-    expect(navigated.result.content).toContainEqual(
-      expect.objectContaining({
-        type: "text",
-        text: expect.stringContaining("(https://example.test/game)"),
-      }),
-    );
-    expect(navigated.result.content.some((c) => c.type === "image")).toBe(true);
+    f.client.read.mockResolvedValueOnce({
+      url: "https://example.test/",
+      title: "about:blank",
+      text: "browser unavailable",
+      outline: "",
+      truncated: false,
+    });
+    const read = await h.callTool("browser_read", {});
+    expect(read.result.ok).toBe(true);
+    expect(read.result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringMatching(/^<untrusted/),
+    });
   });
+
+  it("reports unverified navigation when the page is changing, without replaying it", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.read.mockRejectedValueOnce(new BrowserClientError("refused"));
+    const navigated = await h.callTool("browser_navigate", { url: "https://example.test/game" });
+    expect(navigated.result).toMatchObject({
+      ok: false,
+      recovery: { kind: "stale", retry: "after_observation" },
+    });
+    expect(navigated.result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("Navigation was acknowledged"),
+    });
+    expect(navigated.result.content.some((c) => c.type === "image")).toBe(true);
+    expect(f.client.navigate).toHaveBeenCalledOnce();
+    expect((await h.callTool("browser_read", {})).result.ok).toBe(true);
+    expect(f.client.navigate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["unavailable", "protected_input", "stale", "aborted", "reply"] as const)(
+    "preserves a %s failure instead of claiming the navigation loaded",
+    async (code) => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      const observe = vi.spyOn(h.tools.gateway, "observe");
+      f.client.read.mockRejectedValueOnce(new BrowserClientError(code));
+      const navigated = await h.callTool("browser_navigate", { url: "https://example.test/game" });
+      expect(navigated.result.ok).toBe(false);
+      expect(navigated.result.content[0]).toEqual({
+        type: "text",
+        text: expect.stringContaining(new BrowserClientError(code).message),
+      });
+      expect(observe).not.toHaveBeenCalled();
+      expect(f.client.navigate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["about:blank", "chrome-error://chromewebdata/"])(
+    "does not report %s as the loaded app after navigation acknowledgement",
+    async (url) => {
+      const f = fixture();
+      await f.browser();
+      const h = tools(f);
+      f.client.read.mockResolvedValueOnce({
+        url,
+        title: "",
+        text: "",
+        outline: "",
+        truncated: false,
+      });
+      const navigated = await h.callTool("browser_navigate", { url: "https://example.test/game" });
+      expect(navigated.result.ok).toBe(false);
+      const output = navigated.result.content
+        .map((c) => (c.type === "text" ? c.text : ""))
+        .join(" ");
+      expect(output).not.toContain("Opened:");
+      expect(output).toContain("Browser status: reachable");
+      expect(f.client.navigate).toHaveBeenCalledOnce();
+    },
+  );
 
   it("types a secret answer into the web browser's own field, and nothing once the screen changed", async () => {
     const secret = "s3cret phrase for the mail";
@@ -1320,6 +1557,13 @@ describe("session-owned screen authority", () => {
     f.session.lastFrameId = ulid();
     const entered = await h.callTool("switch_screen", { screen: "browser" });
     expect(entered.result.ok).toBe(true);
+    const explanation = entered.result.content
+      .flatMap((item) => (item.type === "text" ? [item.text] : []))
+      .join("\n");
+    expect(explanation).toContain("Switching selects a screen; it does not open a site");
+    expect(explanation).toContain("localhost previews in desktop Chromium");
+    expect(explanation).toContain("A blank initial tab is not a browser failure");
+    expect(f.client.navigate).not.toHaveBeenCalled();
     expect(f.screens.selection.screen).toBe("browser");
     expect(f.screens.selection.cellId).not.toBe(f.session.cellId);
     expect(f.session.lastFrameId).toBeUndefined();

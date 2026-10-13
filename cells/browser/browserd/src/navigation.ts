@@ -47,7 +47,9 @@ function frameUrl(frame: schema.infer<typeof frameSchema>): string {
   }
 }
 
-export async function navigateOwnedDocument(options: OwnedNavigationOptions): Promise<void> {
+export async function navigateOwnedDocument(
+  options: OwnedNavigationOptions,
+): Promise<"download" | void> {
   if (!navigable(options.url)) throw new BrowserNavigationError("request");
   if (options.signal?.aborted) throw new BrowserNavigationError("stale");
   options.preflight();
@@ -176,10 +178,27 @@ export async function navigateOwnedDocument(options: OwnedNavigationOptions): Pr
     );
     check();
     acknowledgement = acknowledgementSchema.parse(reply);
+    // A download leaves the current document in place. Chromium may report ERR_ABORTED
+    // alongside isDownload because no replacement document commits. Do not retire the
+    // browser or wait for a load event that will never arrive.
+    if (acknowledgement.isDownload) {
+      const final = await readFrame();
+      check();
+      if (
+        acknowledgement.frameId !== initial.id ||
+        (acknowledgement.errorText && acknowledgement.errorText !== "net::ERR_ABORTED") ||
+        navigated ||
+        withinDocument !== undefined ||
+        final.id !== initial.id ||
+        final.loaderId !== initial.loaderId ||
+        frameUrl(final) !== frameUrl(initial)
+      )
+        throw new BrowserNavigationError("stale");
+      return "download";
+    }
     if (
       acknowledgement.frameId !== initial.id ||
       acknowledgement.errorText ||
-      acknowledgement.isDownload ||
       acknowledgement.loaderId === initial.loaderId
     )
       throw new BrowserNavigationError("unready");

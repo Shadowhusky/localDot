@@ -6,6 +6,7 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { ModelOptions } from "@localdot/protocol";
 import {
   CLAUDE_CODE_MODEL,
   earlierRecord,
@@ -32,7 +33,7 @@ export const CLAUDE_CODE_DONE = 0;
 export const CLAUDE_CODE_GAVE_UP = 3;
 export const CLAUDE_CODE_CRASHED = 70;
 const NUDGE =
-  "If the task is finished, call the localdot done tool with a summary. If you need the user, call ask_user.";
+  "If the requested outcome is complete, call the localdot done tool with completion.status complete and observed evidence. If work is waiting for another actor, processing, loading or a timer, use done with completion.status waiting or computer wait, then inspect and continue. Waiting is not completion or a blocker. Use ask_user only for missing user information; otherwise continue the task.";
 const PNG_HEADER = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_PROMPT_BYTES = 256 * 1024;
 const SIGNED_OUT = new Set([
@@ -244,7 +245,10 @@ export class ClaudeCodeDriver {
       `The previous run and all its calls were retired before Pause. ${receipt.completedCalls} call results were confirmed. Do not replay any previous tool call. Choose fresh work from the current full screenshot.`,
     );
   }
-  async run(session: AgentSession, input: { model: string; resume: boolean }): Promise<number> {
+  async run(
+    session: AgentSession,
+    input: { model: string; options?: ModelOptions; resume: boolean },
+  ): Promise<number> {
     if (this.#blocked.has(session.id)) throw new ClaudeCodeCleanupError();
     if (this.#running.has(session.id)) throw new Error("The Claude Code task is already running.");
     if (session.stopped) return CLAUDE_CODE_DONE;
@@ -271,14 +275,23 @@ export class ClaudeCodeDriver {
         if (session.stopped) break;
         const generation = session.beginBrain();
         session.setStatus("running");
-        const result = await this.#cycle(session, generation, input.model, recap, next, redact, {
-          publish: (cycle) => {
-            owner.active = cycle;
+        const result = await this.#cycle(
+          session,
+          generation,
+          input.model,
+          input.options,
+          recap,
+          next,
+          redact,
+          {
+            publish: (cycle) => {
+              owner.active = cycle;
+            },
+            retire: () => {
+              owner.active = undefined;
+            },
           },
-          retire: () => {
-            owner.active = undefined;
-          },
-        });
+        );
         recap = true;
         if (result.kind === "safety") {
           await session.waitForSafety();
@@ -403,6 +416,7 @@ export class ClaudeCodeDriver {
     session: AgentSession,
     generation: BrainGeneration,
     model: string,
+    options: ModelOptions | undefined,
     recap: boolean,
     suffix: string,
     redact: Redactor,
@@ -625,7 +639,7 @@ export class ClaudeCodeDriver {
           for (const part of out.content)
             if (part.type === "image" && !part.region) returned = part.frameId;
           if (!session.safetyPause) {
-            if (name === "done" && out.ok) {
+            if (name === "done" && out.ok && out.final) {
               finish(pending.size ? { kind: "completed", pending: true } : { kind: "done" });
               return inactive();
             }
@@ -635,6 +649,9 @@ export class ClaudeCodeDriver {
             }
           }
           completedCalls++;
+          // A useful nonterminal result (including an external wait) resets the consecutive
+          // no-tool nudge count. Refusals and failed/cancelled work cannot prolong a loop.
+          if (out.ok && !out.pause && !out.cancelled) nudged = false;
           return toCallToolResult(out);
         })
         .catch(() => {
@@ -787,6 +804,7 @@ export class ClaudeCodeDriver {
         options: claudeCodeOptions({
           launch,
           model,
+          modelOptions: options,
           instructions: redact(d.instructions(session)),
           server: localdotServer(call, !!session.research, () =>
             connectorDescriptors(session.connectors),

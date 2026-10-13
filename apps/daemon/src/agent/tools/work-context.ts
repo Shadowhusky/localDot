@@ -1,0 +1,122 @@
+import {
+  DesktopCapabilities,
+  type ToolResult,
+  WORK_PROGRAMS,
+  type WorkContextInput,
+} from "@localdot/protocol";
+import { DesktopdError } from "../../desktopd/client.ts";
+import { untrusted } from "../untrusted.ts";
+import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+
+export function chooseRoute(
+  goal: WorkContextInput["goal"],
+  desktop: boolean,
+  browser: boolean,
+  apps: number,
+): string[] {
+  const order =
+    goal === "code"
+      ? ["shell", "connector", "browser"]
+      : goal === "desktop"
+        ? ["desktop", "shell"]
+        : goal === "web"
+          ? ["browser", "connector"]
+          : ["connector", "browser", "shell"];
+  return order.filter((route) =>
+    route === "connector" ? apps > 0 : route === "browser" ? browser : desktop,
+  );
+}
+
+export async function workContextTool(
+  deps: ToolDeps,
+  ctx: ToolCallContext,
+  input: WorkContextInput,
+): Promise<ToolResult> {
+  ctx.check();
+  if (!ctx.permit?.consume(input, null)) return fail("Reading the work context is not authorized.");
+  append(ctx, "step.start", { kind: "think" });
+  append(ctx, "tool.start", { tool: "work_context", title: "Checking available tools and access" });
+  const desktop = deps.desktop(ctx.session.cellId);
+  let programs = Object.fromEntries(WORK_PROGRAMS.map((name) => [name, "unknown"]));
+  let reachable: boolean | null = desktop ? null : false;
+  let inspection = desktop ? "not_supported" : "unavailable";
+  if (desktop?.capabilities) {
+    try {
+      const capabilities = DesktopCapabilities.parse(await desktop.capabilities(ctx.signal));
+      ctx.check();
+      reachable = true;
+      inspection = capabilities.search;
+      programs = capabilities.programs;
+    } catch (error) {
+      ctx.check();
+      // Older computers remain usable. Never fall back to running a login shell from a read tool.
+      if (error instanceof DesktopdError && error.status === 404) {
+        reachable = true;
+        inspection = "not_supported";
+      } else {
+        reachable = false;
+        inspection = "unavailable";
+      }
+    }
+  }
+  const apps = ctx.session.connectors.specs.flatMap((spec) => {
+    const entry = ctx.session.connectors.get(spec.name);
+    const access = entry && deps.connectors?.access(entry);
+    if (
+      !entry ||
+      !access ||
+      (input.app && !entry.app.toLowerCase().includes(input.app.toLowerCase()))
+    )
+      return [];
+    return [
+      {
+        app: entry.app,
+        tool: entry.exposed,
+        access: access.access,
+        ...deps.connectors?.observation(entry),
+      },
+    ];
+  });
+  const screens = ctx.session.screens?.availability();
+  const snapshot = {
+    observedAt: new Date().toISOString(),
+    desktop: {
+      reachable,
+      inspection,
+      programs,
+      cliAuthentication: "not_checked",
+      verification:
+        "The inventory checks the service PATH only; shell-profile additions may differ. For the CLI you need, check its own auth status through shell. Installed does not mean signed in.",
+    },
+    browser: {
+      available: Boolean(screens) && screens?.browser !== "unavailable",
+      state: screens?.browser ?? "unavailable",
+      selected: screens?.selected ?? "desktop",
+      health: "not_checked",
+      page: "not_inspected",
+      navigation:
+        "browser_navigate opens the task URL and selects its screen: localhost previews use desktop Chromium, public sites use the separate web browser. switch_screen only selects a screen; it does not open a site.",
+      readiness:
+        "Available means a browser can be opened, not that a target page has loaded. not_open is not a failure. A successful read of about:blank means the browser answered but no target page is loaded; navigate to the task URL before diagnosing a blocker.",
+      websiteAuthentication: "not_checked",
+      verification:
+        "Open the requested site in the visible browser and inspect the existing session before requesting sign-in.",
+    },
+    connectors: apps,
+    recentResults: ctx.session.workProgress.snapshot(),
+    preferredRoutes: chooseRoute(
+      input.goal,
+      Boolean(desktop) && reachable !== false,
+      Boolean(screens) && screens?.browser !== "unavailable",
+      apps.length,
+    ),
+    rules:
+      "Route order is advice, not authorization. Match the operation to the listed tool schema. A connected app cannot authenticate another browser or CLI. Respect refusals on every route; do not copy credentials. After a timeout or lost result, verify completion before retrying a possible write. Unknown access is not a request to log in.",
+  };
+  append(ctx, "tool.end", { ok: true });
+  append(ctx, "step.end", { status: "ok" });
+  return {
+    ok: true,
+    content: [text(untrusted("work context data", ctx.redact(JSON.stringify(snapshot))))],
+  };
+}

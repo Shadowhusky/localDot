@@ -35,6 +35,7 @@ export type RiskFacts = {
     | "memory_write"
     // dot changes when it works: pauses a routine or schedules a follow-up.
     | "schedule"
+    | "device_code"
     // A tool of one of the user's connected apps.
     | "connector";
   // Filled from the daemon's own session state when the action is decided.

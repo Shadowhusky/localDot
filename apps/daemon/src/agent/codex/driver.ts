@@ -13,6 +13,7 @@ import {
   threadStartParams,
   turnOutcome,
 } from "@localdot/codex-harness";
+import type { ModelOptions } from "@localdot/protocol";
 import {
   earlierRecord,
   type InboxItem,
@@ -39,7 +40,7 @@ export const CODEX_DONE = 0;
 export const CODEX_GAVE_UP = 3;
 export const CODEX_CRASHED = 70;
 const NUDGE =
-  "If the task is finished, call the localdot done tool with a summary. If you need the user, call ask_user.";
+  "If the requested outcome is complete, call the localdot done tool with completion.status complete and observed evidence. If work is waiting for another actor, processing, loading or a timer, use done with completion.status waiting or computer wait, then inspect and continue. Waiting is not completion or a blocker. Use ask_user only for missing user information; otherwise continue the task.";
 const FRESH =
   "The previous action was canceled because its screenshot was stale. Use this fresh screenshot to decide what to do next; do not apply the canceled action automatically.";
 const SUB_AGENT =
@@ -152,7 +153,7 @@ export interface CodexDriverDeps {
   readonly waitForAuthResume?: (session: AgentSession) => Promise<void>;
 }
 type CycleResult =
-  | { kind: "completed"; pending: boolean }
+  | { kind: "completed"; pending: boolean; progressed?: boolean }
   | {
       kind:
         | "done"
@@ -279,7 +280,10 @@ export class CodexDriver {
       `The previous native turn and all its calls were retired before Pause. ${receipt.completedCalls} call results were confirmed under that owner. Do not replay any previous tool call. Choose fresh work from the current full screenshot.`,
     );
   }
-  async run(session: AgentSession, input: { model: string; resume: boolean }): Promise<number> {
+  async run(
+    session: AgentSession,
+    input: { model: string; options?: ModelOptions; resume: boolean },
+  ): Promise<number> {
     if (this.#blocked.has(session.id)) throw new CodexCleanupError();
     if (this.#running.has(session.id)) throw new Error("The ChatGPT task is already running.");
     if (session.stopped) return CODEX_DONE;
@@ -374,6 +378,7 @@ export class CodexDriver {
           generation,
           lease,
           input.model,
+          input.options,
           recap,
           next,
           redact,
@@ -482,6 +487,9 @@ export class CodexDriver {
           nudged = false;
           continue;
         }
+        // Count consecutive empty turns, not all empty turns over a long task. Successful
+        // waits/actions may naturally end a native turn while the requested outcome is pending.
+        if (result.kind === "completed" && result.progressed) nudged = false;
         if (!nudged) {
           next = NUDGE;
           nudged = true;
@@ -553,6 +561,7 @@ export class CodexDriver {
     generation: BrainGeneration,
     lease: CodexDriverLease,
     model: string,
+    options: ModelOptions | undefined,
     recap: boolean,
     suffix: string,
     redact: Redactor,
@@ -582,6 +591,7 @@ export class CodexDriver {
       result: CycleResult | undefined,
       savedAssistant: string | undefined,
       fenced = false,
+      progressed = false,
       nativeUncertain = false;
     let pauseInterruptOwner: Pick<PauseSnapshot, "requestId" | "revision"> | undefined;
     let pauseWork: Promise<{ generationId: number; completedCalls: number }> | undefined;
@@ -767,7 +777,7 @@ export class CodexDriver {
           )
             continue;
           if (outcome.kind === "completed")
-            finish({ kind: "completed", pending: pending.size > 0 });
+            finish({ kind: "completed", pending: pending.size > 0, progressed });
           else if (outcome.kind === "signed_out") {
             d.auth.markSignedOut(lease.generation);
             finish({ kind: "signed_out" });
@@ -790,8 +800,9 @@ export class CodexDriver {
       )
         return;
       if (session.safetyPause) return;
-      if (tool === "done" && value.ok) finish(done());
+      if (tool === "done" && value.ok && value.final) finish(done());
       else if (value.final) finish({ kind: "done" });
+      else if (value.ok && !value.pause && !value.cancelled) progressed = true;
     };
     signal.addEventListener("abort", loss, { once: true });
     const removeControlObserver = session.onControlRequested(generation, () =>
@@ -1095,6 +1106,7 @@ export class CodexDriver {
         "turn/start",
         {
           threadId: mainThread,
+          ...(options?.reasoningEffort ? { effort: options.reasoningEffort } : {}),
           input: [
             { type: "text", text },
             { type: "image", url: `data:image/png;base64,${image.toString("base64")}` },

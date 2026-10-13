@@ -12,7 +12,7 @@ const launch = {
   env: { HOME: "/Users/person", PATH: "/usr/bin" },
   cwd: "/private/localdot/claude-code/work",
 };
-function options() {
+function options(effort?: "low" | "high" | "max") {
   const call = vi.fn(async () => ({
     isError: false,
     content: [{ type: "text" as const, text: "ok" }],
@@ -24,6 +24,7 @@ function options() {
     options: claudeCodeOptions({
       launch,
       model: "sonnet",
+      modelOptions: effort ? { reasoningEffort: effort } : undefined,
       instructions: "You are dot.",
       server,
       abort: new AbortController(),
@@ -40,6 +41,10 @@ async function connect(server: ReturnType<typeof localdotServer>) {
 }
 
 describe("Claude Code as dot's brain", () => {
+  it("passes selected effort to the native SDK and omits it for provider defaults", () => {
+    expect(options("high").options.effort).toBe("high");
+    expect(options().options).not.toHaveProperty("effort");
+  });
   it("offers exactly localDot's tools over MCP, with every built-in tool off", () => {
     const { options: o, server } = options();
     expect(o.tools).toEqual([]);

@@ -595,7 +595,7 @@ export class BrowserTargets {
     }
   }
 
-  async navigate(tabId: string, url: string, signal?: AbortSignal): Promise<void> {
+  async navigate(tabId: string, url: string, signal?: AbortSignal): Promise<"download" | void> {
     const target = this.#tab(tabId);
     if (this.#reloads.has(target)) throw new BrowserTargetError("busy");
     this.#readyFamily(target);
@@ -604,7 +604,7 @@ export class BrowserTargets {
     const cancel = () => lifetime.abort();
     this.#reloads.set(target, cancel);
     try {
-      await navigateOwnedDocument({
+      return await navigateOwnedDocument({
         broker: this.#broker,
         sessionId: target.sessionId as string,
         url,

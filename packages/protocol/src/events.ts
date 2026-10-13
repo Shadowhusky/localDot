@@ -432,6 +432,7 @@ export const TakeoverEnd = event(
 export const TaskResult = event(
   "task.result",
   z.object({
+    outcome: z.enum(["complete", "blocked"]).optional(),
     summary: z.string().max(8000),
     files: z
       .array(

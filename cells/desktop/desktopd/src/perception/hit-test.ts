@@ -208,7 +208,7 @@ export async function hitTest(
 }
 
 // The front Chromium window: the page browser_read reads and browser_act acts on.
-function frontChromium(windows: HelperWindow[]): HelperWindow | undefined {
+export function frontChromium(windows: HelperWindow[]): HelperWindow | undefined {
   return windows.find((w) => appToolkit(w.cls) === "chromium" && !w.overrideRedirect);
 }
 

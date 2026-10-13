@@ -62,7 +62,7 @@ export class BrowserNavigation {
     tabId: string,
     url: string,
     signal: AbortSignal,
-  ): Promise<{ done: true }> {
+  ): Promise<{ done: true; download?: true }> {
     if (this.#lifetime.signal.aborted) throw new BrowserNavigationError("closed");
     if (this.#active) throw new BrowserNavigationError("busy");
     if (typeof tabId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/u.test(tabId) || !navigable(url))
@@ -76,10 +76,10 @@ export class BrowserNavigation {
       const combined = AbortSignal.any([signal, lease.signal, this.#lifetime.signal]);
       combined.throwIfAborted();
       lease.check();
-      await this.#targets.navigate(tabId, url, combined);
+      const outcome = await this.#targets.navigate(tabId, url, combined);
       combined.throwIfAborted();
       lease.check();
-      return { done: true };
+      return { done: true, ...(outcome === "download" ? { download: true as const } : {}) };
     } catch {
       throw new BrowserNavigationError("refused");
     } finally {

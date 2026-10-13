@@ -6,7 +6,7 @@ import {
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
-import { providerById } from "@localdot/providers";
+import { providerById, sameModelOptions } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
@@ -35,7 +35,7 @@ import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
-import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
+import { type HudActionKind, hudFor, withScreenHud } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
@@ -994,7 +994,10 @@ function Theatre({ api }: { api: ApiClient }) {
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? stageHud
-      : hud;
+      : withScreenHud(
+          hud,
+          selectedScreen?.screen === "browser" && physicalStageCell ? stageHud : undefined,
+        );
   // Which conversation and task the thread shows is not known yet.
   const threadPending =
     status === "listing" ||
@@ -1275,9 +1278,12 @@ function Theatre({ api }: { api: ApiClient }) {
           (role) =>
             role.role === "main" &&
             role.provider === mainChoice.provider &&
-            role.model === mainChoice.model,
+            role.model === mainChoice.model &&
+            sameModelOptions(role.options, mainChoice.options),
         )
-      : taskModels.kind !== mainChoice.provider || taskModels.model !== mainChoice.model);
+      : taskModels.kind !== mainChoice.provider ||
+        taskModels.model !== mainChoice.model ||
+        !sameModelOptions(taskModels.options, mainChoice.options));
   // A task at work keeps its model; one chosen meanwhile starts with the next task.
   const taskWorking =
     !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle" && !recoveryWait;
@@ -1305,6 +1311,11 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const modelMenu = {
     groups: modelChoices,
+    choice: mainChoice,
+    outputLimit: (choice: import("@localdot/protocol").AgentRoleChoice) =>
+      providerIndex?.providers
+        .find((provider) => provider.id === choice.provider)
+        ?.models.find((model) => model.id === choice.model)?.maxOutputTokens ?? 4096,
     current: modelSaving?.id ?? currentOption(settings.saved),
     working: taskWorking,
     onChoose: (option: ModelOption) => void chooseModel(option),
@@ -1334,14 +1345,6 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const activity = (
     <ActivityRail
-      onHide={
-        phone
-          ? undefined
-          : () => {
-              setRailView("chat");
-              panelsButton.current?.focus();
-            }
-      }
       cellId={viewedConversation ? undefined : cell?.id}
       releaseReady={
         !viewedConversation &&
