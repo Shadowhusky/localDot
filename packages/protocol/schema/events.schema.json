@@ -4558,6 +4558,13 @@
         "data": {
           "type": "object",
           "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "blocked"
+              ]
+            },
             "summary": {
               "type": "string",
               "maxLength": 8000

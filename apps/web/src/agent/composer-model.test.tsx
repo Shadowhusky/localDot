@@ -90,11 +90,11 @@ describe("a model chosen since the task started", () => {
     ]);
   });
 
-  it("shows the model chip in a card's row, and keeps a phone's field to its words", () => {
+  it("keeps model controls available in both card and phone composers", () => {
     setup(task("idle"), { model: <button type="button">Claude Opus</button> });
     screen.getByRole("button", { name: "Claude Opus" });
     cleanup();
     setup(task("idle"), { layout: "pill", model: <button type="button">Claude Opus</button> });
-    expect(screen.queryByRole("button", { name: "Claude Opus" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Claude Opus" })).toBeTruthy();
   });
 });
