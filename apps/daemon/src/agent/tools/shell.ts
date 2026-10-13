@@ -3,6 +3,11 @@ import {
   ShellCleanupUncertainError,
   ShellExecutionUncertainError,
 } from "../../desktopd/tools-client.ts";
+import {
+  beginFileTracking,
+  creationCandidates,
+  finishFileTracking,
+} from "../safety/local-cleanup.ts";
 import { untrusted } from "../untrusted.ts";
 import {
   append,
@@ -71,9 +76,17 @@ export async function shellTool(
     if (pending.length >= FLUSH || Date.now() - lastFlush >= 100) flush();
   };
   try {
+    const candidates = creationCandidates(input);
+    const tracking = await beginFileTracking(
+      deps,
+      ctx,
+      candidates.paths,
+      candidates.prefix,
+      input.cwd,
+    );
     const done = await desktop.shell(
       {
-        command: input.command,
+        command: ctx.localCleanup?.command ?? input.command,
         ...(input.cwd ? { cwd: input.cwd } : {}),
         timeoutMs: (input.timeout_sec ?? 120) * 1000,
       },
@@ -97,6 +110,7 @@ export async function shellTool(
     if (model) ctx.session.taint.add("files", "command output", model);
     ctx.session.connections.checkedThroughProxy(input.command);
     const ok = done.exitCode === 0 && !done.timedOut;
+    if (ok) await finishFileTracking(deps, ctx, tracking);
     append(ctx, "tool.end", { ok, ...(done.exitCode !== null ? { exitCode: done.exitCode } : {}) });
     append(ctx, "step.end", { status: ok ? "ok" : "failed" });
     const status = done.timedOut

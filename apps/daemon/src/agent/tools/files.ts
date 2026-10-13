@@ -1,4 +1,5 @@
 import { clipPatch, type FilesInput, type ToolResult } from "@localdot/protocol";
+import { beginFileTracking, finishFileTracking } from "../safety/local-cleanup.ts";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
@@ -62,8 +63,10 @@ export async function filesTool(
     case "write": {
       if (input.content === undefined) throw new Error("write needs content");
       ctx.check();
+      const tracking = await beginFileTracking(deps, ctx, [input.path]);
       const r = await desktop.writeFile(input.path, input.content, ctx.signal);
       ctx.check();
+      await finishFileTracking(deps, ctx, tracking);
       append(ctx, "file.change", { path: r.path, op: r.op, patch: clipPatch(ctx.redact(r.patch)) });
       result = { ok: true, content: [text(ctx.redact(`Wrote ${r.path} (${r.bytes} bytes).`))] };
       break;
@@ -72,8 +75,10 @@ export async function filesTool(
       if (input.old_text === undefined || input.new_text === undefined)
         throw new Error("edit needs old_text and new_text");
       ctx.check();
+      const tracking = await beginFileTracking(deps, ctx, [input.path]);
       const r = await desktop.editFile(input.path, input.old_text, input.new_text, ctx.signal);
       ctx.check();
+      await finishFileTracking(deps, ctx, tracking);
       append(ctx, "file.change", { path: r.path, op: r.op, patch: clipPatch(ctx.redact(r.patch)) });
       result = { ok: true, content: [text(ctx.redact(`Edited ${r.path}.`))] };
       break;

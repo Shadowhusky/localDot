@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "0354bd7050dee2a18d5089e1e2c7cbbbede39aa23514511bcbad48c4666aa2c8",
+  "inputSha256": "1bfc2d2b46ebdc2b67f72df531d90c2281eefddd41a950c632b15b7a7b26f512",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -162,6 +162,8 @@
     "apps/daemon/src/agent/safety/judge-model.test.ts": "d38c7ce2f8d8653fa82f3de7f89c77bc7dc147675dd5d7fc0cdadf16205cc0ea",
     "apps/daemon/src/agent/safety/judge-model.ts": "5374b02f79328836e60814815185a0e69237f6ebe4cfe30121f7ef63d2a3ed6b",
     "apps/daemon/src/agent/safety/judges.ts": "3d987c28a5c9364478e1f54d4bc5752519148eabd77c47dcd466ba0bf434995e",
+    "apps/daemon/src/agent/safety/local-cleanup.test.ts": "de2a14a352f6ec4f60eca80df4ca98809e1a85cb102cee4e686b0d16c62f2953",
+    "apps/daemon/src/agent/safety/local-cleanup.ts": "54c17d50ad849142a1049009c65be9beac8725502457fee7d4f76de4d3acd55a",
     "apps/daemon/src/agent/safety/native-boot.test.ts": "3453e1a1e9c5e3770ba46bd29cbd2a478e84bf87e90054a497fc3e755896fa33",
     "apps/daemon/src/agent/safety/native-boot.ts": "4ccced5d779f3da59dbfaf991134e3ef9d80ee58bf5931a5fed937d7d1ea6d8e",
     "apps/daemon/src/agent/safety/native-confirmations.ts": "a2e55de18957961752ac8c910de4d462d9e3b373acaef57e368c05a8ed26d400",
@@ -246,7 +248,7 @@
     "apps/daemon/src/agent/tools/connector.test.ts": "15b302e35a78c8f3925d78f5437769a9fab9657f2cb6ccd7f90691be92279f6b",
     "apps/daemon/src/agent/tools/connector.ts": "b183124a10d2dd43249e8512769bd0088a5ed9a5d558e86d74191a5cb520cd25",
     "apps/daemon/src/agent/tools/deps.test.ts": "0b75e7fe61e0c586a19c9fd9a2d39ae21e233a7a2e9583cc77a2cc14aaacbfc7",
-    "apps/daemon/src/agent/tools/deps.ts": "2174d847c96295e0628bdfd3f9da38134528bee4a9c2f32de9bd0cececbd93f9",
+    "apps/daemon/src/agent/tools/deps.ts": "5fca5305aea57690ce2a2ce3debc1f0e820cba353242494616e658f6f69f7a8f",
     "apps/daemon/src/agent/tools/done-completion.test.ts": "95039a21d6e789064350859dd69bc6bd9993b403014d15121e5e3e1c83ae67a9",
     "apps/daemon/src/agent/tools/done-input.test.ts": "492ecb7fefaf3540c1dbeedad488a1903a02429f92e9220d19784a1144bfc7aa",
     "apps/daemon/src/agent/tools/done-versions.test.ts": "3a32c7620f90905b8bee156ecc2c179228746fcad34c88b05c859e77e7d5330b",
@@ -254,10 +256,10 @@
     "apps/daemon/src/agent/tools/elements.ts": "a69170da95961f606d2c271b2b646307b3172249e851130d5ba79a14211ff2c4",
     "apps/daemon/src/agent/tools/experience.test.ts": "d26047dc088bcd8a25a5414795c86ba27e912c8a831b28f111c81c6c02a350bf",
     "apps/daemon/src/agent/tools/fast-actions.test.ts": "0ab1732eaf09a331930174bc3abecaa3aa9443941fcbddd68b83de3496d12af1",
-    "apps/daemon/src/agent/tools/files.ts": "6c840a09606d21c7b94a33967e2f9a41fdc55791f8e655f37a08c6f775199883",
+    "apps/daemon/src/agent/tools/files.ts": "366bf70f3dbe5d8fcb99da52647e6127360d4b73b0e7b51009647e444080e40d",
     "apps/daemon/src/agent/tools/find.ts": "16b3724c0fe25b91a9a2484ecbc150c84fc170bdb0593ae1f9b4746df041b647",
     "apps/daemon/src/agent/tools/handler-boundaries.test.ts": "bb37b7cba713b020573c529bcce4564eebce480fe09a845e22577ab1cf9ee782",
-    "apps/daemon/src/agent/tools/index.ts": "6edb4f491b13f0c08d54340ceeeb17996aa7c3345639dd427a11f3e7f26cd369",
+    "apps/daemon/src/agent/tools/index.ts": "9613c8dff5a220be8e76d890363853f6029bd3e935dbf2a368c72b4a2dcc3670",
     "apps/daemon/src/agent/tools/page-elements.test.ts": "6ca567e3fbee8173a5f42b37c71711b9dc482962acc673ca92703591020e3981",
     "apps/daemon/src/agent/tools/people.test.ts": "025295cd9262e4043cf940f4a8790d308382ce238df56354fe52190256626ed4",
     "apps/daemon/src/agent/tools/people.ts": "a8d2982c41c59ad870e78d5269d537bdf2dd7d2408fab08ad34110e9bb80b39f",
@@ -272,7 +274,7 @@
     "apps/daemon/src/agent/tools/routine.ts": "ccd1a075b13e5dbc288356bf2afd52991b9d0331409edcd403ff7b26ba244f83",
     "apps/daemon/src/agent/tools/screen.ts": "24a9b6ce61f626e7f70840bae9d98689e2322053cd6ac3341f5c663806f0bd10",
     "apps/daemon/src/agent/tools/secret-field.ts": "b00fa6b0ef61984ab7071703acccaa37b572124e0b14ccc65109f03d441a7317",
-    "apps/daemon/src/agent/tools/shell.ts": "26eae286c5a1ce30bb0ef641045b98d806c426cca4b3c76df414c93325a100b1",
+    "apps/daemon/src/agent/tools/shell.ts": "5e617c99c88df2cf4d2e508dbd77a6531b6f194aabbbaba9470a0d170c5f4b1a",
     "apps/daemon/src/agent/tools/web-page.ts": "4c2ac99979c43097ae412bd9a7684981c11fe5ac335e871156bba0340f828975",
     "apps/daemon/src/agent/tools/web.test.ts": "b946fe5e97232818b345971bcd199d867040c897743dac02a8894038f88e006a",
     "apps/daemon/src/agent/tools/web.ts": "8f3285ad81d96b5f80f431c82d551587381ecaf1cf2b72592fcf85f84ce8ecef",
@@ -1044,7 +1046,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "53adc7c868e94e4195b633b506e2682852ee205ea244384513206a5a2f7a1131",
+  "reportSha256": "99d0b244bc79d9873ff55f2aecc1478c906f71684a8b36381cf51b1629bde593",
   "exit": {
     "code": 0,
     "signal": null

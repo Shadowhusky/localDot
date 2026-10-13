@@ -246,3 +246,30 @@ long-evidence nonterminal wait, read again, and emitted one `task.result` with o
 `complete`. The task had no failed tool calls. This validates the bounded continuation path,
 not a complete real multiplayer game. The temporary activation heartbeat remains disabled;
 no further automatic restart is needed.
+
+### Cleanup of task-created files
+
+The ordinary Auto and Full modes no longer ask for destructive-action approval when
+removing an unchanged regular file whose creation localDot observed in the current task.
+A daemon-owned, in-memory ledger records absence before a successful file write or a
+recognized shell writer, then the resulting inode, timestamps, size and content digest.
+Overwriting a pre-existing file never makes it task-owned. A user edit, replaced file,
+unavailable probe or restarted daemon leaves cleanup under the normal approval rules.
+
+The initial shell coverage includes leading heredoc redirects and ImageMagick/ffmpeg
+outputs, including the screenshot and temporary HTML-page cleanup reported on 13 October.
+The exception accepts a literal leading `rm` (optionally after `cd ... &&`), with no
+recursion, globs, substitutions, traversal, symlinks or special files. Remaining commands
+still pass through normal safety classification; custom policies remain unchanged.
+
+Execution rechecks the files and moves them into the computer's
+`~/.local/share/localdot/recovered-files/<task>/<operation>/`, with a manifest mapping
+original names to saved files. The tool output reports recovery paths. Recovery files
+are not automatically purged. Cross-filesystem moves fail without deleting the source.
+Files larger than 16 MiB and unrecognized writers retain normal confirmation behavior.
+The ledger is bounded to 256 files per task and cleanup to 32 files per command.
+
+Validation: 1,209 safety/tool tests passed, including real filesystem and dispatcher
+regressions for owned creation, edits, pre-existing data, changed targets, cross-session
+ownership, symlinks, compound destructive commands and byte-preserving recovery. A
+separate disposable-file check passed inside the installed Linux desktop.
