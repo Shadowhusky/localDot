@@ -58,7 +58,8 @@ describe("Codex developer instructions", () => {
     expect(text).not.toContain("research");
     expect(text).toContain("browser_upload");
     expect(text).toContain(workingRules("batch"));
-    expect(text.length).toBeLessThan(6500);
+    // Completion evidence and nonterminal waiting add guidance shared by all providers.
+    expect(text.length).toBeLessThan(7100);
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("adds the research rules and tool only in research mode", () => {

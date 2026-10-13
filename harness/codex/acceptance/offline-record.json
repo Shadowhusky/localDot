@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "0ec0b88800b816e0867c8672f9b0114623c6875fced347e982ee6c08d4e94be1",
+  "inputSha256": "1f27654be3dc411e63bb6dc3e1055337eb76a75d1d17145879851c804d2d2e57",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -42,7 +42,7 @@
     "apps/daemon/src/agent/codex/encrypted-refresh.codex.test.ts": "42e26546bf2af6d8bc8271336d110ea0ff39725b40108b6e9fb6d1d7e6ab3d48",
     "apps/daemon/src/agent/codex/events.test.ts": "27b3f8d73904d283292556dbef20cad8c948bbda4772e33a144100f7f664d958",
     "apps/daemon/src/agent/codex/events.ts": "e04b40d2d0564b6244375d292efc0386a1efc235f734408c6d0b497678f0d8a8",
-    "apps/daemon/src/agent/codex/instructions.test.ts": "9156399bbe16d85cea53ba877fc19ebd024d4f902bc0f69993793d1744e53e4c",
+    "apps/daemon/src/agent/codex/instructions.test.ts": "605971191cb776c30ff9917ec2d4516b029575bdeb59afcf36a5b194d7d241e3",
     "apps/daemon/src/agent/codex/instructions.ts": "f50d74dc6dc34825cba3d3ec369b98a2e7278c0046f06eb584b4b3723b4195b8",
     "apps/daemon/src/agent/codex/mcp-endpoint.test.ts": "05e43255b0f58df8fc8744aa5da0e6bd6f7d4ca237cbf7d963fb3135b50b937f",
     "apps/daemon/src/agent/codex/mcp-endpoint.ts": "11522b9b20872aa9ac910995a77937c19bbf0e05836eb0a37cebd680bc8b7524",
@@ -546,7 +546,7 @@
     "apps/daemon/src/doctor-network.ts": "7f144974679227085fa75049ad8de60eda20791f7ec1bf4e3f86399543c98583",
     "apps/daemon/src/doctor-recovery.test.ts": "40dc618a79f95c5cb3649724d80b8336437e8106068bebe4f66f1cb66ef300ef",
     "apps/daemon/src/doctor-recovery.ts": "2c098a15992e4ec699d4a764cb82f63b222b005126fdfceaf0ea1a49115cc5a4",
-    "apps/daemon/src/doctor-relay.test.ts": "03bea3cbfd08baf551931b703a18306a14c5b774361d7c1c8678af8419a8244d",
+    "apps/daemon/src/doctor-relay.test.ts": "11a1b295d7e36129d2c583e2df3850200b9a2647d31ac5c1afd60656992a04ae",
     "apps/daemon/src/doctor-relay.ts": "93bf8d5d62d9ac5c050d7456b68509faf0a89fdbbf32c87be0ba875af601fa93",
     "apps/daemon/src/doctor-selftests.test.ts": "2a1ef7a7889f474d4b0874794f8f96e86fc703383bf5f6aa7b27e2e8539bb4b3",
     "apps/daemon/src/doctor-selftests.ts": "3a0c24ebd2ceedeac74c882b741228d56496ce017be5661de71b94150c27a64e",
@@ -1042,7 +1042,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "6a585f205232ceab0e35ed6c1a03487c3a711a4dae0f067e889d2c5f653c58ef",
+  "reportSha256": "e7cf142a7987348cc8d1bd8907262e58118c13fe66281ba6a56b2f6515a02c7e",
   "exit": {
     "code": 0,
     "signal": null

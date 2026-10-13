@@ -109,7 +109,7 @@ describe("the model's advertised tools and instructions", () => {
         new Date("2026-10-09T00:00:00Z"),
       );
       // Includes account reuse, visible app testing and required-configuration handoff.
-      expect(prompt.length).toBeLessThan(6200);
+      expect(prompt.length).toBeLessThan(6800);
       expect(prompt).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });
