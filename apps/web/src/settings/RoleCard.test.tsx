@@ -57,6 +57,29 @@ describe("role card", () => {
     fireEvent.click(add);
     expect(props.onKeys).toHaveBeenCalledWith("main", "azure", add);
   });
+  it("offers a saved compatible key for a Responses-only gateway", () => {
+    render(
+      <RoleCard
+        {...base()}
+        value={{ provider: "openai-responses-compatible", model: "gateway-model", key: "gateway" }}
+        keys={[
+          {
+            id: "gateway",
+            kind: "llm",
+            provider: "openai-compatible",
+            baseURL: "https://gateway.example/v1",
+          },
+        ]}
+      />,
+    );
+    const key = combo(card("Main model"), "Key");
+    expect(key.textContent).toBe("gateway");
+    expect(screen.getByText(/Uses the Responses API with your OpenAI-compatible key/)).toBeTruthy();
+    fireEvent.keyDown(key, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /^gateway/ }).getAttribute("aria-disabled")).not.toBe(
+      "true",
+    );
+  });
   it("says why a key can't be chosen while keys can't be read", () => {
     render(<RoleCard {...base()} keyLayer="offline" />);
     const key = combo(card("Main model"), "Key");

@@ -78,6 +78,7 @@ interface ClientVideo {
 interface Transport {
   readyState?: number;
   send?(data: string): void;
+  close?(): void;
 }
 
 // What Selkies' client keeps of its stream's numbers once they are asked for: each second, its own
@@ -157,6 +158,7 @@ export class LiveStream {
   #away = false;
   #foreground: { client: Client; decoded: number; at: number } | null = null;
   #leaving: ReturnType<typeof setTimeout> | undefined;
+  #quietProbe: { client: Client; decoded: number; at: number } | null = null;
 
   constructor(target: StreamTarget) {
     this.target = target;
@@ -188,8 +190,8 @@ export class LiveStream {
     this.#source?.stop();
     this.#source = null;
     this.#report(this.#current, { visible: false }, Date.now());
-    this.#current?.frame.remove();
-    this.#next?.frame.remove();
+    this.#drop(this.#current);
+    this.#drop(this.#next);
     this.#current = this.#next = null;
     this.#counted = null;
     this.#foreground = null;
@@ -250,6 +252,8 @@ export class LiveStream {
   // Resume capture explicitly: the iframe's own visibility event may never have arrived.
   // A fresh decoded frame must prove recovery, even if its socket still claims to be OPEN.
   refresh(): void {
+    if (this.#closed || !this.#sink || document.visibilityState === "hidden") return;
+    this.#startPolling();
     this.#polledAt = Date.now();
     if (this.#current) this.#current.tapped = null;
     const { transport, decoded } = look(this.#current);
@@ -283,6 +287,20 @@ export class LiveStream {
     });
   }
 
+  // Close before detaching: a retained track or callback can keep the iframe's
+  // realm alive, including its websocket and decoder, after its DOM node is gone.
+  #drop(client: Client | null): void {
+    if (!client) return;
+    const { transport } = look(client);
+    try {
+      if (transport?.readyState === OPEN) transport.send?.("STOP_VIDEO");
+      transport?.close?.();
+    } catch {}
+    client.frame.remove();
+    if (this.#reported?.client === client) this.#reported = null;
+    if (this.#quietProbe?.client === client) this.#quietProbe = null;
+  }
+
   close(): void {
     this.#closed = true;
     document.removeEventListener("visibilitychange", this.#visibility);
@@ -291,8 +309,8 @@ export class LiveStream {
     this.#sink = null;
     clearInterval(this.#timer);
     clearTimeout(this.#leaving);
-    this.#current?.frame.remove();
-    this.#next?.frame.remove();
+    this.#drop(this.#current);
+    this.#drop(this.#next);
     this.#current = this.#next = null;
     this.#listeners.clear();
   }
@@ -327,14 +345,21 @@ export class LiveStream {
 
   #prepare(path: string): void {
     if (this.#closed || !this.#sink || document.visibilityState === "hidden") return;
-    this.#next?.frame.remove();
+    this.#drop(this.#next);
     const frame = document.createElement("iframe");
     frame.className = "desktop-frame";
     frame.title = "Desktop stream client";
     frame.setAttribute("inert", "");
     frame.src = `${path}#shared`;
     clientHost().append(frame);
-    this.#next = { frame, path, seenAt: Date.now(), tapped: null, decoded: 0, advancedAt: 0 };
+    this.#next = {
+      frame,
+      path,
+      seenAt: Date.now(),
+      tapped: null,
+      decoded: 0,
+      advancedAt: Date.now(),
+    };
     this.#poll();
   }
 
@@ -343,12 +368,7 @@ export class LiveStream {
     const now = Date.now();
     // A hidden page shows nothing, and its throttled timers are not a suspension.
     if (document.visibilityState === "hidden") {
-      this.#polledAt = now;
-      this.#away = true;
-      // A recovery deadline measures foreground time, never a later spell in the background.
-      this.#foreground = null;
-      this.#report(this.#current, { visible: false }, now);
-      this.#counted = null;
+      this.#suspend();
       return;
     }
     // Timers that stopped this long on a visible page mean it was suspended, and its socket may
@@ -369,6 +389,26 @@ export class LiveStream {
         this.replace();
       }
     }
+    // An open socket is not proof of video. Ask a quiet encoder for one frame;
+    // reconnect this viewer only if that request produces nothing. A still desktop
+    // is healthy when it answers, and does not need a continuous high-frame-rate feed.
+    if (client && decoded !== client.decoded) client.advancedAt = now;
+    if (client && transport?.readyState === OPEN) {
+      const probe = this.#quietProbe;
+      if (probe && (probe.client !== client || decoded !== probe.decoded)) this.#quietProbe = null;
+      if (this.#quietProbe && now - this.#quietProbe.at >= TAP_STALL_MS) {
+        this.#quietProbe = null;
+        client.advancedAt = now;
+        this.replace();
+      } else if (!this.#quietProbe && now - (client.advancedAt || client.seenAt) >= STALE_MS) {
+        try {
+          transport.send?.("REQUEST_KEYFRAME");
+          this.#quietProbe = { client, decoded, at: now };
+        } catch {
+          this.replace();
+        }
+      }
+    }
     let delivering = false;
     if (client && !video) {
       // An error page, or a client that never loaded; one that keeps failing is given longer.
@@ -378,9 +418,12 @@ export class LiveStream {
         this.replace();
       }
     } else if (client && video) {
-      client.seenAt = now;
+      if (track) client.seenAt = now;
+      else if (now - client.seenAt >= STALE_MS) {
+        client.seenAt = now;
+        this.replace();
+      }
       this.#patience = STALE_MS;
-      if (decoded > client.decoded) client.advancedAt = now;
       client.decoded = decoded;
       // The decoder has run on well past the last frame the stage presented.
       const stalled = client.advancedAt - this.#presentedAt >= TAP_STALL_MS;
@@ -400,7 +443,7 @@ export class LiveStream {
       } else if (track && stalled && now - this.#presentedAt >= STALE_MS) {
         this.#presentedAt = now;
         this.replace();
-      } else delivering = !!track && !stalled && !this.#awaiting;
+      } else delivering = !!track && !stalled && !this.#awaiting && !this.#quietProbe;
     }
     if (transport && transport.readyState !== OPEN) delivering = false;
     if (client && video && now - this.#tunedAt >= TUNE_MS) this.#tune(client, now);
@@ -423,11 +466,11 @@ export class LiveStream {
     if (!next) return;
     const fresh = look(next);
     if ((fresh.track && (fresh.video?.readyState ?? 0) >= SHOWING) || !look(this.#current).track) {
-      this.#current?.frame.remove();
+      this.#drop(this.#current);
       this.#current = next;
       this.#next = null;
     } else if (now - next.seenAt >= STALE_MS) {
-      next.frame.remove();
+      this.#drop(next);
       this.#next = null;
     }
   }

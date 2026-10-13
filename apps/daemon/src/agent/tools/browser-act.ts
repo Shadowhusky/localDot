@@ -9,11 +9,12 @@ import {
 } from "@localdot/protocol";
 import { checkCombo, keyCombo } from "@localdot/protocol/keys";
 import { pageScreen } from "./browser.ts";
+import { browserDeviceCodeTool } from "./browser-device-code.ts";
 import { type InputRun, inputResult, nextStep, runInput } from "./computer.ts";
 import { fail, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const SECRET =
-  "That is a password field. Ask the user with ask_user and a secret field whose target is this field; never type passwords yourself.";
+  "That is a protected input. For a CLI device-pairing code you already received, use device_code with its ref, text and exact HTTPS origin. For passwords or user-held verification codes, use ask_user with a private secret or code field.";
 
 // Acts that type or press keys into the element: never into a password field.
 const ENTERS_TEXT = new Set<BrowserAction["action"]>(["fill", "select", "press"]);
@@ -45,6 +46,8 @@ function inputsOf(input: BrowserAction): ComputerStep[] | string {
       if (unknown) return unknown;
       return [click, { action: "key", keys }];
     }
+    case "device_code":
+      return "Device pairing requires its private input action.";
     case "scroll": {
       const n = input.scroll_amount ?? 3;
       const way = input.scroll_direction ?? "down";
@@ -104,6 +107,7 @@ export async function browserActTool(
         `${input.ref} is not in this screen's last page read. Read the page again with browser_read.`,
       );
   } else if (!point) return fail("browser_act needs a ref from browser_read, or a coordinate.");
+  if (input.action === "device_code") return browserDeviceCodeTool(deps, ctx, input, element, url);
   const entersText = ENTERS_TEXT.has(input.action);
   if (element?.secret && entersText) return fail(SECRET);
   const wanted = input.action === "check" ? "true" : input.action === "uncheck" ? "false" : "";

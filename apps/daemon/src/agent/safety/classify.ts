@@ -163,6 +163,7 @@ export function classify(facts: RiskFacts): readonly ActionClass[] {
       return facts.signedIn ? ["computer", "unknown"] : ["computer"];
     case "memory_write":
       return ["memory"];
+    case "device_code":
     case "schedule":
       return ["system_settings"];
     case "files_upload":

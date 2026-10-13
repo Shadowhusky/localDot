@@ -1,6 +1,6 @@
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { formOf, needsPrice, priceOf, validateForm } from "./settings-form.ts";
+import { formOf, needsPrice, priceOf, sameSettingsValue, validateForm } from "./settings-form.ts";
 import { providerFixture } from "./testing.ts";
 
 const custom = () =>
@@ -9,6 +9,28 @@ const custom = () =>
     codexDenyRead: ["/private/fixture"],
   });
 describe("configuration validation before explicit save", () => {
+  it("round-trips options through the settings form and preserves reset to defaults", () => {
+    const saved = {
+      main: {
+        provider: "openai-responses-compatible",
+        model: "gpt-6.1-sol",
+        key: "gateway",
+        price: { inputUSDPerMTok: 2, outputUSDPerMTok: 10 },
+        options: { reasoningEffort: "high" as const },
+      },
+    };
+    const form = formOf(saved);
+    const result = validateForm(form, saved, providerFixture());
+    expect(result).toMatchObject({
+      ok: true,
+      document: { main: { options: { reasoningEffort: "high" } } },
+    });
+    if (!form.choices.main) throw new Error("Missing main");
+    form.choices.main.options = undefined;
+    const reset = validateForm(form, saved, providerFixture());
+    expect(reset.ok).toBe(true);
+    if (reset.ok) expect(reset.document.main?.options).toBeUndefined();
+  });
   it("refuses conflicting manual rates for the same route/model across active roles", () => {
     const d = custom();
     d.choices.fast = { provider: "openai-compatible", model: "custom", key: "gateway" };
@@ -497,4 +519,14 @@ it("explicit autonomy save preserves fixed protected-input rules and applies onl
   if (!result.ok) throw new Error("valid future-task settings required");
   expect(result.document.autonomy).toEqual({ ...DEFAULT_AUTONOMY, send: "handoff" });
   expect(saved.autonomy).toEqual(DEFAULT_AUTONOMY);
+});
+
+it("compares saved settings independently of property order and omitted optional fields", () => {
+  expect(
+    sameSettingsValue(
+      { provider: "anthropic", model: "saved", key: undefined },
+      { model: "saved", provider: "anthropic" },
+    ),
+  ).toBe(true);
+  expect(sameSettingsValue({ model: "saved" }, { model: "changed" })).toBe(false);
 });

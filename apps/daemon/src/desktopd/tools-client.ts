@@ -4,6 +4,7 @@ import {
   BrowserNavigateResult,
   BrowserPageResult,
   BrowserReadResult,
+  DesktopCapabilities,
   ElementsRequest,
   ElementsResult,
   FileChangeResult,
@@ -207,6 +208,10 @@ export class DesktopdTools {
     } finally {
       scope.abort();
     }
+  }
+
+  capabilities(signal?: AbortSignal): Promise<DesktopCapabilities> {
+    return this.#json("/capabilities", undefined, DesktopCapabilities.parse, signal, 5000);
   }
 
   async shell(

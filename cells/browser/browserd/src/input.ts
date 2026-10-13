@@ -15,13 +15,14 @@ import {
   type BrowserSecretReply,
   BrowserSecretRequest,
 } from "../../../../packages/protocol/src/browser-secret.ts";
+import { segmentedCodeForm, segmentedCodeText } from "./code-fields.ts";
 import type { BrowserActionLease, BrowserControl } from "./control.ts";
 import type { BrowserGeometry, BrowserGeometrySnapshot, BrowserPoint } from "./geometry.ts";
 import { loginForm } from "./login-form.ts";
 import type { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
 import type { BrowserSecrets } from "./secrets.ts";
-import { privateCodeField } from "./secrets.ts";
+import { deviceCodeField, privateCodeField } from "./secrets.ts";
 import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
 export const BROWSER_INPUT_TIMEOUT_MS = 120_000;
@@ -894,10 +895,24 @@ export class BrowserInput {
           ),
         );
         scope.check(first.document);
-        if (hit.frameId !== frame.id) throw new BrowserInputError("target");
+        if (
+          hit.frameId !== frame.id ||
+          (request.node !== undefined && hit.backendNodeId !== request.node)
+        )
+          throw new BrowserInputError("target");
+        if (
+          request.purpose === "device_code" &&
+          (!request.node ||
+            request.username !== undefined ||
+            (request.text !== undefined &&
+              !/^[a-z0-9]{4,12}$/iu.test(request.text.replace(/[ -]/gu, ""))))
+        )
+          throw new BrowserInputError("request");
         this.#options.targets.rememberNodes?.(first.document, [hit.backendNodeId]);
         let privateCode = false;
-        const inspect = async (focused: boolean) => {
+        let segmented = false;
+        let currentNode = hit.backendNodeId;
+        const inspect = async (focused: boolean, allowedFocus = [currentNode]) => {
           await checkOrigin();
           const geometry = await this.#geometry(tabId, scope);
           if (!sameGeometry({ ...first, focus: geometry.focus }, geometry))
@@ -913,7 +928,7 @@ export class BrowserInput {
               await this.#options.targets.command(
                 first.document,
                 "DOM.describeNode",
-                { backendNodeId: hit.backendNodeId, depth: 0, pierce: false },
+                { backendNodeId: currentNode, depth: 0, pierce: false },
                 scope.signal,
               ),
             ).node;
@@ -924,7 +939,13 @@ export class BrowserInput {
           // Only password fields or explicitly identified verification or access-code fields.
           // Code values use the private channel and are never saved as a login.
           privateCode = privateCodeField(attrs);
+          segmented = privateCode && attrs.get("maxlength") === "1";
           const inputType = (attrs.get("type") ?? "text").toLowerCase();
+          if (
+            request.purpose === "device_code" &&
+            (!deviceCodeField(attrs) || inputType === "password")
+          )
+            throw new BrowserInputError("secret");
           if (
             node.nodeName !== "INPUT" ||
             (inputType !== "password" &&
@@ -965,11 +986,15 @@ export class BrowserInput {
               node.properties?.some((p) => p.name === "focused" && p.value.value === true),
             );
             if (
-              !focus.some((node) => node.backendDOMNodeId === hit.backendNodeId) ||
+              !focus.some(
+                (node) =>
+                  node.backendDOMNodeId !== undefined &&
+                  allowedFocus.includes(node.backendDOMNodeId),
+              ) ||
               focus.some(
                 (node) =>
-                  node.backendDOMNodeId !== hit.backendNodeId &&
                   node.backendDOMNodeId !== undefined &&
+                  !allowedFocus.includes(node.backendDOMNodeId) &&
                   node.role?.value !== "RootWebArea",
               )
             )
@@ -984,6 +1009,34 @@ export class BrowserInput {
           );
         };
         const rememberable = await inspect(false);
+        const codeFields = async (allowDisabledSubmit = true) => {
+          await checkOrigin();
+          const snapshot = await this.#options.targets.command(
+            first.document,
+            "DOMSnapshot.captureSnapshot",
+            { computedStyles: [] },
+            scope.signal,
+          );
+          scope.check(first.document);
+          try {
+            return segmentedCodeForm(
+              snapshot,
+              hit.backendNodeId,
+              request.origin,
+              allowDisabledSubmit,
+            );
+          } catch {
+            throw new BrowserInputError("secret");
+          }
+        };
+        const code = segmented ? await codeFields() : undefined;
+        const segments = code?.fields;
+        const checkSegments = async () => {
+          if (!segments) return;
+          const current = await codeFields();
+          if (JSON.stringify(current) !== JSON.stringify(code))
+            throw new BrowserInputError("target");
+        };
         const form = async (allowDisabledSubmit = false) => {
           await checkOrigin();
           const snapshot = await this.#options.targets.command(
@@ -1055,6 +1108,22 @@ export class BrowserInput {
         if (request.text === undefined) return { filled: false, rememberable };
         if ([...request.text].some((ch) => !nativeRequest("char", { ch }, this.#options.scale)))
           throw new BrowserInputError("request");
+        let value = request.text;
+        if (segments) {
+          try {
+            value = segmentedCodeText(value, segments.length);
+          } catch {
+            throw new BrowserInputError("request");
+          }
+        }
+        if (segments) {
+          // Segmented widgets can interpret Ctrl+A as the letter A and advance
+          // focus. Start only from empty protected fields, then type each bound
+          // character without a select-all shortcut or replaying a partial code.
+          const metadata = await this.#options.secrets.inspect(first.document, scope.signal);
+          scope.check(first.document);
+          if (metadata.filled) throw new BrowserInputError("secret");
+        }
         const { mono: armedMono } = await this.#options.native.command("arm", {}, scope.signal);
         scope.check(first.document);
         if (login?.username !== undefined && request.username) {
@@ -1100,44 +1169,59 @@ export class BrowserInput {
             1,
           );
         }
-        const passwordPoint = await nodePoint(hit.backendNodeId);
-        await this.#press(
-          scope,
-          armedMono,
-          () =>
-            this.#options.native.command(
-              "click",
-              { ...passwordPoint.native, button: 1, count: 1, holdMs: 0, mods: [] },
-              scope.signal,
-            ),
-          (event) => event.kind === "button" && event.detail === 1,
-          1,
-        );
-        // Native click evidence arrives before Chromium's accessibility focus update.
-        // Wait only for this same protected field, before delivering any characters.
-        for (let attempt = 1; ; attempt++) {
-          try {
-            await inspect(true);
-            break;
-          } catch (error) {
-            if (
-              !(error instanceof BrowserInputError) ||
-              error.reason !== "focus" ||
-              attempt >= KEYBOARD_ATTEMPTS
-            )
-              throw error;
+        const focusField = async () => {
+          await checkSegments();
+          const passwordPoint = await nodePoint(currentNode);
+          await this.#press(
+            scope,
+            armedMono,
+            () =>
+              this.#options.native.command(
+                "click",
+                { ...passwordPoint.native, button: 1, count: 1, holdMs: 0, mods: [] },
+                scope.signal,
+              ),
+            (event) => event.kind === "button" && event.detail === 1,
+            1,
+          );
+          // Native click evidence arrives before Chromium's accessibility focus update.
+          // Wait only for this same protected field, before delivering any characters.
+          for (let attempt = 1; ; attempt++) {
+            try {
+              await inspect(true);
+              break;
+            } catch (error) {
+              if (
+                !(error instanceof BrowserInputError) ||
+                error.reason !== "focus" ||
+                attempt >= KEYBOARD_ATTEMPTS
+              )
+                throw error;
+            }
+            await sleep(KEYBOARD_RETRY_MS, undefined, { signal: scope.signal });
+            scope.check(first.document);
           }
-          await sleep(KEYBOARD_RETRY_MS, undefined, { signal: scope.signal });
-          scope.check(first.document);
-        }
-        await this.#press(
-          scope,
-          armedMono,
-          () => this.#options.native.command("keys", { combo: ["Control_L", "a"] }, scope.signal),
-          (event, reply) => event.kind === "key" && event.detail === reply.keycodes.at(-1),
-          1,
-        );
-        for (const ch of request.text) {
+          if (!segments)
+            await this.#press(
+              scope,
+              armedMono,
+              () =>
+                this.#options.native.command("keys", { combo: ["Control_L", "a"] }, scope.signal),
+              (event, reply) => event.kind === "key" && event.detail === reply.keycodes.at(-1),
+              1,
+            );
+        };
+        await focusField();
+        let position = 0;
+        for (const ch of value) {
+          if (segments && position > 0) {
+            const next = segments[position]!;
+            // Only automatic advance to the next already-bound field is acceptable.
+            await inspect(true, [currentNode, next]);
+            currentNode = next;
+            await focusField();
+          }
+          await checkSegments();
           await inspect(true);
           await this.#press(
             scope,
@@ -1146,8 +1230,33 @@ export class BrowserInput {
             (event, reply) => event.kind === "key" && event.detail === reply.keycode,
             1,
           );
+          position++;
+        }
+        if (code) {
+          // The last segment may move focus to Continue. Bind and revalidate the
+          // same form's sole submit control instead of assuming this is navigation
+          // or sending Return to whichever control now owns focus.
+          await inspect(true, [currentNode, code.submit]);
+          const current = await codeFields(false);
+          if (JSON.stringify(current) !== JSON.stringify(code))
+            throw new BrowserInputError("target");
+          const submit = await nodePoint(code.submit);
+          await this.#press(
+            scope,
+            armedMono,
+            () =>
+              this.#options.native.command(
+                "click",
+                { ...submit.native, button: 1, count: 1, holdMs: 0, mods: [] },
+                scope.signal,
+              ),
+            (event) => event.kind === "button" && event.detail === 1,
+            1,
+          );
+          return { filled: true, rememberable: false, submitted: true };
         }
         try {
+          await checkSegments();
           await inspect(true);
         } catch (error) {
           // Some verification forms navigate as the final digit lands. All

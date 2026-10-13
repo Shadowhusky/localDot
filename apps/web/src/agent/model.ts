@@ -92,6 +92,7 @@ export interface AgentChange {
   readonly undoes?: string;
 }
 export interface AgentResult {
+  readonly outcome?: EventOf<"task.result">["data"]["outcome"];
   readonly id: string;
   // An earlier task's result in the conversation: its files are that task's.
   readonly sessionId?: string;
@@ -183,6 +184,8 @@ export interface AgentModel {
   readonly pendingTakeover: string | null;
   readonly changes: readonly AgentChange[];
   readonly results: readonly AgentResult[];
+  // Only the current turn's result; continuing work clears it without erasing result history.
+  readonly completion?: "complete" | "blocked";
   // What started the task when the user did not: a routine or a follow-up.
   readonly origin?: SessionOrigin;
   readonly research: AgentResearch | null;

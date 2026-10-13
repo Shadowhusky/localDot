@@ -1,6 +1,8 @@
 import {
   type BrowserNavigateInput,
+  type ComputerAction,
   clipText,
+  type DoneInput,
   isConnectorToolName,
   isToolName,
   type PeopleInput,
@@ -18,6 +20,7 @@ import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
+import { withRecoveryAdvice } from "../work-progress.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
 import { browserNavigateTool, browserReadTool } from "./browser.ts";
 import { browserActTool } from "./browser-act.ts";
@@ -39,6 +42,7 @@ import { shellTool } from "./shell.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
 import { opensInWebBrowser } from "./web-page.ts";
 import { startWorkClock } from "./work-clock.ts";
+import { workContextTool } from "./work-context.ts";
 
 export interface DispatchDeps {
   tools: ToolDeps;
@@ -54,6 +58,7 @@ const outOfTime = (): DispatchOutcome => ({
 });
 
 const STEP_KIND: Record<ToolName, string> = {
+  work_context: "think",
   computer: "gui",
   shell: "shell",
   files: "file",
@@ -114,9 +119,20 @@ export async function dispatchTool(
     if (!parsed.success)
       return {
         status: 400,
-        result: fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
+        result: {
+          ...fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
+          recovery: { kind: "invalid_input", surface: "runtime", retry: "after_change" },
+        },
       };
-    queuedInput = freezeExecutionInput(parsed.data);
+    // A completion carrying a missing-input form is an ask, not a final result. Normalize
+    // before admission/policy, privacy handling, clocks and step logging so it receives the
+    // exact same checks and waiting semantics as a direct ask_user call. Do not collect its
+    // proposed output files or save its proposed experience while work is still incomplete.
+    const request = name === "done" ? (parsed.data as DoneInput).input_request : undefined;
+    if (request) {
+      name = "ask_user";
+      queuedInput = freezeExecutionInput(request);
+    } else queuedInput = freezeExecutionInput(parsed.data);
   }
   const clock = startWorkClock(session, name, queuedInput);
   const signal = clock
@@ -126,8 +142,30 @@ export async function dispatchTool(
     // Takeover is a control interrupt. It must be able to cancel an approval or
     // policy wait and drain it through the existing ToolLease owner, so it skips the
     // step queue; the session still refuses it while a Pause is held.
-    const invoke = () =>
-      dispatchAdmitted(deps, session, name, callId, queuedInput, redact, generation, signal);
+    const invoke = async () => {
+      session.workProgress.reset(`${generation.id}:${session.requests.length}`);
+      const outcome = await dispatchAdmitted(
+        deps,
+        session,
+        name,
+        callId,
+        queuedInput,
+        redact,
+        generation,
+        signal,
+      );
+      if (
+        session.stopped ||
+        !session.isCurrent(generation) ||
+        signal?.aborted ||
+        (!isToolName(name) && !session.connectors.get(name))
+      )
+        return outcome;
+      return {
+        ...outcome,
+        result: withRecoveryAdvice(session.workProgress.record(name, queuedInput, outcome.result)),
+      };
+    };
     const outcome =
       name === "request_takeover"
         ? await invoke()
@@ -240,7 +278,13 @@ async function dispatchAdmitted(
         decision.kind === "ask" ? `needs approval: ${decision.reason}` : decision.reason,
       );
       blocked(session, name, STEP_KIND[name], `Refused ${name}`, note);
-      return { status: 200, result: fail(`Refused by localDot's rules: ${note}`) };
+      return {
+        status: 200,
+        result: {
+          ...fail(`Refused by localDot's rules: ${note}`),
+          recovery: { kind: "permission", surface: "runtime", retry: "never" },
+        },
+      };
     }
     if (name === "remember" && session.tainted)
       return {
@@ -284,9 +328,12 @@ async function dispatchAdmitted(
         if (!(error instanceof ScreenUnavailableError)) throw error;
         return {
           status: 200,
-          result: fail(
-            "The browser is temporarily unavailable. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.",
-          ),
+          result: {
+            recovery: { kind: "unavailable", surface: "browser", retry: "after_change" },
+            ...fail(
+              "The browser is temporarily unavailable. Saved sign-ins are still kept. Retry browser_navigate once it is ready; do not open a second browser or ask for credentials again.",
+            ),
+          },
         };
       }
       ctx.check();
@@ -312,6 +359,11 @@ async function dispatchAdmitted(
         activeLease.check();
         screen.check();
       };
+      if (
+        name === "browser_read" ||
+        (name === "computer" && (frozen as ComputerAction).action === "screenshot")
+      )
+        await session.screens.refreshBrowser(screen);
       if (!deps.tools.bindScreen) throw new Error("The selected screen is unavailable.");
       ctx.nativeScreen = deps.tools.bindScreen(session, screen);
       if (
@@ -338,12 +390,18 @@ async function dispatchAdmitted(
       if (!ctx.permit)
         return {
           status: 200,
-          result: fail("This action was not authorized. Do not retry it automatically."),
+          result: {
+            ...fail("This action was not authorized. Do not retry it automatically."),
+            recovery: { kind: "permission", surface: "runtime", retry: "never" },
+          },
         };
     }
     const t = deps.tools,
       input = frozen as never;
     switch (name) {
+      case "work_context":
+        result = await workContextTool(t, ctx, input);
+        break;
       case "computer":
         append(ctx, "step.start", { kind: "gui", ...intentOf(ctx, input) });
         result = await computerTool(t, ctx, input);
@@ -463,6 +521,15 @@ async function dispatchAdmitted(
       status: 200,
       result: {
         ...fail(message),
+        ...(error instanceof ScreenUnavailableError
+          ? {
+              recovery: {
+                kind: "unavailable" as const,
+                surface: "browser" as const,
+                retry: "after_change" as const,
+              },
+            }
+          : {}),
         ...(result?.cancelled === "stale" ? { cancelled: "stale" as const } : {}),
         ...(session.stopped ? { final: true } : {}),
       },
@@ -486,23 +553,38 @@ async function dispatchConnector(
   const { session } = ctx;
   const refuse = (title: string, note: string): DispatchOutcome => {
     blocked(session, entry.exposed, "app", title, note);
-    return { status: 200, result: fail(note) };
+    return {
+      status: 200,
+      result: {
+        ...fail(note),
+        recovery: { kind: "permission", surface: "connector", retry: "never" },
+      },
+    };
   };
   const hub = deps.tools.connectors;
   const access = hub?.access(entry);
   if (!hub || !access)
     return refuse(
       `${entry.app} is off`,
-      `${entry.app} or this tool is turned off. Do it another way or ask the user.`,
+      `${entry.app} or this tool is turned off. Respect the user’s access settings; do not retry it automatically.`,
     );
   if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput))
-    return { status: 400, result: fail(`Invalid ${entry.exposed} input: an object is needed.`) };
+    return {
+      status: 400,
+      result: {
+        ...fail(`Invalid ${entry.exposed} input: an object is needed.`),
+        recovery: { kind: "invalid_input", surface: "connector", retry: "after_change" },
+      },
+    };
   const { intent, args } = splitIntent(entry, rawInput as Record<string, unknown>);
   const problem = hub.check(entry, args);
   if (problem)
     return {
       status: 400,
-      result: fail(`Invalid ${entry.exposed} input: ${redact(clipText(problem, 1000))}`),
+      result: {
+        ...fail(`Invalid ${entry.exposed} input: ${redact(clipText(problem, 1000))}`),
+        recovery: { kind: "invalid_input", surface: "connector", retry: "after_change" },
+      },
     };
   session.toolCalls += 1;
   session.actionsSinceUser += 1;
@@ -537,7 +619,13 @@ async function dispatchConnector(
       decision.kind === "ask" ? `needs approval: ${decision.reason}` : decision.reason,
     );
     blocked(session, entry.exposed, "app", `Refused ${entry.app}`, note);
-    return { status: 200, result: fail(`Refused by localDot's rules: ${note}`) };
+    return {
+      status: 200,
+      result: {
+        ...fail(`Refused by localDot's rules: ${note}`),
+        recovery: { kind: "permission", surface: "runtime", retry: "never" },
+      },
+    };
   }
   ctx.permit = await authorizePrepared(ctx, {
     tool: entry.exposed,
@@ -553,7 +641,10 @@ async function dispatchConnector(
   if (!ctx.permit)
     return {
       status: 200,
-      result: fail("This action was not authorized. Do not retry it automatically."),
+      result: {
+        ...fail("This action was not authorized. Do not retry it automatically."),
+        recovery: { kind: "permission", surface: "runtime", retry: "never" },
+      },
     };
   const result = await connectorTool(deps.tools, ctx, entry, frozen, intent);
   if (session.stopped)

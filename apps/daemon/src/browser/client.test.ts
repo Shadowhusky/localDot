@@ -229,6 +229,20 @@ describe("daemon browser client", () => {
     },
   );
 
+  it.each([
+    [409, "refused"],
+    [423, "protected_input"],
+    [503, "unavailable"],
+  ])("distinguishes observation refusal %s from transport failure", async (status, code) => {
+    const f = await fixture((_request, response) => {
+      response.writeHead(Number(status), { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "private-canary" }));
+    });
+    await expect(f.client.read(f.permit, f.tab, { maxChars: 20000 }, f.scope)).rejects.toThrow(
+      expect.objectContaining({ code }),
+    );
+  });
+
   it("never follows a service redirect or reflects its private error text", async () => {
     const f = await fixture((_request, response) => {
       response.writeHead(302, { location: "http://127.0.0.1:1/stolen" });

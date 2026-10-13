@@ -946,6 +946,45 @@ describe("routine start options", () => {
     expect(session.unattended).toBe(true);
     expect(h.boots[0]?.run).toEqual(run);
   });
+  it("does not publish Done when an API brain gives up and its idle window expires", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Finish the whole game", undefined, {
+      idleMs: 0,
+    });
+    await h.ready();
+    h.exit(0, 3);
+    await until(() => h.log.read(session.id).some((event) => event.type === "session.end"));
+    expect(h.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "stopped",
+    });
+    expect(h.log.read(session.id).some((event) => event.type === "task.result")).toBe(false);
+    expect(h.containments).toEqual([]);
+  });
+
+  it("keeps an API brain's blocked result unfinished even when its caller exits successfully", async () => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Finish the whole game", undefined, {
+      idleMs: 0,
+    });
+    await h.ready();
+    session.append("task.result", {
+      outcome: "blocked",
+      summary: "The game is unavailable.",
+      files: [],
+    });
+    h.exit(0, 0);
+    await until(() => h.log.read(session.id).some((event) => event.type === "session.end"));
+    const events = h.log.read(session.id);
+    expect(events.filter((event) => event.type === "agent.state").at(-1)?.data).toEqual({
+      state: "idle",
+      reason: "blocked",
+    });
+    expect(events.find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "stopped",
+    });
+    expect(h.containments).toEqual([]);
+  });
+
   it("ends right after done when idleMs is 0", async () => {
     const h = setup();
     const session = await h.runner.start(h.cellId, "Task", undefined, { idleMs: 0 });

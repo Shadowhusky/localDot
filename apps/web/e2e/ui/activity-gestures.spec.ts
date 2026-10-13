@@ -114,8 +114,85 @@ test("a finger swipe switches Activity tabs without moving the sheet", async ({
     });
     await page.waitForTimeout(16);
   }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  // Selection changes while the finger is still down, not after the snap finishes.
   await expect(sheet.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   expect(Math.abs((await bounds(sheet)).y - before.y)).toBeLessThan(1);
   await cdp.detach();
+});
+
+test("opening the pinned plan preserves the steps viewport and scroll position", async ({
+  page,
+  ui,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await ui.open("done");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Activity" });
+  await expect(sheet).toBeVisible();
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => null)),
+    ),
+  );
+  const pane = sheet.locator('[role="tabpanel"]:not([aria-hidden]) .activity-scroll');
+  await pane.dispatchEvent("touchstart");
+  await pane.evaluate((n) => {
+    n.scrollTop = 60;
+  });
+  const before = await pane.evaluate((n) => ({
+    y: n.getBoundingClientRect().y,
+    height: n.clientHeight,
+    scroll: n.scrollTop,
+  }));
+  const toggle = sheet.locator(".activity-plan .ui-disclosure-trigger");
+  for (const expanded of [true, false]) {
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", String(expanded));
+    const samples = await pane.evaluate(async (n) => {
+      const frames = [];
+      for (let i = 0; i < 35; i++) {
+        await new Promise(requestAnimationFrame);
+        frames.push({
+          y: n.getBoundingClientRect().y,
+          height: n.clientHeight,
+          scroll: n.scrollTop,
+        });
+      }
+      return frames;
+    });
+    for (const sample of samples) expect(sample).toEqual(before);
+  }
+});
+
+test("the filter travels with Steps and selection updates at the halfway threshold", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("done");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Activity" });
+  const pager = sheet.locator(".ui-swipe-panels");
+  const filter = sheet.locator(".activity-filter");
+  await expect(filter).toBeVisible();
+  const initial = await bounds(filter);
+  await pager.dispatchEvent("touchstart");
+  await pager.evaluate((n) => {
+    n.style.scrollSnapType = "none";
+    n.scrollLeft = n.clientWidth * 0.4;
+  });
+  await expect(sheet.getByRole("tab", { name: /^Steps/ })).toHaveAttribute("aria-selected", "true");
+  await expect.poll(async () => (await bounds(filter)).x).toBeLessThan(initial.x - 100);
+  await pager.evaluate((n) => {
+    n.scrollLeft = n.clientWidth * 0.6;
+  });
+  await expect(sheet.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => pager.evaluate((n) => n.scrollLeft / n.clientWidth)).toBeCloseTo(0.6, 1);
+  await pager.evaluate((n) => {
+    n.scrollLeft = n.clientWidth * 0.4;
+  });
+  await expect(sheet.getByRole("tab", { name: /^Steps/ })).toHaveAttribute("aria-selected", "true");
 });

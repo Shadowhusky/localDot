@@ -106,6 +106,15 @@ export async function shellTool(
         : `Exit code ${done.exitCode}.`;
     return {
       ok,
+      ...(done.timedOut
+        ? {
+            recovery: {
+              kind: "timeout" as const,
+              surface: "desktop" as const,
+              retry: "verify_first" as const,
+            },
+          }
+        : {}),
       content: [
         text(
           `${status}${done.truncated ? " Output was cut at 1 MB." : ""}\n${model ? untrusted("command output", tail(model, MODEL_MAX)) : "(no output)"}`,

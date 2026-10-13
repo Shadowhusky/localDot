@@ -227,18 +227,61 @@
 }
 
 .island-label-text {
+  position: relative;
+  display: block;
   min-width: 0;
   overflow: hidden;
+}
+
+.island-text-current,
+.island-text-leaving {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.island-label-text > span {
-  display: inline-block;
-  animation: island-text-in var(--dur-text-in) var(--ease-standard) both;
+.island-text-current[data-entering] {
+  animation: island-text-in var(--dur-default) var(--ease-spring) both;
+}
+
+.island-text-leaving {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: island-text-out var(--dur-exit) var(--ease-exit) forwards;
 }
 
 @keyframes island-text-in {
   from {
+    opacity: 0;
+    translate: 0 var(--spacing);
+  }
+}
+
+@keyframes island-text-out {
+  to {
+    opacity: 0;
+    translate: 0 calc(var(--spacing) * -0.75);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-text-current[data-entering] {
+    animation-name: island-text-fade-in;
+  }
+  .island-text-leaving {
+    animation-name: island-text-fade-out;
+  }
+}
+
+@keyframes island-text-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes island-text-fade-out {
+  to {
     opacity: 0;
   }
 }

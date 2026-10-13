@@ -303,17 +303,18 @@ describe("the first-class bearer providers' official packages", () => {
 
 describe("the Responses APIs keep nothing on the provider (P5a-R33)", () => {
   const cases = [
-    { client: "openai", auth: "authorization" },
-    { client: "azure", auth: "api-key" },
-    { client: "xai", auth: "authorization" },
+    { client: "openai", route: "gateway", auth: "authorization" },
+    { client: "openai", route: "openai", auth: "authorization" },
+    { client: "azure", route: "azure", auth: "api-key" },
+    { client: "xai", route: "xai", auth: "authorization" },
   ] as const;
-  for (const { client, auth } of cases) {
-    it(`${client}: store is false, and a reasoning model's thinking goes to the next turn encrypted`, async () => {
+  for (const { client, route, auth } of cases) {
+    it(`${route}: store is false, and a reasoning model's thinking goes to the next turn encrypted`, async () => {
       const listener = await recordingListener(RESPONSES_WITH_REASONING);
       const model = languageModel(
         binding({
           client,
-          route: client,
+          route,
           model: "m",
           reasoning: true,
           computer: "generic",
@@ -329,7 +330,7 @@ describe("the Responses APIs keep nothing on the provider (P5a-R33)", () => {
       ];
       expect(await streamText({ model, messages, maxRetries: 0 }).text).toBe("ok");
       const [a, b] = listener.seen;
-      expect(a?.line).toBe(`POST http://llm.ldot/${client}/responses`);
+      expect(a?.line).toBe(`POST http://llm.ldot/${route}/responses`);
       if (auth === "api-key") {
         // Azure's own header, and no Authorization at all.
         expect([a?.azureKey, a?.authorization]).toEqual([SURROGATE, undefined]);

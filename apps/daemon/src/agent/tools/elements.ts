@@ -31,7 +31,7 @@ export function corners(box: PageElement["box"]): string {
 // One line per element: its ref, role, name, what it shows and its box.
 export function elementLine(e: PageElement): string {
   const state = [
-    ...(e.secret ? ["password"] : []),
+    ...(e.secret ? ["protected input"] : []),
     ...(e.value !== undefined ? [`value ${JSON.stringify(e.value)}`] : []),
     ...(e.checked ? [CHECKED[e.checked]] : []),
     ...(e.expanded === undefined ? [] : [e.expanded ? "expanded" : "collapsed"]),

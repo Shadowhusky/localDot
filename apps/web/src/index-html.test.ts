@@ -16,7 +16,9 @@ describe("index.html", () => {
     expect(page).toContain(
       '<link rel="manifest" crossorigin="use-credentials" href="/manifest.webmanifest" />',
     );
-    expect(page).toContain('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />');
+    expect(page).toContain(
+      '<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=mascot-1" />',
+    );
     expect(page).toContain('<meta name="theme-color" content="#0a0b0d" />');
     expect(page).toContain('<meta name="apple-mobile-web-app-title" content="localDot" />');
   });

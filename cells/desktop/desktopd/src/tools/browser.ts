@@ -6,7 +6,8 @@ import {
   webUrl,
 } from "@localdot/protocol";
 import { WebSocket } from "ws";
-import { CdpSession, type PageTarget } from "../perception/cdp.ts";
+import { CdpSession, type PageTarget, pickTarget } from "../perception/cdp.ts";
+import type { HelperWindow } from "../perception/hit-test.ts";
 
 export class NoPageError extends Error {
   constructor() {
@@ -20,6 +21,14 @@ export interface BrowserOptions {
   fetchImpl?: typeof fetch;
   WebSocketImpl?: typeof WebSocket;
   loadTimeoutMs?: number;
+  // The same native foreground Chromium window used by browser_act and pageElements.
+  window?(signal: AbortSignal): Promise<HelperWindow | undefined>;
+}
+
+interface SelectedPage {
+  target: PageTarget;
+  windowId?: number;
+  active?: boolean;
 }
 
 interface AxNode {
@@ -86,6 +95,14 @@ export class NavigationError extends Error {
   }
 }
 
+// CDP can publish a new title before the window manager does. This is a read-only
+// identity check that can settle; it does not authorize a new target or another input.
+class PageTitlePendingError extends NavigationError {
+  constructor() {
+    super("the visible Chromium page title is still settling");
+  }
+}
+
 // The desktop's own Chromium, through its DevTools port on the cell's loopback (Part 3, D13):
 // a fast read of the page the user sees, and navigation in that same tab.
 export class PageBrowser {
@@ -93,12 +110,14 @@ export class PageBrowser {
   readonly #fetchImpl: typeof fetch;
   readonly #WebSocketImpl: typeof WebSocket;
   readonly #loadTimeoutMs: number;
+  readonly #window: BrowserOptions["window"];
 
   constructor(opts: BrowserOptions = {}) {
     this.#port = opts.port ?? 9222;
     this.#fetchImpl = opts.fetchImpl ?? fetch;
     this.#WebSocketImpl = opts.WebSocketImpl ?? WebSocket;
     this.#loadTimeoutMs = opts.loadTimeoutMs ?? 10_000;
+    this.#window = opts.window;
     if (
       !Number.isInteger(this.#port) ||
       this.#port < 1 ||
@@ -111,8 +130,9 @@ export class PageBrowser {
     }
   }
 
-  // Use the first ordinary page reported by Chromium; this does not prove foreground focus.
-  async #page(signal: AbortSignal): Promise<PageTarget> {
+  // CDP target order is not tab focus. Match the native foreground browser; without
+  // that identity only a single page can be selected, never an arbitrary background tab.
+  async #page(signal: AbortSignal, expected?: SelectedPage): Promise<SelectedPage> {
     signal.throwIfAborted();
     try {
       const res = await this.#fetchImpl(`http://127.0.0.1:${this.#port}/json/list`, {
@@ -124,16 +144,49 @@ export class PageBrowser {
       const targets: unknown = await res.json();
       signal.throwIfAborted();
       if (!Array.isArray(targets)) throw new NoPageError();
-      const page = targets.find(
+      const pages = targets.filter(
         (t) =>
           t &&
           typeof t === "object" &&
           t.type === "page" &&
+          typeof t.id === "string" &&
+          typeof t.title === "string" &&
           typeof t.url === "string" &&
           !t.url.startsWith("devtools://") &&
           typeof t.webSocketDebuggerUrl === "string",
-      ) as PageTarget | undefined;
-      if (!page) throw new NoPageError();
+      ) as PageTarget[];
+      if (!pages.length) throw new NoPageError();
+      let window: HelperWindow | undefined;
+      try {
+        window = await this.#window?.(signal);
+      } catch {
+        signal.throwIfAborted();
+        throw new NavigationError("the visible Chromium window is unavailable");
+      }
+      signal.throwIfAborted();
+      const page = this.#window
+        ? window && pickTarget(pages, window)
+        : pages.length === 1
+          ? pages[0]
+          : undefined;
+      if (!page) {
+        // During revalidation, wait only while the already admitted CDP target and
+        // native window still exist and no page matches the native title. Once a
+        // different tab matches, or identity becomes ambiguous, refuse immediately.
+        if (
+          expected &&
+          window?.id === expected.windowId &&
+          pages.some(
+            (candidate) =>
+              candidate.id === expected.target.id &&
+              candidate.webSocketDebuggerUrl === expected.target.webSocketDebuggerUrl,
+          ) &&
+          window &&
+          !pages.some((candidate) => candidate.title === window.title.replace(/ - Chromium$/, ""))
+        )
+          throw new PageTitlePendingError();
+        throw new NavigationError("the visible Chromium page cannot be identified");
+      }
       const socket = new URL(page.webSocketDebuggerUrl);
       if (
         socket.protocol !== "ws:" ||
@@ -144,16 +197,48 @@ export class PageBrowser {
         !socket.pathname.startsWith("/devtools/page/")
       )
         throw new NoPageError();
-      return page;
+      return { target: page, ...(window ? { windowId: window.id, active: window.active } : {}) };
     } catch (error) {
       signal.throwIfAborted();
-      if (error instanceof NoPageError) throw error;
+      if (error instanceof NoPageError || error instanceof NavigationError) throw error;
       throw new NoPageError();
     }
   }
 
+  async #samePage(selected: SelectedPage, signal: AbortSignal, focused = false): Promise<void> {
+    // Native title/focus may settle after Chromium acknowledges navigation or
+    // bringToFront. Wait briefly, but never change the admitted target or resend input.
+    for (let attempt = 0; ; attempt++) {
+      let current: SelectedPage;
+      try {
+        current = await this.#page(signal, selected);
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof PageTitlePendingError && attempt < 10) {
+          await delay(50, undefined, { signal });
+          continue;
+        }
+        throw new NavigationError("the visible Chromium page changed; inspect it before retrying");
+      }
+      if (
+        current.target.id !== selected.target.id ||
+        current.target.webSocketDebuggerUrl !== selected.target.webSocketDebuggerUrl ||
+        current.windowId !== selected.windowId
+      )
+        throw new NavigationError("the visible Chromium page changed; inspect it before retrying");
+      if (!focused || !this.#window || current.active === true) return;
+      if (attempt >= 10)
+        throw new NavigationError("the visible Chromium window did not receive focus");
+      await delay(50, undefined, { signal });
+    }
+  }
+
   async #with<T>(
-    fn: (cdp: CdpSession, signal: AbortSignal) => Promise<T>,
+    fn: (
+      cdp: CdpSession,
+      signal: AbortSignal,
+      check: (focused?: boolean) => Promise<void>,
+    ) => Promise<T>,
     parent?: AbortSignal,
   ): Promise<T> {
     parent?.throwIfAborted();
@@ -176,10 +261,14 @@ export class PageBrowser {
     const operation = (async () => {
       const page = await this.#page(signal);
       signal.throwIfAborted();
-      cdp = new CdpSession(page.webSocketDebuggerUrl, this.#WebSocketImpl);
+      cdp = new CdpSession(page.target.webSocketDebuggerUrl, this.#WebSocketImpl);
       await cdp.ready;
       signal.throwIfAborted();
-      return await fn(cdp, signal);
+      const check = (focused = false) => this.#samePage(page, signal, focused);
+      await check();
+      const result = await fn(cdp, signal, check);
+      await check();
+      return result;
     })();
     try {
       return await Promise.race([operation, cancelled]);
@@ -192,7 +281,9 @@ export class PageBrowser {
 
   // The front page's address from Chromium's target list: nothing runs in the page.
   async page(signal = AbortSignal.timeout(5000)): Promise<BrowserPageResult> {
-    return { url: (await this.#page(signal)).url };
+    const page = await this.#page(signal);
+    await this.#samePage(page, signal);
+    return { url: page.target.url };
   }
 
   read(maxChars: number, signal?: AbortSignal): Promise<BrowserReadResult> {
@@ -232,7 +323,7 @@ export class PageBrowser {
   navigate(raw: string, signal?: AbortSignal): Promise<BrowserNavigateResult> {
     const url = webUrl(raw);
     if (!url) return Promise.reject(new NavigationError("only http and https pages can be opened"));
-    return this.#with(async (cdp, active) => {
+    return this.#with(async (cdp, active, check) => {
       const probe = async (): Promise<PageState | undefined> => {
         active.throwIfAborted();
         const r = await cdp
@@ -253,7 +344,13 @@ export class PageBrowser {
       };
       const before = await probe();
       if (!before) throw new NavigationError("could not establish the current document");
+      await check();
       active.throwIfAborted();
+      // Explicit navigation may reveal the already identified browser window. Reads
+      // never activate tabs, and an ambiguous target never reaches this command.
+      await cdp.send("Page.bringToFront");
+      active.throwIfAborted();
+      await check(true);
       const nav = await cdp.send<{ errorText?: string; loaderId?: string }>("Page.navigate", {
         url: url.href,
       });

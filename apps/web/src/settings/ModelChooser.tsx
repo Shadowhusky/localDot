@@ -92,7 +92,9 @@ export function ModelChooser({
               autoCapitalize="off"
               spellCheck={false}
               placeholder="e.g. my-model-1"
-              onChange={(event) => onChange({ ...value, model: event.target.value })}
+              onChange={(event) =>
+                onChange({ ...value, model: event.target.value, options: undefined })
+              }
             />
           </Field>
         ) : (
@@ -111,7 +113,9 @@ export function ModelChooser({
               placeholder="Choose a model"
               searchPlaceholder="Search models"
               customDescription={typed ? "Use this model ID" : undefined}
-              onValueChange={(model) => onChange({ ...value, model, price: undefined })}
+              onValueChange={(model) =>
+                onChange({ ...value, model, options: undefined, price: undefined })
+              }
             />
           </Field>
         ))}

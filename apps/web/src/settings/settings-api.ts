@@ -8,6 +8,7 @@ const model = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
   name: z.string().max(200),
   contextTokens: z.number().int().positive(),
+  maxOutputTokens: z.number().int().positive().optional(),
   releaseDate: z.string().max(32).optional(),
   inputUSDPerMTok: z.number().nonnegative(),
   outputUSDPerMTok: z.number().nonnegative(),

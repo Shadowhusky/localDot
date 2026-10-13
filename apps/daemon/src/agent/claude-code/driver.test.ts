@@ -239,6 +239,77 @@ function fixture(deps: Partial<ClaudeCodeDriverDeps> = {}) {
 }
 
 describe("Claude Code driver", () => {
+  it("keeps running after done collects required input until a final completion arrives", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    f.dispatch.mockResolvedValueOnce({
+      ok: true,
+      content: [
+        { type: "text", text: "The public client ID was provided. Continue verification." },
+      ],
+    });
+    const answer = await fake.call("done", {
+      summary: "Verification needs configuration",
+      input_request: {
+        question: "What is the public client ID?",
+        fields: [{ id: "client_id", kind: "text", label: "Client ID" }],
+      },
+      experience: null,
+    });
+    expect(answer.isError).toBe(false);
+    expect(fake.closed).toBe(false);
+    expect(fake.child.killed).toBe(false);
+    await fake.call("browser_read", {});
+    expect(f.dispatch).toHaveBeenLastCalledWith(
+      f.session,
+      expect.anything(),
+      "browser_read",
+      expect.any(String),
+      {},
+      expect.any(AbortSignal),
+    );
+    await fake.call("done", { summary: "Verified", input_request: null, experience: null });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+  });
+
+  it("keeps the same process through external waits and further actions until final completion", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    for (let n = 0; n < 3; n++) {
+      f.dispatch.mockResolvedValueOnce({
+        ok: true,
+        content: [{ type: "text", text: "Wait ended. Inspect the current state and continue." }],
+      });
+      const answer = await fake.call("done", {
+        summary: "The requested outcome is still pending",
+        completion: {
+          status: "waiting",
+          evidence: "Another participant's turn is active",
+          wait_seconds: 15,
+        },
+        input_request: null,
+        experience: null,
+      });
+      expect(answer.isError).toBe(false);
+      expect(fake.closed).toBe(false);
+      expect(fake.child.killed).toBe(false);
+      await fake.call("browser_read", {});
+    }
+    await fake.call("browser_act", { action: "click", ref: "e4" });
+    expect(f.runs).toHaveLength(1);
+    expect(f.dispatch.mock.calls.filter((c) => c[2] === "browser_read")).toHaveLength(3);
+    expect(f.dispatch.mock.calls.filter((c) => c[2] === "browser_act")).toHaveLength(1);
+    await fake.call("done", {
+      summary: "The requested outcome is reached",
+      completion: { status: "complete", evidence: "Final results are displayed" },
+      input_request: null,
+      experience: null,
+    });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+  });
+
   it("runs dot on the user's Claude Code with only localDot's tools, and ends on done", async () => {
     const f = fixture();
     const result = f.run();
@@ -578,9 +649,51 @@ describe("Claude Code driver", () => {
     fake.emit({ type: "result", subtype: "success", is_error: false });
     await until(() => fake.prompts.length === 2);
     expect(fake.prompts[1]?.message.content).toContain("call the localdot done tool");
+    expect(fake.prompts[1]?.message.content).toContain("completion.status waiting");
+    expect(fake.prompts[1]?.message.content).toContain("Waiting is not completion or a blocker.");
     fake.emit({ type: "result", subtype: "success", is_error: false });
     expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
     expect(f.states().at(-1)).toEqual({ state: "idle", reason: "no result" });
+  });
+
+  it("renews the no-tool nudge after a useful wait, but stops consecutive empty replies", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    fake.emit({ type: "result", subtype: "success", is_error: false });
+    await until(() => fake.prompts.length === 2);
+    f.dispatch.mockResolvedValueOnce({
+      ok: true,
+      content: [{ type: "text", text: "Wait ended; inspect and continue." }],
+    });
+    await fake.call("done", {
+      summary: "Outcome is still pending",
+      completion: { status: "waiting", evidence: "Another actor's turn is active" },
+      input_request: null,
+      experience: null,
+    });
+    fake.emit({ type: "result", subtype: "success", is_error: false });
+    await until(() => fake.prompts.length === 3);
+    expect(fake.prompts[2]?.message.content).toContain("completion.status waiting");
+    expect(fake.closed).toBe(false);
+    fake.emit({ type: "result", subtype: "success", is_error: false });
+    expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
+  });
+
+  it("does not renew the no-tool nudge after a refused or failed tool", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    fake.emit({ type: "result", subtype: "success", is_error: false });
+    await until(() => fake.prompts.length === 2);
+    f.dispatch.mockResolvedValueOnce({
+      ok: false,
+      content: [{ type: "text", text: "Action refused. Do not retry unchanged." }],
+    });
+    await fake.call("browser_act", { action: "click", ref: "e4" });
+    fake.emit({ type: "result", subtype: "success", is_error: false });
+    expect(await result).toBe(CLAUDE_CODE_GAVE_UP);
+    expect(fake.prompts).toHaveLength(2);
   });
 
   it("reports a crash when Claude Code exits on its own", async () => {

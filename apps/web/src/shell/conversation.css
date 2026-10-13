@@ -1701,7 +1701,7 @@
     align-items: flex-end;
     gap: calc(var(--spacing) * 2);
     padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3)
-      calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+      max(calc(var(--spacing) * 3), env(safe-area-inset-bottom));
     background-color: var(--_toolbar);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     backdrop-filter: blur(20px) saturate(160%);

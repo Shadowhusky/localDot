@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AskFieldId, AskFieldValue, MAX_ASK_FIELDS } from "./ask.ts";
 import { CLAUDE_CODE_MODEL } from "./claude-code.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { ModelOptions } from "./model-options.ts";
 
 const Id = z.string().regex(ULID_PATTERN);
 // Bound ordinary text to the existing redactor's UTF-16 limits. Manual text has its own
@@ -63,10 +64,12 @@ export type BudgetRaiseRequest = z.infer<typeof BudgetRaiseRequest>;
 export const TaskModelSelection = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("chatgpt"),
+    options: ModelOptions.optional(),
     model: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
   }),
   z.strictObject({
     kind: z.literal("claude-code"),
+    options: ModelOptions.optional(),
     model: z.string().regex(CLAUDE_CODE_MODEL),
   }),
   z.strictObject({
@@ -75,6 +78,7 @@ export const TaskModelSelection = z.discriminatedUnion("kind", [
       .array(
         z.strictObject({
           role: z.enum(["main", "fast", "local"]),
+          options: ModelOptions.optional(),
           provider: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
           model: z.string().min(1).max(128),
         }),

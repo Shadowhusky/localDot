@@ -246,6 +246,7 @@ describe("a target that changed while the user decided", () => {
           text: "The screen changed while the user was deciding. Look again before acting.",
         },
         { type: "image" },
+        { type: "text", text: expect.stringContaining("after_observation") },
       ],
     });
     expect(desktop.calls.filter((c) => c.path === "/input")).toHaveLength(0);

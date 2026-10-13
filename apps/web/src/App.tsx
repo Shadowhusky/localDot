@@ -6,8 +6,8 @@ import {
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
-import { providerById } from "@localdot/providers";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { providerById, sameModelOptions } from "@localdot/providers";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
@@ -35,7 +35,7 @@ import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
-import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
+import { type HudActionKind, hudFor, withScreenHud } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
@@ -134,11 +134,11 @@ import {
   takeReason,
   takeSlot,
 } from "./shell/island.ts";
-import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
-import { CommandsButton, PanelMenu } from "./shell/PanelMenu.tsx";
+import { CommandsButton, CommandsMenuItem, PanelMenu } from "./shell/PanelMenu.tsx";
 import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
 import { CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
@@ -149,9 +149,16 @@ import { StageFrame } from "./shell/StageFrame.tsx";
 import { StreamMenu } from "./shell/StreamMenu.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
+import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { WorkOverlay } from "./shell/WorkOverlay.tsx";
-import { backgroundStep, requestShowCommands } from "./shell/work-overlay.ts";
+import {
+  backgroundStep,
+  commandsHidden,
+  onCommandsVisibility,
+  requestHideCommands,
+  requestShowCommands,
+} from "./shell/work-overlay.ts";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -339,6 +346,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 const SENDING_HOLD_MS = 20_000;
 
 function Theatre({ api }: { api: ApiClient }) {
+  const workHidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
   const appearance = useAppearance();
   const showDot = useShowDot();
   const streamChoice = useStreamPreference(showToast);
@@ -658,6 +666,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const layout = useLayout();
   const phone = layout === "phone";
+  const mobileScreen = useMobileScreen(phone);
   const panelsButton = useRef<HTMLButtonElement>(null);
   const { panels, update: updatePanels } = usePanelPreferences();
   const railView = panels.view;
@@ -725,6 +734,7 @@ function Theatre({ api }: { api: ApiClient }) {
     () =>
       !phone && (
         <RowMenu label="More" size={32}>
+          <CommandsMenuItem />
           <MenuItem icon="repeat" onSelect={() => showRoutines.current()}>
             Routines
           </MenuItem>
@@ -984,7 +994,10 @@ function Theatre({ api }: { api: ApiClient }) {
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? stageHud
-      : hud;
+      : withScreenHud(
+          hud,
+          selectedScreen?.screen === "browser" && physicalStageCell ? stageHud : undefined,
+        );
   // Which conversation and task the thread shows is not known yet.
   const threadPending =
     status === "listing" ||
@@ -1265,9 +1278,12 @@ function Theatre({ api }: { api: ApiClient }) {
           (role) =>
             role.role === "main" &&
             role.provider === mainChoice.provider &&
-            role.model === mainChoice.model,
+            role.model === mainChoice.model &&
+            sameModelOptions(role.options, mainChoice.options),
         )
-      : taskModels.kind !== mainChoice.provider || taskModels.model !== mainChoice.model);
+      : taskModels.kind !== mainChoice.provider ||
+        taskModels.model !== mainChoice.model ||
+        !sameModelOptions(taskModels.options, mainChoice.options));
   // A task at work keeps its model; one chosen meanwhile starts with the next task.
   const taskWorking =
     !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle" && !recoveryWait;
@@ -1295,6 +1311,11 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const modelMenu = {
     groups: modelChoices,
+    choice: mainChoice,
+    outputLimit: (choice: import("@localdot/protocol").AgentRoleChoice) =>
+      providerIndex?.providers
+        .find((provider) => provider.id === choice.provider)
+        ?.models.find((model) => model.id === choice.model)?.maxOutputTokens ?? 4096,
     current: modelSaving?.id ?? currentOption(settings.saved),
     working: taskWorking,
     onChoose: (option: ModelOption) => void chooseModel(option),
@@ -1324,14 +1345,6 @@ function Theatre({ api }: { api: ApiClient }) {
   };
   const activity = (
     <ActivityRail
-      onHide={
-        phone
-          ? undefined
-          : () => {
-              setRailView("chat");
-              panelsButton.current?.focus();
-            }
-      }
       cellId={viewedConversation ? undefined : cell?.id}
       releaseReady={
         !viewedConversation &&
@@ -1624,7 +1637,7 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const { focus, leave: leaveFocus } = useFocusMode(
     !curtain.up && !replayId,
-    !!question,
+    !!question || mobileScreen.minimized,
     fullScreen.on && phone,
   );
   const touchStill = useStill(focus);
@@ -1662,12 +1675,13 @@ function Theatre({ api }: { api: ApiClient }) {
         ? NEW_TITLE
         : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
-  useKeyboardFit(page, keyboard);
+  useViewportFit(page, keyboard);
   return (
     <div
       ref={page}
       className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
+      data-screen-minimized={mobileScreen.minimized || undefined}
       data-chat-hidden={!chatVisible || undefined}
       data-activity-hidden={wide || undefined}
       data-replaying={replayId ? "" : undefined}
@@ -1726,7 +1740,19 @@ function Theatre({ api }: { api: ApiClient }) {
         }
       />
       <div className="watch" hidden={!!replayId} inert={!!replayId}>
-        <main className="stage-col" aria-label="Computer">
+        {mobileScreen.minimized && (
+          <div className="mobile-screen-restore">
+            <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
+              Show screen
+            </Button>
+          </div>
+        )}
+        <main
+          ref={mobileScreen.ref}
+          className="stage-col"
+          aria-label="Computer"
+          inert={mobileScreen.minimized}
+        >
           <ErrorBoundary>
             <StageFrame
               overlay={
@@ -1739,7 +1765,6 @@ function Theatre({ api }: { api: ApiClient }) {
                   <WorkOverlay
                     key={session.sessionId}
                     model={agent.model}
-                    restoreInMenu={phone || full || focus}
                     working={!!appStatus.control && !yours && !agent.model.ended}
                   />
                 ) : undefined
@@ -1922,7 +1947,11 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
               />
               {!yours && !full && !focus && stageHud.live && (
-                <StageExpand phone={phone} onEnter={fullScreen.enter} />
+                <StageExpand
+                  phone={phone}
+                  onEnter={fullScreen.enter}
+                  onMinimize={phone ? () => mobileScreen.setMinimized(true) : undefined}
+                />
               )}
             </StageFrame>
           </ErrorBoundary>
@@ -2055,7 +2084,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       },
                       { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
                       {
-                        label: "Show commands",
+                        label: workHidden ? "Show commands" : "Hide commands",
                         icon: "terminal",
                         disabledReason:
                           curtain.up ||
@@ -2067,14 +2096,22 @@ function Theatre({ api }: { api: ApiClient }) {
                           ![...agent.model.steps.values()].some(backgroundStep)
                             ? "No commands available for this computer yet"
                             : undefined,
-                        run: requestShowCommands,
+                        run: workHidden ? requestShowCommands : requestHideCommands,
+                      },
+                      {
+                        label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
+                        icon: mobileScreen.minimized ? "monitor" : "chevron-up",
+                        run: () => mobileScreen.setMinimized(!mobileScreen.minimized),
                       },
                       {
                         label: "Full screen",
                         icon: "expand",
                         disabledReason:
                           curtain.up || replayId ? "Turn on your computer first" : undefined,
-                        run: () => fullScreen.enter(),
+                        run: () => {
+                          mobileScreen.setMinimized(false);
+                          fullScreen.enter();
+                        },
                       },
                       {
                         label: "Stop everything",
@@ -2542,7 +2579,7 @@ function Theatre({ api }: { api: ApiClient }) {
       {showDot.value && (
         <ErrorBoundary quiet>
           <PresenceLayer
-            place={place}
+            place={mobileScreen.minimized && !replayId && !onboarding.open ? null : place}
             feed={
               onboarding.open
                 ? {

@@ -48,62 +48,82 @@ function setup(over: Partial<Parameters<typeof ModelChip>[0]> = {}) {
   return { onChoose, onManage, onPeek, chip: screen.getByRole("button", { name: /^Model/ }) };
 }
 
-describe("the composer's model chip", () => {
-  it("names the main model and opens a menu of models by provider, the current one checked", () => {
+describe("the composer's model configuration", () => {
+  it("opens a dialog with provider groups and only supported thinking controls", () => {
     const { chip, onPeek } = setup();
-    expect(chip.getAttribute("aria-label")).toBe("Model: Claude Sonnet 5.5");
-    expect(chip.getAttribute("aria-haspopup")).toBe("menu");
+    expect(chip.getAttribute("aria-haspopup")).toBe("dialog");
     fireEvent.click(chip);
     expect(onPeek).toHaveBeenCalled();
-    const menu = screen.getByRole("menu", { name: "Model" });
-    expect(
-      within(menu)
-        .getAllByRole("group")
-        .map((group) => group.getAttribute("aria-labelledby") && group.textContent),
-    ).toEqual(["AnthropicClaude Sonnet 5.5", "Claude CodeClaude SonnetClaude Opus"]);
-    const radios = within(menu).getAllByRole("menuitemradio");
-    expect(radios.map((radio) => radio.getAttribute("aria-checked"))).toEqual([
-      "true",
-      "false",
-      "false",
+    const panel = screen.getByRole("dialog", { name: "Model and thinking" });
+    expect(within(panel).getByRole("slider").getAttribute("aria-valuetext")).toBe(
+      "Provider default",
+    );
+    expect(within(panel).queryByRole("combobox", { name: "Thinking budget" })).toBeNull();
+    fireEvent.click(within(panel).getByRole("combobox", { name: "Model" }));
+    expect(screen.getAllByRole("group").map((g) => g.textContent)).toEqual([
+      "AnthropicClaude Sonnet 5.5",
+      "Claude CodeClaude SonnetClaude Opus",
     ]);
-    within(menu).getByRole("menuitem", { name: "Manage models…" });
   });
 
-  it("chooses another model, and does nothing for the one already chosen", async () => {
+  it("applies model and effort together, never saving intermediate slider changes", async () => {
     const { chip, onChoose } = setup();
     fireEvent.click(chip);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Claude Sonnet 5.5" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.click(screen.getByRole("option", { name: "Claude Opus" }));
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "3" } });
     expect(onChoose).not.toHaveBeenCalled();
-    fireEvent.click(chip);
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitemradio", { name: "Claude Opus" }));
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     });
-    expect(onChoose).toHaveBeenCalledWith(groups[1]?.options[1]);
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      ...groups[1]?.options[1],
+      choice: { provider: "claude-code", model: "opus", options: { reasoningEffort: "high" } },
+    });
   });
 
-  it("leads to Settings for the rest", () => {
-    const { chip, onManage } = setup();
+  it("can reset saved options to defaults", () => {
+    const { chip, onChoose } = setup({
+      choice: {
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        key: "anthropic",
+        options: { reasoningEffort: "max" },
+      },
+    });
     fireEvent.click(chip);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage models…" }));
+    expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("Maximum");
+    fireEvent.click(screen.getByRole("button", { name: "Reset to provider defaults" }));
+    expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("Provider default");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChoose.mock.calls[0]?.[0].choice.options).toBeUndefined();
+  });
+
+  it("discards unapplied changes on Escape and restores focus to its trigger", async () => {
+    const { chip, onChoose } = setup();
+    chip.focus();
+    fireEvent.click(chip);
+    const slider = screen.getByRole("slider");
+    slider.focus();
+    fireEvent.change(slider, { target: { value: "2" } });
+    await act(async () => {
+      fireEvent.keyDown(slider, { key: "Escape" });
+    });
+    expect(onChoose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(chip);
+    fireEvent.click(chip);
+    expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("Provider default");
+  });
+
+  it("opens model management and explains that an active task keeps its settings", () => {
+    const { chip, onManage } = setup({ working: true, next: true });
+    fireEvent.click(chip);
+    expect(screen.getByRole("dialog").textContent).toContain("Applies from the next task");
+    fireEvent.click(screen.getByRole("button", { name: "Manage models…" }));
     expect(onManage).toHaveBeenCalledOnce();
-  });
-
-  it("says quietly that a task at work keeps its model, and holds while a choice saves", () => {
-    const { chip } = setup({ working: true, next: true, name: "Claude Opus" });
-    expect(chip.getAttribute("aria-label")).toBe("Model for the next task: Claude Opus");
-    fireEvent.click(chip);
-    expect(screen.getByRole("menu").textContent).toContain(
-      "Applies from the next task. This one keeps its model.",
-    );
-    cleanup();
-    setup();
-    fireEvent.click(screen.getByRole("button", { name: /^Model/ }));
-    expect(screen.getByRole("menu").textContent).not.toContain("next task");
     cleanup();
     const saving = setup({ disabledReason: "Saving…" });
-    expect(saving.chip.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(saving.chip);
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

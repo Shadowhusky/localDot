@@ -175,6 +175,7 @@ export async function typeSecret(
   field: SecretField,
   value: string,
   username?: string,
+  deviceCode?: { purpose: "device_code"; node: number },
 ): Promise<{ filled: boolean; submitted: boolean }> {
   let typing = false;
   try {
@@ -187,6 +188,7 @@ export async function typeSecret(
         typing = true;
       },
       username,
+      deviceCode,
     );
   } catch (error) {
     if (typing) throw error;
@@ -202,6 +204,7 @@ function deliver(
   value: string,
   startTyping: () => void,
   username?: string,
+  deviceCode?: { purpose: "device_code"; node: number },
 ): Promise<{ filled: boolean; submitted: boolean }> {
   return onScreen(deps, ctx, async (screen) => {
     if (
@@ -225,6 +228,7 @@ function deliver(
           {
             origin,
             at,
+            ...deviceCode,
             text: value,
             ...(username ? { username } : {}),
           },

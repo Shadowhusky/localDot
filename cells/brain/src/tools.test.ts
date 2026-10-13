@@ -1,5 +1,5 @@
 import { GenericComputerInput } from "@localdot/protocol";
-import { researchSection, workingRules } from "@localdot/protocol/guidance";
+import { DONE_TOOL_DESCRIPTION, researchSection, workingRules } from "@localdot/protocol/guidance";
 import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
@@ -13,6 +13,7 @@ describe("the model's advertised tools and instructions", () => {
     expect(Object.keys(tools).sort()).toEqual(
       [
         "computer",
+        "work_context",
         "shell",
         "files",
         "browser_read",
@@ -42,6 +43,12 @@ describe("the model's advertised tools and instructions", () => {
     const schema = await asSchema(toolSet(binding()).done?.inputSchema).jsonSchema;
     expect(schema).toMatchObject({ required: expect.arrayContaining(["experience", "summary"]) });
     expect(JSON.stringify(schema)).toContain('"null"');
+  });
+  it("shares the completion handoff guidance with every model", () => {
+    for (const tools of [toolSet(binding()), toolSet(binding({ vision: false }))]) {
+      expect(tools.done?.description).toBe(DONE_TOOL_DESCRIPTION);
+      expect(tools.ask_user?.description).toContain("non-secret client IDs");
+    }
   });
   it("offers web search and page reading to every model, sighted or not", () => {
     for (const tools of [toolSet(binding()), toolSet(binding({ vision: false }))]) {
@@ -101,8 +108,8 @@ describe("the model's advertised tools and instructions", () => {
         [],
         new Date("2026-10-09T00:00:00Z"),
       );
-      // Includes account reuse, verification steps, visible app testing and navigation recovery.
-      expect(prompt.length).toBeLessThan(6000);
+      // Includes account reuse, visible app testing and required-configuration handoff.
+      expect(prompt.length).toBeLessThan(6800);
       expect(prompt).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });
@@ -184,8 +191,8 @@ describe("the model's advertised tools and instructions", () => {
     for (const rule of [
       "do whatever the task needs without asking: install packages, write and run scripts, open and use apps",
       "The safety system asks the user before consequential steps such as sending, posting, buying, deleting online data, uploading files or changing account settings, so never ask the user for permission yourself.",
-      "Use ask_user only when you cannot continue without the user's information or a choice that would change the result.",
-      "pick sensible defaults for small details and mention them in your summary",
+      "Missing required configuration/information: check context safely, then ask_user and wait, not done.",
+      "Otherwise choose defaults.",
       "Use request_takeover only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
       "a secret field whose target is the password box",
       "Never ask for passwords, card numbers or other secrets in a plain message or a text field",

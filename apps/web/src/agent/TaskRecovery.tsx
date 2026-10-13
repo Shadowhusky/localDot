@@ -46,8 +46,8 @@ function knownReason(
     };
   if (reason === STALL.modelRefused)
     return {
-      title: "The model turned down my request",
-      text: `Try again, or ${ANOTHER_MODEL}`,
+      title: "The provider could not process my request",
+      text: `Check the error details, API address, API type and model ID, then try again, or ${ANOTHER_MODEL}`,
     };
   if (reason === STALL.keyReenter)
     return {

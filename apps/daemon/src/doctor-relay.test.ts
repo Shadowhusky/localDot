@@ -166,5 +166,6 @@ describe("RELAY_PROBE_SCRIPT", () => {
     expect(run('echo "E getaddrinfo: Name does not resolve" >&2; exit 1')).toBe(6);
     expect(run('echo "E connect(5): Connection refused" >&2; exit 1')).toBe(111);
     expect(run("exit 143")).toBe(124);
-  });
+    // Seven real shell processes can exceed the default timeout on a loaded macOS runner.
+  }, 15_000);
 });

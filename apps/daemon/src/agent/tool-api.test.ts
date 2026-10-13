@@ -413,9 +413,12 @@ describe("the tools", () => {
     }
     // A drag that failed for any other reason may have dropped: nothing is claimed.
     h.setOutcome(() => ({ ok: false, error: "no raw release observed" }));
-    expect(
-      (await h.call("computer", { action: "drag", path })).body.content.map((c) => c.text),
-    ).toEqual(["Failed: no raw release observed"]);
+    const failed = (await h.call("computer", { action: "drag", path })).body;
+    expect(failed.content.map((c) => c.text)).toEqual([
+      "Failed: no raw release observed",
+      expect.stringContaining("This attempt has failed 2 times"),
+    ]);
+    expect(JSON.stringify(failed)).not.toContain("The drag was cancelled");
   });
 
   it("ends a drag when the task is paused", async () => {

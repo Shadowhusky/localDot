@@ -153,7 +153,16 @@ export class BrowserGeometry {
       bounds.width * this.scale,
       bounds.height * this.scale,
     ];
-    if (!sameRect(expected, window.frame, this.scale))
+    // Chromium reports the client bounds for WM-decorated popup windows.
+    // Match measured native bounds, never an arbitrary title-bar tolerance.
+    if (
+      !sameRect(expected, window.frame, this.scale) &&
+      !(
+        window.client &&
+        inside(window.client, window.frame) &&
+        sameRect(expected, window.client, this.scale)
+      )
+    )
       throw new BrowserGeometryError("unavailable");
     const first = await this.native.command("surface", { window: window.id }, signal);
     this.#check(signal, documents);

@@ -21,6 +21,7 @@ export * from "./key-like.ts";
 export * from "./keyd.ts";
 export * from "./manual-input.ts";
 export * from "./memory-entries.ts";
+export * from "./model-options.ts";
 export * from "./notify.ts";
 export * from "./patch.ts";
 export * from "./people.ts";
@@ -48,3 +49,4 @@ export * from "./tools/web.ts";
 export * from "./tools.ts";
 
 export * from "./window-control.ts";
+export * from "./work-context.ts";

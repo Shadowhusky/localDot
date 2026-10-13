@@ -18,6 +18,7 @@ import {
 } from "../../../../../packages/protocol/src/desktop-uploads.ts";
 import { PlacementError, parsePlacementHeader, placeDownload } from "../place-download.ts";
 import { NavigationError, NoPageError, type PageBrowser } from "./browser.ts";
+import { desktopCapabilities } from "./capabilities.ts";
 import {
   editFile,
   FileToolError,
@@ -108,6 +109,13 @@ function transferPath(c: Context): string | Response {
 }
 
 export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
+  app.get("/capabilities", async (c) => {
+    try {
+      return c.json(await desktopCapabilities(deps.env.PATH, c.req.raw.signal));
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
   // Cancellation stops an owned command without discarding its terminal cleanup receipt.
   const commands = new Map<string, AbortController>();
   app.post("/shell/stop", async (c) => {

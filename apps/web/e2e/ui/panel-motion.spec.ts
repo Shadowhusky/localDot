@@ -51,33 +51,18 @@ test("Activity tabs and filters remain below the header while scrolling", async 
   await expect(rail.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
 });
 
-test("work window animates without replacing its output", async ({ page, ui }) => {
+test("work window remains open and keeps its output during task updates", async ({ page, ui }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await ui.open("running");
   await ui.picture();
-  const expand = page.getByRole("button", { name: "Expand command window" });
-  if (await expand.isVisible()) await expand.click();
-  const panel = page.locator(".work-overlay");
-  await panel.evaluate(async (node) => {
-    await Promise.all(node.getAnimations().map((animation) => animation.finished));
-  });
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Show commands", exact: true }).click();
   const output = await page.locator(".work-overlay-output").elementHandle();
-  const start = await panel.evaluate((node) => node.getBoundingClientRect().height);
-  await page.getByRole("button", { name: "Minimize command window" }).click();
-  expect(await panel.evaluate((node) => getComputedStyle(node).transitionDuration)).not.toBe("0s");
-  await expect
-    .poll(() => panel.evaluate((node) => node.getBoundingClientRect().height))
-    .toBeLessThan(start);
-  expect(await output?.evaluate((node) => node.isConnected)).toBe(true);
-  await expand.click();
   await expect(page.getByRole("region", { name: "Recent command output" })).toBeVisible();
+  await ui.settle();
   expect(
     await output?.evaluate((node) => node === document.querySelector(".work-overlay-output")),
   ).toBe(true);
-  await panel.evaluate(async (node) => {
-    await Promise.all(
-      node.getAnimations().map((animation) => animation.finished.catch(() => null)),
-    );
-  });
+  await expect(page.getByRole("button", { name: "Minimize command window" })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("work-details.png") });
 });

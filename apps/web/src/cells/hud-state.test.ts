@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type CellView, type ComputerPhase, hudFor, NEEDS_FRESH_START } from "./hud-state.ts";
+import {
+  type CellView,
+  type ComputerPhase,
+  hudFor,
+  NEEDS_FRESH_START,
+  withScreenHud,
+} from "./hud-state.ts";
 import type { CellSummary } from "./types.ts";
 
 const cell = (
@@ -285,5 +291,47 @@ describe("hudFor", () => {
     expect(
       hudFor(known({ ...cell("ready"), fenced: { revision: 1 }, needsFreshStart: true })).phase,
     ).toBe("unavailable");
+  });
+});
+
+describe("selected screen HUD", () => {
+  it("shows the live browser while the unused desktop stream reconnects", () => {
+    const parent = hudFor({ ...known(cell("ready", "none")), streamed: true });
+    const browser = hudFor(known({ ...cell("ready", "live"), id: "browser" }));
+    expect(parent.phase).toBe("reconnecting");
+    expect(withScreenHud(parent, browser)).toMatchObject({ phase: "live", label: "Ready" });
+    expect(withScreenHud(parent, browser).action).toBe(parent.action);
+    // Returning to the desktop reinstates its own stream state.
+    expect(withScreenHud(parent)).toBe(parent);
+  });
+
+  it("reports a browser stream failure even if the desktop stream stays live", () => {
+    const parent = hudFor(known(cell("ready", "live"), "stop"));
+    const browser = hudFor(known({ ...cell("ready", "stalled"), id: "browser" }));
+    expect(withScreenHud(parent, browser)).toMatchObject({
+      phase: "reconnecting",
+      label: "Reconnecting…",
+      action: { kind: "stop", enabled: false },
+    });
+  });
+
+  it.each([
+    known(null),
+    { cell: null, status: "listing" as const, pending: "list" as const },
+    { cell: cell("ready", "live"), status: "unknown" as const, pending: null },
+    known(cell("starting")),
+    known(cell("starting", "none", RESTART_NOTE)),
+    known(cell("stopping")),
+    known(cell("stopped")),
+    known(cell("failed", "none", "desktop exited")),
+    known({ ...cell("ready", "live"), paused: true }),
+    known({ ...cell("ready", "live"), fenced: { revision: 1 } }),
+    known({ ...cell("ready", "live"), replacementPending: true }),
+    known({ ...cell("ready", "live"), needsFreshStart: true }),
+    known({ ...cell("starting"), updating: true }),
+  ])("keeps desktop lifecycle and containment authoritative (%j)", (view) => {
+    const parent = hudFor(view);
+    const browser = hudFor(known({ ...cell("ready", "live"), id: "browser" }));
+    expect(withScreenHud(parent, browser)).toBe(parent);
   });
 });

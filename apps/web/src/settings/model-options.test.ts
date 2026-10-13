@@ -101,7 +101,12 @@ describe("model names", () => {
     expect(named.name("chatgpt", "plan-model")).toBe("Plan model");
     expect(named.name("anthropic", "claude-opus-5-5")).toBe("Claude Opus 5.5");
     expect(named.provider("openai", "gpt-6-luna")).toBe("openai");
-    expect(named.provider("gateway", "my-model")).toBe("openai-compatible");
+    // One key can now serve Chat Completions or Responses; a route alone does not identify the API.
+    expect(named.provider("gateway", "my-model")).toBeUndefined();
+    expect(named.name("gateway", "my-model")).toBe("my-model");
+    expect(named.provider("openai-responses-compatible", "my-model")).toBe(
+      "openai-responses-compatible",
+    );
     const keyed = modelNames(
       { ...index, keys: [{ id: "work-key", provider: "anthropic" }] },
       { chatgpt: [], claudeCode: [] },

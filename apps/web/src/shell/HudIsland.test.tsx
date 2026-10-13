@@ -261,3 +261,27 @@ it("rises over a sheet's scrim while it is up, and settles back as the sheet clo
   expect(anchor?.hasAttribute("data-lifted")).toBe(false);
   layer.remove();
 });
+
+it("keeps identical status text mounted across clock and state updates", () => {
+  const view = render(<HudIsland {...props({ status: status("acting", "Reading page", 1) })} />);
+  const text = screen.getByTestId("hud-status").firstChild;
+  view.rerender(<HudIsland {...props({ status: status("thinking", "Reading page", 2) })} />);
+  expect(screen.getByTestId("hud-status").firstChild).toBe(text);
+  expect(document.querySelector(".island-text-leaving")).toBeNull();
+  expect(document.querySelector("[data-entering]")).toBeNull();
+});
+
+it("retains the outgoing line during a change, announcing only the latest status", () => {
+  const view = render(<HudIsland {...props({ status: status("acting", "Reading page") })} />);
+  view.rerender(<HudIsland {...props({ status: status("acting", "Opening file") })} />);
+  expect(screen.getByTestId("hud-status").textContent).toBe("Opening file");
+  expect(document.querySelector(".island-text-leaving")?.textContent).toBe("Reading page");
+  expect(document.querySelector(".island-text-leaving")?.getAttribute("aria-hidden")).toBe("true");
+  const current = screen.getByTestId("hud-status").firstChild;
+  view.rerender(<HudIsland {...props({ status: status("acting", "Opening file", 43) })} />);
+  expect(screen.getByTestId("hud-status").firstChild).toBe(current);
+  view.rerender(<HudIsland {...props({ status: status("ready", "Done") })} />);
+  expect(document.querySelectorAll(".island-text-leaving")).toHaveLength(1);
+  expect(document.querySelector(".island-text-leaving")?.textContent).toBe("Opening file");
+  expect(screen.getByTestId("hud-status").textContent).toBe("Done");
+});

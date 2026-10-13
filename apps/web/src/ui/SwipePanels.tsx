@@ -20,6 +20,7 @@ export function SwipePanels({
   latest.current = { value, values, onValueChange };
   const fromSwipe = useRef(false);
   const initialized = useRef(false);
+  const destination = useRef<string | null>(null);
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!enabled || !element) return;
@@ -33,29 +34,36 @@ export function SwipePanels({
     };
     align(false);
     initialized.current = true;
-    const observer = new ResizeObserver(() => align(false));
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      align(false);
+    });
     observer.observe(element);
-    let timer = 0;
-    const settled = () => {
-      clearTimeout(timer);
+    const scroll = () => {
+      if (destination.current !== null) return;
       const index = Math.round(element.scrollLeft / Math.max(1, element.clientWidth));
       const next = latest.current.values[index];
       if (next && next !== latest.current.value) {
         fromSwipe.current = true;
+        latest.current.value = next;
         latest.current.onValueChange(next);
       }
     };
-    const scroll = () => {
-      clearTimeout(timer);
-      timer = window.setTimeout(settled, 120);
+    const touched = () => {
+      destination.current = null;
     };
+    element.addEventListener("touchstart", touched, { passive: true });
+    element.addEventListener("pointerdown", touched, { passive: true });
     element.addEventListener("scroll", scroll, { passive: true });
-    element.addEventListener("scrollend", settled);
+
     return () => {
       observer.disconnect();
-      clearTimeout(timer);
       element.removeEventListener("scroll", scroll);
-      element.removeEventListener("scrollend", settled);
+      element.removeEventListener("touchstart", touched);
+      element.removeEventListener("pointerdown", touched);
+
       initialized.current = false;
     };
   }, [enabled]);
@@ -66,6 +74,10 @@ export function SwipePanels({
       fromSwipe.current = false;
       return;
     }
+    destination.current =
+      Math.abs(element.scrollLeft - Math.max(0, values.indexOf(value)) * element.clientWidth) > 1
+        ? value
+        : null;
     element.scrollTo({
       left: Math.max(0, values.indexOf(value)) * element.clientWidth,
       behavior:

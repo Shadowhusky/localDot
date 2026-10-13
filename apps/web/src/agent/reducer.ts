@@ -107,6 +107,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = {
         ...next,
         state: { ...e.data },
+        // Tool-completion notifications can say thinking after task.result. Only an
+        // actual return from the follow-up window starts a new turn here.
+        completion:
+          WORKING.has(e.data.state) &&
+          (model.state?.state === "idle" || model.state?.state === "done")
+            ? undefined
+            : model.completion,
         retrying: model.retrying && e.data.state === "paused" && e.data.reason === STALL.modelBusy,
       };
       break;
@@ -366,6 +373,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "tool.output":
     case "tool.end": {
       if (!e.step) break;
+      if (e.type === "step.start") next = { ...next, completion: undefined };
       const old = step(model, e.step);
       let row: AgentStep = { ...old, firstSeenAt: old.firstSeenAt ?? e.t };
       if (e.type === "step.start")
@@ -549,6 +557,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "task.result":
       next = {
         ...next,
+        completion: e.data.outcome ?? "complete",
         results: [
           ...model.results,
           {
@@ -556,6 +565,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             seq: e.seq,
             at: e.t,
             summary: e.data.summary,
+            ...(e.data.outcome ? { outcome: e.data.outcome } : {}),
             files: e.data.files.map((file) => ({ ...file })),
           },
         ].slice(-L.results),

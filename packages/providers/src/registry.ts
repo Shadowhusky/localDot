@@ -91,6 +91,15 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     custom: true,
   },
   {
+    // Responses-only gateways can reuse an existing compatible key and its bound endpoint.
+    // The OpenAI client already uses stateless Responses through that keyd route.
+    id: "openai-responses-compatible",
+    name: "Other (OpenAI Responses-compatible)",
+    client: "openai",
+    keyd: "openai-compatible",
+    custom: true,
+  },
+  {
     id: "anthropic-compatible",
     name: "Other (Anthropic-compatible)",
     client: "anthropic-compatible",

@@ -610,6 +610,53 @@ def presses(kb):
     return [(("down" if k == X.KeyPress else "up"), d) for k, d in kb.events]
 
 
+class UnicodeMappings(unittest.TestCase):
+    def helper(self):
+        cmds, kb = keyboard()
+        cmds.min_kc, cmds.max_kc = 200, 202
+        mapping = [[0, 0], [0, 0], [65, 65]]
+        kb.get_keyboard_mapping = lambda start, count: [row[:] for row in mapping]
+        kb.change_keyboard_mapping = lambda kc, rows: mapping.__setitem__(kc - 200, [rows[0][0]] * 2 + [0])
+        kb.keysym_to_keycodes = lambda sym: iter(
+            (200 + i, 0) for i, row in enumerate(mapping) if sym in row)
+        return cmds, kb, mapping
+
+    def test_long_multilingual_text_reuses_slots_and_repeated_characters_still_match(self):
+        cmds, kb, mapping = self.helper()
+        text = "哈喽哈宝~ 我是阿七，刚开的桌子，等几个人一起玩呀 😄" * 3
+        with patch.object(xhelper.time, "sleep", lambda _: None):
+            for ch in text:
+                reply = cmds.cmd_char({"ch": ch})
+                self.assertEqual(mapping[reply["keycode"] - 200][0], xhelper.keysym_for_char(ch))
+                self.assertFalse(kb.down)
+                self.assertLessEqual(len(cmds.remapped), 2)
+        self.assertEqual(mapping[2], [65, 65])
+
+    def test_recycling_never_changes_a_held_key_or_another_clients_mapping(self):
+        cmds, kb, mapping = self.helper()
+        with patch.object(xhelper.time, "sleep", lambda _: None):
+            first = cmds.remap(1000)
+            second = cmds.remap(1001)
+            kb.down.add(first)
+            self.assertEqual(cmds.remap(1002, recycle=True), second)
+            self.assertEqual(mapping[first - 200], [1000, 1000, 0])
+            mapping[second - 200] = [99, 99]
+            with self.assertRaisesRegex(RuntimeError, "no spare keycode"):
+                cmds.remap(1003, recycle=True)
+            self.assertEqual(mapping[second - 200], [99, 99])
+
+    def test_chord_resolution_does_not_recycle_keys_awaiting_their_press(self):
+        cmds, kb, mapping = self.helper()
+        with patch.object(xhelper.time, "sleep", lambda _: None):
+            cmds.remap(1000)
+            cmds.remap(1001)
+            before = [row[:] for row in mapping]
+            with self.assertRaisesRegex(RuntimeError, "no spare keycode"):
+                cmds.combo_plan([1002, 1003])
+        self.assertEqual(mapping, before)
+        self.assertFalse(kb.down)
+
+
 class Keys(unittest.TestCase):
     def test_a_shifted_symbol_presses_its_level_modifier_around_its_own_key(self):
         cmds, kb = keyboard()

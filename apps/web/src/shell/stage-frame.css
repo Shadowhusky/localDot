@@ -950,11 +950,6 @@
   box-shadow: var(--shadow-overlay);
   font-size: var(--text-callout);
 }
-.work-overlay[data-compact] {
-  width: min(168px, calc(100% - 16px));
-  height: 38px;
-  border-radius: var(--radius-xl);
-}
 .work-overlay-header {
   padding: var(--spacing);
   gap: calc(var(--spacing) * 0.5);
@@ -1031,9 +1026,6 @@
   opacity: 1;
   transition: opacity var(--dur-fade) var(--ease-standard);
 }
-.work-overlay[data-compact] .work-overlay-body {
-  opacity: 0;
-}
 .work-overlay-output {
   min-height: 0;
   height: 100%;
@@ -1099,11 +1091,8 @@
   font-size: var(--text-footnote);
 }
 
-/* Keep touch controls generous without making the collapsed pill wide. */
+/* Keep touch controls generous. */
 @media (pointer: coarse) {
-  .work-overlay[data-compact] {
-    height: 46px;
-  }
   .work-overlay-header {
     height: 44px;
     padding-block: 0;
@@ -1122,30 +1111,10 @@
   white-space: nowrap;
 }
 
-.work-overlay[data-compact] .work-overlay-state {
-  display: none;
-}
-
 .work-overlay .work-overlay-handle {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-.work-overlay-show.ui-button {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  pointer-events: auto;
-}
-@media (pointer: coarse) {
-  .work-overlay-show.ui-button {
-    width: 44px;
-    height: 44px;
-  }
-}
-
 /* Fullscreen viewing preferences stay outside the streamed picture and recordings. */
 .fullscreen-stream-controls {
   position: absolute;

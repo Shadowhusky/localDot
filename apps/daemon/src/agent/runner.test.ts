@@ -996,6 +996,139 @@ describe("Claude Code (your plan)", () => {
 });
 
 describe("ChatGPT runner lifecycle", () => {
+  it.each([
+    { code: 0, limited: false, expected: "done" },
+    { code: 3, limited: false, expected: "stopped" },
+    { code: 0, limited: true, expected: "stopped" },
+  ] as const)(
+    "preserves the terminal outcome after immediate idle expiry: %j",
+    async ({ code, limited, expected }) => {
+      const f = setup(0);
+      const drive = f.run.getMockImplementation();
+      if (!drive) throw new Error("fixture missing driver");
+      f.run.mockImplementationOnce(async (session, input) => {
+        await drive(session, input);
+        session.actionLimitReached = limited;
+        return code;
+      });
+      const session = await f.runner.start(f.cellId, "Play until the game is finished");
+      await f.live.settled(session.id);
+      expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+        reason: expected,
+      });
+      expect(f.containment).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not relabel a gave-up task Done when releasing its idle conversation", async () => {
+    const f = setup();
+    const drive = f.run.getMockImplementation();
+    if (!drive) throw new Error("fixture missing driver");
+    f.run.mockImplementationOnce(async (session, input) => {
+      await drive(session, input);
+      return 3;
+    });
+    const session = await f.runner.start(f.cellId, "Play until the game is finished");
+    await until(() => session.status === "idle");
+    expect(
+      f.log
+        .read(session.id)
+        .filter((event) => event.type === "agent.state")
+        .at(-1)?.data,
+    ).toEqual({
+      state: "idle",
+      reason: "gave up",
+    });
+    await f.runner.release();
+    expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+      reason: "stopped",
+    });
+    expect(f.containment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { first: 3, second: 0, expected: "done" },
+    { first: 0, second: 3, expected: "stopped" },
+  ] as const)(
+    "uses the follow-up's latest outcome on retirement: %j",
+    async ({ first, second, expected }) => {
+      const f = setup();
+      const drive = f.run.getMockImplementation();
+      if (!drive) throw new Error("fixture missing driver");
+      for (const code of [first, second])
+        f.run.mockImplementationOnce(async (session, input) => {
+          await drive(session, input);
+          return code;
+        });
+      const session = await f.runner.start(f.cellId, "Play until the game is finished");
+      await until(() => session.status === "idle");
+      session.post("followup", "Continue the game");
+      await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
+      await f.runner.release();
+      expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+        reason: expected,
+      });
+      expect(f.containment).not.toHaveBeenCalled();
+    },
+  );
+  it.each([0, 3])(
+    "keeps an explicitly blocked result unfinished after caller exit %i",
+    async (code) => {
+      const f = setup(0);
+      const drive = f.run.getMockImplementation();
+      if (!drive) throw new Error("fixture missing driver");
+      f.run.mockImplementationOnce(async (session, input) => {
+        await drive(session, input);
+        session.append("task.result", {
+          outcome: "blocked",
+          summary: "The game is unavailable.",
+          files: [],
+        });
+        return code;
+      });
+      const session = await f.runner.start(f.cellId, "Play until the game is finished");
+      await f.live.settled(session.id);
+      const events = f.log.read(session.id);
+      expect(events.filter((event) => event.type === "agent.state").at(-1)?.data).toEqual({
+        state: "idle",
+        reason: "blocked",
+      });
+      expect(events.find((event) => event.type === "session.end")?.data).toEqual({
+        reason: "stopped",
+      });
+      expect(f.containment).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { first: "blocked", second: undefined, expected: "done" },
+    { first: "blocked", second: "complete", expected: "done" },
+    { first: "complete", second: "blocked", expected: "stopped" },
+  ] as const)(
+    "does not carry a result outcome into a new follow-up: %j",
+    async ({ first, second, expected }) => {
+      const f = setup();
+      const drive = f.run.getMockImplementation();
+      if (!drive) throw new Error("fixture missing driver");
+      for (const outcome of [first, second])
+        f.run.mockImplementationOnce(async (session, input) => {
+          await drive(session, input);
+          if (outcome)
+            session.append("task.result", { outcome, summary: "Current task result.", files: [] });
+          return 0;
+        });
+      const session = await f.runner.start(f.cellId, "Play until the game is finished");
+      await until(() => session.status === "idle");
+      session.post("followup", "Continue the game");
+      await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
+      await f.runner.release();
+      expect(f.log.read(session.id).find((event) => event.type === "session.end")?.data).toEqual({
+        reason: expected,
+      });
+      expect(f.containment).not.toHaveBeenCalled();
+    },
+  );
+
   it("ends an idle successful task without stopping its desktop", async () => {
     const f = setup(0);
     const physicalStop = vi.fn(async () => {});

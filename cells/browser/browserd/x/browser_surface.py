@@ -44,14 +44,14 @@ def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clo
         states = node.get_state_set()
         return states.contains(atspi.StateType.VISIBLE) and states.contains(atspi.StateType.SHOWING)
 
-    def children(node, maximum):
-        budget()
+    def children(node, maximum, check=budget):
+        check()
         count = node.get_child_count()
         if not isinstance(count, int) or count < 0 or count > maximum:
             raise SurfaceUnavailable()
         result = []
         for position in range(count):
-            budget()
+            check()
             result.append(node.get_child_at_index(position))
         return result
 
@@ -113,26 +113,69 @@ def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clo
         if not isinstance(url, str) or not url or len(url) > 32768:
             raise SurfaceUnavailable()
         page_focus = False
+        # Focus is optional metadata. Its search must not consume the budget needed
+        # to verify the native window again, or a large page becomes unreadable.
+        focus_deadline = min(deadline - 0.15, clock() + 0.35)
+        focus_visited = 0
+
+        def focus_budget(depth=0):
+            nonlocal focus_visited
+            focus_visited += 1
+            if depth > 32 or focus_visited > 1500 or clock() >= focus_deadline:
+                raise SurfaceUnavailable()
 
         def visit_focus(node, depth=0):
             nonlocal page_focus
-            budget(depth)
+            focus_budget(depth)
             if node is None:
                 raise SurfaceUnavailable()
-            if not showing(node):
-                return
+            # Editors can keep keyboard focus on an offscreen or zero-height node.
+            # Native focus, not its painted rectangle, determines where keys go.
             if node.get_state_set().contains(atspi.StateType.FOCUSED):
                 page_focus = True
                 return
-            for child in children(node, 200):
+            if not showing(node):
+                return
+            for child in children(node, 200, focus_budget):
                 visit_focus(child, depth + 1)
                 if page_focus:
                     return
 
+        def collection_focus():
+            focus_budget()
+            rule = atspi.MatchRule.new(
+                atspi.StateSet.new([atspi.StateType.FOCUSED]), atspi.CollectionMatchType.ALL,
+                {}, atspi.CollectionMatchType.ALL, [], atspi.CollectionMatchType.ALL,
+                [], atspi.CollectionMatchType.ALL, False)
+            matches = document.get_collection_iface().get_matches(
+                rule, atspi.CollectionSortOrder.CANONICAL, 2, True)
+            focus_budget()
+            if len(matches) != 1:
+                raise SurfaceUnavailable()
+            node = matches[0]
+            if node is None or not node.get_state_set().contains(atspi.StateType.FOCUSED):
+                raise SurfaceUnavailable()
+            # Confirm the result belongs to this document, without reading names or values.
+            for depth in range(33):
+                focus_budget(depth)
+                if node == document:
+                    return True
+                node = node.get_parent()
+                if node is None:
+                    break
+            raise SurfaceUnavailable()
+
         if not chrome_focus:
             try:
-                visit_focus(document)
-            except SurfaceUnavailable:
+                # Chromium answers this native query in one call instead of thousands of
+                # cross-process child reads. Retain a bounded fallback for older bindings.
+                if document.get_state_set().contains(atspi.StateType.FOCUSED):
+                    page_focus = True
+                elif hasattr(atspi, 'MatchRule'):
+                    page_focus = collection_focus()
+                else:
+                    visit_focus(document)
+            except Exception:
                 focus_complete = False
         if identity() != initial:
             raise SurfaceUnavailable()

@@ -9,6 +9,7 @@ import { BrowserControl } from "./control.ts";
 import { BROWSER_HTTP_BODY_BYTES, BROWSER_HTTP_BODY_MS, BrowserHttp } from "./http.ts";
 import { BrowserInputError } from "./input.ts";
 import { BrowserNavigation } from "./navigation-owner.ts";
+import { BrowserObservationError } from "./observation.ts";
 
 const browserCellId = "01K6NZAGJT44QM01BDMEMSHP25";
 const parentCellId = "01K6NZAGJT44QM01BDMEMSHP26";
@@ -633,6 +634,17 @@ describe("authenticated browser HTTP transport", () => {
     expect(records[1]).toEqual({ kind: "progress", count: 2, pressMono: 12 });
     expect(records[2].kind).toBe("result");
     expect(reply.text).not.toContain("private-");
+  });
+
+  it("reports entered protected input without claiming a lost connection", async () => {
+    const peer = await setup();
+    peer.setWork(async () => {
+      throw new BrowserObservationError("secret");
+    });
+    expect(await peer.send("POST", "/observe", { permit, tabId })).toMatchObject({
+      status: 423,
+      text: '{"error":"protected-input"}',
+    });
   });
 
   it.each([

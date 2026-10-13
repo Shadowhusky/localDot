@@ -324,6 +324,23 @@ export function outboundOf(tool: ToolName | string, input: unknown, facts: RiskF
       },
     ];
   }
+  if (
+    tool === "browser_act" &&
+    facts.operation === "device_code" &&
+    typeof object.text === "string"
+  ) {
+    const url = webAddress(facts.target?.url);
+    const where = url && reach(url);
+    return where
+      ? [
+          {
+            kind: "enter_text",
+            ...(where.destination && { destination: where.destination }),
+            text: object.text,
+          },
+        ]
+      : [];
+  }
   if (tool === "computer") {
     const action = (object.action ?? {}) as Record<string, unknown>;
     // A paste carries what was copied, which may be anything dot read.

@@ -128,6 +128,25 @@ describe("bounded agent projection", () => {
     const ended = projectAgentEvent(model, ev(4, "session.end", { reason: "stopped" }));
     expect(projectAgentEvent(ended, ev(5, "agent.state", { state: "acting" }))).toBe(ended);
   });
+  it("preserves blocked outcomes through tool completion and clears them when work resumes", () => {
+    const result = reduce([
+      ev(0, "agent.state", { state: "acting" }),
+      ev(1, "task.result", { outcome: "blocked", summary: "Unfinished work.", files: [] }),
+      ev(2, "agent.state", { state: "thinking" }),
+    ]);
+    expect(result.completion).toBe("blocked");
+    expect(result.results[0]?.outcome).toBe("blocked");
+    const continued = projectAgentEvent(result, ev(3, "step.start", { kind: "think" }, "next"));
+    expect(continued.completion).toBeUndefined();
+    expect(continued.results[0]?.outcome).toBe("blocked");
+    const idle = projectAgentEvent(
+      result,
+      ev(3, "agent.state", { state: "idle", reason: "blocked" }),
+    );
+    const followup = projectAgentEvent(idle, ev(4, "agent.state", { state: "thinking" }));
+    expect(followup.completion).toBeUndefined();
+    expect(followup.results[0]?.outcome).toBe("blocked");
+  });
   it("marks a follow-up sent while dot works as waiting for the task, and keeps that on replay", () => {
     const queued = id(10002);
     const events = [

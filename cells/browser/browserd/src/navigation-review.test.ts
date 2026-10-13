@@ -130,7 +130,7 @@ async function setup() {
   };
 }
 
-const outcome = (work: Promise<void>) =>
+const outcome = (work: Promise<unknown>) =>
   work.then(
     () => "complete",
     () => "refused",

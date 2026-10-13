@@ -2156,9 +2156,9 @@ function requestApproval(
             (text) => text,
           )
         : ({
-            actionClass: "send",
+            actionClass: kind === "delete" ? "delete" : "send",
             risk,
-            title: "Send this email?",
+            title: kind === "delete" ? "Delete these files?" : "Send this email?",
             fields: [
               ["From", "henry.liao@example.test (you)"],
               ["To", "team@example.test · 4 people"],

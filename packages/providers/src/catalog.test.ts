@@ -172,12 +172,19 @@ describe("the first-class providers", () => {
 });
 
 describe("custom endpoints", () => {
-  it("are the two Other rows, one for each API they can speak, with no address of their own", () => {
+  it("offer each supported custom API with no address of their own", () => {
     expect(PROVIDERS.filter((p) => p.custom)).toEqual([
       {
         id: "openai-compatible",
         name: "Other (OpenAI-compatible)",
         client: "openai-compatible",
+        keyd: "openai-compatible",
+        custom: true,
+      },
+      {
+        id: "openai-responses-compatible",
+        name: "Other (OpenAI Responses-compatible)",
+        client: "openai",
         keyd: "openai-compatible",
         custom: true,
       },

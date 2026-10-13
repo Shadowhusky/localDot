@@ -4,7 +4,15 @@ import { STILL_MS } from "./focus.ts";
 
 // Keep watching unobstructed. Activity on the picture reveals its control without taking over
 // the computer; activity elsewhere in the conversation does not keep it on screen.
-export function StageExpand({ phone, onEnter }: { phone: boolean; onEnter(): void }) {
+export function StageExpand({
+  phone,
+  onEnter,
+  onMinimize,
+}: {
+  phone: boolean;
+  onEnter(): void;
+  onMinimize?(): void;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   const [still, setStill] = useState(false);
   useEffect(() => {
@@ -25,6 +33,16 @@ export function StageExpand({ phone, onEnter }: { phone: boolean; onEnter(): voi
   }, []);
   return (
     <span ref={ref} className="stage-expand" data-still={still || undefined}>
+      {onMinimize && (
+        <IconButton
+          variant="glass"
+          round
+          size={44}
+          icon="chevron-up"
+          label="Minimize screen"
+          onClick={onMinimize}
+        />
+      )}
       <IconButton
         variant="glass"
         round

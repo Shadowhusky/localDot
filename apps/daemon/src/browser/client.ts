@@ -111,6 +111,7 @@ const manualReply = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("text"), receipt: typeReply }),
 ]);
 const done = z.strictObject({ done: z.literal(true) });
+const navigated = done.extend({ download: z.literal(true).optional() });
 const page = BrowserReadResult.extend({
   url: z.string().max(8192),
   title: z.string().max(2048),
@@ -148,7 +149,11 @@ const REFUSALS = {
   login_form:
     "The password field was found, but its sign-in form could not be verified. Open the site's sign-in page again, read its current fields, then retry ask_user with a secret field. Do not click or type into the password field through ordinary tools or hand control over for a rejected password.",
   secret_refused:
-    "Secure password entry was refused because the page, field, or control changed. Read the current page and retry ask_user with its password target; do not repeat unchanged calls or click the password box through ordinary tools.",
+    "Private input was refused because the page, field, or control changed or is incompatible. Read the current page and use the appropriate private code or password action; do not repeat unchanged calls or type secrets through ordinary tools.",
+  protected_input:
+    "This page contains entered protected input, so it cannot be read safely. Complete or clear that input privately; do not restart the browser or repeat sign-in.",
+  refused:
+    "The browser refused this operation because its page, field, or control is not ready or has changed. The connection is still available. Read the current page before retrying; do not repeat unchanged calls.",
   stale: "The web browser or the selected screen changed during the request.",
   aborted: "The browser request timed out or was cancelled; the page may still have loaded.",
   unavailable: "The browser control connection is unavailable; the page may still be responsive.",
@@ -756,7 +761,7 @@ export class BrowserClient {
     tabId: string,
     url: string,
     scope: BrowserScope,
-  ): Promise<z.infer<typeof done>> {
+  ): Promise<z.infer<typeof navigated>> {
     if (typeof url !== "string" || !url.length || url.length > 8192)
       return Promise.reject(new BrowserClientError("request"));
     return this.#json(
@@ -765,7 +770,7 @@ export class BrowserClient {
       { ...this.#action(permit, tabId), url },
       scope,
       BROWSER_NAVIGATION_TIMEOUT_MS + 5000,
-      done,
+      navigated,
       4096,
     );
   }
@@ -1011,6 +1016,8 @@ export class BrowserClient {
         throw new BrowserClientError("login_form");
       if (path === "/secret" && response.statusCode === 409)
         throw new BrowserClientError("secret_refused");
+      if (response.statusCode === 423) throw new BrowserClientError("protected_input");
+      if (response.statusCode === 409) throw new BrowserClientError("refused");
       if (response.statusCode !== 200 || response.headers["content-encoding"] !== undefined)
         throw new BrowserClientError("unavailable");
       return { response, signal, check, close };

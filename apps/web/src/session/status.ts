@@ -38,6 +38,7 @@ export interface TaskFacts {
   // The reason on the latest agent.state.
   readonly reason: string | null;
   readonly result: boolean;
+  readonly outcome?: "complete" | "blocked";
   // A model call waiting to be tried again: when, in session ms, and whether the model could be
   // reached at all.
   readonly retry: { readonly atMs: number; readonly unreachable: boolean } | null;
@@ -92,7 +93,8 @@ export function taskFacts(model: AgentModel): TaskFacts {
     yours: !yours ? null : yours.by === "user" ? "user" : yours.reason,
     pause: model.safetyPause?.phase ?? null,
     reason: model.state?.reason ?? null,
-    result: model.results.length > 0,
+    result: model.completion !== undefined,
+    outcome: model.completion,
     retry:
       model.retrying && model.retry
         ? {
@@ -220,8 +222,8 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
   },
   [STALL.modelRefused]: {
     row: "recovery",
-    label: "Model turned down a request",
-    caption: "The model turned down my request. Try again, or change the model.",
+    label: "Provider request failed",
+    caption: "The provider could not process my request. Check its settings and error details.",
   },
   [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
   [STALL.keyReenter]: {
@@ -318,16 +320,22 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     control,
   });
 
+  const at = agentStateAt(model, nowMs);
+  const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
+  const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
+  const blocked = facts?.outcome === "blocked" || reason === "blocked";
+  const unfinished = () =>
+    finished("failed", "Couldn’t finish", "I couldn’t finish. The chat says what blocked me.");
+
   if (model.ended && model.ended.t <= nowMs) {
+    if (blocked && (model.ended.reason === "done" || model.ended.reason === "stopped"))
+      return unfinished();
     if (model.ended.reason === "done") return finished("done", "Done", "Done.");
     if (model.ended.reason === "stopped") return finished("stopped", "Task stopped", "Stopped.");
     if (model.ended.reason === "interrupted")
       return finished("interrupted", "Task interrupted", INTERRUPTED_CAPTION);
     return finished("failed", "Task failed", "The task failed.");
   }
-  const at = agentStateAt(model, nowMs);
-  const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
-  const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
   if (facts?.yours) return waiting("control", "You're in control", YOUR_TURN[facts.yours]);
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
@@ -385,6 +393,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
           "Needs attention",
           "I can't go on by myself. The chat says what to do.",
         );
+  if (blocked && (state === "done" || state === "idle")) return unfinished();
   if (state === "done") return finished("done", "Done", "Done.");
   if (state === "idle" && reason === STALL.actionLimit)
     return waiting("limit", "Reached your action limit", "I stopped at the action limit you set.");

@@ -8,7 +8,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createXai } from "@ai-sdk/xai";
 import { ModelBinding, SURROGATE_PATTERN } from "@localdot/protocol";
-import { gatewayBaseURL } from "@localdot/providers";
+import { gatewayBaseURL, modelOptionsProblem, modelProviderOptions } from "@localdot/providers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { type LanguageModel, wrapLanguageModel } from "ai";
 
@@ -46,6 +46,48 @@ function stateless(
 // providers use their official packages (P5a-R4), each calling only the operation its keyd preset
 // lists (P5a-R31).
 export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageModel {
+  const model = baseModel(b, fetch);
+  if (!b.options) return model;
+  const provider = b.provider ?? b.client;
+  const problem = modelOptionsProblem(provider, b.model, b.options, b.maxOutputTokens);
+  if (problem) throw new Error(problem);
+  const namespace = ["openai-compatible", "lmstudio", "ollama"].includes(b.client)
+    ? b.route
+    : b.client === "anthropic-compatible"
+      ? "anthropic"
+      : b.client;
+  return wrapLanguageModel({
+    model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
+    middleware: {
+      specificationVersion: "v4",
+      transformParams: async ({ params }) => {
+        const total = Math.min(params.maxOutputTokens ?? b.maxOutputTokens, b.maxOutputTokens);
+        // Compaction asks for fewer tokens than a normal turn. Keep its thinking within that
+        // request's limit; Anthropic's SDK *adds* the budget to maxOutputTokens internally.
+        const budget =
+          b.options?.thinkingBudget === undefined
+            ? undefined
+            : Math.min(b.options.thinkingBudget, Math.max(1024, total - 1024));
+        if (budget !== undefined && budget >= total)
+          throw new Error("Output limit is too small for the selected thinking budget.");
+        const options = modelProviderOptions(provider, b.model, {
+          ...b.options,
+          thinkingBudget: budget,
+        });
+        return {
+          ...params,
+          maxOutputTokens:
+            namespace === "anthropic" && budget !== undefined ? total - budget : total,
+          providerOptions: {
+            ...params.providerOptions,
+            [namespace]: { ...params.providerOptions?.[namespace], ...options },
+          },
+        };
+      },
+    },
+  });
+}
+function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageModel {
   b = ModelBinding.parse(b);
   const local = b.client === "lmstudio" || b.client === "ollama";
   if (local && b.route !== b.client) throw new Error("Local model has a different gateway route");
@@ -64,7 +106,7 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
       return stateless(
         createOpenAI({ baseURL, apiKey, fetch }).responses(b.model),
         "openai",
-        b.reasoning,
+        b.reasoning || b.options?.reasoningEffort !== undefined,
       );
     case "google":
       return createGoogleGenerativeAI({ baseURL, apiKey, fetch })(b.model);
@@ -93,7 +135,7 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
       return stateless(
         createAzure({ baseURL, apiKey, fetch }).responses(b.model),
         "azure",
-        b.reasoning,
+        b.reasoning || b.options?.reasoningEffort !== undefined,
       );
     case "openai-compatible":
     case "lmstudio":

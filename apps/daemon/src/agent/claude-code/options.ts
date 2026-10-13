@@ -5,6 +5,7 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { ModelOptions } from "@localdot/protocol";
 import { isConnectorToolName, TOOL_NAMES } from "@localdot/protocol";
 import type { ClaudeCodeLaunch } from "./setup.ts";
 
@@ -58,6 +59,7 @@ export const onlyLocaldot: CanUseTool = async (name, input, { mcpServer }) =>
 export interface ClaudeCodeOptionsInput {
   readonly launch: ClaudeCodeLaunch;
   readonly model?: string;
+  readonly modelOptions?: ModelOptions;
   readonly instructions: string;
   readonly server: McpSdkServerConfigWithInstance;
   readonly abort: AbortController;
@@ -68,6 +70,9 @@ export interface ClaudeCodeOptionsInput {
 // settings, CLAUDE.md, memory, skills, plugins or other MCP servers of the user's reach dot, and
 // nothing of the task is saved in Claude Code's history.
 export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
+  const effort = input.modelOptions?.reasoningEffort;
+  if (effort && !["low", "medium", "high", "xhigh", "max"].includes(effort))
+    throw new Error("Unsupported Claude Code effort.");
   return {
     pathToClaudeCodeExecutable: input.launch.executable,
     spawnClaudeCodeProcess: input.spawn,
@@ -75,6 +80,13 @@ export function claudeCodeOptions(input: ClaudeCodeOptionsInput): Options {
     env: { ...input.launch.env },
     abortController: input.abort,
     ...(input.model ? { model: input.model } : {}),
+    ...(effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "xhigh" ||
+    effort === "max"
+      ? { effort }
+      : {}),
     systemPrompt: input.instructions,
     settingSources: [],
     strictMcpConfig: true,

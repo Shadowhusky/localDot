@@ -91,7 +91,7 @@ export class ScreenUnavailableError extends Error {
         ? "The desktop isn't ready right now. Try switching to it again in a moment."
         : starting
           ? "The web browser is still starting. Try switching to it again in a few seconds."
-          : "The web browser couldn't open. Don't sign in on the desktop's Chromium, which doesn't keep sign-ins: try the web browser later, or tell the user what you couldn't do.",
+          : "The web browser couldn't open. Don't sign in on the desktop's Chromium or launch another browser as a workaround. Retry the visible web browser once after recovery, then tell the user what you couldn't do if it still fails.",
     );
     this.name = "ScreenUnavailableError";
   }
@@ -117,6 +117,7 @@ export class ScreenController {
   #userReady = false;
   readonly #active = new Set<Promise<void>>();
   readonly #leases = new WeakSet<ScreenLease>();
+  readonly #tabs = new WeakMap<ScreenLease, string>();
   #holding: Promise<void> | undefined;
   #regranting: Promise<void> | undefined;
   #containment: Promise<void> | undefined;
@@ -140,6 +141,19 @@ export class ScreenController {
 
   get selection(): ScreenSelection {
     return this.#selection;
+  }
+
+  availability(): {
+    desktop: boolean;
+    browser: "attached" | "not_open" | "unavailable";
+    selected: ScreenName;
+  } {
+    return {
+      desktop: this.deps.desktopReady(),
+      browser:
+        this.#closed || this.#failed ? "unavailable" : this.#browser ? "attached" : "not_open",
+      selected: this.#selection.screen,
+    };
   }
 
   lease(raw: ScreenScope): ScreenLease {
@@ -181,6 +195,8 @@ export class ScreenController {
       },
     });
     this.#leases.add(lease);
+    if (selection.screen === "browser" && this.#browser?.tabId)
+      this.#tabs.set(lease, this.#browser.tabId);
     return lease;
   }
 
@@ -205,7 +221,25 @@ export class ScreenController {
       !owner.tabId
     )
       throw new ScreenControlError();
-    return { client: owner.client, permit: owner.permit, tabId: owner.tabId };
+    return {
+      client: owner.client,
+      permit: owner.permit,
+      tabId: this.#tabs.get(lease) ?? owner.tabId,
+    };
+  }
+
+  // A read follows the visible tab, including popup sign-in windows. Input stays pinned to
+  // the tab admitted for its lease; discovering a popup must never replay an old click there.
+  async refreshBrowser(lease: ScreenLease): Promise<void> {
+    if (!this.#leases.has(lease)) throw new ScreenControlError();
+    lease.check();
+    if (lease.selection.screen !== "browser") return;
+    const owner = this.#browser;
+    if (!owner?.permit) throw new ScreenControlError();
+    const tabId = await this.#foreground(owner, this.#browserScope(owner, lease));
+    lease.check();
+    owner.tabId = tabId;
+    this.#tabs.set(lease, tabId);
   }
 
   async switchTo(screen: ScreenName, raw: ScreenScope): Promise<ScreenSwitchData> {
@@ -251,6 +285,7 @@ export class ScreenController {
     if (!owner?.client.manual || !permit) throw new ScreenControlError();
     const send = owner.client.manual.bind(owner.client);
     const selection = this.#selection;
+    const epoch = this.#epoch;
     const signal = AbortSignal.any([scope.signal, this.#manual.signal]);
     let finished = false;
     const check = () => {
@@ -295,6 +330,38 @@ export class ScreenController {
         finished = true;
         this.#active.delete(done.promise);
         done.resolve();
+      },
+      // Recovery outlives the input lease. A fresh user grant drains the old browser
+      // actions before acknowledging it, without reading private fields, replaying
+      // uncertain input, reloading the page, or returning control to the agent.
+      confirm: async () => {
+        const current = () => {
+          if (
+            epoch !== this.#epoch ||
+            selection !== this.#selection ||
+            owner !== this.#browser ||
+            !this.#held ||
+            !this.#userReady ||
+            this.#returning ||
+            this.#pending ||
+            this.#closed ||
+            this.#failed ||
+            !this.deps.desktopReady()
+          )
+            throw new ScreenControlError();
+          this.#checkBrowser(owner);
+        };
+        current();
+        await this.#revoke();
+        current();
+        await owner.client.health(
+          this.#browserScope(owner, {
+            signal: AbortSignal.any([this.#manual.signal, AbortSignal.timeout(5000)]),
+            check: current,
+          }),
+        );
+        current();
+        if (!owner.manualPermit) throw new ScreenControlError();
       },
     };
   }
@@ -365,6 +432,15 @@ export class ScreenController {
       this.#held = false;
       this.#holding = undefined;
       return result;
+    } catch (error) {
+      // A cancelled hand-back must not leave the user's input signal aborted.
+      // Re-establish physical user ownership before reopening manual admission.
+      this.#returning = false;
+      if (epoch === this.#epoch && !this.#closed && !this.#failed) {
+        this.#holding = undefined;
+        await this.takeOver();
+      }
+      throw error;
     } finally {
       this.#returning = false;
     }
@@ -752,7 +828,10 @@ export class ScreenController {
       scope.check();
       if (!listing.tabs.length || listing.tabs.some((tab) => !tab.ready))
         throw new ScreenControlError();
-      for (const tab of listing.tabs) {
+      const ordered = [...listing.tabs].sort(
+        (a, b) => Number(b.id === owner.tabId) - Number(a.id === owner.tabId),
+      );
+      for (const tab of ordered) {
         try {
           // The admitted clock request first resolves BrowserGeometry: unique root
           // URL across all tabs, native active window, and two matching surfaces.

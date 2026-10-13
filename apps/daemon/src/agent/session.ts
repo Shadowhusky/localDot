@@ -43,6 +43,7 @@ import { TaskTaint } from "./safety/taint.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import { SecretAnswers } from "./secret-answers.ts";
 import type { TranscriptStore } from "./transcript.ts";
+import { WorkProgress } from "./work-progress.ts";
 
 export const AGENT = "main";
 // How long a hand-back waits for the user's input to land and the computer to confirm it.
@@ -245,6 +246,7 @@ export class AgentSession {
   recent: readonly RecentLine[] = [];
   // The connected apps' tools this task's model was shown.
   connectors: TaskConnectors = NO_TASK_CONNECTORS;
+  readonly workProgress = new WorkProgress();
   toolCalls = 0;
   // The user's optional hard stop: the most tool calls between two of their messages.
   actionLimit: number | undefined;
@@ -1549,10 +1551,11 @@ export class AgentSession {
           this.#screenScope(generation, signal ?? generation.signal, true),
         );
         this.check(generation, signal, true);
-        if (this.#control !== record || this.#manual.size || record.manualUnconfirmed) return false;
+        if (this.#control !== record || this.#manual.size || record.manualUnconfirmed)
+          return this.#keepControl(record);
         this.#screenReady = generation;
       } catch {
-        return false;
+        return this.#keepControl(record);
       }
     }
     // Native takeover can retire its brain. With no current generation, keep the physical

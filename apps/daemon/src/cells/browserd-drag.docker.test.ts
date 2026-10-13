@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Point, ulid } from "@localdot/protocol";
+import { type BrowserReadResult, type Point, ulid } from "@localdot/protocol";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { evalCellOptions } from "../agent/evals/cell.ts";
@@ -26,11 +26,16 @@ ul { position: absolute; left: 100px; top: 250px; width: 300px; list-style: none
 li { height: 60px; line-height: 60px; margin: 0 0 10px; padding-left: 16px; background: #ddd; }
 #login { position: absolute; left: 800px; top: 100px; width: 250px; }
 #login input, #login button { display: block; margin: 10px; height: 35px; width: 220px; }
+#preview { position: absolute; left: 100px; top: 510px; width: 300px; }
+#preview input, #preview button { display: block; margin: 8px 0; height: 32px; }
+#preview-result { display: block; height: 90px; background: #eee; }
 </style></head><body>
 <canvas id="background" width="1280" height="800" style="position:fixed;inset:0;width:100vw;height:100vh;z-index:-1"></canvas>
 <form id="login" method="post" action="/session"><input name="username" aria-label="Account" autocomplete="username"><input name="password" aria-label="Password" type="password" autocomplete="current-password"><button>Sign in</button></form>
+<button id="popup" style="position:absolute;left:500px;top:180px" onclick="window.open('http://drag.localdot.test/popup', 'signin', 'popup,width=600,height=600')">Open sign-in window</button>
 <input id="volume" aria-label="Volume" type="range" min="0" max="100" value="0">
 <ul id="list"><li draggable="true">Alpha</li><li draggable="true">Beta</li><li draggable="true">Gamma</li></ul>
+<section id="preview"><input aria-label="Preview name"><button type="button">Apply preview</button><output id="preview-result" aria-live="polite">No preview applied</output></section>
 <script>
 const paint = document.getElementById("background").getContext("2d");
 paint.fillStyle = "rgb(20,180,210)"; paint.fillRect(0,0,1280,800);
@@ -49,6 +54,14 @@ list.addEventListener("drop", (e) => {
   show();
 });
 volume.addEventListener("input", show);
+// Echo typed text through the page itself, so the native input test checks actual delivery.
+document.querySelector('[name=username]').addEventListener('input', e => { document.title = e.target.value; });
+document.querySelector('#preview button').addEventListener('click', () => {
+  const result = document.querySelector('#preview-result');
+  result.textContent = 'Preview applied: ' + document.querySelector('#preview input').value;
+  result.style.background = 'rgb(20,210,70)';
+  document.title = result.textContent;
+});
 show();
 </script></body></html>`;
 
@@ -69,6 +82,35 @@ const JS_PAGE = PAGE.replace(
   </script></body>`,
   );
 
+// A dense page whose editor keeps focus in a zero-height, offscreen element, as web apps do.
+const LARGE_FOCUS_PAGE = PAGE.replace(
+  "</body>",
+  `<script>
+const dense = document.createElement('div');
+dense.style.cssText = 'position:absolute;left:450px;top:450px;width:700px';
+for(let group=0;group<20;group++) {
+  const row = document.createElement('div');
+  for(let cell=0;cell<50;cell++) {
+    const button = document.createElement('button');
+    button.textContent = 'Cell'; button.style.cssText = 'width:6px;height:6px;padding:0;font-size:1px';
+    row.append(button);
+  }
+  dense.append(row);
+}
+document.body.append(dense);
+const editor = document.createElement('div');
+editor.tabIndex=0; editor.style.cssText='position:absolute;left:-10000px;top:10000px;width:10000px;height:0;overflow:hidden';
+document.body.append(editor); editor.focus({preventScroll:true});
+</script></body>`,
+);
+
+const CODE_PAGE = `<!doctype html><title>Device code</title><form method="post" action="/device"><p>Enter the device code</p>${Array.from({ length: 8 }, (_, i) => `${i === 4 ? '<input aria-label="User code 4" readonly value="-" style="width:12px">' : ""}<input ${i === 0 ? "autofocus" : ""} maxlength="1" aria-label="User code ${i < 4 ? i : i + 1}" name="part${i}" style="width:40px;height:40px;margin:4px">`).join("")}<button>Continue</button></form><script>
+const fields = [...document.querySelectorAll('input:not([readonly])')];
+fields.forEach((field, i) => field.addEventListener('input', () => { if (field.value) (fields[i+1] || document.querySelector('button')).focus(); }));
+// Some segmented widgets process letters before checking keyboard modifiers.
+fields.forEach((field, i) => field.addEventListener('keydown', event => { if (event.ctrlKey && event.key === 'a') { event.preventDefault(); field.value = 'A'; fields[i+1]?.focus(); } }));
+</script>`;
+
 const gateScript = (cert: string, key: string) => `
 import http.server, ssl, urllib.parse
 open("/tmp/test-cert.pem", "w").write(${JSON.stringify(cert)})
@@ -77,6 +119,8 @@ tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 tls.load_cert_chain("/tmp/test-cert.pem", "/tmp/test-key.pem")
 page = ${JSON.stringify(PAGE)}.encode()
 js_page = ${JSON.stringify(JS_PAGE)}.encode()
+large_page = ${JSON.stringify(LARGE_FOCUS_PAGE)}.encode()
+code_page = ${JSON.stringify(CODE_PAGE)}.encode()
 class Gate(http.server.BaseHTTPRequestHandler):
     def do_CONNECT(self):
         self.send_response(200)
@@ -88,9 +132,12 @@ class Gate(http.server.BaseHTTPRequestHandler):
         self.close_connection = False
         self.handle_one_request()
     def do_GET(self):
-        content = js_page if self.path == "/javascript" else page
+        path = urllib.parse.urlsplit(self.path).path
+        content = code_page if path == "/device" else large_page if path == "/large-focus" else js_page if path == "/javascript" else page
         self.send_response(200)
-        self.send_header("content-type", "text/html; charset=utf-8")
+        if path == "/source.zip":
+            self.send_header("content-disposition", 'attachment; filename="source.zip"')
+        self.send_header("content-type", "application/octet-stream" if path == "/source.zip" else "text/html; charset=utf-8")
         self.send_header("content-length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -105,6 +152,10 @@ class Gate(http.server.BaseHTTPRequestHandler):
                 result = result.replace(b'name="otp" autocomplete="one-time-code" aria-label="Authentication code"', b'name="entry" placeholder="Your Early Access Code"').replace(b'authenticator app', b'invitation email')
             if fields.get("username") == ["fixture-mfa-auto"]:
                 result = result.replace(b'</body>', b'<script>document.querySelector("input").addEventListener("input", e => { if(e.target.value.length === 6) e.target.form.requestSubmit(); });</script></body>')
+        elif "".join(fields.get("part" + str(i), [""])[0] for i in range(8)) == "ABCDEFGH":
+            result = b'<html><head><title>Device consent</title></head><body><p>Authorize the CLI</p><form method="post" action="/consent"><input type="hidden" name="user_code" value="ABCDEFGH"><button>Authorize</button></form></body></html>'
+        elif self.path == "/consent" and fields.get("user_code") == ["ABCDEFGH"]:
+            result = b'<html><head><title>Confirm access</title></head><body><h1>Confirm access</h1><p>Use your passkey or authenticator app</p><form method="post" action="/verify"><input type="hidden" name="user_code" value="ABCDEFGH"><input type="hidden" name="sudo_totp" value="1"><input type="hidden" name="password_state" value="hidden-password-canary"><input type="hidden" name="authenticity_token" value="hidden-token-canary"><input autofocus name="otp" autocomplete="one-time-code" aria-label="Authentication code"><button>Verify</button></form></body></html>'
         elif ok or fields.get("otp") == ["123456"] or fields.get("backup_code") == ["A1B2C3"] or fields.get("entry") == ["Invite-Abc.123-XYZ"]:
             result = b"<html><head><title>signed in</title></head><body>Signed in</body></html>"
         else:
@@ -161,6 +212,8 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
   let client: BrowserClient;
   let permit: Parameters<BrowserClient["input"]>[0];
   let tabId = "";
+  let startupPage: BrowserReadResult;
+  let startupImage: string;
   const lifetime = new AbortController();
   const owner = (signal = lifetime.signal): BrowserScope => ({
     signal,
@@ -330,6 +383,18 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       tabId = (await client.tabs(owner())).tabs.find((tab) => tab.ready)?.id ?? "";
       if (!tabId) await sleep(250);
     }
+    // The startup tab is intentionally blank. Being blank must not be mistaken for a
+    // failed browser: it is readable, capturable, and ready for explicit navigation.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        startupPage = await client.read(permit, tabId, { maxChars: 500 }, owner());
+        startupImage = (await client.observe(permit, tabId, owner())).frame.image;
+        break;
+      } catch (error) {
+        if (attempt >= 40) throw error;
+        await sleep(250);
+      }
+    }
     await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
     for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
   }, 240_000);
@@ -364,6 +429,106 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       },
       owner(signal),
     );
+
+  it("navigates a ready blank browser into a visible interactive app", async () => {
+    expect(startupPage.url).toBe("about:blank");
+    expect(startupPage.text.trim()).toBe("");
+    expect(startupImage.length).toBeGreaterThan(1000);
+    expect((await client.health(owner())).ready).toBe(true);
+    expect((await client.read(permit, tabId, { maxChars: 2000 }, owner())).url).toBe(
+      "http://drag.localdot.test/",
+    );
+
+    const input = await element({ role: "textbox", name: "Preview name" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: input.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    await client.type(
+      permit,
+      tabId,
+      {
+        text: "Visible browser works",
+        masked: false,
+        injector: "xtest",
+        pace: { firstCount: 0, firstMs: 0, restMs: 0 },
+      },
+      owner(),
+      () => {},
+    );
+    const apply = await element({ role: "button", name: "Apply preview" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: apply.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    await expect.poll(title, { timeout: 10_000 }).toBe("Preview applied: Visible browser works");
+    const read = await client.read(permit, tabId, { maxChars: 5000 }, owner());
+    expect(read.text).toContain("Preview applied: Visible browser works");
+    const { frame } = await client.observe(permit, tabId, owner());
+    expect(frame.image).not.toBe(startupImage);
+    const { data, info } = await sharp(Buffer.from(frame.image, "base64"))
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    // A native button press turns this visible output green. Checking the actual image
+    // prevents an invisible/headless success or a stale blank capture from passing.
+    let greenPixels = 0;
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      if (
+        (data[offset] ?? 255) < 45 &&
+        (data[offset + 1] ?? 0) > 175 &&
+        (data[offset + 2] ?? 255) < 100
+      )
+        greenPixels++;
+    }
+    expect(greenPixels).toBeGreaterThan(10_000);
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    await expect.poll(title, { timeout: 10_000 }).toBe("range 0 order ABG");
+  });
+
+  it("types long multilingual messages without exhausting native key mappings", async () => {
+    const account = await element({ name: "Account" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: account.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    const text = "哈喽哈宝~ 我是阿七，刚开的桌子，等几个人一起玩呀 😄 日本語 한국어".repeat(3);
+    const result = await client.type(
+      permit,
+      tabId,
+      {
+        text,
+        masked: false,
+        injector: "xtest",
+        pace: { firstCount: 0, firstMs: 0, restMs: 0 },
+      },
+      owner(),
+      () => {},
+    );
+    expect(result.count).toBe([...text].length);
+    expect(await title()).toBe(text);
+    expect((await client.health(owner())).ready).toBe(true);
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    for (let i = 0; i < 40 && !/^range/.test(await title()); i++) await sleep(250);
+  }, 120_000);
 
   it("shows a full-page canvas in the agent image while masking password fields", async () => {
     const password = await element({ name: "Protected field" });
@@ -528,4 +693,149 @@ describe.skipIf(!DOCKER_TESTS)("browserd drags in a real browser cell", () => {
       expect(JSON.stringify(await client.observe(permit, tabId, owner()))).not.toContain("123456");
     },
   );
+  it("privately fills GitHub-style segmented device codes with native input", async () => {
+    await client.navigate(permit, tabId, "https://drag.localdot.test/device", owner());
+    expect(await title()).toBe("Device code");
+    const read = await client.read(permit, tabId, { maxChars: 20000 }, owner());
+    expect(read.text).toContain("Enter the device code");
+    expect((await client.observe(permit, tabId, owner())).frame.image.length).toBeGreaterThan(1000);
+    const first = read.elements?.find((element) => element.secret && element.role === "textbox");
+    expect(first?.secret).toBe(true);
+    const field = await client.lookup(permit, tabId, { kind: "focused" }, owner());
+    expect(field.target?.secret).toBe(true);
+    expect(
+      await client.secret(
+        permit,
+        tabId,
+        {
+          origin: "https://drag.localdot.test",
+          at: field.target!.point,
+          text: "ABCD-EFGH",
+          purpose: "device_code",
+          node: Number(first!.ref.slice(1)),
+        },
+        owner(),
+      ),
+    ).toMatchObject({ filled: true, rememberable: false });
+    for (let i = 0; i < 40 && (await title()) !== "Device consent"; i++) await sleep(250);
+    const consent = await client.read(permit, tabId, { maxChars: 20000 }, owner());
+    expect(consent.title).toBe("Device consent");
+    expect(consent.text).toContain("Authorize the CLI");
+    expect(JSON.stringify(consent)).not.toContain("ABCDEFGH");
+    expect((await client.observe(permit, tabId, owner())).frame.image.length).toBeGreaterThan(1000);
+    const authorize = await element({ role: "button", name: "Authorize" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: authorize.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    for (let i = 0; i < 40 && (await title()) !== "Confirm access"; i++) await sleep(250);
+    const reauthentication = await client.read(permit, tabId, { maxChars: 20000 }, owner());
+    expect(reauthentication.title).toBe("Confirm access");
+    expect(reauthentication.text).toContain("Use your passkey or authenticator app");
+    expect(JSON.stringify(reauthentication)).not.toMatch(
+      /ABCDEFGH|hidden-password-canary|hidden-token-canary/,
+    );
+    expect((await client.observe(permit, tabId, owner())).frame.image.length).toBeGreaterThan(1000);
+    const verification = await client.lookup(permit, tabId, { kind: "focused" }, owner());
+    expect(verification.target?.secret).toBe(true);
+    if (!verification.target) throw new Error("Missing private verification target");
+    // A user-held second factor still uses private input, never the CLI pairing-code path.
+    await client.secret(
+      permit,
+      tabId,
+      { origin: "https://drag.localdot.test", at: verification.target.point, text: "123456" },
+      owner(),
+    );
+    for (let i = 0; i < 40 && (await title()) !== "signed in"; i++) await sleep(250);
+    expect(await title()).toBe("signed in");
+  });
+
+  it("downloads an attachment and keeps the browser usable", async () => {
+    await client.navigate(permit, tabId, "https://drag.localdot.test/", owner());
+    const binding = { holder: "agent" as const, sessionId: permit.owner.sessionId, permit };
+    await client.armDownloads(binding, owner());
+    expect(
+      await client.navigate(permit, tabId, "https://drag.localdot.test/source.zip", owner()),
+    ).toEqual({ done: true, download: true });
+    expect(await title()).toMatch(/^range/);
+    let offers = await client.downloads(binding, owner());
+    for (let i = 0; i < 40 && !offers.length; i++) {
+      await sleep(250);
+      offers = await client.downloads(binding, owner());
+    }
+    expect(offers).toHaveLength(1);
+    expect(offers[0]!.bytes).toBeGreaterThan(0);
+    await client.acknowledgeDownload(binding, offers[0]!, owner());
+    await client.navigate(permit, tabId, "https://drag.localdot.test/javascript", owner());
+    expect(await title()).toMatch(/^range/);
+  });
+
+  it("reads, captures and clicks a dense page with an offscreen focused editor", async () => {
+    await client.navigate(permit, tabId, "http://drag.localdot.test/large-focus", owner());
+    expect(await title()).toMatch(/^range/);
+    const frame = await client.observe(permit, tabId, owner());
+    expect(frame.frame.image.length).toBeGreaterThan(1000);
+    const slider = await element({ role: "slider" });
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: {
+          kind: "click",
+          at: { x: slider.box.x + slider.box.w / 2, y: slider.at.y },
+          button: "left",
+          count: 1,
+        },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    expect(await title()).not.toMatch(/^range 0 /);
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    expect(await title()).toMatch(/^range 0 /);
+  });
+
+  it("reads a sign-in popup after opening it from the page", async () => {
+    await client.navigate(permit, tabId, "http://drag.localdot.test/", owner());
+    await title();
+    const button = { at: { x: 580, y: 277 } };
+    await client.input(
+      permit,
+      tabId,
+      {
+        input: { kind: "click", at: button.at, button: "left", count: 1 },
+        injector: "xtest",
+        holdMs: 0,
+      },
+      owner(),
+    );
+    let popup = "";
+    for (let i = 0; i < 40 && !popup; i++) {
+      popup = (await client.tabs(owner())).tabs.find((t) => t.id !== tabId && t.ready)?.id ?? "";
+      if (!popup) await sleep(250);
+    }
+    expect(popup).not.toBe("");
+    await expect
+      .poll(
+        async () => {
+          try {
+            await client.clock(permit, popup, owner());
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 10000 },
+      )
+      .toBe(true);
+    expect((await client.read(permit, popup, { maxChars: 500 }, owner())).title).toMatch(/^range/);
+    expect(await client.observe(permit, popup, owner())).toHaveProperty("frame");
+  });
 });

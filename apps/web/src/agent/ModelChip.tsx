@@ -1,12 +1,16 @@
-import { Fragment, type RefObject, useRef, useState } from "react";
+import type { AgentRoleChoice } from "@localdot/protocol";
+import { sameModelOptions } from "@localdot/providers";
+import { type RefObject, useRef, useState } from "react";
+import { ModelOptionsFields, optionsLabel } from "../settings/ModelOptionsFields.tsx";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { Menu, MenuGroup, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { mergeHandlers } from "../ui/merge.ts";
-import { triggerProps } from "../ui/Popover.tsx";
+import { Popover, triggerProps } from "../ui/Popover.tsx";
 import type { Align, Side } from "../ui/position.ts";
+import { Select } from "../ui/Select.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
 
 export interface ModelMenuProps {
@@ -18,6 +22,8 @@ export interface ModelMenuProps {
   dim?: boolean;
   groups: readonly ModelGroup[];
   current?: string;
+  choice?: AgentRoleChoice;
+  outputLimit?(choice: AgentRoleChoice): number;
   // A task is at work: it keeps its model, and a choice starts with the next task.
   working?: boolean;
   onChoose(option: ModelOption): void;
@@ -25,49 +31,105 @@ export interface ModelMenuProps {
   onManage(trigger: HTMLElement): void;
 }
 
-// The models the user can switch to, by provider, the current one checked; then Settings for the
-// rest.
-export function ModelMenu({
+// Model and thinking settings share one panel. Edits are local until Apply; Escape discards
+// them. Catalog/account refreshes never remount the slider or steal the user's focus.
+export function ModelMenu(props: ModelMenuProps) {
+  return (
+    <Popover
+      open={props.open}
+      onClose={props.onClose}
+      anchor={props.anchor}
+      side={props.side}
+      align={props.align}
+      label="Model and thinking"
+      className="model-config-panel"
+    >
+      <ModelMenuBody key={props.open ? "open" : "closed"} {...props} />
+    </Popover>
+  );
+}
+function ModelMenuBody({
   groups,
   current,
+  choice,
   working,
   onChoose,
   onManage,
+  outputLimit,
   ...props
 }: ModelMenuProps) {
+  const choices = groups.flatMap((group) => group.options);
+  const selected = choices.find((option) => option.id === current);
+  const [draft, setDraft] = useState<ModelOption | undefined>(() =>
+    selected ? { ...selected, choice: choice ?? selected.choice } : undefined,
+  );
+  const dirty =
+    draft &&
+    (draft.id !== current ||
+      !sameModelOptions(draft.choice.options, choice?.options ?? selected?.choice.options));
   return (
-    <Menu {...props} label="Model" className="model-menu">
+    <div className="model-config-content">
+      <div className="model-config-heading">
+        <span>Model & thinking</span>
+        <IconButton
+          icon="undo-2"
+          size={24}
+          label="Reset to provider defaults"
+          disabledReason={draft?.choice.options ? undefined : "Using provider defaults"}
+          onClick={() => {
+            if (draft) setDraft({ ...draft, choice: { ...draft.choice, options: undefined } });
+          }}
+        />
+      </div>
       {working && (
-        <p role="none" className="model-menu-note">
-          Applies from the next task. This one keeps its model.
+        <p className="model-options-note">
+          Applies from the next task. This one keeps its settings.
         </p>
       )}
-      {groups.map((group) => (
-        <Fragment key={group.label}>
-          <MenuGroup label={group.label}>
-            {group.options.map((option) => (
-              <MenuItem
-                key={option.id}
-                checked={option.id === current}
-                onSelect={() => {
-                  if (option.id !== current) onChoose(option);
-                }}
-              >
-                {option.name}
-              </MenuItem>
-            ))}
-          </MenuGroup>
-          <MenuSeparator />
-        </Fragment>
-      ))}
-      <MenuItem
-        onSelect={() => {
-          if (props.anchor.current) onManage(props.anchor.current);
-        }}
-      >
-        Manage models…
-      </MenuItem>
-    </Menu>
+      <Select
+        aria-label="Model"
+        value={draft?.id ?? ""}
+        groups={groups.map((group) => ({
+          label: group.label,
+          items: group.options.map((option) => ({ value: option.id, label: option.name })),
+        }))}
+        onValueChange={(id) => setDraft(choices.find((option) => option.id === id))}
+      />
+      {draft && (
+        <ModelOptionsFields
+          compact
+          choice={draft.choice}
+          outputLimit={outputLimit?.(draft.choice)}
+          onChange={(choice) => setDraft({ ...draft, choice })}
+        />
+      )}
+      <div className="model-config-actions">
+        <Button
+          variant="quiet"
+          size="sm"
+          className="model-config-manage"
+          onClick={() => {
+            props.onClose();
+            if (props.anchor.current) onManage(props.anchor.current);
+          }}
+        >
+          Manage models…
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabledReason={dirty ? undefined : "Settings are already selected"}
+          onClick={() => {
+            if (draft && dirty) {
+              onChoose(draft);
+              props.onClose();
+            }
+          }}
+        >
+          Apply
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -101,13 +163,16 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
         disabledReason={disabledReason}
         aria-label={next ? `Model for the next task: ${name}` : `Model: ${name}`}
         aria-describedby={tip["aria-describedby"]}
-        {...triggerProps("menu", open)}
+        {...triggerProps("dialog", open)}
         onClick={() => {
           onPeek?.();
           setOpen(true);
         }}
       >
         <MiddleTruncate text={label} tail={Math.max(0, label.length - label.lastIndexOf(" "))} />
+        {menu.choice?.options && (
+          <span className="composer-effort">{optionsLabel(menu.choice.options)}</span>
+        )}
         <Icon name="chevron-down" size={12} className="composer-model-chevron" />
       </Button>
       {tooltip}

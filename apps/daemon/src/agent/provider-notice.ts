@@ -14,7 +14,7 @@ export function providerNotice(reason: string | undefined, detail?: string): str
     "claude code sign-in expired":
       "Claude Code needs you to sign in again. Check its connection in Settings, then continue.",
     [STALL.modelRefused]:
-      "The model rejected my request. Check its details below, or choose another model and continue.",
+      "The provider could not process my request. Check the error details, API address, API type and model ID, then continue.",
     [STALL.modelUnavailable]:
       "The model is not responding after several attempts. Check its connection, or choose another model and continue.",
   };

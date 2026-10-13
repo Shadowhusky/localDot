@@ -4,7 +4,7 @@ import { LINGER_MS } from "./render-gate.ts";
 import type { WorkerIn, WorkerOut } from "./worker-protocol.ts";
 
 // A still stage costs no rendering: the worker draws once, then only when a frame arrives.
-const state = vi.hoisted(() => ({ renders: 0, pending: false }));
+const state = vi.hoisted(() => ({ renders: 0, pending: false, fail: false }));
 vi.mock("./pixi-presenter.ts", () => ({
   PixiPresenter: {
     create: async () => ({
@@ -24,12 +24,14 @@ vi.mock("./pixi-presenter.ts", () => ({
       draw() {},
       render() {
         state.renders += 1;
+        if (state.fail) throw new Error("renderer unavailable");
         state.pending = false;
       },
     }),
   },
 }));
 beforeEach(() => {
+  state.fail = false;
   state.renders = 0;
   state.pending = false;
 });
@@ -52,10 +54,11 @@ const ev = (type: string, tMs: number, data: Record<string, unknown>): LocalDotE
   }) as LocalDotEvent;
 
 async function worker() {
+  const posted: WorkerOut[] = [];
   const scope: {
     onmessage: ((e: { data: WorkerIn }) => void) | null;
     postMessage(m: WorkerOut): void;
-  } = { onmessage: null, postMessage: () => {} };
+  } = { onmessage: null, postMessage: (message) => posted.push(message) };
   const frames: FrameRequestCallback[] = [];
   const timers: (() => void)[] = [];
   let now = 0;
@@ -95,7 +98,7 @@ async function worker() {
     reducedMotion: false,
   });
   await vi.waitFor(() => expect(frames).toHaveLength(1));
-  return { send, step, settle, frames, timers, now: () => now };
+  return { send, step, settle, frames, timers, posted, now: () => now };
 }
 
 it("renders a still stage once, sleeps, and wakes for a frame", async () => {
@@ -144,4 +147,23 @@ it("does not render a still stage for each word dot streams", async () => {
   await send({ type: "view", view: { dim: true } });
   step(16);
   expect(state.renders).toBe(still + 1);
+});
+
+it("backs off repeated renderer failures and resumes when rendering works", async () => {
+  const { step, frames, timers, posted } = await worker();
+  state.fail = true;
+  step(16);
+  expect(state.renders).toBe(1);
+  expect(frames).toHaveLength(0);
+  for (let n = 0; n < 3; n++) {
+    for (const callback of timers.splice(0)) callback();
+    step(1000);
+  }
+  expect(state.renders).toBe(4);
+  expect(posted.filter((message) => message.type === "error")).toHaveLength(1);
+  state.fail = false;
+  for (const callback of timers.splice(0)) callback();
+  step(1000);
+  expect(state.renders).toBe(5);
+  expect(frames).toHaveLength(1);
 });

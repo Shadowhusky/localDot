@@ -43,9 +43,11 @@ function FocusLine({ item, next = false }: { item: PlanItem; next?: boolean }) {
 export function PlanStrip({
   plan,
   label = "Task plan",
+  overlay = false,
 }: {
   plan: readonly PlanItem[];
   label?: string;
+  overlay?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const done = plan.filter((item) => item.status === "done").length;
@@ -53,7 +55,7 @@ export function PlanStrip({
   return (
     <Disclosure
       strip
-      className="plan-strip"
+      className={overlay ? "plan-strip plan-strip-overlay" : "plan-strip"}
       open={open}
       onOpenChange={setOpen}
       summary={
@@ -69,8 +71,8 @@ export function PlanStrip({
               {done} of {plan.length}
             </span>
           </span>
-          {!open && current && <FocusLine item={current} />}
-          {!open && next && <FocusLine item={next} next />}
+          {(overlay || !open) && current && <FocusLine item={current} />}
+          {(overlay || !open) && next && <FocusLine item={next} next />}
         </span>
       }
     >

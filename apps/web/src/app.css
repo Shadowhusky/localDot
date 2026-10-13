@@ -143,6 +143,7 @@
    top, dot and its line sit under it, the thread is the one scroller and the toolbar is its foot. */
 @media (--phone) {
   .app {
+    height: var(--_visible-h, 100dvh);
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     padding-right: 0;
@@ -360,5 +361,44 @@
   .stage > .stage-veil {
     scale: 1;
     transition: none;
+  }
+}
+
+/* A minimized phone screen leaves the task running and gives its space to the conversation. */
+@media (--phone) {
+  .app:not([data-focus]) .stage-col {
+    --mobile-screen-height: 100dvh;
+    max-height: calc(var(--mobile-screen-height) + var(--stage-top) + env(safe-area-inset-top));
+    transition:
+      max-height var(--dur-default) var(--ease-standard),
+      padding-top var(--dur-default) var(--ease-standard),
+      opacity var(--dur-fade) var(--ease-standard);
+  }
+  .app[data-screen-minimized] .stage-col {
+    max-height: 0;
+    padding-top: 0;
+    overflow: clip;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .mobile-screen-restore {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: max(calc(var(--spacing) * 2), env(safe-area-inset-top)) calc(var(--spacing) * 3)
+      calc(var(--spacing) * 2);
+  }
+  .app[data-screen-minimized] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .app[data-screen-minimized] .rail-chat {
+    grid-area: 2 / 1;
+  }
+}
+@media (--phone) and (prefers-reduced-motion: reduce) {
+  .app:not([data-focus]) .stage-col {
+    transition: opacity var(--dur-fade) var(--ease-standard);
   }
 }

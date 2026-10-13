@@ -3,7 +3,7 @@ import { fakeCdp, fakeTargets } from "../testing/fake-cdp.ts";
 import { NavigationError, NoPageError, outlineOf, PageBrowser } from "./browser.ts";
 
 describe("PageBrowser", () => {
-  it("reads the most recent page's text and outline, cut at maxChars", async () => {
+  it("reads the sole page's text and outline, cut at maxChars", async () => {
     const { WebSocketImpl } = fakeCdp((method) => {
       if (method === "Runtime.evaluate")
         return {
@@ -42,10 +42,7 @@ describe("PageBrowser", () => {
     const { WebSocketImpl, sent } = fakeCdp(() => ({}));
     const browser = new PageBrowser({
       WebSocketImpl,
-      fetchImpl: fakeTargets([
-        { type: "page", url: "https://accounts.google.com/signin" },
-        { type: "page", url: "https://example.com/" },
-      ]),
+      fetchImpl: fakeTargets([{ type: "page", url: "https://accounts.google.com/signin" }]),
     });
     expect(await browser.page()).toEqual({ url: "https://accounts.google.com/signin" });
     expect(sent).toEqual([]);

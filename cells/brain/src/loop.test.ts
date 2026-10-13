@@ -252,6 +252,130 @@ describe("Agent", () => {
       expect(t.f.toolCalls.find((c) => c.name === "ask_user")?.input).toEqual(field([640, 200]));
     });
 
+    it("continues after done asks for missing input and converts its private target to screen pixels", async () => {
+      const field = (target: number[]) => ({
+        question: "Sign in to continue verification",
+        fields: [{ id: "password", kind: "secret", label: "Password", target }],
+      });
+      const t = agent(
+        [
+          call("done", { summary: "Verification needs sign-in", input_request: field([500, 250]) }),
+          call("browser_read", {}),
+          call("done", { summary: "Verified", input_request: null }),
+        ],
+        {
+          boot: { models: { main: binding({ computer: "generic", coords: "per1000" }) } },
+          answer: (name, input) =>
+            name === "done" && (input as { input_request?: unknown }).input_request
+              ? {
+                  ok: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: "The password was provided privately. Continue verification.",
+                    },
+                  ],
+                }
+              : undefined,
+        },
+      );
+      expect(await t.run()).toBe("done");
+      expect(t.f.toolCalls.map((c) => c.name)).toEqual([
+        "computer",
+        "done",
+        "browser_read",
+        "done",
+      ]);
+      expect(t.f.toolCalls.find((c) => c.name === "done")?.input).toEqual({
+        summary: "Verification needs sign-in",
+        input_request: field([640, 200]),
+      });
+      expect(JSON.stringify(t.main.prompts[1])).toContain("Continue verification.");
+    });
+
+    it("refuses an off-screen private input target nested in done before reaching the daemon", async () => {
+      const t = agent(
+        [
+          call("done", {
+            summary: "Needs input",
+            input_request: {
+              question: "Sign in",
+              fields: [{ id: "password", kind: "secret", label: "Password", target: [1200, 250] }],
+            },
+          }),
+          call("done", { summary: "Stopped without entering anything", input_request: null }),
+        ],
+        { boot: { models: { main: binding({ computer: "generic", coords: "per1000" }) } } },
+      );
+      expect(await t.run()).toBe("done");
+      expect(t.f.toolCalls.filter((c) => c.name === "done")).toHaveLength(1);
+      expect(JSON.stringify(t.main.prompts[1])).toContain("ask_user: the target of password:");
+    });
+
+    it("continues through repeated external waits and later actions until the requested outcome is complete", async () => {
+      const waiting = {
+        summary: "The requested outcome is still pending",
+        completion: {
+          status: "waiting",
+          evidence: "Another participant's turn is still active",
+          wait_seconds: 15,
+        },
+        input_request: null,
+        experience: null,
+      };
+      const t = agent(
+        [
+          ...Array.from({ length: 3 }, () => calls(["done", waiting], ["browser_read", {}])),
+          call("browser_act", { action: "click", ref: "e4" }),
+          call("browser_read", {}),
+          call("done", {
+            summary: "The requested outcome is reached",
+            completion: { status: "complete", evidence: "Final results are displayed" },
+            input_request: null,
+            experience: null,
+          }),
+        ],
+        {
+          answer: (name, input) =>
+            name === "done" &&
+            (input as { completion?: { status: string } }).completion?.status === "waiting"
+              ? {
+                  ok: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: "Wait ended. Inspect current state and continue; task remains active.",
+                    },
+                  ],
+                }
+              : name === "browser_read"
+                ? { ok: true, content: [{ type: "text", text: "Current page observed" }] }
+                : undefined,
+        },
+      );
+      expect(await t.run()).toBe("done");
+      expect(t.f.toolCalls.map((c) => c.name)).toEqual([
+        "computer",
+        "done",
+        "browser_read",
+        "done",
+        "browser_read",
+        "done",
+        "browser_read",
+        "browser_act",
+        "browser_read",
+        "done",
+      ]);
+      const completions = t.f.toolCalls.filter((c) => c.name === "done");
+      expect(
+        completions
+          .slice(0, 3)
+          .every((c) => (c.input as typeof waiting).completion.status === "waiting"),
+      ).toBe(true);
+      expect(completions.at(-1)?.input).toMatchObject({ completion: { status: "complete" } });
+      expect(JSON.stringify(t.main.prompts[1])).toContain("task remains active");
+    });
+
     it("declares switch_screen but never a tool outside the table", async () => {
       const t = agent([call("done", { summary: "x" })]);
       await t.run();
@@ -277,6 +401,7 @@ describe("Agent", () => {
         "update_plan",
         "web_fetch",
         "web_search",
+        "work_context",
       ]);
     });
 
@@ -1064,6 +1189,8 @@ describe("Agent", () => {
     const t = agent([say("Hmm."), say("Hmm."), say("Hmm.")]);
     expect(await t.run()).toBe("gave_up");
     expect(JSON.stringify(t.main.prompts[1])).toContain("You stopped without calling a tool.");
+    expect(JSON.stringify(t.main.prompts[1])).toContain("completion.status waiting");
+    expect(JSON.stringify(t.main.prompts[1])).toContain("Waiting is not completion or a blocker.");
   });
 
   it("summarizes older turns with the fast model past 60 % of the context", async () => {
@@ -1082,6 +1209,8 @@ describe("Agent", () => {
     });
     expect(await t.run()).toBe("done");
     expect(t.fast?.prompts.length).toBeGreaterThan(0);
+    expect(JSON.stringify(t.fast?.prompts[0])).toContain("explicit completion/stopping conditions");
+    expect(JSON.stringify(t.fast?.prompts[0])).toContain("external state still being awaited");
     expect(
       t.f.transcript.some(
         (m) =>

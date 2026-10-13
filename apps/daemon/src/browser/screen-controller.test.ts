@@ -358,6 +358,24 @@ function fixture(downloads?: ScreenControllerDeps["downloads"]) {
 }
 
 describe("session screen coordinator", () => {
+  it("reports screen availability without launching or granting browser control", async () => {
+    const f = fixture();
+    expect(f.controller.availability()).toEqual({
+      desktop: true,
+      browser: "not_open",
+      selected: "desktop",
+    });
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+    expect(f.client.control).not.toHaveBeenCalled();
+    await f.controller.switchTo("browser", f.scope);
+    expect(f.controller.availability()).toEqual({
+      desktop: true,
+      browser: "attached",
+      selected: "browser",
+    });
+    await f.controller.close();
+    expect(f.controller.availability().browser).toBe("unavailable");
+  });
   it("hands the running browser to the next task with a newer control revision", async () => {
     const f = fixture();
     let counted = 0;
@@ -399,6 +417,53 @@ describe("session screen coordinator", () => {
     expect(f.controller.browserAccess(lease).tabId).toBe(second);
     expect(f.client.clock.mock.calls.map(([, tabId]) => tabId)).toEqual([f.tabId, second, second]);
     lease.finish();
+    await f.controller.close();
+  });
+
+  it("refreshes a read onto a popup while keeping previously admitted input pinned", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    const previous = f.controller.lease(f.scope);
+    const popup = randomUUID();
+    f.client.tabs.mockResolvedValue({
+      tabs: [
+        { id: f.tabId, ready: true },
+        { id: popup, ready: true },
+      ],
+    });
+    f.client.clock.mockImplementation(async (_permit, id, scope) => {
+      scope.check();
+      if (id !== popup) throw new BrowserClientError("unavailable");
+      return { mono: 50 };
+    });
+    const read = f.controller.lease(f.scope);
+    await f.controller.refreshBrowser(read);
+    expect(f.controller.browserAccess(read).tabId).toBe(popup);
+    expect(f.controller.browserAccess(previous).tabId).toBe(f.tabId);
+    expect(f.deps.browser.stop).not.toHaveBeenCalled();
+    read.finish();
+    previous.finish();
+    const next = f.controller.lease(f.scope);
+    expect(f.controller.browserAccess(next).tabId).toBe(popup);
+    next.finish();
+    await f.controller.close();
+  });
+
+  it("cannot refresh a read after the user takes control", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    const lease = f.controller.lease(f.scope);
+    const popup = randomUUID();
+    f.client.tabs.mockResolvedValue({ tabs: [{ id: popup, ready: true }] });
+    const held = Promise.withResolvers<{ mono: number }>();
+    f.client.clock.mockReturnValue(held.promise);
+    const pending = f.controller.refreshBrowser(lease);
+    const result = expect(pending).rejects.toThrow();
+    const taking = f.controller.takeOver();
+    held.resolve({ mono: 50 });
+    await result;
+    lease.finish();
+    await taking;
     await f.controller.close();
   });
 
@@ -501,6 +566,60 @@ describe("session screen coordinator", () => {
     await returning;
     expect(f.holder()).toBe("agent");
     expect(() => f.controller.manualAccess(f.scope)).toThrow();
+    await f.controller.close();
+  });
+
+  it("confirms delivery after the input lease ends, but never after a browser replacement", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    const abort = new AbortController();
+    const manual = f.controller.manualAccess({
+      signal: abort.signal,
+      check: () => abort.signal.throwIfAborted(),
+    });
+    manual.finish();
+    abort.abort();
+    expect(() => manual.check()).toThrow();
+    await manual.confirm();
+    expect(f.holder()).toBe("user");
+    expect(f.client.manual).not.toHaveBeenCalled();
+    f.replace();
+    const calls = f.client.control.mock.calls.length;
+    await expect(manual.confirm()).rejects.toThrow(ScreenControlError);
+    expect(f.client.control).toHaveBeenCalledTimes(calls);
+    await f.controller.close();
+  });
+
+  it("does not confirm browser input when control ends during recovery", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    const manual = f.controller.manualAccess(f.scope);
+    manual.finish();
+    const barrier = Promise.withResolvers<void>();
+    f.controlBarrier.mockImplementationOnce(async () => barrier.promise);
+    const recovery = manual.confirm();
+    const rejected = expect(recovery).rejects.toThrow(ScreenControlError);
+    const closing = f.controller.close();
+    barrier.resolve();
+    await rejected;
+    await closing;
+  });
+
+  it("restores user input when the hand-back request is cancelled", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    const abort = new AbortController();
+    const returning = f.controller.handback({ ...f.scope, signal: abort.signal });
+    abort.abort();
+    await expect(returning).rejects.toThrow(ScreenControlError);
+    expect(f.holder()).toBe("user");
+    const manual = f.controller.manualAccess(f.scope);
+    await manual.input({ kind: "text", text: "x" });
+    manual.finish();
+    await f.controller.handback(f.scope);
     await f.controller.close();
   });
 

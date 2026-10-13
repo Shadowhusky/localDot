@@ -337,6 +337,7 @@ export function toolRisk(
       return {
         operation: input.op === "read" || input.op === "list" ? "files_read" : "files_write",
       };
+    case "work_context":
     case "browser_read":
       return { operation: "files_read" };
     case "find":
@@ -359,6 +360,8 @@ export function toolRisk(
     case "people":
       return { operation: input.op === "save" ? "memory_write" : "files_read" };
     case "done":
+      if ((input.completion as { status?: unknown } | undefined)?.status === "waiting")
+        return { operation: "wait" };
       return {
         operation:
           Array.isArray(input.files) && input.files.length > 0 ? "files_write" : "files_read",

@@ -9,7 +9,7 @@ import { captureFile, Screenshots } from "./perception/capture.ts";
 import { ChromiumPerception } from "./perception/cdp.ts";
 import { CuaDriver } from "./perception/driver.ts";
 import { driverInjector } from "./perception/find.ts";
-import type { PerceptionDeps } from "./perception/hit-test.ts";
+import { frontChromium, listWindows, type PerceptionDeps } from "./perception/hit-test.ts";
 import { AtspiAccessibility } from "./perception/native.ts";
 import { cachedSelfTest, nodeProbes, runSelfTest, selfTestConfigFromEnv } from "./selftest.ts";
 import { PageBrowser } from "./tools/browser.ts";
@@ -81,7 +81,15 @@ const app = createDesktopdApp({
   tools: {
     home: process.env.LOCALDOT_HOME_DIR ?? "/config",
     env: process.env,
-    browser: new PageBrowser(),
+    browser: new PageBrowser({
+      window: async (signal) => {
+        signal.throwIfAborted();
+        if (!x?.alive) return undefined;
+        const windows = await listWindows(x);
+        signal.throwIfAborted();
+        return frontChromium(windows);
+      },
+    }),
   },
   selfTest: cachedSelfTest(() => runSelfTest(selfTestConfigFromEnv(process.env), nodeProbes())),
   connectionOwner: (port) => connectionOwner(port),

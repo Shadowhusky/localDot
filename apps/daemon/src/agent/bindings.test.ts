@@ -38,6 +38,20 @@ const keys: KeydRecord[] = [
 const SURROGATE = "ld_llm_0123456789abcdefghijkl_abcdef";
 
 describe("resolveRole", () => {
+  it("snapshots options into the brain binding and rejects unsupported settings", () => {
+    const choice = {
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      key: "anthropic",
+      options: { reasoningEffort: "high" as const },
+    };
+    const role = resolveRole("main", choice, catalog, keys);
+    expect(bindingOf(role, { anthropic: SURROGATE }).options).toEqual({ reasoningEffort: "high" });
+    expect(Object.isFrozen(role.options)).toBe(true);
+    expect(() =>
+      resolveRole("main", { ...choice, options: { reasoningEffort: "none" } }, catalog, keys),
+    ).toThrow(/does not support/);
+  });
   it("binds Claude Sonnet 5.5 through the user's anthropic key with the native toolset", () => {
     const r = resolveRole(
       "main",
@@ -46,6 +60,7 @@ describe("resolveRole", () => {
       keys,
     );
     expect(bindingOf(r, { anthropic: SURROGATE })).toEqual({
+      provider: "anthropic",
       route: "anthropic",
       client: "anthropic",
       model: "claude-sonnet-5-5",
@@ -467,6 +482,7 @@ describe("custom endpoints state what their model can do", () => {
   it("reaches an Anthropic-compatible endpoint with localDot's computer tool by default", () => {
     const r = resolveRole("main", anc, catalog, custom);
     expect(bindingOf(r, { anc: SURROGATE })).toEqual({
+      provider: "anthropic-compatible",
       route: "anc",
       client: "anthropic-compatible",
       model: "glm-5.3-flash",
@@ -483,6 +499,35 @@ describe("custom endpoints state what their model can do", () => {
     );
     expect(() => resolveRole("main", { ...anc, price: undefined }, catalog, custom)).toThrow(
       /no price in the catalog/,
+    );
+  });
+
+  it("uses Responses with an existing compatible key without changing its endpoint or pricing", () => {
+    const choice = {
+      provider: "openai-responses-compatible",
+      model: "gateway-model",
+      key: "gateway",
+      price,
+    };
+    const resolved = resolveRole("main", choice, undefined, custom);
+    expect(bindingOf(resolved, { gateway: SURROGATE })).toMatchObject({
+      client: "openai",
+      route: "gateway",
+      model: "gateway-model",
+      surrogate: SURROGATE,
+      computer: "generic",
+      vision: true,
+    });
+    const chat = resolveRole(
+      "main",
+      { ...choice, provider: "openai-compatible" },
+      undefined,
+      custom,
+    );
+    expect(chat.client).toBe("openai-compatible");
+    expect(pricingOf([resolved])).toEqual(pricingOf([chat]));
+    expect(() => resolveRole("main", { ...choice, key: "anc" }, undefined, custom)).toThrow(
+      /is not a/,
     );
   });
 

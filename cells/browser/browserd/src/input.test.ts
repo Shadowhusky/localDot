@@ -1063,3 +1063,206 @@ describe("private browser password delivery", () => {
     expect(f.effects()).toHaveLength(0);
   });
 });
+
+describe("segmented private codes", () => {
+  async function segmented() {
+    const f = await setup(1);
+    f.state.passwordType = "text";
+    f.state.autocomplete = "off";
+    let ids = [10, 11, 12, 13, 14, 15, 16, 17];
+    let action = "/login/device";
+    let submitAttrs = ["type", "submit"];
+    const attrs = (id: number) => [
+      "type",
+      "text",
+      "maxlength",
+      "1",
+      "aria-label",
+      `User code ${id - 10 + (id >= 14 ? 1 : 0)}`,
+    ];
+    const original = f.command.getMockImplementation()!;
+    f.command.mockImplementation(async (document, method, params) => {
+      if (method === "DOM.describeNode")
+        return {
+          node: {
+            nodeName: "INPUT",
+            attributes: attrs((params as { backendNodeId: number }).backendNodeId),
+          },
+        };
+      if (method === "DOMSnapshot.captureSnapshot") {
+        const strings: string[] = [];
+        const intern = (value: string) => {
+          strings.push(value);
+          return strings.length - 1;
+        };
+        return {
+          strings,
+          documents: [
+            {
+              nodes: {
+                nodeName: [
+                  intern("#document"),
+                  intern("FORM"),
+                  ...ids.map(() => intern("INPUT")),
+                  intern("INPUT"),
+                  intern("BUTTON"),
+                ],
+                backendNodeId: [1, 2, ...ids, 80, 90],
+                parentIndex: [-1, 0, ...ids.map(() => 1), 1, 1],
+                attributes: [
+                  [],
+                  ["method", "post", "action", action].map(intern),
+                  ...ids.map((id) => attrs(id).map(intern)),
+                  ["aria-label", "User code 4", "readonly", "", "value", "-"].map(intern),
+                  submitAttrs.map(intern),
+                ],
+              },
+            },
+          ],
+        };
+      }
+      if (method === "DOM.getBoxModel") {
+        const id = (params as { backendNodeId: number }).backendNodeId;
+        const x = id === 90 ? 600 : 100 + (id - 10) * 50;
+        return { model: { content: [x - 10, 100, x + 10, 100, x + 10, 140, x - 10, 140] } };
+      }
+      if (method === "DOM.getNodeForLocation") {
+        const x = (params as { x: number }).x;
+        return {
+          backendNodeId: x === 600 ? 90 : x >= 100 ? 10 + (x - 100) / 50 : 10,
+          frameId: "root",
+        };
+      }
+      return original(document, method, params);
+    });
+    const native = f.nativeCommand.getMockImplementation()!;
+    f.nativeCommand.mockImplementation(async (name, args) => {
+      if (name === "click")
+        f.state.focusedNode = 10 + Math.round(((Number(args.x) - 20) / 1.25 - 100) / 50);
+      const result = await native(name, args);
+      if (name === "char")
+        f.state.focusedNode = f.state.focusedNode < 17 ? f.state.focusedNode + 1 : 90;
+      // GitHub moves to the next segment on Ctrl+A before a code character lands.
+      if (name === "keys" && JSON.stringify(args.combo) === '["Control_L","a"]')
+        f.state.focusedNode++;
+      return result;
+    });
+    const request = {
+      origin: "https://github.com",
+      at: { x: 100, y: 150 },
+      text: "ABCD-EFGH",
+      purpose: "device_code" as const,
+      node: 10,
+    };
+    return {
+      ...f,
+      request,
+      replace: () => {
+        ids = ids.map((id) => id + 100);
+      },
+      crossOrigin: () => {
+        action = "https://evil.test/";
+      },
+      submitAttributes: (attrs: string[]) => {
+        submitAttrs = ["type", "submit", ...attrs];
+      },
+    };
+  }
+  it("fills GitHub's eight boxes despite automatic focus advance and a displayed hyphen", async () => {
+    const f = await segmented();
+    expect(await f.input.secret(permit, "tab", f.request, f.abort.signal)).toEqual({
+      filled: true,
+      rememberable: false,
+      submitted: true,
+    });
+    expect(
+      f.commands
+        .filter((c) => c.name === "char")
+        .map((c) => c.args.ch)
+        .join(""),
+    ).toBe("ABCDEFGH");
+    expect(f.commands.filter((c) => c.name === "click")).toHaveLength(9);
+  });
+  it.each(["formaction", "formmethod", "formtarget", "form", "hidden"])(
+    "refuses a segmented submit with a %s override before typing",
+    async (attribute) => {
+      const f = await segmented();
+      f.submitAttributes([attribute, "unexpected"]);
+      await expect(f.input.secret(permit, "tab", f.request, f.abort.signal)).rejects.toThrow(
+        "secret",
+      );
+      expect(f.effects()).toHaveLength(0);
+    },
+  );
+  it("does not click a segmented submit that stays disabled", async () => {
+    const f = await segmented();
+    f.submitAttributes(["disabled", ""]);
+    await expect(f.input.secret(permit, "tab", f.request, f.abort.signal)).rejects.toThrow(
+      "secret",
+    );
+    expect(f.commands.filter((c) => c.name === "char")).toHaveLength(8);
+    expect(f.commands.filter((c) => c.name === "click")).toHaveLength(8);
+  });
+  it("refuses a partially filled segmented code before any native input", async () => {
+    const f = await segmented();
+    vi.mocked(f.options.secrets.inspect).mockResolvedValue({ filled: true, nodeIds: [10] });
+    await expect(f.input.secret(permit, "tab", f.request, f.abort.signal)).rejects.toThrow(
+      "secret",
+    );
+    expect(f.effects()).toHaveLength(0);
+  });
+  it.each(["password", "authenticator", "wrong-node", "missing-node"])(
+    "refuses known device-code delivery to %s before typing",
+    async (kind) => {
+      const f = await segmented();
+      if (kind === "wrong-node") f.request.node = 999;
+      if (kind === "missing-node") Reflect.deleteProperty(f.request, "node");
+      if (kind === "password" || kind === "authenticator") {
+        const original = f.command.getMockImplementation()!;
+        f.command.mockImplementation(async (document, method, params) => {
+          if (method === "DOM.describeNode")
+            return {
+              node: {
+                nodeName: "INPUT",
+                attributes:
+                  kind === "password"
+                    ? ["type", "password", "aria-label", "User code"]
+                    : [
+                        "type",
+                        "text",
+                        "autocomplete",
+                        "one-time-code",
+                        "aria-label",
+                        "Authenticator code",
+                      ],
+              },
+            };
+          return original(document, method, params);
+        });
+      }
+      await expect(f.input.secret(permit, "tab", f.request, f.abort.signal)).rejects.toThrow();
+      expect(f.commands.filter((c) => c.name === "char")).toHaveLength(0);
+    },
+  );
+  it.each(["length", "foreign-form", "replacement", "focus", "origin"])(
+    "refuses %s without leaking remaining characters",
+    async (kind) => {
+      const f = await segmented();
+      if (kind === "length") f.request.text = "ABC";
+      if (kind === "foreign-form") f.crossOrigin();
+      if (kind === "replacement") f.hooks.set("native.char:1", f.replace);
+      if (kind === "focus")
+        f.hooks.set("native.char:1", () => {
+          f.state.focusedNode = 99;
+        });
+      if (kind === "origin")
+        f.hooks.set("native.char:1", () => {
+          f.state.origin = "https://evil.test/";
+        });
+      await expect(f.input.secret(permit, "tab", f.request, f.abort.signal)).rejects.toThrow();
+      expect(f.commands.filter((c) => c.name === "char")).toHaveLength(
+        ["length", "foreign-form"].includes(kind) ? 0 : 1,
+      );
+    },
+  );
+});

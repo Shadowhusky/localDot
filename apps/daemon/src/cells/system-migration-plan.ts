@@ -10,6 +10,13 @@ const Entry = z.tuple([
 ]);
 export const Manifest = z.record(z.string(), Entry);
 export type Manifest = z.infer<typeof Manifest>;
+export const SYSTEM_BASE_MISSING =
+  "The previous system image is missing from Docker. Restore it before updating this computer. Your apps and files are unchanged.";
+export class SystemBaseMissing extends Error {
+  constructor(readonly image: string) {
+    super(SYSTEM_BASE_MISSING);
+  }
+}
 export class SystemMigrationConflict extends Error {
   constructor(readonly paths: string[]) {
     super("An installed app changed files needed by this update. Nothing was replaced.");

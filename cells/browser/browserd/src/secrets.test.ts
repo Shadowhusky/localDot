@@ -128,12 +128,72 @@ describe("secret metadata projection", () => {
     { name: "otp" },
     { id: "verification_code" },
     { "aria-label": "Security code" },
+    { "aria-label": "User code 0" },
+    { "aria-label": "User code 8" },
+    { name: "device_code" },
   ])("recognizes live secrets without returning their values: %j", (attributes) => {
     const result = secretMetadata(snapshot([{ attributes, value: "private-canary" }]));
     expect(result).toEqual({ filled: true, nodeIds: [1] });
     expect(JSON.stringify(result)).not.toContain("canary");
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.nodeIds)).toBe(true);
+  });
+
+  it.each(["user_code", "password", "otp", "sudo_totp", "authenticity_token"])(
+    "redacts non-renderable %s form state without blocking consent or reauthentication",
+    (name) => {
+      const attributes = { type: "hidden", name, value: "private-canary" };
+      const result = secretMetadata(snapshot([{ attributes, value: "private-canary" }]));
+      expect(result).toEqual({ filled: false, nodeIds: [1] });
+      expect(JSON.stringify(result)).not.toContain("private-canary");
+    },
+  );
+
+  it.each<Record<string, string>>([
+    { type: "text", name: "user_code", hidden: "" },
+    { type: "text", name: "otp", style: "display:none" },
+    { type: "password", hidden: "" },
+    { type: "password", style: "visibility:hidden" },
+    { type: "text", name: "otp", "aria-hidden": "true" },
+  ])("keeps renderable secrets protected even when concealed: %j", (attributes) => {
+    expect(secretMetadata(snapshot([{ attributes, value: "private-canary" }]))).toEqual({
+      filled: true,
+      nodeIds: [1],
+    });
+  });
+
+  it("does not let hidden form state exempt an entered verification field", () => {
+    expect(
+      secretMetadata(
+        snapshot([
+          { attributes: { type: "hidden", name: "sudo_totp" }, value: "1" },
+          { attributes: { autocomplete: "one-time-code" }, value: "123456" },
+        ]),
+      ),
+    ).toEqual({ filled: true, nodeIds: [1, 2] });
+  });
+
+  it.each(["readonly", "disabled"])(
+    "does not treat a fixed %s code separator as an entered secret",
+    (flag) => {
+      const attributes = { "aria-label": "User code 4", [flag]: "", value: "-" };
+      expect(secretMetadata(snapshot([{ attributes, value: "-" }]))).toEqual({
+        filled: false,
+        nodeIds: [1],
+      });
+      // A changed live value must still block perception even with a retained hyphen attribute.
+      expect(secretMetadata(snapshot([{ attributes, value: "private-canary" }]))).toEqual({
+        filled: true,
+        nodeIds: [1],
+      });
+    },
+  );
+  it.each<Record<string, string>>([
+    { "aria-label": "User code 4", value: "-" },
+    { type: "password", readonly: "", value: "-" },
+    { "aria-label": "User code 4", readonly: "", value: "A" },
+  ])("keeps editable or non-separator secrets protected: %j", (attributes) => {
+    expect(secretMetadata(snapshot([{ attributes }]))).toEqual({ filled: true, nodeIds: [1] });
   });
 
   it("identifies empty protected fields without erasing ordinary filled forms", () => {

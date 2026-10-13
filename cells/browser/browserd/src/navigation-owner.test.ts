@@ -23,7 +23,9 @@ async function fixture(grant = true) {
     reload: async () => {},
   });
   if (grant) await control.set({ ...permit, holder: "agent" });
-  const navigate = vi.fn(async (_tab: string, _url: string, _signal?: AbortSignal) => {});
+  const navigate = vi.fn(
+    async (_tab: string, _url: string, _signal?: AbortSignal): Promise<"download" | void> => {},
+  );
   const owner = new BrowserNavigation(control, { navigate });
   return { control, owner, navigate };
 }
@@ -59,6 +61,20 @@ describe("admitted navigation lifetime", () => {
       "https://example.test/private?value=canary",
       expect.any(AbortSignal),
     );
+    await owner.close();
+  });
+
+  it("reports a download separately from a page load", async () => {
+    const { owner, navigate } = await fixture();
+    navigate.mockResolvedValueOnce("download");
+    expect(
+      await owner.navigate(
+        permit,
+        tabId,
+        "https://example.test/source.zip",
+        new AbortController().signal,
+      ),
+    ).toEqual({ done: true, download: true });
     await owner.close();
   });
 

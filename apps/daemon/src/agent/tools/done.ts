@@ -1,5 +1,7 @@
 import { basename } from "node:path";
 import type { DoneInput, ToolResult } from "@localdot/protocol";
+import { PausedStepError } from "../safety/step-barrier.ts";
+import { abortable } from "../session.ts";
 import { append, cut, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 export async function doneTool(
   deps: ToolDeps,
@@ -7,8 +9,43 @@ export async function doneTool(
   input: DoneInput,
 ): Promise<ToolResult> {
   ctx.check();
+  // Normal dispatch routes this to ask_user before policy checks. Direct callers must not
+  // turn an unresolved input request into a finished result or collect files prematurely.
+  if (input.input_request)
+    return fail("This task needs the user's input. Ask with ask_user, then continue the work.");
   if (!ctx.permit?.consume(input, null))
     return fail("Execution approval is unavailable or already used. Do not retry automatically.");
+  const completion = input.completion;
+  if (completion?.status === "waiting") {
+    // Waiting on another actor or a process is still part of this task. Keep it
+    // cancellable under the normal tool lease without requiring a live screen,
+    // collecting files, recording a result, or saving an unfinished lesson.
+    const ms = (completion.wait_seconds ?? 15) * 1000;
+    append(ctx, "step.start", { kind: "think", intent: cut(ctx.redact(completion.evidence), 120) });
+    append(ctx, "tool.start", { tool: "done", title: "Waiting for progress" });
+    const requests = ctx.session.requests.length;
+    let waited = 0;
+    while (waited < ms && ctx.session.requests.length === requests) {
+      if (ctx.session.safetyPause) throw new PausedStepError();
+      const interval = Math.min(1000, ms - waited);
+      await abortable(deps.sleep(interval, ctx.signal), ctx.signal);
+      ctx.check();
+      waited += interval;
+    }
+    if (ctx.session.safetyPause) throw new PausedStepError();
+    append(ctx, "tool.end", { ok: true });
+    append(ctx, "step.end", { status: "ok" });
+    return {
+      ok: true,
+      content: [
+        text(
+          ctx.session.requests.length !== requests
+            ? "A new user instruction arrived. The task remains active; apply that instruction before continuing."
+            : `Waited ${waited / 1000} seconds. The task remains active and unfinished. Inspect the current state, act when the next step is available, and keep waiting when needed until the user's requested outcome is verified. Another actor's turn or a pending process is not task completion.`,
+        ),
+      ],
+    };
+  }
   const desktop = deps.desktop(ctx.session.cellId);
   const files: { name: string; path: string; bytes: number; version?: number }[] = [];
   const problems: string[] = [];
@@ -57,8 +94,8 @@ export async function doneTool(
       ],
     };
   ctx.check();
-  const checked = input.checked?.trim();
-  if (checked)
+  const checked = input.checked?.trim() || completion?.evidence.trim();
+  if (checked && completion?.status !== "blocked")
     append(ctx, "step.verify", { status: "success", evidence: cut(ctx.redact(checked), 200) });
   if (input.experience && deps.saveExperience) {
     const experience = input.experience;
@@ -71,6 +108,18 @@ export async function doneTool(
       ...(experience.cues ? { cues: experience.cues.map((cue) => ctx.redact(cue)) } : {}),
     });
   }
-  append(ctx, "task.result", { summary: cut(ctx.redact(input.summary), 8000), files });
-  return { ok: true, final: true, content: [text("Task finished.")] };
+  append(ctx, "task.result", {
+    summary: cut(ctx.redact(input.summary), 8000),
+    files,
+    ...(completion ? { outcome: completion.status } : {}),
+  });
+  return {
+    ok: true,
+    final: true,
+    content: [
+      text(
+        completion?.status === "blocked" ? "Task ended with unfinished work." : "Task finished.",
+      ),
+    ],
+  };
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SECRET_ID_PATTERN } from "./keyd.ts";
+import { ModelOptions } from "./model-options.ts";
 import { PurposeCheck } from "./purpose.ts";
 import { ResearchBudget } from "./research.ts";
 import { AutonomyPolicy } from "./safety.ts";
@@ -18,6 +19,7 @@ export const AgentRoleChoice = z.strictObject({
   model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
   key: z.string().regex(SECRET_ID_PATTERN).optional(),
   price: AgentModelPrice.optional(),
+  options: ModelOptions.optional(),
   // What a custom endpoint's model can do, as the user states it; the daemon refuses these for any
   // other provider. Without them the model sees images and has a 32,768-token context.
   vision: z.boolean().optional(),

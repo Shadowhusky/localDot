@@ -13,6 +13,7 @@ export interface PickerModel extends Capability {
   id: string;
   name: string;
   contextTokens: number;
+  maxOutputTokens?: number;
   releaseDate?: string;
   inputUSDPerMTok: number;
   outputUSDPerMTok: number;

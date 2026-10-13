@@ -54,6 +54,8 @@ const oracle = new OracleCapture();
 const gate = new RenderGate();
 let animationFrame: number | null = null;
 let idleLook: ReturnType<typeof setTimeout> | null = null;
+let renderRetryAt = 0;
+let renderError: string | null = null;
 
 // The rings on the fields dot will fill, on the screen shown.
 function showFields(): void {
@@ -111,12 +113,16 @@ function probing(inner: Presenter): Presenter {
 
 function tick(): void {
   animationFrame = null;
+  const now = performance.now();
+  if (now < renderRetryAt) {
+    idleLook = setTimeout(wake, renderRetryAt - now);
+    return;
+  }
   if (replay) {
     replay.tick();
     animationFrame = requestAnimationFrame(tick);
     return;
   }
-  const now = performance.now();
   if (presenter) {
     const screen = screenNow();
     presenter.setScreen(selection || model.screen ? screen : null);
@@ -143,6 +149,8 @@ function tick(): void {
       presenter.draw(scene);
       try {
         presenter.render();
+        renderRetryAt = 0;
+        renderError = null;
         // Uploading a texture does not make it visible. Manual admission acknowledges only
         // a successful canvas render, and a retired pump cannot publish its pending stats.
         if (pendingStats?.generation === sourceGeneration) {
@@ -158,12 +166,17 @@ function tick(): void {
           oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
       } catch (err) {
         gate.invalidate();
-        report(err);
+        // A lost renderer must not spin and log at display refresh rate. Keep the newest
+        // frame and retry at most once a second while the browser recovers.
+        renderRetryAt = now + 1000;
+        const message = err instanceof Error ? err.message : String(err);
+        if (message !== renderError) report(err);
+        renderError = message;
       }
     }
   }
   // An idle look still waits for a display frame, so a hidden page gets none.
-  const wait = gate.wait(now);
+  const wait = Math.max(gate.wait(now), renderRetryAt - now);
   if (wait > 0) idleLook = setTimeout(wake, wait);
   else animationFrame = requestAnimationFrame(tick);
 }

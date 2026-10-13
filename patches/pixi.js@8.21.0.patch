@@ -1,0 +1,26 @@
+diff --git a/lib/rendering/renderers/canvas/utils/canvasUtils.js b/lib/rendering/renderers/canvas/utils/canvasUtils.js
+index 3cc8d68bbd0319e01d080af4ba284fad4d864d14..2bc382d99138ef24ba900ea0a60cc7fb8d3adba8 100644
+--- a/lib/rendering/renderers/canvas/utils/canvasUtils.js
++++ b/lib/rendering/renderers/canvas/utils/canvasUtils.js
+@@ -25,7 +25,7 @@ const canvasUtils = {
+     const resourceHeight = source.resourceHeight ?? source.pixelHeight;
+     const needsResize = resourceWidth !== source.pixelWidth || resourceHeight !== source.pixelHeight;
+     if (isPMA) {
+-      if (resource instanceof HTMLCanvasElement || typeof OffscreenCanvas !== "undefined" && resource instanceof OffscreenCanvas) {
++      if (typeof HTMLCanvasElement !== "undefined" && resource instanceof HTMLCanvasElement || typeof OffscreenCanvas !== "undefined" && resource instanceof OffscreenCanvas) {
+         if (!needsResize) {
+           return resource;
+         }
+diff --git a/lib/rendering/renderers/canvas/utils/canvasUtils.mjs b/lib/rendering/renderers/canvas/utils/canvasUtils.mjs
+index 93bc00bd4ab47f47a2442d6dcf339457ab8a5019..ebc1ebe4e8f8663bbfe87076081339830847ee39 100644
+--- a/lib/rendering/renderers/canvas/utils/canvasUtils.mjs
++++ b/lib/rendering/renderers/canvas/utils/canvasUtils.mjs
+@@ -23,7 +23,7 @@ const canvasUtils = {
+     const resourceHeight = source.resourceHeight ?? source.pixelHeight;
+     const needsResize = resourceWidth !== source.pixelWidth || resourceHeight !== source.pixelHeight;
+     if (isPMA) {
+-      if (resource instanceof HTMLCanvasElement || typeof OffscreenCanvas !== "undefined" && resource instanceof OffscreenCanvas) {
++      if (typeof HTMLCanvasElement !== "undefined" && resource instanceof HTMLCanvasElement || typeof OffscreenCanvas !== "undefined" && resource instanceof OffscreenCanvas) {
+         if (!needsResize) {
+           return resource;
+         }

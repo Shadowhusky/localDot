@@ -14,7 +14,7 @@ import type { BrowserActionLease, BrowserControl } from "./control.ts";
 import type { BrowserGeometry, BrowserGeometrySnapshot } from "./geometry.ts";
 import { captureBrowserRequest } from "./input.ts";
 import type { BrowserNative } from "./native.ts";
-import { type BrowserProjection, projectBrowser } from "./perception.ts";
+import { BrowserPerceptionError, type BrowserProjection, projectBrowser } from "./perception.ts";
 import type { BrowserSecrets } from "./secrets.ts";
 import {
   type BrowserDocument,
@@ -407,6 +407,8 @@ export class BrowserObservation {
       if (operationSignal?.aborted || signal.aborted || this.#lifetime.signal.aborted)
         throw new BrowserObservationError("aborted");
       if (error instanceof BrowserObservationError) throw error;
+      if (error instanceof BrowserPerceptionError && error.reason === "secret")
+        throw new BrowserObservationError("secret");
       throw new BrowserObservationError("unavailable");
     } finally {
       clearTimeout(deadline);

@@ -414,6 +414,37 @@ describe("private browser perception projection", () => {
     },
   );
 
+  it("keeps dense pages usable and still masks protected fields after many controls", () => {
+    const source = metadata();
+    const root = required(source.snapshot.documents[0]);
+    for (let i = 0; i < 1000; i++) {
+      const offset = root.nodes.nodeName.length;
+      const id = 1000 + i;
+      root.nodes.nodeName.push(4);
+      root.nodes.parentIndex.push(2);
+      root.nodes.backendNodeId.push(id);
+      root.nodes.attributes.push([]);
+      root.layout.nodeIndex.push(offset);
+      root.layout.bounds.push([25, 30050, 250, 75]);
+      source.accessibility.nodes.unshift({
+        ignored: false,
+        backendDOMNodeId: id,
+        role: { value: "button" },
+        name: { value: "Cell" },
+      });
+    }
+    const result = projectBrowser(source.snapshot, source.accessibility, "root", geometry(), 2);
+    expect(result.targets.length).toBeGreaterThan(1000);
+    expect(result.targetOf(1999)?.name).toBe("Cell");
+    expect(result.targetOf(17)).toMatchObject({ name: "Protected field", secret: true });
+    expect(result.mask.redactions.length).toBeGreaterThan(0);
+    expect(JSON.stringify(result)).not.toContain(privateCanary);
+    required(root.nodes.inputValue).value[1] = 12;
+    expect(() =>
+      projectBrowser(source.snapshot, source.accessibility, "root", geometry(), 2),
+    ).toThrow("secret");
+  });
+
   it("rejects a filled protected field before projecting any data", () => {
     const source = metadata();
     required(source.snapshot.documents[0]).nodes.inputValue.value[1] = 12;

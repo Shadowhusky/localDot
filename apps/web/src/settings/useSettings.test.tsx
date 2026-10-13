@@ -65,6 +65,21 @@ async function opened(f: ReturnType<typeof server>) {
   return view;
 }
 describe("explicit configuration save ownership", () => {
+  it("returns to the saved provider without edits after visiting a provider with no key", async () => {
+    const f = server();
+    const { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "deepseek", model: "" }));
+    expect(result.current.dirty).toBe(true);
+    expect(result.current.saveEnabled).toBe(false);
+    act(() => result.current.change("main", { provider: "ollama", model: "" }));
+    expect(result.current.draft?.choices.main).toEqual(f.state.settings.main);
+    expect(result.current.dirty).toBe(false);
+    expect(f.state.puts).toEqual([]);
+    act(() => result.current.close());
+    expect(result.current.open).toBe(false);
+    expect(f.state.settings).toEqual(initial());
+  });
+
   it("keeps configured choices while switching providers in one settings visit", async () => {
     const f = server(),
       { result } = await opened(f);

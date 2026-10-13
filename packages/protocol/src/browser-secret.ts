@@ -17,6 +17,8 @@ export const BrowserSecretRequest = z.strictObject({
     x: z.number().finite().min(0).lt(1280),
     y: z.number().finite().min(0).lt(800),
   }),
+  purpose: z.literal("device_code").optional(),
+  node: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   username: z
     .string()
     .min(1)

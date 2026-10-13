@@ -29,7 +29,7 @@ import type { BrowserControl } from "./control.ts";
 import type { BrowserDownloadService } from "./download-service.ts";
 import { type BrowserInput, BrowserInputError } from "./input.ts";
 import type { BrowserNavigation } from "./navigation-owner.ts";
-import type { BrowserObservation } from "./observation.ts";
+import { type BrowserObservation, BrowserObservationError } from "./observation.ts";
 import type { BrowserRuntimeConfig } from "./runtime-config.ts";
 import type { BrowserTargets } from "./targets.ts";
 import { BROWSER_UPLOAD_TIMEOUT_MS, type BrowserUploadService } from "./upload-service.ts";
@@ -108,7 +108,14 @@ export interface BrowserHttpOptions {
 class HttpRefusal extends Error {
   constructor(
     readonly status: number,
-    readonly code: "authentication" | "request" | "busy" | "unavailable" | "refused" | "login-form",
+    readonly code:
+      | "authentication"
+      | "request"
+      | "busy"
+      | "unavailable"
+      | "refused"
+      | "login-form"
+      | "protected-input",
   ) {
     super("Browser service request refused");
   }
@@ -583,11 +590,13 @@ export class BrowserHttp {
       const refusal =
         error instanceof HttpRefusal
           ? error
-          : route === "POST /secret" &&
-              error instanceof BrowserInputError &&
-              error.reason === "login-form"
-            ? new HttpRefusal(422, "login-form")
-            : new HttpRefusal(409, "refused");
+          : error instanceof BrowserObservationError && error.reason === "secret"
+            ? new HttpRefusal(423, "protected-input")
+            : route === "POST /secret" &&
+                error instanceof BrowserInputError &&
+                error.reason === "login-form"
+              ? new HttpRefusal(422, "login-form")
+              : new HttpRefusal(409, "refused");
       if (response.headersSent) {
         if (downloadStream) {
           response.destroy();
