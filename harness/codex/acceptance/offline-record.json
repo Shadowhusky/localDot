@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "1f27654be3dc411e63bb6dc3e1055337eb76a75d1d17145879851c804d2d2e57",
+  "inputSha256": "0354bd7050dee2a18d5089e1e2c7cbbbede39aa23514511bcbad48c4666aa2c8",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -208,7 +208,7 @@
     "apps/daemon/src/agent/secret-answers.ts": "f2870ce6403dbe09673326d6f84dbf91a426f668316661b46dbce0a52dad44aa",
     "apps/daemon/src/agent/session-boundaries.test.ts": "bc07b08bd16a55f251034ab3c0ad95674e43896b3a51e5a37e1762ed66817de8",
     "apps/daemon/src/agent/session-cancellation.test.ts": "c8e856baff37d62031c10dc13556129ea8d2ca1e0a68061dad93d3cb9715adc8",
-    "apps/daemon/src/agent/session-screens.test.ts": "6d94415cdefd1035383fa217f84a6faa31e401317f6f80b63cfbce880d4d854b",
+    "apps/daemon/src/agent/session-screens.test.ts": "c41994cbd16ed23f9b46424df74b47cff433be3350599be02dd8fabc18c71248",
     "apps/daemon/src/agent/session-state.test.ts": "46d18a6ebbb0925b2962f8b93e14a93106fb5a6f01997c0e1f60ccef3bbe3da1",
     "apps/daemon/src/agent/session-unattended.test.ts": "ff533f5e6cb84488927786d27811435ce34844b73a57387e7be36b0725ce4d6c",
     "apps/daemon/src/agent/session.ts": "ef33e68f4af49daae69cd020bcaf1bd0b861abbf3834b09a4b17eef74b2dff4f",
@@ -280,7 +280,7 @@
     "apps/daemon/src/agent/tools/work-clock.test.ts": "e1375614d2482514c938d6c75543fcdc0af2596a9f0f1312fda763588d54f018",
     "apps/daemon/src/agent/tools/work-clock.ts": "aa1936947986977df17ebb070f4ec505aa116cb81538ddf77c98140b2942af32",
     "apps/daemon/src/agent/tools/work-context.test.ts": "789c0b22066dc33997992593a53b260f3c98ca269539267c3f70c71d082250bf",
-    "apps/daemon/src/agent/tools/work-context.ts": "5660d7aeaae1cecf59bc73d6790935e478feac53e9a3406b51240d5cad4e318d",
+    "apps/daemon/src/agent/tools/work-context.ts": "60afde95ba12bc27a6483553012a8d452bac773c4700eec1346ae7a76fdf19da",
     "apps/daemon/src/agent/transcript.ts": "76cb3ab83c78b6ca5aa75c3c9f2c228a21619f7cb157a1c0d9b25c2ce2ae3593",
     "apps/daemon/src/agent/transfers.test.ts": "62003548c6608012e69345503703726af124e5c30c1121e41560635bbaaa2a3e",
     "apps/daemon/src/agent/transfers.ts": "80e1f56ac1b1fb02ebacb92a79a16757fb15a6e6470aa7fd99b108f1f3c720f1",
@@ -364,6 +364,7 @@
     "apps/daemon/src/cells/computer-update.ts": "82b11d63fc6c16b6f130dea53e551eb259dc0ac25534829a1f94b874a935da3e",
     "apps/daemon/src/cells/desktop-image.docker.test.ts": "3fc646b8629dc2b1f57248866e56fee045f1cf75b28219862ed54c8aa85292d3",
     "apps/daemon/src/cells/desktop-keyd-files.docker.test.ts": "487ac10cf8189fbf636e8d127a98932944804144ea05e6fb1569234ff5ae2bf6",
+    "apps/daemon/src/cells/desktop-preview.docker.test.ts": "5e8685ee93f2aa14d71c21f332c3bd2f2b93f09a5fa14be34d86e0f32845cd4c",
     "apps/daemon/src/cells/desktopd-cdp.docker.test.ts": "898cb5669536d6e4c3552fd0a3ebeb95668a05fe602c4a123675882524405630",
     "apps/daemon/src/cells/desktopd-keys.docker.test.ts": "7a3159d8f265def12dedcbfdf151afc61aab4180b6230146171ce3d5918db7cc",
     "apps/daemon/src/cells/desktopd-mouse.docker.test.ts": "b246f251cdd7aa9953b6e33c1acd15e3766f1bbfeb7c3e6ed8480248e5e45f25",
@@ -530,8 +531,8 @@
     "apps/daemon/src/desktopd/registry.ts": "42bec42a7dedd1b7f0d06c6613a8210866acf7f154a7ad0b0dbbab794888b22a",
     "apps/daemon/src/desktopd/shell-handoff.test.ts": "1ed782cd44fd9c016d1f668860ee7721114ba3276518e76c01cb22c9e036c345",
     "apps/daemon/src/desktopd/testing/fake-desktopd.ts": "004df58f2c7899a1040e01cbc2028e8f44655a5382208f39f274a1cc64c9859c",
-    "apps/daemon/src/desktopd/tools-client.test.ts": "90affafcf8d1536dc41f989f551e14a261b9717ca88a9c58c81b2041d37aca6c",
-    "apps/daemon/src/desktopd/tools-client.ts": "a8292f2b1b4138cbdf90d3e9b4ce3f61f603659496a806d1e48ee3a2aacd2959",
+    "apps/daemon/src/desktopd/tools-client.test.ts": "957c7d5c07127781f71f2d4dfc10f5b6f9f93475f3aa07156181434a19504dbc",
+    "apps/daemon/src/desktopd/tools-client.ts": "fd781f380bfc8588557859fff972f12797086bfbe2565ef17c466d847f1b70cf",
     "apps/daemon/src/desktopd/upload-client.ts": "750b891490497e5f56d8bef236dd681d001d224fd21d20b687fb2994810fafdb",
     "apps/daemon/src/diagnostics/canary-verdict.test.ts": "ed8bd55ced6c52f33c24ff6081c2aa9a69d01478aae85e2d95ac44e1009ddd30",
     "apps/daemon/src/diagnostics/canary-verdict.ts": "8309d8339e3f2717af8ac85c97734f3577b00a7515d3ac79650e7eb4b4378326",
@@ -883,6 +884,7 @@
     "packages/protocol/src/browser-control.test.ts": "d3bdd7fcb323fc8d870542a88e8e3287b9be26a89e2c42448f135a55338eaab2",
     "packages/protocol/src/browser-control.ts": "bd75852cb2ba75aa6e1aca149016c0e7cea95c335c49538351d506801591d08d",
     "packages/protocol/src/browser-downloads.ts": "7579e35caf7f67305968e817f831c46244c5177125cf6b39a53a09e1c1550e7c",
+    "packages/protocol/src/browser-failure.ts": "43de304406307f5a78af4e63801a495c5fe6019199d45ae0422c92a6de033aa7",
     "packages/protocol/src/browser-secret.ts": "67b3b7ca92b67dd980eee49f244f4c6eedc72b5539204c4ae4c775332c9ee63a",
     "packages/protocol/src/browser-uploads.ts": "157f544b501e5612083464ff7d12ef9dbf873dbe2b5cd95f5d1bcd24d6cf4b06",
     "packages/protocol/src/canary-operation.ts": "dda857b65a4243495592fcfac15dbf7df3fadc6083c2082025632b96001b3237",
@@ -1042,7 +1044,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "e7cf142a7987348cc8d1bd8907262e58118c13fe66281ba6a56b2f6515a02c7e",
+  "reportSha256": "53adc7c868e94e4195b633b506e2682852ee205ea244384513206a5a2f7a1131",
   "exit": {
     "code": 0,
     "signal": null

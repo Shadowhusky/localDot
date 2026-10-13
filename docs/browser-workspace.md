@@ -39,6 +39,13 @@ dot must perform the requested interactions and inspect their visible result bef
 that a flow was tested. A confirmed download remains a download even if its optional screenshot
 cannot be captured; that failure must not cause dot to start another copy.
 
+Local development HTTPS is supported in the disposable desktop browser, including
+Portless URLs such as `https://app.localhost:1355` and nested worktree subdomains.
+Its localhost certificate exception does not apply to the browser containing saved
+sign-ins or to public websites. Navigation errors distinguish certificates, stopped
+servers, DNS and genuinely unsafe ports. See [Local development previews](local-development-previews.md)
+for the policy, incident diagnosis, comparison sources and regression checks.
+
 ## Sign in once
 
 Sign-ins live in one browser profile that belongs to you, not to a computer. It is kept when the

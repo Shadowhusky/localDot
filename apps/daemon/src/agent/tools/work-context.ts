@@ -95,7 +95,7 @@ export async function workContextTool(
       health: "not_checked",
       page: "not_inspected",
       navigation:
-        "browser_navigate opens the task URL and selects its screen: localhost previews use desktop Chromium, public sites use the separate web browser. switch_screen only selects a screen; it does not open a site.",
+        "browser_navigate opens the task URL and selects its screen: localhost previews use desktop Chromium, public sites use the separate web browser. Local preview ports (including Portless 1355) and *.localhost names are supported. Preserve the project preview origin for OAuth callbacks. Diagnose the reported certificate, connection, DNS, or unsafe-port error; do not infer a port policy from a generic failure. If application configuration or a test account is missing, request the specific required input and report the UI flow as blocked until verified. switch_screen only selects a screen; it does not open a site.",
       readiness:
         "Available means a browser can be opened, not that a target page has loaded. not_open is not a failure. A successful read of about:blank means the browser answered but no target page is loaded; navigate to the task URL before diagnosing a blocker.",
       websiteAuthentication: "not_checked",

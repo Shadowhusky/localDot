@@ -96,6 +96,8 @@ class ProfilesTest(unittest.TestCase):
         process, ready = self.launch()
         self.assertFalse(ready["secretInherited"])
         self.assertIn("--user-data-dir=" + str(old), ready["args"])
+        self.assertIn("--allow-insecure-localhost", ready["args"])
+        self.assertNotIn("--ignore-certificate-errors", ready["args"])
         self.owner.rotate(B)
         self.assertFalse(old.exists())
         self.assertFalse(m.members(self.groups[0]))

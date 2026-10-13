@@ -1536,14 +1536,20 @@ describe("session-owned screen authority", () => {
     expect(desktop).not.toHaveBeenCalled();
   });
 
-  it("goes back to the desktop for a local address while the web browser is shown", async () => {
+  it.each([
+    "http://localhost:5173/",
+    "https://thema.localhost:1355/",
+    "https://branch.app.localhost:8443/",
+    "http://127.0.0.1:4173/",
+    "http://[::1]:3000/",
+  ])("shows the desktop preview for %s while the web browser is selected", async (url) => {
     const f = fixture();
     await f.ready();
     const h = tools(f);
     bindDesktop(h);
     expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(true);
     const desktop = vi.spyOn(h.tools, "desktop");
-    const navigated = await h.callTool("browser_navigate", { url: "http://localhost:5173/" });
+    const navigated = await h.callTool("browser_navigate", { url });
     expect(navigated.result.ok).toBe(true);
     expect(f.screens.selection.screen).toBe("desktop");
     expect(desktop).toHaveBeenCalledWith(f.session.cellId);

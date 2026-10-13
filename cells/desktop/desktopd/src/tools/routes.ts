@@ -12,6 +12,7 @@ import {
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import type { z } from "zod";
+import { browserFailureCode } from "../../../../../packages/protocol/src/browser-failure.ts";
 import {
   DesktopUploadInspect,
   DesktopUploadRead,
@@ -98,8 +99,11 @@ function failure(c: Context, error: unknown): Response {
     return c.text(error.message, status);
   }
   if (error instanceof FileToolError) return c.text(error.message, error.status);
-  if (error instanceof NoPageError) return c.text(error.message, 409);
-  if (error instanceof NavigationError) return c.text(error.message, 502);
+  if (error instanceof NoPageError || error instanceof NavigationError)
+    return c.json(
+      { error: "browser", code: browserFailureCode(error.message) },
+      error instanceof NoPageError ? 409 : 502,
+    );
   return c.text("desktop tool failed", 500);
 }
 

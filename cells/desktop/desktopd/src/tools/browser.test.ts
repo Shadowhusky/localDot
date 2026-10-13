@@ -102,6 +102,20 @@ describe("PageBrowser", () => {
     expect(polls).toBe(2);
   });
 
+  it("classifies a CDP timeout without exposing its raw transport error", async () => {
+    const { WebSocketImpl } = fakeCdp((method) => {
+      if (method === "Page.navigate") throw new Error("Page.navigate timed out");
+      return { result: { value: { url: "about:blank", title: "", ready: "complete", origin: 1 } } };
+    });
+    const browser = new PageBrowser({
+      WebSocketImpl,
+      fetchImpl: fakeTargets([{ type: "page", url: "about:blank" }]),
+    });
+    await expect(browser.navigate("https://app.localhost:1355/")).rejects.toThrow(
+      "navigation failed: page operation timed out",
+    );
+  });
+
   it("reports a navigation Chromium refused", async () => {
     const { WebSocketImpl } = fakeCdp((method) =>
       method === "Page.navigate"

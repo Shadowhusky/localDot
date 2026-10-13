@@ -114,7 +114,7 @@ describe("browser runtime bootstrap confinement", () => {
     expect(chromium.args).toContain("--hide-crash-restore-bubble");
     expect(
       chromium.args.some((argument) =>
-        /(?:no-sandbox|disable-setuid-sandbox|remote-debugging-port|ignore-certificate-errors)/u.test(
+        /(?:no-sandbox|disable-setuid-sandbox|remote-debugging-port|ignore-certificate-errors|allow-insecure-localhost)/u.test(
           argument,
         ),
       ),

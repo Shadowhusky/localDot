@@ -272,6 +272,13 @@ export class PageBrowser {
     })();
     try {
       return await Promise.race([operation, cancelled]);
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      if (error instanceof Error && /^cdp: .*timed out$/.test(error.message))
+        throw new NavigationError("page operation timed out");
+      if (error instanceof Error && error.message.startsWith("cdp:"))
+        throw new NavigationError("browser connection failed");
+      throw error;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", abort);
@@ -351,9 +358,11 @@ export class PageBrowser {
       await cdp.send("Page.bringToFront");
       active.throwIfAborted();
       await check(true);
-      const nav = await cdp.send<{ errorText?: string; loaderId?: string }>("Page.navigate", {
-        url: url.href,
-      });
+      const nav = await cdp.send<{ errorText?: string; loaderId?: string }>(
+        "Page.navigate",
+        { url: url.href },
+        this.#loadTimeoutMs,
+      );
       active.throwIfAborted();
       if (nav.errorText) throw new NavigationError(nav.errorText);
       const deadline = performance.now() + this.#loadTimeoutMs;
