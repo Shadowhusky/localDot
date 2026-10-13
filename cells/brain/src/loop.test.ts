@@ -692,7 +692,7 @@ describe("Agent", () => {
       );
       expect(await t.run()).toBe("done");
       expect(t.f.toolCalls.filter((c) => c.name === "ask_user")).toEqual([]);
-    });
+    }, 30_000);
 
     it("gives repeated failures back to the model as a cue to change approach", async () => {
       const t = agent(

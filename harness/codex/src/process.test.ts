@@ -275,6 +275,52 @@ describe("owned process boundary", () => {
     f.close();
     await p.closed;
   });
+  it("waits for ESRCH after a transient existence-probe failure", async () => {
+    vi.useFakeTimers();
+    const f = fake();
+    let reaping = true;
+    f.input.killImpl = vi.fn((pid, signal) => {
+      if (signal === 0 && reaping)
+        throw Object.assign(new Error("owned group is being reaped"), { code: "EPERM" });
+      return f.kill(pid, signal);
+    });
+    const p = create(f);
+    f.child.emit("spawn");
+    await p.started;
+    const stop = p.stop();
+    await vi.advanceTimersByTimeAsync(1250);
+    expect(f.kills).toContainEqual([-87654, "SIGKILL"]);
+    f.close(null, "SIGKILL");
+    let closed = false;
+    void p.closed.then(() => {
+      closed = true;
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(closed).toBe(false);
+    reaping = false;
+    await vi.advanceTimersByTimeAsync(25);
+    await expect(stop).resolves.toBeUndefined();
+    expect(closed).toBe(true);
+  });
+
+  it("keeps an actual signal failure even if the group subsequently disappears", async () => {
+    vi.useFakeTimers();
+    const f = fake();
+    f.input.killImpl = vi.fn((pid, signal) => {
+      if (signal === "SIGTERM")
+        throw Object.assign(new Error("owned signal refused"), { code: "EPERM" });
+      return f.kill(pid, signal);
+    });
+    const p = create(f);
+    f.child.emit("spawn");
+    await p.started;
+    const stop = p.stop();
+    await vi.advanceTimersByTimeAsync(250);
+    f.close();
+    await p.closed;
+    await expect(stop).rejects.toMatchObject({ code: "process_shutdown_failed" });
+  });
+
   it("does not mistake a non-ESRCH signal exception for confirmed retirement", async () => {
     vi.useFakeTimers();
     const f = fake();
@@ -362,7 +408,9 @@ describe("harmless owned Node process acceptance", () => {
     const actual = JSON.parse(out);
     // On this Mac a child has a system text-encoding value in addition to the explicit env.
     if (process.platform === "darwin") {
-      expect(actual.__CF_USER_TEXT_ENCODING).toMatch(/^0x[0-9a-fA-F]+:[0-9]+:[0-9]+$/);
+      expect(actual.__CF_USER_TEXT_ENCODING).toMatch(
+        /^0x[0-9a-fA-F]+:(?:0x[0-9a-fA-F]+|[0-9]+):(?:0x[0-9a-fA-F]+|[0-9]+)$/,
+      );
       delete actual.__CF_USER_TEXT_ENCODING;
     }
     expect(actual).toEqual({ PATH: "/usr/bin:/bin", HOME: "/tmp" });

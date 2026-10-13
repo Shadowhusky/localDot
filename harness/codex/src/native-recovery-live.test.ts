@@ -33,7 +33,9 @@ const live = it.skipIf(process.platform !== "darwin" || !binary);
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const f of cleanups.splice(0).reverse()) await f();
-});
+  // The supervisor-death fixture deliberately leaves a 10 s child alive; cleanup
+  // allows 14 s for its exit and reaping, so the hook must outlast that bound.
+}, 20000);
 const signal = () => new AbortController().signal;
 async function until(check: () => Promise<boolean> | boolean, timeout = 5000) {
   const end = Date.now() + timeout;

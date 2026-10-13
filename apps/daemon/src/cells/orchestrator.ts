@@ -78,7 +78,11 @@ export interface OrchestratorDeps {
   // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
   relay?: () => Promise<GateRelay>;
   streamFullcolor?: boolean;
-  probeDesktopd(endpoint: CellEndpoints["desktopd"]): Promise<DesktopdHealth | undefined>;
+  probeDesktopd(
+    endpoint: CellEndpoints["desktopd"],
+    timeoutMs?: number,
+    options?: { selftest?: boolean },
+  ): Promise<DesktopdHealth | undefined>;
   probeStream(endpoint: CellEndpoints["stream"]): Promise<boolean>;
   // Docker-backed tests pass "localdot-test-", so they never create or touch a real cell's objects.
   namePrefix?: string;
@@ -692,10 +696,14 @@ export class CellOrchestrator {
         });
       throw error;
     });
-    const begun = await this.#startContainers(record, 0, undefined, false, {
-      kind: "start",
-      startedAt,
-    });
+    const begun = await this.#startContainers(
+      record,
+      0,
+      undefined,
+      false,
+      { kind: "start", startedAt },
+      this.#live.get(id)?.state === "failed",
+    );
     if (begun) this.#detach(id, this.#waitReady(record));
   }
 
@@ -1171,6 +1179,7 @@ export class CellOrchestrator {
     error?: string,
     frozen = false,
     operation?: OperationStart,
+    recycle = false,
   ): Promise<boolean> {
     if (this.#fenced(record.id))
       throw new CellControlConflict("the computer is permanently fenced");
@@ -1207,10 +1216,15 @@ export class CellOrchestrator {
       }
       if (!frozen) {
         let running = desktop.Running;
-        if (running && (desktop.Paused || (this.#keyd && !(await this.#keyd.isWired(record))))) {
+        if (
+          running &&
+          (recycle || desktop.Paused || (this.#keyd && !(await this.#keyd.isWired(record))))
+        ) {
           await this.#stopContainer(d.desktop);
           running = false;
         }
+        if (!this.#current(record.id, starting)) return false;
+        if (recycle) await this.#stopContainer(d.gate);
         if (!this.#current(record.id, starting)) return false;
         if (!running) await this.#keyd?.wire(record);
         if (!this.#current(record.id, starting)) return false;
@@ -1352,8 +1366,9 @@ export class CellOrchestrator {
     });
   }
 
-  // Runs while the cell is ready: an exited container is restarted with backoff, and a cell that
-  // keeps dying is marked failed once the backoff list is exhausted.
+  // Watch both the containers and the services inside them. A guest shutdown can leave PID 1
+  // alive. Require three consecutive failed probes before recycling, and retain the bounded
+  // restart budget so a broken desktop cannot flap forever.
   async #watch(record: CellRecord): Promise<void> {
     const live = this.#live.get(record.id);
     if (live?.state !== "ready" || this.#held(record.id) || !this.#current(record.id, live)) return;
@@ -1367,14 +1382,42 @@ export class CellOrchestrator {
   }
 
   async #watchLoop(record: CellRecord, live: Live): Promise<void> {
+    let unhealthy = 0;
     for (;;) {
       await this.#sleep(this.#watchEveryMs);
       if (this.#held(record.id) || !this.#current(record.id, live)) return;
       await this.deps.verifyRuntime?.(record);
       if (this.#held(record.id) || !this.#current(record.id, live)) return;
-      const exited = await this.#exitedContainer(record);
+      let exited = await this.#exitedContainer(record);
       if (!this.#current(record.id, live)) return;
-      if (exited === undefined) continue;
+      let recycle = false;
+      if (exited === undefined) {
+        if (live.paused || !live.ports) continue;
+        const endpoints = endpointsFor(record, live.ports);
+        const health = await this.#probeDesktopd(endpoints.desktopd, undefined, {
+          selftest: false,
+        });
+        if (this.#held(record.id) || !this.#current(record.id, live) || live.paused) return;
+        const breach = health?.selftest?.checks.find((c) => c.kind === "isolation" && !c.ok);
+        if (breach) {
+          await this.#queued(record.id, () => this.#isolationFailure(record, live, breach));
+          return;
+        }
+        const desktopReady = health?.ok;
+        const streaming = desktopReady && (await this.#probeStream(endpoints.stream));
+        if (this.#held(record.id) || !this.#current(record.id, live) || live.paused) return;
+        if (streaming) {
+          unhealthy = 0;
+          continue;
+        }
+        if (++unhealthy < 3) continue;
+        recycle = true;
+        exited = {
+          role: "desktop",
+          gone: false,
+          detail: `${desktopReady ? "desktop stream" : "desktop services"} stopped responding for 3 consecutive checks`,
+        };
+      }
       // Claim the transition in the same queue as Stop/Resume. A watch that
       // inspected before a freeze must not restart a now-frozen desktop.
       const restarting = await this.#queued(record.id, async () => {
@@ -1419,7 +1462,7 @@ export class CellOrchestrator {
       // Queued like a user's start: a Stop that lands during the restart runs after it.
       const restarted = await this.#queued(record.id, async () =>
         this.#current(record.id, restarting)
-          ? this.#startContainers(record, attempt, note, frozen)
+          ? this.#startContainers(record, attempt, note, frozen, undefined, recycle)
           : false,
       ).catch(() => false);
       if (restarted)

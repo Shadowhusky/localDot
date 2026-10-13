@@ -213,8 +213,8 @@ describe("CellOrchestrator.update", () => {
     const clock = { now: 1_000_000 };
     const { updates, orchestrator, store, changes, id, record } = await setup({
       now: () => clock.now,
-      probeDesktopd: async () => {
-        clock.now += 6_000;
+      probeDesktopd: async (_endpoint, _timeout, options) => {
+        if (options?.selftest !== false) clock.now += 6_000;
         return healthy;
       },
     });
