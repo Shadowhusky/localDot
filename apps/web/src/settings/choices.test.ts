@@ -130,6 +130,7 @@ describe("provider and model choice rules", () => {
         !provider.availableIn &&
           (provider.local === true ||
             provider.id === "openai-compatible" ||
+            provider.id === "openai-responses-compatible" ||
             provider.id === "anthropic-compatible"),
       );
     expect(modelIdProblem("Qwen/model:v2@preview+1")).toBeNull();

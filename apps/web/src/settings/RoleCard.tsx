@@ -60,6 +60,10 @@ const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 function keyNote(provider: ReturnType<typeof providerById>): string | undefined {
   if (!provider) return undefined;
   if (provider.plan) return "Use a key from this plan, not a pay-as-you-go key.";
+  if (provider.id === "openai-compatible")
+    return "Uses Chat Completions. For a Responses-only endpoint, choose Other (OpenAI Responses-compatible). The endpoint's address is set with the key.";
+  if (provider.id === "openai-responses-compatible")
+    return "Uses the Responses API with your OpenAI-compatible key. The endpoint's address is set with the key.";
   if (provider.client === "azure" || provider.custom)
     return "The endpoint's address is set with the key.";
   return undefined;

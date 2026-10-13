@@ -220,8 +220,8 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
   },
   [STALL.modelRefused]: {
     row: "recovery",
-    label: "Model turned down a request",
-    caption: "The model turned down my request. Try again, or change the model.",
+    label: "Provider request failed",
+    caption: "The provider could not process my request. Check its settings and error details.",
   },
   [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
   [STALL.keyReenter]: {

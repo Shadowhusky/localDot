@@ -486,6 +486,35 @@ describe("custom endpoints state what their model can do", () => {
     );
   });
 
+  it("uses Responses with an existing compatible key without changing its endpoint or pricing", () => {
+    const choice = {
+      provider: "openai-responses-compatible",
+      model: "gateway-model",
+      key: "gateway",
+      price,
+    };
+    const resolved = resolveRole("main", choice, undefined, custom);
+    expect(bindingOf(resolved, { gateway: SURROGATE })).toMatchObject({
+      client: "openai",
+      route: "gateway",
+      model: "gateway-model",
+      surrogate: SURROGATE,
+      computer: "generic",
+      vision: true,
+    });
+    const chat = resolveRole(
+      "main",
+      { ...choice, provider: "openai-compatible" },
+      undefined,
+      custom,
+    );
+    expect(chat.client).toBe("openai-compatible");
+    expect(pricingOf([resolved])).toEqual(pricingOf([chat]));
+    expect(() => resolveRole("main", { ...choice, key: "anc" }, undefined, custom)).toThrow(
+      /is not a/,
+    );
+  });
+
   it("gives a model that cannot see images the text-only capability", () => {
     for (const choice of [
       { ...anc, vision: false },

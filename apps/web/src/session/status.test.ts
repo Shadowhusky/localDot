@@ -607,7 +607,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       );
     });
     it.each([
-      ["model refused", "Model turned down a request", "recovery"],
+      ["model refused", "Provider request failed", "recovery"],
       ["model unavailable", "Model not answering", "recovery"],
       ["keyd unavailable", "Keys are offline", "recovery"],
       ["budget", "Spending limit reached", "limit"],

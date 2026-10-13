@@ -3,14 +3,14 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "a0d28d174613de57500c3d645c55c3a58626007f825349bfa5fdf4fae25bece8",
+  "inputSha256": "af5cac3e0d1ef3971ba6ee471a252fe2fb20e6320a3c4d706417e8fc6005b2fb",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
     "apps/daemon/src/access-links.ts": "902ed4a2697a52f36cb1ce8b6d63d1ef69776aa57328444840bdb21f0f98dc25",
     "apps/daemon/src/agent/autonomy-replay.test.ts": "e9c7540227ee016f4fc15e3b7a492a83e0ddb4bcca9419d55701e2ba85596c31",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "78d41682cf1c0baa3942178f8904e08e2c08431e22363c652be409682f7015ae",
-    "apps/daemon/src/agent/bindings.test.ts": "8b5e8f6c5f9dbd2de4ff624a52f380d163c0985f872ef0ce6f1da4fd28032aa5",
+    "apps/daemon/src/agent/bindings.test.ts": "fe65e6542bdd99b746e2b24666f5b4420dd003dfa7073949821d20364ff88d1d",
     "apps/daemon/src/agent/bindings.ts": "5af96d8911cd9c3d2052ff8e533658b116d0759ba3c12126a39d0b79662862a3",
     "apps/daemon/src/agent/brain-cell.docker.test.ts": "bab34ab488f06bfc7796ce889677f3090cb34f9d5e64774c3bf4accfdb246726",
     "apps/daemon/src/agent/brain-cell.test.ts": "9c0029293a331cf33d46d35091eb7292148d043bea87dc2dd7c489324ff269c6",
@@ -114,7 +114,7 @@
     "apps/daemon/src/agent/people.ts": "941740e976686ed90b758cdb2b29142a062d63f2f7c63d5314ac6f2c99f90fb6",
     "apps/daemon/src/agent/policy.ts": "3f7bab146f9b1099aab8138479694d1b3f93d17a9818d0a2f83e3d8b64e2d6f5",
     "apps/daemon/src/agent/private-files.ts": "d7b340d8c5429f82ca8d37e1ad1363c15b17a8544e3bb3c71c4d205e9b0ff712",
-    "apps/daemon/src/agent/provider-notice.ts": "e24034ce7ced256abafc103f44a19271a34928797ff718d0b8e66a036f79e811",
+    "apps/daemon/src/agent/provider-notice.ts": "2aeb992eceea85ae83d238e3918dfca4c5a83f2770623fe2bc634a798266fdcd",
     "apps/daemon/src/agent/providers.keyd.test.ts": "d6b3152c1a3ffc5d0758ab0ccf76a236d38b88a999ef7c71205230190604eec0",
     "apps/daemon/src/agent/recall-flow.test.ts": "638de1fcab64a2bfd6d9aa1942962e620e5611b1969ebc67513d3d1adf8dc612",
     "apps/daemon/src/agent/recent-activity.test.ts": "1b03e6aabe65ea74bbc828b2de5bdf148bf8c797404646b54646774a5eb67bfa",
@@ -1032,7 +1032,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "9c473ab6fc786986beeb106635901c458554d2c03892bfbf9dcafe8421cb663a",
+  "reportSha256": "368d5896e169db7e29b9aa8ae0e26d8829998de9d66f1575d02546497350abae",
   "exit": {
     "code": 0,
     "signal": null
