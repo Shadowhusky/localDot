@@ -607,10 +607,11 @@ describe("App token states", () => {
 
     const retrying = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    const timersBeforeClose = vi.getTimerCount();
     act(() => FakeWebSocket.instances[1]?.onclose?.());
-    // Cell retry, live-session retry and the curtain's clock; a starting computer's downloads are
-    // not polled.
-    expect(vi.getTimerCount()).toBe(3);
+    // Closing this socket adds one retry, independent of presentation timers
+    // (the curtain and first-use voice hint). All are cleaned up on unmount.
+    expect(vi.getTimerCount()).toBe(timersBeforeClose + 1);
     retrying.unmount();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);
