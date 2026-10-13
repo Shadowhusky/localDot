@@ -22,17 +22,15 @@
   padding-bottom: calc(var(--spacing) * 4);
 }
 
-/* Room for the Jump to latest pill, so it never covers the list's end or a row just revealed. */
+/* Revealed rows keep clear of Jump to latest. This is scroll alignment, not
+   extra content: at the end the pill disappears, and padding as tall as the pill
+   can scroll the final row completely out of a short mobile viewport. */
 .activity-body:has(> .activity-jump) {
   --_jump-room: calc(var(--spacing) * 12);
 }
 
 .activity-body:has(> .activity-jump) .activity-scroll {
   scroll-padding-bottom: var(--_jump-room);
-}
-
-.activity-body:has(> .activity-jump) .activity-content {
-  padding-bottom: var(--_jump-room);
 }
 
 .activity-content > :first-child {
@@ -636,6 +634,15 @@ button.activity-row-head[data-pressed] {
 .activity-jump:focus-visible {
   outline: var(--focus-width) solid var(--color-fg-1);
   outline-offset: var(--focus-offset);
+}
+
+/* Touching an already-ended list pauses live following without producing a
+   scroll event. The jump control must still stay out of the final row's way. */
+.activity-body:has(
+  [role="tabpanel"]:not([aria-hidden]):not([hidden]) .activity-scroll:not([data-edge-bottom])
+) > .activity-jump {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* The usage line, one quiet line pinned under the tabs' content. */
