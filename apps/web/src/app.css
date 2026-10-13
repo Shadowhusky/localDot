@@ -188,7 +188,16 @@
     height: var(--_visible-h, 100dvh);
   }
 
-  .app[data-keyboard] .stage-band {
+  .app[data-composer-keyboard] .thread-toolbar {
+    position: fixed;
+    z-index: 20;
+    left: 0;
+    right: 0;
+    bottom: var(--_composer-keyboard, 0px);
+    padding-bottom: 8px;
+  }
+
+  .app[data-keyboard]:not([data-composer-keyboard]) .stage-band {
     min-height: 0;
     height: 0;
     overflow: hidden;

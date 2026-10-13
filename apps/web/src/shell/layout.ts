@@ -57,11 +57,18 @@ export function useViewportFit(page: { current: HTMLElement | null }, up: boolea
     const view = window.visualViewport;
     if (!element || !view || !handheld) return;
     let frame = 0;
+    let composing = false;
     const fit = () => {
       frame = 0;
       if (view.scale !== 1) return;
-      const height = `${view.height}px`;
-      const top = `${up ? view.offsetTop : 0}px`;
+      const focused = document.activeElement?.matches(".composer-field");
+      composing = keyboardUp() && (composing || !!focused);
+      element.toggleAttribute("data-composer-keyboard", composing);
+      const height = `${composing ? window.innerHeight : view.height}px`;
+      const top = `${up && !composing ? view.offsetTop : 0}px`;
+      const inset = `${composing ? keyboardInset() : 0}px`;
+      if (element.style.getPropertyValue("--_composer-keyboard") !== inset)
+        element.style.setProperty("--_composer-keyboard", inset);
       if (element.style.getPropertyValue("--_visible-h") !== height)
         element.style.setProperty("--_visible-h", height);
       if (element.style.getPropertyValue("--_visible-top") !== top)
@@ -72,8 +79,14 @@ export function useViewportFit(page: { current: HTMLElement | null }, up: boolea
     };
     fit();
     const stop = onViewport(schedule);
+    document.addEventListener("focusin", schedule);
+    document.addEventListener("focusout", schedule);
     return () => {
       stop();
+      document.removeEventListener("focusin", schedule);
+      document.removeEventListener("focusout", schedule);
+      element.removeAttribute("data-composer-keyboard");
+      element.style.removeProperty("--_composer-keyboard");
       cancelAnimationFrame(frame);
       element.style.removeProperty("--_visible-h");
       element.style.removeProperty("--_visible-top");

@@ -37,10 +37,62 @@
     flex-shrink: 0;
   }
 
+  .composer-card[data-layout="pill"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .composer-card[data-layout="pill"] > .composer-field {
+    order: 0;
+    width: 100%;
+    padding-inline: 4px 44px;
+    max-height: 144px;
+  }
+
+  .composer-card[data-layout="pill"] > .composer-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0;
+  }
+
+  .composer-card[data-layout="pill"] .composer-bar > * {
+    order: 0;
+    margin-block: 0;
+  }
+
   .composer-card[data-layout="pill"] .composer-model {
-    order: 4;
-    flex-basis: 100%;
-    justify-content: center;
+    flex: 1 1 0;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .composer-card[data-layout="pill"] .composer-pop {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+  }
+
+  .composer-card[data-layout="pill"][data-voice] .composer-hint {
+    inset: 4px 56px auto 8px;
+    height: 44px;
+    border-radius: inherit;
+  }
+
+  .composer-card[data-layout="pill"] .composer-effort {
+    display: none;
+  }
+
+  .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button,
+  .composer-card[data-layout="pill"] .voice-mic > .ui-icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button::after,
+  .composer-card[data-layout="pill"] .voice-mic > .ui-icon-button::after {
+    inset: 0;
   }
 
   .composer-count {
