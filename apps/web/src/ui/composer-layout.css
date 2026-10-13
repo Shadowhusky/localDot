@@ -40,20 +40,22 @@
   .composer-card[data-layout="pill"] {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    padding: 8px;
+    row-gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2);
   }
 
   .composer-card[data-layout="pill"] > .composer-field {
     order: 0;
     width: 100%;
-    padding-inline: 4px 44px;
+    padding-inline: var(--spacing) calc(var(--spacing) * 14);
+    min-height: 44px;
     max-height: 144px;
   }
 
   .composer-card[data-layout="pill"] > .composer-bar {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--spacing);
     margin: 0;
   }
 
@@ -68,15 +70,42 @@
     height: 44px;
   }
 
+  /* On phones, reserve a full 44px slot beside the field, above Send. Keep
+     the card as its containing block when recording changes toolbar styles. */
   .composer-card[data-layout="pill"] .composer-pop {
     position: absolute;
-    top: 4px;
-    right: 8px;
+    top: calc(var(--spacing) * 2);
+    right: calc(var(--spacing) * 2);
+  }
+
+  .composer-card[data-layout="pill"][data-voice] > .composer-bar {
+    position: static;
+  }
+
+  .composer-bar > .composer-pop:has(> .voice-mic) {
+    margin-inline: var(--spacing);
+  }
+
+  .composer-card[data-layout="pill"] .composer-pop:has(> .voice-mic) {
+    margin-inline: 0;
+  }
+
+  .voice-mic > .ui-icon-button::after {
+    inset: 0;
+  }
+
+  /* The listening pulse stays inside its own hit area, away from Send. */
+  .voice-mic[data-voice] > .voice-mic-halo {
+    scale: calc(0.85 + var(--_level, 0) * 0.15);
+  }
+
+  .composer-card[data-voice]:not([data-layout="pill"]) .composer-hint {
+    right: 80px;
   }
 
   .composer-card[data-layout="pill"][data-voice] .composer-hint {
-    inset: 4px 56px auto 8px;
-    height: 44px;
+    inset: 8px 60px 60px 8px;
+    height: auto;
     border-radius: inherit;
   }
 

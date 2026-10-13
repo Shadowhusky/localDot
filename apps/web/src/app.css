@@ -204,7 +204,7 @@
     top: var(--_composer-bottom);
     bottom: auto;
     translate: 0 -100%;
-    padding-bottom: 8px;
+    padding-bottom: calc(var(--spacing) * 2);
   }
 
   .app[data-keyboard]:not([data-composer-keyboard]) .stage-band {

@@ -1700,7 +1700,8 @@
     display: flex;
     align-items: flex-end;
     gap: 0;
-    padding: 8px 4px max(8px, env(safe-area-inset-bottom));
+    padding: calc(var(--spacing) * 2) var(--spacing)
+      max(calc(var(--spacing) * 2), env(safe-area-inset-bottom));
     background-color: var(--_toolbar);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     backdrop-filter: blur(20px) saturate(160%);
