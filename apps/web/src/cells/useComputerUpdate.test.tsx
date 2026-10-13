@@ -74,6 +74,9 @@ const settle = async (ms = 500) => {
 const toasts = () => screen.queryAllByRole("listitem").map((item) => item.textContent);
 
 it("passes on only the daemon's own plain refusals", () => {
+  const missing =
+    "The previous system image is missing from Docker. Restore it before updating this computer. Your apps and files are unchanged.";
+  expect(kit.describeUpdateError(409, missing)).toBe(missing);
   expect(kit.describeUpdateError(409, "Hand back the computer first.")).toBe(
     "Hand back the computer first.",
   );

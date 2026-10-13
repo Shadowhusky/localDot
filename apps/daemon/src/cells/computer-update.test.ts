@@ -22,6 +22,7 @@ import {
 } from "./orchestrator.ts";
 import { desktopSpec, gateSpec } from "./spec.ts";
 import { CellStore } from "./store.ts";
+import { SYSTEM_BASE_MISSING, SystemBaseMissing } from "./system-migration-plan.ts";
 import { type FakeDocker, startFakeDocker } from "./testing/fake-docker.ts";
 import type { CellRecord, CellSummary, DesktopdHealth } from "./types.ts";
 
@@ -486,6 +487,19 @@ const mountsHome = (record: CellRecord) =>
   );
 
 describe("refusals before and during the swap", () => {
+  it("keeps both the browser and desktop running when system preflight refuses", async () => {
+    const stop = vi.fn(async () => {});
+    const { updates, orchestrator, id, record } = await setup({ browser: { stop } as never });
+    stop.mockClear();
+    const prepare = vi.spyOn(updates, "prepare").mockRejectedValue(new SystemBaseMissing(OLD));
+    const before = fake.state.calls.length;
+    await expect(orchestrator.update(id)).rejects.toThrow(SYSTEM_BASE_MISSING);
+    expect(prepare).toHaveBeenCalledWith(record);
+    expect(stop).not.toHaveBeenCalled();
+    expect(fake.state.calls.slice(before).filter((c) => c.method !== "GET")).toEqual([]);
+    expect(orchestrator.get(id)?.state).toBe("ready");
+  });
+
   it("says the new version isn't here before anything stops", async () => {
     const { updates, orchestrator, id, record } = await setup();
     rebuild();

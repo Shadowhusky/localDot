@@ -9,6 +9,7 @@ import { ComputerUpdateRefused } from "./computer-update.ts";
 import { DockerError } from "./docker.ts";
 import { SkippedCellsError } from "./orchestrator.ts";
 import { TicketRegistry } from "./secrets.ts";
+import { SYSTEM_BASE_MISSING, SystemBaseMissing } from "./system-migration-plan.ts";
 import { SYSTEM_UPDATE_BLOCKED, SystemUpdateBlocked } from "./system-state.ts";
 import { FakeOrchestrator } from "./testing/fake-orchestrator.ts";
 import type { CellSummary } from "./types.ts";
@@ -180,6 +181,11 @@ describe("cell API", () => {
     const refused = await post(app);
     expect(refused.status).toBe(409);
     expect(await refused.text()).toBe("Hand back the computer first.");
+
+    update.mockRejectedValueOnce(new SystemBaseMissing(`sha256:${"a".repeat(64)}`));
+    const missingBase = await post(app);
+    expect(missingBase.status).toBe(409);
+    expect(await missingBase.text()).toBe(SYSTEM_BASE_MISSING);
 
     update.mockRejectedValueOnce(new SystemUpdateBlocked());
     const preserved = await post(app);

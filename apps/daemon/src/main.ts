@@ -169,6 +169,7 @@ const updates = new ComputerUpdates({
   images,
   stream,
   relay,
+  preflightSystem: (record, target) => migration.preflight(record, target),
   migrateSystem: (record, target) => migration.prepare(record, target),
 });
 const orchestrator = new CellOrchestrator({

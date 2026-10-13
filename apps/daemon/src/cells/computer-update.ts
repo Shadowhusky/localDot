@@ -118,6 +118,7 @@ export interface ComputerUpdatesDeps {
   // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
   relay?: () => Promise<GateRelay>;
   everyMs?: number;
+  preflightSystem?(record: CellRecord, target: string): Promise<void>;
   migrateSystem?(record: CellRecord, target: string): Promise<string>;
 }
 
@@ -125,6 +126,7 @@ export interface ComputerUpdatesDeps {
 // moves it onto them. Image IDs are compared, never tags: a rebuilt image keeps its tag.
 export class ComputerUpdates {
   readonly #docker: Docker;
+  readonly #preflight: ComputerUpdatesDeps["preflightSystem"];
   readonly #migrate: ComputerUpdatesDeps["migrateSystem"];
   readonly #images: Images;
   readonly #relay: () => Promise<GateRelay>;
@@ -138,6 +140,7 @@ export class ComputerUpdates {
   constructor(deps: ComputerUpdatesDeps) {
     this.#docker = deps.docker;
     this.#migrate = deps.migrateSystem;
+    this.#preflight = deps.preflightSystem;
     this.#images = deps.images;
     this.#relay = deps.relay ?? (() => Promise.resolve(HOST_RELAY));
     this.#stream = deps.stream;
@@ -207,7 +210,9 @@ export class ComputerUpdates {
     if (this.pending(record.id)) return;
     const owned = ownedContainers(record);
     if (!this.#migrate) await requireUnmodifiedSystem(this.#docker, owned.desktop);
-    if (!(await this.#targets())) throw new CellControlConflict(NOT_HERE);
+    const targets = await this.#targets();
+    if (!targets) throw new CellControlConflict(NOT_HERE);
+    await this.#preflight?.(record, targets.images.desktop);
   }
 
   // The computer must be stopped. Resolves the record that now owns the new containers.
