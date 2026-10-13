@@ -1675,7 +1675,7 @@ function Theatre({ api }: { api: ApiClient }) {
         ? NEW_TITLE
         : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
-  useViewportFit(page, keyboard);
+  useViewportFit(page);
   return (
     <div
       ref={page}

@@ -50,7 +50,7 @@ export function useKeyboardUp(): boolean {
 // Keep handheld layouts fitted to the visible viewport, including Home Screen launches and
 // keyboard dismissal. Restricting this to an open keyboard can leave stale browser-chrome space.
 // Pinch zoom is a viewing operation and must not reflow the app.
-export function useViewportFit(page: { current: HTMLElement | null }, up: boolean): void {
+export function useViewportFit(page: { current: HTMLElement | null }): void {
   const handheld = useMediaQuery(HANDHELD);
   useLayoutEffect(() => {
     const element = page.current;
@@ -58,17 +58,29 @@ export function useViewportFit(page: { current: HTMLElement | null }, up: boolea
     if (!element || !view || !handheld) return;
     let frame = 0;
     let composing = false;
+    // Capture the layout before iOS scrolls/resizes it to reveal the caret. Some
+    // browsers resize innerHeight along with the visual viewport.
+    let restingHeight = view.height;
+    let focusedHeight: number | undefined;
     const fit = () => {
       frame = 0;
       if (view.scale !== 1) return;
       const focused = document.activeElement?.matches(".composer-field");
-      composing = keyboardUp() && (composing || !!focused);
+      if (focused && focusedHeight === undefined) focusedHeight = restingHeight;
+      const covered = (focusedHeight ?? restingHeight) - view.height > KEYBOARD_PX;
+      composing = covered && (composing || !!focused);
+      if (!covered) {
+        restingHeight = view.height;
+        if (!focused) focusedHeight = undefined;
+      }
       element.toggleAttribute("data-composer-keyboard", composing);
-      const height = `${composing ? window.innerHeight : view.height}px`;
-      const top = `${up && !composing ? view.offsetTop : 0}px`;
-      const inset = `${composing ? keyboardInset() : 0}px`;
-      if (element.style.getPropertyValue("--_composer-keyboard") !== inset)
-        element.style.setProperty("--_composer-keyboard", inset);
+      const height = `${composing ? (focusedHeight ?? restingHeight) : view.height}px`;
+      // A fixed shell follows the visual viewport's origin while the toolbar
+      // follows its bottom. Merely shrinking the app lets Safari pan it away.
+      const top = `${composing || keyboardUp() ? view.offsetTop : 0}px`;
+      const bottom = `${view.offsetTop + view.height}px`;
+      if (element.style.getPropertyValue("--_composer-bottom") !== bottom)
+        element.style.setProperty("--_composer-bottom", bottom);
       if (element.style.getPropertyValue("--_visible-h") !== height)
         element.style.setProperty("--_visible-h", height);
       if (element.style.getPropertyValue("--_visible-top") !== top)
@@ -79,19 +91,24 @@ export function useViewportFit(page: { current: HTMLElement | null }, up: boolea
     };
     fit();
     const stop = onViewport(schedule);
-    document.addEventListener("focusin", schedule);
+    const focus = () => {
+      if (document.activeElement?.matches(".composer-field") && focusedHeight === undefined)
+        focusedHeight = restingHeight;
+      schedule();
+    };
+    document.addEventListener("focusin", focus);
     document.addEventListener("focusout", schedule);
     return () => {
       stop();
-      document.removeEventListener("focusin", schedule);
+      document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", schedule);
       element.removeAttribute("data-composer-keyboard");
-      element.style.removeProperty("--_composer-keyboard");
+      element.style.removeProperty("--_composer-bottom");
       cancelAnimationFrame(frame);
       element.style.removeProperty("--_visible-h");
       element.style.removeProperty("--_visible-top");
     };
-  }, [page, up, handheld]);
+  }, [page, handheld]);
 }
 
 // How much of the page's foot the on-screen keyboard covers, so a sheet can rest on top of it.
