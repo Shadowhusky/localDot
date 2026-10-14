@@ -2941,7 +2941,7 @@ routes.post("/__qa/step-end", (c) => {
   return c.json({ ok: true });
 });
 // Finishes the open step and starts the next, after a model call, as a live task does.
-function nextStep(owned: AgentSession, planItem: string) {
+function nextStep(owned: AgentSession, planItem: string, label?: string) {
   if (liveStep) {
     owned.append("action.result", { ok: true }, liveStep);
     owned.append("step.end", { status: "ok" }, liveStep);
@@ -2960,7 +2960,7 @@ function nextStep(owned: AgentSession, planItem: string) {
     "action.intent",
     {
       verb: "click",
-      label: `Fill area ${fill} with brown`,
+      label: label ?? `Fill area ${fill} with brown`,
       risk: "none",
       point: { x: 1200, y: 700 },
     },
@@ -2975,7 +2975,7 @@ routes.post("/__qa/research", (c) => {
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)
-    nextStep(session, c.req.query("item") ?? "colour");
+    nextStep(session, c.req.query("item") ?? "colour", c.req.query("label"));
   return c.json({ ok: true });
 });
 // A busy task for `ms`: dot says a word every 40 ms, a new message every 60 words and takes a

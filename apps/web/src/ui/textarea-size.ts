@@ -55,7 +55,11 @@ export function observeTextAreaSize(area: HTMLTextAreaElement): () => void {
       if (!area.getClientRects().length) return;
       const css = getComputedStyle(area);
       for (const metric of METRICS) mirror.style.setProperty(metric, css.getPropertyValue(metric));
-      mirror.style.whiteSpace = css.whiteSpace;
+      // Placeholder truncation must not disable wrapping once a draft has text.
+      mirror.style.whiteSpace =
+        css.whiteSpace === "nowrap" && area.matches(":placeholder-shown")
+          ? "pre-wrap"
+          : css.whiteSpace;
       mirror.wrap = area.wrap;
       const padding = Number.parseFloat(css.paddingTop) + Number.parseFloat(css.paddingBottom);
       const border =

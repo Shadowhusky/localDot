@@ -6,6 +6,7 @@ import {
   isConnectorToolName,
   isToolName,
   type PeopleInput,
+  type ShellInput,
   TOOL_INPUTS,
   type ToolName,
   type ToolResult,
@@ -18,6 +19,7 @@ import { splitIntent } from "../../connectors/intent.ts";
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
+import { prepareLocalCleanup } from "../safety/local-cleanup.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { withRecoveryAdvice } from "../work-progress.ts";
@@ -376,6 +378,13 @@ async function dispatchAdmitted(
     }
     const facts = toolRisk(name, frozen, (id) => deps.tools.routines?.name(id));
     if (facts) {
+      // Only unchanged files observed being created by this task qualify. The
+      // execution path retains their bytes; custom deletion policies still win.
+      if (name === "shell" && session.permissionMode() !== "custom") {
+        ctx.localCleanup = await prepareLocalCleanup(deps.tools, ctx, frozen as ShellInput);
+        ctx.check();
+        if (ctx.localCleanup) facts.command = ctx.localCleanup.riskCommand;
+      }
       ctx.permit = await authorizePrepared(ctx, {
         tool: name,
         input: frozen,

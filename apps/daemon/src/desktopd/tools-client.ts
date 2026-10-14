@@ -17,6 +17,7 @@ import {
 } from "@localdot/protocol";
 import { Agent, fetch as transportFetch } from "undici";
 import { z } from "zod";
+import { browserFailureDetail } from "../../../../packages/protocol/src/browser-failure.ts";
 import {
   DesktopBrowserReady,
   DesktopBrowserTask,
@@ -201,7 +202,16 @@ export class DesktopdTools {
           ? await this.#send(path, scope)
           : await this.#send(path, scope, JSON.stringify(body), "application/json");
       const text = await textBody(res, scope.signal, res.ok ? JSON_BYTES : 4096);
-      if (!res.ok) throw new DesktopdError(res.status, "tool request refused", path);
+      if (!res.ok) {
+        const browserFailure =
+          ["/browser/navigate", "/browser/read", "/browser/page"].includes(path) &&
+          [409, 502].includes(res.status);
+        throw new DesktopdError(
+          res.status,
+          browserFailure ? browserFailureDetail(text) : "tool request refused",
+          path,
+        );
+      }
       const result = parse(JSON.parse(text));
       scope.signal.throwIfAborted();
       return result;

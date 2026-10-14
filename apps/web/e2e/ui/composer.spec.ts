@@ -104,7 +104,11 @@ test("sending from far back brings the message's place at the end into view", as
     `${fixture.origin}/__qa/say?n=240&text=Checking%20that%20each%20month%20adds%20up`,
   );
   expect(said.ok()).toBe(true);
-  await expect(rail.getByText("Checking that each month adds up (240)")).toBeAttached();
+  await expect(
+    rail
+      .getByRole("region", { name: "Conversation history" })
+      .getByText("Checking that each month adds up (240)"),
+  ).toBeAttached();
   const scroller = rail.locator(".thread-scroll");
   await expect(async () => {
     await scroller.evaluate((element) => element.scrollTo({ top: 0 }));

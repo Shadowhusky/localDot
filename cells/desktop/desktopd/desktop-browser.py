@@ -274,6 +274,10 @@ class Profiles:
             profile = os.path.join(self.root, "profile-" + state["generation"])
             args = [*command, "--start-maximized", "--force-renderer-accessibility",
                     "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
+                    # Only this disposable, container-local development browser tolerates
+                    # local TLS certificates. Chromium limits this to IsLocalhost URLs;
+                    # public sites and the isolated saved-account browser stay strict.
+                    "--allow-insecure-localhost",
                     "--disable-quic", "--no-first-run", "--no-default-browser-check",
                     "--user-data-dir=" + profile]
             if os.environ.get("HTTPS_PROXY"):

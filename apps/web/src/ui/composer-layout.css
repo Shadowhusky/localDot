@@ -37,10 +37,106 @@
     flex-shrink: 0;
   }
 
+  .composer-card[data-layout="pill"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: calc(var(--spacing) * 2);
+    gap: 0;
+  }
+
+  .composer-card[data-layout="pill"] > .composer-field {
+    order: 0;
+    width: 100%;
+    padding: var(--spacing);
+    min-height: 32px;
+    max-height: 144px;
+  }
+
+  .composer-card[data-layout="pill"] > .composer-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
+    margin: 0;
+  }
+
+  .composer-card[data-layout="pill"] .composer-bar > * {
+    order: 0;
+    margin-block: 0;
+  }
+
   .composer-card[data-layout="pill"] .composer-model {
-    order: 4;
-    flex-basis: 100%;
-    justify-content: center;
+    flex: 1 1 0;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .composer-card[data-layout="pill"] .composer-effort {
+    display: none;
+  }
+
+  .composer-card[data-layout="pill"] .composer-bar > .ui-icon-button,
+  .composer-card[data-layout="pill"] .composer-send {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer-bar > .ui-icon-button::after,
+  .composer-send::after {
+    inset: 0;
+  }
+
+  .composer-send-wrap {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+  }
+
+  /* Recording occupies the existing control row, leaving the draft in place. */
+  .composer-card[data-voice] .composer-bar {
+    position: relative;
+  }
+
+  .composer-card[data-voice] .composer-bar > :not(.composer-send-wrap):not(.composer-hint) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .composer-card[data-voice] .composer-hint {
+    position: absolute;
+    inset: 0 calc(32px + var(--spacing) * 2) 0 0;
+    height: auto;
+    display: flex;
+    border-radius: 0;
+    padding: 0;
+    background: var(--color-raised);
+  }
+
+  .composer-card[data-layout="pill"][data-voice] .composer-hint {
+    inset: 0 calc(44px + var(--spacing) * 2) 0 0;
+  }
+
+  .composer-voice-hint {
+    position: absolute;
+    bottom: calc(100% + var(--spacing) * 2);
+    right: 0;
+    z-index: 4;
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    border-radius: var(--radius-row);
+    background: var(--color-popover);
+    box-shadow: var(--shadow-overlay);
+    color: var(--color-fg-1);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .composer-voice-hint::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    right: calc(var(--spacing) * 4);
+    border: var(--spacing) solid transparent;
+    border-top-color: var(--color-popover);
   }
 
   .composer-count {

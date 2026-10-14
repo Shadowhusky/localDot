@@ -102,6 +102,7 @@ export interface ToolCallContext {
   redact: Redactor;
   signal: AbortSignal;
   permit?: EffectPermit;
+  localCleanup?: import("../safety/local-cleanup.ts").LocalCleanup;
   screen?: ScreenLease;
   nativeScreen?: NativeScreenBinding;
   // The call's last Activity step was stopped before it did anything.

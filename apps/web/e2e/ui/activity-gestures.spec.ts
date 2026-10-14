@@ -12,6 +12,7 @@ test("Activity content scrolls without dragging the sheet; only its handle dismi
   page,
   ui,
 }) => {
+  await page.setViewportSize({ width: 390, height: 680 });
   await ui.open("done");
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "Activity" });
@@ -24,7 +25,9 @@ test("Activity content scrolls without dragging the sheet; only its handle dismi
   const box = await bounds(pane);
   await page.mouse.move(box.x + box.width / 2, box.y + 40);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + 190, { steps: 12 });
+  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(140, box.height - 12), {
+    steps: 12,
+  });
   await expect.poll(async () => Math.abs((await bounds(sheet)).y - top)).toBeLessThan(1);
   await page.mouse.up();
   await pane.evaluate((node) => {
