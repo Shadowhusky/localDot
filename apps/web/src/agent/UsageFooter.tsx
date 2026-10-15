@@ -10,7 +10,12 @@ import type { AgentModel } from "./model.ts";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const whole = (value: number) => value.toLocaleString();
-const ROLES: Record<string, string> = { main: "Main", fast: "Fast", vision: "Vision" };
+const ROLES: Record<string, string> = {
+  main: "Main",
+  fast: "Fast",
+  vision: "Vision",
+  subagent: "Subagents",
+};
 const roleName = (role: string) => ROLES[role] ?? role;
 
 export type ModelName = (provider: string, model: string) => string | undefined;

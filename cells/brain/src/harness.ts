@@ -32,8 +32,10 @@ import * as AgentList from "@deepseek-ai/dsh-tool-subagent-control/list-agents";
 import * as TodoTool from "@deepseek-ai/dsh-tool-todo";
 import ToolRuntime from "@deepseek-ai/dsh-tools";
 import type { ToolResult } from "@localdot/protocol";
-import { changesSkills, desktopSkillProvider, type SkillComputer } from "./harness-skills.ts";
+import { desktopSkillProvider, type SkillComputer, skillChange } from "./harness-skills.ts";
 import { type HarnessJournal, HarnessStorage } from "./harness-storage.ts";
+
+const CONTINUE = "Continue with the updated localDot context.";
 
 export interface HarnessStep {
   text: string;
@@ -125,7 +127,18 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
     if (host.delegation) {
       await ctx.plugin(SessionQuery, { path: ":memory:", openAt: "never" });
       await ctx.plugin(TokenMeter, {});
-      await ctx.plugin(Compaction, {});
+      // localDot compacts the root's transcript itself; a second, paid summary of DSH's copy
+      // would only reach the host context as another message.
+      class ChildCompaction extends Compaction {
+        override compactIfNeeded(...args: Parameters<Compaction["compactIfNeeded"]>) {
+          return String(args[0].session.id) === host.sessionId
+            ? Promise.resolve(null)
+            : super.compactIfNeeded(...args);
+        }
+      }
+      // Upstream reserves 65,536 tokens of headroom and summary by default: more than many
+      // windows leave, and more output than many models allow.
+      await ctx.plugin(ChildCompaction, { headroomTokens: 8192, maxTokens: 4000 });
     }
     const skillComputer = host.skills;
     if (skillComputer) {
@@ -140,10 +153,11 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
             typeof args === "object" &&
             "op" in args &&
             (args.op === "write" || args.op === "edit");
-          if (exec.name === "shell" || fileMutation) {
-            if (changesSkills(exec.name, args)) provider.invalidate();
-            control.invalidate();
-          }
+          if (exec.name !== "shell" && !fileMutation) return;
+          const change = skillChange(exec.name, args);
+          if (change === undefined) return;
+          provider.invalidate(change);
+          control.invalidate();
         });
         ctx.effect(() => () => provider.dispose());
         return provider;
@@ -363,6 +377,7 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
               !("source" in message) ||
               !message.source ||
               message.source.kind === "user" ||
+              message.source.kind === "compact-checkpoint" ||
               !("id" in message)
             )
               return [];
@@ -415,7 +430,8 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
       }
     }
     ctx.llm.registerAdapter(["localdot"], new HostAdapter());
-    const factory = (await ctx.sessionPersistence.stat(SessionId(host.sessionId)))
+    const resumed = !!(await ctx.sessionPersistence.stat(SessionId(host.sessionId)));
+    const factory = resumed
       ? (options: Parameters<typeof ctx.agents.create>[0]) =>
           ctx.agents.resume({ ...options, resumeSessionId: options.sessionId })
       : (options: Parameters<typeof ctx.agents.create>[0]) => ctx.agents.create(options);
@@ -430,7 +446,7 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
           if (await host.stopping(signal, ctx.goals.get(agent)?.phase === "active"))
             agent.steer(
               createUserMessage({
-                content: [{ type: "text", text: "Continue with the updated localDot context." }],
+                content: [{ type: "text", text: CONTINUE }],
                 source: { kind: "user" },
               }),
             );
@@ -441,9 +457,11 @@ export async function driveHarness(host: HarnessHost): Promise<void> {
     host.signal.addEventListener("abort", abort, { once: true });
     try {
       host.signal.throwIfAborted();
+      // A resumed session holds the task already: following it up again would repeat its
+      // /skill gestures and what they inject.
       handle.agent.followup(
         createUserMessage({
-          content: [{ type: "text", text: host.task }],
+          content: [{ type: "text", text: resumed ? CONTINUE : host.task }],
           source: { kind: "user" },
         }),
       );

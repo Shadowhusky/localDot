@@ -50,12 +50,13 @@ import {
   pruneScreenshots,
   resultParts,
   safeCut,
+  settleOldTurns,
   toTranscript,
 } from "./context.ts";
 import type { EventSink } from "./events.ts";
 import { driveHarness, type HarnessRequest } from "./harness.ts";
 import { harnessModel } from "./harness-model.ts";
-import { imagesInToolResults } from "./models.ts";
+import { editsOlderTurns, imagesInToolResults } from "./models.ts";
 import { type PlanLine, reminder, screenHands, systemPrompt } from "./prompt.ts";
 import { providerFailure } from "./provider-failure.ts";
 import type { ToolClient } from "./tool-client.ts";
@@ -145,6 +146,8 @@ const POLL_MS = 1000;
 // a cue to change approach.
 const FAILURE_CUE = 3;
 const COMPACT_AT = 0.6;
+// However large the window, a longer conversation costs more on every call than it helps.
+const COMPACT_MAX = 120_000;
 const COMPACTION_PROMPT = `Summarize this earlier part of a computer-use task for the agent that continues it, which will see only your summary and the messages after it. Use these sections:
 1. Request: the user's requested outcome, constraints and completion or stopping conditions. Quote every user message, shortening only very long ones.
 2. Done: the steps completed and what they found, with exact names: files and paths, URLs, commands, apps, accounts and values.
@@ -241,6 +244,9 @@ export class Agent {
   #plan: PlanLine[] = [];
   #harnessRequest: HarnessRequest = { system: "", tools: [], context: [] };
   #harnessContexts = new Set<string>();
+  // Harness context the stored transcript already holds, counted by text: a restarted brain's
+  // first request finds its earlier context there, one copy for each id, instead of adding it again.
+  readonly #restoredContexts = new Map<string, number>();
   #inboxSeq: number;
   #ackSeq: number;
   readonly #pending = new Map<number, InboxItem>();
@@ -251,6 +257,7 @@ export class Agent {
   #silentTurns = 0;
   #failed = 0;
   #nudges = 0;
+  #compactFailedAt = 0;
 
   constructor(o: AgentOptions) {
     this.#o = o;
@@ -259,7 +266,12 @@ export class Agent {
     this.#inboxSeq = o.boot.inboxAfter;
     this.#ackSeq = o.boot.inboxAfter;
     for (const record of o.storedTranscript ?? []) {
-      if (!record.sourceInbox) continue;
+      if (!record.sourceInbox) {
+        const text = record.role === "user" && !record.harnessEvent ? record.content : undefined;
+        if (typeof text === "string" && text)
+          this.#restoredContexts.set(text, (this.#restoredContexts.get(text) ?? 0) + 1);
+        continue;
+      }
       if (record.role !== "user" || typeof record.content !== "string")
         throw new Error("Invalid persisted inbox source");
       const source = { seq: record.sourceInbox.seq, text: record.content };
@@ -389,18 +401,23 @@ export class Agent {
           const self = this;
           return (async function* () {
             await self.#waitSafety(signal);
-            yield* harnessModel(options, self.#model(), (inputTokens, outputTokens) => {
-              sink.push({
-                type: "model.usage",
-                data: {
-                  role: self.#role,
-                  route: binding.route,
-                  model: binding.model,
-                  inputTokens,
-                  outputTokens,
-                },
-              });
-            });
+            yield* harnessModel(
+              options,
+              self.#model(),
+              (inputTokens, outputTokens) => {
+                sink.push({
+                  type: "model.usage",
+                  data: {
+                    role: "subagent",
+                    route: binding.route,
+                    model: binding.model,
+                    inputTokens,
+                    outputTokens,
+                  },
+                });
+              },
+              binding.client,
+            );
           })();
         },
         execute: async (sessionId, id, name, input, toolSignal) => {
@@ -434,6 +451,7 @@ export class Agent {
           ),
       },
       skills: {
+        installed: boot.skills,
         read: (input, readSignal) =>
           this.#o.api.tool("files", `skill-${crypto.randomUUID()}`, input, readSignal),
       },
@@ -442,6 +460,11 @@ export class Agent {
         const catalog = request.context.findLast((item) => item.kind === "skill-catalog");
         for (const context of request.context) {
           if (context.kind === "skill-catalog" && context !== catalog) continue;
+          const copies = this.#restoredContexts.get(context.text) ?? 0;
+          if (copies && !this.#harnessContexts.has(context.id)) {
+            this.#restoredContexts.set(context.text, copies - 1);
+            this.#harnessContexts.add(context.id);
+          }
           const restoredCatalog =
             context === catalog &&
             !this.#history.some(
@@ -451,6 +474,7 @@ export class Agent {
           this.#history.push({ role: "user", content: context.text });
           this.#harnessContexts.add(context.id);
         }
+        this.#restoredContexts.clear();
         if (batch && batch.done.length !== batch.step.calls.length)
           throw new Error("Harness did not settle every call in the previous step");
         if (requestSignal.aborted || outcome) return undefined;
@@ -743,7 +767,7 @@ export class Agent {
       };
       // This exact pruned prompt and full-frame basis belong to the whole returned tool batch.
       const progressDue = this.#silentTurns >= 8 || Date.now() - this.#lastProgressAt >= 60_000;
-      const history = pruneScreenshots(this.#history, KEEP_SCREENSHOTS, KEEP_PICTURES, PRUNE_CHUNK);
+      const history = this.#sent(binding);
       const basedOn = newestFullFrame(history);
       const prompt = cachedPrompt(
         [
@@ -1111,30 +1135,64 @@ export class Agent {
     };
   }
 
-  // Older turns become one summary, written by the fast model when there is one, once the
-  // context passes 60 % of the model's window.
+  // The history as the model is sent it.
+  #sent(binding: ModelBinding): ModelMessage[] {
+    const pruned = pruneScreenshots(this.#history, KEEP_SCREENSHOTS, KEEP_PICTURES, PRUNE_CHUNK);
+    return editsOlderTurns(binding) ? settleOldTurns(pruned) : pruned;
+  }
+
+  // Older turns become one summary, written by the fast model when there is one, once what is sent
+  // passes 60 % of the model's window, or 120k tokens where older turns may change. A failed
+  // summary is tried again once that has grown by a tenth.
   async #compactIfNeeded(signal: AbortSignal): Promise<void> {
     await this.#waitSafety(signal);
     const binding = this.#binding();
-    if (estimateTokens(this.#history) < binding.contextTokens * COMPACT_AT) return;
+    const window = binding.contextTokens * COMPACT_AT;
+    const budget = Math.max(
+      editsOlderTurns(binding) ? Math.min(window, COMPACT_MAX) : window,
+      this.#compactFailedAt * 1.1,
+    );
+    // What is sent is never more than the whole history, which is cheaper to measure.
+    if (estimateTokens(this.#history) < budget) return;
+    const sent = this.#sent(binding);
+    const estimate = estimateTokens(sent);
+    if (estimate < budget) return;
     const cut = safeCut(this.#history, Math.floor(this.#history.length / 2));
     if (cut <= 0) return;
+    const fast = this.#o.models.fast;
+    const summarizer = fast ? (this.#o.boot.models.fast ?? binding) : binding;
     let text: string;
     try {
       const result = await generateText({
-        model: this.#o.models.fast ?? this.#model(),
+        model: fast ?? this.#model(),
         system: COMPACTION_PROMPT,
-        messages: pruneScreenshots(this.#history.slice(0, cut), 0, 0),
+        messages: pruneScreenshots(sent.slice(0, cut), 0, 0),
         maxOutputTokens: 4000,
         maxRetries: 0,
         abortSignal: signal,
       });
       signal.throwIfAborted();
       text = result.text;
+      const usage = result.totalUsage;
+      this.#o.sink.push({
+        type: "model.usage",
+        data: {
+          role: fast ? "fast" : this.#role,
+          route: summarizer.route,
+          model: summarizer.model,
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          ...(usage.outputTokenDetails?.reasoningTokens
+            ? { reasoningTokens: usage.outputTokenDetails.reasoningTokens }
+            : {}),
+        },
+      });
     } catch {
       signal.throwIfAborted();
+      this.#compactFailedAt = estimate;
       return;
     }
+    this.#compactFailedAt = 0;
     await this.#persist(signal);
     signal.throwIfAborted();
     const summary = `Summary of the earlier part of this task:\n${text}`;

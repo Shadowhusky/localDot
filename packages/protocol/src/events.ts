@@ -446,7 +446,8 @@ export const TaskResult = event(
       .max(32),
   }),
 );
-export const ModelRole = z.enum(["main", "fast", "local"]);
+// A subagent's calls, and the summaries of its history, use the main model's binding.
+export const ModelRole = z.enum(["main", "fast", "local", "subagent"]);
 export const ModelUsage = event(
   "model.usage",
   z.object({

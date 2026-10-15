@@ -1,4 +1,5 @@
 import { type GenerateOptions, type StreamChunk, ToolCallId } from "@deepseek-ai/dsh-llm";
+import type { ClientKind } from "@localdot/protocol";
 import {
   type AssistantContent,
   jsonSchema,
@@ -7,6 +8,7 @@ import {
   streamText,
   tool,
 } from "ai";
+import { cachedPrompt } from "./context.ts";
 
 // Native DSH histories retain the exact AI SDK response for provider-specific
 // reasoning signatures. Tool observations remain ordinary untrusted tool content.
@@ -14,6 +16,7 @@ export async function* harnessModel(
   options: GenerateOptions,
   model: LanguageModel,
   usage: (input: number, output: number) => void,
+  client?: ClientKind,
 ): AsyncIterable<StreamChunk> {
   const names = new Map<string, string>();
   const messages: ModelMessage[] = [];
@@ -70,10 +73,16 @@ export async function* harnessModel(
       });
     } else if (text) messages.push({ role: "user", content: text });
   }
+  // A child's prompt is cached as the parent's is: Anthropic up to the marked blocks, OpenAI on the
+  // server its session's key routes to.
+  const prompt = cachedPrompt(instructions.join("\n\n"), messages, "", client === "anthropic");
   const stream = streamText({
     model,
-    messages,
-    ...(instructions.length ? { system: instructions.join("\n\n") } : {}),
+    messages: prompt.messages,
+    ...(instructions.length ? { system: prompt.system } : {}),
+    ...(client === "openai" && options.sessionId
+      ? { providerOptions: { openai: { promptCacheKey: String(options.sessionId) } } }
+      : {}),
     tools: Object.fromEntries(
       (options.tools ?? []).map((schema) => [
         schema.name,

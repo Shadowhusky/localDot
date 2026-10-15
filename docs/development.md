@@ -204,6 +204,22 @@ compaction and retains exact provider replay blocks. Model
 requests continue through the AI SDK and keyd; tools continue through the authenticated
 daemon API at `127.0.0.1:4751`, including JEV approvals and computer ownership checks.
 
+Each model call is sent a lighter copy of the root history (`cells/brain/src/context.ts`): the
+newest three to six screenshots, and for DeepSeek, OpenAI and Azure, whose APIs accept it,
+reasoning from only the newest 8 turns and, older than the newest 12 turns, tool output over 2,000
+characters replaced by a one-line note (the skill tool's instructions stay). Reasoning and output
+leave together, 16 turns at a time, so the prefix a provider caches changes once every 16 calls.
+Other clients get older turns as they were: Claude binds each thinking block to the conversation
+before it, so an edited earlier turn invalidates every later block. The stored transcript keeps
+everything. localDot summarizes the older half once that copy passes 60% of the window or, for
+those three clients, 120k tokens if that is less (the turns a summary keeps would carry Claude
+thinking bound to the conversation it replaced). The summary's usage is reported, and a failed
+summary is tried again once the copy has grown by a tenth. Upstream compaction summarizes child
+sessions only, with 8,192 tokens of headroom and a 4,000-token summary; the root's DSH log is
+never summarized into the conversation. A restarted brain does not add harness context (catalogs,
+skill bodies, reminders) its restored transcript already holds, and a resumed DSH session is
+continued, not given the task again.
+
 The runtime composition now includes the upstream `dsh-tool-todo`, `dsh-skill`,
 `dsh-skill-filesystem`, `dsh-tool-skill`, and `dsh-repeat-tool-reminder` plugins at the
 same exact version. Their schemas and injected context reach the actual model requests;
@@ -213,9 +229,14 @@ plugin outcomes, including refusals, join the same durable provider transcript a
 
 The upstream filesystem skill provider reads **the virtual computer**, through the existing
 authorized `files` gateway. It never scans the Mac or the brain container for user skills.
-It discovers `/config/.agents/skills`, `/config/.dsh/skills`, and `/config/.skills`, loads
-instructions on demand, honors invocation frontmatter, and refreshes after shell calls and file mutations. Ordinary reference reads do not rescan the catalog.
-Host filesystem watching is disabled. Complete catalogs are retained across transient failures;
+The catalog starts as the skills the daemon installed for the task in `/config/.skills`, known
+from the boot configuration without a read, and is the only place the model sees them listed.
+The agent's own folders, `/config/.agents/skills` and `/config/.dsh/skills`, are scanned only
+after a skills installer runs or a command or file write changes one of them. A folder found
+missing is not probed again in the task unless a later command names it, and a rescan reads only
+skills it has not read. Running a skill's scripts or reading its files rescans nothing. Loading a
+skill always rereads its `SKILL.md` and honors its invocation frontmatter.
+Host filesystem watching is disabled. The last complete scan is retained across transient failures;
 truncated/binary instructions are rejected, reads remain bounded and redacted, and discovery
 cannot run commands. Native plugin pre-execution respects the host's veto and cancellation.
 The current skill catalog is restored to model context after localDot compaction.

@@ -13,6 +13,7 @@ import {
   pruneScreenshots,
   resultParts,
   safeCut,
+  settleOldTurns,
   toTranscript,
 } from "./context.ts";
 
@@ -282,5 +283,121 @@ describe("the prompt providers cache", () => {
         ),
       ).match(new RegExp(`data-${A}`, "g"))?.length ?? 0;
     expect([6, 7, 8, 10, 11].map(kept)).toEqual([6, 3, 4, 6, 3]);
+  });
+});
+
+describe("older turns in the prompt", () => {
+  const big = (k: number) => `[output-${k}]`.padEnd(3000, ".");
+  const turn = (k: number, output: string, toolName = "web_fetch"): ModelMessage[] => [
+    {
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: `[thought-${k}]` },
+        { type: "tool-call", toolCallId: `call-${k}`, toolName, input: {} },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: `call-${k}`,
+          toolName,
+          output: { type: "text", value: output },
+        },
+      ],
+    },
+  ];
+  const history = (turns: number, output = big): ModelMessage[] => [
+    { role: "user", content: "Research the topic" },
+    ...Array.from({ length: turns }, (_, k) => turn(k, output(k))).flat(),
+  ];
+  const marks = (messages: ModelMessage[], mark: string) => {
+    const text = JSON.stringify(messages);
+    return messages
+      .filter((m) => m.role === "assistant")
+      .flatMap((_, k) => (text.includes(`[${mark}-${k}]`) ? [k] : []));
+  };
+
+  it("leaves out reasoning older than the newest 8 turns, 16 turns at a time", () => {
+    const kept = (turns: number) => marks(settleOldTurns(history(turns)), "thought");
+    expect([8, 23, 24, 39, 40].map((turns) => kept(turns).length)).toEqual([8, 23, 8, 23, 8]);
+    expect(kept(24)).toEqual(Array.from({ length: 8 }, (_, k) => 16 + k));
+  });
+
+  it("replaces large output older than the newest 12 turns with a note at the same moments", () => {
+    const kept = (turns: number) => marks(settleOldTurns(history(turns)), "output");
+    expect([12, 23, 24, 39, 40].map((turns) => kept(turns).length)).toEqual([12, 23, 12, 27, 12]);
+    expect(kept(24)).toEqual(Array.from({ length: 12 }, (_, k) => 12 + k));
+    const settled = JSON.stringify(settleOldTurns(history(24)));
+    expect(settled).toContain("Older output left out of context: 3000 characters.");
+    const small = settleOldTurns(history(40, (k) => (k % 2 ? `[output-${k}]` : big(k))));
+    expect(marks(small, "output").filter((k) => k < 28)).toEqual(
+      Array.from({ length: 14 }, (_, k) => 2 * k + 1),
+    );
+  });
+
+  it("keeps the prompt's start the same between boundaries and changes it only at one", () => {
+    const start = (turns: number) => JSON.stringify(settleOldTurns(history(turns)).slice(0, 41));
+    expect(start(25)).toBe(start(39));
+    expect(start(39)).not.toBe(start(40));
+    expect(start(40)).toBe(start(55));
+  });
+
+  it("keeps skill instructions, screenshots, failures' kind and turns with nothing but reasoning", () => {
+    const frame = `[[localdot:frame ${A}]]`;
+    const messages: ModelMessage[] = [
+      { role: "user", content: "Use the skill" },
+      ...turn(0, big(0), "skill"),
+      { role: "assistant", content: [{ type: "reasoning", text: "[thought-1]" }] },
+      { role: "user", content: "Continue" },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call-2", toolName: "browser_read", input: {} }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-2",
+            toolName: "browser_read",
+            output: {
+              type: "content",
+              value: [
+                { type: "text", text: big(2) },
+                { type: "text", text: frame },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call-3", toolName: "shell", input: {} }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-3",
+            toolName: "shell",
+            output: { type: "error-text", value: big(3) },
+          },
+        ],
+      },
+      ...Array.from({ length: 36 }, (_, k) => turn(100 + k, big(100 + k))).flat(),
+    ];
+    const settled = settleOldTurns(messages);
+    const text = JSON.stringify(settled);
+    expect(text).toContain("[output-0]");
+    expect(text).toContain("[thought-1]");
+    expect(text).not.toContain("[output-2]");
+    expect(text).toContain(frame);
+    expect(text).not.toContain("[output-3]");
+    const failed = settled[8] as Extract<ModelMessage, { role: "tool" }>;
+    expect(failed.content[0]).toMatchObject({ output: { type: "error-text" } });
+    expect(messages[2]).toEqual(turn(0, big(0), "skill")[1]);
   });
 });

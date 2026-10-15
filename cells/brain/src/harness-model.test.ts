@@ -207,3 +207,58 @@ it("runs the real SDK bridge through native child journaling, tools and completi
   expect(childTurns).toBe(2);
   expect(executeChild).toHaveBeenCalledTimes(1);
 });
+
+it("marks a child's prompt for Anthropic's cache and keys OpenAI's cache by the child", async () => {
+  const model = () =>
+    new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "Findings" },
+            { type: "text-end", id: "t" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: undefined },
+              usage: {
+                inputTokens: {
+                  total: 10,
+                  noCache: 10,
+                  cacheRead: undefined,
+                  cacheWrite: undefined,
+                },
+                outputTokens: { total: 5, text: 5, reasoning: undefined },
+              },
+            },
+          ] as never[],
+        }),
+      }),
+    });
+  const options = {
+    provider: "localdot",
+    model: "configured",
+    sessionId: "child-session",
+    system: "Trusted provider policy",
+    messages: [
+      createUserMessage({
+        content: [{ type: "text", text: "Research" }],
+        source: { kind: "user" },
+      }),
+    ],
+  } as unknown as GenerateOptions;
+  const drain = async (source: AsyncIterable<unknown>) => {
+    for await (const _ of source);
+  };
+  const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } };
+  const anthropic = model();
+  await drain(harnessModel(options, anthropic, () => {}, "anthropic"));
+  const prompt = anthropic.doStreamCalls[0]?.prompt ?? [];
+  expect(prompt[0]).toMatchObject({ role: "system", providerOptions: ephemeral });
+  expect(prompt.at(-1)).toMatchObject({ role: "user", providerOptions: ephemeral });
+  const openai = model();
+  await drain(harnessModel(options, openai, () => {}, "openai"));
+  expect(openai.doStreamCalls[0]?.providerOptions).toEqual({
+    openai: { promptCacheKey: "child-session" },
+  });
+  expect(JSON.stringify(openai.doStreamCalls[0]?.prompt)).not.toContain("cacheControl");
+});

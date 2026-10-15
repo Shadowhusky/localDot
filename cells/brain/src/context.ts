@@ -1,5 +1,11 @@
 import type { InboxItem, ToolContent, ToolResult, TranscriptMessage } from "@localdot/protocol";
-import type { ModelMessage, SystemModelMessage, ToolResultPart } from "ai";
+import type {
+  AssistantModelMessage,
+  ModelMessage,
+  SystemModelMessage,
+  ToolModelMessage,
+  ToolResultPart,
+} from "ai";
 
 // Spec "Harness rules": only the latest three screenshots stay in context. Older ones, and every
 // screenshot in the stored transcript, become a marker naming their frame, so a restarted brain can
@@ -171,6 +177,75 @@ export function cachedPrompt(
   return {
     system: marked ? { role: "system", content: system, providerOptions: EPHEMERAL } : system,
     messages,
+  };
+}
+
+const KEEP_REASONING_TURNS = 8;
+const KEEP_OUTPUT_TURNS = 12;
+const SETTLE_CHUNK = 16;
+const LARGE_OUTPUT = 2000;
+const outputNote = (chars: number) =>
+  `(Older output left out of context: ${chars} characters. Run the call again if you need it.)`;
+
+// A copy in which older model turns are lighter: reasoning older than the newest 8 turns is left
+// out, and tool output over 2,000 characters older than the newest 12 becomes a note. Both move at
+// the same moments, 16 turns at a time, so the prefix a provider caches changes once every 16
+// calls. The skill tool's instructions stay, and screenshots are pruneScreenshots' to keep.
+export function settleOldTurns(messages: readonly ModelMessage[]): ModelMessage[] {
+  const turns = messages.filter((m) => m.role === "assistant").length;
+  const drop = Math.max(0, turns - KEEP_REASONING_TURNS);
+  const reasoningCut = drop - (drop % SETTLE_CHUNK);
+  const outputCut = Math.max(0, reasoningCut - (KEEP_OUTPUT_TURNS - KEEP_REASONING_TURNS));
+  let seen = 0;
+  return messages.map((message) => {
+    if (message.role === "assistant") {
+      seen += 1;
+      return seen <= reasoningCut ? withoutReasoning(message) : message;
+    }
+    return message.role === "tool" && seen > 0 && seen <= outputCut
+      ? withoutLargeOutput(message)
+      : message;
+  });
+}
+
+function withoutReasoning(message: AssistantModelMessage): ModelMessage {
+  if (typeof message.content === "string") return message;
+  const content = message.content.filter(
+    (part) => part.type !== "reasoning" && part.type !== "reasoning-file",
+  );
+  // A turn that was only reasoning keeps it: an empty assistant message is not valid everywhere.
+  return content.length && content.length < message.content.length
+    ? { ...message, content }
+    : message;
+}
+
+function withoutLargeOutput(message: ToolModelMessage): ModelMessage {
+  let changed = false;
+  const content = message.content.map((part) => {
+    if (part.type !== "tool-result" || part.toolName === "skill") return part;
+    const output = settledOutput(part.output);
+    if (output === part.output) return part;
+    changed = true;
+    return { ...part, output };
+  });
+  return changed ? { ...message, content } : message;
+}
+
+function settledOutput(output: ToolResultPart["output"]): ToolResultPart["output"] {
+  if (output.type === "text" || output.type === "error-text")
+    return output.value.length > LARGE_OUTPUT
+      ? { ...output, value: outputNote(output.value.length) }
+      : output;
+  if (output.type !== "content") return output;
+  const texts = output.value.filter((part) => part.type === "text" && !parseMarker(part.text));
+  const chars = texts.reduce((sum, part) => sum + (part.type === "text" ? part.text.length : 0), 0);
+  if (chars <= LARGE_OUTPUT) return output;
+  return {
+    ...output,
+    value: [
+      { type: "text", text: outputNote(chars) },
+      ...output.value.filter((part) => !texts.includes(part)),
+    ],
   };
 }
 

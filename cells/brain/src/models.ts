@@ -157,3 +157,12 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
 export function imagesInToolResults(b: ModelBinding): boolean {
   return b.client === "anthropic";
 }
+
+// Older turns may change between these clients' calls: lightened (settleOldTurns) and summarized
+// sooner. DeepSeek V4 then gets an empty reasoning_content, and the stateless Responses APIs of
+// OpenAI and Azure get no item for the reasoning (no item id ties a function call to it). Claude
+// binds each thinking block to the conversation before it, so a changed earlier turn invalidates
+// every later block; other APIs and gateways may check the same or expect what they sent back.
+export function editsOlderTurns(b: ModelBinding): boolean {
+  return b.client === "deepseek" || b.client === "openai" || b.client === "azure";
+}

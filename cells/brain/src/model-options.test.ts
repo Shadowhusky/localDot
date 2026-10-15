@@ -1,7 +1,9 @@
-import type { ModelOptions } from "@localdot/protocol";
+import type { ModelBinding, ModelOptions } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
+import { type AssistantContent, generateText, jsonSchema, type ModelMessage, tool } from "ai";
 import { describe, expect, it } from "vitest";
-import { languageModel } from "./models.ts";
+import { settleOldTurns } from "./context.ts";
+import { editsOlderTurns, languageModel } from "./models.ts";
 import { binding } from "./testing/scripted.ts";
 
 // Exercise each installed SDK, stopping at its network boundary. Expectations are HTTP fields,
@@ -189,4 +191,91 @@ describe("model option wire contracts", () => {
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body).not.toHaveProperty("thinking");
   });
+});
+
+type ReasoningPart = Extract<Exclude<AssistantContent, string>[number], { type: "reasoning" }>;
+
+describe("older reasoning on the wire", () => {
+  // A task's turns as each SDK returned them: reasoning, a tool call, then the tool's result.
+  const history = (reasoning: (k: number) => ReasoningPart): ModelMessage[] => [
+    { role: "user", content: "Research the topic" },
+    ...Array.from({ length: 24 }, (_, k): ModelMessage[] => [
+      {
+        role: "assistant",
+        content: [
+          reasoning(k),
+          { type: "tool-call", toolCallId: `call_${k}`, toolName: "shell", input: { k } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: `call_${k}`,
+            toolName: "shell",
+            output: { type: "text", value: `ran ${k}` },
+          },
+        ],
+      },
+    ]).flat(),
+  ];
+  async function wire(over: Partial<ModelBinding>, messages: ModelMessage[]) {
+    const b = { ...binding(), computer: "generic" as const, ...over };
+    expect(editsOlderTurns(b)).toBe(true);
+    let body: Record<string, unknown> | undefined;
+    const model = languageModel(b, async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      throw new Error("captured request");
+    });
+    await expect(
+      generateText({
+        model,
+        messages: settleOldTurns(messages),
+        tools: { shell: tool({ inputSchema: jsonSchema({ type: "object" }) }) },
+        maxRetries: 0,
+      }),
+    ).rejects.toThrow();
+    return body as Record<string, unknown>;
+  }
+
+  it("sends DeepSeek V4 an empty reasoning_content for older turns", async () => {
+    const body = await wire(
+      { route: "deepseek", client: "deepseek", model: "deepseek-flash", reasoning: true },
+      history((k) => ({ type: "reasoning", text: `[thought-${k}]` })),
+    );
+    const assistants = (body.messages as { role: string; reasoning_content?: string }[]).filter(
+      (m) => m.role === "assistant",
+    );
+    expect(assistants.map((m) => m.reasoning_content)).toEqual([
+      ...Array.from({ length: 16 }, () => ""),
+      ...Array.from({ length: 8 }, (_, k) => `[thought-${16 + k}]`),
+    ]);
+  });
+
+  it.each(["openai", "azure"] as const)(
+    "sends the stateless %s Responses API no item for older reasoning and no call item ids",
+    async (client) => {
+      const body = await wire(
+        { route: client, client, model: "gpt-5.4", reasoning: true },
+        history((k) => ({
+          type: "reasoning",
+          text: "",
+          providerOptions: {
+            [client]: { itemId: `rs_${k}`, reasoningEncryptedContent: `enc-${k}` },
+          },
+        })),
+      );
+      const input = body.input as { type?: string; id?: string; encrypted_content?: string }[];
+      expect(body.store).toBe(false);
+      expect(
+        input.flatMap((item) =>
+          item.type === "reasoning" ? [[item.id, item.encrypted_content]] : [],
+        ),
+      ).toEqual(Array.from({ length: 8 }, (_, k) => [`rs_${16 + k}`, `enc-${16 + k}`]));
+      const calls = input.filter((item) => item.type === "function_call");
+      expect(calls).toHaveLength(24);
+      for (const call of calls) expect(call).not.toHaveProperty("id");
+    },
+  );
 });

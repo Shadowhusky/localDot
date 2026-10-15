@@ -176,12 +176,21 @@ describe("upstream agent capabilities reach the provider", () => {
     });
     await driveHarness(
       host({
-        skills: { read },
+        skills: { installed: [], read },
         request: async (_signal, request) => {
           const context = request.context.map((item) => item.text).join("\n");
           if (turn++ === 0) {
             expect(context).not.toContain("verified-tool");
-            return step("shell");
+            return {
+              text: "",
+              calls: [
+                {
+                  id: "shell-0",
+                  name: "shell",
+                  input: { command: "npx skills add verified-owner/verified-tool" },
+                },
+              ],
+            };
           }
           expect(context).toContain("verified-tool");
           expect(context).not.toContain("manual-only");
@@ -262,20 +271,7 @@ it("reloads changed skill instructions and retains the catalog, not stale bodies
   let turn = 0;
   const read = async (input: { op: string; path: string }) => {
     if (offline) throw new Error("Computer temporarily unavailable");
-    if (input.op === "list")
-      return {
-        ok: true,
-        content: [],
-        fileList: {
-          path: input.path,
-          truncated: false,
-          entries:
-            input.path === "/config/.agents/skills"
-              ? [{ name: "test-workflow", type: "dir" as const, bytes: 0 }]
-              : [],
-        },
-      };
-    if (input.path !== "/config/.agents/skills/test-workflow/SKILL.md")
+    if (input.path !== "/config/.skills/test-workflow/SKILL.md")
       return { ok: false, content: [], fileError: "not_found" as const };
     const content = `---\nname: test-workflow\ndescription: Current workflow\n---\nWorkflow revision ${version}`;
     return {
@@ -293,7 +289,16 @@ it("reloads changed skill instructions and retains the catalog, not stale bodies
   const outputs: string[] = [];
   await driveHarness(
     host({
-      skills: { read },
+      skills: {
+        installed: [
+          {
+            name: "test-workflow",
+            description: "Current workflow",
+            path: "~/.skills/test-workflow",
+          },
+        ],
+        read,
+      },
       request: async (_signal, request) => {
         expect(request.context.some((item) => item.text.includes("test-workflow"))).toBe(true);
         switch (turn++) {
@@ -332,25 +337,14 @@ it("reloads changed skill instructions and retains the catalog, not stale bodies
 it.each(["binary", "truncated"] as const)(
   "does not load %s skill instructions as a valid workflow",
   async (flag) => {
-    let invalid = false;
     let turn = 0;
     await driveHarness(
       host({
         skills: {
+          installed: [
+            { name: "test-workflow", description: "Workflow", path: "~/.skills/test-workflow" },
+          ],
           read: async (input) => {
-            if (input.op === "list")
-              return {
-                ok: true,
-                content: [],
-                fileList: {
-                  path: input.path,
-                  truncated: false,
-                  entries:
-                    input.path === "/config/.agents/skills"
-                      ? [{ name: "test-workflow", type: "dir", bytes: 0 }]
-                      : [],
-                },
-              };
             const content =
               "---\nname: test-workflow\ndescription: Workflow\n---\nDO NOT LOAD THIS PARTIAL BODY";
             return {
@@ -362,13 +356,12 @@ it.each(["binary", "truncated"] as const)(
                 bytes: content.length,
                 binary: false,
                 truncated: false,
-                [flag]: invalid,
+                [flag]: true,
               },
             };
           },
         },
         request: async () => {
-          invalid = true; // Discovery succeeded; the subsequent load must independently validate.
           return turn++ === 0
             ? { text: "", calls: [{ id: "load", name: "skill", input: { name: "test-workflow" } }] }
             : step("done");
@@ -384,6 +377,60 @@ it.each(["binary", "truncated"] as const)(
     );
   },
 );
+
+it("does not follow up the task again when resuming", async () => {
+  const records: { sessionId: string; event: unknown }[] = [];
+  const journal = {
+    records,
+    append: async (sessionId: string, event: unknown) => {
+      records.push({ sessionId, event: structuredClone(event) });
+    },
+  };
+  const body = "---\nname: test-workflow\ndescription: Workflow\n---\nFollow the test workflow.";
+  const skills = {
+    installed: [
+      { name: "test-workflow", description: "Workflow", path: "~/.skills/test-workflow" },
+    ],
+    read: async (input: { path: string }) => ({
+      ok: true,
+      content: [],
+      fileRead: {
+        path: input.path,
+        content: body,
+        bytes: body.length,
+        binary: false,
+        truncated: false,
+      },
+    }),
+  };
+  const task = "Write the report with /test-workflow";
+  const injected: string[][] = [];
+  for (let drive = 0; drive < 2; drive++) {
+    let turn = 0;
+    await driveHarness(
+      host({
+        task,
+        journal,
+        skills,
+        request: async (_signal, request) => {
+          if (turn++ === 0)
+            injected.push(
+              request.context.filter((item) => item.kind === "skill-invocation").map((i) => i.id),
+            );
+          return step("done");
+        },
+      }),
+    );
+  }
+  expect(injected[0]).toHaveLength(1);
+  expect(injected[1]).toEqual(injected[0]);
+  const followed = records.filter(
+    (r) =>
+      (r.event as { type?: string }).type === "user/message" &&
+      JSON.stringify(r.event).includes(task),
+  );
+  expect(followed).toHaveLength(1);
+});
 
 it("persists upstream goal state and resumes it without replaying completed tool bodies", async () => {
   const records: { sessionId: string; event: unknown }[] = [];
@@ -838,8 +885,9 @@ it("waits without nudging or abandoning a child and consumes its completion wake
   expect(stopping).toHaveBeenCalledTimes(1);
 });
 
-it("does not rediscover every installed skill after ordinary shell commands", async () => {
+it("does not read skill folders after ordinary commands or a skill's own scripts", async () => {
   let turn = 0;
+  const commands = ["pnpm test", "./setup.sh", "python3 ~/.skills/office-files/convert.py a.docx"];
   const read = vi.fn(async (input: { op: string; path: string }) => ({
     ok: true,
     content: [],
@@ -847,46 +895,152 @@ it("does not rediscover every installed skill after ordinary shell commands", as
   }));
   await driveHarness(
     host({
-      skills: { read },
+      skills: {
+        installed: [
+          {
+            name: "office-files",
+            description: "Office conversions",
+            path: "~/.skills/office-files",
+          },
+        ],
+        read,
+      },
       request: async () =>
         turn++ < 20
           ? {
               text: "",
-              calls: [{ id: `build-${turn}`, name: "shell", input: { command: "pnpm test" } }],
+              calls: [
+                {
+                  id: `build-${turn}`,
+                  name: "shell",
+                  input: { command: commands[turn % commands.length] },
+                },
+              ],
             }
           : step("done"),
       execute: async (id) => ({ result, conclude: id.startsWith("done") }),
     }),
   );
-  expect(read).toHaveBeenCalledTimes(3); // One inventory, not three reads per command.
+  expect(read).not.toHaveBeenCalled();
 });
 
-it("refreshes opaque shell changes after the catalog lifetime expires", async () => {
-  let time = 1_000;
-  let turn = 0;
-  const now = vi.spyOn(Date, "now").mockImplementation(() => time);
-  const read = vi.fn(async (input: { op: string; path: string }) => ({
-    ok: true,
-    content: [],
-    fileList: { path: input.path, truncated: false, entries: [] },
-  }));
-  try {
+describe("upstream compaction", () => {
+  const page = (n: number) =>
+    Array.from({ length: 340 }, (_, i) => `page ${n} line ${i} lorem ipsum dolor sit amet`).join(
+      "\n",
+    );
+  const fetchTool = {
+    name: "web_fetch",
+    description: "Fetch a page",
+    parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+  };
+  const summary = async function* () {
+    yield { type: "block-start", index: 0, blockType: "text" } as const;
+    yield { type: "text-delta", index: 0, text: "SUMMARY" } as const;
+    yield { type: "block-end", index: 0, block: { type: "text", text: "SUMMARY" } } as const;
+    yield { type: "finish", reason: { kind: "stop" } } as const;
+  };
+
+  it("keeps root-session compaction local and out of the host context", async () => {
+    const delegated: { purpose?: string; sessionId?: string }[] = [];
+    const kinds = new Set<string>();
+    let turn = 0;
     await driveHarness(
       host({
-        skills: { read },
-        request: async () => {
-          if (turn++ > 1) return step("done");
-          if (turn === 2) time += 300_001;
-          return {
-            text: "",
-            calls: [{ id: `script-${turn}`, name: "shell", input: { command: "./setup.sh" } }],
-          };
+        delegation: {
+          tools: [fetchTool],
+          contextTokens: 128_000,
+          maxOutputTokens: 8192,
+          request: (options) => {
+            delegated.push({ purpose: options.purpose, sessionId: options.sessionId });
+            return summary();
+          },
+          execute: async () => result,
         },
-        execute: async (id) => ({ result, conclude: id.startsWith("done") }),
+        request: async (_signal, request) => {
+          for (const item of request.context) kinds.add(item.kind);
+          return ++turn <= 30
+            ? { text: "", calls: [{ id: `fetch-${turn}`, name: "web_fetch", input: {} }] }
+            : step("done");
+        },
+        execute: async (id) => ({
+          result: id.startsWith("fetch")
+            ? { ok: true, content: [{ type: "text", text: page(turn) }] }
+            : result,
+          conclude: id.startsWith("done"),
+        }),
       }),
     );
-    expect(read).toHaveBeenCalledTimes(6);
-  } finally {
-    now.mockRestore();
-  }
+    expect(delegated).toEqual([]);
+    expect(kinds.has("compact-checkpoint")).toBe(false);
+  });
+
+  it("summarizes a long child with a bounded request", async () => {
+    const compactions: { sessionId?: string; maxTokens?: number }[] = [];
+    let childTurn = 0;
+    let parentTurn = 0;
+    await driveHarness(
+      host({
+        delegation: {
+          tools: [fetchTool],
+          contextTokens: 32_000,
+          maxOutputTokens: 4096,
+          request: (options) => {
+            if (options.purpose === "compaction") {
+              compactions.push({ sessionId: options.sessionId, maxTokens: options.maxTokens });
+              return summary();
+            }
+            const fetch = ++childTurn <= 8;
+            return (async function* () {
+              yield {
+                type: "block-start",
+                index: 0,
+                blockType: fetch ? "tool-call" : "text",
+              } as const;
+              yield {
+                type: "block-end",
+                index: 0,
+                block: fetch
+                  ? {
+                      type: "tool-call",
+                      id: `child-fetch-${childTurn}` as never,
+                      name: "web_fetch",
+                      arguments: `{"url":"https://example.com/${childTurn}"}`,
+                    }
+                  : { type: "text", text: "Research complete" },
+              } as const;
+              yield { type: "finish", reason: { kind: fetch ? "tool-calls" : "stop" } } as const;
+            })();
+          },
+          execute: async () => ({ ok: true, content: [{ type: "text", text: page(childTurn) }] }),
+        },
+        request: async () =>
+          ++parentTurn === 1
+            ? {
+                text: "",
+                calls: [
+                  {
+                    id: "delegate",
+                    name: "subagent",
+                    input: {
+                      description: "Research",
+                      prompt: "Read every page",
+                      run_in_background: false,
+                    },
+                  },
+                ],
+              }
+            : step("done"),
+        execute: async (id, _signal, native) => ({
+          result: native ?? result,
+          conclude: id.startsWith("done"),
+        }),
+      }),
+    );
+    expect(compactions.length).toBeGreaterThan(0);
+    for (const compaction of compactions) {
+      expect(compaction.sessionId).not.toBe("test-session");
+      expect(compaction.maxTokens).toBe(4000);
+    }
+  });
 });
