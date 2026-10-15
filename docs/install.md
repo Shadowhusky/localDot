@@ -22,6 +22,9 @@ computer images. Download time depends on your connection. The current alpha sup
 Mac and Linux x64, including Windows through WSL 2. Clean native Windows installation has not yet
 been verified for this candidate. Intel Mac and Linux ARM64 packages are not published yet.
 
+In a terminal, setup first shows where it will install and asks once; press Enter to keep those
+folders. To use another folder or drive, see [Choose where localDot installs](#choose-where-localdot-installs).
+
 Keep PowerShell open. Ubuntu downloads and installs in PowerShell first, so progress and errors
 stay visible. Once it is installed, account setup opens in a separate window; create your Linux user
 and password there. PowerShell checks readiness in the background and continues when the account
@@ -87,6 +90,59 @@ localdot open
 **On Windows, `localdot` works in PowerShell and Ubuntu/WSL after installation.** Open the resulting
 link in your Windows browser. If your saved keys are locked, run `localdot unlock`.
 
+## Choose where localDot installs
+
+localDot keeps the app in `~/.local/share/localdot` and your data (settings, saved keys, task
+history and logs) in `~/.localdot`. The first time you run the installer in a terminal, it shows
+these folders and asks once:
+
+```text
+localDot will be installed in:
+  App   ~/.local/share/localdot
+  Data  ~/.localdot
+Press Enter to continue, or type another folder:
+```
+
+Press Enter to keep them, or type another folder, such as one on another drive; on a Mac you can
+also drag the folder from Finder into Terminal. The app goes in that folder and your data in its
+`data` folder, but data you already have in `~/.localdot` stays there. `~` is your home folder,
+and a relative path starts in the current folder.
+
+To choose without the question, pass the folders as options, quoting paths that contain spaces:
+
+```sh
+curl -fsSL https://downloads.localdot.dev/install.sh | bash -s -- \
+  --prefix "/Volumes/Husky's SSD 4T/localDot" --home "/Volumes/Husky's SSD 4T/localDot/data"
+```
+
+`--prefix` is the app's folder and `--home` your data's. `--yes` skips the question and uses the
+default folders; a run without a terminal never asks.
+
+On Windows, `-Prefix` and `-HomeDir` choose the folders inside Ubuntu:
+
+```powershell
+& ([scriptblock]::Create((irm https://downloads.localdot.dev/install.ps1))) -Prefix '~/apps/localdot' -HomeDir '~/localdot data'
+```
+
+Keep them inside Linux: a Windows drive such as `D:\` (which Linux sees as `/mnt/d`) normally
+can't keep the file permissions localDot needs, and the installer refuses it.
+
+The installer remembers the folders in `~/.config/localdot/install-location` (in
+`$XDG_CONFIG_HOME/localdot` if you set that). Running the installer again, `localdot update`,
+`localdot uninstall` and `localdot doctor` all use them. Options win over the remembered folders,
+which win over the `LOCALDOT_PREFIX` and `LOCALDOT_HOME` environment variables.
+
+Each folder must be one you can write to, on a drive that keeps file permissions (such as APFS,
+HFS+ or ext4, but not exFAT or FAT), and can't be `/` or your home folder itself. The app's folder
+must be new, empty or an earlier localDot install. Your data folder's path can be at most 87 bytes
+on macOS and 60 on Linux, because localDot's services keep sockets in it. The installer checks the
+free space on the drives of both folders.
+
+To move localDot, run `localdot uninstall`, which keeps your data, then install again with
+`--prefix` set to the new folder and `--home` to your data folder (move that folder first if it
+should go too). While localDot is installed, the installer refuses to install a second copy
+elsewhere.
+
 ## If setup stops
 
 Fix the reported issue and rerun the same installer command; it keeps your settings and data.
@@ -108,6 +164,8 @@ Fix the reported issue and rerun the same installer command; it keeps your setti
 | Final installation checks failed | Setup is not complete. Run `localdot doctor`, fix the reported checks, and rerun the installer. A running web server alone is not a successful installation. |
 | `go: command not found` while building the gate image | Rerun the latest installer. It supplies Go automatically; no separate Go installation is needed. |
 | A prerequisite is missing | Follow the commands the installer prints, then rerun it. |
+| `localDot is already installed in …` | You chose a different install folder. To move localDot, see [Choose where localDot installs](#choose-where-localdot-installs). |
+| A folder `doesn't keep file permissions`, or `you can't write to` it | Choose a folder you own on a drive formatted for macOS or Linux, or connect the drive it is on. See [Choose where localDot installs](#choose-where-localdot-installs). |
 | `localdot: command not found` | Open a new terminal. On macOS/Linux/WSL, you can also run `~/.local/bin/localdot open`. On Windows, rerun setup if the PowerShell command is missing. |
 | Sign-in link expired | Run `localdot open` for a fresh link. |
 | Saved keys are locked | Run `localdot unlock`. |
@@ -223,9 +281,10 @@ Packaged publication/signing/installed acceptance gates remain in [release packa
   again does the same. Your settings are kept; options change them, for example
   `localdot update --tailscale`. Source-only `--ref` does not apply to packaged installs.
 - `localdot uninstall` (or `install.sh --uninstall`) removes the services, the `localdot`
-  command and what the installer put in `~/.local/share/localdot`. It keeps your data and Docker's
-  computers and images, and prints the commands that delete them. `--prefix` must name a new or
-  empty folder, so uninstalling never removes anything else.
+  command and what the installer put in the app's folder (`~/.local/share/localdot` unless you
+  [chose another](#choose-where-localdot-installs)). It keeps your data and Docker's computers and
+  images, and prints the commands that delete them. `--prefix` must name a new or empty folder, so
+  uninstalling never removes anything else.
 
 ## The localdot command
 
@@ -326,7 +385,8 @@ The source installer also needs authenticated Git access when it downloads the a
 For an existing installation, use `localdot update --tailscale`. `localdot update --help`
 lists the installer options.
 
-Windows PowerShell accepts `-Distro`, `-Ref`, `-Tailscale` and `-Uninstall`. For example:
+Windows PowerShell accepts `-Distro`, `-Ref`, `-Prefix`, `-HomeDir`, `-Tailscale` and
+`-Uninstall`. For example:
 
 ```powershell
 ./install.ps1 -Tailscale
@@ -355,8 +415,8 @@ an authenticated source checkout, not to the packaged installer.
 5. Runs `localdot doctor` and prints the sign-in link. On a computer with a screen it opens the
    link in your browser.
 
-Your data lives in `~/.localdot` (`--home` chooses another folder), with the logs in
-`~/.localdot/logs`. The installer refuses to replace services it did not create, such as an
+Your data lives in `~/.localdot` unless you [chose another folder](#choose-where-localdot-installs),
+with the logs in its `logs` folder. The installer refuses to replace services it did not create, such as an
 existing localDot run by hand, and a port something else uses (`--port` chooses another).
 
 ### How the computers reach localDot
