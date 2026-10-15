@@ -78,10 +78,19 @@ Hosted models see screenshots and the task's context. [Model options](docs/model
 ## Safety
 
 dot works on its own computer, not yours. Reading, searching, clicking and running code there just
-happen. It asks before it sends anything as you, pays for something, uploads your files, or
-changes or deletes things on a remote service. Your LAN, your router and cloud metadata are
-blocked. Your real keys stay in keyd, a small local service: dot only ever holds stand-ins, and
-the real key is added on the way out, for that key's own hosts.
+happen. How often it asks first is up to you:
+
+- **Custom**, the default, asks before dot sends or posts anything as you, pays for something,
+  uploads your files, changes your account's security, or changes or deletes things online.
+- **Auto** lets a reviewer model approve routine steps. Purchases, sign-ins and online deletions
+  still ask you.
+- **Full access** gets on with it, and still asks before every purchase and before deleting
+  things online (once per site).
+
+Your LAN, your router and cloud metadata are always blocked. Your real keys stay in keyd, a small
+local service: dot only ever holds stand-ins, and the real key is added on the way out, for that
+key's own hosts. Passwords go through a private form straight into the site, so dot never sees
+them.
 
 Pages, search results and app responses reach the model marked as untrusted. An optional purpose
 check flags private data heading somewhere unrelated to the task. This is alpha software, so
