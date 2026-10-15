@@ -1832,6 +1832,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
                   />
                   <Toaster anchor={toastAnchor} />
+                  {/* A phone has no top bar: New conversation waits in the top corner, beside the
+                      island, whenever there is something to start afresh from. */}
+                  {phone && !newConversation.reason && (
+                    <span className="island-new">
+                      <NewConversationButton {...newConversation} />
+                    </span>
+                  )}
                 </>
               }
               band={

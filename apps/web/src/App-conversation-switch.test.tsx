@@ -161,6 +161,22 @@ it("clears the thread the moment New conversation is pressed, and never draws th
   expect(thread.textContent).not.toContain(REPLIED);
 });
 
+it("offers New conversation in a phone's top corner, and drops it once the conversation is new", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: /width < (700|1100)px/.test(query),
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  const d = await opened();
+  // A phone has no top bar and no rail header: the button stands on its own, not in More.
+  fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+  await act(async () => d.answer.resolve());
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "New conversation" })).toBeNull(),
+  );
+});
+
 it("takes up a conversation chosen from the list, its thread coming in once it is read", async () => {
   const d = await opened();
   const { thread } = d;

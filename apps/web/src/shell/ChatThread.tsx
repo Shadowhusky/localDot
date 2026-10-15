@@ -25,11 +25,14 @@ export interface NewConversation {
   reason?: string;
 }
 
+// Filled, so it reads as the conversation's first action rather than one more quiet icon.
 export function NewConversationButton({ run, reason }: NewConversation) {
   return (
     <IconButton
       icon="compose"
       size={32}
+      variant="filled"
+      round
       label="New conversation"
       disabledReason={reason}
       onClick={() => run()}
