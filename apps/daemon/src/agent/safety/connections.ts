@@ -394,7 +394,10 @@ export class ConnectionApprovals {
         )
         .catch(() => false);
       if (this.deps.task(cellId)?.id !== task.id) return false;
-      if (allowed && task.permissionMode?.() === "auto") return true;
+      if (allowed && task.permissionMode?.() === "auto") {
+        this.#once.set(once, (this.deps.now?.() ?? Date.now()) + ONCE_MS);
+        return true;
+      }
     }
     const decision = await task.connections.request({
       ...(app ? { app } : {}),

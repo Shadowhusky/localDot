@@ -27,7 +27,7 @@ const PATTERNS = {
   names: [
     [
       "purchase",
-      /\b(?:buy|pay|purchase|place\s+(?:your\s+)?order|check\s*out|subscribe|upgrade|donate)\b|购买|購買|支付|付款|下单|下單|结账|結帳/i,
+      /\b(?:buy|pay|purchase|donate|pre-?order|order\s+now|book\s+now|place\s+(?:(?:your|my|the|a)\s+)?(?:order|bid)|(?:submit|confirm|complete|make|send|authori[sz]e|process)\s+(?:(?:the|a|an|your|my|this)\s+)?(?:order|payment|purchase|transfer|booking|reservation|bid|trade|transaction|donation|deposit|withdrawal)s?|send\s+money|(?:transfer|wire)\s+(?:funds|money)|wire\s+transfer|add\s+funds|top[\s-]?up)\b|购买|購買|支付|付款|下单|下單|结账|結帳/i,
     ],
     [
       "send",
@@ -37,9 +37,37 @@ const PATTERNS = {
       "post",
       /\b(?:post|publish|share|comment|tweet|repost|retweet)\b|发布|發佈|發布|发表|發表|分享|评论|評論/i,
     ],
-    ["delete", /\b(?:delete|remove|trash|erase|discard)\b|删除|刪除|移除/i],
+    // Removing a filter or a cart's item, or discarding a draft, deletes nothing of the user's.
+    [
+      "delete",
+      /\b(?:delete|trash|erase)\b|\bremove\b(?!\s+(?:(?:all|the|this)\s+)?(?:filters?|sort(?:ing)?|selection|formatting)\b|\s+from\s+(?:(?:the|your|my)\s+)?(?:cart|bag|basket)\b)|删除|刪除|移除/i,
+    ],
   ] as const,
-  commit: /\b(?:submit|save|update|apply|confirm|yes)\b|提交|保存|儲存|确认|確認|确定|確定/i,
+  // What buys on a button but only leads to it on a link or opens a headline. Booking a demo or a
+  // call costs nothing.
+  spend:
+    /^\W*(?:reserve|withdraw)\b|^\W*book\b(?!\s+(?:(?:a|an|your)\s+)?(?:free\s+)?(?:demo|call|meeting|consultation|appointment|session|tour|viewing)s?\b)|转账|轉帳|轉賬|提现|提現|充值|预订|預訂/i,
+  price:
+    /[$€£¥₹₩₽₺₪₱฿]\s?\d|\b(?:usd|eur|gbp|jpy|cny|rmb|aud|chf|inr|hkd|sgd)\s?\d|\d\s?(?:[$€£¥₹₩₽元円]|(?:usd|eur|gbp|jpy|cny|rmb|aud|chf|inr|hkd|sgd)\b)/i,
+  // Adding to a cart moves no money, whatever price its button shows.
+  cart: /\badd\s+to\s+(?:cart|bag|basket|trolley)\b/i,
+  // An offer buys only with a price or a plan in sight: a newsletter's Subscribe moves no money.
+  offer: /\b(?:subscribe|upgrade|check\s*out|start\s+(?:(?:a|your)\s+)?(?:free\s+)?trial)\b/i,
+  plan: /\b(?:pro|premium|plus|enterprise|plans?|membership)\b/i,
+  // The path words of a page that moves money, where a commit pays, and of one that sells plans.
+  moneyPage:
+    /(?:^|[/_.-])(?:checkout|pay|payments?|billing|orders?|bookings?|reservations?|cart|basket|transfers?|wallets?|withdraw(?:als?)?|trade|trading)(?=$|[/_.-])/i,
+  planPage: /(?:^|[/_.-])(?:pricing|plans?|upgrade|subscription)(?=$|[/_.-])/i,
+  trade: /\b(?:transfer|sell|trade)\b/i,
+  button: /^(?!.*radio).*(?:button|submit)/i,
+  link: /link/i,
+  commit: /\b(?:submit|confirm)\b|提交|确认|確認|确定|確定/i,
+  // Changes to how an account is signed in to or reached: its password and second factors, keys
+  // and tokens, the apps given access to it, its name, email and phone, and where its mail goes.
+  // Showing a password or signing in with a passkey changes none of them, and the plainer words
+  // count only at a label's end: "Create secret gist" posts, and email preferences are no address.
+  account:
+    /\b(?:change|reset|update|set\s*up|set|edit|add|remove|delete|disable|enable|turn\s+(?:on|off)|generate|regenerate|create|new|register|replace|rotate|configure)\s+(?:(?:a|an|the|your|my|this|new|another)\s+)*(?:[\w-]+\s+)?(?:(?:pass(?:word|key|phrase)s?|2fa|mfa|(?:two|2|multi)[\s-]?(?:factor|step)|authenticator|recovery|backup\s+codes?|security\s+(?:keys?|questions?)|(?:ssh|gpg|pgp|signing|deploy|api|access)\s+(?:keys?|tokens?)|oauth|forwarding)\b|(?:tokens?|secrets?|e-?mail(?:\s+address)?|phone(?:\s+number)?|username)(?:\s*\([^)]*\))?\W*$)|\b(?:authori[sz]e|revoke|deactivate|(?:grant|allow)\s+access|close\s+(?:(?:my|your|this|the)\s+)?account)\b|^\W*(?:allow|grant)\W*$/i,
   actionable: /button|link|menu ?item|submit/i,
   field:
     /^(?:ax)?(?:text|text ?box|text ?field|text ?area|search ?box|search ?field|combo ?box|entry|editable text|input|spin ?button|password text|secure ?text ?field)$/i,
@@ -49,6 +77,11 @@ const PATTERNS = {
     /密碼|密码|验证码|驗證碼|支付|付款|信用卡|登入|登录|登錄|password|passcode|passphrase|one[ -]?time|verification[ -]?code|2fa|captcha|credit[ -]?card|card[ -]?number|security[ -]?code|cvv|cvc|expiry|expiration|billing|payment|sign[ -]?in|log[ -]?in/i,
   search: /search|搜索|搜尋|\bfind\b|\bquery\b/i,
   enter: /^(?:return|enter|kp_enter)$/i,
+  // Keys that delete what is selected; # deletes in Google's apps.
+  deleteKey: /^(?:delete|del|backspace|kp_delete|numbersign|#)$/i,
+  // Chromium reads a rich-text editor with no role of its own as generic and cannot see into a
+  // frame; native editors focus a paragraph, a section, a document or a sheet's cell.
+  editor: /^(?:generic|iframe|paragraph|section|document(?: \w+)?|table cell)$/i,
   terminal: /terminal/i,
   // Window classes of the browsers a desktop runs.
   browserApp: /^(?:chromium|(?:google-)?chrome|firefox|brave|microsoft-edge)\b/i,
@@ -146,6 +179,24 @@ const PATTERNS = {
   curlUpload: /^(?:form|upload-file$)/,
   wgetDelete: /--method[\s=]DELETE\b/i,
   wgetSend: /--post-(?:data|file)|--body-(?:data|file)|--method[\s=](?:POST|PUT|PATCH)\b/i,
+  ghDelete: /(?:^|\s)(?:-X\s?|--method[\s=])DELETE(?=\s|$)/i,
+  httpie: /^(?:https?|xhs?)$/,
+  // A push that deletes or rewrites the remote's branches: --delete or a :branch, a forced or
+  // mirrored push, or a +branch.
+  rewrite:
+    /^(?:--(?:delete|force|force-with-lease|mirror|prune)(?:=.*)?|-[46nquv]*[df][46dfnquv]*(?:o.*)?|[:+].+)$/,
+  // Cloud and cluster tools, and the words with which they delete what they name.
+  destroys: new Map([
+    ["aws", /^(?:rm|rb|(?:delete|terminate|deregister|remove)-[\w-]+)$/],
+    ["gsutil", /^(?:rm|rb)$/],
+    ["gcloud", /^delete$/],
+    ["az", /^delete$/],
+    ["kubectl", /^delete$/],
+    ["helm", /^(?:uninstall|delete)$/],
+    ["terraform", /^destroy$/],
+    ["pulumi", /^destroy$/],
+    ["vercel", /^(?:rm|remove)$/],
+  ]),
 } as const;
 
 export function classify(facts: RiskFacts): readonly ActionClass[] {
@@ -248,6 +299,51 @@ function named(text: string): ActionClass[] {
   return PATTERNS.names.filter(([, pattern]) => pattern.test(text)).map(([c]) => c);
 }
 
+// A name nothing confirmed may be a button's, so a money verb in it asks as one. A price alone
+// may be any product's tile.
+function claims(name: string): ActionClass[] {
+  const classes = named(name);
+  return PATTERNS.spend.test(name) && !classes.includes("purchase")
+    ? ["purchase", ...classes]
+    : classes;
+}
+
+// A button buys by what it shows or where it is: a money verb or a price on it, an offer with a
+// plan in sight, or a commit on a page that moves money. A link with any of these only leads there.
+function buys(target: NativeTargetFacts, name: string): boolean {
+  if (!PATTERNS.button.test(target.role ?? "")) return false;
+  const path = pathOf(target.url);
+  const pays = PATTERNS.moneyPage.test(path);
+  return (
+    PATTERNS.spend.test(name) ||
+    (PATTERNS.price.test(name) && !PATTERNS.cart.test(name)) ||
+    (PATTERNS.offer.test(name) &&
+      (PATTERNS.plan.test(name) || pays || PATTERNS.planPage.test(path))) ||
+    ((PATTERNS.commit.test(name) || PATTERNS.trade.test(name)) && pays)
+  );
+}
+
+const LEAD_NAMES = PATTERNS.names.map(
+  ([actionClass, pattern]) =>
+    [actionClass, new RegExp(`^\\W*(?:${pattern.source})`, pattern.flags)] as const,
+);
+
+// A link names what it does when it is short or starts with the doing: a headline that mentions
+// buying or deleting something only opens an article.
+function linkNamed(text: string): ActionClass[] {
+  if (text.trim().split(/\s+/).length <= 3) return named(text);
+  return LEAD_NAMES.filter(([, pattern]) => pattern.test(text)).map(([c]) => c);
+}
+
+// Whether a key edits text where focus is, or focus has no role to tell.
+function editable(target: NativeTargetFacts): boolean {
+  const role = target.role ?? "";
+  return (
+    !role ||
+    [PATTERNS.field, PATTERNS.terminal, PATTERNS.editor].some((pattern) => pattern.test(role))
+  );
+}
+
 function input(facts: RiskFacts): ActionClass[] {
   const target = facts.target;
   const identified =
@@ -258,12 +354,25 @@ function input(facts: RiskFacts): ActionClass[] {
   const web = facts.screen === "browser" || target?.source === "dom" || isWebUrl(target?.url);
   const name = identified?.name ?? "";
   if (identified && (web || facts.signedIn) && PATTERNS.actionable.test(identified.role ?? "")) {
-    const classes = named(name);
+    const classes = PATTERNS.link.test(identified.role ?? "") ? linkNamed(name) : named(name);
     if (classes.length) return classes;
-    if (facts.signedIn && PATTERNS.commit.test(name)) return ["system_settings"];
+    if (buys(identified, name)) return ["purchase"];
+    if (facts.signedIn && (PATTERNS.commit.test(name) || PATTERNS.account.test(name)))
+      return ["system_settings"];
   }
-  if (!facts.signedIn) return ["computer"];
   const keys = facts.operation === "key" ? (facts.keys ?? []) : [];
+  const terminal = PATTERNS.terminal.test(identified?.role ?? "");
+  const submits =
+    keys.some((key) => PATTERNS.enter.test(key) || endsLine(key)) ||
+    (terminal && runsLine(keys)) ||
+    (facts.operation === "type" && facts.newline === true);
+  // A line run in a terminal is a command, as the shell tool's is, whether or not the desktop is
+  // signed in. A key runs a line it cannot read.
+  if (terminal && submits)
+    return facts.command === undefined
+      ? ["unknown"]
+      : shell(facts.command, facts.signedIn === true);
+  if (!facts.signedIn) return ["computer"];
   // Tab moves focus, so what follows it lands on the next control, where a space presses Send.
   const tabbed =
     facts.operation === "type"
@@ -273,19 +382,12 @@ function input(facts: RiskFacts): ActionClass[] {
   if (!identified) {
     // A name nothing confirmed can only add a check: an unclear press the model calls "Buy" asks
     // as a purchase, while one it calls anything else stays unclear.
-    const claimed = named(target?.name ?? "");
+    const claimed = claims(target?.name ?? "");
     if (claimed.length && facts.operation !== "type") return claimed;
     return facts.operation === "type" && !facts.newline && !tabbed ? ["computer"] : ["unknown"];
   }
-  const terminal = PATTERNS.terminal.test(identified.role ?? "");
-  const submits =
-    keys.some((key) => PATTERNS.enter.test(key) || endsLine(key)) ||
-    (terminal && runsLine(keys)) ||
-    (facts.operation === "type" && facts.newline === true);
-  // A line run in a terminal is a command that can drive the signed-in browser, like the shell
-  // tool's. A key runs a line it cannot read.
-  if (terminal && submits)
-    return facts.command === undefined ? ["unknown"] : shell(facts.command, true);
+  // A key that deletes what is selected deletes it from the account, unless it edits text there.
+  if (keys.some((key) => PATTERNS.deleteKey.test(key)) && !editable(identified)) return ["delete"];
   const compose =
     PATTERNS.field.test(identified.role ?? "") &&
     !PATTERNS.searchRole.test(identified.role ?? "") &&
@@ -336,10 +438,30 @@ function navigation(facts: RiskFacts): ActionClass[] {
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
     return ["unknown"];
   if (facts.signedIn) {
-    const classes = named(decodePath(url.pathname).replace(/[-_/.+]+/g, " "));
+    const classes = pathNamed(url.pathname);
     if (classes.length) return classes;
   }
   return ["browsing"];
+}
+
+const SEGMENT_NAMES = PATTERNS.names.map(
+  ([actionClass, pattern]) =>
+    [actionClass, new RegExp(`^(?:${pattern.source})$`, pattern.flags)] as const,
+);
+
+// A path names an action only with a whole segment, such as /delete or /place-order: an article
+// whose slug mentions buying or removing something is only read.
+function pathNamed(path: string): ActionClass[] {
+  const segments = decodePath(path)
+    .split("/")
+    .map((segment) => segment.replace(/\.\w+$/, "").replace(/[-_.+]+/g, " "));
+  return SEGMENT_NAMES.filter(([, pattern]) =>
+    segments.some((segment) => pattern.test(segment)),
+  ).map(([actionClass]) => actionClass);
+}
+
+function pathOf(value: string | undefined): string {
+  return value !== undefined && isWebUrl(value) ? decodePath(new URL(value).pathname) : "";
 }
 
 function decodePath(value: string): string {
@@ -1043,11 +1165,23 @@ function stageClass(tokens: readonly string[]): ActionClass | undefined {
   if ((name === "scp" || name === "rsync") && remoteDestination(args)) return "upload";
   if (name === "sftp" && remote(args.map((arg) => `sftp://${arg.replace(/^[^@]*@/, "")}`)))
     return "upload";
-  if (name === "git" && subcommand(tokens) === "push") return "post";
+  if (name === "git" && subcommand(tokens) === "push")
+    return args.slice(args.indexOf("push") + 1).some((arg) => PATTERNS.rewrite.test(arg))
+      ? "delete"
+      : "post";
   const publish = PATTERNS.publish.get(name);
   if (publish && subcommand(tokens) === publish) return "post";
+  if (PATTERNS.httpie.test(name) && args.some((arg) => /^delete$/i.test(arg)) && remote(args))
+    return "delete";
+  const destroys = PATTERNS.destroys.get(name);
+  if (
+    (destroys && args.some((arg) => destroys.test(arg))) ||
+    (name === "terraform" && args.includes("apply") && args.includes("-destroy"))
+  )
+    return "delete";
   if (name === "gh") {
-    if (args[1] === "delete") return "delete";
+    if (args[1] === "delete" || (args[0] === "api" && PATTERNS.ghDelete.test(args.join(" "))))
+      return "delete";
     if (
       ["pr", "issue", "release", "repo", "gist"].includes(args[0] ?? "") &&
       PATTERNS.ghPost.test(args[1] ?? "")

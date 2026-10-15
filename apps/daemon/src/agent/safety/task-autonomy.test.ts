@@ -4,7 +4,7 @@ import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import { requestTakeoverTool } from "../tools/ask.ts";
 import type { ToolCallContext, ToolDeps } from "../tools/deps.ts";
-import { authorizePrepared, toolRisk } from "./authorize.ts";
+import { authorizePrepared, runsUnasked, toolRisk } from "./authorize.ts";
 import { decideAutonomy } from "./autonomy.ts";
 import { PausedStepError } from "./step-barrier.ts";
 import { TaskAutonomy } from "./task-autonomy.ts";
@@ -72,7 +72,7 @@ describe("signed-in screens of one task", () => {
     expect(decideAutonomy(ctx, command).mode).toBe("act");
     expect(decideAutonomy(ctx, { operation: "files_write" }).mode).toBe("act");
     session.taskAutonomy.signIn("desktop");
-    expect(decideAutonomy(ctx, command)).toEqual({
+    expect(decideAutonomy(ctx, command)).toMatchObject({
       actionClass: "unknown",
       mode: "ask",
       risk: "medium",
@@ -90,6 +90,27 @@ describe("signed-in screens of one task", () => {
     });
     expect(asks).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ["web_fetch", { url: "https://shop.example.test/buy" }],
+    ["research", { op: "pdf", url: "https://shop.example.test/buy" }],
+  ] as const)(
+    "a %s fetch carries none of the user's cookies, so it is never signed in",
+    async (tool, input) => {
+      const { ctx, asks } = context("browser");
+      const prepared = (name: typeof tool | "browser_navigate", raw: Record<string, string>) => {
+        const facts = toolRisk(name, raw);
+        if (!facts) throw new Error(`${name} has no facts`);
+        return { tool: name, input: raw, target: null, facts, revalidate: async () => true };
+      };
+      expect(runsUnasked(ctx, prepared(tool, input))).toBe(true);
+      await authorizePrepared(ctx, prepared(tool, input));
+      expect(asks).not.toHaveBeenCalled();
+      const page = prepared("browser_navigate", { url: input.url });
+      expect(runsUnasked(ctx, page)).toBe(false);
+      expect(decideAutonomy(ctx, page.facts)).toMatchObject({ actionClass: "purchase" });
+    },
+  );
 
   it("a password hand-off on the desktop makes its unclear clicks ask for the rest of the task", async () => {
     const { ctx, session, takeover } = context();

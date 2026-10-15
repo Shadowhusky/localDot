@@ -5,6 +5,7 @@ import {
   DEFAULT_RESEARCH_BUDGET,
   type KeydRecord,
   RESUME_WAIT_REASON,
+  type RoutineProfile,
   type TaskPricing,
   ulid,
 } from "@localdot/protocol";
@@ -16,14 +17,17 @@ import { NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { KeydHealth } from "../keyd/monitor.ts";
+import { autonomyFor } from "../routines/policy.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
 import { agentRoutes } from "./routes.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { decideAutonomy } from "./safety/autonomy.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { type AgentSettings, SettingsStore } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
+import type { ToolCallContext } from "./tools/deps.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 function required<T>(value: T | undefined): T {
@@ -945,6 +949,47 @@ describe("routine start options", () => {
     await h.ready();
     expect(session.unattended).toBe(true);
     expect(h.boots[0]?.run).toEqual(run);
+  });
+  describe("under global Full access", () => {
+    const send = {
+      operation: "click",
+      target: {
+        source: "dom",
+        fresh: true,
+        role: "button",
+        name: "Send",
+        url: "https://mail.example.test/compose",
+      },
+    } as const;
+    const started = async (profile: RoutineProfile) => {
+      const h = setup({
+        settings: {
+          main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+          taskBudgetUSD: 5,
+          permissionMode: "full",
+        },
+      });
+      const session = await h.runner.start(h.cellId, "Task", undefined, {
+        autonomy: autonomyFor(profile, { ...DEFAULT_AUTONOMY, send: "act" }),
+        run: { kind: "routine", name: "Morning bills", profile, approvalWindowMinutes: 60 },
+        approvalWindowMs: 3_600_000,
+      });
+      await h.ready();
+      return { session } as unknown as ToolCallContext;
+    };
+    it.each(["ask_first", "read_only"] as const)(
+      "an Ask me first routine asks before a send (%s)",
+      async (profile) => {
+        const ctx = await started(profile);
+        expect(ctx.session.permissionMode()).toBe("custom");
+        expect(decideAutonomy(ctx, send).mode).toBe("ask");
+      },
+    );
+    it("a routine that acts within the user's rules keeps their mode", async () => {
+      const ctx = await started("act_within_rules");
+      expect(ctx.session.permissionMode()).toBe("full");
+      expect(decideAutonomy(ctx, send).mode).toBe("act");
+    });
   });
   it("does not publish Done when an API brain gives up and its idle window expires", async () => {
     const h = setup();

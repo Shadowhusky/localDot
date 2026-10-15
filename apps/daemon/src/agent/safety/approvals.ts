@@ -10,6 +10,7 @@ import {
   ApprovalRequestDraft as DraftSchema,
   ulid,
 } from "@localdot/protocol";
+import type { Place, PlacedOption } from "./rules.ts";
 
 export interface ActionBinding {
   readonly sessionId: string;
@@ -24,6 +25,8 @@ export interface ApprovalChecks {
   readonly signal: AbortSignal;
   check(binding: ActionBinding): void;
   revalidate(binding: ActionBinding): Promise<boolean>;
+  // Where the step acts, kept off the card: a yes for this task covers steps there only.
+  readonly place?: Place;
 }
 export interface ApprovalResolution {
   approvalId: string;
@@ -31,7 +34,7 @@ export interface ApprovalResolution {
   by: "user" | "timeout";
   note?: string;
   // The card's own option the user chose, never one the answer described.
-  always?: { readonly actionClass: ActionClass; readonly option: AlwaysOption };
+  always?: { readonly actionClass: ActionClass; readonly option: PlacedOption };
   // The hosts an approved purpose card asked about.
   destinations?: readonly string[];
 }
@@ -92,6 +95,7 @@ export class ApprovalBroker {
     if (this.#pending.has(binding.sessionId)) throw new Error("approval already pending");
     if (this.#revision >= Number.MAX_SAFE_INTEGER) throw new Error("approval owner exhausted");
     const privateBinding = Object.freeze(structuredClone(binding));
+    const place = checks.place && Object.freeze(structuredClone(checks.place));
     const parsed = DraftSchema.parse(draft);
     const { whole, ...shown } = cardFields(parsed);
     const card = CardSchema.parse({
@@ -122,7 +126,12 @@ export class ApprovalBroker {
             by,
             ...(result === "stale" ? { note: "Approval cancelled." } : {}),
             ...(always && result === "approve"
-              ? { always: { actionClass: card.actionClass, option: always } }
+              ? {
+                  always: {
+                    actionClass: card.actionClass,
+                    option: place && always.scope === "task" ? { ...always, place } : always,
+                  },
+                }
               : {}),
             ...(card.destinations && result === "approve"
               ? { destinations: [...card.destinations] }

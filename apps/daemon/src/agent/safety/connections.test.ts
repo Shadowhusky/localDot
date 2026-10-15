@@ -126,6 +126,20 @@ it("auto checks a connection with Jev before allowing it", async () => {
   expect(f.cards()).toEqual([]);
 });
 
+it("holds Jev's yes for a program's retries to the same place for a minute, as the user's own", async () => {
+  const f = setup();
+  if (!f.session) throw new Error("Missing fixture session");
+  f.session.permissionMode = () => "auto";
+  f.session.autoPermit = vi.fn(async () => true);
+  await f.approvals.ask(CELL, held("example.com", 8443));
+  await f.approvals.ask(CELL, held("example.com", 8443));
+  expect(f.session.autoPermit).toHaveBeenCalledTimes(1);
+  f.later(61_000);
+  await f.approvals.ask(CELL, held("example.com", 8443));
+  expect(f.session.autoPermit).toHaveBeenCalledTimes(2);
+  expect(f.answers.map((a) => a.decision)).toEqual(["allow", "allow", "allow"]);
+});
+
 describe("ConnectionCards", () => {
   const make = () => {
     let now = 1_000_000;

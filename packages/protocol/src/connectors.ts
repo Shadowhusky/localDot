@@ -341,7 +341,8 @@ function nameClass(tokens: readonly string[]): ActionClass | undefined {
 }
 
 // Read or change, from the user's choice first, then the app's annotations, then the tool's name.
-// The description can only make a tool ask more, since a server writes it.
+// A server writes the description and hints, so the description can only make a tool ask more and
+// a read-only hint never reads a tool whose name says it changes something.
 export function toolAccess(
   tool: { name: string; description?: string; annotations?: ToolAnnotationsLike },
   choice?: ToolAccess,
@@ -357,7 +358,7 @@ export function toolAccess(
   const hints = tool.annotations;
   if (hints?.destructiveHint === true)
     return { access: "write", from: "app", actionClass: named ?? describedClass ?? "delete" };
-  if (hints?.readOnlyHint === true && !describedClass)
+  if (hints?.readOnlyHint === true && !describedClass && !named)
     return { access: "read", from: "app", actionClass: "reading" };
   if (hints?.readOnlyHint === false)
     return { access: "write", from: "app", actionClass: changeClass };

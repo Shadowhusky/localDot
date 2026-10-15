@@ -502,12 +502,16 @@ export class AgentRunner {
       );
       session.earlier = earlier;
       session.permissionMode = () => {
+        // A routine set to ask first or only read keeps its own policy whatever the chat's mode.
+        if (session.run && session.run.profile !== "act_within_rules") return "custom";
         try {
           return this.deps.settings().permissionMode ?? "custom";
         } catch {
           return "custom";
         }
       };
+      // Jev's answers in this task, by the question it was asked: the same action is asked once.
+      const verdicts = new Map<string, boolean>();
       session.autoPermit = async (action, signal, observe) => {
         const keys = await this.deps.keyd.secrets();
         const choice = judgeChoice(this.deps.settings().purposeCheck, keys, false);
@@ -534,16 +538,22 @@ export class AgentRunner {
             if (!evidence) return false;
           }
         }
+        const request = evidence
+          ? jevNavigationRequest(session.currentPurpose, evidence)
+          : action.local
+            ? jevLocalChangeRequest(session.currentPurpose, action)
+            : jevApprovalRequest(session.currentPurpose, action);
+        const asked = JSON.stringify(request);
+        const known = verdicts.get(asked);
+        if (known !== undefined) return known;
         const reply = await this.deps.jev(
           choice.secretId,
-          evidence
-            ? jevNavigationRequest(session.currentPurpose, evidence)
-            : action.local
-              ? jevLocalChangeRequest(session.currentPurpose, action)
-              : jevApprovalRequest(session.currentPurpose, action),
+          request,
           AbortSignal.any([signal, AbortSignal.timeout(5000)]),
         );
-        return jevFits(reply) >= 0.9;
+        const fits = jevFits(reply) >= 0.9;
+        verdicts.set(asked, fits);
+        return fits;
       };
       if (options.research)
         session.research = new ResearchLog(

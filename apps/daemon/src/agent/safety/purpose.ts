@@ -94,7 +94,8 @@ export const unreadableJudge: PurposeJudge = {
 };
 
 export const FITS_THRESHOLD = 0.75;
-export const JUDGE_TIMEOUT_MS = 3_000;
+// Each try; a judge that fails one gets a second before it counts as down.
+export const JUDGE_TIMEOUT_MS = 8_000;
 const DOWN_MS = 30_000;
 
 const DNS_NAME =
@@ -673,6 +674,20 @@ function timed<T>(work: (signal: AbortSignal) => Promise<T>, signal: AbortSignal
   });
 }
 
+// A judge that fails a try gets one more, unless the caller gave up.
+async function judged<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+  ms: number,
+): Promise<T> {
+  try {
+    return await timed(work, signal, ms);
+  } catch {
+    signal.throwIfAborted();
+    return timed(work, signal, ms);
+  }
+}
+
 const METHOD: Readonly<Record<Outbound["kind"], JudgeAction["method"]>> = {
   open_page: "GET",
   enter_text: "typed",
@@ -756,7 +771,7 @@ export class PurposeGate {
         (await this.#derivedHosts(judge, purpose, key, signal)).some((named) =>
           covers(named, host),
         ) ||
-        (await timed(
+        (await judged(
           (s) =>
             judge.fits(
               purpose,
@@ -792,13 +807,17 @@ export class PurposeGate {
     signal: AbortSignal,
   ): Promise<string[]> {
     if (this.#derived?.key !== key) {
-      const hosts = timed((s) => judge.destinations(purpose, s), signal, this.#timeout);
+      const hosts = judged((s) => judge.destinations(purpose, s), signal, this.#timeout);
       hosts.catch(() => {});
       this.#derived = { key, hosts };
     }
     return (await this.#derived.hosts)
       .map((named) => named.toLowerCase().replace(/\.$/, ""))
       .filter((named) => ownerOfHost(named));
+  }
+  // Which judge the check uses; none when it is off or nothing can judge.
+  get judgeName(): PurposeJudge["name"] | undefined {
+    return this.deps.judge()?.name;
   }
   // The user allowed these hosts for the rest of the task.
   allow(destinations: readonly string[]): void {
@@ -850,18 +869,19 @@ export class PurposeGate {
       return undefined;
     const overlaps = taint.overlap(outbound.text).overlaps;
     const refusal = overlaps ? "carries" : "unrelated";
+    // The judge sees the send's shape, never its text, so sends it would see alike share a verdict.
+    const seen: JudgeAction = {
+      kind: outbound.kind,
+      destination: judgedName(host, purpose),
+      ...(outbound.app ? { app: outbound.app } : {}),
+      method: METHOD[outbound.kind],
+      bytes: Buffer.byteLength(outbound.text),
+      shape: shapeOf(outbound),
+      overlapsPrivateText: overlaps,
+      privateData: taint.kinds,
+    };
     const judgmentKey = createHash("sha256")
-      .update(
-        JSON.stringify([
-          key,
-          host,
-          outbound.kind,
-          outbound.app,
-          outbound.text,
-          taint.kinds,
-          overlaps,
-        ]),
-      )
+      .update(JSON.stringify([key, host, seen]))
       .digest("hex");
     const known = this.#judged.get(judgmentKey);
     if (known !== undefined) return known ? undefined : refusal;
@@ -872,25 +892,7 @@ export class PurposeGate {
         this.#judged.set(judgmentKey, true);
         return undefined;
       }
-      const p = await timed(
-        (s) =>
-          judge.fits(
-            purpose,
-            {
-              kind: outbound.kind,
-              destination: judgedName(host, purpose),
-              ...(outbound.app ? { app: outbound.app } : {}),
-              method: METHOD[outbound.kind],
-              bytes: Buffer.byteLength(outbound.text),
-              shape: shapeOf(outbound),
-              overlapsPrivateText: overlaps,
-              privateData: taint.kinds,
-            },
-            s,
-          ),
-        signal,
-        this.#timeout,
-      );
+      const p = await judged((s) => judge.fits(purpose, seen, s), signal, this.#timeout);
       signal.throwIfAborted();
       const fits = Number.isFinite(p) && p >= FITS_THRESHOLD;
       this.#judged.set(judgmentKey, fits);

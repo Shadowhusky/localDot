@@ -150,13 +150,21 @@ function holdsCredentials(
   );
 }
 
+// web_fetch and a research PDF are fetched without the user's cookies, so neither is signed in
+// whichever screen is selected.
+function riskFacts({ tool, facts }: Pick<PreparedEffect, "tool" | "facts">): RiskFacts {
+  return (tool === "web_fetch" || tool === "research") && facts.operation === "navigate"
+    ? { ...facts, signedIn: false }
+    : facts;
+}
+
 // Whether authorizePrepared would let this effect run with no card and no hand-off.
 export function runsUnasked(
   ctx: ToolCallContext,
   prepared: Pick<PreparedEffect, "tool" | "input" | "target" | "facts" | "upload">,
 ): boolean {
   return (
-    decideAutonomy(ctx, prepared.facts).mode === "act" &&
+    decideAutonomy(ctx, riskFacts(prepared)).mode === "act" &&
     !holdsCredentials(ctx, {
       ...prepared,
       input: freezeExecutionInput(prepared.input),
@@ -176,19 +184,17 @@ export async function authorizePrepared(
     targetDigest = actionDigest(target);
   const digest = actionDigest({ tool: prepared.tool, input, target });
   const permit = new OncePermit(digest);
-  const decision = decideAutonomy(ctx, prepared.facts);
+  const facts = riskFacts(prepared);
+  let decision = decideAutonomy(ctx, facts);
   const permission = ctx.session.permissionMode();
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
-  if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
+  if (upload && (prepared.tool !== "browser_upload" || facts.operation !== "files_upload"))
     throw new Error("Upload approval does not match this action.");
-  if (
-    decision.mode === "handoff" ||
-    holdsCredentials(ctx, { ...prepared, input, target, upload })
-  ) {
+  const handOff = async (handed: RiskDecision): Promise<undefined> => {
     // No native effect has begun. Release this initiating tool's physical screen lease
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
-    const { reason, note } = handoffFor(decision, prepared.facts);
+    const { reason, note } = handoffFor(handed, facts);
     // A held Pause refuses the hand-off before anything counts as signed in.
     if (ctx.session.safetyPause) throw new PausedStepError();
     if (reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
@@ -196,33 +202,37 @@ export async function authorizePrepared(
     ctx.check();
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;
-  }
-  if (
-    permission === "auto" &&
-    decision.mode === "ask" &&
-    (decision.actionClass !== "delete" || decision.local) &&
-    ctx.session.autoPermit
-  ) {
+  };
+  if (decision.mode === "handoff" || holdsCredentials(ctx, { ...prepared, input, target, upload }))
+    return handOff(decision);
+  if (decision.judge && ctx.session.autoPermit) {
     const allowed = await ctx.session
       .autoPermit(
         {
           tool: prepared.tool,
-          operation: prepared.facts.operation,
+          operation: facts.operation,
           actionClass: decision.actionClass,
           ...(decision.local ? { local: true } : {}),
           input,
           target,
-          facts: actingFacts(ctx, prepared.facts),
+          facts: actingFacts(ctx, facts),
         },
         ctx.signal,
         prepared.observeTarget,
       )
-      .catch(() => false);
+      .then(
+        (yes) => yes,
+        () => undefined,
+      );
     ctx.check();
     if (allowed) {
       if (!(await prepared.revalidate())) return undefined;
       ctx.check();
       decision.mode = "act";
+    } else if (allowed === undefined) {
+      // A judge that couldn't answer leaves the step to the user's own settings.
+      decision = decideAutonomy(ctx, facts, false);
+      if (decision.mode === "handoff") return handOff(decision);
     }
   }
   const purpose =
@@ -230,8 +240,8 @@ export async function authorizePrepared(
       ? await purposeCheck(ctx, prepared, input)
       : undefined;
   if (decision.mode === "ask" || purpose) {
-    const draft = approvalDraft(prepared.tool, input, prepared.facts, decision, ctx.redact, upload);
-    const acting = actingFacts(ctx, prepared.facts);
+    const draft = approvalDraft(prepared.tool, input, facts, decision, ctx.redact, upload);
+    const acting = actingFacts(ctx, facts);
     const outcome = await ctx.session.requestApproval(
       {
         sessionId: ctx.session.id,
@@ -273,6 +283,7 @@ export async function authorizePrepared(
           ctx.check();
           return valid;
         },
+        place: decision.place,
       },
     );
     ctx.check();

@@ -13,6 +13,33 @@ import { ALWAYS_SCOPES, type Place } from "./rules.ts";
 const MODE_RANK = { act: 0, ask: 1, handoff: 2 } as const;
 const DESKTOP_ONLY = new Set<RiskFacts["operation"]>(["shell", "files_write", "files_delete"]);
 const RISK_RANK = { none: 0, medium: 1, high: 2 } as const;
+// Of equally strict decisions, the one that names the step: the hardest to take back first.
+const PRECEDENCE: readonly ActionClass[] = [
+  "credentials",
+  "purchase",
+  "delete",
+  "upload",
+  "system_settings",
+  "send",
+  "post",
+  "download_execute",
+  "network",
+  "unknown",
+  "memory",
+  "computer",
+  "browsing",
+  "reading",
+];
+// Auto asks the user before these whatever its judge would say, except a deletion inside the
+// computer that is all the step asks about.
+const UNJUDGED = new Set<ActionClass>(["credentials", "purchase", "delete"]);
+
+export interface AutonomyDecision extends RiskDecision {
+  // Where the step acts, for the class decided: a yes for this task covers steps there only.
+  readonly place: Place;
+  // An ask Auto's judge may answer in the user's place.
+  readonly judge?: true;
+}
 
 function mode(actionClass: ActionClass, policy: AutonomyPolicy): AutonomyMode {
   if (actionClass === "credentials") return "handoff";
@@ -26,11 +53,34 @@ function risk(actionClass: ActionClass): RiskDecision["risk"] {
   return actionClass === "unknown" || actionClass === "memory" ? "medium" : "high";
 }
 
-function stricter(best: RiskDecision, next: RiskDecision): RiskDecision {
-  return MODE_RANK[next.mode] > MODE_RANK[best.mode] ||
-    (next.mode === best.mode && RISK_RANK[next.risk] > RISK_RANK[best.risk])
-    ? next
-    : best;
+function stricter<T extends RiskDecision>(best: T, next: T): T {
+  if (next.mode !== best.mode) return MODE_RANK[next.mode] > MODE_RANK[best.mode] ? next : best;
+  if (next.risk !== best.risk) return RISK_RANK[next.risk] > RISK_RANK[best.risk] ? next : best;
+  return PRECEDENCE.indexOf(next.actionClass) < PRECEDENCE.indexOf(best.actionClass) ? next : best;
+}
+
+// A preset's decision for a class before any allowance. Full asks only before paying or deleting
+// online data. Auto always asks before paying, deleting online data or a sweeping deletion, and
+// leaves the rest but reading, browsing and work in the computer to its judge, or with none to the
+// user's own settings.
+function preset(
+  actionClass: ActionClass,
+  permission: "auto" | "full",
+  inside: Place["inside"],
+  unjudged: AutonomyPolicy | undefined,
+): AutonomyMode {
+  if (actionClass === "credentials") return "handoff";
+  if (actionClass === "purchase" || (actionClass === "delete" && inside !== "local")) return "ask";
+  if (permission === "full" || ["reading", "browsing", "computer"].includes(actionClass))
+    return "act";
+  return unjudged ? mode(actionClass, unjudged) : "ask";
+}
+
+// Auto's judge is Jev, which the task's purpose check also uses whenever a Jev key is saved: with
+// no Jev there, nothing can approve in the user's place.
+function judges(ctx: ToolCallContext): boolean {
+  const gate = ctx.session.purpose;
+  return ctx.session.autoPermit !== undefined && (gate === undefined || gate.judgeName === "jev");
 }
 
 // A task allowance or saved rule only turns ask into act, class by class.
@@ -104,53 +154,75 @@ export function screenOf(ctx: ToolCallContext): ScreenName {
   return ctx.screen?.selection.screen ?? ctx.session.screens?.selection.screen ?? "desktop";
 }
 
-// Commands and file changes run on the desktop whichever screen is selected.
+// Commands and file changes run on the desktop whichever screen is selected. A fetch made without
+// the user's cookies is never signed in.
 export function actingFacts(ctx: ToolCallContext, facts: RiskFacts): RiskFacts {
   const screen = DESKTOP_ONLY.has(facts.operation) ? "desktop" : screenOf(ctx);
-  return { ...facts, screen, signedIn: ctx.session.taskAutonomy.signedIn(screen) };
+  return {
+    ...facts,
+    screen,
+    signedIn: facts.signedIn !== false && ctx.session.taskAutonomy.signedIn(screen),
+  };
 }
 
-export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDecision {
+// `judging` says whether Auto may ask its judge; with none to ask, the user's own settings decide
+// in its place.
+export function decideAutonomy(
+  ctx: ToolCallContext,
+  facts: RiskFacts,
+  judging = judges(ctx),
+): AutonomyDecision {
   const acting = actingFacts(ctx, facts);
   const permission = ctx.session.permissionMode();
-  if (permission !== "custom") {
-    const classes = [...classify(acting)];
-    // Presets change the default decision, not the scope of a user's explicit approval.
-    // Keep each class independent: allowing deletion must not also allow a credential
-    // action, upload, or unrelated destination carried by the same step.
-    const destroys = permission === "auto" ? deletion(acting) : undefined;
-    const local = destroys === "local" && !classes.includes("delete");
-    if (destroys && !classes.includes("delete")) classes.push("delete");
-    const place = placeOf(acting);
-    const decisions = classes.map((actionClass): RiskDecision => {
-      const needsApproval =
-        actionClass === "delete" ||
-        actionClass === "purchase" ||
-        (permission === "auto" && !["reading", "browsing", "computer"].includes(actionClass));
-      return {
-        actionClass,
-        mode:
-          actionClass === "credentials"
-            ? "handoff"
-            : needsApproval && !ctx.session.taskAutonomy.relaxes(actionClass, place)
-              ? "ask"
-              : "act",
-        risk: risk(actionClass),
-      };
-    });
-    const decision = decisions.reduce(stricter);
-    // The judge's question about a local deletion answers for nothing else the step does.
-    return local &&
-      decision.actionClass === "delete" &&
-      decision.mode === "ask" &&
-      decisions.every((other) => other === decision || other.mode === "act")
-      ? { ...decision, local: true }
-      : decision;
-  }
   const place = placeOf(acting);
-  return decide(acting, ctx.session.autonomy, (actionClass) =>
-    ctx.session.taskAutonomy.relaxes(actionClass, place),
-  );
+  const relaxes = (actionClass: ActionClass, at: Place) =>
+    ctx.session.taskAutonomy.relaxes(actionClass, at);
+  // A connected app's tool the user set to ask first asks in every mode, never the judge, until
+  // they say yes for this task.
+  if (acting.connector?.asks) {
+    const decision = decide(acting, ctx.session.autonomy, (actionClass) =>
+      relaxes(actionClass, place),
+    );
+    if (decision.mode !== "handoff")
+      return { ...decision, mode: relaxes(decision.actionClass, place) ? "act" : "ask", place };
+  }
+  if (permission === "custom")
+    return {
+      ...decide(acting, ctx.session.autonomy, (actionClass) => relaxes(actionClass, place)),
+      place,
+    };
+  const classes = [...classify(acting)];
+  // Presets change the default decision, not the scope of a user's explicit approval.
+  // Keep each class independent: allowing deletion must not also allow a credential
+  // action, upload, or unrelated destination carried by the same step.
+  const inside =
+    permission === "auto" && !classes.includes("delete") ? deletion(acting) : undefined;
+  if (inside) classes.push("delete");
+  const unjudged =
+    permission === "auto" && !judging ? AutonomyPolicy.parse(ctx.session.autonomy) : undefined;
+  const decisions = classes.map((actionClass): AutonomyDecision => {
+    const at = actionClass === "delete" && inside ? { ...place, inside } : place;
+    const asked = preset(actionClass, permission, inside, unjudged);
+    return {
+      actionClass,
+      mode: asked === "ask" && relaxes(actionClass, at) ? "act" : asked,
+      risk: risk(actionClass),
+      place: at,
+    };
+  });
+  const decision = decisions.reduce(stricter);
+  // The judge's question about a local deletion answers for nothing else the step does.
+  const local =
+    inside === "local" &&
+    decision.actionClass === "delete" &&
+    decision.mode === "ask" &&
+    decisions.every((other) => other === decision || other.mode === "act");
+  const judge =
+    permission === "auto" &&
+    judging &&
+    decision.mode === "ask" &&
+    (local || !classes.some((actionClass) => UNJUDGED.has(actionClass)));
+  return { ...decision, ...(local ? { local: true } : {}), ...(judge ? { judge: true } : {}) };
 }
 
 const TEMP_DIRECTORY = String.raw`\/(?:tmp|var\/tmp|private\/tmp)`;

@@ -1643,6 +1643,39 @@ describe("ChatGPT runner lifecycle", () => {
     );
   });
 
+  it("asks Jev once for an action it already answered in this task", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const f = setup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.95, unclear: 0.05 } } },
+    }));
+    f.deps.jev = ask;
+    f.secrets.mockResolvedValue([jev]);
+    const session = await f.runner.start(f.cellId, "Render the promo film");
+    await until(() => session.status === "idle");
+    const action = (command: string) => ({
+      tool: "shell" as const,
+      operation: "shell" as const,
+      actionClass: "computer" as const,
+      input: { command },
+    });
+    const signal = new AbortController().signal;
+    expect(await session.autoPermit?.(action("npm test"), signal)).toBe(true);
+    expect(await session.autoPermit?.(action("npm test"), signal)).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(await session.autoPermit?.(action("npm run build"), signal)).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
   it("asks where data goes when the saved keys can't be read, instead of not checking", async () => {
     const f = setup();
     const session = await f.runner.start(f.cellId, "Fixture task");

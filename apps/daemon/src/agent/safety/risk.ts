@@ -64,6 +64,8 @@ export interface ConnectorFacts {
   readonly actionClass: ActionClass;
   // Where its arguments go, when known.
   readonly host?: string;
+  // The user set this tool to ask first, which holds in every mode.
+  readonly asks?: true;
 }
 export type RiskDecision = {
   actionClass: ActionClass;

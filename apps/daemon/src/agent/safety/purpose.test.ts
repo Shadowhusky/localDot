@@ -18,6 +18,7 @@ import { type ToolCallContext, taintScreen } from "../tools/deps.ts";
 import { authorizePrepared, toolRisk } from "./authorize.ts";
 import { jevJudge, jevRequest, modelJudge } from "./judges.ts";
 import {
+  JUDGE_TIMEOUT_MS,
   type JudgeAction,
   judgeChoice,
   mentionedHosts,
@@ -444,6 +445,15 @@ describe("the purpose check", () => {
     expect(j.fits).not.toHaveBeenCalled();
   });
 
+  it("asks the judge once for two sends it would see alike", async () => {
+    const j = judge(0.1);
+    const g = gate({ judge: j, tainted: false });
+    g.taint.add("screen", "mail.example.com", PRIVATE);
+    for (const text of ["q=apple", "q=melon"])
+      expect((await g.gate.check([leak("tracker.example", text)], signal)).allow).toBe(false);
+    expect(j.fits).toHaveBeenCalledTimes(1);
+  });
+
   it("judges data read on one host going to its sibling", async () => {
     const j = judge(0.1);
     const g = gate({ judge: j, tainted: false });
@@ -622,22 +632,50 @@ describe("the purpose check", () => {
       why: expect.stringMatching(/^The purpose check couldn't tell whether evil\.example fits/),
     });
     expect((await g.gate.check([leak("other.example")], signal)).allow).toBe(false);
-    expect(down.fits).toHaveBeenCalledOnce();
+    expect(down.fits).toHaveBeenCalledTimes(2);
     now += 31_000;
     await g.gate.check([leak("third.example")], signal);
-    expect(down.fits).toHaveBeenCalledTimes(2);
+    expect(down.fits).toHaveBeenCalledTimes(4);
     const untainted = gate({ judge: down, tainted: false });
     expect((await untainted.gate.check([leak("evil.example")], signal)).allow).toBe(true);
   });
 
+  it("tries the judge once more before counting it unavailable", async () => {
+    const flaky = () => ({
+      name: "jev" as const,
+      destinations: async () => [],
+      fits: vi
+        .fn<PurposeJudge["fits"]>()
+        .mockRejectedValueOnce(new Error("Jev answered 529"))
+        .mockResolvedValue(0.9),
+    });
+    const page = flaky();
+    expect((await gate({ judge: page }).gate.check([leak("evil.example")], signal)).allow).toBe(
+      true,
+    );
+    expect(page.fits).toHaveBeenCalledTimes(2);
+    const connection = flaky();
+    expect(
+      await gate({ judge: connection }).gate.fitsConnection("chat.example.com", 5222, signal),
+    ).toBe(true);
+    expect(connection.fits).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives the judge about eight seconds a try", () => {
+    expect(JUDGE_TIMEOUT_MS).toBe(8_000);
+  });
+
   it("asks when the judge does not answer in time", async () => {
+    let tries = 0;
     const slow = {
       name: "model" as const,
       destinations: async () => [],
-      fits: (_p: unknown, _a: unknown, s: AbortSignal) =>
-        new Promise<number>((_resolve, reject) =>
+      fits: (_p: unknown, _a: unknown, s: AbortSignal) => {
+        tries++;
+        return new Promise<number>((_resolve, reject) =>
           s.addEventListener("abort", () => reject(s.reason)),
-        ),
+        );
+      },
     };
     const taint = new TaskTaint();
     taint.add("memory", "USER.md", PRIVATE);
@@ -649,6 +687,7 @@ describe("the purpose check", () => {
       timeoutMs: 20,
     });
     expect((await g.check([leak("evil.example")], signal)).allow).toBe(false);
+    expect(tries).toBe(2);
   });
 });
 

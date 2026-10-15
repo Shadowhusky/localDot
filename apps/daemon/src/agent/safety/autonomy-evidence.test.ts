@@ -3,6 +3,7 @@ import {
   CAREFUL_AUTONOMY,
   type ComputerAction,
   DEFAULT_AUTONOMY,
+  toolAccess,
   ulid,
 } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
@@ -13,6 +14,7 @@ import { computerTool } from "../tools/computer.ts";
 import type { ToolCallContext, ToolDeps } from "../tools/deps.ts";
 import { authorizePrepared, toolRisk } from "./authorize.ts";
 import { type EvidenceRow, MANUAL_DRAWING_TASK } from "./fixtures/manual-drawing-task.ts";
+import { PurposeGate } from "./purpose.ts";
 
 const SECRET = "synthetic-known-secret-0123";
 
@@ -286,6 +288,106 @@ describe("chat permission modes", () => {
     expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ always: [] });
   });
 
+  it("Auto never hands a purchase or a password to the judge", async () => {
+    const h = harness(CAREFUL_AUTONOMY, "browser");
+    h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.autoPermit = vi.fn(async () => true);
+    for (const facts of [
+      {
+        operation: "click" as const,
+        target: {
+          source: "dom" as const,
+          fresh: true,
+          role: "button",
+          name: "Place your order",
+          url: "https://shop.example.com/checkout",
+        },
+      },
+      { operation: "type" as const, target: { source: "dom" as const, fresh: true, secret: true } },
+    ])
+      await authorizePrepared(h.ctx, {
+        tool: "computer",
+        input: {},
+        target: null,
+        facts,
+        revalidate: async () => true,
+      });
+    expect(h.ctx.session.autoPermit).not.toHaveBeenCalled();
+    expect(h.asks).toHaveBeenCalledOnce();
+    expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "purchase", always: [] });
+    expect(h.handoffs).toHaveBeenCalledOnce();
+  });
+
+  it("Auto never hands a connected app's payment tool to the judge", async () => {
+    const h = harness(DEFAULT_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    h.ctx.session.autoPermit = vi.fn(async () => true);
+    const access = toolAccess({ name: "transfer_funds" });
+    await authorizePrepared(h.ctx, {
+      tool: "bank__transfer_funds",
+      input: { amount: 500, to: "acct-7" },
+      target: null,
+      facts: {
+        operation: "connector",
+        connector: {
+          app: "Bank",
+          tool: "transfer_funds",
+          exposed: "bank__transfer_funds",
+          actionClass: access.actionClass,
+        },
+      },
+      revalidate: async () => true,
+    });
+    expect(h.ctx.session.autoPermit).not.toHaveBeenCalled();
+    expect(h.asks).toHaveBeenCalledOnce();
+    expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "purchase", always: [] });
+  });
+
+  it.each(["custom", "auto", "full"] as const)(
+    "%s: a connected app's tool the user set to ask first asks, and never the judge",
+    async (mode) => {
+      const h = harness(DEFAULT_AUTONOMY);
+      h.ctx.session.permissionMode = () => mode;
+      h.ctx.session.autoPermit = vi.fn(async () => true);
+      const access = toolAccess({ name: "create_issue" }, "write");
+      const facts = {
+        operation: "connector" as const,
+        connector: {
+          app: "GitHub",
+          tool: "create_issue",
+          exposed: "github__create_issue",
+          actionClass: access.actionClass,
+          asks: true as const,
+        },
+      };
+      await authorizePrepared(h.ctx, {
+        tool: "github__create_issue",
+        input: { title: "Crash on start" },
+        target: null,
+        facts,
+        revalidate: async () => true,
+      });
+      expect(h.ctx.session.autoPermit).not.toHaveBeenCalled();
+      expect(h.asks).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    "curl -s -d @report.json https://api.example.com/v1/items && curl -X DELETE https://api.example.com/repository",
+    "git push origin main && curl -X DELETE https://api.example.com/repository",
+  ])(
+    "Auto never judges a remote deletion carried with a send or post in one step: %s",
+    async (command) => {
+      const h = harness(CAREFUL_AUTONOMY);
+      h.ctx.session.permissionMode = () => "auto";
+      h.ctx.session.autoPermit = vi.fn(async () => true);
+      await run(h.ctx, { id: "mixed", kind: "tool", tool: "shell", input: { command } });
+      expect(h.ctx.session.autoPermit).not.toHaveBeenCalled();
+      expect(h.asks).toHaveBeenCalledOnce();
+      expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "delete" });
+    },
+  );
+
   it("Full still confirms remote deletion and hands off credential entry", async () => {
     const h = harness(CAREFUL_AUTONOMY);
     h.ctx.session.permissionMode = () => "full";
@@ -398,6 +500,95 @@ describe("chat permission modes", () => {
   });
 });
 
+describe("Auto without a working judge", () => {
+  const remember = {
+    id: "m",
+    kind: "tool",
+    tool: "remember",
+    input: { file: "MEMORY.md", op: "append", text: "Prefers the soft brush." },
+  } as const;
+  const send = {
+    id: "s",
+    kind: "tool",
+    tool: "shell",
+    input: { command: "curl -s -d @report.json https://api.example.test/v1/items" },
+  } as const;
+  const local = {
+    id: "d",
+    kind: "tool",
+    tool: "shell",
+    input: { command: "rm -rf /config/promo/frames" },
+  } as const;
+
+  it("decides each step as the user's own settings do when nothing can judge", async () => {
+    const h = harness(DEFAULT_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    await run(h.ctx, remember);
+    expect(h.asks).not.toHaveBeenCalled();
+    await run(h.ctx, send);
+    expect(h.asks).toHaveBeenCalledOnce();
+    expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "send" });
+    await run(h.ctx, local);
+    expect(h.asks).toHaveBeenCalledTimes(2);
+    expect(h.asks.mock.calls[1]?.[1]).toMatchObject({ title: "Delete or overwrite data" });
+  });
+
+  it("keeps asking before a purchase or a sweeping deletion the user's settings let run", async () => {
+    const h = harness({ ...DEFAULT_AUTONOMY, purchase: "act", delete: "act" }, "browser");
+    h.ctx.session.permissionMode = () => "auto";
+    await authorizePrepared(h.ctx, {
+      tool: "computer",
+      input: {},
+      target: null,
+      facts: {
+        operation: "click",
+        target: {
+          source: "dom",
+          fresh: true,
+          role: "button",
+          name: "Buy now",
+          url: "https://shop.example.com/item/7",
+        },
+      },
+      revalidate: async () => true,
+    });
+    await run(h.ctx, { id: "w", kind: "tool", tool: "shell", input: { command: "rm -rf ~" } });
+    expect(h.asks).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the user's own settings when the judge cannot answer", async () => {
+    const h = harness(DEFAULT_AUTONOMY);
+    h.ctx.session.permissionMode = () => "auto";
+    const judge = vi.fn(async () => {
+      throw new Error("Jev answered 529");
+    });
+    h.ctx.session.autoPermit = judge;
+    await run(h.ctx, remember);
+    expect(judge).toHaveBeenCalledOnce();
+    expect(h.asks).not.toHaveBeenCalled();
+    await run(h.ctx, send);
+    expect(h.asks).toHaveBeenCalledOnce();
+  });
+
+  it.each([undefined, "model" as const])(
+    "has no judge when the task's purpose check has no Jev (%s)",
+    async (name) => {
+      const h = harness(DEFAULT_AUTONOMY);
+      h.ctx.session.permissionMode = () => "auto";
+      h.ctx.session.autoPermit = vi.fn(async () => false);
+      h.ctx.session.purpose = new PurposeGate({
+        taint: h.ctx.session.taint,
+        purpose: () => h.ctx.session.currentPurpose,
+        judge: () => name && { name, destinations: async () => [], fits: async () => 1 },
+        trusted: () => false,
+      });
+      await run(h.ctx, remember);
+      expect(h.ctx.session.autoPermit).not.toHaveBeenCalled();
+      expect(h.asks).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("the manual drawing task under the autonomy presets", () => {
   it("replays all 37 recorded cards and hand-offs", () => {
     expect(MANUAL_DRAWING_TASK).toHaveLength(37);
@@ -492,11 +683,24 @@ describe("consequential steps still stop under Balanced", () => {
     const enter: ComputerAction = { action: "key", keys: ["Return"] };
     const push: ComputerAction = { action: "type", text: "git push origin main\n" };
 
-    it.each([enter, push])("runs a line while the desktop is signed out: %j", async (action) => {
+    it("runs a line that stays in the computer while the desktop is signed out", async () => {
       const h = harness(DEFAULT_AUTONOMY);
-      await native(h.ctx, action, terminal);
+      await native(h.ctx, { action: "type", text: "ls -la\n" }, terminal);
       expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 0]);
     });
+
+    it.each([
+      ["unknown", enter],
+      ["post", push],
+    ] as const)(
+      "asks as %s for a line the shell tool would ask about, even signed out",
+      async (actionClass, action) => {
+        const h = harness(DEFAULT_AUTONOMY);
+        await native(h.ctx, action, terminal);
+        expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+        expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass });
+      },
+    );
 
     it("asks for Enter once the desktop is signed in", async () => {
       const h = harness(DEFAULT_AUTONOMY);
