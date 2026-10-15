@@ -47,6 +47,13 @@ irm https://downloads.localdot.dev/install.ps1 | iex
 - **干什么活，就找什么 dot。** 日常助手、程序员、研究员、财务、剪辑师、设计师，每个 dot 只带本职工作需要的技能，更专注，也更省 token。
 - **开源，由你掌控全局。** 代码采用 MIT 协议开源。应用、dot 的电脑和所有录像都保存在你自己的电脑上，API Key 也只存在本地。
 
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/capabilities-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/capabilities-mobile.png">
+  <source srcset="docs/readme/capabilities.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/capabilities.png" alt="手绘示意图：dot 在自己的电脑上能做的事，包括操作屏幕、使用会记住登录状态的浏览器、终端和文件，搜索网页、带编号出处的深度调研，语音对话，把你的应用当作工具，定时例行任务，可编辑的记忆，以及以你的名义行事前先问你。">
+</picture>
+
 ## 模型
 
 dot 需要一个能看懂截图、会调用工具的模型。在 **Settings → Models** 里添加，然后在输入框里选用。
@@ -58,6 +65,13 @@ dot 需要一个能看懂截图、会调用工具的模型。在 **Settings → 
 用云端模型时，截图和任务内容会发给模型服务商。[模型说明](docs/model-options.md)
 
 ## 安全
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/safety-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/safety-mobile.png">
+  <source srcset="docs/readme/safety.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/safety.png" alt="手绘示意图：dot 和互联网之间的六道关卡，分别是硬性检查、用途检查、审批、隔离的电脑、网络网关和替身 Key。搜索、阅读和点击直接通过；以你的名义发邮件会先问你；把你的笔记发到无关网站会先问你；访问路由器会被拦下；偷带 API Key 只能拿到替身。">
+</picture>
 
 dot 在它自己的电脑上干活，跟你的电脑是隔开的。在那台电脑上看网页、搜索、点击、跑代码，它都直接做。什么时候先问你，由你决定：
 
@@ -71,7 +85,23 @@ dot 在它自己的电脑上干活，跟你的电脑是隔开的。在那台电�
 
 ## 工作原理
 
-你的浏览器连接本机上的 localDot 守护进程（daemon）。它负责提供界面、执行任务、把 dot 的桌面实时推给你，并记下每一步。dot 的电脑由几个容器组成：你看到的桌面、一个会记住你登录状态的浏览器、agent 的主循环，还有一道网关，那是它连外网的唯一出口。[系统结构图](docs/readme/system.svg)
+你的浏览器连接本机上的 localDot 守护进程（daemon）。它负责提供界面、执行任务、把 dot 的桌面实时推给你，并记下每一步。dot 的电脑由几个容器组成：你看到的桌面、一个会记住你登录状态的浏览器、agent 的主循环，还有一道网关，那是它连外网的唯一出口。
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.png">
+  <source srcset="docs/readme/system.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/system.png" alt="手绘示意图：你的浏览器和手机连接本机上的 localDot 守护进程，它运行一台由桌面、浏览器、主循环和网关四个容器组成的隔离电脑。网关通往 keyd，keyd 保管真正的 Key，请求发往模型服务商、网页和你的应用时才把 Key 加上。网页搜索和阅读经由 keyd，不带登录状态也不带 Key；每个以程序运行的应用都有自己独立的容器。">
+</picture>
+
+每个任务都按同一个循环推进：动手，重新看一眼屏幕，说明进展，一直到做完。需要你的时候，它会在对话里问你。
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/task-loop-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/task-loop-mobile.png">
+  <source srcset="docs/readme/task-loop.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/task-loop.png" alt="手绘示意图：一个任务从头到尾，依次是提出、计划、动手、查看、说明、回放；动手、查看、说明循环进行直到完成，需要你的时候它会在对话里问你。">
+</picture>
 
 | 目录 | 内容 |
 | --- | --- |

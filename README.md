@@ -60,6 +60,13 @@ keeps your data, and `localdot doctor` diagnoses a problem.
 - **Open source, and yours.** The app, dot's computer and every recording stay on your machine,
   and your keys live in a local vault.
 
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/capabilities-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/capabilities-mobile.png">
+  <source srcset="docs/readme/capabilities.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/capabilities.png" alt="Pencil sketch of what dot can do on its own computer: use the screen, a web browser that keeps your sign-ins, a terminal and files; search the web and do deep research with numbered sources; talk with voice; use your apps as tools; run routines on a schedule; keep an editable memory; and ask you before it acts as you.">
+</picture>
+
 ## Models
 
 dot needs a model that can read screenshots and use tools. Add one in **Settings → Models**, then
@@ -76,6 +83,13 @@ pick it from the message box.
 Hosted models see screenshots and the task's context. [Model options](docs/model-options.md)
 
 ## Safety
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/safety-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/safety-mobile.png">
+  <source srcset="docs/readme/safety.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Searching, reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
+</picture>
 
 dot works on its own computer, not yours. Reading, searching, clicking and running code there just
 happen. How often it asks first is up to you:
@@ -102,7 +116,24 @@ review what dot does with your accounts. [How the agent runs](docs/agent-runtime
 Your browser talks to the localDot daemon on your machine, which serves the app, runs tasks,
 streams dot's desktop and records every step. dot's computer is a set of containers: the desktop
 you watch, a web browser that keeps your sign-ins, the agent's loop, and a gate that is its only
-way out to the network. [The system drawn out](docs/readme/system.svg)
+way out to the network.
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/system-mobile.png">
+  <source srcset="docs/readme/system.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/system.png" alt="Pencil sketch: your browser and phone talk to the localDot daemon on your machine, which runs an isolated computer of four containers: desktop, web browser, brain and gate. The gate leads to keyd, which holds the real keys and adds them on the way out to model providers, the web and your apps. Web search and page reads go through keyd with no sign-ins or keys, and each app that runs as a program gets an app cell of its own.">
+</picture>
+
+A task goes round a simple loop: act, take a fresh look at the screen, say what happened, and
+repeat until it's done. When dot needs you, it asks in the chat.
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/readme/task-loop-mobile.svg" type="image/svg+xml">
+  <source media="(max-width: 600px)" srcset="docs/readme/task-loop-mobile.png">
+  <source srcset="docs/readme/task-loop.svg" type="image/svg+xml">
+  <img width="100%" src="docs/readme/task-loop.png" alt="Pencil sketch of one task: ask, plan, act, look, narrate, replay. Act, look and narrate repeat until the task is done; when dot needs you, it asks in the chat.">
+</picture>
 
 | Folder | What's in it |
 | --- | --- |
