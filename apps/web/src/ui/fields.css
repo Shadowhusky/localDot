@@ -567,6 +567,37 @@
     margin-bottom: calc(var(--spacing) * 2.5);
   }
 
+  .ui-radio-cards[data-layout="tiles"][data-compact] {
+    grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing) * 15), 1fr));
+    gap: calc(var(--spacing) * 1.5);
+  }
+
+  .ui-radio-cards[data-layout="tiles"][data-compact] > .ui-radio-card {
+    align-items: center;
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    text-align: center;
+  }
+
+  .ui-radio-cards[data-layout="tiles"][data-compact] .ui-choice-label {
+    font:
+      var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
+      var(--font-ui);
+  }
+
+  .ui-radio-cards[data-layout="tiles"][data-compact] .ui-radio-card-preview {
+    align-self: stretch;
+    margin-bottom: calc(var(--spacing) * 2);
+  }
+
+  .ui-radio-cards[data-layout="tiles"][data-compact] .ui-radio-card-title {
+    justify-content: center;
+  }
+
+  /* A tile row is as tall as its tallest tile; the others keep their words at the top. */
+  .ui-radio-cards[data-layout="tiles"] .ui-choice-text {
+    align-content: start;
+  }
+
   /* The tile's check: an fg-1 disc with a void tick, in its top-right corner. */
   .ui-radio-card-check {
     position: absolute;

@@ -188,6 +188,13 @@
     --_fg-hover: var(--color-danger-fg);
   }
 
+  /* At a row's end, where the rows around it end in faced buttons, a red action keeps a face too. */
+  .ui-group-row-trailing > .ui-button[data-variant="destructive"] {
+    --_bg: var(--color-control);
+    --_bg-hover: var(--color-control-hover);
+    --_bg-pressed: var(--color-control-pressed);
+  }
+
   /* Confirmation actions need a visible face. Quiet red text stays available for
      secondary actions elsewhere, while an enabled delete reads as a button. */
   :is(.decision-actions, .ui-dialog-actions) > .ui-button[data-variant="destructive"] {

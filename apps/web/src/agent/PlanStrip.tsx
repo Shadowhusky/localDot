@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { markdownToPlain } from "./markdown.ts";
@@ -38,56 +38,81 @@ function FocusLine({ item, next = false }: { item: PlanItem; next?: boolean }) {
   );
 }
 
-// The plan as one compact strip: how far dot is, the item it is on and the next. The whole list
-// unfolds in place under it.
+// The plan as one compact card over the steps: how far dot is, the item it is on and the next.
+// Open, the whole list takes the place of those two lines on the same card, and the card keeps
+// its closed height in the rail so the steps under it never move.
 export function PlanStrip({
   plan,
   label = "Task plan",
-  overlay = false,
 }: {
   plan: readonly PlanItem[];
   label?: string;
-  overlay?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [closedHeight, setClosedHeight] = useState(0);
+  const card = useRef<HTMLDivElement>(null);
   const done = plan.filter((item) => item.status === "done").length;
   const { current, next } = planFocus(plan);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (!card.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", dismiss);
+    };
+  }, [open]);
   return (
-    <Disclosure
-      strip
-      className={overlay ? "plan-strip plan-strip-overlay" : "plan-strip"}
-      open={open}
-      onOpenChange={setOpen}
-      summary={
-        <span className="plan-strip-summary">
-          <span className="plan-strip-head">
-            <span className="plan-strip-title">Plan</span>
-            <span
-              className="plan-strip-bar"
-              aria-hidden="true"
-              style={{ "--_done": plan.length ? done / plan.length : 0 } as CSSProperties}
-            />
-            <span className="plan-strip-count num">
-              {done} of {plan.length}
-            </span>
-          </span>
-          {(overlay || !open) && current && <FocusLine item={current} />}
-          {(overlay || !open) && next && <FocusLine item={next} next />}
-        </span>
-      }
+    <div
+      ref={card}
+      className="plan-card"
+      style={open ? ({ "--_closed": `${closedHeight}px` } as CSSProperties) : undefined}
     >
-      <ol className="plan-list" aria-label={label}>
-        {plan.map((item) => {
-          const [state, word] = stateOf(item.status);
-          const text = markdownToPlain(item.text);
-          return (
-            <li key={item.id} className="plan-item" data-state={item.status}>
-              <StatusGlyph state={state} label={word} />
-              <span className="plan-text">{text}</span>
-            </li>
-          );
-        })}
-      </ol>
-    </Disclosure>
+      <Disclosure
+        strip
+        className="plan-strip"
+        open={open}
+        onOpenChange={(next) => {
+          if (next) setClosedHeight(card.current?.offsetHeight ?? 0);
+          setOpen(next);
+        }}
+        summary={
+          <span className="plan-strip-summary">
+            <span className="plan-strip-head">
+              <span className="plan-strip-title">Plan</span>
+              <span
+                className="plan-strip-bar"
+                aria-hidden="true"
+                style={{ "--_done": plan.length ? done / plan.length : 0 } as CSSProperties}
+              />
+              <span className="plan-strip-count num">
+                {done} of {plan.length}
+              </span>
+            </span>
+            {!open && current && <FocusLine item={current} />}
+            {!open && next && <FocusLine item={next} next />}
+          </span>
+        }
+      >
+        <ol className="plan-list" aria-label={label}>
+          {plan.map((item) => {
+            const [state, word] = stateOf(item.status);
+            const text = markdownToPlain(item.text);
+            return (
+              <li key={item.id} className="plan-item" data-state={item.status}>
+                <StatusGlyph state={state} label={word} />
+                <span className="plan-text">{text}</span>
+              </li>
+            );
+          })}
+        </ol>
+      </Disclosure>
+    </div>
   );
 }

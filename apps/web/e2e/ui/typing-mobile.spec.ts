@@ -34,7 +34,7 @@ for (const fallback of [false, true]) {
       });
       viewport.dispatchEvent(new Event("resize"));
     });
-    await expect(page.locator(".app")).toHaveAttribute("data-keyboard", "");
+    await expect(page.locator(".app")).toHaveAttribute("data-composer-keyboard", "");
     const emptyHeight = await box.evaluate((field) => field.getBoundingClientRect().height);
     const cdp = browserName === "chromium" ? await page.context().newCDPSession(page) : undefined;
     await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 6 });

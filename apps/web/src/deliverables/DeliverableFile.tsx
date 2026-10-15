@@ -1,5 +1,5 @@
 import { canOpenOnMac, type FileVersion, fileKind, viewerKind } from "@localdot/protocol";
-import { useId, useRef, useState } from "react";
+import { type Ref, useId, useRef, useState } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import type { FileState, ResultDownloads } from "../agent/ResultFiles.tsx";
 import { bytes } from "../copy/format.ts";
@@ -29,6 +29,8 @@ import { entryKey, useFileViewer } from "./viewer/scope.tsx";
 type ResultFile = AgentResult["files"][number];
 
 export interface DeliverableFileProps {
+  measure?: Ref<HTMLLIElement>;
+  index?: number;
   api: ApiClient;
   // The task that handed the file over, and the result it came with.
   sessionId: string;
@@ -47,6 +49,8 @@ export interface DeliverableFileProps {
 // A file dot handed over: a row to open its preview, download it or open it on the Mac, and under
 // it, what it looks like, its versions, and Revise and Compare.
 export function DeliverableFile({
+  measure,
+  index,
   api,
   sessionId,
   resultId,
@@ -126,7 +130,7 @@ export function DeliverableFile({
         : undefined;
 
   return (
-    <li className="deliverable" aria-label={file.name}>
+    <li ref={measure} data-index={index} className="deliverable" aria-label={file.name}>
       <FileRow
         name={file.name}
         meta={meta}

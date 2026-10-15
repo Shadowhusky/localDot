@@ -14,16 +14,17 @@ for (const height of [568, 680, 844]) {
     await working.click();
     const pane = page.locator(".thread-live .thread-work-scroll");
     await expect(pane).toBeVisible();
-    await expect(pane.locator(".thread-work-step")).toHaveCount(116);
     await pane.dispatchEvent("touchstart");
     await pane.evaluate((node) => {
       node.scrollTop = node.scrollHeight;
     });
     await ui.settle();
-    const last = pane.locator(".thread-work-step").last();
+    // The history is windowed, so only the rows near the end are mounted: the last is step 116.
+    await expect(pane.locator('[data-index="115"]')).toBeAttached();
+    const last = pane.locator(".activity-row").last();
     expect(
       await last
-        .locator(".thread-work-title")
+        .locator(".activity-row-title")
         .evaluate(
           (node) =>
             node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight),

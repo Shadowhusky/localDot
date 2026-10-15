@@ -716,6 +716,7 @@ function Player({
     <ActivityRail
       empty={lost ? "Steps show here once the recording loads." : undefined}
       rows={timelineRows(chapterRows, replay.model.keyUses)}
+      agent={replay.agent}
       api={api}
       sessionId={sessionId}
       scale={replay.model.screen?.scale ?? 1}

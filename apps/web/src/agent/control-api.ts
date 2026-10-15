@@ -293,6 +293,24 @@ export function steerQueuedMessage(
   );
 }
 
+export function cancelQueuedMessage(
+  api: ApiClient,
+  sessionId: string,
+  messageId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!ULID_PATTERN.test(sessionId) || !ULID_PATTERN.test(messageId))
+    return Promise.reject(new ControlFailure(false));
+  return controlRequest(
+    api,
+    `/api/agent/sessions/${sessionId}/messages/${messageId}/cancel`,
+    undefined,
+    204,
+    signal,
+    () => {},
+  );
+}
+
 export function editQueuedMessage(
   api: ApiClient,
   sessionId: string,

@@ -53,11 +53,15 @@ export function useTabAttention(status: Status, attention = NOTHING) {
   useEffect(() => {
     const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
     if (!marked || !link) return;
-    const plain = link.getAttribute("href");
+    const original = new Map(["href", "type", "sizes"].map((key) => [key, link.getAttribute(key)]));
     link.setAttribute("href", attentionIcon);
+    link.setAttribute("type", "image/svg+xml");
+    link.setAttribute("sizes", "any");
     return () => {
-      if (plain === null) link.removeAttribute("href");
-      else link.setAttribute("href", plain);
+      for (const [key, value] of original) {
+        if (value === null) link.removeAttribute(key);
+        else link.setAttribute(key, value);
+      }
     };
   }, [marked]);
 }

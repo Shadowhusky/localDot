@@ -168,12 +168,14 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         onClose={() => setResult(null)}
       />
       {error && (
-        <GroupNote>
-          <span role="alert">{error}</span>{" "}
-          <Button variant="quiet" onClick={() => setRetry((value) => value + 1)}>
+        <div className="settings-inline settings-note-line">
+          <p className="settings-lede" role="alert">
+            {error}
+          </p>
+          <Button variant="quiet" size="sm" onClick={() => setRetry((value) => value + 1)}>
             Retry
           </Button>
-        </GroupNote>
+        </div>
       )}
     </div>
   );

@@ -11,7 +11,8 @@ const CUSTOM_MEDIA = /^@custom-media [^;]+;$/gm;
 // Stylesheets written before the Tailwind stack join its components layer, so the kit's utilities
 // win over them and the reset stays beneath them. Each restates the layer order, so the order holds
 // whichever stylesheet the bundle meets first. @custom-media has to stay at the top level.
-function legacyLayer(): Plugin {
+// The website (apps/site) shows the app's components, so it builds them with this too.
+export function legacyLayer(): Plugin {
   return {
     name: "localdot:legacy-layer",
     enforce: "pre",

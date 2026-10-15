@@ -47,6 +47,9 @@ export interface SpeechRecognitionLike {
   maxAlternatives: number;
   processLocally?: boolean;
   onstart: (() => void) | null;
+  onspeechstart?: (() => void) | null;
+  onspeechend?: (() => void) | null;
+  onaudioend?: (() => void) | null;
   onresult: ((event: { results: ArrayLike<SpeechResultLike> }) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;

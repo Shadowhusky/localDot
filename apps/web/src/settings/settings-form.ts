@@ -1,11 +1,15 @@
 import {
+  type Accessory,
   AgentModelPrice,
   AgentSettingsDocument,
   AutonomyPolicy,
   CheckIns,
   CLAUDE_CODE_MODEL,
   DEFAULT_AUTONOMY,
+  DEFAULT_PERSONA,
   DEFAULT_RESEARCH_BUDGET,
+  type LocalDotLink,
+  type PersonaId,
   ResearchBudget,
 } from "@localdot/protocol";
 import {
@@ -59,6 +63,11 @@ export interface SettingsDraft {
   // On is Auto.
   purposeCheck: boolean;
   recentActivity: boolean;
+  persona: PersonaId;
+  // This localDot's name, as typed, the accessory its dot wears, and the user's others.
+  name: string;
+  accessory?: Accessory;
+  localDots: LocalDotLink[];
 }
 export const roles = ["main", "fast", "local"] as const;
 const CHECK_INS = ["steps", "failures", "actions"] as const;
@@ -81,6 +90,10 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
     choices,
     prices,
     autonomy: settings.autonomy ?? DEFAULT_AUTONOMY,
+    persona: settings.persona ?? DEFAULT_PERSONA,
+    name: settings.name ?? "",
+    ...(settings.accessory ? { accessory: settings.accessory } : {}),
+    localDots: settings.localDots ?? [],
     spending: {
       on: settings.taskBudgetUSD !== undefined || settings.dayBudgetUSD !== undefined,
       task: amount(settings.taskBudgetUSD),
@@ -151,6 +164,16 @@ export function validateForm(
   if (!draft.choices.main) problems.push("Choose a main provider and model.");
   const document: AgentSettingsDocument = { ...saved };
   if (draft.models?.length) document.models = draft.models;
+  if (draft.persona === DEFAULT_PERSONA) delete document.persona;
+  else document.persona = draft.persona;
+  const name = draft.name.trim();
+  if (!name) delete document.name;
+  else if (AgentSettingsDocument.shape.name.safeParse(name).success) document.name = name;
+  else problems.push("Name this localDot in up to 40 letters, numbers and punctuation.");
+  if (draft.accessory) document.accessory = draft.accessory;
+  else delete document.accessory;
+  if (draft.localDots.length) document.localDots = draft.localDots;
+  else delete document.localDots;
   const subscription = onSubscription(draft.choices.main?.provider);
   const accounting = new Map<string, string>();
   for (const role of roles) {

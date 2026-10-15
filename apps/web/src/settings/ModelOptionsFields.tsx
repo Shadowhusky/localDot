@@ -1,6 +1,5 @@
 import type { AgentRoleChoice, ModelOptions, ReasoningEffort } from "@localdot/protocol";
 import { modelControls } from "@localdot/providers";
-import { Button } from "../ui/Button.tsx";
 import { EffortSlider } from "../ui/EffortSlider.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Select } from "../ui/Select.tsx";
@@ -26,6 +25,16 @@ export function optionsLabel(options?: ModelOptions): string {
         ? `${effortLabel(options.verbosity)} detail`
         : "";
 }
+// What more thinking costs, or why the model offers no controls: a note under its rows.
+export function optionsNote(choice: AgentRoleChoice, compact = false): string {
+  if (!modelControls(choice.provider, choice.model).wire)
+    return "This model uses its provider defaults. No adjustable reasoning controls are verified for this endpoint.";
+  return compact
+    ? "More thinking may take longer."
+    : "More thinking can take longer and use more tokens.";
+}
+
+// A model's reasoning controls: pop-up rows of a settings group, or sliders in the composer's panel.
 export function ModelOptionsFields({
   choice,
   onChange,
@@ -49,6 +58,11 @@ export function ModelOptionsFields({
     { value: "", label: "Provider default" },
     ...controls.efforts.map((value) => ({ value, label: effortLabel(value) })),
   ];
+  const changeEffort = (value: string) =>
+    change({
+      reasoningEffort: (value || undefined) as ReasoningEffort | undefined,
+      thinkingBudget: undefined,
+    });
   const detailItems = [
     { value: "", label: "Provider default" },
     { value: "low", label: "Concise" },
@@ -57,6 +71,27 @@ export function ModelOptionsFields({
   ];
   const changeDetail = (value: string) =>
     change({ verbosity: (value || undefined) as ModelOptions["verbosity"] });
+  if (compact)
+    return (
+      <div className="model-options-fields" data-compact="">
+        {controls.efforts.length > 0 && (
+          <EffortSlider
+            value={options.reasoningEffort ?? ""}
+            items={items}
+            onChange={changeEffort}
+          />
+        )}
+        {controls.verbosity && (
+          <EffortSlider
+            label="Answer detail"
+            value={options.verbosity ?? ""}
+            items={detailItems}
+            onChange={changeDetail}
+          />
+        )}
+        <p className="model-options-note">{optionsNote(choice, true)}</p>
+      </div>
+    );
   const budgets = [
     ...new Set([
       1024,
@@ -70,38 +105,21 @@ export function ModelOptionsFields({
     .sort((a, b) => a - b)
     .filter((value) => value <= Math.min(outputLimit, 16000) - 1024);
   return (
-    <div className="model-options-fields" data-compact={compact || undefined}>
-      {controls.efforts.length > 0 &&
-        (compact ? (
-          <EffortSlider
+    <>
+      {controls.efforts.length > 0 && (
+        <Field label="Reasoning effort" inline className="ui-group-row">
+          <Select
+            appearance="inline"
             value={options.reasoningEffort ?? ""}
             items={items}
-            onChange={(value) =>
-              change({
-                reasoningEffort: (value || undefined) as ReasoningEffort | undefined,
-                thinkingBudget: undefined,
-              })
-            }
+            onValueChange={changeEffort}
           />
-        ) : (
-          <Field label="Reasoning effort" inline className="ui-group-row">
-            <Select
-              size="sm"
-              value={options.reasoningEffort ?? ""}
-              items={items}
-              onValueChange={(value) =>
-                change({
-                  reasoningEffort: (value || undefined) as ReasoningEffort | undefined,
-                  thinkingBudget: undefined,
-                })
-              }
-            />
-          </Field>
-        ))}
+        </Field>
+      )}
       {controls.budget && budgets.length > 0 && (
         <Field label="Thinking budget" inline className="ui-group-row">
           <Select
-            size="sm"
+            appearance="inline"
             value={String(options.thinkingBudget ?? "")}
             items={[
               { value: "", label: "Provider default" },
@@ -119,40 +137,16 @@ export function ModelOptionsFields({
           />
         </Field>
       )}
-      {controls.verbosity &&
-        (compact ? (
-          <EffortSlider
-            label="Answer detail"
+      {controls.verbosity && (
+        <Field label="Answer detail" inline className="ui-group-row">
+          <Select
+            appearance="inline"
             value={options.verbosity ?? ""}
             items={detailItems}
-            onChange={changeDetail}
+            onValueChange={changeDetail}
           />
-        ) : (
-          <Field label="Answer detail" inline className="ui-group-row">
-            <Select
-              size="sm"
-              value={options.verbosity ?? ""}
-              items={detailItems}
-              onValueChange={changeDetail}
-            />
-          </Field>
-        ))}
-      <p className="model-options-note">
-        {controls.wire
-          ? compact
-            ? "More thinking may take longer."
-            : "More thinking can take longer and use more tokens. Your spending limits still apply."
-          : "This model uses its provider defaults. No adjustable reasoning controls are verified for this endpoint."}
-      </p>
-      {!compact && Object.values(options).some((value) => value !== undefined) && (
-        <Button
-          variant="quiet"
-          size="sm"
-          onClick={() => onChange({ ...choice, options: undefined })}
-        >
-          Reset to provider defaults
-        </Button>
+        </Field>
       )}
-    </div>
+    </>
   );
 }

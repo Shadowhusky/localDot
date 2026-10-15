@@ -80,6 +80,10 @@ const PLANNED: IconName[] = [
   "repeat",
   // The full preview of a document or deck: its pages, Present, and zoom on a phone.
   "layout-grid",
+  // The chat panel's toggle in the top bar.
+  "panel-right",
+  // Settings' section for the user's dot.
+  "smile",
   "presentation",
   "zoom-in",
   "zoom-out",

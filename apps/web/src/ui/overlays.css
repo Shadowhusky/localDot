@@ -62,6 +62,16 @@
     outline: none;
   }
 
+  /* Unbroken filenames, URLs and translated text must not set an overlay's width. */
+  :is(.ui-popup, .ui-sheet, .ui-dialog) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  :is(.ui-popup, .ui-sheet-heading, .ui-dialog) > * {
+    min-width: 0;
+  }
+
   /* Popover and menu. */
   .ui-popup {
     position: fixed;
@@ -83,6 +93,11 @@
       opacity var(--dur-hover) var(--ease-enter),
       scale var(--dur-default) var(--ease-spring),
       translate var(--dur-default) var(--ease-spring);
+  }
+
+  /* The panel scrolls when its content is taller than the room; its parts keep their own height. */
+  .ui-popup > * {
+    flex-shrink: 0;
   }
 
   .ui-layer[data-closing] > .ui-popup {
@@ -782,6 +797,10 @@
   .ui-dialog {
     position: relative;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    max-height: calc(100dvh - var(--spacing) * 8);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     gap: calc(var(--spacing) * 2);
     width: min(100%, calc(var(--spacing) * 90));
     padding: calc(var(--spacing) * 5);
@@ -851,7 +870,7 @@
   /* Label and value pairs, the labels sharing one column. */
   .ui-dialog-facts {
     display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-columns: fit-content(35%) minmax(0, 1fr);
     gap: calc(var(--spacing) * 1.5) calc(var(--spacing) * 4);
     margin-top: var(--spacing);
   }
@@ -871,9 +890,16 @@
 
   .ui-dialog-actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: calc(var(--spacing) * 2);
     margin-top: calc(var(--spacing) * 3);
+  }
+
+  .ui-dialog-actions > * {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
   }
 
   @media (--phone) {

@@ -3,7 +3,7 @@ import { emptyModel, foldEvents } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { timelineRows } from "../session/key-uses.ts";
 import { stepRows } from "../session/session-view.ts";
-import { activityRows, stepStatus } from "./activity.ts";
+import { activityRows, entryView, foldKeyUses, groupActivity, stepStatus } from "./activity.ts";
 import { emptyAgentModel } from "./model.ts";
 import { createAgentFeed, projectAgentEvent } from "./reducer.ts";
 
@@ -92,5 +92,60 @@ describe("ordered activity presentation", () => {
       reason: "The target changed before input.",
     });
     expect(stepRows(model)[0]?.reason).not.toContain("Untrusted");
+  });
+});
+
+it("groups only adjacent successful reads and preserves each audit identity", () => {
+  const model = emptyAgentModel();
+  const kinds = ["read", "list", "failed", "read", "write", "read"];
+  const steps = new Map(
+    kinds.map((kind, i) => [
+      String(i),
+      {
+        id: String(i),
+        kind: "file" as const,
+        startedAt: i * 1000,
+        status: kind === "failed" ? ("failed" as const) : ("ok" as const),
+        tool: {
+          name: "files",
+          title: `${kind === "failed" ? "read" : kind} /config/report`,
+          ok: kind !== "failed",
+        },
+        output: [],
+        outputTruncated: false,
+      },
+    ]),
+  );
+  const entries = foldKeyUses(activityRows([], { ...model, steps }));
+  const groups = groupActivity(entries);
+  expect(groups.map((group) => group.entries.length)).toEqual([2, 1, 1, 1, 1]);
+  expect(groups.flatMap((group) => group.entries.map((entry) => entry.key))).toEqual(
+    entries.map((entry) => entry.key),
+  );
+});
+
+it("does not repeat the intent as its own subtitle", () => {
+  const [entry] = foldKeyUses(
+    activityRows([], {
+      steps: new Map([
+        [
+          "s",
+          {
+            id: "s",
+            kind: "shell",
+            intent: "Checking the export",
+            status: "ok",
+            tool: { name: "shell", title: "Checking the export", ok: true },
+            output: [],
+            outputTruncated: false,
+          },
+        ],
+      ]),
+    }),
+  );
+  if (!entry) throw new Error("Expected an activity entry");
+  expect(entryView(entry, [], false)).toMatchObject({
+    title: "Checking the export",
+    meta: "Terminal",
   });
 });

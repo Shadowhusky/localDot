@@ -549,3 +549,36 @@ it("moves a queued message to the composer only after withdrawal is confirmed", 
     unsubscribe();
   }
 });
+
+it("cancels a queued message without replacing the current draft", async () => {
+  const sessionId = "01J00000000000000000000001",
+    messageId = "01J00000000000000000000002";
+  const fetch = vi.fn(async (_url: RequestInfo | URL) => new Response(null, { status: 204 }));
+  const api = createApi("fixture", { origin: "http://127.0.0.1:4790", fetchImpl: fetch });
+  const receive = vi.fn(() => true);
+  const unsubscribe = onQueuedDraft(receive);
+  try {
+    const queued = { ...message(messageId), queued: true, sessionId, kind: "followup" as const };
+    const view = render(
+      <Conversation items={items([queued])} truncated={false} api={api} sessionId={sessionId} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    await waitFor(() =>
+      expect(spoken.announce).toHaveBeenCalledWith("thread", "Queued message cancelled."),
+    );
+    expect(String(fetch.mock.calls[0]?.[0])).toContain(`/messages/${messageId}/cancel`);
+    expect(receive).not.toHaveBeenCalled();
+    view.rerender(
+      <Conversation
+        items={items([{ ...queued, queued: false, delivery: "cancelled" }])}
+        truncated={false}
+        api={api}
+        sessionId={sessionId}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^Cancel$/ })).toBeNull();
+    expect(screen.getByText("Not sent")).toBeTruthy();
+  } finally {
+    unsubscribe();
+  }
+});

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AgentStep, emptyAgentModel } from "../agent/model.ts";
+import { showStep, wantedStep } from "../agent/step-focus.ts";
 import { appendTerminal, emptyTerminal } from "../agent/terminal-text.ts";
 import { createApi } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
@@ -172,6 +173,26 @@ describe("ActivityRail", () => {
     expect(within(row).getByLabelText("Unified text diff").textContent).toBe("+# Report");
   });
 
+  it("opens the step a chat row asks for, clearing a filter that hides it", () => {
+    const failing = {
+      terminal: appendTerminal(emptyTerminal(), "stderr", "no such file"),
+      status: "failed" as const,
+      tool: { name: "shell", title: "Run b", ok: false, exitCode: 2 },
+    };
+    const model = {
+      ...emptyAgentModel(),
+      steps: new Map([tool("a", "x", 1), tool("b", "x", 2, failing)]),
+    };
+    render(<ActivityRail rows={[]} sessionId="one" scale={1} api={api} agent={model} />);
+    const filter = within(screen.getByRole("radiogroup", { name: "Activity filter" }));
+    fireEvent.click(filter.getByRole("radio", { name: "Screen" }));
+    act(() => showStep("step-b"));
+    expect(screen.getByRole("button", { name: /Run b/ }).getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(wantedStep()).toBeNull();
+  });
+
   it("unfolds one step at a time in place, and Escape folds it and returns focus", () => {
     const failing = {
       terminal: appendTerminal(emptyTerminal(), "stderr", "no such file"),
@@ -200,7 +221,7 @@ describe("ActivityRail", () => {
     expect(document.activeElement).toBe(second);
   });
 
-  it("says in a failed row what dot did next, even when the filter hides that step", () => {
+  it("says only what went wrong in a failed row", () => {
     const model = {
       ...emptyAgentModel(),
       steps: new Map([
@@ -223,7 +244,7 @@ describe("ActivityRail", () => {
     const filter = within(screen.getByRole("radiogroup", { name: "Activity filter" }));
     fireEvent.click(filter.getByRole("radio", { name: "Tools" }));
     expect(screen.getByTestId("tool-row").querySelector(".activity-row-meta")?.textContent).toBe(
-      "The command returned exit code 2. Then clicked Save.",
+      "The command returned exit code 2.",
     );
   });
 
@@ -248,7 +269,7 @@ describe("ActivityRail", () => {
     expect(screen.getAllByTestId("tool-row")).toHaveLength(1);
   });
 
-  it("pins a compact plan: the count, the item dot is on and the next, unfolding the whole list", () => {
+  it("pins a compact plan: the count, the item dot is on and the next, opening into the whole list", () => {
     const model = {
       ...emptyAgentModel(),
       plan: [
@@ -276,8 +297,8 @@ describe("ActivityRail", () => {
     expect(screen.queryByRole("list", { name: "Task plan" })).toBeNull();
     fireEvent.click(strip);
     expect(strip.getAttribute("aria-expanded")).toBe("true");
-    // Expanding the overlay keeps the compact summary in place, avoiding a layout jump.
-    expect(container.querySelector(".plan-strip-text")?.textContent).toBe("Check the totals");
+    // The whole list takes the place of the two lines, so no item shows twice.
+    expect(container.querySelector(".plan-strip-text")).toBeNull();
     expect(
       within(screen.getByRole("list", { name: "Task plan" }))
         .getAllByRole("listitem")
@@ -402,4 +423,69 @@ describe("ActivityRail", () => {
     expect(container.querySelector(".activity-scroll")?.contains(usage)).toBe(false);
     expect(container.querySelector(".activity-rail")?.lastElementChild).toBe(usage);
   });
+});
+
+it("keeps a long timeline windowed while expanding details and receiving more steps", () => {
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.hasAttribute("data-index") ? 64 : 500;
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(400);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return {
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 400,
+      bottom: this.offsetHeight,
+      width: 400,
+      height: this.offsetHeight,
+      toJSON() {},
+    };
+  });
+  const model = {
+    ...emptyAgentModel(),
+    steps: new Map(Array.from({ length: 3000 }, (_, i) => tool(`long-${i}`, "p", i))),
+  };
+  const panel = (agent: typeof model) => (
+    <div style={{ height: 500, overflowY: "auto" }}>
+      <ActivityRail rows={[]} sessionId="long-history" scale={1} api={api} agent={agent} />
+    </div>
+  );
+  const view = render(panel(model));
+  expect(screen.getAllByTestId("tool-row").length).toBeGreaterThan(0);
+  expect(screen.getAllByTestId("tool-row").length).toBeLessThan(40);
+  fireEvent.click(within(screen.getAllByTestId("tool-row")[0] as HTMLElement).getByRole("button"));
+  expect(screen.getAllByTestId("tool-row").length).toBeLessThan(40);
+  const more = {
+    ...model,
+    steps: new Map([
+      ...model.steps,
+      ...Array.from({ length: 1000 }, (_, i) => tool(`more-${i}`, "p", i + 3000)),
+    ]),
+  };
+  view.rerender(panel(more));
+  expect(screen.getAllByTestId("tool-row").length).toBeLessThan(40);
+});
+
+it("indents expanded read-group children without indenting unrelated steps", () => {
+  const model = {
+    ...emptyAgentModel(),
+    steps: new Map([
+      tool("read-a", "p", 0, { tool: { name: "files", title: "read a", ok: true } }),
+      tool("read-b", "p", 1000, { tool: { name: "files", title: "read b", ok: true } }),
+      tool("build", "p", 2000),
+    ]),
+  };
+  const view = render(
+    <ActivityRail rows={[]} sessionId="nested" scale={1} api={api} agent={model} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Read files and instructions/ }));
+  expect(view.container.querySelectorAll("[data-group-child]")).toHaveLength(2);
+  expect(screen.getByText("read a").closest("[data-group-child]")).toBeTruthy();
+  expect(screen.getByText("Run build").closest("[data-group-child]")).toBeNull();
 });

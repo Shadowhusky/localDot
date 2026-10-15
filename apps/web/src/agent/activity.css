@@ -37,11 +37,31 @@
   margin-top: 0;
 }
 
-/* The plan, pinned over the tabs (design-v2 §10.20): "Plan" and how far dot is, a hairline of
-   progress, then the item dot is on and the one after it. The strip unfolds the whole list. */
-.plan-strip {
+/* The plan over the steps: "Plan" and how far dot is, a hairline of progress, then the item dot is
+   on and the one after it. Open, the strip lifts into one card whose list takes those lines' place;
+   the card keeps its closed height in the rail, so the steps under it stay put. */
+.plan-card {
+  position: relative;
   flex: none;
-  margin-inline: calc(var(--spacing) * -2);
+  min-height: var(--_closed, 0);
+}
+
+.plan-strip[data-open] {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  border-radius: var(--radius-group);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* The trigger's 1 px border is taken from its padding, so its glyphs sit on the steps' column. */
+.plan-strip > .ui-disclosure-trigger {
+  padding-inline: calc(var(--spacing) * 2 - 1px);
+}
+
+.plan-strip[data-open] > .ui-disclosure-trigger {
+  border-radius: var(--radius-group) var(--radius-group) 0 0;
 }
 
 .plan-strip-summary {
@@ -127,6 +147,7 @@
   padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .plan-item {
@@ -354,14 +375,15 @@ a.research-row:focus-visible {
   }
 }
 
+/* Every list of steps, in Activity and in chat, shares this head: a 16 px status column, the text,
+   and the time with its chevron. The glyph and the time sit on the title's first line. */
 .activity-row-head {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   column-gap: calc(var(--spacing) * 2.5);
-  align-items: center;
+  align-items: start;
   width: 100%;
-  min-height: 40px;
-  padding: var(--spacing) calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
   border: 0;
   border-radius: inherit;
   background-color: transparent;
@@ -395,6 +417,16 @@ button.activity-row-head[data-pressed] {
 .activity-row-head:focus-visible {
   outline: var(--focus-width) solid var(--color-fg-1);
   outline-offset: calc(var(--focus-width) * -1);
+}
+
+.activity-row-head > :is(.ui-status-glyph, .activity-row-glyph) {
+  margin-top: 1px;
+}
+
+@media (pointer: coarse) {
+  .activity-row-head {
+    padding-block: calc(var(--spacing) * 2.5);
+  }
 }
 
 .activity-row-glyph {
@@ -889,20 +921,158 @@ button.activity-usage-trigger:active {
   min-height: 0;
 }
 .activity-plan .plan-list {
-  max-height: min(200px, 24dvh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  max-height: min(320px, 45dvh);
 }
 
-/* Opening the pinned plan must not resize the virtualized step viewport. */
-.activity-plan .plan-strip-overlay {
-  position: relative;
+/* Windowed history uses real measured row heights. Rows reentering the viewport should
+   not replay entrance animations or shift the reader's scroll position. */
+.activity-window-row {
+  min-width: 0;
 }
-.activity-plan .plan-strip-overlay > .ui-collapse {
+.activity-window-row .activity-row {
+  transition: none;
+  opacity: 1;
+  translate: none;
+}
+.activity-row-trailing {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  margin-top: 1px;
+}
+
+/* The chevron shows where it helps: on the row a pointer is over, and on the open one. */
+.activity-row-chevron {
+  color: var(--color-fg-3);
+  opacity: 0;
+  transition:
+    rotate var(--dur-fade) var(--ease-standard),
+    opacity var(--dur-hover) var(--ease-standard);
+}
+.activity-row-head:is(:hover, :focus-visible) .activity-row-chevron,
+.activity-row[data-open] .activity-row-chevron {
+  opacity: 1;
+}
+.activity-row[data-open] .activity-row-chevron {
+  rotate: 90deg;
+}
+/* A group of read-only steps sits on the rows' grid: its mark in the status column, its count and
+   chevron where a row has its time. */
+.activity-read-group {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: calc(var(--spacing) * 2.5);
+  align-items: start;
+  width: calc(100% + var(--spacing) * 4);
+  margin-inline: calc(var(--spacing) * -2);
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-fg-1);
+  text-align: start;
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+.activity-read-group > .ui-status-glyph {
+  margin-top: 1px;
+}
+@media (pointer: coarse) {
+  .activity-read-group {
+    padding-block: calc(var(--spacing) * 2.5);
+  }
+}
+.activity-read-group .ui-group-heading-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-read-group .ui-group-heading-trail {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  margin-top: 1px;
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+.activity-read-group .ui-group-heading-chevron {
+  transition: rotate var(--dur-fade) var(--ease-standard);
+}
+.activity-read-group[aria-expanded="true"] .ui-group-heading-chevron {
+  rotate: 90deg;
+}
+@media (hover: hover) {
+  .activity-read-group:not([data-pressed]):hover {
+    background-color: var(--color-state-hover);
+  }
+}
+.activity-read-group[data-pressed] {
+  background-color: var(--color-state-pressed);
+  transition-duration: var(--dur-press);
+}
+.activity-read-group:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-row-chevron {
+    transition: none;
+  }
+}
+
+/* One thread runs through the status column of a list of steps: down from each glyph to the
+   next, with a gap around every glyph. A group's steps sit one column in, under its title, and
+   the thread passes them by. Rows are measured on their own, so each draws its own stretch. */
+:is(.activity-window-row, .thread-work-window-row) {
+  position: relative;
+  isolation: isolate;
+}
+:is(.activity-window-row, .thread-work-window-row)::before,
+:is(.activity-window-row, .thread-work-window-row)::after {
+  content: "";
   position: absolute;
-  inset-inline: 0;
-  top: 100%;
-  background: var(--rail-surface);
-  border-radius: 0 0 var(--radius-group) var(--radius-group);
-  box-shadow: var(--shadow-overlay);
+  z-index: -1;
+  left: calc(var(--spacing) * 2);
+  width: 1px;
+  translate: -50% 0;
+  background-color: var(--color-separator);
+}
+:is(.activity-window-row, .thread-work-window-row)::before {
+  top: 0;
+  height: calc(var(--spacing) * 1);
+}
+:is(.activity-window-row, .thread-work-window-row)::after {
+  top: calc(var(--spacing) * 6.5);
+  bottom: 0;
+}
+:is(.activity-window-row, .thread-work-window-row)[data-index="0"]::before,
+:is(.activity-window-row, .thread-work-window-row)[data-last]::after {
+  display: none;
+}
+:is(.activity-window-row, .thread-work-window-row)[data-group-child] {
+  padding-inline-start: calc(var(--spacing) * 6.5);
+}
+:is(.activity-window-row, .thread-work-window-row)[data-group-child]::before {
+  height: 100%;
+}
+:is(.activity-window-row, .thread-work-window-row)[data-group-child]::after {
+  display: none;
+}
+@media (pointer: coarse) {
+  :is(.activity-window-row, .thread-work-window-row)::before {
+    height: calc(var(--spacing) * 2);
+  }
+  :is(.activity-window-row, .thread-work-window-row)::after {
+    top: calc(var(--spacing) * 7.5);
+  }
+}
+.thread-work-window-row {
+  min-width: 0;
+  flex-shrink: 0;
 }

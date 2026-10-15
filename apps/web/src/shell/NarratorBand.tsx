@@ -3,6 +3,7 @@ import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { Button } from "../ui/Button.tsx";
+import { HitButton } from "../ui/HitButton.tsx";
 import { useFullLine } from "./FullLine.tsx";
 import { LINE_HOLD_MS, LINE_OUT_MS } from "./narration.ts";
 
@@ -27,6 +28,8 @@ export interface NarratorBandProps {
   idle?: boolean;
   // One small step after the line, which goes with it.
   action?: LineAction;
+  // Pressing dot opens what changes it.
+  dot?: { label: string; open: boolean; onPress(trigger: HTMLButtonElement): void };
   onHover?(over: boolean): void;
 }
 
@@ -41,6 +44,7 @@ export function NarratorBand({
   forUser = false,
   idle = false,
   action,
+  dot,
   onHover,
 }: NarratorBandProps) {
   const {
@@ -68,6 +72,14 @@ export function NarratorBand({
       onPointerLeave={onHover && (() => onHover(false))}
     >
       {showDot && <PresenceSlot name="dock" className="narrator-dock" />}
+      {showDot && dot && (
+        <HitButton
+          className="narrator-dot"
+          label={dot.label}
+          expanded={dot.open}
+          onClick={dot.onPress}
+        />
+      )}
       <div
         className="narration"
         data-speaker={speaker}

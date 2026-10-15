@@ -1,4 +1,10 @@
-import type { AgentSettingsDocument, AutonomyPolicy } from "@localdot/protocol";
+import {
+  type AgentSettingsDocument,
+  type AutonomyPolicy,
+  DEFAULT_PERSONA,
+  type PersonaId,
+  personaOf,
+} from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { AUTONOMY_PRESETS, presetOf } from "../copy/autonomy.ts";
@@ -23,6 +29,7 @@ import { Button } from "../ui/Button.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { PersonaPicker } from "./PersonaPicker.tsx";
 import { saveSetup } from "./save.ts";
 import {
   CustomKeyStep,
@@ -80,6 +87,7 @@ export interface SetupDraft {
   plan: boolean;
   price: { input: string; output: string };
   preset: string;
+  persona: PersonaId;
 }
 
 const FIRST_PROVIDER: Record<ThinkKind, string> = {
@@ -110,6 +118,7 @@ function draftOf(progress: WizardProgress, saved: AgentSettingsDocument | null):
       output: main?.price ? String(main.price.outputUSDPerMTok) : "",
     },
     preset: (saved?.autonomy && presetOf(saved.autonomy)?.label) || "Balanced",
+    persona: saved?.persona ?? DEFAULT_PERSONA,
   };
 }
 
@@ -305,6 +314,18 @@ export function Onboarding(props: OnboardingProps) {
       () =>
         saveSetup(api, (form) => ({ ...form, autonomy: policy }), {
           autonomy: policy,
+          subscriptionModels: appModels,
+        }),
+      () => {
+        props.onSaved();
+        advance();
+      },
+    );
+
+  const savePersona = () =>
+    run(
+      () =>
+        saveSetup(api, (form) => ({ ...form, persona: draft.persona }), {
           subscriptionModels: appModels,
         }),
       () => {
@@ -515,6 +536,14 @@ export function Onboarding(props: OnboardingProps) {
           primary: "Continue",
           run: savePermissions,
         };
+      case "dot":
+        return {
+          title: "Which dot do you need most?",
+          sub: "Each one brings the skills for its kind of work. You can switch any time.",
+          body: <PersonaPicker value={draft.persona} onChange={(persona) => change({ persona })} />,
+          primary: "Continue",
+          run: savePersona,
+        };
       case "turn-on":
         return {
           title: "You're all set.",
@@ -547,6 +576,12 @@ export function Onboarding(props: OnboardingProps) {
                   label: "Checks with you",
                   value: (saved?.autonomy && presetOf(saved.autonomy)?.label) ?? draft.preset,
                   change: () => go("permissions", "turn-on"),
+                },
+                {
+                  icon: "smile",
+                  label: "Your dot",
+                  value: personaOf(saved?.persona).name,
+                  change: () => go("dot", "turn-on"),
                 },
               ]}
             />

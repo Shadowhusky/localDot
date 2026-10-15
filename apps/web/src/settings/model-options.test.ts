@@ -47,6 +47,43 @@ describe("the models the composer can switch to", () => {
     expect(groups[1]?.options[0]?.choice).toEqual(saved.fast);
   });
 
+  it("lists a custom endpoint's model under its address, once whatever format it was chosen in", () => {
+    const gateway = {
+      ...index,
+      keys: [
+        ...index.keys,
+        { id: "gw", provider: "openai-compatible", baseURL: "https://gateway.example/v1" },
+      ],
+    };
+    const custom: AgentSettingsDocument = {
+      main: { provider: "openai-compatible", model: "gpt-x", key: "gw" },
+      models: [{ provider: "openai-responses-compatible", model: "gpt-x", key: "gw" }],
+    };
+    const groups = modelGroups(
+      custom,
+      gateway,
+      { chatgpt: signedOut, claudeCode: signedOut },
+      names,
+    );
+    expect(groups.map((group) => group.label)).toEqual(["gateway.example"]);
+    expect(groups[0]?.options.map((option) => option.choice)).toEqual([custom.main]);
+    const price = { inputUSDPerMTok: 1, outputUSDPerMTok: 2 };
+    const both: AgentSettingsDocument = {
+      main: { provider: "openai-compatible", model: "gpt-main", key: "gw", price },
+      models: [
+        { provider: "openai-compatible", model: "gpt-x", key: "gw", price },
+        { provider: "openai-responses-compatible", model: "gpt-x", key: "gw", price },
+      ],
+    };
+    const listed = modelGroups(both, gateway, { chatgpt: signedOut, claudeCode: signedOut }, names);
+    expect(
+      listed[0]?.options.map((option) => [option.choice.model, option.choice.provider]),
+    ).toEqual([
+      ["gpt-main", "openai-compatible"],
+      ["gpt-x", "openai-responses-compatible"],
+    ]);
+  });
+
   it("leaves out a plan that isn't signed in and a model whose key is gone", () => {
     const keyless = { ...index, keys: index.keys.filter((key) => key.id !== "openai") };
     expect(

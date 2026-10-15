@@ -87,6 +87,7 @@ beforeEach(() => {
   } as unknown as typeof ResizeObserver;
 });
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

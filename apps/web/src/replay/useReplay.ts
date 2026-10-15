@@ -22,6 +22,8 @@ import {
   stepAt,
 } from "@localdot/stage";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { type AgentModel, emptyAgentModel } from "../agent/model.ts";
+import { projectAgentEvent } from "../agent/reducer.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
 import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
@@ -36,6 +38,7 @@ export interface ReplayState {
   card: SessionCard | null;
   info: RecordingInfo | null;
   model: SessionModel;
+  agent: AgentModel;
   version: number;
   tMs: number;
   playing: boolean;
@@ -67,6 +70,7 @@ function initialState(sessionId: string | null): ReplayValues {
     card: null,
     info: null,
     model: emptyModel(),
+    agent: emptyAgentModel(),
     version: 0,
     tMs: 0,
     playing: false,
@@ -356,6 +360,7 @@ export function useReplay(
     let openedEndMs = 0;
     let lastRefresh = 0;
     const model = emptyModel();
+    let agent = emptyAgentModel();
     const change = (patch: Partial<ReplayValues>) => {
       if (controller.signal.aborted) return;
       current.current = { ...current.current, ...patch };
@@ -381,7 +386,7 @@ export function useReplay(
       if (versionTimer !== undefined) return;
       versionTimer = setTimeout(() => {
         versionTimer = undefined;
-        change({ version: current.current.version + 1 });
+        change({ agent, version: current.current.version + 1 });
       }, 100);
     }
     async function load(initial: boolean) {
@@ -403,6 +408,7 @@ export function useReplay(
         await readReplayEvents(api, sessionId, model.lastSeq + 1, controller.signal, (events) => {
           if (controller.signal.aborted) return;
           foldEvents(model, events);
+          for (const event of events) agent = projectAgentEvent(agent, event);
           lastEventMs.current = Math.max(
             lastEventMs.current,
             sessionMsOf(events.at(-1) as LocalDotEvent),
@@ -425,7 +431,7 @@ export function useReplay(
           endMs,
           Math.max(map.startMs, initial && Number.isFinite(requested) ? requested : state.tMs),
         );
-        change({ card, info, map, tMs, idleNow: idleAt(map, tMs) });
+        change({ agent, card, info, map, tMs, idleNow: idleAt(map, tMs) });
         const liveNowMs = Math.max(endMs, Date.now() - Date.parse(card.startedAt));
         const follow = initial
           ? "stay"

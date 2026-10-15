@@ -3,7 +3,6 @@ import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
 import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
-import { past } from "../session/status.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
 import { markdownToPlain } from "./markdown.ts";
@@ -21,7 +20,7 @@ export interface ActivityStep {
 // The raw audit events allow grouping only after tools have joined the ordered history.
 export function activityRows(
   rows: readonly TimelineRow<StepRowView>[],
-  model?: AgentModel,
+  model?: Pick<AgentModel, "steps">,
   keyUses?: readonly KeyUseState[],
 ): TimelineRow<ActivityStep>[] {
   const steps = new Map<string, ActivityStep>();
@@ -244,11 +243,15 @@ export function entryView(
     : state === "todo"
       ? "The task ended before this step finished."
       : undefined;
+  const distinctAction =
+    intent && intent.trim().toLowerCase() !== what.trim().toLowerCase() ? what : undefined;
+  // A gesture says something only with what it touched: "click F3", never a bare "click".
+  const touched = computer?.gesture?.includes(" ") ? computer.gesture : undefined;
   const where = computer
-    ? joined(computer.app, intent ? what : computer.gesture)
+    ? joined(computer.app, intent ? distinctAction : touched)
     : joined(
         WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
-        intent ? what : undefined,
+        distinctAction,
         diffStat(own.map((change) => change.patch)),
       );
   return {
@@ -262,32 +265,6 @@ export function entryView(
     startT: row.startT,
     endT: durationMs === null ? null : row.startT + durationMs,
   };
-}
-
-const lowerFirst = (text: string) =>
-  /^[A-Z][a-z]/.test(text) ? text[0]?.toLowerCase() + text.slice(1) : text;
-
-// What dot did after a step failed: the same step again, possibly after one or two steps that
-// made room for it, or else the step that came next.
-function nextMove(views: readonly EntryView[], index: number): string {
-  const failed = views[index];
-  if (failed?.state !== "failed" || failed.testId === "key-use") return "";
-  const later = views.slice(index + 1).filter((view) => view.testId !== "key-use");
-  const [next] = later;
-  if (!next) return "";
-  const retry = later.slice(0, 3).findIndex((view) => past(view.title) === past(failed.title));
-  if (retry === 0) return "Tried again.";
-  if (retry > 0) return `${next.title}, then tried again.`;
-  return `Then ${lowerFirst(next.title)}.`;
-}
-
-// A failure's meta line goes on to say what dot did about it.
-export function withNextMoves(views: readonly EntryView[]): EntryView[] {
-  return views.map((view, index) => {
-    const next = nextMove(views, index);
-    if (!next) return view;
-    return { ...view, meta: [view.meta && asSentence(view.meta), next].filter(Boolean).join(" ") };
-  });
 }
 
 export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]): boolean {
@@ -329,4 +306,55 @@ export function changeView(change: AgentChange): EntryView {
     startT: Number.NaN,
     endT: null,
   };
+}
+
+export interface ReadGroup<T> {
+  key: string;
+  entries: T[];
+  label?: string;
+}
+export type ActivityGroup = ReadGroup<ActivityEntry>;
+
+// A group key is evidence of a successful read, scoped to its plan item. Presentation
+// titles alone must never classify a mutation, failure or current action as read-only.
+export function activityReadGroup(entry: ActivityEntry): string | undefined {
+  const row = entry.row;
+  if (row.kind !== "step") return undefined;
+  const tool = row.agent?.tool;
+  return (row.agent?.status ?? row.computer?.status) === "ok" &&
+    tool?.ok !== false &&
+    (tool?.name === "files" || row.computer?.stepKind === "file") &&
+    /^(read|list) /i.test(tool?.title ?? row.computer?.label ?? "")
+    ? (row.agent?.planItem ?? "")
+    : undefined;
+}
+
+// Shared by Activity and Chat. Keep every audit identity and cap groups so opening one
+// never introduces an unbounded block. Failures, mutations and running steps stay separate.
+export function groupReadSteps<T extends { key: string }>(
+  entries: readonly T[],
+  readGroup: (entry: T) => string | undefined,
+): ReadGroup<T>[] {
+  const groups: ReadGroup<T>[] = [];
+  for (const entry of entries) {
+    const scope = readGroup(entry);
+    const previous = groups.at(-1);
+    if (
+      scope !== undefined &&
+      previous?.label &&
+      previous.entries.length < 50 &&
+      readGroup(previous.entries[0]!) === scope
+    )
+      previous.entries.push(entry);
+    else
+      groups.push({
+        key: entry.key,
+        entries: [entry],
+        ...(scope !== undefined ? { label: "Read files and instructions" } : {}),
+      });
+  }
+  return groups;
+}
+export function groupActivity(entries: readonly ActivityEntry[]): ActivityGroup[] {
+  return groupReadSteps(entries, activityReadGroup);
 }

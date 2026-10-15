@@ -75,8 +75,20 @@ async function browserHearing(
   let settle: (() => void) | null = null;
   let rejectStart: ((error: Error) => void) | undefined;
   let startTimer = 0;
+  // Recognition exposes speech activity, not PCM amplitude. Animate that activity without
+  // opening a competing microphone. Result pulses cover engines that omit speech events.
+  let speaking = false;
+  let lastSpeech = Number.NEGATIVE_INFINITY;
+  recognition.onspeechstart = () => {
+    speaking = true;
+  };
+  recognition.onspeechend = recognition.onaudioend = () => {
+    speaking = false;
+    lastSpeech = Number.NEGATIVE_INFINITY;
+  };
   recognition.onresult = (event) => {
     text = Array.from(event.results, (result) => result[0].transcript).join("");
+    lastSpeech = performance.now();
     events.partial(text);
   };
   recognition.onend = () => {
@@ -108,7 +120,12 @@ async function browserHearing(
     window.clearTimeout(startTimer);
   }
   return {
-    level: () => -1,
+    level: () => {
+      if (ended) return 0;
+      const t = performance.now();
+      const activity = speaking ? 1 : Math.max(0, 1 - (t - lastSpeech) / 1200);
+      return activity * (0.35 + 0.4 * Math.abs(Math.sin(t / 115) * Math.cos(t / 193)));
+    },
     finish() {
       if (ended) return Promise.resolve(text);
       return new Promise<string>((resolve) => {
@@ -124,6 +141,7 @@ async function browserHearing(
       });
     },
     abort() {
+      ended = true;
       settle = () => {};
       recognition.abort();
     },

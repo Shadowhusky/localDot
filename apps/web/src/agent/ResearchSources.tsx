@@ -1,13 +1,15 @@
-import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
+import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { ControlFailure, changeResearch } from "./control-api.ts";
 import type { AgentResearch } from "./model.ts";
 import { researchMeta, researchUsed, STOP_WORDS, sourceMeta, sourceSite } from "./research.ts";
 
 // The newest sources show while dot reads; the rest are one tap away.
 const SHOWN = 5;
+const estimateSource = () => 52;
 
 export interface ResearchSourcesProps {
   research: AgentResearch;
@@ -38,6 +40,9 @@ export function ResearchSources({
   useEffect(() => () => request.current?.abort(), []);
   const sources = research.sources;
   const shown = all || sources.length <= SHOWN + 1 ? sources : sources.slice(-SHOWN);
+  const list = useRef<HTMLOListElement>(null);
+  const keys = useMemo(() => shown.map((source) => String(source.n)), [shown]);
+  const windowed = useVirtualRows(list, keys, estimateSource);
   const change = (next: "wrap_up" | "more") => {
     request.current?.abort();
     const abort = new AbortController();
@@ -76,8 +81,11 @@ export function ResearchSources({
         style={{ "--_used": researchUsed(research, nowMs) } as CSSProperties}
       />
       {sources.length ? (
-        <ol className="research-sources" aria-label="Sources dot read">
-          {shown.map((source) => {
+        <ol ref={list} className="research-sources" aria-label="Sources dot read">
+          <li aria-hidden="true" style={{ height: windowed.before }} />
+          {windowed.indexes.map((index) => {
+            const source = shown[index];
+            if (!source) return null;
             const body = (
               <>
                 <span className="research-number num">{source.n}</span>
@@ -88,7 +96,13 @@ export function ResearchSources({
               </>
             );
             return (
-              <li key={source.n} className="research-source" data-cited={source.cited || undefined}>
+              <li
+                ref={windowed.measure}
+                data-index={index}
+                key={source.n}
+                className="research-source"
+                data-cited={source.cited || undefined}
+              >
                 {linkable(source.url) ? (
                   <a
                     className="research-row"
@@ -105,6 +119,7 @@ export function ResearchSources({
               </li>
             );
           })}
+          <li aria-hidden="true" style={{ height: windowed.after }} />
         </ol>
       ) : (
         <p className="activity-empty">Sources appear here as dot reads them.</p>

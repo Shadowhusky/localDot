@@ -471,3 +471,29 @@
 .onboarding-catalog-status > .ui-button {
   flex-shrink: 0;
 }
+
+/* A dot's tile: the dot in its outfit, centred over its name. */
+.ui-radio-card-preview:has(> .persona-preview:not([data-layout="rows"])) {
+  align-self: stretch;
+}
+
+.persona-preview {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: calc(var(--spacing) * 20);
+  border-radius: var(--radius-row);
+  background: linear-gradient(180deg, var(--color-void), var(--color-raised-2));
+}
+
+.persona-note {
+  margin-top: calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.persona-preview[data-layout="rows"] {
+  width: calc(var(--spacing) * 11);
+  height: calc(var(--spacing) * 11);
+  border-radius: var(--radius-md);
+}

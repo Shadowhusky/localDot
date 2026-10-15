@@ -72,10 +72,15 @@ for (const run of runs) {
           .getByRole("listbox", { name: "Provider" })
           .getByRole("group", { name: "Compatible providers" })
           .getByRole("option"),
-      ).toContainText(["Other (OpenAI-compatible)", "Other (Anthropic-compatible)"]);
-      await page.getByRole("combobox", { name: "Search: Provider" }).fill("anthropic-compatible");
+      ).toContainText(["Custom endpoint"]);
+      await page.getByRole("combobox", { name: "Search: Provider" }).fill("custom endpoint");
       await page.getByRole("combobox", { name: "Search: Provider" }).press("Enter");
-      await expect(provider).toHaveText("Other (Anthropic-compatible)");
+      await expect(provider).toHaveText("Custom endpoint");
+      const format = main.getByRole("combobox", { name: "API format", exact: true });
+      await expect(format).toHaveText("OpenAI Chat Completions");
+      await press(format);
+      await page.getByRole("option", { name: /^Anthropic Messages/ }).click();
+      await expect(format).toHaveText("Anthropic Messages");
 
       await press(main.getByRole("button", { name: "Add key", exact: true }));
       const keys = nestedKeys(page);

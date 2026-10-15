@@ -186,7 +186,7 @@ function Waveform({ voice, since }: { voice: Voice; since: number | null }) {
       if (!finishing && t - last >= SAMPLE_MS) {
         last = t;
         const heard = level.current();
-        const value = heard < 0 ? 0.1 + 0.06 * Math.sin(t / 220) : heard;
+        const value = heard < 0 ? 0 : heard;
         levels.current = [...levels.current, value].slice(-count);
         card?.style.setProperty("--_level", value.toFixed(3));
       }

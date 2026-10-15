@@ -3,6 +3,7 @@ import { emptyManifest } from "@localdot/protocol";
 import { buildPlaybackMap, emptyModel } from "@localdot/stage";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { emptyAgentModel } from "../agent/model.ts";
 import { createApi } from "../lib/api.ts";
 import { ReplayControls } from "./ReplayControls.tsx";
 import type { ReplayState } from "./useReplay.ts";
@@ -20,6 +21,7 @@ function replay(): ReplayState {
     card: null,
     info: { manifest: emptyManifest("none"), live: false, upto: 0, servedBytes: 0 },
     model: emptyModel(),
+    agent: emptyAgentModel(),
     version: 0,
     tMs: 0,
     playing: false,

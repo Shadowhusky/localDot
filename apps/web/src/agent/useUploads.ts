@@ -8,7 +8,16 @@ export interface UploadRow {
   readonly phase: "pending" | "uploading" | "complete" | "refused" | "uncertain";
   readonly path?: string;
   readonly explanation?: string;
+  // A picture's own pixels, for its chip; let go with the chip.
+  readonly preview?: string;
 }
+const PREVIEW_BYTES = 25 * 1024 * 1024;
+const previewOf = (file: File) =>
+  file.type.startsWith("image/") &&
+  file.size <= PREVIEW_BYTES &&
+  typeof URL.createObjectURL === "function"
+    ? URL.createObjectURL(file)
+    : undefined;
 interface Owner {
   api: ApiClient;
   cellId: string | null;
@@ -27,6 +36,9 @@ export function useUploads(props: Owner) {
     nextId = useRef(0),
     active = useRef<{ id: number; abort: AbortController } | null>(null);
   const update = useCallback((next: UploadRow[]) => {
+    const kept = new Set(next.map((row) => row.preview));
+    for (const row of list.current)
+      if (row.preview && !kept.has(row.preview)) URL.revokeObjectURL(row.preview);
     list.current = next;
     if (mounted.current) setRows(next);
   }, []);
@@ -75,6 +87,7 @@ export function useUploads(props: Owner) {
     document.addEventListener("visibilitychange", hidden);
     return () => {
       mounted.current = false;
+      for (const row of list.current) if (row.preview) URL.revokeObjectURL(row.preview);
       epoch.current++;
       active.current?.abort.abort();
       active.current = null;
@@ -184,7 +197,14 @@ export function useUploads(props: Owner) {
     const added = chosen.map((file) => {
       const id = ++nextId.current;
       sources.current.set(id, file);
-      return { id, name: file.name, bytes: file.size, phase: "pending" as const };
+      const preview = previewOf(file);
+      return {
+        id,
+        name: file.name,
+        bytes: file.size,
+        phase: "pending" as const,
+        ...(preview ? { preview } : {}),
+      };
     });
     setProblem(null);
     setNotice(null);

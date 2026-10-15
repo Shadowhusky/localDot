@@ -365,10 +365,16 @@ describe("settings inspector", () => {
   });
   it("on a phone, lists the sections with what each holds and pushes into one", () => {
     onPhone();
-    const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
+    const p = {
+      ...props(),
+      autonomy: DEFAULT_AUTONOMY,
+      onAutonomy: vi.fn(),
+      persona: { value: "coder" as const, onChange: vi.fn() },
+    };
     render(<SettingsSheet {...p} keysPanel={keysPanel()} />);
     expect(sheet()).toBeTruthy();
     const row = (name: RegExp) => screen.getByRole("button", { name });
+    expect(row(/^Your dot/).textContent).toBe("Your dotCoder");
     expect(row(/^Models/).textContent).toBe("ModelsSample Large");
     expect(row(/^Autonomy/).textContent).toBe("AutonomyBalanced");
     fireEvent.click(row(/^Autonomy/));

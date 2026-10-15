@@ -13,12 +13,14 @@ const modes = {
   auto: {
     name: "Auto",
     icon: "shield",
-    detail: "Jev approves routine actions. You decide when it’s unsure.",
+    detail:
+      "Jev approves routine actions, including cleanup inside the computer. You decide when it’s unsure.",
   },
   full: {
     name: "Full access",
     icon: "bolt",
-    detail: "Act without asking, except for destructive actions.",
+    detail:
+      "Local work and downloads run without asking. Purchases and online deletes still ask. Purpose check is bypassed.",
   },
 } as const;
 

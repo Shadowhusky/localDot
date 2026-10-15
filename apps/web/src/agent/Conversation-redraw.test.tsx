@@ -121,3 +121,24 @@ it("draws a message's new words from the feed when it says they came, with the p
   });
   expect(view.container.querySelector(".safe-markdown")?.textContent).toBe("Opening the sheet");
 });
+
+it("redraws an earlier work row when only its detail changes", () => {
+  const before = thread();
+  const view = render(
+    <Conversation items={before} truncated={false} live={live(1000)} onReplay={() => {}} />,
+  );
+  const count = drawn.work;
+  view.rerender(
+    <Conversation
+      items={before.map((item) =>
+        item.key === "work-1" && item.kind === "work"
+          ? { ...item, steps: item.steps.map((step) => ({ ...step, meta: "Command completed" })) }
+          : item,
+      )}
+      truncated={false}
+      live={live(1000)}
+      onReplay={() => {}}
+    />,
+  );
+  expect(drawn.work).toBe(count + 1);
+});

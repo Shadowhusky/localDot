@@ -7,6 +7,8 @@ import "./bar.css";
 export type Mode = "watch" | "replay";
 
 export interface TopBarProps {
+  // In the wordmark's place: the menu of the user's localDots.
+  brand?: ReactNode;
   // Left out before there is anything to name, as on a first run.
   title?: string;
   // Said after the title, quieter: where a recording comes from.
@@ -35,6 +37,7 @@ export interface TopBarProps {
 // The wordmark and what is on the stage, then the modes, Settings and Keys. It redraws only when one
 // of these changes, never with the task.
 export const TopBar = memo(function TopBar({
+  brand,
   title,
   note,
   lead,
@@ -64,7 +67,7 @@ export const TopBar = memo(function TopBar({
   return (
     <header className="bar">
       <div className="bar-l">
-        <span className="bar-wordmark">localDot</span>
+        {brand ?? <span className="bar-wordmark">localDot</span>}
         {title && (
           <>
             <span className="bar-sep" aria-hidden="true" />

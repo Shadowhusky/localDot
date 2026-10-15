@@ -195,6 +195,22 @@
   }
 
   /* A picture to press, such as a moment of a recording. */
+  /* HitButton: no face, round; the focus ring shows where it is. */
+  .ui-hit {
+    display: block;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-full);
+    background-color: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ui-hit:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: var(--focus-offset);
+  }
+
   .ui-thumbnail {
     position: relative;
     display: block;

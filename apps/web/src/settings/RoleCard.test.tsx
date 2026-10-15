@@ -52,16 +52,23 @@ describe("role card", () => {
     const view = render(<RoleCard {...props} />);
     expect(within(card("Main model")).queryByRole("combobox", { name: "Key" })).toBeNull();
     view.rerender(<RoleCard {...props} value={{ provider: "azure", model: "fixture" }} />);
-    expect(screen.getByText(/The endpoint's address is set with the key\./)).toBeTruthy();
+    expect(screen.getByText(/The endpoint's address is set with its key\./)).toBeTruthy();
     const add = screen.getByRole("button", { name: "Add key" });
     fireEvent.click(add);
     expect(props.onKeys).toHaveBeenCalledWith("main", "azure", add);
   });
-  it("offers a saved compatible key for a Responses-only gateway", () => {
+  it("shows a custom endpoint once, with its API format, and keeps what it can when that changes", () => {
+    const onChange = vi.fn();
     render(
       <RoleCard
         {...base()}
-        value={{ provider: "openai-responses-compatible", model: "gateway-model", key: "gateway" }}
+        onChange={onChange}
+        value={{
+          provider: "openai-responses-compatible",
+          model: "gateway-model",
+          key: "gateway",
+          options: { reasoningEffort: "high" },
+        }}
         keys={[
           {
             id: "gateway",
@@ -72,13 +79,30 @@ describe("role card", () => {
         ]}
       />,
     );
-    const key = combo(card("Main model"), "Key");
+    const main = card("Main model");
+    expect(combo(main, "Provider").textContent).toBe("Custom endpoint");
+    const key = combo(main, "Key");
     expect(key.textContent).toBe("gateway");
-    expect(screen.getByText(/Uses the Responses API with your OpenAI-compatible key/)).toBeTruthy();
     fireEvent.keyDown(key, { key: "ArrowDown" });
     expect(screen.getByRole("option", { name: /^gateway/ }).getAttribute("aria-disabled")).not.toBe(
       "true",
     );
+    fireEvent.keyDown(key, { key: "Escape" });
+    const format = combo(main, "API format");
+    expect(format.textContent).toBe("OpenAI Responses");
+    fireEvent.keyDown(format, { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("option", { name: /^OpenAI Chat Completions/ }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      provider: "openai-compatible",
+      model: "gateway-model",
+      key: "gateway",
+    });
+    fireEvent.keyDown(format, { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("option", { name: /^Anthropic Messages/ }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      provider: "anthropic-compatible",
+      model: "gateway-model",
+    });
   });
   it("says why a key can't be chosen while keys can't be read", () => {
     render(<RoleCard {...base()} keyLayer="offline" />);

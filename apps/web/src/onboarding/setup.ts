@@ -1,12 +1,12 @@
 import type { ProviderSpec } from "@localdot/providers";
 
-// Setup's five steps, as the first-run setup counts them: how dot thinks, the key, the model,
-// permissions and turning the computer on. The rail lists the first four; the curtain's Turn on is
-// the fifth.
-export const SETUP_STEPS = 5;
+// Setup's six steps, as the first-run setup counts them: how dot thinks, the key, the model,
+// permissions, which dot, and turning the computer on. The rail lists the first five; the curtain's
+// Turn on is the sixth.
+export const SETUP_STEPS = 6;
 
 export interface SetupStep {
-  id: "thinks" | "key" | "model" | "permissions";
+  id: "thinks" | "key" | "model" | "permissions" | "dot";
   title: string;
   detail: string;
   done: boolean;
@@ -22,6 +22,8 @@ export interface SetupInput {
   model: string | null;
   // The autonomy preset the user chose; null until they have chosen one.
   permissions: string | null;
+  // The name of the dot the user chose; null until they have chosen one.
+  persona: string | null;
   // A computer has been turned on before.
   computer: boolean;
 }
@@ -61,6 +63,12 @@ export function setupSteps(input: SetupInput): { steps: SetupStep[]; done: numbe
       title: "Permissions",
       detail: input.permissions ?? "Balanced until you choose",
       done: input.permissions !== null,
+    },
+    {
+      id: "dot",
+      title: "Your dot",
+      detail: input.persona ?? "Everyday until you choose",
+      done: input.persona !== null,
     },
   ];
   return {

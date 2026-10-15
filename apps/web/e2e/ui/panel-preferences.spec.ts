@@ -16,14 +16,11 @@ test("Activity stays in the conversation panel across desktop sizes and reloads"
   await expect(chat.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(chat.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("button", { name: "Panels", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: /activity/i })).toHaveCount(0);
-  await page.getByRole("menuitem", { name: "Hide chat" }).click();
+  await page.getByRole("button", { name: "Hide chat", exact: true }).click();
   await expect(chat).toBeHidden();
   await page.reload();
   await expect(chat).toBeHidden();
-  await page.getByRole("button", { name: "Panels", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Show chat" }).click();
+  await page.getByRole("button", { name: "Show chat", exact: true }).click();
   await expect(chat.getByRole("radio", { name: "Activity", exact: true })).toBeVisible();
   await ui.picture();
   await page.screenshot({ path: test.info().outputPath("shared-activity.png") });
@@ -35,12 +32,10 @@ test("a tablet keeps the restore control available when its lower panel is hidde
 }) => {
   await page.setViewportSize({ width: 900, height: 1000 });
   await ui.open("done");
-  await page.getByRole("button", { name: "Panels", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Hide chat" }).click();
+  await page.getByRole("button", { name: "Hide chat", exact: true }).click();
   await expect(page.locator(".rail-chat")).toBeHidden();
   await page.reload();
   await expect(page.locator(".rail-chat")).toBeHidden();
-  await page.getByRole("button", { name: "Panels", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Show chat" }).click();
+  await page.getByRole("button", { name: "Show chat", exact: true }).click();
   await expect(page.getByRole("form", { name: "Message dot" })).toBeVisible();
 });

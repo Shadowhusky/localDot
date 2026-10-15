@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DotEngine } from "../engine/engine.ts";
+import { setWearing } from "../wearing.ts";
 import { DotView, type DotViewOptions } from "./DotView.ts";
 
 const T0 = 1000;
@@ -12,6 +13,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const v of views.splice(0)) v.destroy();
+  setWearing([]);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -55,11 +57,64 @@ function translate(root: HTMLElement): [number, number] {
   return [Number(m?.[1]), Number(m?.[2])];
 }
 
+const worn = (root: HTMLElement) =>
+  [...root.querySelectorAll<HTMLImageElement>(".dot-body > .dot-wear")].map(
+    (img) => img.dataset.wear,
+  );
+
+// A matrix's six numbers, from an SVG transform attribute or a CSS transform.
+const matrix = (text: string | null | undefined) =>
+  (text?.match(/matrix\(([^)]*)\)/)?.[1] ?? "").split(/[\s,]+/).map(Number);
+
 const steps = (values: number[]) => values.slice(1).map((v, i) => Math.abs(v - (values[i] ?? v)));
 const between = (values: number[], lo: number, hi: number) =>
   new Set(values.filter((v) => v > lo && v < hi)).size;
 
 describe("DotView", () => {
+  it("wears its own outfit over the face, or the user's dot's, and changes with it", () => {
+    setWearing(["headphones", "mustache"]);
+    const { root, view } = mount({ wearables: ["round-glasses", "mortarboard"] });
+    expect(worn(root)).toEqual(["mortarboard", "round-glasses"]);
+    expect(root.querySelector(".dot-face ~ .dot-wear")).not.toBeNull();
+    const glasses = root.querySelector<HTMLImageElement>('[data-wear="round-glasses"]');
+    expect(glasses?.srcset).toMatch(/wear-round-glasses-48.* 48w, .* 448w$/);
+    expect(glasses?.sizes).toBe("24px");
+
+    view.setWearables(undefined);
+    expect(worn(root)).toEqual(["headphones", "mustache"]);
+    setWearing(["hoodie"]);
+    expect(worn(root)).toEqual(["hoodie"]);
+    view.setSize(96);
+    expect(root.querySelector<HTMLImageElement>(".dot-wear")?.sizes).toBe("96px");
+  });
+
+  it("keeps what is on the face on the eyes as they look around, and the rest on the body", () => {
+    const { root, view } = mount({ size: 192, wearables: ["round-glasses", "hoodie"] });
+    view.setBias({ x: 6, y: 4 });
+    drive(view, T0, T0 + 1200);
+    const [left, right] = [...root.querySelectorAll(".dot-face g[transform]")].map((g) =>
+      matrix(g.getAttribute("transform")),
+    );
+    const k = 192 / 64;
+    const glasses = matrix(
+      root.querySelector<HTMLElement>('[data-wear="round-glasses"]')?.style.transform,
+    );
+    const centre = [32 + (glasses[4] ?? 0) / k, 27.5 + (glasses[5] ?? 0) / k];
+    expect(centre[0]).toBeGreaterThan(33);
+    expect(centre[0]).toBeCloseTo(((left?.[4] ?? 0) + (right?.[4] ?? 0)) / 2, 0);
+    expect(centre[1]).toBeCloseTo(((left?.[5] ?? 0) + (right?.[5] ?? 0)) / 2, 0);
+    expect(root.querySelector<HTMLElement>('[data-wear="hoodie"]')?.style.transform).toBe("");
+  });
+
+  it("dims what it wears with the body", () => {
+    const { root, view } = mount({ wearables: ["beret"] });
+    const beret = root.querySelector<HTMLElement>('[data-wear="beret"]');
+    expect(beret?.style.filter).toBe("");
+    view.setState("offline");
+    drive(view, T0, T0 + 1500);
+    expect(beret?.style.filter).toMatch(/^brightness\(0\.[3-5]\d*\)$/);
+  });
+
   it("loads the neutral plate at once and the xenon and dim plates only when they show", () => {
     const { view, plate } = mount();
     expect(plate("neutral").srcset).toMatch(/body-neutral-48.* 48w, .* 96w, .* 192w, .* 448w$/);

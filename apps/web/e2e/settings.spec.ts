@@ -275,8 +275,8 @@ for (const width of [1280, 390])
       });
       throw failure;
     }
-    await search(page, provider, "openai-compatible");
-    await expect(provider).toHaveText("Other (OpenAI-compatible)");
+    await search(page, provider, "custom endpoint");
+    await expect(provider).toHaveText("Custom endpoint");
     const custom = main.getByRole("textbox", { name: "Model ID", exact: true });
     await custom.fill("fixture-custom");
     await custom.press("-");

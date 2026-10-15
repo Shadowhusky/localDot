@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 
 import { emptyManifest, type LocalDotEvent, ulid } from "@localdot/protocol";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
 import type { StageHandle } from "../stage/Stage.tsx";
 import type { ReplaySource, WorkerOut } from "../stage/worker-protocol.ts";
 import { useReplay } from "./useReplay.ts";
 
-function liveFixture() {
+function liveFixture(extra: LocalDotEvent[] = []) {
   const sessionId = ulid();
   const events: LocalDotEvent[] = [
     {
@@ -30,6 +31,7 @@ function liveFixture() {
       data: { count: 1, chunk: "a", masked: false },
     },
   ];
+  events.push(...extra);
   let listener: ((message: WorkerOut) => void) | undefined;
   const unsubscribe = vi.fn();
   const replay = {
@@ -321,4 +323,54 @@ describe("a recording that fails to load", () => {
     await vi.waitFor(() => expect(fixture.replay.open).toHaveBeenCalledOnce());
     expect(hook.result.current.status).not.toBe("error");
   });
+});
+
+it("loads saved command details with replay and preserves them when switching screens", async () => {
+  const step = "saved-command";
+  const events = [
+    { type: "step.start", data: { kind: "shell", intent: "Checking the build" } },
+    { type: "tool.start", data: { tool: "run", title: "Run tests" } },
+    { type: "tool.output", data: { stream: "stdout", chunk: "Tests passed\n" } },
+    { type: "tool.end", data: { ok: true, exitCode: 0 } },
+    { type: "step.end", data: { status: "ok", note: "Build verified" } },
+  ].map((e, i) => ({
+    ...e,
+    v: 1,
+    id: ulid(),
+    seq: i + 2,
+    t: 6_000_000 + i * 1000,
+    agent: "main",
+    step,
+  })) as LocalDotEvent[];
+  const f = liveFixture(events);
+  const hook = renderHook(() => useReplay(f.api, f.sessionId, f.stage, { onGoLive: vi.fn() }));
+  try {
+    await vi.waitFor(() =>
+      expect(hook.result.current.agent.steps.get(step)).toMatchObject({
+        note: "Build verified",
+        tool: { title: "Run tests", exitCode: 0 },
+        output: [{ stream: "stdout", text: "Tests passed\n" }],
+      }),
+    );
+    act(() => hook.result.current.setScreen("browser"));
+    await vi.waitFor(() =>
+      expect(hook.result.current.agent.steps.get(step)?.note).toBe("Build verified"),
+    );
+    const view = render(
+      <ActivityRail
+        rows={[]}
+        agent={hook.result.current.agent}
+        api={f.api}
+        sessionId={f.sessionId}
+        scale={1}
+        asOfMs={7000}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Checking the build/ }));
+    expect(screen.getByText("Tests passed")).toBeTruthy();
+    expect(screen.getByText("Build verified")).toBeTruthy();
+    view.unmount();
+  } finally {
+    hook.unmount();
+  }
 });

@@ -9,7 +9,6 @@ import {
   type EntryView,
   entryView,
   foldKeyUses,
-  withNextMoves,
 } from "./activity.ts";
 import type { AgentStep } from "./model.ts";
 
@@ -234,30 +233,53 @@ describe("the activity timeline", () => {
     expect(entryView(entry, [], false).title).toBe("Saving report.ods to ~/Documents");
   });
 
-  it("says in a failed row what dot did next: tried again, made room and tried again, or moved on", () => {
-    const view = (title: string, state: EntryView["state"] = "done", meta = ""): EntryView => ({
-      testId: "step-row",
-      title,
-      meta,
-      time: "",
-      state,
-      stateLabel: state,
-      startT: 0,
-      endT: null,
+  it("leaves a bare gesture out of the meta line, keeping the app and what it touched", () => {
+    const row = (extra: Partial<StepRowView>): ActivityEntry => ({
+      key: "s",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "s",
+        startT: 0,
+        computer: {
+          id: "s",
+          label: "Picked brown from the palette",
+          startT: 0,
+          status: "ok",
+          durationMs: 400,
+          ...extra,
+        },
+      },
     });
-    const failed = view("Click Save", "failed", "The target changed before input.");
-    const metas = (views: EntryView[]) => withNextMoves(views).map((row) => row.meta);
-    expect(metas([failed, view("Clicked Save")])).toEqual([
-      "The target changed before input. Tried again.",
-      "",
-    ]);
-    expect(metas([failed, view("Scrolled down"), view("Clicked Save")])[0]).toBe(
-      "The target changed before input. Scrolled down, then tried again.",
+    expect(entryView(row({ gesture: "click" }), [], false).meta).toBe("");
+    expect(entryView(row({ gesture: "double-click" }), [], false).meta).toBe("");
+    expect(entryView(row({ app: "Paint", gesture: "keys" }), [], false).meta).toBe("Paint");
+    expect(entryView(row({ app: "Paint", gesture: "click Brown" }), [], false).meta).toBe(
+      "Paint · click Brown",
     );
-    expect(metas([failed, view("Opened the File menu")])[0]).toBe(
-      "The target changed before input. Then opened the File menu.",
+  });
+
+  it("says only what went wrong in a failed row, since the next row says what dot did next", () => {
+    const failed: ActivityEntry = {
+      key: "f",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "f",
+        startT: 0,
+        computer: {
+          id: "f",
+          label: "Type 8B5A2B in the hex field",
+          startT: 0,
+          status: "failed",
+          durationMs: 400,
+          reason: "The colour dialog didn't take the typed value.",
+        },
+      },
+    };
+    expect(entryView(failed, [], false).meta).toBe(
+      "The colour dialog didn't take the typed value.",
     );
-    expect(metas([view("Export", "failed", "Exit code 1")])).toEqual(["Exit code 1"]);
   });
 
   it("counts added and removed lines, not file headers", () => {

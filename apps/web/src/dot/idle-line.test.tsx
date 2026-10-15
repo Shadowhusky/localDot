@@ -17,6 +17,7 @@ import {
   usePageHidden,
 } from "./idle-line.ts";
 import { GREETINGS, TIPS, type Tip, type TipSignals } from "./tips.ts";
+import { VOICES, type Voice } from "./voices.ts";
 
 const SIGNALS: TipSignals = {
   touch: false,
@@ -258,4 +259,77 @@ it("does not restore an idle tip over work started while Watch was covered", () 
   expect(view.result.current).toBeNull();
   view.rerender({ resting: true, held: false, signals: SIGNALS, tips: THREE });
   expect(view.result.current).toBeNull();
+});
+
+describe("a dot's own voice", () => {
+  const VOICE: Voice = {
+    greetings: VOICES.coder.greetings,
+    hello: "Hoodie on.",
+    lines: ["Own 1.", "Own 2."],
+    suggestions: [],
+  };
+
+  it("greets in the chosen dot's words", () => {
+    expect(greeting(new Date(2026, 9, 9, 7), 0, VOICES.coder)).toBe(
+      VOICES.coder.greetings.morning[0],
+    );
+    const view = idle({ voice: VOICE });
+    expect(VOICES.coder.greetings.morning).toContain(view.result.current?.text);
+  });
+
+  it("gives its own lines every other turn, between the tips", () => {
+    const view = idle({ voice: VOICE });
+    const shown: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      wait(TIP_MS);
+      shown.push(view.result.current?.text ?? "");
+    }
+    expect(shown).toEqual(["Tip a.", "Own 1.", "Tip b.", "Own 2.", "Tip c."]);
+  });
+
+  it("says hello at once when another dot is chosen, but not while the band is busy", () => {
+    const view = idle({ voice: VOICE });
+    view.rerender({
+      resting: true,
+      held: false,
+      signals: SIGNALS,
+      tips: THREE,
+      voice: VOICES.finance,
+    });
+    expect(view.result.current?.text).toBe(VOICES.finance.hello);
+    view.rerender({
+      resting: false,
+      held: false,
+      signals: SIGNALS,
+      tips: THREE,
+      voice: VOICES.design,
+    });
+    view.rerender({
+      resting: true,
+      held: false,
+      signals: SIGNALS,
+      tips: THREE,
+      voice: VOICES.design,
+    });
+    expect(view.result.current).toBeNull();
+  });
+});
+
+it("gives every dot its own greetings, hello, lines and suggestions in dot's plain style", () => {
+  for (const [id, voice] of Object.entries(VOICES)) {
+    const all = [
+      ...Object.values(voice.greetings).flat(),
+      voice.hello,
+      ...voice.lines,
+      ...voice.suggestions,
+    ];
+    for (const part of ["morning", "afternoon", "evening", "night"] as const)
+      expect(voice.greetings[part].length, `${id} ${part}`).toBe(3);
+    expect(voice.lines.length, id).toBeGreaterThanOrEqual(3);
+    expect(voice.suggestions.length, id).toBe(3);
+    for (const text of all) {
+      expect(text, id).not.toContain("!");
+      expect(text.length, `${id}: ${text}`).toBeLessThanOrEqual(70);
+    }
+  }
 });

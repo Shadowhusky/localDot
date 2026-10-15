@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
+import { VOICES } from "../dot/voices.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { RoutineCard } from "../routines/RoutineCard.tsx";
 import { originLine } from "../routines/routine-copy.ts";
@@ -28,7 +29,7 @@ import { SentFiles } from "./Attachments.tsx";
 import { answerSummary } from "./ask-form.ts";
 import { fileName, splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
-import { editQueuedMessage, steerQueuedMessage } from "./control-api.ts";
+import { cancelQueuedMessage, editQueuedMessage, steerQueuedMessage } from "./control-api.ts";
 import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
@@ -38,6 +39,7 @@ import { QuestionCard } from "./QuestionCard.tsx";
 import { restoreQueuedDraft } from "./queued-draft.ts";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
+import { showStep } from "./step-focus.ts";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
 import { TurnMeta } from "./TurnMeta.tsx";
 import {
@@ -61,11 +63,6 @@ const WINDOW = OPENING_ROWS;
 // a field unfolding never moves the foot; the gap between the two heights covers the task bar
 // coming and going.
 const FOOT_FROM = 480;
-const SUGGESTIONS = [
-  "Tidy my Downloads folder",
-  "Fill in a spreadsheet from a PDF",
-  "Find a table for two on Friday",
-];
 const END_BELOW = 400;
 // A recovery card brought into view sits this far under the scroller's faded top edge.
 const REVEAL_MARGIN = 16;
@@ -155,7 +152,7 @@ const MessageCard = memo(function MessageCard({
     message.delivery === "withdrawn"
       ? "Moved to draft"
       : message.delivery === "cancelled"
-        ? "Not sent — task stopped"
+        ? "Not sent"
         : message.kind === "steer"
           ? "Sent while working"
           : message.queued
@@ -216,8 +213,10 @@ function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean 
         return (
           !!other &&
           step.key === other.key &&
+          step.readGroup === other.readGroup &&
           step.state === other.state &&
           step.title === other.title &&
+          step.meta === other.meta &&
           step.time === other.time &&
           step.startT === other.startT &&
           step.endT === other.endT
@@ -247,7 +246,7 @@ function SteerMessage({
       <Button
         variant="quiet"
         size="sm"
-        disabledReason={busy ? "Moving message…" : undefined}
+        disabledReason={busy ? "Updating message…" : undefined}
         onClick={() => {
           if (pending.current) return;
           pending.current = true;
@@ -303,6 +302,35 @@ function SteerMessage({
           }}
         >
           Steer now
+        </Button>
+      )}
+      {queued && (
+        <Button
+          variant="quiet"
+          size="sm"
+          disabledReason={busy ? "Updating message…" : undefined}
+          onClick={() => {
+            if (pending.current) return;
+            pending.current = true;
+            setBusy(true);
+            setError(null);
+            const abort = new AbortController();
+            lifetime.current = abort;
+            void cancelQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
+              .then(() => {
+                if (!abort.signal.aborted) announce("Queued message cancelled.");
+              })
+              .catch(() => {
+                if (!abort.signal.aborted)
+                  setError("Couldn't cancel this message. It may have started already. Try again.");
+              })
+              .finally(() => {
+                pending.current = false;
+                if (!abort.signal.aborted) setBusy(false);
+              });
+          }}
+        >
+          Cancel
         </Button>
       )}
       {error && (
@@ -406,6 +434,7 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         live={null}
         ended={endedOf(item, thread)}
         spend={item.spend}
+        onOpenStep={item.earlier ? undefined : showStep}
       />
     ),
     same: (was, now, then, thread) =>
@@ -514,6 +543,8 @@ export interface ConversationProps {
   computerReady?: boolean;
   // The computer is moving onto a new version and is back in about a minute.
   computerUpdating?: boolean;
+  // What an empty thread offers to start with; the everyday dot's by default.
+  suggestions?: readonly string[];
   // In place of the empty thread's suggestions, such as the steps setup has left.
   start?: ReactNode;
   // Counts the conversations the user chose: each one's thread comes in anew.
@@ -549,6 +580,7 @@ export function Conversation({
   onReplayTask,
   computerReady = false,
   computerUpdating = false,
+  suggestions = VOICES.everyday.suggestions,
   start,
   reveal = 0,
   words,
@@ -678,8 +710,8 @@ export function Conversation({
     };
     return { older: watch("older"), newer: watch("newer") };
   }, [moveAt]);
-  const reading = () => {
-    follow.interrupt();
+  const reading = (stop = true) => {
+    if (stop) follow.interrupt();
     setHolding(null);
     if (!held.current) return;
     held.current = false;
@@ -922,10 +954,17 @@ export function Conversation({
           if (!follow.onScroll()) page.freeze();
           else if (!page.following && !page.hasNewer) page.latest();
         }}
-        onWheel={reading}
-        onTouchStart={reading}
-        onPointerDown={reading}
-        onKeyDown={reading}
+        // Only a move toward earlier rows stops following; a gesture that ends at the end resumes it.
+        onWheel={(event) => {
+          reading(event.deltaY <= 0);
+          if (event.deltaY > 0) follow.resume();
+        }}
+        onTouchStart={() => reading()}
+        onPointerDown={() => reading()}
+        onKeyDown={() => reading()}
+        onTouchEnd={follow.resume}
+        onPointerUp={follow.resume}
+        onKeyUp={follow.resume}
       >
         <div className="thread-content">
           <section
@@ -979,7 +1018,7 @@ export function Conversation({
                       : "Turn on your computer, then ask dot to do something."}
                 </p>
                 <div className="thread-suggestions">
-                  {SUGGESTIONS.map((text) => (
+                  {suggestions.map((text) => (
                     <Chip key={text} variant="outline" onClick={() => suggest(text)}>
                       {text}
                     </Chip>
@@ -1053,6 +1092,7 @@ export function Conversation({
                 startMs={footWork.startMs}
                 live={liveWork ? live : null}
                 ended={ended}
+                onOpenStep={showStep}
               />
             )}
           </Collapse>

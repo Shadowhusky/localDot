@@ -137,6 +137,8 @@ export interface DotPose {
   blink: number;
   talk: number;
   gaze: Point;
+  // The face's roll in degrees, about the body's centre.
+  roll: number;
 }
 
 export interface DotEngineOptions {
@@ -405,6 +407,7 @@ export class DotEngine {
       blink,
       talk,
       gaze: { x: gx, y: gy },
+      roll,
     };
   }
 

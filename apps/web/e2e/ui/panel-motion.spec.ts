@@ -50,19 +50,3 @@ test("Activity tabs and filters remain below the header while scrolling", async 
   await rail.getByRole("tab", { name: /^Files/ }).click();
   await expect(rail.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
 });
-
-test("work window remains open and keeps its output during task updates", async ({ page, ui }) => {
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await ui.open("running");
-  await ui.picture();
-  await page.getByRole("button", { name: "More", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Show commands", exact: true }).click();
-  const output = await page.locator(".work-overlay-output").elementHandle();
-  await expect(page.getByRole("region", { name: "Recent command output" })).toBeVisible();
-  await ui.settle();
-  expect(
-    await output?.evaluate((node) => node === document.querySelector(".work-overlay-output")),
-  ).toBe(true);
-  await expect(page.getByRole("button", { name: "Minimize command window" })).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath("work-details.png") });
-});

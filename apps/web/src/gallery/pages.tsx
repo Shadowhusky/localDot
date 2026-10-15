@@ -1,3 +1,4 @@
+import { PERSONAS } from "@localdot/protocol";
 import type { ComponentType } from "react";
 import { Dot } from "../dot/Dot.tsx";
 import type { DotState } from "../dot/engine/states.ts";
@@ -6,6 +7,7 @@ import { NarratorBand } from "../shell/NarratorBand.tsx";
 import { StageFrame } from "../shell/StageFrame.tsx";
 import { FeedbackPage } from "../ui/gallery/FeedbackPage.tsx";
 import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
+import { ActivityPage } from "./ActivityPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
 import { SystemPage } from "./SystemPage.tsx";
 
@@ -51,9 +53,23 @@ function DotPage() {
         <Glyph size={16} />
         <figcaption>glyph</figcaption>
       </figure>
+      {Object.values(PERSONAS)
+        .filter((persona) => persona.wearables.length > 0)
+        .flatMap((persona) =>
+          WORN_STATES.map((state) => (
+            <figure key={`${persona.id}-${state}`} className="gallery-dot">
+              <Dot size={96} state={state} wearables={persona.wearables} seed={SEED} />
+              <Dot size={24} state={state} wearables={persona.wearables} seed={SEED} />
+              <figcaption>{`${persona.name}, ${state}`}</figcaption>
+            </figure>
+          )),
+        )}
     </div>
   );
 }
+
+// Each dot's outfit in the states that move the body most, to check it stays on.
+const WORN_STATES: DotState[] = ["listening", "acting", "your-turn", "offline"];
 
 const STAGES = [
   { label: "dot has control", caption: "Select the Net total cell", control: true },
@@ -83,6 +99,12 @@ function StagePage() {
 }
 
 export const GALLERY_PAGES: GalleryPage[] = [
+  {
+    id: "activity",
+    title: "Activity",
+    about: "Long task timeline and expansion stress test",
+    Page: ActivityPage,
+  },
   {
     id: "system",
     title: "System",

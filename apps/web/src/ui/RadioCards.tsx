@@ -31,6 +31,8 @@ export interface RadioCardsProps {
   mark?: "start" | "end";
   // Rows that stand on their own on a page, further in and with larger titles.
   roomy?: boolean;
+  // Small tiles, several to a row, each a picture over a one-word label.
+  compact?: boolean;
   name?: string;
   className?: string;
   "aria-label"?: string;
@@ -43,6 +45,7 @@ export function RadioCards({
   layout = "rows",
   mark = "start",
   roomy = false,
+  compact = false,
   name,
   className,
   "aria-label": label,
@@ -57,6 +60,7 @@ export function RadioCards({
       data-layout={layout}
       data-mark={mark}
       data-roomy={roomy ? "" : undefined}
+      data-compact={compact ? "" : undefined}
       aria-label={label}
       aria-labelledby={label ? undefined : control.labelId}
       aria-describedby={control.describedBy}

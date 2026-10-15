@@ -55,13 +55,13 @@ it("opens setup on first run, and Finish later leaves what is left in the chat t
   render(<App fetchImpl={fetchImpl} />);
   fireEvent.click(await screen.findByRole("button", { name: "Get started" }));
   expect(await screen.findByRole("heading", { name: "How should dot think?" })).toBeTruthy();
-  expect(screen.getByRole("list", { name: "Step 1 of 5 · How dot thinks" })).toBeTruthy();
+  expect(screen.getByRole("list", { name: "Step 1 of 6 · How dot thinks" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Finish later" }));
   await waitFor(() =>
     expect(screen.queryByRole("heading", { name: "How should dot think?" })).toBeNull(),
   );
   const setup = await screen.findByRole("region", { name: "Finish setting up" });
-  expect(setup.textContent).toContain("0 of 5 steps done. dot needs a model before it can start.");
+  expect(setup.textContent).toContain("0 of 6 steps done. dot needs a model before it can start.");
   expect(
     within(setup)
       .getAllByRole("listitem")
@@ -71,6 +71,7 @@ it("opens setup on first run, and Finish later leaves what is left in the chat t
     "KeyNot added yet",
     "ModelNeeded to startChoose…",
     "PermissionsBalanced until you choose",
+    "Your dotEveryday until you choose",
   ]);
   const choose = within(setup).getByRole("button", { name: "Choose…" });
   fireEvent.click(choose);
@@ -121,9 +122,13 @@ it("sets up an API key's models and permissions, then turns the computer on", as
     },
   ]);
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  await screen.findByRole("heading", { name: "You're all set." });
+  await screen.findByRole("heading", { name: "Which dot do you need most?" });
   // Balanced is saved too, so setup knows it was chosen.
   expect(puts()[1]).toMatchObject({ autonomy: { computer: "act", purchase: "ask" } });
+  fireEvent.click(screen.getByRole("radio", { name: /Coder/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("heading", { name: "You're all set." });
+  expect(puts()[2]).toMatchObject({ persona: "coder" });
   fireEvent.click(screen.getByRole("button", { name: "Turn on your computer" }));
   await waitFor(() =>
     expect(calls.some((call) => call.method === "POST" && call.path === "/api/cells")).toBe(true),

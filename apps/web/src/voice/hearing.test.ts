@@ -31,6 +31,8 @@ class FakeRecognition implements SpeechRecognitionLike {
   maxAlternatives = 0;
   processLocally?: boolean;
   onstart: (() => void) | null = null;
+  onspeechstart: (() => void) | null = null;
+  onspeechend: (() => void) | null = null;
   onresult: ((event: { results: ArrayLike<SpeechResultLike> }) => void) | null = null;
   onerror: ((event: { error: string }) => void) | null = null;
   onend: (() => void) | null = null;
@@ -193,4 +195,32 @@ it("settles if recognition closes before it starts", async () => {
   const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, events());
   made[0]?.onend?.();
   await expect(opening).rejects.toMatchObject({ failure: "no-speech" });
+});
+
+it("animates detected speech and result activity, then settles during silence and after abort", async () => {
+  let now = 0;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  try {
+    const opening = startHearing({ kind: "online" }, { api: api(), language: "en-US" }, events());
+    const recognition = made[0]!;
+    recognition.onstart?.();
+    const hearing = await opening;
+    expect(hearing.level()).toBe(0);
+    recognition.onspeechstart?.();
+    const first = hearing.level();
+    now = 180;
+    expect(hearing.level()).toBeGreaterThan(0.3);
+    expect(hearing.level()).not.toBe(first);
+    recognition.onspeechend?.();
+    expect(hearing.level()).toBe(0);
+    recognition.say("still speaking");
+    expect(hearing.level()).toBeGreaterThan(0.3);
+    now += 1400;
+    expect(hearing.level()).toBe(0);
+    recognition.onspeechstart?.();
+    hearing.abort();
+    expect(hearing.level()).toBe(0);
+  } finally {
+    clock.mockRestore();
+  }
 });

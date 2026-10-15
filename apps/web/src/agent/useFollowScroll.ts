@@ -2,6 +2,9 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 // Within this many px of the end, the reader is following the live end.
 const PIN_SLACK = 32;
+// Scrolling down to within this many px of it, they mean to follow it again: rows that arrive during
+// the scroll leave them short of an end that moved.
+const RESUME_SLACK = 160;
 
 interface Tracking {
   element: HTMLElement | null;
@@ -184,6 +187,7 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     const t = tracking.current,
       element = t.element;
     if (!element) return t.pinned;
+    const down = element.scrollTop > t.top + 0.5;
     t.top = element.scrollTop;
     // A streamed row can arrive before the next animation frame. Keep the old anchor at
     // its new scroll position until pickAnchor chooses the first visible row.
@@ -203,7 +207,7 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     }
     if ((t.jumping || t.glide) && below >= PIN_SLACK) return t.pinned;
     if (below <= 1) t.jumping = false;
-    const next = follow && below < PIN_SLACK;
+    const next = follow && (below < PIN_SLACK || (down && below < RESUME_SLACK));
     if (next !== t.pinned) setPin(next);
     cancelAnimationFrame(t.frame);
     t.frame = requestAnimationFrame(pickAnchor);
@@ -239,6 +243,14 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       // before that resize, or it can pull the list back down over the reader's gesture.
       setPin(false);
       pickAnchor();
+    },
+    // A gesture that has ended with the reader at the end (a click, a tap, a key, a wheel that met
+    // the end) follows it again.
+    resume() {
+      const t = tracking.current,
+        element = t.element;
+      if (!element || t.pinned || !follow) return;
+      if (element.scrollHeight - element.clientHeight - element.scrollTop < PIN_SLACK) setPin(true);
     },
     // Following the end, an element whose top the end would hide is brought to the top of the view,
     // this far below it, and held there instead. Says whether it was.

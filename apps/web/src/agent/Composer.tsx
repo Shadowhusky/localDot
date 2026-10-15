@@ -1,6 +1,5 @@
 import { keyLikePresent, STALL, ULID_PATTERN } from "@localdot/protocol";
 import {
-  type DragEvent,
   memo,
   type ReactNode,
   useCallback,
@@ -42,6 +41,7 @@ import { fileName, withAttachments } from "./attachments.ts";
 import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import { Outbox } from "./outbox.ts";
+import { pastedFiles, pastedText } from "./paste.ts";
 import { onQueuedDraft } from "./queued-draft.ts";
 import { ResearchLine, ResearchToggle } from "./ResearchToggle.tsx";
 import { RevisingChip } from "./RevisingChip.tsx";
@@ -165,7 +165,35 @@ const userIds = (props: ComposerProps) =>
 const editable = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])");
-const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+const carriesFiles = (event: { dataTransfer: DataTransfer | null }) =>
+  event.dataTransfer?.types.includes("Files") === true;
+
+// The words being written outlast a reload, never a key: the guard's catch clears them.
+const DRAFT_KEY = "localdot.composer-draft.v1";
+const DRAFT_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+function readDraft(): string {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "null") as {
+      text?: unknown;
+      at?: unknown;
+    } | null;
+    return typeof saved?.text === "string" &&
+      typeof saved.at === "number" &&
+      Date.now() - saved.at < DRAFT_DAYS_MS
+      ? saved.text
+      : "";
+  } catch {
+    return "";
+  }
+}
+function keepDraft(text: string): void {
+  try {
+    if (text.trim()) localStorage.setItem(DRAFT_KEY, JSON.stringify({ text, at: Date.now() }));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* A blocked store keeps the draft for this page only. */
+  }
+}
 // What the composer shows of its text: whether there is any, and its length once that shows.
 interface TextShape {
   readonly blank: boolean;
@@ -372,6 +400,45 @@ export function Composer(props: ComposerProps) {
     ready: readyCell(props) && !takeover,
     enabled: permitted && !sending && !uncertain,
   });
+  // Pasted pictures and long texts get names of their own; attaching answers whether it could.
+  const pasteNames = useRef(new Set<string>());
+  const attach = useRef<(files: readonly File[]) => boolean>(() => false);
+  const draft = useRef(0);
+  // Files dropped anywhere on the window join the draft, while the composer is on screen.
+  useEffect(() => {
+    const shown = () => !!form.current && !form.current.closest("[hidden], [inert]");
+    const enter = (event: DragEvent) => {
+      if (!carriesFiles(event) || !shown()) return;
+      drags.current += 1;
+      setDragging(true);
+    };
+    const over = (event: DragEvent) => {
+      if (carriesFiles(event) && shown()) event.preventDefault();
+    };
+    const leave = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      drags.current = Math.max(0, drags.current - 1);
+      if (!drags.current) setDragging(false);
+    };
+    const drop = (event: DragEvent) => {
+      drags.current = 0;
+      setDragging(false);
+      if (!carriesFiles(event) || !shown()) return;
+      event.preventDefault();
+      const files = [...(event.dataTransfer?.files ?? [])];
+      if (files.length) attach.current(files);
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragover", over);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
 
   // The message's own row is in the thread: one of yours, in its words, that the thread did not
   // have when it was sent.
@@ -403,6 +470,16 @@ export function Composer(props: ComposerProps) {
       SUGGEST_MS,
     );
   }, []);
+  // What was being written before a reload comes back, through the key guard like a paste.
+  useEffect(() => {
+    const input = form.current?.querySelector("textarea");
+    const saved = readDraft();
+    if (!input || input.value || input.readOnly || !saved) return;
+    input.value = saved;
+    revision.current += 1;
+    guardOwner.current.check(input);
+    measure(input);
+  }, [measure]);
   // Revise on a file fills the message with the file's name, keeps what was typed and focuses it.
   useEffect(
     () =>
@@ -486,6 +563,7 @@ export function Composer(props: ComposerProps) {
     if (revision.current === record.revision && input && input.value === record.draftText) {
       outbox?.keep();
       input.value = "";
+      keepDraft("");
       measure(input);
       window.clearTimeout(suggestion.current);
       setSuggested(false);
@@ -776,12 +854,22 @@ export function Composer(props: ComposerProps) {
         measure(event.currentTarget, true);
         weigh(event.currentTarget);
         if (problemShown.current !== null) setProblem(null);
+        const input = event.currentTarget;
+        window.clearTimeout(draft.current);
+        draft.current = window.setTimeout(
+          () => keepDraft(guardOwner.current.notice ? "" : input.value),
+          400,
+        );
       },
       onPaste: (event) => {
         const input = event.currentTarget;
         if (input.readOnly) return;
         event.preventDefault();
+        const files = [...(event.clipboardData.files ?? [])];
+        if (files.length && attach.current(pastedFiles(files, pasteNames.current))) return;
         const pasted = event.clipboardData.getData("text/plain");
+        const document = pastedText(pasted, pasteNames.current);
+        if (document && attach.current([document])) return;
         if (
           pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
           LIMIT
@@ -800,12 +888,17 @@ export function Composer(props: ComposerProps) {
           touch ||
           event.key !== "Enter" ||
           event.shiftKey ||
-          event.ctrlKey ||
-          event.metaKey ||
           event.nativeEvent.isComposing ||
           composing.current
         )
           return;
+        // Command or Control and Enter sends now, into the step dot is on.
+        if (event.ctrlKey || event.metaKey) {
+          if (!choosing) return;
+          event.preventDefault();
+          if (event.currentTarget.value.trim()) submit(false);
+          return;
+        }
         event.preventDefault();
         // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
         if (event.altKey && !choosing) return;
@@ -840,6 +933,11 @@ export function Composer(props: ComposerProps) {
     : sending || uncertain
       ? "Wait until your message is sent."
       : (reason ?? (takeover ? "Add files once you hand back." : undefined));
+  attach.current = (files) => {
+    if (attachReason || !files.length) return false;
+    uploads.select(files);
+    return true;
+  };
   // A message to a conversation at rest starts its next task, but reads as any other message.
   const newConversation = mode === "new" && !props.agent.sessionId;
   const researchReason =
@@ -912,25 +1010,6 @@ export function Composer(props: ComposerProps) {
         onSubmit={(event) => {
           event.preventDefault();
           submit();
-        }}
-        onDragEnter={(event) => {
-          if (!carriesFiles(event)) return;
-          drags.current += 1;
-          setDragging(true);
-        }}
-        onDragOver={(event) => {
-          if (carriesFiles(event)) event.preventDefault();
-        }}
-        onDragLeave={(event) => {
-          if (!carriesFiles(event)) return;
-          drags.current = Math.max(0, drags.current - 1);
-          if (!drags.current) setDragging(false);
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          drags.current = 0;
-          setDragging(false);
-          if (event.dataTransfer.files.length) uploads.select(event.dataTransfer.files);
         }}
       >
         <KeyFound
@@ -1036,7 +1115,7 @@ export function Composer(props: ComposerProps) {
             {choosing && (
               <MenuItem
                 disabledReason={sendReason}
-                kbd={touch ? undefined : ["Enter"]}
+                kbd={touch ? undefined : ["Mod", "Enter"]}
                 onSelect={() => send(false)}
               >
                 Send now
@@ -1068,11 +1147,16 @@ export function Composer(props: ComposerProps) {
             aria-describedby={guard.notice ? keyNotice : undefined}
           />
         </div>
-        <div className="composer-drop" aria-hidden="true">
-          <Icon name="paperclip" />
-          Drop files to attach
-        </div>
       </form>
+      {createPortal(
+        <div className="composer-window-drop" data-shown={dragging || undefined} aria-hidden="true">
+          <div className="composer-window-drop-card">
+            <Icon name="paperclip" />
+            {attachReason ?? "Drop files to attach"}
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

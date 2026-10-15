@@ -1,6 +1,7 @@
 import { isOpenRouterRouterId, providerById } from "@localdot/providers";
 import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
+import { Select } from "../ui/Select.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import {
   customModelAllowed,
@@ -10,7 +11,15 @@ import {
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
-import { CHATGPT, CLAUDE_CODE, modelItems, providerGroups, subscription } from "./chooser.ts";
+import {
+  CHATGPT,
+  CLAUDE_CODE,
+  CUSTOM_FORMATS,
+  isCustomFormat,
+  modelItems,
+  providerGroups,
+  subscription,
+} from "./chooser.ts";
 
 export interface ModelChooserProps {
   modelRole: ModelRole;
@@ -46,8 +55,16 @@ export function modelNote(
     : chosen?.note;
 }
 
+// The same endpoint in another format: what the user said about it stays, and its key while the
+// formats share one kind of key; reasoning options belong to the old format's client.
+function inFormat(value: RoleChoice, format: string): RoleChoice {
+  const { key, options: _, ...rest } = value;
+  const sameKey = providerById(format)?.keyd === providerById(value.provider)?.keyd;
+  return { ...rest, provider: format, ...(sameKey && key ? { key } : {}) };
+}
+
 // The provider, then one of its models: two rows of a group, each a searchable list that opens as a
-// sheet on a phone.
+// sheet on a phone. A custom endpoint has a row for the API format it speaks between them.
 export function ModelChooser({
   modelRole: role,
   value,
@@ -81,6 +98,16 @@ export function ModelChooser({
           onValueChange={(id) => onChange({ provider: id, model: "" })}
         />
       </Field>
+      {isCustomFormat(value.provider) && (
+        <Field label="API format" inline className="ui-group-row">
+          <Select
+            appearance="inline"
+            value={value.provider}
+            items={CUSTOM_FORMATS.map((format) => ({ ...format }))}
+            onValueChange={(format) => onChange(inFormat(value, format))}
+          />
+        </Field>
+      )}
       {(plan || (provider && !provider.notOffered)) &&
         (typed && !models.length ? (
           <Field label="Model ID" inline className="ui-group-row" error={idProblem ?? undefined}>

@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import exportPage from "../export.html?raw";
 import page from "../index.html?raw";
-import icon from "./favicon.svg?raw";
 
 describe("index.html", () => {
-  // Without one, the browser asks for /favicon.ico, which the daemon answers with 404. The icon is
-  // a bundled file, so it is served from /assets under the page's img-src 'self'.
-  it("declares an icon that the build bundles", () => {
-    expect(page).toContain('<link rel="icon" type="image/svg+xml" href="/src/favicon.svg" />');
-    expect(icon).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
+  it("declares the detailed PNG mascot for browser bookmark clients", () => {
+    expect(page).toContain(
+      '<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=mascot-2" />',
+    );
   });
 
   // The phone's Home Screen app: files from public/ that the build copies to the dist root as is.
@@ -17,7 +15,7 @@ describe("index.html", () => {
       '<link rel="manifest" crossorigin="use-credentials" href="/manifest.webmanifest" />',
     );
     expect(page).toContain(
-      '<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=mascot-1" />',
+      '<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-mascot-2.png" />',
     );
     expect(page).toContain('<meta name="theme-color" content="#0a0b0d" />');
     expect(page).toContain('<meta name="apple-mobile-web-app-title" content="localDot" />');

@@ -25,6 +25,5 @@ test("fullscreen manual controls and settings stay below the computer picture", 
   expect(manual.y).toBeGreaterThanOrEqual(toolbar.y);
   expect(manual.y + manual.height).toBeLessThanOrEqual(toolbar.y + toolbar.height + 1);
   expect(toolbar.y + toolbar.height).toBeLessThanOrEqual(page.viewportSize()?.height ?? 0);
-  await expect(page.locator(".work-overlay-show")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("fullscreen-toolbar.png") });
 });

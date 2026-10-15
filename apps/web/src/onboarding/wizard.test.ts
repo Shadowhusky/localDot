@@ -53,15 +53,19 @@ describe("first-run setup", () => {
   it("returns to the summary from a change once nothing after it needs choosing again", () => {
     expect(nextStep({ step: "model", back: "turn-on" })).toBe("turn-on");
     expect(nextStep({ step: "permissions", back: "turn-on" })).toBe("turn-on");
+    expect(nextStep({ step: "dot", back: "turn-on" })).toBe("turn-on");
+    expect(nextStep({ step: "permissions" })).toBe("dot");
+    expect(nextStep({ step: "dot" })).toBe("turn-on");
     // A new way of thinking needs its key and model before it can return.
     expect(nextStep({ step: "thinks", back: "turn-on" })).toBe("key");
     expect(nextStep({ step: "key", back: "turn-on" })).toBe("model");
   });
 
-  it("counts five steps after the welcome and names the credential for how dot thinks", () => {
+  it("counts six steps after the welcome and names the credential for how dot thinks", () => {
     expect(stepNumber("welcome")).toBe(0);
     expect(stepNumber("thinks")).toBe(1);
-    expect(stepNumber("turn-on")).toBe(5);
+    expect(stepNumber("dot")).toBe(5);
+    expect(stepNumber("turn-on")).toBe(6);
     expect(stepTitle("key", "api")).toBe("Key");
     expect(stepTitle("key", "chatgpt")).toBe("Sign-in");
     expect(stepTitle("key", "local")).toBe("Server");

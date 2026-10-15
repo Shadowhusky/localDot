@@ -37,9 +37,25 @@ test("the keyboard lifts only the composer and restores it on dismissal", async 
   const stage = page.locator(".stage-col");
   const before = await stage.boundingBox();
   const height = (await app.boundingBox())?.height;
+  const scroll = page.locator(".thread-scroll");
+  const scrollBefore = await scroll.boundingBox();
   const card = await composer(page);
   const field = card.getByRole("textbox", { name: "Message", exact: true });
   await field.focus();
+  // Check intermediate frames, including movement below the old 120px threshold.
+  for (const covered of [0, 12, 60, 119, 121, 200, 310]) {
+    await page.evaluate((covered) => {
+      const view = window.visualViewport;
+      if (!view) throw new Error("Visual viewport required");
+      Object.defineProperty(view, "height", { configurable: true, value: innerHeight - covered });
+      view.dispatchEvent(new Event("resize"));
+    }, covered);
+    await expect(app).toHaveAttribute("data-composer-keyboard", "");
+    await expect.poll(async () => (await app.boundingBox())?.height).toBe(height);
+    await expect.poll(() => stage.boundingBox()).toEqual(before);
+    await expect.poll(() => scroll.boundingBox()).toEqual(scrollBefore);
+    await expect(app).not.toHaveAttribute("data-keyboard");
+  }
   for (const offset of [0, 45, 240]) {
     await page.evaluate((offsetTop) => {
       const view = window.visualViewport;
@@ -91,6 +107,23 @@ test("the keyboard lifts only the composer and restores it on dismissal", async 
     })
     .toBe(774);
   await page.screenshot({ path: test.info().outputPath("keyboard-open.png") });
+  await field.blur();
+  for (const covered of [310, 200, 119, 60, 12]) {
+    await page.evaluate((covered) => {
+      document.body.style.removeProperty("min-height");
+      window.scrollTo(0, 0);
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+      const view = window.visualViewport;
+      if (!view) throw new Error("Visual viewport required");
+      Object.defineProperty(view, "height", { configurable: true, value: 844 - covered });
+      Object.defineProperty(view, "offsetTop", { configurable: true, value: 0 });
+      view.dispatchEvent(new Event("resize"));
+    }, covered);
+    await expect(app).toHaveAttribute("data-composer-keyboard", "");
+    await expect.poll(() => stage.boundingBox()).toEqual(before);
+    await expect.poll(() => scroll.boundingBox()).toEqual(scrollBefore);
+  }
+
   await page.evaluate(() => {
     document.body.style.removeProperty("min-height");
     window.scrollTo(0, 0);
@@ -101,6 +134,9 @@ test("the keyboard lifts only the composer and restores it on dismissal", async 
     Object.defineProperty(view, "offsetTop", { configurable: true, value: 0 });
     view.dispatchEvent(new Event("resize"));
   });
+  await expect(app).not.toHaveAttribute("data-composer-keyboard");
+  await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event("scroll")));
+  await ui.settle();
   await expect(app).not.toHaveAttribute("data-composer-keyboard");
   await expect
     .poll(async () => {
@@ -161,4 +197,39 @@ test("the composer stays visible above a tall keyboard on a short phone viewport
       .toBe(true);
   }
   await page.screenshot({ path: test.info().outputPath("short-phone-keyboard.png") });
+});
+
+test("tapping an already focused composer relocks the next keyboard transition", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("running");
+  const app = page.locator(".app");
+  await expect(app).not.toHaveAttribute("data-entering");
+  const field = (await composer(page)).getByRole("textbox", { name: "Message", exact: true });
+  await field.focus();
+  const resize = async (height: number) => {
+    await page.evaluate((height) => {
+      const view = window.visualViewport;
+      if (!view) throw new Error("Visual viewport required");
+      Object.defineProperty(view, "height", { configurable: true, value: height });
+      view.dispatchEvent(new Event("resize"));
+    }, height);
+  };
+  await resize(534);
+  await expect(app).toHaveAttribute("data-composer-keyboard", "");
+  // Focus pins the shell synchronously; wait for the viewport frame as well.
+  await expect
+    .poll(() => app.evaluate((element) => element.style.getPropertyValue("--_composer-bottom")))
+    .toBe("534px");
+  await resize(844);
+  await expect(app).not.toHaveAttribute("data-composer-keyboard");
+  await expect(field).toBeFocused();
+  await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event("scroll")));
+  await ui.settle();
+  await expect(app).not.toHaveAttribute("data-composer-keyboard");
+  await field.dispatchEvent("pointerdown", { pointerType: "touch" });
+  await expect(app).toHaveAttribute("data-composer-keyboard", "");
+  await resize(832);
+  await expect.poll(async () => (await app.boundingBox())?.height).toBe(844);
 });

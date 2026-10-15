@@ -40,10 +40,17 @@ const onViewport = (onChange: () => void) => {
   };
 };
 
-// A phone's keyboard is up: the band collapses and dot moves into the island.
+// Computer keyboard input can collapse the band. Composer typing keeps the background static.
 export function useKeyboardUp(): boolean {
   const handheld = useMediaQuery(HANDHELD);
-  const up = useSyncExternalStore(onViewport, keyboardUp, () => false);
+  const up = useSyncExternalStore(
+    onViewport,
+    () =>
+      keyboardUp() &&
+      !document.activeElement?.matches(".composer-field") &&
+      !document.querySelector(".app[data-composer-keyboard]"),
+    () => false,
+  );
   return handheld && up;
 }
 
@@ -62,17 +69,32 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
     // browsers resize innerHeight along with the visual viewport.
     let restingHeight = view.height;
     let focusedHeight: number | undefined;
+    let sawKeyboard = false;
+    let dismissed = false;
     const fit = () => {
       frame = 0;
       if (view.scale !== 1) return;
       const focused = document.activeElement?.matches(".composer-field");
       if (focused && focusedHeight === undefined) focusedHeight = restingHeight;
-      const covered = (focusedHeight ?? restingHeight) - view.height > KEYBOARD_PX;
-      composing = covered && (composing || !!focused);
-      if (!covered) {
-        restingHeight = view.height;
-        if (!focused) focusedHeight = undefined;
+      // Lock on focus, before the first keyboard frame, and keep the lock through
+      // dismissal. The 120px detection threshold must never resize the background.
+      if (focused && !composing && !dismissed && focusedHeight !== undefined) {
+        const toolbar = element.querySelector(".thread-toolbar");
+        element.style.setProperty(
+          "--_composer-rest-height",
+          `${toolbar?.getBoundingClientRect().height ?? 0}px`,
+        );
+        composing = true;
       }
+      const covered = (focusedHeight ?? restingHeight) - view.height;
+      if (covered > KEYBOARD_PX) sawKeyboard = true;
+      if (composing && (!focused || sawKeyboard) && covered <= 1 && view.offsetTop <= 1) {
+        composing = false;
+        focusedHeight = undefined;
+        sawKeyboard = false;
+        dismissed = !!focused;
+      }
+      if (!composing) restingHeight = view.height;
       element.toggleAttribute("data-composer-keyboard", composing);
       const height = `${composing ? (focusedHeight ?? restingHeight) : view.height}px`;
       // A fixed shell follows the visual viewport's origin while the toolbar
@@ -92,18 +114,30 @@ export function useViewportFit(page: { current: HTMLElement | null }): void {
     fit();
     const stop = onViewport(schedule);
     const focus = () => {
+      dismissed = false;
       if (document.activeElement?.matches(".composer-field") && focusedHeight === undefined)
         focusedHeight = restingHeight;
-      schedule();
+      // Safari may begin caret reveal before the next animation frame.
+      if (frame) cancelAnimationFrame(frame);
+      fit();
     };
+    const pointer = (event: PointerEvent) => {
+      // Dismissing the software keyboard can leave the textarea focused. Tapping
+      // it again opens a new keyboard transition without another focusin event.
+      if (dismissed && event.target instanceof Element && event.target.matches(".composer-field"))
+        focus();
+    };
+    document.addEventListener("pointerdown", pointer, true);
     document.addEventListener("focusin", focus);
     document.addEventListener("focusout", schedule);
     return () => {
       stop();
+      document.removeEventListener("pointerdown", pointer, true);
       document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", schedule);
       element.removeAttribute("data-composer-keyboard");
       element.style.removeProperty("--_composer-bottom");
+      element.style.removeProperty("--_composer-rest-height");
       cancelAnimationFrame(frame);
       element.style.removeProperty("--_visible-h");
       element.style.removeProperty("--_visible-top");

@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import { useResultDownloads } from "../agent/ResultFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
+import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { DeliverableFile } from "./DeliverableFile.tsx";
 import { FileViewerScope } from "./viewer/scope.tsx";
 
+const estimateFile = () => 64;
 type Handed = { result: AgentResult; file: AgentResult["files"][number] };
 
 // Each file name once, as the latest result handed it over.
@@ -41,21 +43,33 @@ export function HandedOverFiles({
       })),
     [files, sessionId],
   );
+  const list = useRef<HTMLUListElement>(null);
+  const keys = useMemo(() => files.map(({ result, file }) => `${result.id}/${file.name}`), [files]);
+  const windowed = useVirtualRows(list, keys, estimateFile);
   return (
     <FileViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
-      <ul className="deliverables activity-deliverables" aria-label="Handed over">
-        {files.map(({ result, file }) => (
-          <DeliverableFile
-            key={`${result.id}/${file.name}`}
-            api={api}
-            sessionId={result.sessionId ?? sessionId}
-            resultId={result.id}
-            file={file}
-            downloads={downloads}
-            refresh={results.length}
-            onMac={onMac}
-          />
-        ))}
+      <ul ref={list} className="deliverables activity-deliverables" aria-label="Handed over">
+        <li aria-hidden="true" style={{ height: windowed.before }} />
+        {windowed.indexes.map((index) => {
+          const item = files[index];
+          if (!item) return null;
+          const { result, file } = item;
+          return (
+            <DeliverableFile
+              measure={windowed.measure}
+              index={index}
+              key={`${result.id}/${file.name}`}
+              api={api}
+              sessionId={result.sessionId ?? sessionId}
+              resultId={result.id}
+              file={file}
+              downloads={downloads}
+              refresh={results.length}
+              onMac={onMac}
+            />
+          );
+        })}
+        <li aria-hidden="true" style={{ height: windowed.after }} />
       </ul>
     </FileViewerScope>
   );

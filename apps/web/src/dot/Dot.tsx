@@ -1,3 +1,4 @@
+import type { Wearable } from "@localdot/protocol";
 import { type CSSProperties, useEffect, useRef, useSyncExternalStore } from "react";
 import type { DotState } from "./engine/states.ts";
 import { Glyph } from "./Glyph.tsx";
@@ -15,6 +16,8 @@ export interface DotProps {
   reducedMotion?: boolean;
   // Fixes how this dot moves; by default each dot moves its own way.
   seed?: number;
+  // What it wears; by default the user's dot's outfit.
+  wearables?: readonly Wearable[];
   style?: CSSProperties;
 }
 
@@ -35,12 +38,20 @@ export function Dot({ size, ...props }: DotProps) {
   return lodFor(size) === "glyph" ? <Glyph size={size} /> : <LiveDot size={size} {...props} />;
 }
 
-function LiveDot({ size, state = "idle", control = false, reducedMotion, seed, style }: DotProps) {
+function LiveDot({
+  size,
+  state = "idle",
+  control = false,
+  reducedMotion,
+  seed,
+  wearables,
+  style,
+}: DotProps) {
   const prefersReduced = useSyncExternalStore(subscribe, prefersReducedMotion, () => false);
   const reduced = reducedMotion ?? prefersReduced;
   const host = useRef<HTMLSpanElement>(null);
   const view = useRef<DotView | null>(null);
-  const initial = useRef({ size, state, control, reducedMotion: reduced, seed });
+  const initial = useRef({ size, state, control, reducedMotion: reduced, seed, wearables });
   useEffect(() => {
     if (!host.current) return;
     const v = new DotView(host.current, initial.current);
@@ -54,6 +65,9 @@ function LiveDot({ size, state = "idle", control = false, reducedMotion, seed, s
   useEffect(() => view.current?.setControl(control), [control]);
   useEffect(() => view.current?.setReducedMotion(reduced), [reduced]);
   useEffect(() => view.current?.setSize(size), [size]);
+  const outfit = wearables?.join(" ");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the outfit's words say when it changed.
+  useEffect(() => view.current?.setWearables(wearables), [outfit]);
   return (
     <span
       ref={host}

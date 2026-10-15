@@ -6,6 +6,7 @@ import type { IconName } from "../ui/icons.ts";
 import type { SpendingDraft } from "./settings-form.ts";
 
 export type SettingsSection =
+  | "dot"
   | "models"
   | "autonomy"
   | "rules"
@@ -27,6 +28,7 @@ export interface SectionInfo {
 
 // In sidebar order, which is also the order of the one scroll they share.
 export const SECTIONS: readonly SectionInfo[] = [
+  { id: "dot", title: "Your dot", icon: "smile" },
   { id: "models", title: "Models", icon: "cpu" },
   { id: "autonomy", title: "Autonomy", icon: "sliders-horizontal" },
   { id: "rules", title: "Always allow", icon: "check-circle" },

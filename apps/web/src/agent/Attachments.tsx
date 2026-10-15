@@ -29,9 +29,12 @@ export function AttachmentChips({
       <ul className="file-chips" aria-label="Attached files">
         {rows.map((row) => (
           <li key={row.id} className="file-chip" data-phase={row.phase}>
+            {row.preview && (
+              <img className="file-chip-thumb" src={row.preview} alt="" decoding="async" />
+            )}
             {row.phase === "uploading" || row.phase === "pending" ? (
               <Spinner size={12} className="file-chip-icon" />
-            ) : (
+            ) : row.preview && row.phase === "complete" ? null : (
               <Icon
                 name={row.phase === "complete" ? "file" : "circle-alert"}
                 size={12}
