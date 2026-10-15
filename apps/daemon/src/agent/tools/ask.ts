@@ -375,7 +375,7 @@ async function askFields(
             secrets.size
               ? `\n${deliveries.join("\n")} Verification codes are never saved. The page may advance after the last character; inspect it and never replay a code after it advances. A rejected password needs a replacement; a different verification step needs the matching input form.`
               : ""
-          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : ""}`,
+          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : secrets.size && fields.some((field) => field.kind === "secret") && ![...secrets.values()].some((field) => field.loginOrigin) ? "\nThis password was entered once but was not saved: this surface did not provide a verified website sign-in form. Tell the user it will need to be provided again if this sign-in is lost." : ""}`,
         ),
       ],
     };

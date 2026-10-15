@@ -197,6 +197,7 @@ export class AgentSession {
       tool: string;
       operation: string;
       actionClass: string;
+      local?: boolean;
       input: unknown;
       target?: unknown;
       facts?: unknown;
@@ -258,6 +259,7 @@ export class AgentSession {
   readonly #inbox: InboxItem[] = [];
   readonly #queued = new Map<string, string>();
   readonly #withdrawn = new Map<string, string>();
+  readonly #cancelledQueued = new Set<string>();
   // Notes to dot that are not the user's words: they never wake a task waiting for them.
   readonly #notes = new Set<number>();
   // dot's next input waits for a fresh look at the screen, which the user has had.
@@ -1027,6 +1029,14 @@ export class AgentSession {
     this.#queued.delete(messageId);
     this.#withdrawn.set(messageId, text);
     return text;
+  }
+  cancelQueued(messageId: string): boolean {
+    if (this.#cancelledQueued.has(messageId)) return true;
+    if (this.stopped || !this.#queued.has(messageId)) return false;
+    this.append("message.delivery", { messageId, state: "cancelled" });
+    this.#queued.delete(messageId);
+    this.#cancelledQueued.add(messageId);
+    return true;
   }
   #flushQueued(): void {
     for (const [messageId, text] of this.#queued) {

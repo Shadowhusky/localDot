@@ -38,6 +38,7 @@ export async function workContextTool(
   append(ctx, "tool.start", { tool: "work_context", title: "Checking available tools and access" });
   const desktop = deps.desktop(ctx.session.cellId);
   let programs = Object.fromEntries(WORK_PROGRAMS.map((name) => [name, "unknown"]));
+  let memory: DesktopCapabilities["memory"];
   let reachable: boolean | null = desktop ? null : false;
   let inspection = desktop ? "not_supported" : "unavailable";
   if (desktop?.capabilities) {
@@ -47,6 +48,7 @@ export async function workContextTool(
       reachable = true;
       inspection = capabilities.search;
       programs = capabilities.programs;
+      memory = capabilities.memory;
     } catch (error) {
       ctx.check();
       // Older computers remain usable. Never fall back to running a login shell from a read tool.
@@ -84,6 +86,9 @@ export async function workContextTool(
       reachable,
       inspection,
       programs,
+      memory: memory ?? { status: "unknown" },
+      resourceAdvice:
+        "Chromium and development/build processes share the desktop memory limit. The optional memory.vm describes the shared Docker VM; container headroom does not imply VM headroom. High VM pressure can stall the browser and control transport without an OOM kill. Before running parallel builds or retrying a crashed tab, inspect memory pressure and OOM counters. Reuse preview servers, limit build/test workers, and stop only your own unneeded jobs. OOM counters are cumulative since container start, not proof the latest command crashed. Unknown memory is not healthy memory. Preserve browser profiles and sign-ins.",
       cliAuthentication: "not_checked",
       verification:
         "The inventory checks the service PATH only; shell-profile additions may differ. For the CLI you need, check its own auth status through shell. Installed does not mean signed in.",

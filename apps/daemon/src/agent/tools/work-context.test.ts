@@ -49,6 +49,13 @@ describe("work context across agent backends", () => {
       capabilities: async () => ({
         version: 1,
         search: "service_path",
+        memory: {
+          currentBytes: 95,
+          workingSetBytes: 90,
+          limitBytes: 100,
+          oomKills: 11,
+          pressure: "critical",
+        },
         programs: DesktopCapabilities.parse({
           version: 1,
           search: "service_path",
@@ -66,6 +73,7 @@ describe("work context across agent backends", () => {
       programs: { git: "available", gh: "not_on_path" },
       cliAuthentication: "not_checked",
     });
+    expect(context.desktop.memory).toMatchObject({ pressure: "critical", oomKills: 11 });
     expect(context.browser.websiteAuthentication).toBe("not_checked");
     expect(context.browser.health).toBe("not_checked");
     expect(context.browser.page).toBe("not_inspected");

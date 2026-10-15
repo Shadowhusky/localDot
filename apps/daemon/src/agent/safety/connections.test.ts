@@ -346,6 +346,27 @@ describe("connections that wait for the user", () => {
     ]);
   });
 
+  it.each(["mtalk.google.com", "alt3-mtalk.google.com"])(
+    "refuses Chromium's background push service on %s without a card or a judge",
+    async (host) => {
+      const f = setup({ owner: async () => "chromium" });
+      if (!f.session) throw new Error("Missing fixture session");
+      f.session.permissionMode = () => "auto";
+      f.session.autoPermit = vi.fn(async () => true);
+      await f.approvals.ask(CELL, held(host, 5228));
+      expect(f.answers).toEqual([{ id: expect.any(String), decision: "deny", app: "chromium" }]);
+      expect(f.session.autoPermit).not.toHaveBeenCalled();
+      expect(f.cards()).toEqual([]);
+    },
+  );
+
+  it("still asks about another program reaching the push service's host", async () => {
+    const f = setup();
+    void f.approvals.ask(CELL, held("mtalk.google.com", 5228));
+    await settle();
+    expect(f.cards()).toHaveLength(1);
+  });
+
   it("refuses when no task is running, since nobody can say yes", async () => {
     const f = setup();
     f.endTask();

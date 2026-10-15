@@ -537,7 +537,9 @@ function commandOutbound(command: string): Outbound[] {
     return found;
   };
   addresses(command);
-  for (const line of commandLines(command)) {
+  // Keep Python/JS input as code: glob.glob and Image.new are not network hosts.
+  // Shell substitutions and nested shell scripts are still walked by the parser.
+  for (const line of commandLines(command, 0, true)) {
     const roles = line.runs.map(roleOf);
     const network = roles.includes("network");
     const expanded =

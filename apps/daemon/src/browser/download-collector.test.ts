@@ -150,6 +150,19 @@ describe("browser download collection", () => {
     },
   );
 
+  it("hands what it stored to its listener once the collection is over", async () => {
+    const f = await fixture();
+    const collected = vi.fn();
+    const collector = new BrowserDownloadCollector({
+      store: f.store,
+      transfers: f.transfers,
+      collected,
+    });
+    const items = await collector.collect(f.client, f.binding, f.scope);
+    expect(collected).toHaveBeenCalledWith(f.id.parentCellId, items);
+    await f.transfers.wait(f.id.parentCellId);
+  });
+
   it("reconciles a lost acknowledgement after daemon restart without copying bytes again", async () => {
     const f = await fixture();
     f.state.failAck = "before";

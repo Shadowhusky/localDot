@@ -104,6 +104,11 @@ export function plainProblem(
       ? new ConnectorProblem("needs_sign_in", "Sign in again to use this app.")
       : new ConnectorProblem("needs_key", "The app didn't accept the key. Add a new one.");
   }
+  if (/^no free keyd listener port in \d+-\d+$/.test(message))
+    return new ConnectorProblem(
+      "failed",
+      "localDot has no free connection slots. This is a local computer connection problem; your app address and key have not been rejected.",
+    );
   if (/abort|timed? ?out/i.test(message))
     return new ConnectorProblem("failed", "The app took too long to answer.", "timeout");
   if (config.server.kind === "local") {

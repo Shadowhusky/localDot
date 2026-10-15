@@ -62,7 +62,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "exit status and the end of the output.",
   files:
     "Read, write, edit (old_text must match exactly once) or list files in the virtual computer's home. " +
-    "Paths are relative to the home or start with ~/.",
+    "Paths are relative to the home or start with ~/. Reading a picture (PNG, JPEG, WebP, GIF, HEIC) shows it to you.",
   browser_read:
     "Read the text and structure of the page open on the selected screen: the web browser or the desktop's Chromium.",
   browser_navigate:

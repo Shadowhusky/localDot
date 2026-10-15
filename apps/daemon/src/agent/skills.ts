@@ -9,6 +9,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { PERSONA_SKILLS, type PersonaId, personaOf } from "@localdot/protocol";
 export interface SkillInfo {
   name: string;
   description: string;
@@ -147,4 +148,17 @@ export function skillFiles(skill: SkillInfo): SkillFile[] {
 export function skillDesktopPath(name: string): string {
   if (!NAME.test(name)) throw new Error("invalid skill name");
   return `~/.skills/${name}`;
+}
+
+// A dot carries its own built-in skills and every skill the user added.
+export function skillsFor(persona: PersonaId | undefined, all: readonly SkillInfo[]): SkillInfo[] {
+  const own = new Set(personaOf(persona).skills);
+  return all.filter((skill) => skill.source === "user" || own.has(skill.name));
+}
+
+// The built-in skills an earlier task's dot left in the computer; anything else there is the
+// user's or one dot installed, and stays.
+export function leftoverSkills(present: readonly string[], kept: readonly SkillInfo[]): string[] {
+  const keep = new Set(kept.map((skill) => skill.name));
+  return present.filter((name) => PERSONA_SKILLS.includes(name) && !keep.has(name));
 }

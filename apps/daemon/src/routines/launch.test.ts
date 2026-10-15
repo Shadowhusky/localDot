@@ -411,6 +411,39 @@ describe("routine launcher", () => {
     expect(f.runner.start).not.toHaveBeenCalled();
   });
 
+  it("posts a follow-up on the computer whose task it continues", async () => {
+    const f = fixture();
+    const other = ulid();
+    f.cells.cells.set(other, {
+      id: other,
+      state: "ready",
+      scale: 2,
+      createdAt: "2026-10-02T00:00:00Z",
+      stream: NO_STREAM,
+    });
+    const original = ulid();
+    f.live.set(other, original);
+    f.idle.add(original);
+    const followUp = f.store.create(
+      {
+        name: "Follow-up",
+        instruction: "Check the parcel",
+        when: { kind: "once", date: "2026-10-12", time: "09:30" },
+      },
+      {
+        state: "active",
+        kind: "follow_up",
+        followUp: { sessionId: original, note: "Check the parcel" },
+      },
+    );
+    expect(await f.launcher.launch(followUp, DUE)).toMatchObject({
+      outcome: "done",
+      note: "Sent to the task.",
+    });
+    expect(f.runner.post).toHaveBeenCalledWith(original, expect.any(String));
+    expect(f.runner.start).not.toHaveBeenCalled();
+  });
+
   it("starts a linked task when the follow-up's task has ended", async () => {
     const f = fixture();
     const original = ulid();

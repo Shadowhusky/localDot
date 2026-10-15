@@ -270,7 +270,11 @@ export async function browserNavigateTool(
           "navigation result",
           ctx.redact(
             download
-              ? `Download started from ${url.href}. The current page remains open. Downloads wait in Activity > Downloads for the user to Review before they reach the computer.`
+              ? `Download started from ${url.href}. The current page remains open. ${
+                  ctx.session.permissionMode() === "full"
+                    ? "Once it finishes it reaches ~/Downloads on the computer by itself; if it doesn't, it waits in Activity > Downloads for the user to Review."
+                    : "Downloads wait in Activity > Downloads for the user to Review before they reach the computer."
+                }`
               : `${result.loaded ? "Opened" : "Page not verified"}: ${result.title} (${result.url})`,
           ),
         ),

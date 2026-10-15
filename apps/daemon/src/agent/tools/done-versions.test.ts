@@ -35,6 +35,28 @@ describe("done hands over versioned files", () => {
       readFileSync(join(h.home, outputPath(h.session.id, "totals.csv", 2) as string), "utf8"),
     ).toContain("12311");
   });
+  it("collects a video for Files and keeps the task open if collection fails", async () => {
+    const h = setup();
+    const path = "/config/Desktop/promo/film.mp4";
+    const fetch = vi.spyOn(h.tools, "desktop").mockReturnValueOnce(undefined);
+    const input = { summary: "Video delivered.", files: [path] };
+    const failed = await h.call("done", input);
+    expect(failed.body.ok).toBe(false);
+    expect(failed.body.final).not.toBe(true);
+    expect(h.events().filter((e) => e.type === "task.result")).toHaveLength(0);
+    fetch.mockRestore();
+    h.desktop.files.set(path, "video fixture bytes");
+    const result = await h.call("done", input);
+    expect(result.body).toMatchObject({ ok: true, final: true });
+    const handed = h.events().find((e) => e.type === "task.result");
+    expect(handed?.data).toMatchObject({
+      files: [{ name: "film.mp4", path, bytes: 19, version: 1 }],
+    });
+    expect(
+      readFileSync(join(h.home, outputPath(h.session.id, "film.mp4", 1) as string), "utf8"),
+    ).toBe("video fixture bytes");
+  });
+
   it("records what dot checked just before the result, redacted and short", async () => {
     const h = setup();
     await h.call("done", { summary: "Done.", checked: `opens, 4 sheets ${PROXY_TOKEN}` });

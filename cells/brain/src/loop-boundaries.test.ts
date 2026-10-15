@@ -162,11 +162,12 @@ describe("immutable model frame basis", () => {
     expect(await u.run()).toBe("done");
     expect(u.f.toolCalls.filter((c) => c.name === "computer")).toEqual([]);
   });
-  it("does not borrow a full image that pruning removed behind three recent crops", async () => {
+  it("does not borrow a full image that pruning removed behind recent crops", async () => {
+    // Six crops after it: pruning, four at a time, takes the full frame and three crops out.
     const t = setup([call("computer", { action: "left_click", coordinate: [1, 1] }), done()], {
       history: [
         frame(ulid()),
-        ...Array.from({ length: 3 }, () => frame(ulid(), { x: 0, y: 0, w: 10, h: 10 })),
+        ...Array.from({ length: 6 }, () => frame(ulid(), { x: 0, y: 0, w: 10, h: 10 })),
       ],
     });
     expect(await t.run()).toBe("done");

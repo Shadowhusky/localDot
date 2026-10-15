@@ -1,6 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
-import type { ModelOptions } from "@localdot/protocol";
 import {
   type AgentLimits,
   type AutonomyPolicy,
@@ -13,6 +12,9 @@ import {
   isJevKey,
   type KeydRecord,
   type ModelBinding,
+  type ModelOptions,
+  type PersonaId,
+  personaOf,
   type RecentLine,
   ReviseLink,
   SESSION_PAUSE_REASONS,
@@ -63,6 +65,7 @@ import {
   jevApprovalRequest,
   jevFits,
   jevJudge,
+  jevLocalChangeRequest,
   jevNavigationRequest,
   modelJudge,
 } from "./safety/judges.ts";
@@ -167,7 +170,7 @@ export interface AgentRunnerDeps {
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
     Partial<Pick<Conversations, "title">>;
-  installSkills(cellId: string, signal: AbortSignal): Promise<SkillSummary[]>;
+  installSkills(cellId: string, signal: AbortSignal, persona?: PersonaId): Promise<SkillSummary[]>;
   prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
   // Must invoke M3's revoke/drain/freeze/fallback path, even if session.stop() already ran.
@@ -201,6 +204,8 @@ type ModelSelection =
 interface Runtime {
   session: AgentSession;
   selection: ModelSelection;
+  // The dot chosen when the task started; its skills and instructions hold for the whole task.
+  persona?: PersonaId;
   limits: AgentLimits;
   skills: SkillSummary[];
   epoch: number;
@@ -505,7 +510,7 @@ export class AgentRunner {
       };
       session.autoPermit = async (action, signal, observe) => {
         const keys = await this.deps.keyd.secrets();
-        const choice = judgeChoice("auto", keys, false);
+        const choice = judgeChoice(this.deps.settings().purposeCheck, keys, false);
         if (choice?.kind !== "jev" || !this.deps.jev) return false;
         let evidence: { effect: "navigate" | "read"; target: string } | undefined;
         if (
@@ -533,7 +538,9 @@ export class AgentRunner {
           choice.secretId,
           evidence
             ? jevNavigationRequest(session.currentPurpose, evidence)
-            : jevApprovalRequest(session.currentPurpose, action),
+            : action.local
+              ? jevLocalChangeRequest(session.currentPurpose, action)
+              : jevApprovalRequest(session.currentPurpose, action),
           AbortSignal.any([signal, AbortSignal.timeout(5000)]),
         );
         return jevFits(reply) >= 0.9;
@@ -550,6 +557,7 @@ export class AgentRunner {
       const rt: Runtime = {
         session,
         selection,
+        ...(settings.persona ? { persona: settings.persona } : {}),
         limits: agentLimits(settings.checkIns),
         skills: [],
         epoch: 0,
@@ -646,9 +654,13 @@ export class AgentRunner {
   }
   // Ends a finished task that waits for a follow-up, so the next message starts a new task in
   // whichever conversation is current. A task still at work is left alone and refused.
-  async release(signal?: AbortSignal): Promise<void> {
+  // A selected session scopes the release; null means an empty conversation. Unrelated
+  // computers keep their tasks and manual control. Omission retains the all-task lifecycle API.
+  async release(signal?: AbortSignal, sessionId?: string | null): Promise<void> {
     if (this.#starting.size) throw new AgentError(409, "A task is starting.");
-    const live = [...this.#runtime.values()].filter((rt) => !rt.session.stopped);
+    const live = [...this.#runtime.values()].filter(
+      (rt) => !rt.session.stopped && (sessionId === undefined || rt.session.id === sessionId),
+    );
     if (live.some((rt) => rt.selection.kind === "none" && rt.session.controlHeld))
       throw new AgentError(409, "Hand back the computer first.");
     const waiting = live.filter((rt) => rt.selection.kind !== "none");
@@ -688,7 +700,7 @@ export class AgentRunner {
       const requestId = live.pendingTakeover;
       if (requestId && !(await live.handback(requestId, undefined, signal)))
         throw new AgentError(409, "Hand back the computer, then sign in.");
-    } else if (live) await this.release(signal);
+    } else if (live) await this.release(signal, live.id);
     return this.hold(cellId, signal, { url, title: `Sign in to ${site}` });
   }
   // The web browser starts before the user's own hold gives way, so one that can't start leaves
@@ -931,6 +943,10 @@ export class AgentRunner {
   }
   skillsOf(id: string): SkillSummary[] {
     return structuredClone(this.#runtime.get(id)?.skills ?? []);
+  }
+  // The instructions of the dot the task started with; none for the everyday dot.
+  roleOf(id: string): string | undefined {
+    return personaOf(this.#runtime.get(id)?.persona).guidance || undefined;
   }
   codexDenyReadOf(id: string): readonly string[] {
     const selection = this.#runtime.get(id)?.selection;
@@ -1256,7 +1272,11 @@ export class AgentRunner {
       if (rt.selection.kind === "none") return await session.waitForControl();
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
-      const skills = await this.deps.installSkills(session.cellId, session.abort.signal);
+      const skills = await this.deps.installSkills(
+        session.cellId,
+        session.abort.signal,
+        rt.persona,
+      );
       session.abort.signal.throwIfAborted();
       rt.skills = structuredClone(skills);
       let resume = false,
@@ -1534,6 +1554,7 @@ export class AgentRunner {
           ...(session.run ? { run: session.run } : {}),
           ...(session.connectors.specs.length ? { connectors: [...session.connectors.specs] } : {}),
           ...(session.research ? { research: session.research.budget } : {}),
+          ...(this.roleOf(session.id) ? { role: this.roleOf(session.id) } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

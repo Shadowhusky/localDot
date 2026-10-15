@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ulid } from "@localdot/protocol";
+import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "./docker.ts";
 import { CellOrchestrator, UnknownCellError } from "./orchestrator.ts";
@@ -91,6 +91,8 @@ async function setup(
     externalKeydPorts?: () => Iterable<number>;
     labels?: Record<string, string>;
     relay?: () => Promise<GateRelay>;
+    updates?: ConstructorParameters<typeof CellOrchestrator>[0]["updates"];
+    keyd?: ConstructorParameters<typeof CellOrchestrator>[0]["keyd"];
   } = {},
 ) {
   fake = await startFakeDocker();
@@ -101,6 +103,8 @@ async function setup(
   const probe = (opts.desktopd ?? runningDesktop)(store);
   const orchestrator = new CellOrchestrator({
     docker: new DockerClient(fake.socketPath),
+    updates: opts.updates,
+    keyd: opts.keyd,
     store,
     images,
     probeDesktopd: opts.probeDesktopd ?? (async () => probe()),
@@ -1454,4 +1458,62 @@ describe("shared desktop and brain keyd allocation", () => {
     expect(h.store.list()).toEqual([]);
     expect(fake.state.calls).toEqual([]);
   });
+});
+
+it("updates a paused computer by thawing and stopping before swapping", async () => {
+  const updates = {
+    available: () => true,
+    needsFreshStart: () => false,
+    pending: () => false,
+    prepare: vi.fn(async () => {}),
+    recover: vi.fn(),
+    discard: vi.fn(),
+    swap: vi.fn(async (record) => {
+      expect(fake.state.containers.get(record.docker.desktop)).toMatchObject({
+        running: false,
+        paused: false,
+      });
+      return record;
+    }),
+  };
+  let closedAt = -1;
+  const keyd = {
+    wire: vi.fn(async () => {}),
+    isWired: vi.fn(async () => true),
+    refresh: vi.fn(async () => []),
+    revoke: vi.fn(async () => 0),
+    close: vi.fn(async () => {
+      closedAt = fake.state.calls.length;
+    }),
+  };
+  const { orchestrator, store, stateOf, changes } = await setup({
+    updates,
+    keyd,
+    probeDesktopd: async () => ({
+      ...healthy,
+      selftest: {
+        ok: true,
+        ms: 1,
+        checks: SELFTEST_CHECKS.map((c) => ({ ...c, ok: true, detail: "fine" })),
+      },
+    }),
+  });
+  const cell = await orchestrator.create({ scale: 2 });
+  await stateOf(cell.id, "ready");
+  await orchestrator.pause(cell.id);
+  const record = store.get(cell.id);
+  if (!record) throw new Error("Missing test computer");
+  const start = fake.state.calls.length;
+  changes.length = 0;
+  await orchestrator.update(cell.id);
+  expect(updates.swap).toHaveBeenCalledOnce();
+  const calls = fake.state.calls.slice(start).map((c) => `${c.method} ${c.path}`);
+  const unpause = calls.findIndex((c) => c.endsWith(`/${record.ownership?.desktop}/unpause`));
+  const stop = calls.findIndex((c) => c.endsWith(`/${record.ownership?.desktop}/stop`));
+  expect(unpause).toBeGreaterThanOrEqual(0);
+  expect(stop).toBeGreaterThan(unpause);
+  expect(closedAt).toBeGreaterThanOrEqual(start);
+  expect(closedAt).toBeLessThanOrEqual(start + unpause);
+  expect(changes[0]?.state).toBe("stopping");
+  expect(changes.findIndex((c) => c.state === "starting")).toBeGreaterThan(0);
 });

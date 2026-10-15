@@ -200,7 +200,7 @@ export async function authorizePrepared(
   if (
     permission === "auto" &&
     decision.mode === "ask" &&
-    decision.actionClass !== "delete" &&
+    (decision.actionClass !== "delete" || decision.local) &&
     ctx.session.autoPermit
   ) {
     const allowed = await ctx.session
@@ -209,6 +209,7 @@ export async function authorizePrepared(
           tool: prepared.tool,
           operation: prepared.facts.operation,
           actionClass: decision.actionClass,
+          ...(decision.local ? { local: true } : {}),
           input,
           target,
           facts: actingFacts(ctx, prepared.facts),

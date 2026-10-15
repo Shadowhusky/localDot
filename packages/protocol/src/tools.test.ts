@@ -235,7 +235,7 @@ describe("the v1 tool table", () => {
 
 describe("whole-task completion contract", () => {
   const legacy = { summary: "Reported result", checked: "Opened the output" };
-  const model = { ...legacy, experience: null, input_request: null };
+  const model = { ...legacy, experience: null, input_request: null, files: [] };
 
   it("keeps legacy host calls compatible while requiring explicit assessment from models", () => {
     expect(DoneInput.parse(legacy)).toEqual(legacy);
@@ -247,7 +247,13 @@ describe("whole-task completion contract", () => {
       }).success,
     ).toBe(true);
     expect(z.toJSONSchema(DoneModelInput)).toMatchObject({
-      required: expect.arrayContaining(["summary", "completion", "experience", "input_request"]),
+      required: expect.arrayContaining([
+        "summary",
+        "completion",
+        "experience",
+        "input_request",
+        "files",
+      ]),
       properties: {
         completion: {
           type: "object",
@@ -259,6 +265,20 @@ describe("whole-task completion contract", () => {
         },
       },
     });
+  });
+
+  it("requires an explicit deliverable list even when the summary claims delivery", () => {
+    const completed = {
+      summary: "Video delivered in ~/Desktop/promo/ and playing in the browser.",
+      completion: { status: "complete", evidence: "Export plays" },
+      experience: null,
+      input_request: null,
+    };
+    expect(DoneModelInput.safeParse(completed).success).toBe(false);
+    expect(
+      DoneModelInput.safeParse({ ...completed, files: ["/config/Desktop/promo/film.mp4"] }).success,
+    ).toBe(true);
+    expect(DoneModelInput.safeParse({ ...completed, files: [] }).success).toBe(true);
   });
 
   it.each(["complete", "waiting", "blocked"])("requires bounded evidence for %s", (status) => {

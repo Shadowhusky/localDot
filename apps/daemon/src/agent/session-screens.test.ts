@@ -1112,6 +1112,21 @@ describe("session-owned screen authority", () => {
     expect(result.result.recovery?.kind).toBe("download_pending");
   });
 
+  it("tells dot a download reaches ~/Downloads by itself in Full access", async () => {
+    const f = fixture();
+    await f.browser();
+    f.session.permissionMode = () => "full";
+    f.client.navigate.mockResolvedValueOnce({ done: true, download: true });
+    const h = tools(f);
+    const result = await h.callTool("browser_navigate", { url: "https://example.test/source.zip" });
+    const text = result.result.content
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join(" ");
+    expect(text).toContain("reaches ~/Downloads on the computer by itself");
+    expect(text).not.toContain("before they reach the computer");
+  });
+
   it.each(["observe", "frame"] as const)(
     "keeps an acknowledged download when its follow-up %s is unavailable",
     async (failure) => {

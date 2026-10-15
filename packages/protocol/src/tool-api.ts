@@ -118,6 +118,8 @@ export const BootConfig = z.object({
   connectors: z.array(ConnectorToolSpec).max(MAX_TASK_CONNECTOR_TOOLS).optional(),
   // Present in research mode: the brain gets the research rules and tool, with this budget.
   research: ResearchBudget.optional(),
+  // The chosen dot's instructions; absent for the everyday dot.
+  role: z.string().min(1).max(2000).optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 
@@ -136,10 +138,26 @@ export const TranscriptMessage = z
     // Durable delivery identity kept outside model content; the daemon validates it
     // against the original user message and the authenticated brain generation.
     sourceInbox: InboxSource.optional(),
+    // Upstream orchestration events are durable metadata, never model message text.
+    harnessEvent: z
+      .object({
+        version: z.literal(1),
+        sessionId: z.string().min(1).max(200),
+        event: z.unknown(),
+      })
+      .optional(),
   })
   .refine((message) => message.sourceInbox === undefined || message.role === "user", {
     message: "only user transcript messages may acknowledge inbox content",
-  });
+  })
+  .refine(
+    (message) =>
+      message.harnessEvent === undefined ||
+      (message.role === "user" && message.content === "" && message.sourceInbox === undefined),
+    {
+      message: "harness events must be isolated from model and inbox content",
+    },
+  );
 export type TranscriptMessage = z.infer<typeof TranscriptMessage>;
 
 // The daemon first persists messages idempotently by sourceInbox.messageId, then advances

@@ -24,6 +24,18 @@ export const HOLD_MS = 120_000;
 export const MAX_WAITING = 16;
 // The card's word for a program desktopd couldn't name.
 export const NOT_KNOWN = "Not known";
+// Chromium keeps a push-messaging connection open whatever the task; refusing it costs nothing.
+const BACKGROUND = [
+  {
+    app: /^(?:chromium|(?:google-)?chrome)\b/i,
+    host: /^(?:alt\d+-)?mtalk\.google\.com$/i,
+    ports: [5228, 5229, 5230],
+  },
+];
+const background = (app: string | undefined, host: string, port: number) =>
+  BACKGROUND.some(
+    (known) => known.app.test(app ?? "") && known.host.test(host) && known.ports.includes(port),
+  );
 
 export interface ConnectionRequest {
   readonly app?: string;
@@ -368,6 +380,7 @@ export class ConnectionApprovals {
     if (this.#once.has(once)) return true;
     if (!task) return false;
     if (task.permissionMode?.() === "full") return true;
+    if (background(app, held.host, held.port)) return false;
     if (task.permissionMode?.() === "auto" && task.autoPermit) {
       const allowed = await task
         .autoPermit(

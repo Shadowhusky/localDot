@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DesktopMemory } from "./work-context.ts";
 
 // desktopd's shell, files and browser routes (spec "desktopd" table: shell(cmd), files.*,
 // browser.read(), browser.navigate(url)). Paths are the desktop user's home or below it.
@@ -33,12 +34,15 @@ export const ShellChunk = z.object({
 });
 export type ShellChunk = z.infer<typeof ShellChunk>;
 export const ShellDone = z.object({
+  outputIncomplete: z.boolean().optional(),
   done: z.literal(true),
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable(),
   timedOut: z.boolean(),
   truncated: z.boolean(),
   ms: z.number().nonnegative(),
+  memory: DesktopMemory.optional(),
+  oomKillsDuringCommand: z.number().int().nonnegative().optional(),
 });
 export type ShellDone = z.infer<typeof ShellDone>;
 

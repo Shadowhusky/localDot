@@ -2,12 +2,14 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NoPageError } from "./browser.ts";
+import * as memory from "./memory.ts";
 import { addToolRoutes } from "./routes.ts";
 
 const owned: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const path of owned.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 function setup() {
@@ -143,4 +145,49 @@ describe("desktopd's tool routes", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ url: "https://accounts.google.com/signin" });
   });
+});
+
+describe("shell terminal receipts", () => {
+  it("retains completion after transport loss and refuses replay of the same id", async () => {
+    const { post } = setup();
+    const id = "receipt-0123456789abcdef";
+    const response = await post("/shell", { id, command: "printf once > once.txt" });
+    expect(response.headers.get("x-localdot-shell-result")).toBe("1");
+    await response.text();
+    const receipt = await post("/shell/result", { id });
+    expect(await receipt.json()).toMatchObject({ id, result: { done: true, exitCode: 0 } });
+    expect((await post("/shell", { id, command: "printf twice > once.txt" })).status).toBe(409);
+    expect(await (await post("/files/read", { path: "once.txt" })).json()).toMatchObject({
+      content: "once",
+    });
+    expect((await post("/shell/result", { id: "unknown-0123456789abcdef" })).status).toBe(404);
+  });
+  it("refuses new work before spawning when desktop memory is critical", async () => {
+    vi.spyOn(memory, "desktopMemory").mockResolvedValue({
+      currentBytes: 99,
+      workingSetBytes: 99,
+      limitBytes: 100,
+      oomKills: 0,
+      pressure: "critical",
+    });
+    const { post } = setup();
+    const response = await post("/shell", { command: "touch should-not-exist" });
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("desktop_memory_pressure");
+    expect((await post("/files/read", { path: "should-not-exist" })).status).toBe(404);
+  });
+});
+
+it("refuses a new command when only the shared VM is critically stalled", async () => {
+  vi.spyOn(memory, "desktopMemory").mockResolvedValue({
+    currentBytes: 10,
+    workingSetBytes: 10,
+    limitBytes: 100,
+    oomKills: 0,
+    pressure: "normal",
+    vm: { totalBytes: 1000, availableBytes: 10, pressure: "critical" },
+  });
+  const { post } = setup();
+  expect((await post("/shell", { command: "touch should-not-exist" })).status).toBe(503);
+  expect((await post("/files/read", { path: "should-not-exist" })).status).toBe(404);
 });

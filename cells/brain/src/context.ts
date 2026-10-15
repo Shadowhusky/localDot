@@ -1,5 +1,5 @@
 import type { InboxItem, ToolContent, ToolResult, TranscriptMessage } from "@localdot/protocol";
-import type { ModelMessage, ToolResultPart } from "ai";
+import type { ModelMessage, SystemModelMessage, ToolResultPart } from "ai";
 
 // Spec "Harness rules": only the latest three screenshots stay in context. Older ones, and every
 // screenshot in the stored transcript, become a marker naming their frame, so a restarted brain can
@@ -8,6 +8,10 @@ export const KEEP_SCREENSHOTS = 3;
 // Pictures from the web are never screenshots: the newest few stay apart from them, older ones and
 // stored ones become a note of where they came from, and no action is ever based on one.
 export const KEEP_PICTURES = 4;
+// In a task, old screenshots and pictures turn into markers this many at a time, so the start of
+// the conversation stays the same for several calls and a provider's prompt cache keeps working:
+// between three and six screenshots are in context.
+export const PRUNE_CHUNK = 4;
 const MARKER =
   /^\[\[localdot:frame ([0-9A-HJKMNP-TV-Z]{26})(?: region (\d+),(\d+),(\d+),(\d+))?\]\]$/;
 
@@ -96,16 +100,33 @@ function contentArrays(m: ModelMessage): unknown[][] {
 }
 
 // A copy with every screenshot but the newest `keep` turned into its marker, and every picture but
-// the newest `pictures` into its note.
+// the newest `pictures` into its note. With a chunk, the oldest turn into markers only `chunk` at a
+// time, so up to `keep + chunk - 1` stay.
 export function pruneScreenshots(
   messages: ModelMessage[],
   keep = KEEP_SCREENSHOTS,
   pictures = KEEP_PICTURES,
+  chunk = 1,
 ): ModelMessage[] {
   if (!Number.isSafeInteger(keep) || keep < 0) throw new RangeError("Invalid screenshot count");
   if (!Number.isSafeInteger(pictures) || pictures < 0)
     throw new RangeError("Invalid picture count");
+  if (!Number.isSafeInteger(chunk) || chunk < 1) throw new RangeError("Invalid prune chunk");
   const copy = structuredClone(messages);
+  let shots = 0;
+  let pics = 0;
+  for (const message of copy)
+    for (const arr of contentArrays(message))
+      for (const part of arr) {
+        if (isPicture(part)) pics += 1;
+        else if (isImage(part)) shots += 1;
+      }
+  const kept = (total: number, wanted: number) => {
+    const drop = Math.max(0, total - wanted);
+    return total - (drop - (drop % chunk));
+  };
+  const keepShots = kept(shots, keep);
+  const keepPics = kept(pics, pictures);
   let seen = 0;
   let seenPictures = 0;
   for (let i = copy.length - 1; i >= 0; i--) {
@@ -114,17 +135,43 @@ export function pruneScreenshots(
         const part = arr[j];
         if (isPicture(part)) {
           seenPictures += 1;
-          if (seenPictures > pictures)
+          if (seenPictures > keepPics)
             arr[j] = { type: "text", text: part.providerOptions.localdot.picture };
           continue;
         }
         if (!isImage(part)) continue;
         seen += 1;
-        if (seen > keep) arr[j] = { type: "text", text: part.providerOptions.localdot.frame };
+        if (seen > keepShots) arr[j] = { type: "text", text: part.providerOptions.localdot.frame };
       }
     }
   }
   return copy;
+}
+
+const EPHEMERAL = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+
+// One model call's prompt as providers cache it best: the same system prompt every time, the
+// conversation, then the reminder that changes, which no cached prefix needs. OpenAI, Gemini and
+// DeepSeek cache a repeated prefix on their own; Anthropic only up to blocks marked for it, so the
+// system prompt and the conversation's end are marked, and the next call reads both from the cache.
+export function cachedPrompt(
+  system: string,
+  history: readonly ModelMessage[],
+  note: string,
+  marked: boolean,
+): { system: string | SystemModelMessage; messages: ModelMessage[] } {
+  const messages: ModelMessage[] = [...history];
+  const last = messages.at(-1);
+  if (marked && last)
+    messages[messages.length - 1] = {
+      ...last,
+      providerOptions: { ...last.providerOptions, ...EPHEMERAL },
+    } as ModelMessage;
+  if (note) messages.push({ role: "user", content: note });
+  return {
+    system: marked ? { role: "system", content: system, providerOptions: EPHEMERAL } : system,
+    messages,
+  };
 }
 
 // The stored form: no image data at all.
@@ -147,6 +194,7 @@ export async function fromTranscript(
   signal?.throwIfAborted();
   let messages: ModelMessage[] = [];
   for (const s of stored) {
+    if (s.harnessEvent) continue;
     // Private compaction metadata is a structured record, never a magic string that a user or
     // a model can accidentally put into ordinary message text. Inbox records remain untouched.
     const entry = s.content as {

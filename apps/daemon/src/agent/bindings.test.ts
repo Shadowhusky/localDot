@@ -495,7 +495,7 @@ describe("custom endpoints state what their model can do", () => {
       maxOutputTokens: 4_096,
     });
     expect(() => resolveRole("main", { ...anc, key: "gateway" }, catalog, custom)).toThrow(
-      new BindingError("main", "key gateway is not a Other (Anthropic-compatible) key"),
+      new BindingError("main", "key gateway is not a Custom endpoint (Anthropic Messages) key"),
     );
     expect(() => resolveRole("main", { ...anc, price: undefined }, catalog, custom)).toThrow(
       /no price in the catalog/,

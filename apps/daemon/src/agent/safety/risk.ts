@@ -69,6 +69,8 @@ export type RiskDecision = {
   actionClass: ActionClass;
   mode: AutonomyMode;
   risk: "none" | "medium" | "high";
+  // A deletion inside the computer, and nothing else the step does, that Auto's judge may approve.
+  local?: true;
 };
 export function safeTargetURL(value: string | undefined): string {
   if (!value) return "";

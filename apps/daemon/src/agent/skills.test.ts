@@ -1,8 +1,16 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PERSONA_SKILLS, PERSONAS } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { frontMatter, listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
+import {
+  frontMatter,
+  leftoverSkills,
+  listSkills,
+  skillDesktopPath,
+  skillFiles,
+  skillsFor,
+} from "./skills.ts";
 
 const ownedHomes: string[] = [];
 afterEach(() => {
@@ -58,5 +66,49 @@ describe("skills", () => {
       ["scripts/run.sh", 0o755],
     ]);
     expect(skillDesktopPath("s")).toBe("~/.skills/s");
+  });
+});
+
+describe("a dot's skills", () => {
+  const skill = (name: string, source: "builtin" | "user" = "builtin") => ({
+    name,
+    description: `${name} skill`,
+    dir: `/skills/${name}`,
+    source,
+  });
+  const all = [
+    skill("office-files"),
+    skill("video-editing"),
+    skill("coding-workflow"),
+    skill("my-notes", "user"),
+  ];
+  it("brings its own built-in skills and every one of the user's", () => {
+    expect(skillsFor("video", all).map((s) => s.name)).toEqual([
+      "office-files",
+      "video-editing",
+      "my-notes",
+    ]);
+    expect(skillsFor(undefined, all).map((s) => s.name)).toEqual(["office-files", "my-notes"]);
+  });
+  it("lets go of another dot's built-in skills only, never one the user or dot added", () => {
+    const kept = skillsFor("video", all);
+    expect(
+      leftoverSkills(["coding-workflow", "video-editing", "my-notes", "agent-made"], kept),
+    ).toEqual(["coding-workflow"]);
+  });
+});
+
+describe("the built-in skills", () => {
+  it("has every skill each dot names, each with a name and a description", () => {
+    const repo = new URL("../../../../skills", import.meta.url).pathname;
+    const found = new Map(
+      listSkills(repo, ownedTemp(join(tmpdir(), "ld-user-skills-"))).map((s) => [s.name, s]),
+    );
+    for (const persona of Object.values(PERSONAS))
+      for (const name of persona.skills) {
+        expect(found.get(name), `${persona.id} needs ${name}`).toBeDefined();
+        expect(found.get(name)?.description.length).toBeGreaterThan(40);
+      }
+    expect([...found.keys()].sort()).toEqual([...PERSONA_SKILLS].sort());
   });
 });

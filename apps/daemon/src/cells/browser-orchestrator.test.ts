@@ -643,3 +643,18 @@ describe("persistent browser lifecycle", () => {
     expect(f.docker.containers.size).toBe(0);
   });
 });
+
+it("does not re-reserve a desktop port after verified retirement, but keeps browser ownership", async () => {
+  const f = fixture();
+  const retired = new Set<string>();
+  f.deps.retiredDesktopPortOwner = (id) => retired.has(id);
+  expect(f.controller.reservedKeydPorts()).toContain(f.parent.keydPort);
+  await f.controller.start(f.parent.id);
+  const browser = f.store.browserFor(f.parent.id)!;
+  retired.add(f.parent.id);
+  expect(f.controller.reservedKeydPorts()).not.toContain(f.parent.keydPort);
+  expect(f.controller.reservedKeydPorts()).toContain(browser.keydPort);
+  expect(f.store.get(f.parent.id)).toBeDefined();
+  retired.clear();
+  expect(f.controller.reservedKeydPorts()).toContain(f.parent.keydPort);
+});

@@ -86,7 +86,7 @@ describe("dot's working rules", () => {
       "Missing required configuration/information: check context safely",
       "a secret field whose target is the password box",
       "Prefer a password or code to a QR code",
-      "Use request_takeover only for a CAPTCHA, a device approval",
+      "Cloudflare/CAPTCHA is not an automatic handoff",
       "then wait for them to hand control back",
       "keeps no sign-ins",
       "Reopen links that apps open there with browser_navigate",
@@ -118,8 +118,8 @@ describe("dot's working rules", () => {
 
   it("stay short and never name localDot's own parts", () => {
     for (const rules of MODES.map(workingRules)) {
-      // Includes private sign-in recovery, app testing and whole-task completion/waiting.
-      expect(rules.length).toBeLessThan(5000);
+      // Includes private sign-in recovery and grounded browser verification before handoff.
+      expect(rules.length).toBeLessThan(6200);
       expect(rules).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
     }
   });
@@ -183,7 +183,11 @@ describe("research mode", () => {
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("leaves the shared rules within their size", () => {
-    for (const rules of MODES.map(workingRules)) expect(rules).not.toContain("research");
+    for (const rules of MODES.map(workingRules)) {
+      expect(rules).not.toContain("# Research mode");
+      expect(rules).not.toContain("research op report");
+      expect(rules).toContain("research suitable tools and agent skills online");
+    }
   });
 });
 
@@ -244,4 +248,17 @@ describe("missing-input handoff", () => {
       "Never use a confirmation question to bypass the action-approval system",
     );
   });
+});
+
+it("distinguishes routine visible verification from evidence-based manual handoff", () => {
+  for (const mode of ["none", "batch", "calls"] as const) {
+    const rules = workingRules(mode);
+    expect(rules).toContain("wait briefly if processing");
+    expect(rules).toContain("try a visible checkbox/Verify button once");
+    expect(rules).toContain("if no accessible ref");
+    expect(rules).toContain("Never infer success from a click");
+    expect(rules).toContain("describe the attempt and blocker");
+    expect(rules).toContain("Never forge tokens");
+    expect(rules).not.toContain("only for a CAPTCHA");
+  }
 });

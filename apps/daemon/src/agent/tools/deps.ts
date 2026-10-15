@@ -65,7 +65,7 @@ export interface ToolDeps {
   device?(cellId: string): NativeDevice | undefined;
   png: Pick<FramePng, "png"> & Partial<Pick<FramePng, "same">>;
   memory: Pick<MemoryStore, "apply" | "appendNote">;
-  // Earlier tasks matching a query, never the asking task itself.
+  // Redacted history matching a query, including messages compacted out of the current task.
   recall?(query: string, limit: number, excludeSessionId: string): RecallHit[];
   people?: Pick<PeopleStore, "find" | "record" | "redirects">;
   // Where a done task's files are kept for the result card: <home>/sessions/<id>/out/<name>.

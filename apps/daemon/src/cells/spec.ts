@@ -8,7 +8,11 @@ export const DESKTOPD_PORT = 7700;
 export const SELKIES_PORT = 3000;
 export const GATE_PORTS = { desktopd: "8081/tcp", stream: "8082/tcp" } as const;
 export const DESKTOP_LIMITS = {
+  // Leave headroom in the default 8 GiB Docker VM for the browser, brain and engine.
+  // Raising this alone shifts local OOMs into VM-wide stalls and lost control connections.
   memoryBytes: 4 * 1024 ** 3,
+  // RAM + swap; small spillover absorbs bursts without consuming the VM's whole swap.
+  memorySwapBytes: 4 * 1024 ** 3 + 256 * 1024 ** 2,
   nanoCpus: 4_000_000_000,
   pids: 4096,
   shmBytes: 1024 ** 3,
@@ -222,7 +226,7 @@ export function desktopSpec(record: CellRecord, image: string, stream: StreamOpt
       CapDrop: ["NET_RAW"],
       ShmSize: DESKTOP_LIMITS.shmBytes,
       Memory: DESKTOP_LIMITS.memoryBytes,
-      MemorySwap: DESKTOP_LIMITS.memoryBytes,
+      MemorySwap: DESKTOP_LIMITS.memorySwapBytes,
       NanoCpus: DESKTOP_LIMITS.nanoCpus,
       PidsLimit: DESKTOP_LIMITS.pids,
       LogConfig: LOG_CONFIG,

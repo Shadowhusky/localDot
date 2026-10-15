@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { ShellChunk, ShellDone } from "@localdot/protocol";
+import { desktopMemoryNow } from "./memory.ts";
 
 export interface ShellOptions {
   command: string;
@@ -41,7 +42,7 @@ export function shellEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEn
 
 // Each command owns a process group. Stop, timeout and the output cap kill that group. Successful
 // foreground exit preserves background jobs; their inherited pipes get only a bounded drain.
-export async function runShell(
+async function executeShell(
   opts: ShellOptions,
   onChunk: (chunk: ShellChunk) => void,
 ): Promise<ShellDone> {
@@ -212,4 +213,22 @@ export async function runShell(
     // An abort can happen synchronously during spawn (e.g. a custom signal/spawn adapter).
     if (opts.signal?.aborted) onAbort();
   });
+}
+
+// Report pressure even after a successful command: an unrelated renderer may have been killed.
+export async function runShell(
+  opts: ShellOptions,
+  onChunk: (chunk: ShellChunk) => void,
+): Promise<ShellDone> {
+  opts.signal?.throwIfAborted();
+  const before = desktopMemoryNow();
+  const done = await executeShell(opts, onChunk);
+  const memory = desktopMemoryNow();
+  return {
+    ...done,
+    ...(memory ? { memory } : {}),
+    ...(before && memory && memory.oomKills >= before.oomKills
+      ? { oomKillsDuringCommand: memory.oomKills - before.oomKills }
+      : {}),
+  };
 }

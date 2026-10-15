@@ -1,5 +1,15 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -85,16 +95,22 @@ export async function buildBrain(root = here) {
         name: "deepseek-bundled-package-metadata",
         setup(builder) {
           builder.onLoad(
-            { filter: /[/\\]@deepseek-ai[/\\]dsh-llm[/\\]lib[/\\]index\.js$/ },
+            {
+              filter:
+                /[/\\]@deepseek-ai[/\\](?:dsh-llm|dsh-repeat-tool-reminder)[/\\]lib[/\\]index\.js$/,
+            },
             ({ path }) => {
-              // DSH reads its own version using createRequire(import.meta.url). That
-              // relative path no longer exists in our single-file, read-only image.
+              // DSH's LLM package and the pinned reminder's inlined copy read their
+              // version using createRequire(import.meta.url). That relative path
+              // no longer exists in our single-file, read-only image.
               // Embed only this audited package's metadata, never redirect require.
               const pkg = JSON.parse(readFileSync(join(dirname(path), "../package.json"), "utf8"));
               const source = readFileSync(path, "utf8");
               const lookup = 'createRequire(import.meta.url)("../package.json")';
               if (
-                pkg.name !== "@deepseek-ai/dsh-llm" ||
+                !["@deepseek-ai/dsh-llm", "@deepseek-ai/dsh-repeat-tool-reminder"].includes(
+                  pkg.name,
+                ) ||
                 pkg.version !== "0.1.7-rc.2" ||
                 source.split(lookup).length !== 2
               )
@@ -123,6 +139,32 @@ export async function buildBrain(root = here) {
     )
     .join("\n\n");
   const code = `/*!\n${header.replaceAll("*/", "* /")}\n*/\n${result.outputFiles[0].text}`;
+  if (resolve(root) === here) {
+    // Execute the production artifact away from node_modules and package.json.
+    // No credentials or tool endpoint are inherited, so entry must stop before
+    // contacting services. This catches runtime-only packaging failures.
+    const smoke = mkdtempSync(join(tmpdir(), "localdot-brain-smoke-"));
+    try {
+      const entry = join(smoke, "brain.mjs");
+      writeFileSync(entry, code);
+      const launched = spawnSync(process.execPath, [entry], {
+        cwd: smoke,
+        env: {},
+        encoding: "utf8",
+        timeout: 15000,
+      });
+      if (
+        launched.error ||
+        launched.status !== 2 ||
+        !launched.stderr.includes("LOCALDOT_TOOL_URL and LOCALDOT_TOOL_TOKEN are required")
+      )
+        throw new Error(
+          `brain: isolated bundle startup failed: ${launched.error?.message ?? launched.stderr}`,
+        );
+    } finally {
+      rmSync(smoke, { recursive: true, force: true });
+    }
+  }
   mkdirSync(dirname(out), { recursive: true });
   const temporary = `${out}.${process.pid}.tmp`;
   try {

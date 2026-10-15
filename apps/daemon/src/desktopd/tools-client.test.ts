@@ -65,7 +65,7 @@ function setup(limit?: number) {
     ((input, init) => app.fetch(new Request(input, init))) as typeof fetch,
     limit,
   );
-  return { tools, home };
+  return { tools, home, app };
 }
 
 describe("DesktopdTools real routes", () => {
@@ -317,7 +317,7 @@ describe("shell stop on caller abort", () => {
     expect(result).toMatchObject({ done: true, exitCode: null, signal: "SIGKILL" });
     expect(output).toEqual(["started\n"]);
   });
-  it("falls back to cancellation when desktopd cannot stop the run", async () => {
+  it("verifies cancellation through the receipt when the stop acknowledgement is lost", async () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), "localdot-tools-")));
     homes.push(home);
     const app = new Hono();
@@ -337,7 +337,7 @@ describe("shell stop on caller abort", () => {
     const stop = new AbortController();
     await expect(
       tools.shell({ command: "echo started; sleep 30" }, () => stop.abort(), stop.signal),
-    ).rejects.toBeInstanceOf(ShellExecutionUncertainError);
+    ).resolves.toMatchObject({ exitCode: null, signal: "SIGKILL", outputIncomplete: true });
   }, 10_000);
 });
 
@@ -583,4 +583,60 @@ it("treats an undefined output-consumer rejection as execution uncertainty", asy
   await expect(tools.shell({ command: "true" }, () => Promise.reject())).rejects.toBeInstanceOf(
     ShellExecutionUncertainError,
   );
+});
+
+describe("verified recovery after shell connection loss", () => {
+  it("recovers a real command receipt without executing the command twice", async () => {
+    const { app } = setup();
+    let executions = 0;
+    const tools = client(async (url, init) => {
+      const response = await app.request(String(url), init);
+      if (String(url).endsWith("/shell")) {
+        executions++;
+        await response.text(); // Server finished, but the transport loses its result.
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.error(new Error("connection reset"));
+            },
+          }),
+          { headers: response.headers },
+        );
+      }
+      return response;
+    });
+    const result = await tools.shell({ command: "printf once >> proof.txt" }, () => {});
+    expect(result).toMatchObject({ exitCode: 0, outputIncomplete: true });
+    expect(executions).toBe(1);
+    expect((await tools.readFile("proof.txt")).content).toBe("once");
+  });
+  it.each(["missing", "wrong-owner", "malformed", "running-then-missing"])(
+    "keeps containment for %s receipts",
+    async (kind) => {
+      let reads = 0;
+      const tools = client(async (url, init) => {
+        if (String(url).endsWith("/shell/stop")) return new Response(null, { status: 204 });
+        if (String(url).endsWith("/shell/result")) {
+          if (kind === "missing" || (kind === "running-then-missing" && reads++ > 0))
+            return new Response("missing", { status: 404 });
+          if (kind === "running-then-missing") return new Response("running", { status: 202 });
+          const id = JSON.parse(String(init?.body)).id;
+          return Response.json({
+            id: kind === "wrong-owner" ? "another-command" : id,
+            result: kind === "malformed" ? {} : done,
+          });
+        }
+        return new Response("", { headers: { "x-localdot-shell-result": "1" } });
+      });
+      await expect(tools.shell({ command: "true" }, () => {})).rejects.toBeInstanceOf(
+        ShellExecutionUncertainError,
+      );
+    },
+  );
+  it("reports resource refusal as not started, not an uncertain execution", async () => {
+    const tools = client(answer(new Response("desktop_memory_pressure", { status: 503 })));
+    await expect(tools.shell({ command: "true" }, () => {})).rejects.toThrow(
+      "command was not started",
+    );
+  });
 });

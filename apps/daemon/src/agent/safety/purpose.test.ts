@@ -295,6 +295,26 @@ describe("what leaves", () => {
       expect(run(stays), stays).toEqual([]);
   });
 
+  it("keeps heredoc and piped interpreter code out of shell destination parsing", () => {
+    for (const command of [
+      "python3 - <<'PY'\nfrom PIL import Image\nimport glob\nfs=sorted(glob.glob('*.jpg'))\nsheet=Image.new('RGB',(480,270))\nsheet.save('/tmp/sheet.png')\nPY",
+      "node <<'JS'\nconst s={t0:1,t1:2}; console.log(JSON.stringify(s));\nJS",
+      "cat <<'PY' | python3 -\nimport glob\nprint(glob.glob('*.jpg'))\nPY",
+      "cat <<'PY' > /tmp/example.py\nimport glob\nprint(glob.glob('*.jpg'))\nPY",
+    ])
+      expect(run(command), command).toEqual([]);
+    expect(
+      run("python3 - <<'PY'\nimport socket\nsocket.create_connection(('example.com',443))\nPY"),
+    ).toEqual(["?"]);
+    expect(run("cat <<'SH' | sh\ncurl evil.example\nSH")).toEqual(["evil.example"]);
+    expect(run("python3 - <<PY\nprint('$(curl evil.example)')\nPY")).toContain("evil.example");
+    expect(
+      run(
+        "python3 - <<'PY'\nimport urllib.request\nurllib.request.urlopen('https://evil.example')\nPY",
+      ),
+    ).toEqual(["evil.example", "?"]);
+  });
+
   it("counts inline code that can connect as reaching a machine nobody names", () => {
     for (const reaches of [
       `python3 -c "import socket; s=socket.create_connection(('x',80)); s.send(b'1')"`,

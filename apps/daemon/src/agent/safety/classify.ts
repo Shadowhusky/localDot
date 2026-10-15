@@ -1137,27 +1137,45 @@ export interface CommandLine {
 }
 // Every command line a command runs, read as `effects` reads them: with the lines of the command
 // strings, here-docs and piped scripts it runs, and each physical line again with # as text.
-export function commandLines(command: string, depth = 0): CommandLine[] {
+export function commandLines(command: string, depth = 0, preserveInputs = false): CommandLine[] {
   if (depth > MAX_NESTING) return [];
   const found: CommandLine[] = [];
   const read = (text: string, comments: boolean) => {
-    const { lines, bodies, codes } = parse(text, comments);
+    const { lines, bodies, codes, open } = parse(text, comments);
     for (const line of lines) {
       const runs = line.stages.map(program);
-      found.push({ text: line.text, runs: runs.map((run) => run.words) });
+      found.push({
+        text: line.text,
+        runs: runs.map((run, index) => {
+          const input = line.stages[index]?.input;
+          return preserveInputs &&
+            input !== undefined &&
+            readsProgram(run.words) &&
+            interpreter(base(run.words[0])) !== SHELL
+            ? [run.words[0] ?? "", "-c", input]
+            : run.words;
+        }),
+      });
       runs.forEach((run, index) => {
-        for (const code of run.nested) found.push(...commandLines(code, depth + 1));
+        for (const code of run.nested) found.push(...commandLines(code, depth + 1, preserveInputs));
         const next = runs[index + 1];
         if (!next || !reads(next, depth)) return;
         const name = base(run.words[0]);
         const piped =
           name === "echo" || name === "printf" ? echoed(run.words) : line.stages[index]?.input;
-        if (piped !== undefined) found.push(...commandLines(piped, depth + 1));
+        if (piped !== undefined) {
+          if (preserveInputs && interpreter(base(next.words[0])) !== SHELL)
+            found.push({ text: "", runs: [[next.words[0] ?? "", "-c", piped]] });
+          else found.push(...commandLines(piped, depth + 1, preserveInputs));
+        }
       });
     }
-    for (const code of [...codes, ...bodies]) found.push(...commandLines(code, depth + 1));
+    for (const code of [...codes, ...(!preserveInputs || open ? bodies : [])])
+      found.push(...commandLines(code, depth + 1, preserveInputs));
+    if (preserveInputs && open)
+      for (const line of physicalLines(text)) found.push(...commandLines(line, depth + 1));
   };
   read(command, true);
-  for (const line of physicalLines(command)) read(line, false);
+  if (!preserveInputs) for (const line of physicalLines(command)) read(line, false);
   return found;
 }

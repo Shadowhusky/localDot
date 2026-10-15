@@ -289,6 +289,11 @@ export class CellOrchestrator {
     return record && this.#summary(record);
   }
 
+  // Only exact retirement plus key revocation releases an archived computer's port.
+  retiredPortOwner(id: string): boolean {
+    return this.#retiredPortOwners.has(id);
+  }
+
   reservedKeydPorts(): number[] {
     const { records, skipped } = this.#store.inventoryAll();
     if (skipped.length)
@@ -729,6 +734,10 @@ export class CellOrchestrator {
       throw new CellControlConflict(
         "the computer is permanently fenced or awaiting replacement confirmation",
       );
+    // Resolve exact container identities before changing state. Docker cannot gracefully stop a
+    // frozen desktop; thaw only after the key layer has closed, inside this lifecycle operation.
+    const owned = await inspectOwnedCell(this.#docker, id, record.docker, record.ownership);
+    if (this.#held(id)) throw new CellControlConflict("the computer is held for replacement");
     this.#updating.add(id);
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
     this.#ops.begin(id, "update", "shutdown", { startedAt });
@@ -740,8 +749,15 @@ export class CellOrchestrator {
         refusal = "The key layer didn't answer. Try again in a moment.";
         throw new CellControlConflict(refusal);
       }
-      for (const name of [record.docker.desktop, record.docker.gate])
-        await this.#stopContainer(name);
+      for (const container of owned.filter((object) => object.kind === "containers")) {
+        if (container.paused) {
+          await this.#docker.request({
+            method: "POST",
+            path: objectPath("containers", container.id, "unpause"),
+          });
+        }
+        await this.#stopContainer(container.id);
+      }
       this.#step(id, "install");
       next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
     } catch (error) {

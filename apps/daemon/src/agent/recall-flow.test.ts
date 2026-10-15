@@ -2,8 +2,8 @@ import { afterEach, expect, it } from "vitest";
 import { brainFlow } from "./testing/brain-flow.ts";
 
 const fixtures: Awaited<ReturnType<typeof brainFlow>>[] = [];
-// The brain looks at the screen before its first model call; the user's word comes after that, so
-// only what the tools under test return can mark the task untrusted.
+// Reset the memory-write guard at the first model call to isolate the tested lookup.
+// The provenance ledger still records startup skill-catalog reads as untrusted files.
 function freshAfterFirstLook(f: Awaited<ReturnType<typeof brainFlow>>) {
   let calls = 0;
   f.controls.beforeModel = () => {
@@ -40,7 +40,7 @@ it("a recall from the brain is untrusted and the next remember is refused", asyn
   expect(stored).toContain('<untrusted source=\\"earlier tasks\\">');
   expect(stored).toContain("Memory can only be saved");
   expect(f.h.session.tainted).toBe(true);
-  expect(f.h.session.taint.kinds).toEqual(["recall"]);
+  expect(f.h.session.taint.kinds).toEqual(["files", "recall"]);
   expect(f.h.events().some((e) => e.type === "memory.change")).toBe(false);
 });
 
@@ -57,6 +57,6 @@ it("a people lookup from the brain is untrusted and the next remember is refused
   const stored = JSON.stringify(f.h.transcripts.read(f.h.session.id));
   expect(stored).toContain('<untrusted source=\\"people the user reaches\\">');
   expect(stored).toContain("Memory can only be saved");
-  expect(f.h.session.taint.kinds).toEqual(["memory"]);
+  expect(f.h.session.taint.kinds).toEqual(["files", "memory"]);
   expect(f.h.events().some((e) => e.type === "memory.change")).toBe(false);
 });

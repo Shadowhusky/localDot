@@ -26,6 +26,13 @@ function risk(actionClass: ActionClass): RiskDecision["risk"] {
   return actionClass === "unknown" || actionClass === "memory" ? "medium" : "high";
 }
 
+function stricter(best: RiskDecision, next: RiskDecision): RiskDecision {
+  return MODE_RANK[next.mode] > MODE_RANK[best.mode] ||
+    (next.mode === best.mode && RISK_RANK[next.risk] > RISK_RANK[best.risk])
+    ? next
+    : best;
+}
+
 // A task allowance or saved rule only turns ask into act, class by class.
 export function decide(
   facts: RiskFacts,
@@ -42,12 +49,7 @@ export function decide(
         risk: risk(actionClass),
       };
     })
-    .reduce((best, next) =>
-      MODE_RANK[next.mode] > MODE_RANK[best.mode] ||
-      (next.mode === best.mode && RISK_RANK[next.risk] > RISK_RANK[best.risk])
-        ? next
-        : best,
-    );
+    .reduce(stricter);
 }
 
 function siteOf(value: string | undefined): string | undefined {
@@ -112,24 +114,38 @@ export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDeci
   const acting = actingFacts(ctx, facts);
   const permission = ctx.session.permissionMode();
   if (permission !== "custom") {
-    const classes = classify(acting);
-    if (classes.includes("credentials"))
-      return { actionClass: "credentials", mode: "handoff", risk: "high" };
-    if (classes.includes("delete") || destructive(acting))
-      return { actionClass: "delete", mode: "ask", risk: "high" };
-    const actionClass =
-      classes.find((c) => !["reading", "browsing", "computer"].includes(c)) ??
-      classes[0] ??
-      "unknown";
-    return {
-      actionClass,
-      mode:
-        permission === "full" ||
-        classes.every((c) => ["reading", "browsing", "computer"].includes(c))
-          ? "act"
-          : "ask",
-      risk: risk(actionClass),
-    };
+    const classes = [...classify(acting)];
+    // Presets change the default decision, not the scope of a user's explicit approval.
+    // Keep each class independent: allowing deletion must not also allow a credential
+    // action, upload, or unrelated destination carried by the same step.
+    const destroys = permission === "auto" ? deletion(acting) : undefined;
+    const local = destroys === "local" && !classes.includes("delete");
+    if (destroys && !classes.includes("delete")) classes.push("delete");
+    const place = placeOf(acting);
+    const decisions = classes.map((actionClass): RiskDecision => {
+      const needsApproval =
+        actionClass === "delete" ||
+        actionClass === "purchase" ||
+        (permission === "auto" && !["reading", "browsing", "computer"].includes(actionClass));
+      return {
+        actionClass,
+        mode:
+          actionClass === "credentials"
+            ? "handoff"
+            : needsApproval && !ctx.session.taskAutonomy.relaxes(actionClass, place)
+              ? "ask"
+              : "act",
+        risk: risk(actionClass),
+      };
+    });
+    const decision = decisions.reduce(stricter);
+    // The judge's question about a local deletion answers for nothing else the step does.
+    return local &&
+      decision.actionClass === "delete" &&
+      decision.mode === "ask" &&
+      decisions.every((other) => other === decision || other.mode === "act")
+      ? { ...decision, local: true }
+      : decision;
   }
   const place = placeOf(acting);
   return decide(acting, ctx.session.autonomy, (actionClass) =>
@@ -137,53 +153,90 @@ export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDeci
   );
 }
 
-// The default policy distinguishes local files from online deletion. Full access
-// still confirms destructive operations in the isolated computer as well.
-function destructive(facts: RiskFacts): boolean {
-  if (facts.operation === "files_delete") return true;
-  if (facts.operation !== "shell" || !facts.command) return false;
-  // A literal cleanup at the start of a command is local scratch work. Restrict
-  // this to individual files directly in a system temp directory: no recursion,
-  // expansions, globs, traversal, or intermediate symlink directories.
+const TEMP_DIRECTORY = String.raw`\/(?:tmp|var\/tmp|private\/tmp)`;
+const TEMP_ENTRY = new RegExp(String.raw`^${TEMP_DIRECTORY}\/[A-Za-z0-9_][A-Za-z0-9_.-]*$`);
+const RM_FLAGS = /^-[rRf]+$/;
+// A whole home or system folder, or a path the shell fills in at run time.
+const SWEEPING_PATHS = [
+  /^\/+\.?\*?$/,
+  /^\/(?:bin|boot|dev|etc|lib\w*|opt|proc|root|run|sbin|srv|sys|usr|var(?!\/tmp\/))(?:\/|$)/,
+  /^\/(?:config|home(?:\/[^/]+)?|media|mnt)\/*\*?$/,
+  /^~\/*\*?$/,
+  /[$`]/,
+];
+// Everything in the working folder, whatever it is.
+const SWEEPING_HERE = /^(?:\.{1,2}\/*|\.{0,2}\/?\*)$/;
+
+function sweeping(path: string, here = true): boolean {
+  const home = path.replace(/^\$(?:HOME\b|\{HOME\})/, "~");
+  return SWEEPING_PATHS.some((pattern) => pattern.test(home)) || (here && SWEEPING_HERE.test(home));
+}
+
+// What a step destroys inside the computer: a sweeping or irreversible deletion always asks in
+// Auto, and a local one is the judge's. Clearing a named entry in a temp directory is scratch work.
+function deletion(facts: RiskFacts): "sweeping" | "local" | undefined {
+  if (facts.operation === "files_delete") return "local";
+  if (facts.operation !== "shell" || !facts.command) return undefined;
   const command = facts.command.replace(
-    /^\s*cd\s+(\/(?:tmp|var\/tmp|private\/tmp))\s*(?:&&|;)\s*rm\s+(?:-f\s+)?(?:--\s+)?([A-Za-z0-9_][A-Za-z0-9_.-]*)(?=\s*(?:;|&&|$))/,
-    (all, _directory: string, file: string) => (file === "." || file === ".." ? all : "true"),
+    new RegExp(
+      String.raw`^\s*cd\s+(${TEMP_DIRECTORY})\s*(?:&&|;)\s*rm\s+(?:-[rRf]+\s+)?(?:--\s+)?([A-Za-z0-9_][A-Za-z0-9_.-]*)(?=\s*(?:;|&&|$))`,
+    ),
+    "true",
   );
-  return commandLines(command).some(({ runs }) =>
-    runs.some((words) => {
-      const name = words[0]?.replace(/^.*\//, "") ?? "";
-      const args = words.slice(1);
-      if (/\.(?:rmtree|unlink|remove|rmdir)\(/.test(name)) return true;
-      if (/^(?:drop|truncate)$/i.test(name) && /^(?:table|database)$/i.test(args[0] ?? ""))
-        return true;
-      if (name === "rm" || name === "unlink") {
-        const files = args.filter((arg) => arg !== "-f" && arg !== "--");
-        return !(
-          files.length > 0 &&
-          files.every((file) =>
-            /^\/(?:tmp|var\/tmp|private\/tmp)\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(file),
-          )
-        );
-      }
-      if (/^(?:rmdir|shred|mkfs(?:\.[a-z0-9]+)?|wipefs)$/.test(name)) return true;
-      if (name === "diskutil") return /^erase/.test(args[0] ?? "");
-      // Reading with dd isn't destructive; an explicit output may overwrite data.
-      if (name === "dd") return args.some((arg) => /^of=/.test(arg) && arg !== "of=/dev/null");
-      if (name === "git") {
-        let index = 0;
-        while (index < args.length && args[index]?.startsWith("-")) {
-          if (["-C", "-c", "--git-dir", "--work-tree"].includes(args[index] ?? "")) index++;
-          index++;
-        }
-        return args[index] === "clean" || (args[index] === "reset" && args.includes("--hard"));
-      }
-      // Inspect program text only when an interpreter or database client executes
-      // it. A grep pattern, filename, comment, or printed example is not an action.
-      if (/^(?:python[\d.]*|node|perl|ruby|sqlite3|psql|mysql)$/.test(name))
-        return /\.(?:rmtree|unlink|remove|rmdir)\s*\(|\b(?:drop\s+(?:table|database)|truncate\s+table)\b/i.test(
-          args.join(" "),
-        );
-      return false;
-    }),
-  );
+  let found: "sweeping" | "local" | undefined;
+  for (const { runs } of commandLines(command))
+    for (const words of runs) {
+      const effect = destroyed(words);
+      if (effect === "sweeping") return effect;
+      found ??= effect;
+    }
+  return found;
+}
+
+function destroyed(words: readonly string[]): "sweeping" | "local" | undefined {
+  const name = words[0]?.replace(/^.*\//, "") ?? "";
+  const args = words.slice(1);
+  if (/\.(?:rmtree|unlink|remove|rmdir)\(/.test(name)) return "local";
+  if (/^(?:drop|truncate)$/i.test(name) && /^(?:table|database)$/i.test(args[0] ?? ""))
+    return "sweeping";
+  if (name === "rm" || name === "unlink") {
+    if (args.includes("--no-preserve-root")) return "sweeping";
+    const paths = args.filter((arg) => !RM_FLAGS.test(arg) && arg !== "--");
+    if (paths.some((path) => sweeping(path))) return "sweeping";
+    return paths.length > 0 && paths.every((path) => TEMP_ENTRY.test(path)) ? undefined : "local";
+  }
+  if (name === "find" && args.includes("-delete")) {
+    const roots = args.slice(
+      0,
+      args.findIndex((arg) => /^[-(!]/.test(arg)),
+    );
+    return roots.some((root) => sweeping(root, false)) ? "sweeping" : "local";
+  }
+  if (/^(?:mkfs(?:\.[a-z0-9]+)?|wipefs)$/.test(name)) return "sweeping";
+  if (/^(?:rmdir|shred)$/.test(name)) return "local";
+  if (name === "diskutil") return /^erase/.test(args[0] ?? "") ? "sweeping" : undefined;
+  // Reading with dd isn't destructive; an explicit output may overwrite data or a disk.
+  if (name === "dd") {
+    const output = args.find((arg) => arg.startsWith("of="));
+    if (!output || output === "of=/dev/null") return undefined;
+    return output.startsWith("of=/dev/") ? "sweeping" : "local";
+  }
+  if (name === "git") {
+    let index = 0;
+    while (index < args.length && args[index]?.startsWith("-")) {
+      if (["-C", "-c", "--git-dir", "--work-tree"].includes(args[index] ?? "")) index++;
+      index++;
+    }
+    return args[index] === "clean" || (args[index] === "reset" && args.includes("--hard"))
+      ? "sweeping"
+      : undefined;
+  }
+  // Inspect program text only when an interpreter or database client executes
+  // it. A grep pattern, filename, comment, or printed example is not an action.
+  if (/^(?:python[\d.]*|node|perl|ruby|sqlite3|psql|mysql)$/.test(name)) {
+    const code = args.join(" ");
+    if (/\b(?:drop\s+(?:table|database)|truncate\s+table)\b/i.test(code)) return "sweeping";
+    return /\.(?:rmtree|unlink|remove|rmdir)\s*\(/.test(code) ? "local" : undefined;
+  }
+  return undefined;
 }

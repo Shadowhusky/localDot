@@ -21,6 +21,7 @@ const BOUND: readonly (keyof Target)[] = [
   "window",
   "url",
   "secret",
+  "loginOrigin",
   "editable",
   "mark",
 ];

@@ -271,11 +271,13 @@ describe("conversation routes", () => {
     expect(fresh.status).toBe(200);
     expect(await fresh.json()).toEqual({ sessions: [], more: false });
     expect(f.releases).toHaveBeenCalledTimes(1);
+    expect(f.releases).toHaveBeenLastCalledWith(expect.any(AbortSignal), newer);
     expect(f.conversations.current()).toBeNull();
     const continued = await f.send("POST", "/api/conversation/continue", { sessionId: older });
     expect(continued.status).toBe(200);
     expect(await continued.json()).toEqual({ sessions: [older], more: false });
     expect(f.releases).toHaveBeenCalledTimes(2);
+    expect(f.releases).toHaveBeenLastCalledWith(expect.any(AbortSignal), null);
     expect(f.conversations.current()).toBe(older);
   });
 

@@ -134,6 +134,15 @@ for p, meta in plan['directories']:
     if os.path.lexists(p) and not os.path.isdir(p): os.unlink(p)
     os.makedirs(p, exist_ok=True)
     os.chown(p, meta[2], meta[3]); os.chmod(p, meta[1])
+if plan.get('packageStatus'):
+    p = '/var/lib/dpkg/status'
+    merged = plan['packageStatus']
+    # Modify the private clone only, without following a substituted final symlink.
+    fd = os.open(p, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(merged['text'].encode('utf-8'))
+        os.fchown(f.fileno(), merged['entry'][2], merged['entry'][3])
+        os.fchmod(f.fileno(), merged['entry'][1])
 print('prepared')
 `;
 

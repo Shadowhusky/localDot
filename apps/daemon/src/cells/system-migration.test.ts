@@ -8,13 +8,19 @@ const base = `sha256:${"a".repeat(64)}`;
 const target = `sha256:${"b".repeat(64)}`;
 const system = `sha256:${"c".repeat(64)}`;
 const record = { id: "cell", ownership: { desktop: "owned" } } as CellRecord;
-function setup({ missing = false, running = true, authority = base, unavailable = false } = {}) {
+function setup({
+  missing = false,
+  running = true,
+  paused = false,
+  authority = base,
+  unavailable = false,
+} = {}) {
   const request = vi.fn(async (req: DockerRequest): Promise<unknown> => {
     if (req.path === "/containers/owned/json")
       return {
         Id: "owned",
         Image: system,
-        State: { Running: running, Paused: false },
+        State: { Running: running, Paused: paused },
         Config: {
           Labels: {
             "localdot.cell": "cell",
@@ -64,6 +70,17 @@ it("never accepts a forged base label or mistakes a Docker outage for a missing 
 });
 it("cannot migrate a running computer even when the preflight succeeds", async () => {
   const { request, migration } = setup();
+  await expect(migration.prepare(record, target)).rejects.toThrow("prepare");
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it("preflights a paused computer without thawing it, but never snapshots it before shutdown", async () => {
+  const { request, migration } = setup({ paused: true });
+  await expect(migration.preflight(record, target)).resolves.toBeUndefined();
+  expect(request.mock.calls.every(([r]) => r.method === "GET" || r.path.endsWith("/tag"))).toBe(
+    true,
+  );
+  request.mockClear();
   await expect(migration.prepare(record, target)).rejects.toThrow("prepare");
   expect(request).toHaveBeenCalledTimes(1);
 });

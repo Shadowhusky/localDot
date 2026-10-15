@@ -59,16 +59,23 @@ export function computerConverter(deps: {
     )
       return "failed";
     // Any ready computer will do: the conversion is stateless and leaves nothing behind.
-    const cellId = deps.computers().find((c) => c.state === "ready" && !c.paused)?.id;
-    if (!cellId) return "computer_off";
-    let access: ComputerAccess | "busy" | undefined;
-    try {
-      access = deps.access(cellId, signal);
-    } catch {
-      return "busy";
+    let access: ComputerAccess | undefined;
+    let busy = false;
+    for (const computer of deps.computers()) {
+      if (computer.state !== "ready" || computer.paused) continue;
+      let found: ComputerAccess | "busy" | undefined;
+      try {
+        found = deps.access(computer.id, signal);
+      } catch {
+        found = "busy";
+      }
+      if (found === "busy") busy = true;
+      else if (found) {
+        access = found;
+        break;
+      }
     }
-    if (access === "busy") return "busy";
-    if (!access) return "computer_off";
+    if (!access) return busy ? "busy" : "computer_off";
     const dir = `.cache/localdot-preview/${randomBytes(12).toString("hex")}`;
     const timeout = to === "pages" ? PAGES_TIMEOUT_S : CONVERT_TIMEOUT_S;
     try {

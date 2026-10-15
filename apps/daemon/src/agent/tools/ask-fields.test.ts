@@ -118,6 +118,58 @@ const textOf = (result: { content: { type: string; text?: string }[] }) =>
   result.content.map((c) => c.text ?? "").join("\n");
 
 describe("ask_user with fields", () => {
+  it("saves a verified desktop password and reuses it in a later task without exposing it", async () => {
+    let saved: { username: string; password: string } | undefined;
+    const store = {
+      login: async (origin: string) =>
+        origin === "https://mail.example.test" && saved ? { ...saved } : undefined,
+      saveLogin: async (origin: string, username: string, password: string) => {
+        expect(origin).toBe("https://mail.example.test");
+        saved = { username, password };
+      },
+    };
+    const bind = () => {
+      const h = setup();
+      h.tools.logins = store;
+      const target = { ...PASSWORD, loginOrigin: "https://mail.example.test" };
+      h.state.hit.target = target;
+      h.state.focus.target = { ...target };
+      return h;
+    };
+    const first = bind();
+    const asking = first.call(LOGIN);
+    first.session.answerFields(
+      await first.asked(),
+      { email: "ada@example.test", password: SECRET },
+      (t) => t,
+    );
+    expect(textOf((await asking).result)).toContain("saved securely");
+    expect(saved?.password).toBe(SECRET);
+    const second = bind();
+    const reply = await second.call(LOGIN);
+    expect(reply.result.ok).toBe(true);
+    expect(textOf(reply.result)).toContain("Used the saved sign-in");
+    expect(second.session.pendingAsk).toBeUndefined();
+    expect(second.state.typed[0]?.text).toBe(SECRET);
+    expect(JSON.stringify(reply)).not.toContain(SECRET);
+    for (const file of second.stored()) expect(file).not.toContain(SECRET);
+  });
+  it("does not reuse a saved desktop password after form verification changes", async () => {
+    const h = setup();
+    h.state.hit.target = { ...PASSWORD, loginOrigin: "https://mail.example.test" };
+    h.state.focus.target = { ...h.state.hit.target };
+    h.tools.logins = {
+      login: async () => {
+        h.state.hit.target = { ...PASSWORD };
+        h.state.focus.target = { ...PASSWORD };
+        return { username: "ada@example.test", password: SECRET };
+      },
+      saveLogin: async () => {},
+    };
+    const { result } = await h.call(LOGIN);
+    expect(result.ok).toBe(false);
+    expect(h.state.typed).toEqual([]);
+  });
   it("types a secret into the field dot named and never stores it or shows it to the model", async () => {
     const h = setup();
     const asking = h.call(LOGIN);

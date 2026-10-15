@@ -21,9 +21,28 @@ export const WORK_PROGRAMS = [
   "libreoffice",
 ] as const;
 export const ProgramAvailability = z.enum(["available", "not_on_path", "unknown"]);
+export const DesktopMemory = z.strictObject({
+  vm: z
+    .strictObject({
+      totalBytes: z.number().int().positive(),
+      availableBytes: z.number().int().nonnegative(),
+      stallPercent10s: z.number().min(0).max(100).optional(),
+      pressure: z.enum(["normal", "high", "critical"]),
+    })
+    .optional(),
+  currentBytes: z.number().int().nonnegative(),
+  workingSetBytes: z.number().int().nonnegative(),
+  limitBytes: z.number().int().positive(),
+  swapBytes: z.number().int().nonnegative().optional(),
+  swapLimitBytes: z.number().int().nonnegative().optional(),
+  oomKills: z.number().int().nonnegative(),
+  pressure: z.enum(["normal", "high", "critical"]),
+});
+export type DesktopMemory = z.infer<typeof DesktopMemory>;
 export const DesktopCapabilities = z.strictObject({
   version: z.literal(1),
   search: z.literal("service_path"),
+  memory: DesktopMemory.optional(),
   programs: z.record(z.enum(WORK_PROGRAMS), ProgramAvailability),
 });
 export type DesktopCapabilities = z.infer<typeof DesktopCapabilities>;

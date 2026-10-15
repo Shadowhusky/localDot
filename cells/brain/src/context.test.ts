@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  cachedPrompt,
   compactionEntry,
   estimateTokens,
   fromTranscript,
@@ -241,4 +242,45 @@ it("selects only retained full-frame pixels and creates exact durable inbox reco
     sourceInbox: { seq: 7, messageId: A },
   });
   expect(inboxTranscript({ kind: "resume", seq: 8, messageId: B, text: "" })).toBeUndefined();
+});
+
+describe("the prompt providers cache", () => {
+  const history: ModelMessage[] = [
+    { role: "user", content: "Book a table" },
+    { role: "assistant", content: [{ type: "text", text: "Looking." }] },
+  ];
+
+  it("marks the system prompt and the conversation's end for Anthropic, and puts the reminder after", () => {
+    const { system, messages } = cachedPrompt("Rules", history, "<reminder>plan</reminder>", true);
+    expect(system).toEqual({
+      role: "system",
+      content: "Rules",
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
+    expect(messages).toHaveLength(3);
+    expect(messages[1]?.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    });
+    expect(messages[2]).toEqual({ role: "user", content: "<reminder>plan</reminder>" });
+    expect(history[1]?.providerOptions).toBeUndefined();
+  });
+
+  it("leaves other providers' prompts unmarked, and adds nothing without a reminder", () => {
+    const { system, messages } = cachedPrompt("Rules", history, "", false);
+    expect(system).toBe("Rules");
+    expect(messages).toEqual(history);
+  });
+
+  it("turns old screenshots into markers only a chunk at a time", () => {
+    const kept = (count: number) =>
+      JSON.stringify(
+        pruneScreenshots(
+          Array.from({ length: count }, () => shot(A)),
+          3,
+          4,
+          4,
+        ),
+      ).match(new RegExp(`data-${A}`, "g"))?.length ?? 0;
+    expect([6, 7, 8, 10, 11].map(kept)).toEqual([6, 3, 4, 6, 3]);
+  });
 });
