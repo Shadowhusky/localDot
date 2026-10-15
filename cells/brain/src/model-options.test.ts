@@ -279,3 +279,71 @@ describe("older reasoning on the wire", () => {
     },
   );
 });
+
+describe("a Claude conversation whose earlier turns changed", () => {
+  const BOUND =
+    "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation.";
+  const reply = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const answer = {
+    id: "msg_1",
+    type: "message",
+    role: "assistant",
+    model: "claude-sonnet-4-5",
+    content: [{ type: "text", text: "4" }],
+    stop_reason: "end_turn",
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  function claude(refuse: (body: Record<string, unknown>) => string | undefined) {
+    const spec = providerById("anthropic");
+    if (!spec) throw new Error("anthropic");
+    const sent: { body: Record<string, unknown>; beta: string }[] = [];
+    const model = languageModel(
+      {
+        ...binding(),
+        provider: "anthropic",
+        client: spec.client,
+        route: spec.keyd,
+        model: "claude-sonnet-4-5",
+        maxOutputTokens: 16000,
+      },
+      async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        sent.push({ body, beta: new Headers(init?.headers).get("anthropic-beta") ?? "" });
+        const why = refuse(body);
+        return why
+          ? reply(400, { type: "error", error: { type: "invalid_request_error", message: why } })
+          : reply(200, answer);
+      },
+    );
+    return { model, sent };
+  }
+
+  it("is sent again with the thinking that no longer fits dropped, and so is every later call", async () => {
+    const { model, sent } = claude((body) =>
+      (body.thinking as { block_binding?: unknown } | undefined)?.block_binding ? undefined : BOUND,
+    );
+    expect((await generateText({ model, prompt: "2 + 2?", maxRetries: 0 })).text).toBe("4");
+    expect((await generateText({ model, prompt: "3 + 3?", maxRetries: 0 })).text).toBe("4");
+    expect(sent.map((s) => s.body.thinking)).toEqual([
+      undefined,
+      { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+      { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+    ]);
+    expect(
+      sent.slice(1).every((s) => s.beta.includes("thinking-binding-controls-2026-08-01")),
+    ).toBe(true);
+  });
+
+  it("leaves a request the account accepts, and any other refusal, as they were", async () => {
+    const fine = claude(() => undefined);
+    await generateText({ model: fine.model, prompt: "2 + 2?", maxRetries: 0 });
+    expect(fine.sent).toHaveLength(1);
+    expect(fine.sent[0]?.body).not.toHaveProperty("thinking");
+    const other = claude(() => "max_tokens: 64000 > 32000, the maximum for this model");
+    await expect(
+      generateText({ model: other.model, prompt: "2 + 2?", maxRetries: 0 }),
+    ).rejects.toThrow(/max_tokens/);
+    expect(other.sent).toHaveLength(1);
+  });
+});
