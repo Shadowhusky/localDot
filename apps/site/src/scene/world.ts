@@ -148,8 +148,12 @@ export class World {
     }
     this.renderer.compile(this.scene, this.camera);
     new ResizeObserver(() => this.resize()).observe(stage);
-    // The window itself moves on a phone, rising over the headline for a task the visitor picked.
-    new ResizeObserver(() => this.measureWindow()).observe(this.hero);
+    // The window itself moves on a phone, rising over the headline for a task the visitor picked,
+    // and on a short one the picture comes in under the task list once a task is picked.
+    const watch = new ResizeObserver(() => this.measureWindow());
+    watch.observe(this.hero);
+    const frame = this.hero.querySelector(".stage-frame");
+    if (frame) watch.observe(frame);
     window.addEventListener("pointermove", (event) => {
       this.pointer = { x: event.clientX, y: event.clientY };
     });

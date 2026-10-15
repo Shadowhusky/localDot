@@ -23,6 +23,14 @@
   }
 }
 
+/* A short phone: until a task is picked, the list of tasks takes the empty desktop's place, so it
+   isn't pushed off the screen. */
+@media (width < 700px) and (500px <= height < 620px) {
+  .hero .site-app:has(.site-start) .stage-box {
+    display: none;
+  }
+}
+
 @media (pointer: coarse) and (orientation: landscape) and (height < 500px) {
   .hero .site-app .stage-col > .stage-frame {
     width: calc((100cqh - var(--stage-top) - var(--band-min)) * 1.6);

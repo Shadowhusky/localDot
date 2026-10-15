@@ -60,7 +60,7 @@ back reverses it exactly. Copy lives in the DOM in reading order.
   Watch/Replay. Desktop: the Theatre plays the demo, dot sits docked under it with its caption, and
   the rail has Chat and Activity. Phone: the app's phone layout, without its top bar.
 - Nothing pretends to take a request. Where the composer would be, a one-line note says "A replay.
-  A real task with DeepSeek Flash, sped up." The top bar has Get localDot.
+  A real task with DeepSeek V4.1 Flash, sped up." The top bar has Get localDot.
 - The page opens still on the app as it starts: the empty chat greets the visitor in dot's voice
   for their time of day and offers the demos, each with the dot that did it. Nothing plays until
   one is picked, so the window never changes under the visitor. The story shows a task at work from

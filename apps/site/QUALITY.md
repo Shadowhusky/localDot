@@ -82,7 +82,7 @@ playing, losing a life and handing back; and with reduced motion.
 
 ## The demos
 
-Every demo is a real task dot did on a separate demo computer with DeepSeek Flash, with invented
+Every demo is a real task dot did on a separate demo computer with DeepSeek V4.1 Flash, with invented
 data or public sources: Breakout (12 minutes, $0.06), Kyoto (35 minutes, $0.36), the budget
 (8½ minutes, $0.08), the poster (9 minutes, $0.08) and the teaser (11 minutes, $0.09). Each
 recording is the daemon's own export, cut and sped up; the island shows the speed of each part. Each

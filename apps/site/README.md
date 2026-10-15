@@ -29,6 +29,10 @@ app's `dot/voices.ts`.
 The build also hashes the page's inline script into the CSP in `_headers`, and records the length
 of each of the site's videos in `media-lengths.json` for the Worker's byte ranges.
 
+The videos (the films and the demos' recordings) are not kept in git: the films carry licensed
+music, and the demos come from reviewed sessions. Render the films (Film) and build the demos
+(Demos) to get them back, or the site builds without them.
+
 The page's Chinese is in `src/i18n/zh.ts`, keyed by the English it stands for; an element marked
 `data-i18n` takes its line, and the tests fail if a marked line has no Chinese or the dictionary
 keeps one the page no longer says.
