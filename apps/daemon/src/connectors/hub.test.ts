@@ -261,7 +261,8 @@ it("explains local port exhaustion without blaming valid app credentials", () =>
   const { hub } = setup();
   const config = hub.add(linear);
   expect(plainProblem(new Error("no free keyd listener port in 4760-4789"), config)).toMatchObject({
-    status: "failed", causeKind: "unavailable",
+    status: "failed",
+    causeKind: "unavailable",
     message: expect.stringContaining("no free connection slots"),
   });
 });
