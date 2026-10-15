@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ResearchLog } from "../research.ts";
 import { toolRisk } from "../safety/authorize.ts";
 import { toolHarness } from "../testing/harness.ts";
-import type { WebAccess, WebReply } from "../web/cell.ts";
+import { type WebAccess, WebError, type WebReply } from "../web/cell.ts";
 
 const fixture = (name: string) => readFileSync(new URL(`../web/fixtures/${name}`, import.meta.url));
 const png = await sharp({
@@ -150,6 +150,14 @@ describe("web_fetch", () => {
       tool: "web_fetch",
       title: "Read en.wikipedia.org",
     });
+    const shown = h
+      .events()
+      .filter((e) => e.type === "tool.output")
+      .map((e) => (e.data as { chunk: string }).chunk)
+      .join("");
+    expect(shown.startsWith(`${ARTICLE}\n`)).toBe(true);
+    expect(shown).toContain("# The Legend of Zelda: Breath of the Wild");
+    expect(shown.length).toBeLessThan(4200);
   });
 
   it("shows a picture by its link", async () => {
@@ -184,6 +192,33 @@ describe("web_fetch", () => {
     expect(textOf(missing)).toContain("fetch failed");
   });
 
+  it("answers a page that already failed in this task at once, without reading it again", async () => {
+    const h = harness({ "gone.example.org": { status: 404 } });
+    const url = "https://gone.example.org/visit";
+    expect((await h.call("web_fetch", { url })).body.ok).toBe(false);
+    const again = await h.call("web_fetch", { url: `${url}#hours` });
+    expect(again.body.ok).toBe(false);
+    expect(textOf(again)).toContain("already failed in this task");
+    expect(textOf(again)).toContain("The site answered 404.");
+    expect(h.asked).toEqual([url]);
+    expect(h.events().filter((e) => e.type === "step.start")).toHaveLength(1);
+  });
+
+  it("tries a page that did not answer once more before giving up on it", async () => {
+    const asked: string[] = [];
+    const web: WebAccess = {
+      get: async (url) => {
+        asked.push(url.href);
+        throw new WebError("The site did not answer in time.");
+      },
+    };
+    const h = toolHarness({ web });
+    fixtures.push(h);
+    const url = "https://slow.example.org/";
+    for (let i = 0; i < 3; i++) await h.call("web_fetch", { url });
+    expect(asked).toEqual([url, url]);
+  });
+
   it("is unavailable, not broken, where the daemon has no way out to the web", async () => {
     const h = toolHarness();
     fixtures.push(h);
@@ -215,6 +250,32 @@ describe("research with the web tools", () => {
     expect(h.session.research.sources.map((s) => s.title)).toEqual([
       "The Legend of Zelda: Breath of the Wild - Wikipedia",
     ]);
+  });
+
+  it("says in a refused page's step why research takes no new sources", async () => {
+    // The user wraps up while the page is being read.
+    const web: WebAccess = {
+      get: async (url) => {
+        h.session.research?.wrapUp();
+        return {
+          url,
+          status: 200,
+          contentType: "text/html",
+          body: fixture("article.html"),
+          truncated: false,
+        };
+      },
+    };
+    const h = toolHarness({ web });
+    fixtures.push(h);
+    h.session.research = new ResearchLog({ sources: 3, minutes: 30 }, (type, data) =>
+      h.session.append(type, data),
+    );
+    await h.call("web_fetch", { url: "https://en.wikipedia.org/wiki/Hyrule" });
+    expect(h.events().find((e) => e.type === "step.end")?.data).toEqual({
+      status: "blocked",
+      note: "You asked dot to wrap up, so it takes no new sources.",
+    });
   });
 
   it("stops new searches and new pages once the budget is reached, but reopens a source", async () => {

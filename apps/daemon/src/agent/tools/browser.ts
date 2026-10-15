@@ -98,7 +98,7 @@ export async function browserReadTool(
   const source = sourceLine(ctx.session.research, ctx.redact(page.url), ctx.redact(page.title));
   if (source.refused) {
     append(ctx, "tool.end", { ok: false });
-    append(ctx, "step.end", { status: "blocked" });
+    append(ctx, "step.end", { status: "blocked", note: source.note });
     return fail(source.refused);
   }
   append(ctx, "tool.end", { ok: true });

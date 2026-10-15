@@ -448,7 +448,9 @@ button.activity-row-head[data-pressed] {
   -webkit-line-clamp: 2;
 }
 
-.activity-row[data-open] :is(.activity-row-title, .activity-row-meta) {
+/* A step with nothing to unfold has no other way to show the words it clips. */
+.activity-row[data-open] :is(.activity-row-title, .activity-row-meta),
+.activity-timeline div.activity-row-head :is(.activity-row-title, .activity-row-meta) {
   display: block;
 }
 
@@ -510,10 +512,15 @@ button.activity-row-head[data-pressed] {
   gap: calc(var(--spacing) * 2);
 }
 
+.activity-detail-action,
 .activity-detail-note {
   color: var(--color-fg-2);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   overflow-wrap: anywhere;
+}
+
+.activity-detail-action code {
+  font-family: var(--font-mono);
 }
 
 .activity-frame {
@@ -955,6 +962,10 @@ button.activity-usage-trigger:active {
 }
 .activity-row[data-open] .activity-row-chevron {
   rotate: 90deg;
+}
+/* A step with no chevron keeps its room (12 px and the 8 px gap), so every step's time lines up. */
+.activity-timeline div.activity-row-head .activity-row-time {
+  margin-inline-end: calc(var(--spacing) * 5);
 }
 /* A group of read-only steps sits on the rows' grid: its mark in the status column, its count and
    chevron where a row has its time. */

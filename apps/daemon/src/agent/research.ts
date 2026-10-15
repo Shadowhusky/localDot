@@ -182,6 +182,14 @@ export class ResearchLog {
           : `The research budget (${this.#budget.sources} sources) is reached.`;
     return `${why} Stop gathering: write the report now with the sources you have, and name what is still open.`;
   }
+  // Why a source was refused, for the user, in its step.
+  stopShown(): string {
+    return this.#stopped === "user"
+      ? "You asked dot to wrap up, so it takes no new sources."
+      : this.#stopped === "time"
+        ? "The research time is up, so dot takes no new sources."
+        : "The research budget is reached, so dot takes no new sources.";
+  }
   moreNote(): string {
     return `The user gave the research more room: about ${this.#budget.sources} sources and ${this.#budget.minutes} minutes in all. Keep gathering where it helps, then write the report.`;
   }

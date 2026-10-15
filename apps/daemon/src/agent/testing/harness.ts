@@ -196,11 +196,11 @@ export function toolHarness(
     redactorFor: () => redactor([PROXY_TOKEN, TOOL_TOKEN]),
   });
   const auth = { authorization: `Bearer ${TOOL_TOKEN}`, "content-type": "application/json" };
-  const call = async (name: string, input: unknown) => {
+  const call = async (name: string, input: unknown, callId = "c1") => {
     const res = await app.request(`/v1/tools/${name}`, {
       method: "POST",
       headers: auth,
-      body: JSON.stringify({ callId: "c1", input }),
+      body: JSON.stringify({ callId, input }),
     });
     return {
       status: res.status,

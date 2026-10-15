@@ -190,9 +190,60 @@ const COMPUTER_STATES: Record<StepRowView["status"], [GlyphState, string]> = {
 };
 
 const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" · ");
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 // A step's time on the m:ss clock; anything that took time shows at least a second.
 const stepTime = (ms: number) => clock(ms > 0 ? Math.max(ms, 1000) : 0);
 const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+type StepRow = Extract<TimelineRow<ActivityStep>, { kind: "step" }>;
+
+function rowWords(row: StepRow, own: readonly AgentChange[], ended: boolean) {
+  const { computer, agent } = row;
+  const [state, stateLabel] =
+    agent && (agent.status || !computer)
+      ? agentState(agent, ended)
+      : computer && !(ended && computer.status === "doing")
+        ? COMPUTER_STATES[computer.status]
+        : agentState({ id: row.id, output: [], outputTruncated: false }, ended);
+  const kind = agent?.kind ?? computer?.stepKind ?? (computer ? "gui" : undefined);
+  const what =
+    computer?.label ||
+    agent?.tool?.title ||
+    (kind === "file" ? fileTitle(own) : "") ||
+    (kind ? KIND_TITLES[kind] : "Step");
+  // dot's own line for the call leads its first row; what it did moves to the meta line.
+  const given = agent?.intent ?? computer?.intent;
+  const intent = (given && plainText(given)) || undefined;
+  const failed = state === "failed" || state === "skipped";
+  const reason = failed
+    ? ((agent?.note && markdownToPlain(agent.note)) ??
+      computer?.reason ??
+      (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
+    : state === "todo"
+      ? "The task ended before this step finished."
+      : undefined;
+  const distinctAction = intent && !same(intent, what) ? what : undefined;
+  // A gesture says something only with what it touched: "click F3", never a bare "click".
+  const touched = computer?.gesture?.includes(" ") ? computer.gesture : undefined;
+  const where = computer
+    ? joined(computer.app, intent ? distinctAction : touched)
+    : joined(
+        WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
+        distinctAction,
+        diffStat(own.map((change) => change.patch)),
+      );
+  return {
+    state,
+    stateLabel,
+    kind,
+    what,
+    title: intent ?? what,
+    reason,
+    meta: reason ? asSentence(reason) : where,
+    // What the meta line says dot did, unless what went wrong took its place.
+    named: reason ? undefined : distinctAction,
+  };
+}
 
 export function entryView(
   entry: ActivityEntry,
@@ -214,68 +265,75 @@ export function entryView(
     };
   const { computer, agent } = row;
   const own = changes.filter((change) => change.type === "file" && change.step === row.id);
-  const [state, stateLabel] =
-    agent && (agent.status || !computer)
-      ? agentState(agent, ended)
-      : computer && !(ended && computer.status === "doing")
-        ? COMPUTER_STATES[computer.status]
-        : agentState({ id: row.id, output: [], outputTruncated: false }, ended);
-  const kind = agent?.kind ?? computer?.stepKind ?? (computer ? "gui" : undefined);
+  const words = rowWords(row, own, ended);
   const durationMs =
     computer?.durationMs ??
     (agent?.startedAt !== undefined && agent.endedAt !== undefined
       ? microsToMs(agent.endedAt - agent.startedAt)
       : null);
-  const what =
-    computer?.label ||
-    agent?.tool?.title ||
-    (kind === "file" ? fileTitle(own) : "") ||
-    (kind ? KIND_TITLES[kind] : "Step");
-  // dot's own line for the call leads its first row; what it did moves to the meta line.
-  const given = agent?.intent ?? computer?.intent;
-  const intent = (given && plainText(given)) || undefined;
-  const title = intent ?? what;
-  const failed = state === "failed" || state === "skipped";
-  const reason = failed
-    ? ((agent?.note && markdownToPlain(agent.note)) ??
-      computer?.reason ??
-      (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
-    : state === "todo"
-      ? "The task ended before this step finished."
-      : undefined;
-  const distinctAction =
-    intent && intent.trim().toLowerCase() !== what.trim().toLowerCase() ? what : undefined;
-  // A gesture says something only with what it touched: "click F3", never a bare "click".
-  const touched = computer?.gesture?.includes(" ") ? computer.gesture : undefined;
-  const where = computer
-    ? joined(computer.app, intent ? distinctAction : touched)
-    : joined(
-        WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
-        distinctAction,
-        diffStat(own.map((change) => change.patch)),
-      );
   return {
     testId: isScreenStep(row) ? "step-row" : "tool-row",
-    title,
-    meta: reason ? asSentence(reason) : where,
+    title: words.title,
+    meta: words.meta,
     time: durationMs === null ? "" : stepTime(durationMs),
-    state,
-    stateLabel,
-    ...(reason ? { failed: true } : {}),
+    state: words.state,
+    stateLabel: words.stateLabel,
+    ...(words.reason ? { failed: true } : {}),
     startT: row.startT,
     endT: durationMs === null ? null : row.startT + durationMs,
   };
 }
 
-export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]): boolean {
+// What unfolding a step shows beyond its row.
+export interface StepDetail {
+  // What the step did, when the row leads with dot's line for it; a command or a path as typed.
+  action?: { text: string; code: boolean };
+  // A result note; a failure's note is the row's meta line already.
+  note?: string;
+  // A screen step shows its picture or says it has none; another step only a picture it took.
+  frame: boolean;
+  // Any output, or a command's exit code even when it printed nothing.
+  output: boolean;
+  changes: AgentChange[];
+}
+
+export function stepDetail(
+  entry: ActivityEntry,
+  changes: readonly AgentChange[],
+): StepDetail | null {
   const { row } = entry;
-  if (row.kind === "key") return false;
+  if (row.kind === "key") return null;
+  const { computer, agent } = row;
+  const own = changes.filter((change) => change.type === "file" && change.step === row.id);
+  const screen = isScreenStep(row);
+  // The row's words while the task runs; once it ends, only an unfinished step's meta line differs.
+  const words = rowWords(row, own, false);
+  const done = screen ? words.what : agent?.tool?.title;
+  const said = done && [words.title, words.named].some((text) => text && same(text, done));
+  const code = !screen && (words.kind === "shell" || words.kind === "file");
+  return {
+    ...(done && !said ? { action: { text: done, code } } : {}),
+    ...(agent?.note && (agent.status === "ok" || !agent.status) ? { note: agent.note } : {}),
+    frame: !!computer && (screen || !!computer.frameId),
+    output:
+      !!agent &&
+      ((agent.terminal?.inputBytes ?? 0) > 0 ||
+        agent.tool?.exitCode !== undefined ||
+        agent.outputTruncated),
+    changes: own,
+  };
+}
+
+export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]): boolean {
+  const detail = stepDetail(entry, changes);
   return (
-    !!row.computer ||
-    entry.keys.length > 0 ||
-    (!!row.agent?.note && (row.agent.status === "ok" || !row.agent.status)) ||
-    !!(row.agent && (row.agent.tool || row.agent.terminal || row.agent.outputTruncated)) ||
-    changes.some((change) => change.type === "file" && change.step === row.id)
+    !!detail &&
+    (!!detail.action ||
+      !!detail.note ||
+      detail.frame ||
+      detail.output ||
+      detail.changes.length > 0 ||
+      entry.keys.length > 0)
   );
 }
 

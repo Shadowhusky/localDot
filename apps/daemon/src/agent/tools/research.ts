@@ -94,10 +94,10 @@ export function sourceLine(
   research: ResearchLog | undefined,
   url: string,
   title: string,
-): { line?: string; refused?: string } {
+): { line?: string; refused?: string; note?: string } {
   if (!research || isSearchPage(url) || !publicUrl(url)) return {};
   const known = research.add(url, title);
-  if (!known) return { refused: research.stopNote() };
+  if (!known) return { refused: research.stopNote(), note: research.stopShown() };
   return { line: `Source [${known.source.n}] (${research.status()}).\n` };
 }
 
@@ -185,7 +185,7 @@ async function pdfOp(
   const listed = sourceLine(research, url.href, ctx.redact(title) || `PDF from ${host}`);
   if (listed.refused) {
     append(ctx, "tool.end", { ok: false });
-    append(ctx, "step.end", { status: "blocked" });
+    append(ctx, "step.end", { status: "blocked", note: listed.note });
     return fail(listed.refused);
   }
   append(ctx, "tool.end", { ok: true });

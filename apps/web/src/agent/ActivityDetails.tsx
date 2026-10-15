@@ -5,7 +5,7 @@ import type { KeyUseRowView } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { cachedThumbnail, releaseThumbnail, thumbnailUrl } from "../session/thumbnails.ts";
 import { Icon } from "../ui/Icon.tsx";
-import type { ActivityEntry } from "./activity.ts";
+import { type ActivityEntry, stepDetail } from "./activity.ts";
 import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentChange } from "./model.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
@@ -47,6 +47,8 @@ export function frameCrop(target: StepRowView["target"], scale: number): FrameCr
   };
 }
 
+const NoScreenshot = () => <p className="activity-detail-note">No screenshot for this step.</p>;
+
 function LiveFrame({
   api,
   sessionId,
@@ -77,7 +79,7 @@ function LiveFrame({
       releaseThumbnail(api, sessionId, frameId);
     };
   }, [api, sessionId, frameId]);
-  if (!frameId) return <p className="activity-detail-note">No screenshot for this step.</p>;
+  if (!frameId) return <NoScreenshot />;
   const crop = frameCrop(row.target, scale);
   const url = image?.frameId === frameId ? image.url : undefined;
   return (
@@ -129,27 +131,36 @@ export function ActivityDetail({
   replay: boolean;
 }) {
   const { row } = entry;
-  if (row.kind === "key") return null;
-  const own = changes.filter((change) => change.type === "file" && change.step === row.id);
-  const agent = row.agent;
+  const detail = stepDetail(entry, changes);
+  if (row.kind === "key" || !detail) return null;
+  const { computer, agent } = row;
+  const { action, note, changes: own } = detail;
   return (
     <div className="activity-detail">
-      {agent?.note && (agent.status === "ok" || !agent.status) && (
+      {action && (
+        <p className="activity-detail-action">
+          {action.code ? <code>{action.text}</code> : action.text}
+        </p>
+      )}
+      {note && (
         <div className="activity-detail-note">
-          <SafeMarkdown text={agent.note} compact />
+          <SafeMarkdown text={note} compact />
         </div>
       )}
-      {row.computer &&
+      {computer &&
+        detail.frame &&
         (replay ? (
-          <div className="activity-frame" data-loaded="">
-            <ReplayImage api={api} sessionId={sessionId} frameId={row.computer.frameId ?? null} />
-          </div>
+          computer.frameId ? (
+            <div className="activity-frame" data-loaded="">
+              <ReplayImage api={api} sessionId={sessionId} frameId={computer.frameId} />
+            </div>
+          ) : (
+            <NoScreenshot />
+          )
         ) : (
-          <LiveFrame api={api} sessionId={sessionId} row={row.computer} scale={scale} />
+          <LiveFrame api={api} sessionId={sessionId} row={computer} scale={scale} />
         ))}
-      {agent && (agent.tool || agent.terminal || agent.outputTruncated) && (
-        <TerminalViewer step={agent} />
-      )}
+      {agent && detail.output && <TerminalViewer step={agent} />}
       {own.map((change) => (
         <DiffViewer key={change.id} change={change} compact={own.length === 1} />
       ))}

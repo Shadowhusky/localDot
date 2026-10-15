@@ -48,6 +48,46 @@ it("distinguishes absent skill directories from unavailable computers", async ()
   expect(unavailable.ok).toBe(false);
   expect(unavailable.fileError).toBeUndefined();
 });
+it("ends a missing path's step with why it failed", async () => {
+  const h = setup();
+  const desktop = h.tools.desktop(h.session.cellId);
+  if (!desktop) throw new Error("Missing fixture desktop");
+  h.tools.desktop = () => ({
+    ...desktop,
+    listDir: async () => {
+      throw new DesktopdError(404, "missing", "/files/list");
+    },
+  });
+  await h.call("files", { op: "list", path: "~/Projects/old" });
+  expect(h.events().find((e) => e.type === "step.end")?.data).toEqual({
+    status: "failed",
+    note: "The file or folder does not exist.",
+  });
+});
+it("shows in its step what dot read, clipped and redacted", async () => {
+  const h = setup();
+  h.desktop.files.set("~/notes.md", `Groceries ${PROXY_TOKEN}\n${"x".repeat(9000)}`);
+  await h.call("files", { op: "read", path: "~/notes.md" });
+  const output = h.events().filter((e) => e.type === "tool.output");
+  expect(output).toHaveLength(1);
+  const chunk = (output[0]?.data as { chunk?: string } | undefined)?.chunk ?? "";
+  expect(chunk).toContain("Groceries [redacted]\n");
+  expect(chunk).not.toContain(PROXY_TOKEN);
+  expect(chunk.length).toBeLessThanOrEqual(4100);
+});
+it("keeps the harness's own skill reads out of Activity", async () => {
+  const h = setup();
+  h.desktop.files.set("~/.skills/pdf-tools/SKILL.md", "# PDF tools");
+  const read = await h.call(
+    "files",
+    { op: "read", path: "~/.skills/pdf-tools/SKILL.md" },
+    "skill-1",
+  );
+  expect(read.body.ok).toBe(true);
+  expect(
+    h.events().filter((e) => e.type.startsWith("step.") || e.type.startsWith("tool.")),
+  ).toEqual([]);
+});
 it("shows the model a picture it reads, as a JPEG no larger than it can use", async () => {
   const h = setup();
   const desktop = h.tools.desktop(h.session.cellId);
@@ -84,6 +124,53 @@ it("shows the model a picture it reads, as a JPEG no larger than it can use", as
   ).metadata();
   expect(meta.format).toBe("jpeg");
   expect([meta.width, meta.height]).toEqual([1568, 1045]);
+});
+it("shows the model no picture but a PNG, JPEG, GIF or WebP, whatever the file is called", async () => {
+  const h = setup();
+  const desktop = h.tools.desktop(h.session.cellId);
+  if (!desktop) throw new Error("Missing fixture desktop");
+  const canvas = () =>
+    sharp({ create: { width: 40, height: 30, channels: 3, background: "#000" } });
+  const tiff = await canvas().tiff().toBuffer();
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"/>');
+  const fetched: string[] = [];
+  const read = async (path: string, bytes: Buffer) => {
+    h.tools.desktop = () => ({
+      ...desktop,
+      readFile: async () => ({
+        path,
+        content: "",
+        bytes: bytes.length,
+        truncated: true,
+        binary: true,
+      }),
+      fetchFile: async (asked: string) => {
+        fetched.push(asked);
+        return new ReadableStream({
+          start(c) {
+            c.enqueue(bytes);
+            c.close();
+          },
+        });
+      },
+    });
+    return ToolResult.parse((await h.call("files", { op: "read", path })).body);
+  };
+  for (const path of ["~/scan.tiff", "~/photo.heic", "~/photo.heif", "~/photo.avif", "~/icon.bmp"])
+    expect(
+      (await read(path, tiff)).content.map((c) => c.type),
+      path,
+    ).toEqual(["text"]);
+  expect(fetched).toEqual([]);
+  for (const [path, bytes] of [
+    ["~/scan.png", tiff],
+    ["~/logo.png", svg],
+    ["~/logo.webp", svg],
+  ] as const)
+    expect(
+      (await read(path, bytes)).content.map((c) => c.type),
+      path,
+    ).toEqual(["text"]);
 });
 it("leaves a binary file that is not a picture as a note", async () => {
   const h = setup();
