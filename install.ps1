@@ -12,11 +12,17 @@ irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1 | ie
 
 .EXAMPLE
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1))) -Tailscale
+
+.EXAMPLE
+./install.ps1 -Prefix '~/apps/localdot' -HomeDir '~/localdot data'
 #>
 [CmdletBinding()]
 param(
   [string]$Distro = "Ubuntu",
   [string]$Ref,
+  # Where install.sh puts the app and your data inside Linux (its --prefix and --home).
+  [string]$Prefix,
+  [string]$HomeDir,
   [switch]$Tailscale,
   [switch]$Uninstall,
   [switch]$InstallPrerequisites,
@@ -48,7 +54,7 @@ function Write-SetupResume {
   } else {
     Receive-SetupFile 'https://raw.githubusercontent.com/Shadowhusky/localdot/main/install.ps1' $saved
   }
-  @{ Distro = $Distro; Ref = $Ref; Tailscale = [bool]$Tailscale; InstallPrerequisites = [bool]$InstallPrerequisites; NoPrerequisites = [bool]$NoPrerequisites; Resume = $true } |
+  @{ Distro = $Distro; Ref = $Ref; Prefix = $Prefix; HomeDir = $HomeDir; Tailscale = [bool]$Tailscale; InstallPrerequisites = [bool]$InstallPrerequisites; NoPrerequisites = [bool]$NoPrerequisites; Resume = $true } |
     ConvertTo-Json | Set-Content (Join-Path $SetupDirectory 'options.json') -Encoding UTF8
   $runner = Join-Path $SetupDirectory 'resume.ps1'
   @'
@@ -451,6 +457,16 @@ function Install-Distro {
   }
 }
 
+# A Windows folder such as D:\localDot becomes the path Linux sees (/mnt/d/localDot), and
+# install.sh checks that its drive keeps Linux file permissions. Linux paths pass as given.
+function ConvertTo-LinuxPath([string]$Path) {
+  if ($Path -notmatch '^([A-Za-z]:[\\/]|\\\\)') { return $Path }
+  $result = Invoke-Wsl -d $Distro --exec wslpath -a -u $Path
+  $linux = @($result.Text -split "`r?`n")[-1].Trim()
+  if ($result.Code -ne 0 -or -not $linux.StartsWith('/')) { throw "Couldn't find $Path inside ${Distro}: $($result.Text)" }
+  $linux
+}
+
 # A new private file in the Linux user's home, which no other user of the distro can swap.
 function Invoke-Installer([string[]]$Options) {
   $made = Invoke-Wsl -d $Distro --cd "~" --exec mktemp .localdot-install.XXXXXX
@@ -607,6 +623,8 @@ function Install-LocalDot {
   if (-not (Initialize-Distro)) { return }
   $options = @()
   if ($Ref) { $options += "--ref", $Ref }
+  if ($Prefix) { $options += "--prefix", (ConvertTo-LinuxPath $Prefix) }
+  if ($HomeDir) { $options += "--home", (ConvertTo-LinuxPath $HomeDir) }
   if ($Tailscale) { $options += "--tailscale" }
   if ($Uninstall) {
     Invoke-Installer (@("--uninstall") + $options)

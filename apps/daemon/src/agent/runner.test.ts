@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CodexLaunchError, prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { CAREFUL_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, type KeydRecord, PERSONAS, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -188,6 +188,52 @@ function setup(idleMs = 60_000) {
     },
   };
 }
+
+describe("scoped conversation release", () => {
+  it.each(["running", "manual"] as const)(
+    "releases the idle current task without touching another computer's %s session",
+    async (kind) => {
+      const f = setup();
+      const originalCell = f.deps.cell;
+      const otherCell = ulid();
+      f.deps.cell = (id) => {
+        const original = originalCell(id === otherCell ? f.cellId : id);
+        return original && { ...original, id };
+      };
+      const current = await f.runner.start(f.cellId, "Finished current conversation");
+      await until(() => current.status === "idle");
+      let other: AgentSession;
+      if (kind === "manual") {
+        const held = await f.runner.hold(otherCell);
+        const heldSession = f.runner.get(held.sessionId);
+        if (!heldSession) throw new Error("missing held session");
+        other = heldSession;
+        await until(() => other.manualControl === "ready");
+      } else {
+        f.run.mockImplementationOnce(async (session) => {
+          session.setStatus("running");
+          await abortable(new Promise<never>(() => {}), session.abort.signal);
+          return 0;
+        });
+        other = await f.runner.start(otherCell, "Other computer work");
+        await until(() => other.status === "running");
+      }
+      await f.runner.release(undefined, current.id);
+      expect(f.live.get(f.cellId)).toBeUndefined();
+      expect(f.live.get(otherCell)).toBe(other.id);
+      expect(other.stopped).toBe(false);
+      if (kind === "manual") expect(other.controlHeld).toBe(true);
+      await f.runner.release(undefined, null);
+      expect(other.stopped).toBe(false);
+      await expect(f.runner.release(undefined, other.id)).rejects.toThrow(
+        kind === "manual"
+          ? "Hand back the computer first."
+          : "Finish or stop the current task first.",
+      );
+      expect(f.containment).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("the user's own hold on the computer", () => {
   it("Stop ends a running task, waits for retirement, and frees the computer for a new task", async () => {
@@ -1329,6 +1375,19 @@ describe("ChatGPT runner lifecycle", () => {
     await f.live.settled(s.id);
     expect(f.ended).toHaveBeenCalledExactlyOnceWith(s.id);
   });
+  it("works the task as the chosen dot: its skills and its role", async () => {
+    const f = setup();
+    f.setSettings({ main: { provider: "chatgpt", model: "gpt-6-astra" }, persona: "coder" });
+    const s = await f.runner.start(f.cellId, "Fix the failing test");
+    await until(() => s.status === "idle");
+    expect(f.installSkills).toHaveBeenCalledWith(f.cellId, expect.any(AbortSignal), "coder");
+    expect(f.runner.roleOf(s.id)).toBe(PERSONAS.coder.guidance);
+    f.setSettings({ main: { provider: "chatgpt", model: "gpt-6-astra" }, persona: "video" });
+    // A dot chosen mid-task is for the next task.
+    expect(f.runner.roleOf(s.id)).toBe(PERSONAS.coder.guidance);
+    s.stop();
+    await f.live.settled(s.id);
+  });
   it.each(["signed_out", "expired"] as const)("refuses start while %s", async (state) => {
     const f = setup();
     f.setStatus({ available: true, state, codexVersion: "0.154.0" });
@@ -1534,6 +1593,87 @@ describe("ChatGPT runner lifecycle", () => {
     unchecked.taint.add("files", "~/notes.txt", "Account 4417-1234-5678");
     expect((await unchecked.purpose?.check(leak, signal))?.allow).toBe(true);
     expect(off.secrets).not.toHaveBeenCalled();
+    off.deps.jev = ask;
+    off.secrets.mockResolvedValue([jev]);
+    ask.mockClear();
+    expect(
+      await unchecked.autoPermit?.(
+        { tool: "browser", operation: "read", actionClass: "unknown", input: {} },
+        signal,
+      ),
+    ).toBe(false);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("asks Jev the local-change question for a deletion inside the computer", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const f = setup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.95, unclear: 0.05 } } },
+    }));
+    f.deps.jev = ask;
+    f.secrets.mockResolvedValue([jev]);
+    const session = await f.runner.start(f.cellId, "Render the promo film");
+    await until(() => session.status === "idle");
+    const allowed = await session.autoPermit?.(
+      {
+        tool: "shell",
+        operation: "shell",
+        actionClass: "delete",
+        local: true,
+        input: { command: "cd /config/promo && rm -rf frames_prev" },
+      },
+      new AbortController().signal,
+    );
+    expect(allowed).toBe(true);
+    const body = ask.mock.calls[0]?.[1] as {
+      questions: { fits: { instructions: { question: string } } };
+    };
+    expect(body.questions.fits.instructions.question).toMatch(
+      /inside the task's isolated computer/,
+    );
+  });
+
+  it("asks Jev once for an action it already answered in this task", async () => {
+    const at = "2026-10-03T00:00:00Z";
+    const jev: KeydRecord = {
+      id: "jev",
+      kind: "http",
+      hosts: ["api.typesafe.ai"],
+      header: "Authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const f = setup();
+    const ask = vi.fn(async (_secretId: string, _body: unknown, _signal: AbortSignal) => ({
+      answers: { fits: { type: "choice", probabilities: { needed: 0.95, unclear: 0.05 } } },
+    }));
+    f.deps.jev = ask;
+    f.secrets.mockResolvedValue([jev]);
+    const session = await f.runner.start(f.cellId, "Render the promo film");
+    await until(() => session.status === "idle");
+    const action = (command: string) => ({
+      tool: "shell" as const,
+      operation: "shell" as const,
+      actionClass: "computer" as const,
+      input: { command },
+    });
+    const signal = new AbortController().signal;
+    expect(await session.autoPermit?.(action("npm test"), signal)).toBe(true);
+    expect(await session.autoPermit?.(action("npm test"), signal)).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(await session.autoPermit?.(action("npm run build"), signal)).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(2);
   });
 
   it("asks where data goes when the saved keys can't be read, instead of not checking", async () => {

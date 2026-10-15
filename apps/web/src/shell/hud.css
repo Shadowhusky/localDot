@@ -340,6 +340,19 @@
   }
 }
 
+/* A phone's New conversation, level with the island in the strip over the picture. */
+.island-new {
+  position: absolute;
+  top: calc(var(--_lower, 0px) - var(--island-h) - var(--island-gap));
+  right: 0;
+  z-index: var(--layer-island);
+  display: flex;
+}
+
+.app[data-full] .island-new {
+  display: none;
+}
+
 /* Focus mode (design-v2 §8.5): the island becomes a status pill over the picture, its controls in the
    margin instead. It fades after a still moment and comes back at a touch, or at once when dot needs
    the user. */

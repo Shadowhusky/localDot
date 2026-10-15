@@ -8,6 +8,7 @@ const FRESH: SetupInput = {
   modelReady: false,
   model: null,
   permissions: null,
+  persona: null,
   computer: false,
 };
 
@@ -20,6 +21,7 @@ describe("setup steps", () => {
       "Key",
       "Model",
       "Permissions",
+      "Your dot",
     ]);
     expect(steps.find((step) => step.id === "model")?.detail).toBe("Needed to start");
   });

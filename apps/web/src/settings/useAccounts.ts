@@ -22,7 +22,11 @@ export interface AccountsView {
 
 function phaseOf(error: unknown): AccountsPhase {
   if (error instanceof ApiError)
-    return error.status === 409 ? "off" : error.status === 503 ? "starting" : "error";
+    return error.status === 409
+      ? "off"
+      : error.status === 502 || error.status === 503
+        ? "starting"
+        : "error";
   return error instanceof DOMException ? "starting" : "error";
 }
 

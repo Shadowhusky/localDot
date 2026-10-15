@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual as equal } from "node:util";
 import { z } from "zod";
 import { type DockerClient, DockerError } from "./docker.ts";
+import { mergedStatusEntry, PACKAGE_STATUS, READ_PACKAGE_STATUS } from "./package-status.ts";
 import {
   ARCHIVE_SYSTEM,
   Manifest,
@@ -10,7 +12,7 @@ import {
   SystemBaseMissing,
   verifyMigration,
 } from "./system-migration-plan.ts";
-import { ComputerSystemState, snapshotOf } from "./system-state.ts";
+import { BLANK_CREDENTIALS, ComputerSystemState, snapshotOf } from "./system-state.ts";
 import { tar } from "./tar.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -54,8 +56,7 @@ export class SystemMigration {
     });
     if (
       source.Id !== sourceId ||
-      (stopped && source.State.Running) ||
-      source.State.Paused ||
+      (stopped && (source.State.Running || source.State.Paused)) ||
       source.Config.Labels?.["localdot.cell"] !== record.id ||
       source.Config.Labels?.["localdot.role"] !== "desktop"
     )
@@ -116,26 +117,60 @@ export class SystemMigration {
         repo: "localdot/update-backup",
         tag: operation,
       },
+      body: { Env: BLANK_CREDENTIALS },
     });
     imageId.parse(checkpoint.Id);
     try {
       const original = await scan(base);
       const fresh = await scan(target);
       const saved = await scan(checkpoint.Id);
-      const plan = migrationPlan(original.manifest, fresh.manifest, saved.manifest);
+      const before = { ...original.manifest },
+        after = { ...fresh.manifest };
+      const oldStatus = before[PACKAGE_STATUS],
+        newStatus = after[PACKAGE_STATUS],
+        savedStatus = saved.manifest[PACKAGE_STATUS];
+      let mergedStatus: ReturnType<typeof mergedStatusEntry> | undefined;
+      if (
+        oldStatus &&
+        newStatus &&
+        savedStatus &&
+        !equal(oldStatus, newStatus) &&
+        !equal(oldStatus, savedStatus) &&
+        !equal(newStatus, savedStatus)
+      ) {
+        const texts: string[] = [];
+        for (const image of [base, target, checkpoint.Id])
+          texts.push(
+            z
+              .string()
+              .parse(
+                JSON.parse((await run(await helper(image, READ_PACKAGE_STATUS))).toString("utf8")),
+              ),
+          );
+        mergedStatus = mergedStatusEntry(
+          [oldStatus, newStatus, savedStatus],
+          texts as [string, string, string],
+        );
+        before[PACKAGE_STATUS] = savedStatus;
+        after[PACKAGE_STATUS] = mergedStatus.entry;
+      }
+      const plan = migrationPlan(before, after, saved.manifest);
       const clone = await helper(
         checkpoint.Id,
         PREPARE_SYSTEM,
         JSON.stringify({
           remove: plan.remove,
-          directories: plan.directories.map((p) => [p, fresh.manifest[p]]),
+          directories: plan.directories.map((p) => [p, after[p]]),
+          packageStatus:
+            mergedStatus && plan.copy.includes(PACKAGE_STATUS) ? mergedStatus : undefined,
         }),
         false,
       );
       await run(clone);
       // Batch exact files into one archive; never copy a parent tree over user additions.
-      if (plan.copy.length) {
-        const exporter = await helper(target, ARCHIVE_SYSTEM, JSON.stringify(plan.copy), false);
+      const copy = plan.copy.filter((path) => !mergedStatus || path !== PACKAGE_STATUS);
+      if (copy.length) {
+        const exporter = await helper(target, ARCHIVE_SYSTEM, JSON.stringify(copy), false);
         await run(exporter);
         const envelope = await this.docker.request<Buffer>({
           method: "GET",
@@ -164,6 +199,12 @@ export class SystemMigration {
         },
         body: {
           ...image.Config,
+          Env: [
+            ...((image.Config.Env as string[] | undefined) ?? []).filter(
+              (entry) => !BLANK_CREDENTIALS.some((blank) => entry.startsWith(blank)),
+            ),
+            ...BLANK_CREDENTIALS,
+          ],
           Labels: {
             ...((image.Config.Labels as Record<string, string>) ?? {}),
             [SYSTEM_BASE]: target,
@@ -175,7 +216,7 @@ export class SystemMigration {
         },
       });
       const result = imageId.parse(committed.Id);
-      verifyMigration(saved.manifest, fresh.manifest, (await scan(result)).manifest, plan);
+      verifyMigration(saved.manifest, after, (await scan(result)).manifest, plan);
       return result;
     } finally {
       for (const id of helpers.reverse()) {

@@ -172,3 +172,15 @@ it("says when the pointer is over the band", () => {
   fireEvent.pointerLeave(narrator);
   expect(onHover).toHaveBeenLastCalledWith(false);
 });
+
+it("opens what changes dot when dot is pressed, and only while dot shows", () => {
+  const onPress = vi.fn();
+  const dot = { label: "Change your dot, now Coder", open: false, onPress };
+  const band = render(<NarratorBand line="" speaker="dot" showDot dot={dot} />);
+  const button = screen.getByRole("button", { name: "Change your dot, now Coder" });
+  expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+  fireEvent.click(button);
+  expect(onPress).toHaveBeenCalledWith(button);
+  band.rerender(<NarratorBand line="" speaker="dot" showDot={false} dot={dot} />);
+  expect(screen.queryByRole("button", { name: /Change your dot/ })).toBeNull();
+});

@@ -39,7 +39,12 @@ export interface Place {
   readonly destination?: string;
   // A connected app's tool: only a yes for that tool, in this task, covers it.
   readonly tool?: string;
+  // A deletion inside the computer, which reaches no online data: one Auto's judge may approve, or
+  // a sweeping one it never may.
+  readonly inside?: "local" | "sweeping";
 }
+// A card's own option as the user chose it, with where the step acted for a yes for this task.
+export type PlacedOption = AlwaysOption & { readonly place?: Place };
 
 const Rule = AutonomyRule.refine((rule) => ALWAYS_SCOPES[rule.actionClass].includes(rule.scope));
 const RulesFile = z

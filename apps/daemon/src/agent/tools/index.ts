@@ -29,7 +29,7 @@ import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
 import { connectorFacts, connectorTool } from "./connector.ts";
-import { append, fail, intentOf, type ToolCallContext, type ToolDeps } from "./deps.ts";
+import { append, fail, intentOf, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { findTool } from "./find.ts";
@@ -475,9 +475,22 @@ async function dispatchAdmitted(
       case "people":
         result = await peopleTool(t, ctx, input);
         break;
-      case "done":
-        result = await doneTool(t, ctx, input);
+      case "done": {
+        // A lesson is memory too: like remember's facts, none is kept from untrusted content.
+        const dropped = session.tainted && !!(frozen as DoneInput).experience;
+        result = await doneTool(dropped ? { ...t, saveExperience: undefined } : t, ctx, input);
+        if (dropped && result.final)
+          result = {
+            ...result,
+            content: [
+              ...result.content,
+              text(
+                "The lesson was not saved: this task read content from outside the user's own words.",
+              ),
+            ],
+          };
         break;
+      }
       case "routine":
         result = await routineTool(t, ctx, input);
         break;
@@ -640,7 +653,11 @@ async function dispatchConnector(
     tool: entry.exposed,
     input: frozen,
     target: null,
-    facts: connectorFacts(entry, access.actionClass),
+    facts: connectorFacts(
+      entry,
+      access.actionClass,
+      access.from === "you" && access.access === "write",
+    ),
     revalidate: async () => {
       ctx.check();
       return hub.access(entry) !== undefined;

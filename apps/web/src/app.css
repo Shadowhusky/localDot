@@ -196,6 +196,13 @@
     right: 0;
   }
 
+  /* Keep the toolbar's original space so focusing never moves the thread or live steps. */
+  .app[data-composer-keyboard] .thread-dock::after {
+    content: "";
+    flex: none;
+    height: var(--_composer-rest-height, 0px);
+  }
+
   .app[data-composer-keyboard] .thread-toolbar {
     position: fixed;
     z-index: 20;

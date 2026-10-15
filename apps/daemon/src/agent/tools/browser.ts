@@ -98,7 +98,7 @@ export async function browserReadTool(
   const source = sourceLine(ctx.session.research, ctx.redact(page.url), ctx.redact(page.title));
   if (source.refused) {
     append(ctx, "tool.end", { ok: false });
-    append(ctx, "step.end", { status: "blocked" });
+    append(ctx, "step.end", { status: "blocked", note: source.note });
     return fail(source.refused);
   }
   append(ctx, "tool.end", { ok: true });
@@ -270,7 +270,11 @@ export async function browserNavigateTool(
           "navigation result",
           ctx.redact(
             download
-              ? `Download started from ${url.href}. The current page remains open. Downloads wait in Activity > Downloads for the user to Review before they reach the computer.`
+              ? `Download started from ${url.href}. The current page remains open. ${
+                  ctx.session.permissionMode() === "full"
+                    ? "Once it finishes it reaches ~/Downloads on the computer by itself; if it doesn't, it waits in Activity > Downloads for the user to Review."
+                    : "Downloads wait in Activity > Downloads for the user to Review before they reach the computer."
+                }`
               : `${result.loaded ? "Opened" : "Page not verified"}: ${result.title} (${result.url})`,
           ),
         ),

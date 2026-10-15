@@ -24,6 +24,7 @@ import {
   internalNetworkSpec,
 } from "./spec.ts";
 import { CellStore } from "./store.ts";
+import { SystemMigration } from "./system-migration.ts";
 import { DOCKER_TESTS, docker, dockerExec } from "./testing/docker-cli.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -35,11 +36,16 @@ const tag = (role: (typeof ROLES)[number], build: string) => `localdot/${role}:l
 const images = { desktop: tag("desktop", "cur"), gate: tag("gate", "cur") };
 const PROOF = "/config/l9-update-proof.txt";
 
-// Two builds of each image that differ only in a label: a rebuild under the same tag.
+// The new desktop and the user independently install the same package; the user
+// also installs another app. The shared package database must retain both records.
 function buildImages(): void {
   for (const role of ROLES)
     for (const build of ["a", "b"]) {
-      const dockerfile = `FROM localdot/${role}:dev\nLABEL dev.localdot.test=l9 dev.localdot.l9.build=${build}\n`;
+      const packageChange =
+        role === "desktop" && build === "b"
+          ? "RUN printf '\\nPackage: localdot-test-shared\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\n' >> /var/lib/dpkg/status\n"
+          : "";
+      const dockerfile = `FROM localdot/${role}:dev\n${packageChange}LABEL dev.localdot.test=l9 dev.localdot.l9.build=${build}\n`;
       const made = spawnSync("docker", ["build", "-q", "-t", tag(role, build), "-"], {
         input: dockerfile,
         encoding: "utf8",
@@ -152,7 +158,15 @@ describe.skipIf(!DOCKER_TESTS)("Update computer against Docker Desktop", () => {
     keyd = await startKeyd();
     const client = new DockerClient();
     store = new CellStore(home, TEST_KEYD_PORTS);
-    updates = new ComputerUpdates({ home, docker: client, images, stream: { fullcolor: false } });
+    const migration = new SystemMigration(client, home);
+    updates = new ComputerUpdates({
+      home,
+      docker: client,
+      images,
+      stream: { fullcolor: false },
+      preflightSystem: (record, target) => migration.preflight(record, target),
+      migrateSystem: (record, target) => migration.prepare(record, target),
+    });
     orchestrator = new CellOrchestrator({
       docker: client,
       keyd: new CellKeydWiring({ keyd: new KeydClient(keyd.socketPath), docker: client }),
@@ -183,12 +197,22 @@ describe.skipIf(!DOCKER_TESTS)("Update computer against Docker Desktop", () => {
     await ready;
     const desktop = record.docker.desktop;
     expect(dockerExec(desktop, "sh", "-c", `echo kept > ${PROOF}`).status).toBe(0);
+    expect(
+      dockerExec(
+        desktop,
+        "sh",
+        "-c",
+        "printf '\\nPackage: localdot-test-shared\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\nPackage: localdot-test-user-app\\nStatus: install ok installed\\nArchitecture: all\\nVersion: 1\\n\\n' >> /var/lib/dpkg/status",
+      ).status,
+    ).toBe(0);
     expect(await updates.check(record)).toBe(false);
 
     for (const role of ROLES) docker("tag", tag(role, "b"), tag(role, "cur"));
     expect(await updates.check(record)).toBe(true);
     expect(running.get(id)?.updateAvailable).toBe(true);
 
+    await running.pause(id);
+    expect(docker("inspect", "-f", "{{.State.Paused}}", desktop)).toBe("true");
     const updated = readyAgain(id);
     await running.update(id);
     await updated;
@@ -196,15 +220,27 @@ describe.skipIf(!DOCKER_TESTS)("Update computer against Docker Desktop", () => {
     const next = store.get(id) as CellRecord;
     for (const role of ROLES) {
       expect(next.ownership?.[role]).not.toBe(record.ownership?.[role]);
-      expect(docker("inspect", "-f", "{{.Image}}", record.docker[role])).toBe(
-        imageId(tag(role, "b")),
-      );
+      const actualImage = docker("inspect", "-f", "{{.Image}}", record.docker[role]);
+      if (role === "desktop")
+        expect(
+          docker(
+            "image",
+            "inspect",
+            "-f",
+            '{{index .Config.Labels "localdot.system-base"}}',
+            actualImage,
+          ),
+        ).toBe(imageId(tag(role, "b")));
+      else expect(actualImage).toBe(imageId(tag(role, "b")));
       expect(spawnSync("docker", ["inspect", record.ownership?.[role] ?? ""]).status).not.toBe(0);
     }
     expect(docker("inspect", "-f", "{{range .Mounts}}{{.Name}} {{end}}", desktop).trim()).toBe(
       record.docker.homeVolume,
     );
     expect(dockerExec(desktop, "cat", PROOF).out.trim()).toBe("kept");
+    const status = dockerExec(desktop, "cat", "/var/lib/dpkg/status").out;
+    expect(status.match(/Package: localdot-test-shared/g)).toHaveLength(1);
+    expect(status).toContain("Package: localdot-test-user-app");
     expect(running.get(id)).not.toHaveProperty("updateAvailable");
   });
 });

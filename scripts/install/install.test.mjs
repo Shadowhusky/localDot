@@ -7,12 +7,12 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -39,6 +39,7 @@ const REAL = [
   "grep",
   "gzip",
   "head",
+  "iconv",
   "id",
   "ln",
   "ls",
@@ -121,10 +122,18 @@ function makeOrigin(root) {
   return origin;
 }
 
-async function makeHost({ os = "linux", machine, release, prefix: within } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "localdot-install-"));
+async function makeHost({
+  os = "linux",
+  machine,
+  release,
+  prefix: within,
+  homeName = "home",
+} = {}) {
+  // A short, real path: the installer records real paths, and refuses a data folder too long for
+  // the sockets kept in it.
+  const root = mkdtempSync(join(realpathSync("/tmp"), "ld-"));
   roots.push(root);
-  const home = join(root, "home");
+  const home = join(root, homeName);
   const stubs = join(root, "stubs");
   const real = join(root, "real");
   const state = join(root, "state");
@@ -271,6 +280,7 @@ chmod 755 "$out"`,
     downloads,
     unit: (name) => join(home, ".config/systemd/user", name),
     plist: (label) => join(home, "Library/LaunchAgents", `${label}.plist`),
+    location: join(home, ".config/localdot/install-location"),
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean),
     clearCalls: () => writeFileSync(log, ""),
     run(args = [], extra = {}) {
@@ -310,6 +320,39 @@ function runBash(args, env, shell = "/bin/bash") {
     });
     child.once("error", reject);
     child.once("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+const python = which("python3");
+
+// In a pseudo-terminal, as someone runs the installer: it reads their answers from /dev/tty.
+function runInTerminal(host, args, answers) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      python,
+      [
+        "-c",
+        "import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)",
+        "/bin/bash",
+        installer,
+        "--repo",
+        host.origin,
+        "--port",
+        String(host.port),
+        ...args,
+      ],
+      { env: host.env, cwd: host.home, detached: true, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ code, output: output.replaceAll("\r\n", "\n") }));
+    child.stdin.end(answers);
   });
 }
 
@@ -1019,11 +1062,322 @@ describe.concurrent("the install folder", { timeout: 60_000 }, () => {
   });
 });
 
+describe.concurrent("choosing where to install", { timeout: 60_000 }, () => {
+  const xml = (text) =>
+    text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+  it("installs for a user whose home folder has a space and an apostrophe", async () => {
+    const host = await makeHost({ homeName: "Husky's home" });
+    const result = await host.run();
+    expect(result.code, result.stderr).toBe(0);
+    const data = join(host.home, ".localdot");
+    expect(readFileSync(host.unit("localdot-keyd.service"), "utf8")).toContain(
+      `ExecStart="${host.prefix}/bin/keyd" "-home" "${data}"\n`,
+    );
+    const daemon = readFileSync(host.unit("localdot-daemon.service"), "utf8");
+    expect(daemon).toContain(`WorkingDirectory=${host.prefix}/app/apps/daemon\n`);
+    expect(daemon).toContain(`Environment="HOME=${host.home}"\n`);
+    expect(daemon).toContain(`Environment="LOCALDOT_INSTALL_PREFIX=${host.prefix}"\n`);
+    expect(daemon).toContain(`StandardOutput=append:${data}/logs/daemon.log\n`);
+    const loginPath = execFileSync(
+      "/bin/bash",
+      ["--noprofile", "--norc", "-c", 'source "$HOME/.profile"; command -v localdot'],
+      { env: { HOME: host.home, PATH: "/usr/bin:/bin" }, encoding: "utf8" },
+    ).trim();
+    expect(loginPath).toBe(join(host.home, ".local/bin/localdot"));
+    const doctor = await host.command(["doctor"]);
+    expect(doctor.code, doctor.stderr).toBe(0);
+    expect(doctor.stdout).toContain(`localDot is installed in ${host.prefix}`);
+  });
+
+  it("escapes chosen folders in LaunchAgents, the command and the commands it prints", async () => {
+    const host = await makeHost({ os: "macos", prefix: "Husky's SSD 4T/localDot" });
+    const data = join(host.home, "Husky's SSD 4T", "dot & <data>");
+    const result = await host.run(["--prefix", host.prefix, "--home", data]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(readFileSync(host.plist("dev.localdot.keyd"), "utf8")).toContain(
+      `<string>${host.prefix}/bin/keyd</string>\n    <string>-home</string>\n    <string>${xml(data)}</string>`,
+    );
+    const daemon = host.plist("dev.localdot.daemon");
+    expect(readFileSync(daemon, "utf8")).toContain(
+      `<key>LOCALDOT_HOME</key><string>${xml(data)}</string>`,
+    );
+    const plutil = which("plutil");
+    if (plutil) {
+      const parsed = JSON.parse(
+        execFileSync(plutil, ["-convert", "json", "-o", "-", daemon], { encoding: "utf8" }),
+      );
+      expect(parsed.EnvironmentVariables.LOCALDOT_HOME).toBe(data);
+      expect(parsed.EnvironmentVariables.LOCALDOT_INSTALL_PREFIX).toBe(host.prefix);
+      expect(parsed.WorkingDirectory).toBe(join(host.prefix, "app/apps/daemon"));
+      expect(parsed.StandardOutPath).toBe(join(data, "logs/daemon.log"));
+    }
+    const doctor = await host.command(["doctor"]);
+    expect(doctor.code, doctor.stderr).toBe(0);
+    expect(doctor.stdout).toContain(`localDot is installed in ${host.prefix}`);
+    const removed = await host.command(["uninstall"]);
+    expect(removed.code, removed.stderr).toBe(0);
+    expect(existsSync(host.prefix)).toBe(false);
+    expect(existsSync(join(data, "logs"))).toBe(true);
+    const printed = /to delete it too: rm -rf (.*)$/m.exec(removed.stdout)?.[1];
+    expect(execFileSync("/bin/sh", ["-c", `printf %s ${printed}`], { encoding: "utf8" })).toBe(
+      data,
+    );
+  });
+
+  it("records the real folders behind a symlink and ~", async () => {
+    const host = await makeHost({ prefix: "disk/localDot" });
+    symlinkSync(join(host.home, "disk"), join(host.home, "shortcut"));
+    const result = await host.run([
+      "--prefix",
+      join(host.home, "shortcut/localDot"),
+      "--home",
+      "~/shortcut/data",
+    ]);
+    expect(result.code, result.stderr).toBe(0);
+    const data = join(host.home, "disk/data");
+    expect(realpathSync(host.prefix)).toBe(host.prefix);
+    const daemon = readFileSync(host.unit("localdot-daemon.service"), "utf8");
+    expect(daemon).toContain(`Environment="LOCALDOT_INSTALL_PREFIX=${host.prefix}"\n`);
+    expect(daemon).toContain(`Environment="LOCALDOT_HOME=${data}"\n`);
+    expect(readFileSync(join(host.prefix, "install.env"), "utf8")).toContain(
+      `LOCALDOT_HOME="${data}"\n`,
+    );
+    expect(readFileSync(host.location, "utf8")).toBe(
+      `# Managed by localDot's install.sh\nLOCALDOT_PREFIX="${host.prefix}"\nLOCALDOT_HOME="${data}"\n`,
+    );
+  });
+
+  it("finds the chosen folders again on a bare rerun, an update and an uninstall", async () => {
+    const host = await makeHost({ prefix: "Husky's SSD 4T/localDot" });
+    const data = join(host.home, "Husky's SSD 4T/dot data");
+    expect((await host.run(["--prefix", host.prefix, "--home", data])).code).toBe(0);
+    host.commit("second");
+    // Like other recorded settings, the remembered folders win over the environment.
+    const again = await host.run([], {
+      LOCALDOT_PREFIX: join(host.home, "elsewhere"),
+      LOCALDOT_HOME: join(host.home, "other data"),
+    });
+    expect(again.code, again.stderr).toBe(0);
+    expect(existsSync(join(host.home, "elsewhere"))).toBe(false);
+    expect(existsSync(join(host.home, ".local/share/localdot"))).toBe(false);
+    const recorded = () => readFileSync(join(host.prefix, "install.env"), "utf8");
+    expect(recorded()).toContain(`LOCALDOT_COMMIT="${git(host.origin, "rev-parse", "HEAD")}"`);
+    expect(readFileSync(host.unit("localdot-daemon.service"), "utf8")).toContain(
+      `Environment="LOCALDOT_HOME=${data}"\n`,
+    );
+    host.commit("third");
+    expect((await host.command(["update"])).code).toBe(0);
+    expect(recorded()).toContain(`LOCALDOT_COMMIT="${git(host.origin, "rev-parse", "HEAD")}"`);
+    const removed = await host.run(["--uninstall"]);
+    expect(removed.code, removed.stderr).toBe(0);
+    expect(existsSync(host.prefix)).toBe(false);
+    expect(existsSync(host.location)).toBe(false);
+    expect(existsSync(join(data, "logs"))).toBe(true);
+    expect((await host.run(["--uninstall"])).stdout).toContain("isn't installed");
+  });
+
+  it("refuses to install a second copy in another folder, leaving the first", async () => {
+    const host = await makeHost({ prefix: "apps/localdot" });
+    expect((await host.run(["--prefix", host.prefix])).code).toBe(0);
+    host.clearCalls();
+    const other = join(host.home, "Husky's SSD 4T/localDot");
+    const result = await host.run(["--prefix", other]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`localDot is already installed in ${host.prefix}.`);
+    expect(result.stderr).toContain("localdot uninstall");
+    expect(result.stderr).toContain(`--prefix '${other.replaceAll("'", "'\\''")}'`);
+    expect(existsSync(other)).toBe(false);
+    expect(host.calls()).toEqual([]);
+    expect(readFileSync(host.unit("localdot-daemon.service"), "utf8")).toContain(
+      `LOCALDOT_INSTALL_PREFIX=${host.prefix}"`,
+    );
+  });
+
+  it("finds an install made before the location was remembered through its command", async () => {
+    const host = await makeHost({ prefix: "apps/localdot" });
+    expect((await host.run(["--prefix", host.prefix])).code).toBe(0);
+    rmSync(host.location);
+    host.commit("second");
+    const again = await host.run();
+    expect(again.code, again.stderr).toBe(0);
+    expect(existsSync(join(host.home, ".local/share/localdot"))).toBe(false);
+    expect(readFileSync(host.location, "utf8")).toContain(`LOCALDOT_PREFIX="${host.prefix}"\n`);
+  });
+
+  it("installs in the default folders without asking when there is no terminal", async () => {
+    const host = await makeHost();
+    const result = await host.run();
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).not.toContain("type another folder");
+    expect(readFileSync(host.location, "utf8")).toContain(
+      `LOCALDOT_PREFIX="${host.prefix}"\nLOCALDOT_HOME="${host.home}/.localdot"\n`,
+    );
+  });
+
+  it("stops when the data folder's disk is full, before building", async () => {
+    const host = await makeHost();
+    const data = join(host.home, "dot data");
+    mkdirSync(data);
+    script(
+      join(host.stubs, "df"),
+      `case "$*" in *"dot data"*) disk="datadisk 100 100 0 100% /data" ;; *) disk="appdisk 100 0 100 0% /" ;; esac
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\n%s\\n' "$disk"`,
+    );
+    const result = await host.run(["--home", data]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("The data folder's filesystem has no free space");
+    expect(host.calls().some((call) => /^(build |pnpm |go )/.test(call))).toBe(false);
+  });
+
+  it.each([
+    ["control characters", (h) => ["--home", join(h.home, "dot\ndata")], "control characters"],
+    ["a double quote", (h) => ["--prefix", join(h.home, 'say "dot"')], "double quotes"],
+    ["a colon in the install folder", (h) => ["--prefix", join(h.home, "a:b")], "a colon"],
+    ["your home folder", (h) => ["--prefix", h.home], "can't be your home folder itself"],
+    ["the filesystem root", () => ["--home", "/"], "can't be / itself"],
+    ["data the app replaces", (h) => ["--home", join(h.prefix, "app/data")], "upgrades replace"],
+    ["too long a data folder", (h) => ["--home", join(h.home, "d".repeat(50))], "too long"],
+  ])("refuses %s before doing anything", async (_, args, words) => {
+    const host = await makeHost();
+    const result = await host.run(args(host));
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(words);
+    expect(host.calls()).toEqual([]);
+    expect(existsSync(join(host.prefix, "app"))).toBe(false);
+    expect(existsSync(host.location)).toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("refuses a folder you can't write to", async () => {
+    const host = await makeHost();
+    const locked = join(host.home, "locked");
+    mkdirSync(locked);
+    chmodSync(locked, 0o555);
+    try {
+      const result = await host.run(["--prefix", join(locked, "localdot")]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(`you can't write to ${locked}`);
+      expect(host.calls()).toEqual([]);
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+  });
+
+  it("refuses a drive that doesn't keep file permissions", async () => {
+    const host = await makeHost();
+    script(join(host.stubs, "ls"), 'echo "drwxrwxrwx  2 dot  staff  64 Oct 15 10:00 $2"');
+    const result = await host.run(["--home", join(host.home, "usb/dot")]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("doesn't keep file permissions");
+    expect(host.calls()).toEqual([]);
+  });
+
+  it("reads a typed folder the way terminals paste or drop one in", async () => {
+    const host = await makeHost();
+    const typed = {
+      "/Volumes/Husky\\'s\\ SSD\\ 4T/localDot ": "/Volumes/Husky's SSD 4T/localDot",
+      "'/media/dot/Husky'\\''s SSD 4T/localDot' ": "/media/dot/Husky's SSD 4T/localDot",
+      '  "/Volumes/Husky\'s \\"SSD\\"/$HOME"': '/Volumes/Husky\'s "SSD"/$HOME',
+      "~/local dot": "~/local dot",
+    };
+    for (const [answer, folder] of Object.entries(typed)) {
+      const result = await runBash(
+        ["-c", 'source "$1"; typed_folder "$2"', "test", installer, answer],
+        host.env,
+      );
+      expect(result.stdout, answer).toBe(folder);
+    }
+  });
+
+  it.skipIf(!which("iconv"))("refuses a folder name that isn't UTF-8 text", async () => {
+    const host = await makeHost();
+    const result = await runBash(
+      ["-c", `source "$1"; check_path "The data folder" $'/tmp/dot\\xff'`, "test", installer],
+      host.env,
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("isn't valid UTF-8");
+  });
+});
+
+describe.concurrent("asking where to install", { timeout: 60_000 }, () => {
+  // No waiting for the key service, which the fixture never starts.
+  const quick = (host) => script(join(host.stubs, "sleep"), ":");
+
+  it.skipIf(!python)(
+    "installs in a folder dragged into the terminal, and remembers it",
+    async () => {
+      const host = await makeHost({ prefix: "Husky's SSD 4T/localDot" });
+      quick(host);
+      // Terminal escapes a dragged-in folder's spaces and quotes, and adds a space after it.
+      const result = await runInTerminal(host, [], "~/Husky\\'s\\ SSD\\ 4T/localDot \n");
+      expect(result.code, result.output).toBe(0);
+      expect(result.output).toContain(
+        "localDot will be installed in:\n  App   ~/.local/share/localdot\n  Data  ~/.localdot\n",
+      );
+      expect(result.output).toContain(
+        "Installing in ~/Husky's SSD 4T/localDot, with your data in ~/Husky's SSD 4T/localDot/data.",
+      );
+      const data = join(host.prefix, "data");
+      expect(readFileSync(host.unit("localdot-daemon.service"), "utf8")).toContain(
+        `Environment="LOCALDOT_HOME=${data}"\n`,
+      );
+      expect(readFileSync(host.location, "utf8")).toContain(
+        `LOCALDOT_PREFIX="${host.prefix}"\nLOCALDOT_HOME="${data}"\n`,
+      );
+      host.commit("second");
+      const again = await runInTerminal(host, [], "");
+      expect(again.code, again.output).toBe(0);
+      expect(again.output).not.toContain("type another folder");
+      expect(existsSync(join(host.home, ".local/share/localdot"))).toBe(false);
+    },
+  );
+
+  it.skipIf(!python)(
+    "asks again after a folder it can't use; Enter keeps the defaults",
+    async () => {
+      const host = await makeHost();
+      quick(host);
+      const documents = join(host.home, "Documents");
+      mkdirSync(documents);
+      writeFileSync(join(documents, "notes.txt"), "keep\n");
+      const result = await runInTerminal(host, [], "~/Documents\n\n");
+      expect(result.code, result.output).toBe(0);
+      expect(result.output).toContain(
+        "~/Documents already holds other files (such as notes.txt). localDot needs a folder of its own: choose a new or empty one, such as ~/Documents/localdot.",
+      );
+      expect(readFileSync(host.location, "utf8")).toContain(`LOCALDOT_PREFIX="${host.prefix}"\n`);
+      expect(readFileSync(join(documents, "notes.txt"), "utf8")).toBe("keep\n");
+      expect(existsSync(join(documents, "app"))).toBe(false);
+    },
+  );
+
+  it.skipIf(!python)("keeps existing data where it is when the app goes elsewhere", async () => {
+    const host = await makeHost({ prefix: "apps/localdot" });
+    quick(host);
+    mkdirSync(join(host.home, ".localdot"));
+    // A relative folder starts in the current folder.
+    const result = await runInTerminal(host, [], "apps/localdot\n");
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain("Your existing data stays in ~/.localdot.");
+    expect(readFileSync(host.unit("localdot-daemon.service"), "utf8")).toContain(
+      `Environment="LOCALDOT_HOME=${host.home}/.localdot"\n`,
+    );
+  });
+
+  it.skipIf(!python)("doesn't ask with --yes", async () => {
+    const host = await makeHost();
+    quick(host);
+    const result = await runInTerminal(host, ["--yes"], "");
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).not.toContain("type another folder");
+    expect(readFileSync(host.location, "utf8")).toContain(`LOCALDOT_PREFIX="${host.prefix}"\n`);
+  });
+});
+
 describe.concurrent("options it refuses before doing anything", { timeout: 60_000 }, () => {
   it.each([
     [["--home", "relative/data"], "must be an absolute path"],
-    [["--home", "/tmp/with space"], "has characters the services can't use"],
-    [["--prefix", "/tmp/a$b"], "has characters the services can't use"],
     [["--ref", "-upload-pack=x"], "--ref wants a branch, tag or commit name"],
     [["--ref", "main;reboot"], "--ref wants a branch, tag or commit name"],
     [["--repo", "--upload-pack=x"], "--repo wants a Git URL or path"],

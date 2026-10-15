@@ -1,0 +1,16 @@
+{
+  "recording": "complete",
+  "results": [
+    {
+      "resultId": "01M4ZBP1HPPVVG4RMQZVKY0S0D",
+      "frames": [
+        { "role": "start", "frameId": "01M4ZB29JM4PMAJ5EJP43NX7S9", "tMs": 1345 },
+        { "role": "change", "frameId": "01M4ZBKNNGC3HP7VKBS0GXX9ZC", "tMs": 570796 },
+        { "role": "end", "frameId": "01M4ZBMZ1APAJA2ZWYVGS0VYB8", "tMs": 613133 }
+      ],
+      "checked": "ffprobe: 1080x1920 h264 24fps, AAC stereo 48kHz, exactly 20.000000s, 14.5MB; stills at all six beats; plays in the desktop Chromium to the credit card",
+      "startMs": 0,
+      "endMs": 648464
+    }
+  ]
+}

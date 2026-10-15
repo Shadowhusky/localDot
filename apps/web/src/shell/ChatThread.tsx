@@ -25,11 +25,14 @@ export interface NewConversation {
   reason?: string;
 }
 
+// Filled, so it reads as the conversation's first action rather than one more quiet icon.
 export function NewConversationButton({ run, reason }: NewConversation) {
   return (
     <IconButton
       icon="compose"
       size={32}
+      variant="filled"
+      round
       label="New conversation"
       disabledReason={reason}
       onClick={() => run()}
@@ -65,6 +68,7 @@ export function ChatThread({
   onReplayTask,
   computerReady = false,
   computerUpdating = false,
+  suggestions,
   sessions = NO_SESSIONS,
   more = false,
   pending = false,
@@ -93,6 +97,8 @@ export function ChatThread({
   onReplayTask?: (sessionId: string) => void;
   computerReady?: boolean;
   computerUpdating?: boolean;
+  // What an empty chat offers to start with, in the chosen dot's line of work.
+  suggestions?: readonly string[];
   // The conversation's tasks, oldest first; the one shown is its latest.
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
@@ -148,6 +154,7 @@ export function ChatThread({
   return (
     <Conversation
       visible={visible}
+      suggestions={suggestions}
       ownerKey={sessions[0] ?? sessionId ?? ""}
       items={shown}
       truncated={model?.historyTruncated ?? false}

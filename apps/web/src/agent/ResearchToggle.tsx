@@ -21,7 +21,7 @@ export function ResearchToggle({ on, suggested, disabledReason, onToggle }: Rese
   return (
     <Chip
       variant="outline"
-      icon="library"
+      icon="globe"
       className="composer-research"
       hint={hint ? SUGGESTED : WHAT}
       disabledReason={disabledReason}
@@ -44,7 +44,7 @@ export function ResearchLine({ on, onToggle }: { on: boolean; onToggle(): void }
       {on ? (
         <p className="file-chips">
           <span className="file-chip" data-research="">
-            <Icon name="library" size={12} className="file-chip-icon" />
+            <Icon name="globe" size={12} className="file-chip-icon" />
             <span>Research</span>
             <span className="file-chip-meta">a cited report</span>
             <IconButton
@@ -57,7 +57,7 @@ export function ResearchLine({ on, onToggle }: { on: boolean; onToggle(): void }
           </span>
         </p>
       ) : (
-        <Chip variant="outline" icon="library" hint={SUGGESTED} onClick={onToggle}>
+        <Chip variant="outline" icon="globe" hint={SUGGESTED} onClick={onToggle}>
           Research this question
         </Chip>
       )}

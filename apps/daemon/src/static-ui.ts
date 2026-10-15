@@ -58,6 +58,19 @@ export function serveUi(app: Hono, dir: string): void {
       });
     });
   }
+  // Home Screen/bookmark clients may discover these conventional URLs independently
+  // of the document's link tag. Expose only these exact public artwork aliases.
+  for (const path of ["/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"]) {
+    app.get(path, (c) => {
+      const file = readStatic(join(dir, "icons"), "/apple-touch-icon.png");
+      if (!file) return c.text("not found", 404, NOSNIFF);
+      return c.body(file.body, 200, {
+        ...NOSNIFF,
+        "content-type": "image/png",
+        "cache-control": "no-cache",
+      });
+    });
+  }
   app.get("/icons/*", (c) => {
     let rel: string;
     try {

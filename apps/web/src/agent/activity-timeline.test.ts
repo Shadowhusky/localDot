@@ -9,9 +9,11 @@ import {
   type EntryView,
   entryView,
   foldKeyUses,
-  withNextMoves,
+  hasDetails,
+  stepDetail,
 } from "./activity.ts";
 import type { AgentStep } from "./model.ts";
+import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
 
 const key = (t: number, decision: "allow" | "deny" = "allow") =>
   keyUseRow({
@@ -234,34 +236,180 @@ describe("the activity timeline", () => {
     expect(entryView(entry, [], false).title).toBe("Saving report.ods to ~/Documents");
   });
 
-  it("says in a failed row what dot did next: tried again, made room and tried again, or moved on", () => {
-    const view = (title: string, state: EntryView["state"] = "done", meta = ""): EntryView => ({
-      testId: "step-row",
-      title,
-      meta,
-      time: "",
-      state,
-      stateLabel: state,
-      startT: 0,
-      endT: null,
+  it("leaves a bare gesture out of the meta line, keeping the app and what it touched", () => {
+    const row = (extra: Partial<StepRowView>): ActivityEntry => ({
+      key: "s",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "s",
+        startT: 0,
+        computer: {
+          id: "s",
+          label: "Picked brown from the palette",
+          startT: 0,
+          status: "ok",
+          durationMs: 400,
+          ...extra,
+        },
+      },
     });
-    const failed = view("Click Save", "failed", "The target changed before input.");
-    const metas = (views: EntryView[]) => withNextMoves(views).map((row) => row.meta);
-    expect(metas([failed, view("Clicked Save")])).toEqual([
-      "The target changed before input. Tried again.",
-      "",
-    ]);
-    expect(metas([failed, view("Scrolled down"), view("Clicked Save")])[0]).toBe(
-      "The target changed before input. Scrolled down, then tried again.",
+    expect(entryView(row({ gesture: "click" }), [], false).meta).toBe("");
+    expect(entryView(row({ gesture: "double-click" }), [], false).meta).toBe("");
+    expect(entryView(row({ app: "Paint", gesture: "keys" }), [], false).meta).toBe("Paint");
+    expect(entryView(row({ app: "Paint", gesture: "click Brown" }), [], false).meta).toBe(
+      "Paint · click Brown",
     );
-    expect(metas([failed, view("Opened the File menu")])[0]).toBe(
-      "The target changed before input. Then opened the File menu.",
+  });
+
+  it("says only what went wrong in a failed row, since the next row says what dot did next", () => {
+    const failed: ActivityEntry = {
+      key: "f",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "f",
+        startT: 0,
+        computer: {
+          id: "f",
+          label: "Type 8B5A2B in the hex field",
+          startT: 0,
+          status: "failed",
+          durationMs: 400,
+          reason: "The colour dialog didn't take the typed value.",
+        },
+      },
+    };
+    expect(entryView(failed, [], false).meta).toBe(
+      "The colour dialog didn't take the typed value.",
     );
-    expect(metas([view("Export", "failed", "Exit code 1")])).toEqual(["Exit code 1"]);
   });
 
   it("counts added and removed lines, not file headers", () => {
     expect(diffStat(["--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n-old\n+new\n+more"])).toBe("+2 −1");
     expect(diffStat([undefined, ""])).toBe("");
+  });
+});
+
+describe("what a step shows unfolded", () => {
+  const step = (
+    id: string,
+    extra: Partial<AgentStep>,
+    computer?: Partial<StepRowView>,
+  ): ActivityEntry => ({
+    key: `step-${id}`,
+    keys: [],
+    row: {
+      kind: "step",
+      id,
+      startT: 0,
+      agent: agent(id, undefined, { terminal: emptyTerminal(), ...extra }),
+      // As recorded, every step also has a row of its own, named by dot's line for it.
+      ...(computer && {
+        computer: {
+          id,
+          stepKind: extra.kind ?? "shell",
+          startT: 0,
+          label: extra.intent ?? extra.tool?.title ?? "",
+          status: "ok" as const,
+          durationMs: 400,
+          ...computer,
+        },
+      }),
+    },
+  });
+  const build = (extra: Partial<AgentStep> = {}, computer?: Partial<StepRowView>) =>
+    step(
+      "c",
+      {
+        intent: "Checking the build",
+        tool: { name: "shell", title: "npm test --workspace web" },
+        ...extra,
+      },
+      computer,
+    );
+
+  it("says what a step did when dot's line leads its row and the meta line doesn't", () => {
+    const recorded = { stepKind: "shell" as const, intent: "Checking the build" };
+    expect(stepDetail(build({ status: "ok" }, recorded), [])?.action).toEqual({
+      text: "npm test --workspace web",
+      code: true,
+    });
+    expect(
+      stepDetail(build({ status: "failed" }, { ...recorded, status: "failed" }), [])?.action?.text,
+    ).toBe("npm test --workspace web");
+    // A meta line that names the command keeps it, until what went wrong takes its place.
+    expect(stepDetail(build({ status: "ok" }), [])?.action).toBeUndefined();
+    expect(
+      stepDetail(build({ status: "failed", note: "The command returned exit code 1." }), [])?.action
+        ?.text,
+    ).toBe("npm test --workspace web");
+    // Without dot's line, the title already says what the step did.
+    expect(stepDetail(build({ intent: undefined, status: "failed" }), [])?.action).toBeUndefined();
+  });
+
+  it("says what a screen step tried when its row only says why it didn't happen", () => {
+    const screen = (status: StepRowView["status"], reason?: string): ActivityEntry => ({
+      key: "step-s",
+      keys: [],
+      row: {
+        kind: "step",
+        id: "s",
+        startT: 0,
+        computer: {
+          id: "s",
+          label: "Click Save",
+          startT: 0,
+          status,
+          durationMs: 400,
+          intent: "Saving the report",
+          ...(reason ? { reason } : {}),
+        },
+      },
+    });
+    expect(stepDetail(screen("ok"), [])?.action).toBeUndefined();
+    expect(stepDetail(screen("failed", "The target changed before input."), [])?.action).toEqual({
+      text: "Click Save",
+      code: false,
+    });
+  });
+
+  it("offers to unfold a step only when unfolding shows more than its row", () => {
+    const list = (extra: Partial<AgentStep> = {}) =>
+      step(
+        "l",
+        {
+          kind: "file",
+          status: "failed",
+          note: "The file or folder does not exist.",
+          tool: { name: "files", title: "list /config/.agents/skills", ok: false },
+          ...extra,
+        },
+        { stepKind: "file", status: "failed" },
+      );
+    expect(hasDetails(list(), [])).toBe(false);
+    expect(hasDetails({ ...list(), keys: [key(1)] }, [])).toBe(true);
+    const listed = appendTerminal(emptyTerminal(), "stdout", "SKILL.md\n");
+    expect(
+      hasDetails(
+        list({
+          status: "ok",
+          note: undefined,
+          output: [{ stream: "stdout", text: "SKILL.md\n" }],
+          terminal: listed,
+        }),
+        [],
+      ),
+    ).toBe(true);
+    // A command that ran and printed nothing says so, with its exit code.
+    const quiet = { name: "shell", title: "true", ok: true, exitCode: 0 };
+    expect(hasDetails(build({ intent: undefined, status: "ok", tool: quiet }, {}), [])).toBe(true);
+    // A command still running has nothing to show until its first output.
+    expect(hasDetails(build({ intent: undefined }, { status: "doing" }), [])).toBe(false);
+    // A screen step shows its picture or says it has none; another step only a picture it took.
+    const screen = { stepKind: "gui" as const };
+    expect(hasDetails(build({ kind: "gui", intent: undefined }, screen), [])).toBe(true);
+    const page = { stepKind: "browser" as const, frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N" };
+    expect(hasDetails(build({ kind: "browser", intent: undefined }, page), [])).toBe(true);
   });
 });

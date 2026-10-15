@@ -19,7 +19,8 @@
 .dot-shadow,
 .dot-body,
 .dot-plate,
-.dot-face {
+.dot-face,
+.dot-wear {
   position: absolute;
   inset: 0;
   width: 100%;

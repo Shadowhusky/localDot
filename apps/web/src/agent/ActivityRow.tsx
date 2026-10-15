@@ -4,6 +4,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { pressHandlers } from "../ui/press.ts";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import type { EntryView } from "./activity.ts";
+import "./activity.css";
 
 export interface ActivityRowProps {
   id: string;
@@ -12,6 +13,9 @@ export interface ActivityRowProps {
   future?: boolean;
   open?: boolean;
   onToggle?(trigger: HTMLButtonElement): void;
+  // A row that opens elsewhere, such as a chat row showing its step in Activity.
+  onSelect?(): void;
+  selectLabel?: string;
   children?: ReactNode;
 }
 
@@ -23,6 +27,8 @@ export function ActivityRow({
   future = false,
   open = false,
   onToggle,
+  onSelect,
+  selectLabel,
   children,
 }: ActivityRowProps) {
   const face = (
@@ -36,7 +42,12 @@ export function ActivityRow({
         <span className="activity-row-title">{view.title}</span>{" "}
         {view.meta && <span className="activity-row-meta">{view.meta}</span>}
       </span>{" "}
-      <span className="activity-row-time num">{view.time}</span>
+      <span className="activity-row-trailing">
+        <span className="activity-row-time num">{view.time}</span>
+        {(onToggle || onSelect) && (
+          <Icon name="chevron-right" size={12} className="activity-row-chevron" />
+        )}
+      </span>
     </>
   );
   return (
@@ -59,15 +70,16 @@ export function ActivityRow({
         head.focus();
       }}
     >
-      {onToggle ? (
+      {onToggle || onSelect ? (
         <button
           {...pressHandlers}
           type="button"
           className="activity-row-head"
-          aria-expanded={open}
-          aria-controls={`${id}-detail`}
+          aria-expanded={onToggle ? open : undefined}
+          aria-controls={onToggle ? `${id}-detail` : undefined}
+          aria-description={onToggle ? undefined : selectLabel}
           aria-current={current ? "step" : undefined}
-          onClick={(event) => onToggle(event.currentTarget)}
+          onClick={(event) => (onToggle ? onToggle(event.currentTarget) : onSelect?.())}
         >
           {face}
         </button>

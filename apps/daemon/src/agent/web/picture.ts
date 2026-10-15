@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import { raster } from "../../raster.ts";
 
 export interface Picture {
   readonly data: Buffer;
@@ -9,7 +9,7 @@ export interface Picture {
 // A picture as the model sees it: at most `side` pixels a side, as JPEG, which keyd can size for
 // the budget; transparency on white, the first frame of an animation, turned upright.
 export async function toJpeg(image: Buffer, side: number): Promise<Picture> {
-  const { data, info } = await sharp(image, { limitInputPixels: 50_000_000 })
+  const { data, info } = await (await raster(image, { limitInputPixels: 50_000_000 }))
     .rotate()
     .resize(side, side, { fit: "inside", withoutEnlargement: true })
     .flatten({ background: "#ffffff" })

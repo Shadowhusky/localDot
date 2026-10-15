@@ -37,7 +37,8 @@ export async function webFetch(
 ): Promise<Fetched> {
   const reply = await web.get(url, {
     signal,
-    accept: "text/html,application/xhtml+xml,text/plain;q=0.9,image/*;q=0.8,*/*;q=0.5",
+    accept:
+      "text/html,application/xhtml+xml,text/plain;q=0.9,image/webp,image/png,image/jpeg;q=0.8,*/*;q=0.5",
     maxBytes: IMAGE_BYTES,
   });
   if (reply.status >= 400) throw new WebError(`The site answered ${reply.status}.`);

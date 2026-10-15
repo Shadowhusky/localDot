@@ -2,9 +2,16 @@ import type { SessionOrigin } from "@localdot/protocol";
 import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
-import { activityRows, type EntryView, entryView, foldKeyUses } from "./activity.ts";
+import {
+  activityReadGroup,
+  activityRows,
+  type EntryView,
+  entryView,
+  foldKeyUses,
+} from "./activity.ts";
 import {
   AGENT_LIMITS,
+  type AgentChange,
   type AgentMessage,
   type AgentModel,
   type AgentQuestion,
@@ -16,7 +23,7 @@ import {
 } from "./model.ts";
 
 export type Speaker = "user" | "dot";
-export type WorkStep = EntryView & { key: string };
+export type WorkStep = EntryView & { key: string; readGroup?: string };
 export interface ModelRef {
   readonly route: string;
   readonly model: string;
@@ -53,6 +60,8 @@ export type ThreadItem =
       turn: string;
       steps: readonly WorkStep[];
       startMs: number | null;
+      // An earlier task's turn, which Activity doesn't show.
+      earlier?: true;
       // What the turn's model calls cost, when any cost something.
       spend?: { usd: number; estimated: boolean };
     })
@@ -203,9 +212,20 @@ export function workSteps(
   rows: readonly TimelineRow<StepRowView>[],
   model: AgentModel,
 ): WorkStep[] {
+  const changes = new Map<string, AgentChange[]>();
+  for (const change of model.changes) {
+    if (!change.step) continue;
+    const own = changes.get(change.step) ?? [];
+    own.push(change);
+    changes.set(change.step, own);
+  }
   return foldKeyUses(activityRows(rows, model))
     .filter((entry) => entry.row.kind === "step")
-    .map((entry) => ({ key: entry.key, ...entryView(entry, model.changes, !!model.ended) }));
+    .map((entry) => ({
+      key: entry.key,
+      readGroup: activityReadGroup(entry),
+      ...entryView(entry, changes.get(entry.row.id) ?? [], !!model.ended),
+    }));
 }
 
 // A turn starts at each task or follow-up the user sends; steering a running task stays in its turn.

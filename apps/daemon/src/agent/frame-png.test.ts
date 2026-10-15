@@ -5,6 +5,7 @@ import { ulid } from "@localdot/protocol";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { FrameStore } from "../gateway/frames.ts";
+import { NotRaster } from "../raster.ts";
 import { type FrameDetail, FramePng, type Region } from "./frame-png.ts";
 
 const solid = (width: number, height: number, r: number, g: number, b: number) =>
@@ -94,5 +95,18 @@ describe("FramePng zoom", () => {
       png.png(sessionId, frameId, { x: 0, y: 0, w: 8, h: 8 }, stop.signal),
     ).rejects.toThrow();
     expect(asked).toBe(0);
+  });
+
+  it("decodes no frame or zoom from the computer that is not a PNG, JPEG, GIF or WebP", async () => {
+    const { frames, sessionId, frameId } = await stored();
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800"/>');
+    const tiff = await solid(16, 16, 0, 0, 255).tiff().toBuffer();
+    const zoomed = new FramePng(frames, { zoom: async () => tiff });
+    await expect(zoomed.png(sessionId, frameId, { x: 0, y: 0, w: 8, h: 8 })).rejects.toBeInstanceOf(
+      NotRaster,
+    );
+    const forged = ulid();
+    frames.save(sessionId, forged, svg);
+    await expect(new FramePng(frames).png(sessionId, forged)).rejects.toBeInstanceOf(NotRaster);
   });
 });

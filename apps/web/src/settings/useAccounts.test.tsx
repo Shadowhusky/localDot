@@ -49,30 +49,30 @@ it("reads the sites only while Settings is open and the computer is on", async (
   expect(hook.result.current.sites).toEqual([GOOGLE]);
 });
 
-it("waits for a starting browser and asks again, then shows the sites", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  const { fetchImpl, hook } = setup([
-    { status: 503, body: "starting" },
-    { status: 200, body: { sites: [] } },
-  ]);
-  await waitFor(() => expect(hook.result.current.phase).toBe("starting"));
-  await act(() => vi.advanceTimersByTimeAsync(STARTING_RETRY_MS));
-  await waitFor(() => expect(hook.result.current.phase).toBe("ready"));
-  expect(fetchImpl).toHaveBeenCalledTimes(2);
-  expect(hook.result.current.sites).toEqual([]);
-});
+it.each([502, 503])(
+  "recovers from a transient browser failure (%s) and shows the sites",
+  async (status) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { fetchImpl, hook } = setup([
+      { status, body: "starting" },
+      { status: 200, body: { sites: [] } },
+    ]);
+    await waitFor(() => expect(hook.result.current.phase).toBe("starting"));
+    await act(() => vi.advanceTimersByTimeAsync(STARTING_RETRY_MS));
+    await waitFor(() => expect(hook.result.current.phase).toBe("ready"));
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.sites).toEqual([]);
+  },
+);
 
-it("stops waiting once the retries run out, and a browser that couldn't start fails at once", async () => {
+it.each([502, 503])("stops waiting once the browser retries run out (%s)", async (status) => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  const slow = setup(Array.from({ length: STARTING_RETRIES + 1 }, () => ({ status: 503 })));
+  const slow = setup(Array.from({ length: STARTING_RETRIES + 1 }, () => ({ status })));
   await waitFor(() => expect(slow.hook.result.current.phase).toBe("starting"));
   for (let retry = 0; retry < STARTING_RETRIES; retry += 1)
     await act(() => vi.advanceTimersByTimeAsync(STARTING_RETRY_MS));
   await waitFor(() => expect(slow.hook.result.current.phase).toBe("error"));
   expect(slow.fetchImpl).toHaveBeenCalledTimes(STARTING_RETRIES + 1);
-  const failed = setup([{ status: 502, body: "the web browser couldn't start" }]);
-  await waitFor(() => expect(failed.hook.result.current.phase).toBe("error"));
-  expect(failed.fetchImpl).toHaveBeenCalledOnce();
 });
 
 it("treats a stopped computer and a malformed reply apart", async () => {

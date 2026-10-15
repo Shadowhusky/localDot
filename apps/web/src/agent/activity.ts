@@ -3,7 +3,6 @@ import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
 import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
-import { past } from "../session/status.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
 import { markdownToPlain } from "./markdown.ts";
@@ -21,7 +20,7 @@ export interface ActivityStep {
 // The raw audit events allow grouping only after tools have joined the ordered history.
 export function activityRows(
   rows: readonly TimelineRow<StepRowView>[],
-  model?: AgentModel,
+  model?: Pick<AgentModel, "steps">,
   keyUses?: readonly KeyUseState[],
 ): TimelineRow<ActivityStep>[] {
   const steps = new Map<string, ActivityStep>();
@@ -191,9 +190,60 @@ const COMPUTER_STATES: Record<StepRowView["status"], [GlyphState, string]> = {
 };
 
 const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" · ");
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 // A step's time on the m:ss clock; anything that took time shows at least a second.
 const stepTime = (ms: number) => clock(ms > 0 ? Math.max(ms, 1000) : 0);
 const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+type StepRow = Extract<TimelineRow<ActivityStep>, { kind: "step" }>;
+
+function rowWords(row: StepRow, own: readonly AgentChange[], ended: boolean) {
+  const { computer, agent } = row;
+  const [state, stateLabel] =
+    agent && (agent.status || !computer)
+      ? agentState(agent, ended)
+      : computer && !(ended && computer.status === "doing")
+        ? COMPUTER_STATES[computer.status]
+        : agentState({ id: row.id, output: [], outputTruncated: false }, ended);
+  const kind = agent?.kind ?? computer?.stepKind ?? (computer ? "gui" : undefined);
+  const what =
+    computer?.label ||
+    agent?.tool?.title ||
+    (kind === "file" ? fileTitle(own) : "") ||
+    (kind ? KIND_TITLES[kind] : "Step");
+  // dot's own line for the call leads its first row; what it did moves to the meta line.
+  const given = agent?.intent ?? computer?.intent;
+  const intent = (given && plainText(given)) || undefined;
+  const failed = state === "failed" || state === "skipped";
+  const reason = failed
+    ? ((agent?.note && markdownToPlain(agent.note)) ??
+      computer?.reason ??
+      (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
+    : state === "todo"
+      ? "The task ended before this step finished."
+      : undefined;
+  const distinctAction = intent && !same(intent, what) ? what : undefined;
+  // A gesture says something only with what it touched: "click F3", never a bare "click".
+  const touched = computer?.gesture?.includes(" ") ? computer.gesture : undefined;
+  const where = computer
+    ? joined(computer.app, intent ? distinctAction : touched)
+    : joined(
+        WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
+        distinctAction,
+        diffStat(own.map((change) => change.patch)),
+      );
+  return {
+    state,
+    stateLabel,
+    kind,
+    what,
+    title: intent ?? what,
+    reason,
+    meta: reason ? asSentence(reason) : where,
+    // What the meta line says dot did, unless what went wrong took its place.
+    named: reason ? undefined : distinctAction,
+  };
+}
 
 export function entryView(
   entry: ActivityEntry,
@@ -215,90 +265,75 @@ export function entryView(
     };
   const { computer, agent } = row;
   const own = changes.filter((change) => change.type === "file" && change.step === row.id);
-  const [state, stateLabel] =
-    agent && (agent.status || !computer)
-      ? agentState(agent, ended)
-      : computer && !(ended && computer.status === "doing")
-        ? COMPUTER_STATES[computer.status]
-        : agentState({ id: row.id, output: [], outputTruncated: false }, ended);
-  const kind = agent?.kind ?? computer?.stepKind ?? (computer ? "gui" : undefined);
+  const words = rowWords(row, own, ended);
   const durationMs =
     computer?.durationMs ??
     (agent?.startedAt !== undefined && agent.endedAt !== undefined
       ? microsToMs(agent.endedAt - agent.startedAt)
       : null);
-  const what =
-    computer?.label ||
-    agent?.tool?.title ||
-    (kind === "file" ? fileTitle(own) : "") ||
-    (kind ? KIND_TITLES[kind] : "Step");
-  // dot's own line for the call leads its first row; what it did moves to the meta line.
-  const given = agent?.intent ?? computer?.intent;
-  const intent = (given && plainText(given)) || undefined;
-  const title = intent ?? what;
-  const failed = state === "failed" || state === "skipped";
-  const reason = failed
-    ? ((agent?.note && markdownToPlain(agent.note)) ??
-      computer?.reason ??
-      (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
-    : state === "todo"
-      ? "The task ended before this step finished."
-      : undefined;
-  const where = computer
-    ? joined(computer.app, intent ? what : computer.gesture)
-    : joined(
-        WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
-        intent ? what : undefined,
-        diffStat(own.map((change) => change.patch)),
-      );
   return {
     testId: isScreenStep(row) ? "step-row" : "tool-row",
-    title,
-    meta: reason ? asSentence(reason) : where,
+    title: words.title,
+    meta: words.meta,
     time: durationMs === null ? "" : stepTime(durationMs),
-    state,
-    stateLabel,
-    ...(reason ? { failed: true } : {}),
+    state: words.state,
+    stateLabel: words.stateLabel,
+    ...(words.reason ? { failed: true } : {}),
     startT: row.startT,
     endT: durationMs === null ? null : row.startT + durationMs,
   };
 }
 
-const lowerFirst = (text: string) =>
-  /^[A-Z][a-z]/.test(text) ? text[0]?.toLowerCase() + text.slice(1) : text;
-
-// What dot did after a step failed: the same step again, possibly after one or two steps that
-// made room for it, or else the step that came next.
-function nextMove(views: readonly EntryView[], index: number): string {
-  const failed = views[index];
-  if (failed?.state !== "failed" || failed.testId === "key-use") return "";
-  const later = views.slice(index + 1).filter((view) => view.testId !== "key-use");
-  const [next] = later;
-  if (!next) return "";
-  const retry = later.slice(0, 3).findIndex((view) => past(view.title) === past(failed.title));
-  if (retry === 0) return "Tried again.";
-  if (retry > 0) return `${next.title}, then tried again.`;
-  return `Then ${lowerFirst(next.title)}.`;
+// What unfolding a step shows beyond its row.
+export interface StepDetail {
+  // What the step did, when the row leads with dot's line for it; a command or a path as typed.
+  action?: { text: string; code: boolean };
+  // A result note; a failure's note is the row's meta line already.
+  note?: string;
+  // A screen step shows its picture or says it has none; another step only a picture it took.
+  frame: boolean;
+  // Any output, or a command's exit code even when it printed nothing.
+  output: boolean;
+  changes: AgentChange[];
 }
 
-// A failure's meta line goes on to say what dot did about it.
-export function withNextMoves(views: readonly EntryView[]): EntryView[] {
-  return views.map((view, index) => {
-    const next = nextMove(views, index);
-    if (!next) return view;
-    return { ...view, meta: [view.meta && asSentence(view.meta), next].filter(Boolean).join(" ") };
-  });
+export function stepDetail(
+  entry: ActivityEntry,
+  changes: readonly AgentChange[],
+): StepDetail | null {
+  const { row } = entry;
+  if (row.kind === "key") return null;
+  const { computer, agent } = row;
+  const own = changes.filter((change) => change.type === "file" && change.step === row.id);
+  const screen = isScreenStep(row);
+  // The row's words while the task runs; once it ends, only an unfinished step's meta line differs.
+  const words = rowWords(row, own, false);
+  const done = screen ? words.what : agent?.tool?.title;
+  const said = done && [words.title, words.named].some((text) => text && same(text, done));
+  const code = !screen && (words.kind === "shell" || words.kind === "file");
+  return {
+    ...(done && !said ? { action: { text: done, code } } : {}),
+    ...(agent?.note && (agent.status === "ok" || !agent.status) ? { note: agent.note } : {}),
+    frame: !!computer && (screen || !!computer.frameId),
+    output:
+      !!agent &&
+      ((agent.terminal?.inputBytes ?? 0) > 0 ||
+        agent.tool?.exitCode !== undefined ||
+        agent.outputTruncated),
+    changes: own,
+  };
 }
 
 export function hasDetails(entry: ActivityEntry, changes: readonly AgentChange[]): boolean {
-  const { row } = entry;
-  if (row.kind === "key") return false;
+  const detail = stepDetail(entry, changes);
   return (
-    !!row.computer ||
-    entry.keys.length > 0 ||
-    (!!row.agent?.note && (row.agent.status === "ok" || !row.agent.status)) ||
-    !!(row.agent && (row.agent.tool || row.agent.terminal || row.agent.outputTruncated)) ||
-    changes.some((change) => change.type === "file" && change.step === row.id)
+    !!detail &&
+    (!!detail.action ||
+      !!detail.note ||
+      detail.frame ||
+      detail.output ||
+      detail.changes.length > 0 ||
+      entry.keys.length > 0)
   );
 }
 
@@ -329,4 +364,55 @@ export function changeView(change: AgentChange): EntryView {
     startT: Number.NaN,
     endT: null,
   };
+}
+
+export interface ReadGroup<T> {
+  key: string;
+  entries: T[];
+  label?: string;
+}
+export type ActivityGroup = ReadGroup<ActivityEntry>;
+
+// A group key is evidence of a successful read, scoped to its plan item. Presentation
+// titles alone must never classify a mutation, failure or current action as read-only.
+export function activityReadGroup(entry: ActivityEntry): string | undefined {
+  const row = entry.row;
+  if (row.kind !== "step") return undefined;
+  const tool = row.agent?.tool;
+  return (row.agent?.status ?? row.computer?.status) === "ok" &&
+    tool?.ok !== false &&
+    (tool?.name === "files" || row.computer?.stepKind === "file") &&
+    /^(read|list) /i.test(tool?.title ?? row.computer?.label ?? "")
+    ? (row.agent?.planItem ?? "")
+    : undefined;
+}
+
+// Shared by Activity and Chat. Keep every audit identity and cap groups so opening one
+// never introduces an unbounded block. Failures, mutations and running steps stay separate.
+export function groupReadSteps<T extends { key: string }>(
+  entries: readonly T[],
+  readGroup: (entry: T) => string | undefined,
+): ReadGroup<T>[] {
+  const groups: ReadGroup<T>[] = [];
+  for (const entry of entries) {
+    const scope = readGroup(entry);
+    const previous = groups.at(-1);
+    if (
+      scope !== undefined &&
+      previous?.label &&
+      previous.entries.length < 50 &&
+      readGroup(previous.entries[0]!) === scope
+    )
+      previous.entries.push(entry);
+    else
+      groups.push({
+        key: entry.key,
+        entries: [entry],
+        ...(scope !== undefined ? { label: "Read files and instructions" } : {}),
+      });
+  }
+  return groups;
+}
+export function groupActivity(entries: readonly ActivityEntry[]): ActivityGroup[] {
+  return groupReadSteps(entries, activityReadGroup);
 }

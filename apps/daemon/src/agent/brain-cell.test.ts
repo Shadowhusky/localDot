@@ -53,6 +53,8 @@ function fixture() {
   const objects = new Map<string, ObjectInfo>();
   const initialized: { id: string; task: string; pricing: TaskPricing; budget?: number }[] = [];
   const keydCells = new Set<string>();
+  // An engine that ignores isolated gateway mode reports a gateway on internal networks too.
+  const engine = { gatewayOnInternal: false };
   let serial = 0;
   const hooks: {
     before?(request: DockerRequest): Promise<void> | void;
@@ -105,7 +107,12 @@ function fixture() {
             Config: { Labels: object.Labels },
             IPAM: {
               Config: [
-                { Subnet: object.name.includes("braincell") ? "172.30.4.0/24" : "172.30.5.0/24" },
+                object.name.includes("braincell")
+                  ? {
+                      Subnet: "172.30.4.0/24",
+                      ...(engine.gatewayOnInternal ? { Gateway: "172.30.4.1" } : {}),
+                    }
+                  : { Subnet: "172.30.5.0/24", Gateway: "172.30.5.1" },
               ],
             },
             State: { Running: object.running, ExitCode: 0 },
@@ -154,7 +161,7 @@ function fixture() {
       ...extra,
     });
   const cells = make();
-  return { calls, order, objects, initialized, keydCells, hooks, cells, make };
+  return { calls, order, objects, initialized, keydCells, engine, hooks, cells, make };
 }
 afterEach(() => vi.useRealTimers());
 
@@ -247,6 +254,17 @@ describe("BrainCells", () => {
         "invalid brain secrets",
       );
     expect(f.calls).toEqual([]);
+    expect(f.cells.reservedPorts()).toEqual([]);
+  });
+  it("refuses an internal network that has a gateway address, before keyd or any container", async () => {
+    const f = fixture();
+    f.engine.gatewayOnInternal = true;
+    await expect(f.cells.open(options())).rejects.toThrow(
+      /has a gateway address .*does not isolate internal networks/,
+    );
+    expect(f.order.some((step) => step.startsWith("keyd open"))).toBe(false);
+    expect(f.calls.some((call) => call.path === "/containers/create")).toBe(false);
+    expect(f.objects.size).toBe(0);
     expect(f.cells.reservedPorts()).toEqual([]);
   });
   it("leaves a key stored under a since-reserved name to keyd", async () => {

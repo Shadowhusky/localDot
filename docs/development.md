@@ -196,11 +196,111 @@ respective vendor runtimes.
 
 The localDot adapter retains the durable multimodal transcript, provider-native replay,
 compaction, queue acknowledgements, retry/budget handling and screenshot coordinates.
-DSH's session is currently a process-local orchestration log; it is **not** a second durable
-conversation store. Restart restores localDot's saved transcript and inbox cursor. Model
+DSH orchestration events and native child transcripts are persisted as isolated metadata
+in the daemon's generation-fenced, redacted, fsynced transcript journal. Upstream session
+ownership, checkpoints, crash-tail repair and resume use this storage adapter. Root provider
+history and inbox acknowledgements remain localDot-owned; native child history uses upstream
+compaction and retains exact provider replay blocks. Model
 requests continue through the AI SDK and keyd; tools continue through the authenticated
 daemon API at `127.0.0.1:4751`, including JEV approvals and computer ownership checks.
-No default DSH shell, credential store, session uploader or telemetry plugin is mounted.
+
+Each model call is sent a lighter copy of the root history (`cells/brain/src/context.ts`): the
+newest three to six screenshots, and for DeepSeek, OpenAI and Azure, whose APIs accept it,
+reasoning from only the newest 8 turns and, older than the newest 12 turns, tool output over 2,000
+characters replaced by a one-line note (the skill tool's instructions stay). Reasoning and output
+leave together, 16 turns at a time, so the prefix a provider caches changes once every 16 calls.
+Other clients get older turns as they were: Claude binds each thinking block to the conversation
+before it, so an edited earlier turn invalidates every later block. The stored transcript keeps
+everything. localDot summarizes the older half once that copy passes 60% of the window or, for
+those three clients, 120k tokens if that is less (the turns a summary keeps would carry Claude
+thinking bound to the conversation it replaced). The summary's usage is reported, and a failed
+summary is tried again once the copy has grown by a tenth. Upstream compaction summarizes child
+sessions only, with 8,192 tokens of headroom and a 4,000-token summary; the root's DSH log is
+never summarized into the conversation. A restarted brain does not add harness context (catalogs,
+skill bodies, reminders) its restored transcript already holds, and a resumed DSH session is
+continued, not given the task again.
+
+The runtime composition now includes the upstream `dsh-tool-todo`, `dsh-skill`,
+`dsh-skill-filesystem`, `dsh-tool-skill`, and `dsh-repeat-tool-reminder` plugins at the
+same exact version. Their schemas and injected context reach the actual model requests;
+simply mounting plugins while discarding `GenerateOptions` does not activate their behavior.
+`todo_write` uses upstream validation and maps to localDot's persisted plan events. Native
+plugin outcomes, including refusals, join the same durable provider transcript as daemon tools.
+
+The upstream filesystem skill provider reads **the virtual computer**, through the existing
+authorized `files` gateway. It never scans the Mac or the brain container for user skills.
+The catalog starts as the skills the daemon installed for the task in `/config/.skills`, known
+from the boot configuration without a read, and is the only place the model sees them listed.
+The agent's own folders, `/config/.agents/skills` and `/config/.dsh/skills`, are scanned only
+after a skills installer runs or a command or file write changes one of them. A folder found
+missing is not probed again in the task unless a later command names it, and a rescan reads only
+skills it has not read. Running a skill's scripts or reading its files rescans nothing. Loading a
+skill always rereads its `SKILL.md` and honors its invocation frontmatter.
+Host filesystem watching is disabled. The last complete scan is retained across transient failures;
+truncated/binary instructions are rejected, reads remain bounded and redacted, and discovery
+cannot run commands. Native plugin pre-execution respects the host's veto and cancellation.
+The current skill catalog is restored to model context after localDot compaction.
+
+Online discovery remains the agent's research step: use the available web tools to compare
+relevant official skills and dependencies, inspect the selected instructions, then install
+inside the virtual computer's standard skill directories through the authorized shell. The
+upstream skill plugin loads catalogs; it does not itself search the whole Internet or select
+an objectively best skill. No task-specific video recipe is bundled.
+
+**Runtime integration:** the API-model profile now mounts upstream goal state and round
+driving, durable session ownership/checkpoints, jobs, one-shot and continuable child agents,
+child messaging/interruption, token accounting and compaction. Child model requests use the
+same selected provider through keyd; child actions use the daemon's existing tool API. The
+parent alone gets visible-browser, mouse/keyboard, approvals, user questions and delivery
+tools. Children can research, read/write files, run shell commands and load skills, with a
+maximum of three active children and one generation. Shared filesystem work still needs
+coordination. `done` cannot complete while jobs or children are running; Stop cancels the
+agent tree. Accepted completion closes the upstream goal; interrupted goals remain recoverable.
+
+This is the localDot application profile, not the stock DSH CLI. Stock host-process shell,
+credential stores, session upload/telemetry, CLI UI and workflow/PTC tools are not mounted.
+Claude Code and ChatGPT subscription runtimes retain their vendor-supported execution paths.
+
+The migration boundary is the agent runtime, not the stock CLI application. Use the upstream
+[composition](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/bundle/base)
+as the capability inventory, while keeping the deployment adapters explicit:
+
+| Capability | Current ownership / migration acceptance |
+| --- | --- |
+| Agent scheduling and cancellation | Upstream DSH, with localDot Stop, manual control and inbox admission. |
+| Skills and implementation checklist | Upstream discovery, parser, loader and todo validation; computer reads and progress persistence remain localDot adapters. |
+| Recovery guidance | Upstream repeat-call reminders reach the provider. They advise recovery, not automatic completion or silent task cancellation. |
+| Browser, shell, files, search and delivery | Existing authorized localDot tools; stock host-process tools must not execute on the Mac or in the brain. DSH service adapters for jobs must route to the same computer. |
+| Models and credentials | Current provider adapters through keyd; preserve native signed reasoning/replay blocks and route-specific settings. Subscription runtimes stay vendor-owned. |
+| Durable sessions and compaction | Upstream orchestration/child state uses the daemon journal; root multimodal history and inbox stay localDot-owned. Child compaction preserves signed provider replay. |
+| Goals and background jobs | Upstream goal state, round continuation, native jobs and completion wakeups, constrained by localDot Stop and keyd spending limits. |
+| Subagents | Upstream spawn, one-shot/background work, continuation messaging, listing and interruption; distinct persisted session identities, shared keyd accounting, no child browser/mouse/keyboard tools. |
+| UI, computer lifecycle and snapshots | Product services, not provided by switching the agent framework. |
+
+Before activation, run an isolated real-model task that researches candidate workflows online,
+loads and applies a newly installed skill, verifies the actual output, and returns it through
+`done.files`. Also exercise unavailable prerequisites, cancellation, manual takeover, restart
+recovery and provider-native replay. Scripted models establish protocol correctness only;
+they do not establish that the selected real model will research or plan well. Production
+bundling now executes the artifact in a temporary directory with an empty environment, without
+adjacent package metadata or node_modules, before publishing the bundle. A separately tagged
+candidate image also passes import/startup in a read-only container with no network or credentials.
+
+Deployment verification (2026-10-14): the current computer updated through the supported API
+with its home mounts and installed `gh`/WeChat versions unchanged. The package database is
+merged by complete Debian package records; conflicting versions still block the update.
+A real configured-provider run (`01M4WWK3Q9H8J6JJX1MYT4F5Y1`) exercised native planning,
+background research through the daemon, skill loading, artifact verification and `done.files`.
+The resulting ZIP was independently downloaded through the Files API and its CRC, CSV rows
+and source URLs checked. This verifies runtime wiring, not general creative quality.
+Real-provider checks caught and fixed system-message placement, streaming-only gateway
+compatibility, and undefined SDK replay fields rejected by the native journal. The SDK bridge
+now has a test covering native child journaling, a real tool round trip and completion.
+Final checks: 283 brain/recall tests, 10 Docker acceptance cases, 9 native and 15 offline Codex
+probes. The broad suite passed 13,029 tests; two provenance assertions were updated to retain
+skill-catalog reads as untrusted file sources and both passed on rerun. No policy exemption was
+added. The synthetic skill directory remains temporarily because a newer user task started
+before cleanup; its name is `localdot-runtime-check-20261014` and it is not a bundled skill.
 
 **Stop** ends the agent run and revokes its access. It does not shut down the computer;
 new conversations use the existing desktop. Computer recovery remains a daemon concern,
@@ -416,3 +516,39 @@ The numbers in the charts come from the measurements listed in
 screenshots and the tour come from the fixture daemon (`apps/web/e2e/fixtures/ui-server.ts`)
 with sample data only. `QA_ACTIVITY=research` starts it on a research task part-way through, with
 web searches, page reads and numbered sources.
+
+### Desktop memory and saved sign-ins
+
+The desktop Chromium and developer tools share one container budget. Its default is
+4 GiB RAM plus at most 256 MiB swap (Docker `MemorySwap` is the combined total),
+not unlimited memory and not a reservation from the Docker VM. The VM still needs
+capacity for the separate browser, brain and other containers. Available swap is
+bounded by the VM's own swap configuration. Sustained oversized workloads can
+still exhaust these limits; reuse preview servers and limit build/test concurrency.
+`work_context` now reports the container's cgroup v2 working set, limit, swap and
+cumulative OOM kills. Shell replies report new OOM kills during the command even
+when the command itself succeeds, so a killed renderer is not misdiagnosed as a
+lost sign-in. Unsupported counters remain unknown. No user process is automatically
+killed and browser profiles are never reset to clear pressure.
+
+Both visible browsers recognize the same verified HTTPS login forms, including
+React function actions with React's exact inert throw sentinel. Arbitrary
+`javascript:` actions, cross-origin forms, password-change forms and changed
+identities do not qualify for saved-password reuse. Desktop perception binds the
+password node to the top-level DOM snapshot's actual origin and the validated form;
+the input path rechecks that identity before typing. Saved credentials remain in
+keyd, outside model context. Native app or unsupported forms accept one-time private
+input but explicitly report that it was not saved. Passwords supplied through the
+old desktop-only path were never persisted and cannot be retroactively recovered.
+
+
+Shell transport recovery retains up to 128 terminal receipts for ten minutes inside desktopd.
+Receipts contain completion metadata only, never output or credentials. After a lost stream,
+the daemon cancels the exact command id and reads its receipt for at most five seconds. Only a
+validated terminal receipt avoids containment; unavailable/unknown/malformed results still
+require recovery. Commands are never replayed, and recovered results explicitly mark output
+incomplete. Critical container or shared-VM memory pressure refuses new shell work before any command starts.
+VM evidence includes available RAM and the kernel full-memory-stall average, reported separately
+from the container limit; absent kernel metrics remain unknown.
+The desktop cap must leave room for the separate browser, brain, Docker engine and other apps;
+increasing it alone is not a solution to a small VM or an unbounded development workload.

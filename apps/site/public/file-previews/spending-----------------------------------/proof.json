@@ -1,0 +1,16 @@
+{
+  "recording": "complete",
+  "results": [
+    {
+      "resultId": "01M4ZA56VRM9XTXXMCAR1TA44M",
+      "frames": [
+        { "role": "start", "frameId": "01M4Z9NAQF3KG2KQVV0FX553PK", "tMs": 1124 },
+        { "role": "change", "frameId": "01M4Z9Z2TK5H54PQ1AMS0H6WCT", "tMs": 320704 },
+        { "role": "end", "frameId": "01M4ZA4A8G39YPQ7T6RZKBX18Y", "tMs": 492196 }
+      ],
+      "checked": "ODS opens and recalculates: zero error cells, 14/14 checks PASS, totals tie to the CSV, 3 charts with titles.",
+      "startMs": 0,
+      "endMs": 521435
+    }
+  ]
+}

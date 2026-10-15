@@ -444,6 +444,26 @@ describe("Always allow precedence", () => {
     expect(task.relaxes("send", { site: MAIL })).toBe(true);
   });
 
+  it("a task allowance covers the place it was given for", () => {
+    const task = new TaskAutonomy();
+    task.grant("send", { ...TASK, place: { site: MAIL } }, ulid());
+    expect(task.relaxes("send", { site: MAIL })).toBe(true);
+    expect(task.relaxes("send", { site: "https://other.example.test" })).toBe(false);
+    expect(task.relaxes("send", {})).toBe(false);
+    task.grant("delete", { ...TASK, place: { inside: "local" } }, ulid());
+    expect(task.relaxes("delete", { inside: "local" })).toBe(true);
+    for (const place of [{}, { site: MAIL }, { inside: "sweeping" as const }])
+      expect(task.relaxes("delete", place)).toBe(false);
+    task.grant("computer", { ...TASK, place: { app: "Notes" } }, ulid());
+    expect(task.relaxes("computer", { app: "Terminal" })).toBe(true);
+    expect(task.revoke("send")).toEqual({
+      scope: "task",
+      actionClass: "send",
+      label: "For this task",
+    });
+    expect(task.relaxes("send", { site: MAIL })).toBe(false);
+  });
+
   it("a corrupt rules.json never blocks the task", () => {
     const dir = home();
     writeFileSync(join(dir, "rules.json"), "{", { mode: 0o600 });
@@ -643,6 +663,14 @@ describe("Always allow on this site, end to end", () => {
         facts: button(name, url),
         revalidate: async () => true,
       });
+    const command = (line: string) =>
+      authorizePrepared(ctx, {
+        tool: "shell",
+        input: { command: line },
+        target: null,
+        facts: shell(line),
+        revalidate: async () => true,
+      });
     const click = (target: Target) => {
       const action = {
         verb: "click" as const,
@@ -673,8 +701,114 @@ describe("Always allow on this site, end to end", () => {
         ...(always ? { always } : {}),
       });
     };
-    return { session, events, send, click, card, answer };
+    return { session, events, send, command, click, card, answer };
   }
+
+  it.each(["auto", "full", "custom"] as const)(
+    "%s: a task delete approval on one site does not cover another site",
+    async (mode) => {
+      const t = task(home(), DEFAULT_AUTONOMY, "browser");
+      t.session.permissionMode = () => mode;
+      const first = t.send(`${MAIL}/templates`, "Delete");
+      expect(await t.answer("approve", "task")).toBe(true);
+      expect((await first)?.approved).toBe(true);
+      expect((await t.send(`${MAIL}/drafts`, "Delete"))?.approved).toBe(false);
+      const elsewhere = t.send("https://other.example.test/templates", "Delete");
+      expect((await t.card()).actionClass).toBe("delete");
+      expect(await t.answer("deny")).toBe(true);
+      expect(await elsewhere).toBeUndefined();
+    },
+  );
+
+  it("a local-deletion task approval does not cover an online or a sweeping deletion", async () => {
+    const t = task(home());
+    t.session.permissionMode = () => "auto";
+    t.session.autoPermit = vi.fn(async () => false);
+    const first = t.command("rm -rf /config/promo/frames");
+    expect((await t.card()).actionClass).toBe("delete");
+    expect(await t.answer("approve", "task")).toBe(true);
+    expect((await first)?.approved).toBe(true);
+    expect((await t.command("rm -rf /config/promo/renders"))?.approved).toBe(false);
+    for (const line of ["curl -X DELETE https://api.example.test/repos/me/app", "rm -rf ~"]) {
+      const asked = t.command(line);
+      expect((await t.card()).actionClass).toBe("delete");
+      expect(await t.answer("deny")).toBe(true);
+      expect(await asked).toBeUndefined();
+    }
+  });
+
+  it.each(["auto", "full", "custom"] as const)(
+    "%s honors a saved site delete approval for the menu and confirmation, but not another origin",
+    async (mode) => {
+      const dir = home();
+      const t = task(dir, DEFAULT_AUTONOMY, "browser");
+      t.session.permissionMode = () => mode;
+      const first = t.send(`${MAIL}/templates`, "Delete");
+      expect((await t.card()).actionClass).toBe("delete");
+      expect(await t.answer("approve", "site")).toBe(true);
+      expect((await first)?.approved).toBe(true);
+
+      const confirmation = t.send(`${MAIL}/templates?filter=mine`, "Delete template");
+      expect(t.session.pendingApproval).toBeUndefined();
+      expect((await confirmation)?.approved).toBe(false);
+      expect(t.events.filter((e) => e.type === "approval.request")).toHaveLength(1);
+
+      const later = task(dir, DEFAULT_AUTONOMY, "browser");
+      later.session.permissionMode = () => mode;
+      const reused = later.send(`${MAIL}/templates`, "Delete");
+      expect(later.session.pendingApproval).toBeUndefined();
+      expect((await reused)?.approved).toBe(false);
+      const other = later.send("https://other.example.test/templates", "Delete");
+      await later.card();
+      expect(await later.answer("deny")).toBe(true);
+      expect(await other).toBeUndefined();
+
+      const saved = new RulesStore(dir).list().rules[0];
+      if (!saved) throw new Error("expected saved site rule");
+      new RulesStore(dir).remove(saved.id);
+      const revoked = t.send(`${MAIL}/templates`, "Delete");
+      await t.card();
+      expect(await t.answer("deny")).toBe(true);
+      expect(await revoked).toBeUndefined();
+    },
+  );
+
+  it.each(["auto", "full"] as const)(
+    "%s honors task delete approval only in that task",
+    async (mode) => {
+      const dir = home();
+      const t = task(dir, DEFAULT_AUTONOMY, "browser");
+      t.session.permissionMode = () => mode;
+      const first = t.send(`${MAIL}/templates`, "Delete");
+      expect(await t.answer("approve", "task")).toBe(true);
+      expect((await first)?.approved).toBe(true);
+      const next = t.send(`${MAIL}/templates`, "Delete template");
+      expect(t.session.pendingApproval).toBeUndefined();
+      expect((await next)?.approved).toBe(false);
+      const later = task(dir, DEFAULT_AUTONOMY, "browser");
+      later.session.permissionMode = () => mode;
+      const unapproved = later.send(`${MAIL}/templates`, "Delete");
+      await later.card();
+      expect(await later.answer("deny")).toBe(true);
+      expect(await unapproved).toBeUndefined();
+    },
+  );
+
+  it("Auto honors the same scoped choices for send actions", async () => {
+    const dir = home();
+    const t = task(dir, DEFAULT_AUTONOMY, "browser");
+    t.session.permissionMode = () => "auto";
+    const first = t.send(`${MAIL}/compose`);
+    expect(await t.answer("approve", "site")).toBe(true);
+    expect(await first).toBeDefined();
+    const next = t.send(`${MAIL}/compose`);
+    expect(t.session.pendingApproval).toBeUndefined();
+    expect((await next)?.approved).toBe(false);
+    const deletion = t.send(`${MAIL}/compose`, "Delete");
+    expect((await t.card()).actionClass).toBe("delete");
+    expect(await t.answer("deny")).toBe(true);
+    expect(await deletion).toBeUndefined();
+  });
 
   it("lets the next send on that site act while another origin still asks", async () => {
     const dir = home();
@@ -722,7 +856,11 @@ describe("Always allow on this site, end to end", () => {
       actionClass: "send",
       label: "For this task",
     });
-    expect((await first.send("https://other.example.test/compose"))?.approved).toBe(false);
+    expect((await first.send(`${MAIL}/inbox/42`))?.approved).toBe(false);
+    const elsewhere = first.send("https://other.example.test/compose");
+    await first.card();
+    expect(await first.answer("deny")).toBe(true);
+    expect(await elsewhere).toBeUndefined();
     expect(new RulesStore(dir).list()).toEqual({ rules: [] });
 
     const next = task(dir);

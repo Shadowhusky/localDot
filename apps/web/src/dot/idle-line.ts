@@ -10,6 +10,7 @@ import {
   type TipAction,
   type TipSignals,
 } from "./tips.ts";
+import type { Voice } from "./voices.ts";
 
 // A tip stays this long before the next one.
 export const TIP_MS = 25_000;
@@ -45,8 +46,8 @@ export function dayPart(hour: number): DayPart {
   return "night";
 }
 
-export function greeting(at: Date, pick = Math.random()): string {
-  const lines = GREETINGS[dayPart(at.getHours())];
+export function greeting(at: Date, pick = Math.random(), voice?: Voice): string {
+  const lines = (voice?.greetings ?? GREETINGS)[dayPart(at.getHours())];
   return lines[Math.min(lines.length - 1, Math.floor(pick * lines.length))] ?? "";
 }
 
@@ -109,22 +110,29 @@ export interface IdleInput {
   held: boolean;
   signals: TipSignals;
   tips?: readonly Tip[];
+  // The chosen dot's words: its greetings, its hello when it is chosen, and the lines about its own
+  // work that take every other turn with the tips. Without one, plain greetings and tips only.
+  voice?: Voice;
 }
 
-// What dot says while the band rests: a greeting the first time on this page, then a tip every
-// TIP_MS. After a task it waits one turn in silence before its next tip.
+// What dot says while the band rests: a greeting the first time on this page, then a line every
+// TIP_MS, a tip and then one of its own in turn. A newly chosen dot says hello at once. After a task
+// it waits one turn in silence before its next line.
 export function useIdleLine({
   resting,
   suspended = false,
   held,
   signals,
   tips = TIPS,
+  voice,
 }: IdleInput): IdleLine | null {
   const [line, setLine] = useState<IdleLine | null>(null);
   const greeted = useRef(false);
   const seen = useRef<string[]>([]);
-  const latest = useRef({ signals, tips });
-  latest.current = { signals, tips };
+  const turn = useRef({ own: false, next: 0 });
+  const heard = useRef(voice);
+  const latest = useRef({ signals, tips, voice });
+  latest.current = { signals, tips, voice };
   useEffect(() => {
     if (suspended) return;
     if (!resting) {
@@ -133,13 +141,26 @@ export function useIdleLine({
     }
     if (greeted.current) return;
     greeted.current = true;
-    setLine({ text: greeting(new Date()) });
+    setLine({ text: greeting(new Date(), Math.random(), latest.current.voice) });
   }, [resting, suspended]);
+  useEffect(() => {
+    if (heard.current === voice) return;
+    heard.current = voice;
+    turn.current = { own: false, next: 0 };
+    if (voice && resting && !suspended) setLine({ text: voice.hello });
+  }, [voice, resting, suspended]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: each new line starts the wait again
   useEffect(() => {
     if (!resting || suspended || held) return;
     const timer = setTimeout(() => {
-      const { signals, tips } = latest.current;
+      const { signals, tips, voice } = latest.current;
+      const own = turn.current.own && !!voice?.lines.length;
+      turn.current.own = !turn.current.own;
+      if (own && voice) {
+        setLine({ text: voice.lines[turn.current.next % voice.lines.length] ?? "" });
+        turn.current.next += 1;
+        return;
+      }
       const next = nextTip(rankTips(tips, signals), seenTips() ?? seen.current);
       if (!next) return;
       seen.current = next.seen;

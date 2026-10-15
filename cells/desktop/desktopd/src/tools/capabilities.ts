@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { DesktopCapabilities, WORK_PROGRAMS } from "@localdot/protocol";
+import { desktopMemory } from "./memory.ts";
 
 // Inspect executable metadata only. No process launch, shell startup, credentials, or network.
 // PATH comes from the desktop service, never tool arguments. Profile-only additions are untested.
@@ -36,6 +37,7 @@ export async function desktopCapabilities(
   return DesktopCapabilities.parse({
     version: 1,
     search: "service_path",
+    memory: await desktopMemory(),
     programs: Object.fromEntries(entries),
   });
 }

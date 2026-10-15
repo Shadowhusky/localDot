@@ -103,7 +103,7 @@ describe("desktopSpec", () => {
       },
       ShmSize: DESKTOP_LIMITS.shmBytes,
       Memory: DESKTOP_LIMITS.memoryBytes,
-      MemorySwap: DESKTOP_LIMITS.memoryBytes,
+      MemorySwap: DESKTOP_LIMITS.memorySwapBytes,
       NanoCpus: DESKTOP_LIMITS.nanoCpus,
       PidsLimit: DESKTOP_LIMITS.pids,
     });

@@ -174,8 +174,9 @@ describe("task-owned recoverable cleanup", () => {
     expect(await h.prepare("rm -f alias/owned.txt")).toBeUndefined();
   });
 
-  it("still asks for destructive operations after an eligible cleanup prefix", async () => {
+  it("Auto still asks for destructive operations after an eligible cleanup prefix", async () => {
     const h = await fixture();
+    h.ctx.session.permissionMode = () => "auto";
     await h.create("owned.txt");
     const input = { command: "rm -f owned.txt && rm -rf important", cwd: h.home };
     const plan = await h.prepare(input.command);

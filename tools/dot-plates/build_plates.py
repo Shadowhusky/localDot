@@ -254,4 +254,5 @@ def main():
         print("saved", args.blend)
 
 
-main()
+if __name__ == "__main__":
+    main()

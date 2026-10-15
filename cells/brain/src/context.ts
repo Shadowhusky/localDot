@@ -1,5 +1,11 @@
 import type { InboxItem, ToolContent, ToolResult, TranscriptMessage } from "@localdot/protocol";
-import type { ModelMessage, ToolResultPart } from "ai";
+import type {
+  AssistantModelMessage,
+  ModelMessage,
+  SystemModelMessage,
+  ToolModelMessage,
+  ToolResultPart,
+} from "ai";
 
 // Spec "Harness rules": only the latest three screenshots stay in context. Older ones, and every
 // screenshot in the stored transcript, become a marker naming their frame, so a restarted brain can
@@ -8,6 +14,10 @@ export const KEEP_SCREENSHOTS = 3;
 // Pictures from the web are never screenshots: the newest few stay apart from them, older ones and
 // stored ones become a note of where they came from, and no action is ever based on one.
 export const KEEP_PICTURES = 4;
+// In a task, old screenshots and pictures turn into markers this many at a time, so the start of
+// the conversation stays the same for several calls and a provider's prompt cache keeps working:
+// between three and six screenshots are in context.
+export const PRUNE_CHUNK = 4;
 const MARKER =
   /^\[\[localdot:frame ([0-9A-HJKMNP-TV-Z]{26})(?: region (\d+),(\d+),(\d+),(\d+))?\]\]$/;
 
@@ -96,16 +106,33 @@ function contentArrays(m: ModelMessage): unknown[][] {
 }
 
 // A copy with every screenshot but the newest `keep` turned into its marker, and every picture but
-// the newest `pictures` into its note.
+// the newest `pictures` into its note. With a chunk, the oldest turn into markers only `chunk` at a
+// time, so up to `keep + chunk - 1` stay.
 export function pruneScreenshots(
   messages: ModelMessage[],
   keep = KEEP_SCREENSHOTS,
   pictures = KEEP_PICTURES,
+  chunk = 1,
 ): ModelMessage[] {
   if (!Number.isSafeInteger(keep) || keep < 0) throw new RangeError("Invalid screenshot count");
   if (!Number.isSafeInteger(pictures) || pictures < 0)
     throw new RangeError("Invalid picture count");
+  if (!Number.isSafeInteger(chunk) || chunk < 1) throw new RangeError("Invalid prune chunk");
   const copy = structuredClone(messages);
+  let shots = 0;
+  let pics = 0;
+  for (const message of copy)
+    for (const arr of contentArrays(message))
+      for (const part of arr) {
+        if (isPicture(part)) pics += 1;
+        else if (isImage(part)) shots += 1;
+      }
+  const kept = (total: number, wanted: number) => {
+    const drop = Math.max(0, total - wanted);
+    return total - (drop - (drop % chunk));
+  };
+  const keepShots = kept(shots, keep);
+  const keepPics = kept(pics, pictures);
   let seen = 0;
   let seenPictures = 0;
   for (let i = copy.length - 1; i >= 0; i--) {
@@ -114,17 +141,112 @@ export function pruneScreenshots(
         const part = arr[j];
         if (isPicture(part)) {
           seenPictures += 1;
-          if (seenPictures > pictures)
+          if (seenPictures > keepPics)
             arr[j] = { type: "text", text: part.providerOptions.localdot.picture };
           continue;
         }
         if (!isImage(part)) continue;
         seen += 1;
-        if (seen > keep) arr[j] = { type: "text", text: part.providerOptions.localdot.frame };
+        if (seen > keepShots) arr[j] = { type: "text", text: part.providerOptions.localdot.frame };
       }
     }
   }
   return copy;
+}
+
+const EPHEMERAL = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+
+// One model call's prompt as providers cache it best: the same system prompt every time, the
+// conversation, then the reminder that changes, which no cached prefix needs. OpenAI, Gemini and
+// DeepSeek cache a repeated prefix on their own; Anthropic only up to blocks marked for it, so the
+// system prompt and the conversation's end are marked, and the next call reads both from the cache.
+export function cachedPrompt(
+  system: string,
+  history: readonly ModelMessage[],
+  note: string,
+  marked: boolean,
+): { system: string | SystemModelMessage; messages: ModelMessage[] } {
+  const messages: ModelMessage[] = [...history];
+  const last = messages.at(-1);
+  if (marked && last)
+    messages[messages.length - 1] = {
+      ...last,
+      providerOptions: { ...last.providerOptions, ...EPHEMERAL },
+    } as ModelMessage;
+  if (note) messages.push({ role: "user", content: note });
+  return {
+    system: marked ? { role: "system", content: system, providerOptions: EPHEMERAL } : system,
+    messages,
+  };
+}
+
+const KEEP_REASONING_TURNS = 8;
+const KEEP_OUTPUT_TURNS = 12;
+const SETTLE_CHUNK = 16;
+const LARGE_OUTPUT = 2000;
+const outputNote = (chars: number) =>
+  `(Older output left out of context: ${chars} characters. Run the call again if you need it.)`;
+
+// A copy in which older model turns are lighter: reasoning older than the newest 8 turns is left
+// out, and tool output over 2,000 characters older than the newest 12 becomes a note. Both move at
+// the same moments, 16 turns at a time, so the prefix a provider caches changes once every 16
+// calls. The skill tool's instructions stay, and screenshots are pruneScreenshots' to keep.
+export function settleOldTurns(messages: readonly ModelMessage[]): ModelMessage[] {
+  const turns = messages.filter((m) => m.role === "assistant").length;
+  const drop = Math.max(0, turns - KEEP_REASONING_TURNS);
+  const reasoningCut = drop - (drop % SETTLE_CHUNK);
+  const outputCut = Math.max(0, reasoningCut - (KEEP_OUTPUT_TURNS - KEEP_REASONING_TURNS));
+  let seen = 0;
+  return messages.map((message) => {
+    if (message.role === "assistant") {
+      seen += 1;
+      return seen <= reasoningCut ? withoutReasoning(message) : message;
+    }
+    return message.role === "tool" && seen > 0 && seen <= outputCut
+      ? withoutLargeOutput(message)
+      : message;
+  });
+}
+
+function withoutReasoning(message: AssistantModelMessage): ModelMessage {
+  if (typeof message.content === "string") return message;
+  const content = message.content.filter(
+    (part) => part.type !== "reasoning" && part.type !== "reasoning-file",
+  );
+  // A turn that was only reasoning keeps it: an empty assistant message is not valid everywhere.
+  return content.length && content.length < message.content.length
+    ? { ...message, content }
+    : message;
+}
+
+function withoutLargeOutput(message: ToolModelMessage): ModelMessage {
+  let changed = false;
+  const content = message.content.map((part) => {
+    if (part.type !== "tool-result" || part.toolName === "skill") return part;
+    const output = settledOutput(part.output);
+    if (output === part.output) return part;
+    changed = true;
+    return { ...part, output };
+  });
+  return changed ? { ...message, content } : message;
+}
+
+function settledOutput(output: ToolResultPart["output"]): ToolResultPart["output"] {
+  if (output.type === "text" || output.type === "error-text")
+    return output.value.length > LARGE_OUTPUT
+      ? { ...output, value: outputNote(output.value.length) }
+      : output;
+  if (output.type !== "content") return output;
+  const texts = output.value.filter((part) => part.type === "text" && !parseMarker(part.text));
+  const chars = texts.reduce((sum, part) => sum + (part.type === "text" ? part.text.length : 0), 0);
+  if (chars <= LARGE_OUTPUT) return output;
+  return {
+    ...output,
+    value: [
+      { type: "text", text: outputNote(chars) },
+      ...output.value.filter((part) => !texts.includes(part)),
+    ],
+  };
 }
 
 // The stored form: no image data at all.
@@ -147,6 +269,7 @@ export async function fromTranscript(
   signal?.throwIfAborted();
   let messages: ModelMessage[] = [];
   for (const s of stored) {
+    if (s.harnessEvent) continue;
     // Private compaction metadata is a structured record, never a magic string that a user or
     // a model can accidentally put into ordinary message text. Inbox records remain untouched.
     const entry = s.content as {

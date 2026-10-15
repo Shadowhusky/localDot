@@ -2,9 +2,10 @@
 
 python3 -I derive.py MASTER_DIR [OUT_DIR]
 
-MASTER_DIR holds build_plates.py's 16-bit RGBA masters. Each one is resized in linear light
-(Lanczos) and encoded with lossy colour and lossless alpha. OUT_DIR defaults to the app's
-apps/web/src/dot/plates. Needs ImageMagick (magick) and cwebp.
+MASTER_DIR holds 16-bit RGBA masters from build_plates.py or build_wearables.py; the plates found
+there are derived. Each one is resized in linear light (Lanczos) and encoded with lossy colour and
+lossless alpha. OUT_DIR defaults to the app's apps/web/src/dot/plates. Needs ImageMagick (magick) and
+cwebp.
 """
 
 import subprocess
@@ -13,12 +14,29 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-# The body crossfades between three plates at every size; the soft shadow upscales cleanly.
+# The body crossfades between three plates at every size, and what dot wears lies over it at the same
+# sizes; the soft shadow upscales cleanly.
+SIZES = [48, 96, 192, 448]
+WEARABLES = [
+    "hoodie",
+    "cap",
+    "sunglasses",
+    "bow",
+    "star-pin",
+    "round-glasses",
+    "mustache",
+    "suit",
+    "scarf",
+    "headphones",
+    "mortarboard",
+    "beret",
+]
 PLATES = {
-    "body-neutral": [48, 96, 192, 448],
-    "body-xenon": [48, 96, 192, 448],
-    "body-dim": [48, 96, 192, 448],
+    "body-neutral": SIZES,
+    "body-xenon": SIZES,
+    "body-dim": SIZES,
     "shadow": [96, 192],
+    **{f"wear-{name}": SIZES for name in WEARABLES},
 }
 
 
@@ -34,6 +52,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for plate, sizes in PLATES.items():
             master = src / f"{plate}.png"
+            if not master.exists():
+                continue
             for px in sizes:
                 png = Path(tmp) / f"{plate}-{px}.png"
                 webp = out / f"{plate}-{px}.webp"

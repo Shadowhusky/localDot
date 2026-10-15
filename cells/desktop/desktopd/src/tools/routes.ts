@@ -5,6 +5,7 @@ import {
   FileListRequest,
   FileReadRequest,
   FileWriteRequest,
+  type ShellDone,
   type ShellFailure,
   ShellRequest,
   ShellStopRequest,
@@ -31,6 +32,7 @@ import {
   writeFile,
 } from "./files.ts";
 import { resolveInHome } from "./home.ts";
+import { desktopMemory } from "./memory.ts";
 import { runShell, ShellTerminationError, shellEnv } from "./shell.ts";
 import { inspectUploadSource, readUploadSource } from "./upload-source.ts";
 
@@ -122,6 +124,29 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
   });
   // Cancellation stops an owned command without discarding its terminal cleanup receipt.
   const commands = new Map<string, AbortController>();
+  // Completion metadata only: no command, output, environment or secrets. Kept independently
+  // of the response so a disconnected client can verify the result without replaying work.
+  const results = new Map<string, { done: ShellDone; at: number }>();
+  const pruneResults = () => {
+    for (const [id, value] of results) if (Date.now() - value.at > 600_000) results.delete(id);
+    while (results.size > 128) {
+      const first = results.keys().next().value;
+      if (first === undefined) break;
+      results.delete(first);
+    }
+  };
+  app.post("/shell/result", async (c) => {
+    const req = await body(c, ShellStopRequest, 1024);
+    if (req instanceof Response) return req;
+    pruneResults();
+    const result = results.get(req.id);
+    c.header("cache-control", "no-store");
+    if (result) return c.json({ id: req.id, result: result.done });
+    return c.text(
+      commands.has(req.id) ? "command running" : "result unavailable",
+      commands.has(req.id) ? 202 : 404,
+    );
+  });
   app.post("/shell/stop", async (c) => {
     const req = await body(c, ShellStopRequest, 1024);
     if (req instanceof Response) return req;
@@ -181,7 +206,15 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
       return c.text("working directory must be inside the home", 400);
     }
     const id = req.id;
-    if (id && (commands.has(id) || commands.size >= 64)) return c.text("command unavailable", 409);
+    pruneResults();
+    if (id && (commands.has(id) || results.has(id) || commands.size >= 64))
+      return c.text("command unavailable", 409);
+    const memory = await desktopMemory();
+    if (memory?.pressure === "critical" || memory?.vm?.pressure === "critical")
+      return c.text("desktop_memory_pressure", 503);
+    // The memory read yields; repeat ownership admission before starting a process.
+    if (id && (commands.has(id) || results.has(id) || commands.size >= 64))
+      return c.text("command unavailable", 409);
     const stopped = new AbortController();
     const cancel = new AbortController();
     if (id) commands.set(id, cancel);
@@ -208,6 +241,10 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
               if (!execution.aborted) send(chunk);
             },
           );
+          if (id) {
+            results.set(id, { done, at: Date.now() });
+            pruneResults();
+          }
           send(done);
         } catch (error) {
           if (!signal.aborted) {
@@ -233,7 +270,10 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
         stopped.abort(new Error("shell response cancelled"));
       },
     });
-    return c.body(output, 200, { "content-type": "application/x-ndjson" });
+    return c.body(output, 200, {
+      "content-type": "application/x-ndjson",
+      ...(id ? { "x-localdot-shell-result": "1" } : {}),
+    });
   });
 
   app.post("/files/read", async (c) => {

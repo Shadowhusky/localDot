@@ -46,10 +46,37 @@ function providerItem(provider: ProviderSpec): PickerItem {
   };
 }
 
-// Every provider a role can use, grouped as the registry groups them. A plan its vendor keeps to
-// their own tools can still be chosen, only to read why it can't be used.
+// The API formats a custom endpoint can speak, each one of the registry's custom providers. Lists
+// show a custom endpoint once; its format is a row of its own (ModelChooser).
+export const CUSTOM_FORMATS = [
+  {
+    value: "openai-compatible",
+    label: "OpenAI Chat Completions",
+    description: "Most servers and proxies",
+  },
+  {
+    value: "openai-responses-compatible",
+    label: "OpenAI Responses",
+    description: "Needed by GPT-6.1 Sol and newer",
+  },
+  {
+    value: "anthropic-compatible",
+    label: "Anthropic Messages",
+    description: "Servers that speak Claude's API",
+  },
+] as const;
+
+export const isCustomFormat = (id: string) => CUSTOM_FORMATS.some((format) => format.value === id);
+
+// Every provider a role can use, grouped as the registry groups them, with one entry for a custom
+// endpoint whatever its format. A plan its vendor keeps to their own tools can still be chosen,
+// only to read why it can't be used.
 export function providerGroups(role: ModelRole, value: string): PickerGroup[] {
-  const offered = PROVIDERS.filter((provider) => role !== "local" || provider.local);
+  const offered = PROVIDERS.filter(
+    (provider) =>
+      (role !== "local" || provider.local) &&
+      (!isCustomFormat(provider.id) || provider.id === CUSTOM_FORMATS[0].value),
+  );
   const groups: PickerGroup[] = [];
   if (value && !subscription(value) && !PROVIDERS.some((provider) => provider.id === value))
     groups.push({
@@ -57,7 +84,18 @@ export function providerGroups(role: ModelRole, value: string): PickerGroup[] {
       items: [{ value, label: value, disabledReason: "No longer offered" }],
     });
   for (const label of PROVIDER_GROUPS) {
-    const items = offered.filter((provider) => groupOf(provider) === label).map(providerItem);
+    const items = offered
+      .filter((provider) => groupOf(provider) === label)
+      .map((provider) =>
+        isCustomFormat(provider.id)
+          ? {
+              value: isCustomFormat(value) ? value : provider.id,
+              label: "Custom endpoint",
+              keywords: "custom endpoint own server proxy openai compatible responses anthropic",
+              description: "Your own server or proxy",
+            }
+          : providerItem(provider),
+      );
     if (label === "Local servers" && role !== "local") groups.push(subscriptions(role));
     if (items.length) groups.push({ label, items });
   }

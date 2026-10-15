@@ -79,16 +79,17 @@ describe("previews", () => {
   it("decodes only PNG, JPEG, GIF and WebP on the Mac", async () => {
     const f = deliverablesFixture();
     const id = f.task();
-    const tiff = await sharp({ create: { width: 10, height: 10, channels: 3, background: "#000" } })
-      .tiff()
-      .toBuffer();
+    const canvas = () =>
+      sharp({ create: { width: 10, height: 10, channels: 3, background: "#000" } });
+    const tiff = await canvas().tiff().toBuffer();
     const heif = Buffer.concat([
       Buffer.from([0, 0, 0, 24]),
       Buffer.from("ftypheic"),
       Buffer.alloc(16),
     ]);
-    f.result(id, { "scan.png": tiff, "photo.png": heif });
-    for (const name of ["scan.png", "photo.png"])
+    const avif = await canvas().avif().toBuffer();
+    f.result(id, { "scan.png": tiff, "photo.png": heif, "photo.webp": avif });
+    for (const name of ["scan.png", "photo.png", "photo.webp"])
       expect(
         await json(await f.get(`/api/agent/sessions/${id}/files/${name}/preview?v=1`)),
         name,

@@ -176,21 +176,21 @@ describe("custom endpoints", () => {
     expect(PROVIDERS.filter((p) => p.custom)).toEqual([
       {
         id: "openai-compatible",
-        name: "Other (OpenAI-compatible)",
+        name: "Custom endpoint (OpenAI Chat Completions)",
         client: "openai-compatible",
         keyd: "openai-compatible",
         custom: true,
       },
       {
         id: "openai-responses-compatible",
-        name: "Other (OpenAI Responses-compatible)",
+        name: "Custom endpoint (OpenAI Responses)",
         client: "openai",
         keyd: "openai-compatible",
         custom: true,
       },
       {
         id: "anthropic-compatible",
-        name: "Other (Anthropic-compatible)",
+        name: "Custom endpoint (Anthropic Messages)",
         client: "anthropic-compatible",
         keyd: "anthropic-compatible",
         custom: true,

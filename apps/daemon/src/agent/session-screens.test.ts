@@ -23,6 +23,7 @@ import { EventLog } from "../event-log.ts";
 import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
 import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
+import { redactor } from "./redact.ts";
 import { AgentSession, ControlHeldError } from "./session.ts";
 import { toolHarness } from "./testing/harness.ts";
 import { dispatchTool } from "./tools/index.ts";
@@ -375,6 +376,10 @@ describe("session-owned screen authority", () => {
       if (mode === "unavailable-store")
         expect(JSON.stringify(reply)).toContain("temporarily unavailable");
       else expect(JSON.stringify(reply)).toContain("Submission was not confirmed");
+      // A saved password filled for the task is masked in whatever the task shows afterwards.
+      expect(redactor([], f.session)("saved-private-canary")).toBe(
+        mode === "unavailable-store" ? "saved-private-canary" : "[redacted]",
+      );
     },
   );
 
@@ -1110,6 +1115,21 @@ describe("session-owned screen authority", () => {
     expect(text).not.toContain("Opened:");
     expect(f.client.read).not.toHaveBeenCalled();
     expect(result.result.recovery?.kind).toBe("download_pending");
+  });
+
+  it("tells dot a download reaches ~/Downloads by itself in Full access", async () => {
+    const f = fixture();
+    await f.browser();
+    f.session.permissionMode = () => "full";
+    f.client.navigate.mockResolvedValueOnce({ done: true, download: true });
+    const h = tools(f);
+    const result = await h.callTool("browser_navigate", { url: "https://example.test/source.zip" });
+    const text = result.result.content
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join(" ");
+    expect(text).toContain("reaches ~/Downloads on the computer by itself");
+    expect(text).not.toContain("before they reach the computer");
   });
 
   it.each(["observe", "frame"] as const)(

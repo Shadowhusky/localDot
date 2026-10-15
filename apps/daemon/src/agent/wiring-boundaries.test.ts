@@ -10,6 +10,7 @@ import { FrameStore } from "../gateway/frames.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { BrainCellsDeps } from "./brain-cell.ts";
 import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
+import { addTaskSecret } from "./redact.ts";
 import { AgentSession } from "./session.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
 
@@ -352,6 +353,20 @@ describe("production agent ownership wiring", () => {
     ).toBe("[redacted] [redacted] hello");
     h.setBusy(true);
     expect(() => h.agent.routes.desktop(h.cellId, new AbortController().signal)).toThrow();
+  });
+  it("masks a password typed for a task in that task's later text only", async () => {
+    const h = setup();
+    await h.agent.start();
+    const id = h.log.createSession("task"),
+      session = new AgentSession(id, h.cellId, "task", h.log);
+    h.agent.runner.sessions.set(id, session);
+    addTaskSecret(session, "hunter2hunter2");
+    expect(h.agent.routes.redactUserText("pw hunter2hunter2", id)).toBe("pw [redacted]");
+    expect(h.agent.routes.redactUserText("pw hunter2hunter2", undefined, h.cellId)).toBe(
+      "pw hunter2hunter2",
+    );
+    h.agent.runner.sessions.delete(id);
+    session.stop();
   });
 });
 

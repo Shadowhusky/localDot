@@ -69,27 +69,32 @@ describe("bundle notice accounting", () => {
       execFileSync(process.execPath, [join(f.root, "dist/brain.mjs")], { encoding: "utf8" }).trim(),
     ).toBe("function");
   });
-  it("embeds DSH's own package version so the bundle runs away from node_modules", async () => {
-    const f = fixture();
-    const dsh = f.input("@deepseek-ai/dsh-llm", "0.1.7-rc.2", "fixture MIT license");
-    const entry = join(dsh.dir, "lib/index.js");
-    mkdirSync(join(dsh.dir, "lib"), { recursive: true });
-    writeFileSync(
-      entry,
-      'import { createRequire } from "node:module"; export const { version } = createRequire(import.meta.url)("../package.json");',
-    );
-    mkdirSync(join(f.root, "src"), { recursive: true });
-    writeFileSync(
-      join(f.root, "src/main.ts"),
-      `import { version } from ${JSON.stringify(entry)}; console.log(version);`,
-    );
-    await buildBrain(f.root);
-    // The original module and metadata are unavailable at execution time.
-    rmSync(join(f.root, "node_modules"), { recursive: true });
-    expect(
-      execFileSync(process.execPath, [join(f.root, "dist/brain.mjs")], { encoding: "utf8" }).trim(),
-    ).toBe("0.1.7-rc.2");
-  });
+  it.each(["@deepseek-ai/dsh-llm", "@deepseek-ai/dsh-repeat-tool-reminder"])(
+    "embeds %s metadata so the bundle runs away from node_modules",
+    async (name) => {
+      const f = fixture();
+      const dsh = f.input(name, "0.1.7-rc.2", "fixture MIT license");
+      const entry = join(dsh.dir, "lib/index.js");
+      mkdirSync(join(dsh.dir, "lib"), { recursive: true });
+      writeFileSync(
+        entry,
+        'import { createRequire } from "node:module"; export const { version } = createRequire(import.meta.url)("../package.json");',
+      );
+      mkdirSync(join(f.root, "src"), { recursive: true });
+      writeFileSync(
+        join(f.root, "src/main.ts"),
+        `import { version } from ${JSON.stringify(entry)}; console.log(version);`,
+      );
+      await buildBrain(f.root);
+      // The original module and metadata are unavailable at execution time.
+      rmSync(join(f.root, "node_modules"), { recursive: true });
+      expect(
+        execFileSync(process.execPath, [join(f.root, "dist/brain.mjs")], {
+          encoding: "utf8",
+        }).trim(),
+      ).toBe("0.1.7-rc.2");
+    },
+  );
   it("refuses missing or empty licenses instead of silently omitting bundled code", () => {
     const f = fixture();
     const missing = f.input("unlicensed", "1.0.0");

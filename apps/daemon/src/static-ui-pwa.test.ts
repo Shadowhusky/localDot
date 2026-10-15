@@ -20,6 +20,7 @@ function scratch() {
   writeFileSync(join(dir, "sw.js"), "self.addEventListener('push', () => {});");
   writeFileSync(join(dir, "manifest.webmanifest"), '{"name":"localDot"}');
   writeFileSync(join(dir, "icons", "icon-192.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  writeFileSync(join(dir, "icons", "apple-touch-icon.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   writeFileSync(join(dir, "icons", "notes.txt"), "not an icon");
   const eventLog = new EventLog(join(top, "events"));
   const app = createApp({ token: "t".repeat(43), port: PORT, eventLog, ui: { dir } });
@@ -45,6 +46,21 @@ describe("Home Screen app files", () => {
     const manifest = await app.request(url("/manifest.webmanifest"));
     expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
     expect(manifest.headers.get("cache-control")).toBe("no-cache");
+  });
+
+  it("supports anonymous Apple icon discovery without exposing other root files", async () => {
+    const app = scratch();
+    const canonical = await app.request(url("/icons/apple-touch-icon.png"));
+    const bytes = await canonical.arrayBuffer();
+    for (const path of ["/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"]) {
+      const response = await app.request(url(path));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      expect(response.headers.get("cache-control")).toBe("no-cache");
+      expect(await response.arrayBuffer()).toEqual(bytes);
+    }
+    expect((await app.request(url("/notes.txt"))).status).toBe(404);
+    expect((await app.request(url("/api/whoami"))).status).toBe(401);
   });
 
   it("serves PNG icons only, from the icons folder only", async () => {

@@ -155,7 +155,9 @@ it("says where sign-ins are kept and offers to sign in to a typed or common site
   const signIn = signInView();
   render(<AccountsSection accounts={ready} signIn={signIn} />);
   expect(
-    screen.getByText(/localDot keeps website sign-ins between tasks.*its sign-in may have expired/),
+    screen.getByText(
+      /dot's web browser keeps your sign-ins between tasks.*its sign-in may have expired/,
+    ),
   ).toBeTruthy();
   expect(screen.getByText("Sign in to a site")).toBeTruthy();
   const field = screen.getByRole("textbox", { name: "Site" });

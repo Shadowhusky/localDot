@@ -10,7 +10,13 @@ import { createXai } from "@ai-sdk/xai";
 import { ModelBinding, SURROGATE_PATTERN } from "@localdot/protocol";
 import { gatewayBaseURL, modelOptionsProblem, modelProviderOptions } from "@localdot/providers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { type LanguageModel, wrapLanguageModel } from "ai";
+import {
+  APICallError,
+  type JSONValue,
+  type LanguageModel,
+  type LanguageModelMiddleware,
+  wrapLanguageModel,
+} from "ai";
 
 // Nothing the brain sends is kept on the provider (P5a-R33): the Responses APIs of OpenAI, Azure
 // and xAI store every request by default, screenshots of the user's desktop included. With
@@ -46,7 +52,7 @@ function stateless(
 // providers use their official packages (P5a-R4), each calling only the operation its keyd preset
 // lists (P5a-R31).
 export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageModel {
-  const model = baseModel(b, fetch);
+  const model = b.client === "anthropic" ? keepsThinking(baseModel(b, fetch)) : baseModel(b, fetch);
   if (!b.options) return model;
   const provider = b.provider ?? b.client;
   const problem = modelOptionsProblem(provider, b.model, b.options, b.maxOutputTokens);
@@ -83,6 +89,62 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
             [namespace]: { ...params.providerOptions?.[namespace], ...options },
           },
         };
+      },
+    },
+  });
+}
+// Claude binds each thinking block to the conversation before it, and newer accounts refuse a
+// request whose earlier turns changed since (a reminder dropped, an old screenshot pruned). Once
+// refused, the request goes again with the blocks that no longer fit dropped, and so does every
+// later one of the task; accounts that never refuse are left as they are.
+const UNBOUND = /bound to a different conversation/i;
+function keepsThinking(model: LanguageModel): LanguageModel {
+  let dropping = false;
+  const dropped: NonNullable<LanguageModelMiddleware["transformParams"]> = async ({ params }) => {
+    const anthropic = (params.providerOptions?.anthropic ?? {}) as Record<string, JSONValue>;
+    const thinking = (anthropic.thinking ?? { type: "adaptive" }) as Record<string, JSONValue>;
+    return {
+      ...params,
+      headers: { ...params.headers, "anthropic-beta": "thinking-binding-controls-2026-08-01" },
+      providerOptions: {
+        ...params.providerOptions,
+        anthropic: {
+          ...anthropic,
+          thinking: { ...thinking, blockBinding: { prefixMismatchBehavior: "drop_block" } },
+        },
+      },
+    };
+  };
+  const unbound = (error: unknown) =>
+    APICallError.isInstance(error) &&
+    error.statusCode === 400 &&
+    UNBOUND.test(`${error.responseBody ?? ""} ${error.message}`);
+  return wrapLanguageModel({
+    model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
+    middleware: {
+      specificationVersion: "v4",
+      wrapGenerate: async ({ doGenerate, params, model }) => {
+        const again = async () =>
+          model.doGenerate(await dropped({ type: "generate", params, model }));
+        if (dropping) return again();
+        try {
+          return await doGenerate();
+        } catch (error) {
+          if (!unbound(error)) throw error;
+          dropping = true;
+          return again();
+        }
+      },
+      wrapStream: async ({ doStream, params, model }) => {
+        const again = async () => model.doStream(await dropped({ type: "stream", params, model }));
+        if (dropping) return again();
+        try {
+          return await doStream();
+        } catch (error) {
+          if (!unbound(error)) throw error;
+          dropping = true;
+          return again();
+        }
       },
     },
   });
@@ -156,4 +218,13 @@ function baseModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageMod
 // drop images inside tool results.
 export function imagesInToolResults(b: ModelBinding): boolean {
   return b.client === "anthropic";
+}
+
+// Older turns may change between these clients' calls: lightened (settleOldTurns) and summarized
+// sooner. DeepSeek V4 then gets an empty reasoning_content, and the stateless Responses APIs of
+// OpenAI and Azure get no item for the reasoning (no item id ties a function call to it). Claude
+// binds each thinking block to the conversation before it, so a changed earlier turn invalidates
+// every later block; other APIs and gateways may check the same or expect what they sent back.
+export function editsOlderTurns(b: ModelBinding): boolean {
+  return b.client === "deepseek" || b.client === "openai" || b.client === "azure";
 }

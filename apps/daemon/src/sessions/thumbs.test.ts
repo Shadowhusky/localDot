@@ -1,10 +1,11 @@
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ulid } from "@localdot/protocol";
+import { SESSION_THUMBS, ulid } from "@localdot/protocol";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FrameStore } from "../gateway/frames.ts";
+import { NotRaster } from "../raster.ts";
 import { Thumbnails } from "./thumbs.ts";
 
 const roots: string[] = [];
@@ -44,6 +45,19 @@ describe("observation thumbnails", () => {
     const { sessionId, thumbs } = await setup();
     expect(await thumbs.path(sessionId, ulid())).toBeUndefined();
     expect(await thumbs.path(sessionId, "../frame")).toBeUndefined();
+  });
+  it("decodes no frame from the computer that is not a PNG, JPEG, GIF or WebP", async () => {
+    const { home, sessionId, thumbs } = await setup();
+    const forged = ulid();
+    new FrameStore(home).save(
+      sessionId,
+      forged,
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800"/>'),
+    );
+    await expect(thumbs.path(sessionId, forged)).rejects.toBeInstanceOf(NotRaster);
+    expect(existsSync(join(home, "sessions", sessionId, SESSION_THUMBS, `${forged}.webp`))).toBe(
+      false,
+    );
   });
   it("runs at most two conversions at once", async () => {
     const { sessionId, ids, thumbs } = await setup(8);

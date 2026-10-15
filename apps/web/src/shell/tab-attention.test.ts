@@ -82,3 +82,18 @@ it("marks the tab's icon while another task needs you out of sight", () => {
   expect(link.getAttribute("href")).toBe("/favicon.svg");
   expect(document.title).toBe("Done · localDot");
 });
+
+it("restores the PNG mascot metadata after the SVG attention badge", () => {
+  document.head.innerHTML =
+    '<link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />';
+  const link = document.querySelector("link") as HTMLLinkElement;
+  hide(false);
+  renderHook(() => useTabAttention(status("needs_you")));
+  act(() => hide(true));
+  expect(link.type).toBe("image/svg+xml");
+  expect(link.getAttribute("sizes")).toBe("any");
+  act(() => hide(false));
+  expect(link.getAttribute("href")).toBe("/icons/icon-192.png");
+  expect(link.type).toBe("image/png");
+  expect(link.getAttribute("sizes")).toBe("192x192");
+});

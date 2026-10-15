@@ -83,10 +83,16 @@ export function notifyFor(
   return trouble || (outcome === "done" && changed);
 }
 
-// The same computer the web shows (apps/web/src/cells/useCell.ts adopt()).
-export function pickComputer(cells: readonly CellSummary[]): CellSummary | undefined {
+// The same computer the web shows (apps/web/src/cells/useCell.ts adopt()), unless the task a
+// follow-up continues is live on another one.
+export function pickComputer(
+  cells: readonly CellSummary[],
+  runs?: (cellId: string) => boolean,
+): CellSummary | undefined {
+  const usable = (c: CellSummary) => !c.fenced && !c.replacementPending && c.state !== "removed";
   return (
-    cells.find((c) => !c.fenced && !c.replacementPending && c.state !== "removed") ??
+    (runs && cells.find((c) => usable(c) && runs(c.id))) ??
+    cells.find(usable) ??
     cells.find((c) => c.state !== "removed")
   );
 }
@@ -170,7 +176,11 @@ export class RoutineLauncher {
     turnedOn: { cellId?: string },
   ): Promise<StoredRun> {
     const { cells, runner, store, clock } = this.deps;
-    const cell = pickComputer(cells.list());
+    const followed = routine.kind === "follow_up" ? routine.followUp?.sessionId : undefined;
+    const cell = pickComputer(
+      cells.list(),
+      followed ? (id) => runner.live(id) === followed : undefined,
+    );
     if (!cell) return this.#finish(routine, run, "skipped", "No computer is set up yet.");
     if (cell.paused) return this.#finish(routine, run, "skipped", FROZEN);
     if (cell.fenced || cell.replacementPending)

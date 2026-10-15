@@ -180,7 +180,7 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     if (!file) return c.text("not found", 404);
     return c.body(readFileSync(file), 200, {
       "content-type": "image/webp",
-      "cache-control": "private, max-age=31536000, immutable",
+      "cache-control": "no-store",
       "x-content-type-options": "nosniff",
     });
   });

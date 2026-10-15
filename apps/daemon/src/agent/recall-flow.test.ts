@@ -2,8 +2,8 @@ import { afterEach, expect, it } from "vitest";
 import { brainFlow } from "./testing/brain-flow.ts";
 
 const fixtures: Awaited<ReturnType<typeof brainFlow>>[] = [];
-// The brain looks at the screen before its first model call; the user's word comes after that, so
-// only what the tools under test return can mark the task untrusted.
+// Reset the memory-write guard at the first model call to isolate the tested lookup.
+// The provenance ledger still records startup skill-catalog reads as untrusted files.
 function freshAfterFirstLook(f: Awaited<ReturnType<typeof brainFlow>>) {
   let calls = 0;
   f.controls.beforeModel = () => {

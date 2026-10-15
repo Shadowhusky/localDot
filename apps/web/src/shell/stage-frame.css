@@ -157,6 +157,15 @@
   height: var(--dock);
 }
 
+/* What a press on dot reaches: the ball, which is three quarters of its frame. */
+.narrator-dot {
+  position: absolute;
+  top: calc(var(--dock-y) + var(--dock) / 8);
+  left: calc(var(--dock-x) + var(--dock) / 8);
+  width: calc(var(--dock) * 0.75);
+  height: calc(var(--dock) * 0.75);
+}
+
 .narrator:not([data-dot]) {
   --line-x: 0px;
 }
@@ -919,202 +928,6 @@
   background: transparent;
 }
 
-/* App chrome only: neither the computer framebuffer nor the replay/export canvas. */
-.work-overlay-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-  pointer-events: none;
-}
-.work-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: auto;
-  width: min(420px, calc(100% - 16px));
-  height: min(262px, calc(75% - 8px));
-  transition:
-    width var(--dur-dim) var(--ease-standard),
-    height var(--dur-dim) var(--ease-standard),
-    border-radius var(--dur-dim) var(--ease-standard);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  isolation: isolate;
-  border: 1px solid var(--color-separator);
-  border-radius: var(--radius-xl);
-  color: var(--color-fg-1);
-  background: var(--color-overlay);
-  box-shadow: var(--shadow-overlay);
-  font-size: var(--text-callout);
-}
-.work-overlay-header {
-  padding: var(--spacing);
-  gap: calc(var(--spacing) * 0.5);
-  display: flex;
-  align-items: center;
-  flex: none;
-  height: 36px;
-  min-width: 0;
-}
-.work-overlay .work-overlay-handle {
-  min-height: 0;
-  padding: 0;
-  border-radius: 0;
-  box-shadow: none;
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-.work-overlay .work-overlay-handle {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 1.5);
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 calc(var(--spacing) * 1.5);
-  border-radius: var(--radius-group);
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-.work-overlay-handle:active {
-  cursor: grabbing;
-}
-.work-overlay-handle .ui-button-content {
-  width: 100%;
-  min-width: 0;
-  gap: calc(var(--spacing) * 1.5);
-}
-.work-overlay .work-overlay-handle svg {
-  flex: none;
-}
-.work-overlay-heading {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-.work-overlay-state {
-  margin-left: auto;
-  padding-left: calc(var(--spacing) * 1);
-  color: var(--color-fg-2);
-  font-size: var(--text-footnote);
-}
-.work-overlay .work-overlay-toggle {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-group);
-}
-/* Adjacent toolbar buttons own their exact target; expanded kit targets must not overlap. */
-.work-overlay-toggle.ui-icon-button::after {
-  inset: 0;
-}
-.work-overlay :is(.ui-button, .ui-icon-button, [tabindex]):focus-visible {
-  outline: var(--focus-width) solid var(--color-fg-1);
-  outline-offset: -3px;
-  border-radius: var(--radius-group);
-}
-.work-overlay-body {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  opacity: 1;
-  transition: opacity var(--dur-fade) var(--ease-standard);
-}
-.work-overlay-output {
-  min-height: 0;
-  height: 100%;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 0 calc(var(--spacing) * 3) calc(var(--spacing) * 3);
-  border-top: 1px solid var(--color-separator);
-  background: var(--color-console);
-  scrollbar-width: thin;
-}
-.work-overlay-entry + .work-overlay-entry {
-  margin-top: calc(var(--spacing) * 4);
-  padding-top: calc(var(--spacing) * 3.5);
-  border-top: 1px solid var(--color-separator);
-}
-.work-overlay-entry-heading {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
-  margin-inline: calc(var(--spacing) * -3);
-  border-bottom: 1px solid var(--color-separator);
-  background: var(--color-overlay);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: var(--spacing) calc(var(--spacing) * 3);
-  margin-bottom: calc(var(--spacing) * 2);
-}
-.work-overlay-command {
-  grid-column: 1 / -1;
-  min-width: 0;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
-  overflow-wrap: anywhere;
-  color: var(--color-fg-2);
-}
-.work-overlay-kind {
-  flex: 1;
-  font-weight: 600;
-}
-.work-overlay-intent {
-  grid-column: 1 / -1;
-  margin: 0 0 var(--spacing);
-  line-height: var(--text-body--line-height);
-}
-.work-overlay pre {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: var(--text-body) / var(--text-reading--line-height) var(--font-mono);
-  tab-size: 2;
-  color: var(--color-fg-1);
-}
-.work-overlay-empty,
-.work-overlay-result {
-  margin: calc(var(--spacing) * 1.5) 0 0;
-  color: var(--color-fg-2);
-  font-size: var(--text-footnote);
-}
-
-/* Keep touch controls generous. */
-@media (pointer: coarse) {
-  .work-overlay-header {
-    height: 44px;
-    padding-block: 0;
-  }
-  .work-overlay .work-overlay-handle {
-    height: 44px;
-  }
-  .work-overlay .work-overlay-toggle {
-    width: 44px;
-    height: 44px;
-  }
-}
-.work-overlay-result {
-  flex: none;
-  margin: 0;
-  white-space: nowrap;
-}
-
-.work-overlay .work-overlay-handle {
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-}
 /* Fullscreen viewing preferences stay outside the streamed picture and recordings. */
 .fullscreen-stream-controls {
   position: absolute;
@@ -1144,11 +957,4 @@
 }
 .stream-menu-note {
   padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .work-overlay,
-  .work-overlay-body {
-    transition: none;
-  }
 }

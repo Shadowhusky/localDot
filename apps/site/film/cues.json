@@ -1,0 +1,208 @@
+{
+  "bpm": 120,
+  "length": 37,
+  "marks": {
+    "land": 0.3,
+    "hello": 1,
+    "own": 2,
+    "screen": 2.4,
+    "watch": 4,
+    "montage": 6,
+    "step": 11,
+    "take": 12,
+    "handBack": 13.75,
+    "models": 15,
+    "jobs": 18,
+    "lineup": 23,
+    "smile": 24.35,
+    "rewind": 25.5,
+    "replay": 26,
+    "share": 27.5,
+    "save": 29.0,
+    "saved": 29.5,
+    "yours": 31.8,
+    "pin": 32.3,
+    "end": 33.6,
+    "hit": 34
+  },
+  "montage": [
+    {
+      "at": 6,
+      "line": "Building a game"
+    },
+    {
+      "at": 7,
+      "line": "Planning a trip"
+    },
+    {
+      "at": 8,
+      "line": "Sorting a budget"
+    },
+    {
+      "at": 9,
+      "line": "Designing a poster"
+    },
+    {
+      "at": 10,
+      "line": "Cutting a teaser"
+    }
+  ],
+  "work": {
+    "demo": "breakout",
+    "from": 22.7
+  },
+  "outfits": [
+    {
+      "at": 18.5,
+      "persona": "coder"
+    },
+    {
+      "at": 19.5,
+      "persona": "research"
+    },
+    {
+      "at": 20.5,
+      "persona": "finance"
+    },
+    {
+      "at": 21.5,
+      "persona": "video"
+    },
+    {
+      "at": 22.5,
+      "persona": "design"
+    }
+  ],
+  "sounds": [
+    {
+      "at": 0.3,
+      "sound": "pop",
+      "db": -10
+    },
+    {
+      "at": 2.3,
+      "sound": "whoosh",
+      "db": -20
+    },
+    {
+      "at": 5.9,
+      "sound": "whoosh-down",
+      "db": -22
+    },
+    {
+      "at": 6.85,
+      "sound": "whoosh",
+      "db": -25
+    },
+    {
+      "at": 7.85,
+      "sound": "whoosh",
+      "db": -25
+    },
+    {
+      "at": 8.85,
+      "sound": "whoosh",
+      "db": -25
+    },
+    {
+      "at": 9.85,
+      "sound": "whoosh",
+      "db": -25
+    },
+    {
+      "at": 12,
+      "sound": "click",
+      "db": -14
+    },
+    {
+      "at": 13.75,
+      "sound": "click",
+      "db": -14
+    },
+    {
+      "at": 14.7,
+      "sound": "whoosh",
+      "db": -18
+    },
+    {
+      "at": 18.5,
+      "sound": "shimmer",
+      "db": -21
+    },
+    {
+      "at": 19.5,
+      "sound": "shimmer",
+      "db": -21
+    },
+    {
+      "at": 20.5,
+      "sound": "shimmer",
+      "db": -21
+    },
+    {
+      "at": 21.5,
+      "sound": "shimmer",
+      "db": -21
+    },
+    {
+      "at": 22.5,
+      "sound": "shimmer",
+      "db": -21
+    },
+    {
+      "at": 23.0,
+      "sound": "pop",
+      "db": -20
+    },
+    {
+      "at": 23.1,
+      "sound": "pop",
+      "db": -21
+    },
+    {
+      "at": 23.2,
+      "sound": "pop",
+      "db": -21
+    },
+    {
+      "at": 23.3,
+      "sound": "pop",
+      "db": -21
+    },
+    {
+      "at": 23.4,
+      "sound": "pop",
+      "db": -21
+    },
+    {
+      "at": 24.35,
+      "sound": "shimmer",
+      "db": -20
+    },
+    {
+      "at": 27.4,
+      "sound": "whoosh",
+      "db": -20
+    },
+    {
+      "at": 29.0,
+      "sound": "click",
+      "db": -14
+    },
+    {
+      "at": 29.5,
+      "sound": "shutter",
+      "db": -14
+    },
+    {
+      "at": 32.3,
+      "sound": "shimmer",
+      "db": -20
+    },
+    {
+      "at": 34,
+      "sound": "bell",
+      "db": -16
+    }
+  ]
+}

@@ -245,8 +245,11 @@ export class DesktopdTools {
     if (signal?.aborted) abort();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let protocolFailure: DesktopdError | undefined;
+    let resultLookup = false;
+    let consumerFailed = false;
     try {
       const res = await this.#send("/shell", scope, JSON.stringify(input), "application/json");
+      resultLookup = res.headers.get("x-localdot-shell-result") === "1";
       let cancellationSent = false;
       cancellation = () => {
         if (cancellationSent) return;
@@ -264,8 +267,14 @@ export class DesktopdTools {
       };
       if (signal?.aborted) cancellation();
       if (!res.ok) {
-        await textBody(res, scope.signal, 4096);
-        protocolFailure = new DesktopdError(res.status, "command request refused", "/shell");
+        const detail = await textBody(res, scope.signal, 4096);
+        protocolFailure = new DesktopdError(
+          res.status,
+          res.status === 503 && detail === "desktop_memory_pressure"
+            ? "Desktop or Docker VM memory is under critical pressure; command was not started. Stop unused previews or build jobs before retrying."
+            : "command request refused",
+          "/shell",
+        );
         throw protocolFailure;
       }
       if (!res.body) throw new ShellExecutionUncertainError();
@@ -306,7 +315,10 @@ export class DesktopdTools {
               try {
                 await untilAborted(Promise.resolve(onChunk(output)), scope.signal);
               } catch (error) {
-                if (!signal?.aborted) throw error;
+                if (!signal?.aborted) {
+                  consumerFailed = true;
+                  throw error;
+                }
                 // An in-flight callback may observe the retired generation. Still drain
                 // the command's cleanup result, without delivering any further output.
               }
@@ -322,6 +334,13 @@ export class DesktopdTools {
       // Only failures created from this response are trusted. An output consumer can throw
       // an arbitrary DesktopdError after the command has already run.
       if (protocolFailure !== undefined && error === protocolFailure) throw error;
+      // Close the failed transport (which cancels a still-running command), then ask only
+      // for this request's terminal receipt. Never replay a side-effecting command.
+      scope.abort();
+      if (resultLookup && !consumerFailed && !this.#lifetime.signal.aborted) {
+        const recovered = await this.#shellResult(id);
+        if (recovered) return { ...recovered, outputIncomplete: true };
+      }
       throw new ShellExecutionUncertainError();
     } finally {
       signal?.removeEventListener("abort", abort);
@@ -331,6 +350,42 @@ export class DesktopdTools {
         void reader.cancel().catch(() => {});
         reader.releaseLock();
       }
+    }
+  }
+
+  async #shellResult(id: string): Promise<ShellDone | undefined> {
+    const scope = this.#scope(5000);
+    try {
+      // Explicit cancellation also covers a response transport that ignored abort.
+      const stop = await this.#send(
+        "/shell/stop",
+        scope,
+        JSON.stringify({ id }),
+        "application/json",
+      );
+      await textBody(stop, scope.signal, 4096);
+      if (stop.status !== 204 && stop.status !== 404) return undefined;
+      for (;;) {
+        const reply = await this.#send(
+          "/shell/result",
+          scope,
+          JSON.stringify({ id }),
+          "application/json",
+        );
+        const body = await textBody(reply, scope.signal, 16384);
+        if (reply.status === 200) {
+          const receipt = z
+            .strictObject({ id: z.literal(id), result: ShellDone.strict() })
+            .parse(JSON.parse(body));
+          return receipt.result;
+        }
+        if (reply.status !== 202) return undefined;
+        await untilAborted(new Promise((resolve) => setTimeout(resolve, 100)), scope.signal);
+      }
+    } catch {
+      return undefined; // Missing, malformed or unreachable is still uncertain.
+    } finally {
+      scope.abort();
     }
   }
 

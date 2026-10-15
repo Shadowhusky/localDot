@@ -8,13 +8,19 @@ const base = `sha256:${"a".repeat(64)}`;
 const target = `sha256:${"b".repeat(64)}`;
 const system = `sha256:${"c".repeat(64)}`;
 const record = { id: "cell", ownership: { desktop: "owned" } } as CellRecord;
-function setup({ missing = false, running = true, authority = base, unavailable = false } = {}) {
+function setup({
+  missing = false,
+  running = true,
+  paused = false,
+  authority = base,
+  unavailable = false,
+} = {}) {
   const request = vi.fn(async (req: DockerRequest): Promise<unknown> => {
     if (req.path === "/containers/owned/json")
       return {
         Id: "owned",
         Image: system,
-        State: { Running: running, Paused: false },
+        State: { Running: running, Paused: paused },
         Config: {
           Labels: {
             "localdot.cell": "cell",
@@ -66,4 +72,90 @@ it("cannot migrate a running computer even when the preflight succeeds", async (
   const { request, migration } = setup();
   await expect(migration.prepare(record, target)).rejects.toThrow("prepare");
   expect(request).toHaveBeenCalledTimes(1);
+});
+
+it("preflights a paused computer without thawing it, but never snapshots it before shutdown", async () => {
+  const { request, migration } = setup({ paused: true });
+  await expect(migration.preflight(record, target)).resolves.toBeUndefined();
+  expect(request.mock.calls.every(([r]) => r.method === "GET" || r.path.endsWith("/tag"))).toBe(
+    true,
+  );
+  request.mockClear();
+  await expect(migration.prepare(record, target)).rejects.toThrow("prepare");
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+const name = (entry: string) => entry.slice(0, entry.indexOf("="));
+// Docker's rule for a commit and for a container made from an image alike: the request's
+// variables, then each of the base's that the request does not name.
+const merged = (request: string[] | undefined, base: string[]) =>
+  request?.length
+    ? [...request, ...base.filter((entry) => !request.some((own) => name(own) === name(entry)))]
+    : base;
+const stdout = (text: string) => {
+  const head = Buffer.alloc(8);
+  head[0] = 1;
+  head.writeUInt32BE(Buffer.byteLength(text), 4);
+  return Buffer.concat([head, Buffer.from(text)]);
+};
+
+it("commits the update's backup and new system with no stream password or desktopd token", async () => {
+  const images = new Map<string, string[]>([
+    [base, ["PATH=/usr/bin"]],
+    [target, ["PATH=/usr/bin", "LANG=C.UTF-8"]],
+  ]);
+  const containers = new Map<string, string[]>([
+    ["owned", ["PUID=1000", "LOCALDOT_DESKTOPD_TOKEN=desktopd-secret", "PASSWORD=stream-secret"]],
+  ]);
+  const commits: { repo?: string; image: string }[] = [];
+  let serial = 0;
+  const request = vi.fn(async (req: DockerRequest): Promise<unknown> => {
+    const [, kind, id = "", action] = req.path.split("/");
+    if (req.method === "GET" && req.path === "/containers/owned/json")
+      return {
+        Id: "owned",
+        Image: system,
+        State: { Running: false, Paused: false },
+        Config: {
+          Env: containers.get("owned"),
+          Labels: { "localdot.cell": "cell", "localdot.role": "desktop", [SYSTEM_BASE]: base },
+        },
+      };
+    if (req.method === "GET" && kind === "images") {
+      const image = decodeURIComponent(id);
+      if (image === system) return { Config: { Labels: { [SYSTEM_BASE]: base } } };
+      return { Id: image, Architecture: "arm64", Config: { Env: images.get(image), Labels: {} } };
+    }
+    if (req.method === "POST" && req.path === "/commit") {
+      const image = `sha256:${String(++serial).padStart(64, "0")}`;
+      const body = req.body as { Env?: string[] } | undefined;
+      images.set(image, merged(body?.Env, containers.get(req.query?.container ?? "") ?? []));
+      commits.push({ repo: req.query?.repo, image });
+      return { Id: image };
+    }
+    if (req.method === "POST" && req.path === "/containers/create") {
+      const helper = `helper-${++serial}`;
+      containers.set(helper, images.get((req.body as { Image: string }).Image) ?? []);
+      return { Id: helper };
+    }
+    if (action === "wait") return { StatusCode: 0 };
+    if (action === "logs") return stdout("{}");
+    if (action === "tag" || action === "start" || action === "archive" || req.method === "DELETE")
+      return undefined;
+    throw new Error(`Unexpected request: ${req.method} ${req.path}`);
+  });
+  const result = await new SystemMigration({ request } as never, "/unused").prepare(record, target);
+  expect(commits.map((commit) => commit.repo)).toEqual([
+    "localdot/update-backup",
+    "localdot/updated-system",
+  ]);
+  expect(commits.at(-1)?.image).toBe(result);
+  for (const { repo, image } of commits) {
+    const env = images.get(image) ?? [];
+    expect(env, repo).toEqual(expect.arrayContaining(["LOCALDOT_DESKTOPD_TOKEN=", "PASSWORD="]));
+    expect(env.join("\n"), repo).not.toMatch(/desktopd-secret|stream-secret/);
+  }
+  expect(images.get(result)).toEqual(
+    expect.arrayContaining(["PATH=/usr/bin", "LANG=C.UTF-8", "PUID=1000"]),
+  );
 });

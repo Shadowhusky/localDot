@@ -11,12 +11,14 @@ export function useVirtualRows(
   const enabled = keys.length > 30;
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
   const [margin, setMargin] = useState(0);
+  const [located, setLocated] = useState(false);
   useLayoutEffect(() => {
     const element = list.current;
     if (!enabled || !element) return;
     let parent = element.parentElement;
     while (parent && !/(auto|scroll)/.test(getComputedStyle(parent).overflowY))
       parent = parent.parentElement;
+    setLocated(true);
     if (!parent) return;
     const port = parent;
     setScroll(port);
@@ -25,6 +27,7 @@ export function useVirtualRows(
         element.getBoundingClientRect().top - port.getBoundingClientRect().top + port.scrollTop,
       );
     measure();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(port);
     observer.observe(element);
@@ -41,21 +44,29 @@ export function useVirtualRows(
     estimateSize,
     overscan: 6,
     scrollMargin: margin,
-    enabled,
+    enabled: enabled && !!scroll,
+    initialOffset: () => scroll?.scrollTop ?? 0,
     initialRect: { width: 400, height: 500 },
   });
   const items = virtual.getVirtualItems();
-  return {
-    enabled,
-    indexes: enabled ? items.map((item) => item.index) : keys.map((_, index) => index),
-    before: enabled && items.length ? Math.max(0, (items[0]?.start ?? margin) - margin) : 0,
-    after:
-      enabled && items.length
-        ? Math.max(0, virtual.getTotalSize() - ((items.at(-1)?.end ?? margin) - margin))
-        : 0,
-    measure: enabled ? virtual.measureElement : undefined,
-    scrollTo: (index: number) => {
+  const active = enabled && !!scroll;
+  const scrollTo = useCallback(
+    (index: number) => {
       if (enabled) virtual.scrollToIndex(index, { align: "auto" });
     },
+    [enabled, virtual],
+  );
+  return {
+    enabled,
+    indexes: active
+      ? items.map((item) => item.index)
+      : (enabled && !located ? keys.slice(0, 30) : keys).map((_, index) => index),
+    before: active && items.length ? Math.max(0, (items[0]?.start ?? margin) - margin) : 0,
+    after:
+      active && items.length
+        ? Math.max(0, virtual.getTotalSize() - ((items.at(-1)?.end ?? margin) - margin))
+        : 0,
+    measure: active ? virtual.measureElement : undefined,
+    scrollTo,
   };
 }

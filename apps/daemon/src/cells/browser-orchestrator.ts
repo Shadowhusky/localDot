@@ -67,6 +67,8 @@ export interface BrowserOrchestratorDeps {
   streamFullcolor?: boolean;
   parentAvailable(parentCellId: string): boolean;
   externalKeydPorts?(): Iterable<number>;
+  // Consult the desktop owner's verified retirement, never infer it from an idle/off state.
+  retiredDesktopPortOwner?(id: string): boolean;
   namePrefix?: string;
   readyTimeoutMs?: number;
   probe?: typeof readBrowserHealth;
@@ -140,7 +142,12 @@ export class BrowserOrchestrator {
     if (inventory.skipped.length) throw new BrowserLifecycleError("Cell port ownership is unknown");
     return [
       ...new Set([
-        ...inventory.records.map((record) => record.keydPort),
+        ...inventory.records
+          .filter(
+            (record) =>
+              record.kind !== "desktop" || !this.deps.retiredDesktopPortOwner?.(record.id),
+          )
+          .map((record) => record.keydPort),
         ...this.#ledger
           .list()
           .filter((record) => record.phase !== "retained")

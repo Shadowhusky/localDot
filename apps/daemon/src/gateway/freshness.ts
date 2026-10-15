@@ -1,5 +1,5 @@
 import type { Point, Rect } from "@localdot/protocol";
-import sharp from "sharp";
+import { raster } from "../raster.ts";
 
 const WIDTH = 1280;
 const HEIGHT = 800;
@@ -13,7 +13,7 @@ export interface FreshnessOptions {
 }
 
 export async function frameLuma(image: Buffer): Promise<Buffer> {
-  const decoded = await sharp(image, { limitInputPixels: WIDTH * HEIGHT * 4 })
+  const decoded = await (await raster(image, { limitInputPixels: WIDTH * HEIGHT * 4 }))
     .resize(WIDTH, HEIGHT, { fit: "fill" })
     .removeAlpha()
     .greyscale()

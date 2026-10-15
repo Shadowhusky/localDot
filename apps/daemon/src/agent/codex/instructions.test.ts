@@ -1,5 +1,10 @@
 import { offeredTools } from "@localdot/protocol";
-import { DONE_TOOL_DESCRIPTION, researchSection, workingRules } from "@localdot/protocol/guidance";
+import {
+  DONE_TOOL_DESCRIPTION,
+  ENVIRONMENT_CONTEXT,
+  researchSection,
+  workingRules,
+} from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { codexInstructions } from "./instructions.ts";
 import { CODEX_TOOL_DESCRIPTIONS, codexTools } from "./mcp-tools.ts";
@@ -19,6 +24,16 @@ describe("Codex developer instructions", () => {
     expect(text).toContain("check these files, then people and recall");
     expect(text).toContain("- 2026-10-08 · done · Send Henry the report on WeChat");
     expect(text.match(/<\/recent_tasks>/g)).toHaveLength(1);
+  });
+  it("carries the chosen dot's role", () => {
+    const base = {
+      memory: { user: "", memory: "" },
+      skills: [],
+      today: new Date("2026-10-09T12:00:00Z"),
+    };
+    const role = "You work as a senior software engineer.";
+    expect(codexInstructions({ ...base, role })).toContain(`# Your role\n${role}`);
+    expect(codexInstructions(base)).not.toContain("# Your role");
   });
   it("escapes memory text so it cannot close its file block", () => {
     const text = codexInstructions({
@@ -55,11 +70,12 @@ describe("Codex developer instructions", () => {
       today: new Date("2026-10-09T12:00:00Z"),
     });
     expect(text).toContain(`server's: ${offeredTools(false).join(", ")}.`);
-    expect(text).not.toContain("research");
+    expect(text).not.toContain("# Research mode");
     expect(text).toContain("browser_upload");
     expect(text).toContain(workingRules("batch"));
-    // Completion evidence and nonterminal waiting add guidance shared by all providers.
-    expect(text.length).toBeLessThan(7100);
+    expect(text).toContain(ENVIRONMENT_CONTEXT);
+    // Source-context recall and evidence-based verification are shared by all providers.
+    expect(text.length).toBeLessThan(9000);
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
   });
   it("adds the research rules and tool only in research mode", () => {
@@ -89,7 +105,7 @@ describe("Codex developer instructions", () => {
       "The safety system asks the user before consequential steps such as sending, posting, buying, deleting online data, uploading files or changing account settings, so never ask the user for permission yourself.",
       "Missing required configuration/information: check context safely, then ask_user and wait, not done.",
       "Otherwise choose defaults.",
-      "Use request_takeover only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
+      "Cloudflare/CAPTCHA is not an automatic handoff.",
       "a secret field whose target is the password box",
       "Never ask for passwords, card numbers or other secrets in a plain message or a text field",
     ])

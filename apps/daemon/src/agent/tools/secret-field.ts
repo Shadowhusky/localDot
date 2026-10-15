@@ -1,4 +1,4 @@
-import { MODEL_SCREEN, type Point, type ScreenName } from "@localdot/protocol";
+import { MODEL_SCREEN, type Point, type ScreenName, webUrl } from "@localdot/protocol";
 import type { NativeDevice } from "../../desktopd/registry.ts";
 import {
   type NativeActionIdentity,
@@ -6,6 +6,12 @@ import {
   sameTarget,
 } from "../../gateway/identity.ts";
 import type { ToolCallContext, ToolDeps } from "./deps.ts";
+import { opensInWebBrowser } from "./web-page.ts";
+
+// dot's own programs run beside the desktop's browser and can read a page back, so a website's
+// password is typed only in the web browser, where saved sign-ins are kept.
+const WEBSITE_ON_DESKTOP =
+  "This is a website's password field in the desktop's browser; a website's password is typed only in the web browser. Open the same page with browser_navigate, locate its password field there, then retry ask_user.";
 
 interface Screen {
   device: NativeDevice;
@@ -24,6 +30,7 @@ export interface SecretField {
   readonly screen: Pick<Screen, "name" | "cellId" | "revision">;
   readonly at?: Point;
   readonly found: NativeActionIdentity;
+  // A sign-in form the web browser vouched for; whatever the desktop claims never counts.
   readonly loginOrigin?: string;
 }
 
@@ -126,6 +133,7 @@ export function findSecretField(
   deps: ToolDeps,
   ctx: ToolCallContext,
   target: readonly number[] | undefined,
+  kind?: "secret" | "code",
 ): Promise<SecretField | string> {
   return onScreen(deps, ctx, async (screen) => {
     let at: Point | undefined;
@@ -145,6 +153,10 @@ export function findSecretField(
       return at
         ? "The field at that target shows what is typed, so a secret can't go there. Do not hand over control just to collect a value. For a website access or verification code, open the same page with browser_navigate, locate its protected code field, then retry ask_user with a code field. For a password, locate the password box."
         : "The field with keyboard focus shows what is typed, so a secret can't go there. Do not hand over control just to collect a value. For a website access or verification code, open the same page with browser_navigate, locate its protected code field, then retry ask_user with a code field. For a password, give the password box's point as target.";
+    if (screen.name === "desktop" && kind === "secret") {
+      const page = found.target.url ? webUrl(found.target.url) : undefined;
+      if (page?.protocol === "https:" && opensInWebBrowser(page)) return WEBSITE_ON_DESKTOP;
+    }
     let loginOrigin: string | undefined;
     if (screen.name === "browser" && screen.device.secret && found.target.url) {
       const url = new URL(found.target.url);

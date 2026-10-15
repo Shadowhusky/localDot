@@ -77,6 +77,7 @@ async function json<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
 // Mount only behind createApp's host/origin/install-token guard. These routes are
 // not installed on the model's tool API. The explicit release POST is the user's
 // approval of one exact tuple; its permit is never cached or exposed to a model.
+// Full access is the user's standing approval for the running task's own downloads.
 export function quarantineRoutes(app: Hono, deps: QuarantineRoutesDeps): void {
   const route = (work: (c: Context, parent: string) => Promise<Response>) => async (c: Context) => {
     c.header("cache-control", "no-store");
@@ -137,43 +138,54 @@ export function quarantineRoutes(app: Hono, deps: QuarantineRoutesDeps): void {
     route(async (c, parent) => {
       const id = itemId(c),
         request = Object.freeze(await json(c.req.raw, QuarantineRelease));
-      if (!deps.store.get(parent, id)) throw new Refusal(404, "Download is unavailable.");
-      let access: QuarantineAccess | undefined;
-      try {
-        access = deps.access(parent, c.req.raw.signal);
-      } catch {
-        throw new Refusal(409, "The computer or task is changing control. Refresh and try again.");
-      }
-      if (!access) throw new Refusal(409, "The computer is not ready for a file release.");
-      const digest = createHash("sha256")
-        .update(JSON.stringify([parent, id, request]))
-        .digest("hex");
-      const approval = new OncePermit(digest);
-      try {
-        access.check();
-        const item = await deps.store.release(
-          parent,
-          id,
-          request,
-          access,
-          (placement, chunks, scope, options) => {
-            scope.check();
-            if (
-              placement.parentCellId !== parent ||
-              placement.bytes !== request.bytes ||
-              placement.sha256 !== request.sha256 ||
-              placement.name !== request.name ||
-              !approval.consume(digest)
-            )
-              throw new Refusal(409, "The approved file changed.");
-            // The store persists approvedRevision/transferId before this single effect.
-            return deps.place(placement, chunks, scope, options);
-          },
-        );
-        return c.json(QuarantineItem.parse(item));
-      } finally {
-        access.release();
-      }
+      return c.json(await releaseDownload(deps, parent, id, request, c.req.raw.signal));
     }),
   );
+}
+
+// The user's Review and Full access's automatic release go through the same checks.
+export async function releaseDownload(
+  deps: QuarantineRoutesDeps,
+  parent: string,
+  id: string,
+  request: QuarantineRelease,
+  signal: AbortSignal,
+): Promise<QuarantineItem> {
+  if (!deps.store.get(parent, id)) throw new Refusal(404, "Download is unavailable.");
+  let access: QuarantineAccess | undefined;
+  try {
+    access = deps.access(parent, signal);
+  } catch {
+    throw new Refusal(409, "The computer or task is changing control. Refresh and try again.");
+  }
+  if (!access) throw new Refusal(409, "The computer is not ready for a file release.");
+  const digest = createHash("sha256")
+    .update(JSON.stringify([parent, id, request]))
+    .digest("hex");
+  const approval = new OncePermit(digest);
+  try {
+    access.check();
+    const item = await deps.store.release(
+      parent,
+      id,
+      request,
+      access,
+      (placement, chunks, scope, options) => {
+        scope.check();
+        if (
+          placement.parentCellId !== parent ||
+          placement.bytes !== request.bytes ||
+          placement.sha256 !== request.sha256 ||
+          placement.name !== request.name ||
+          !approval.consume(digest)
+        )
+          throw new Refusal(409, "The approved file changed.");
+        // The store persists approvedRevision/transferId before this single effect.
+        return deps.place(placement, chunks, scope, options);
+      },
+    );
+    return QuarantineItem.parse(item);
+  } finally {
+    access.release();
+  }
 }

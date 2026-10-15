@@ -104,9 +104,9 @@ export function AccountsSection({
   return (
     <div className="settings-accounts">
       <p className="settings-lede">
-        localDot keeps website sign-ins between tasks. A listed site has stored browser data; its
-        sign-in may have expired. Passwords supplied through a private sign-in form are saved
-        separately. App connections in Connect provide API access and do not sign in the website.
+        dot's web browser keeps your sign-ins between tasks. A site listed here has saved data,
+        though its sign-in may have expired. Passwords you give in a private sign-in form are kept
+        separately, and apps in Connectors work without signing in to the website.
       </p>
       {signIn && <SignInToSite signIn={signIn} off={phase === "off"} />}
       {phase === "off" ? (

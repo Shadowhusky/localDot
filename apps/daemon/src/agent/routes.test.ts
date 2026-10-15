@@ -167,6 +167,22 @@ async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness" | "cla
 const endpoint = (name: string) => `/api/agent/sessions/${SESSION}/${name}`;
 
 describe("agent user routes", () => {
+  it("exposes purpose diagnostics without running tests on read", async () => {
+    const f = await setup();
+    const status = {
+      mode: "bypassed" as const,
+      host: "api.typesafe.ai" as const,
+      model: "jev-latest" as const,
+      calls: 0,
+      succeeded: 0,
+      failed: 0,
+    };
+    f.deps.purpose = { status: vi.fn(async () => status), test: vi.fn(async () => status) };
+    expect(await (await f.send("GET", "/api/agent/purpose-check")).json()).toEqual(status);
+    expect(f.deps.purpose.test).not.toHaveBeenCalled();
+    expect((await f.send("POST", "/api/agent/purpose-check/test")).status).toBe(200);
+    expect(f.deps.purpose.test).toHaveBeenCalledTimes(1);
+  });
   it("rejects a forged remote local-role selection before persisting or starting a task", async () => {
     const f = await setup();
     const document = {
@@ -1445,5 +1461,35 @@ it("does not withdraw a queued message that already reached the model", async ()
   const path = `/api/agent/sessions/${SESSION}/messages/${message.messageId}`;
   expect((await f.send("POST", `${path}/steer`)).status).toBe(204);
   expect((await f.send("POST", `${path}/edit`)).status).toBe(409);
+  expect((await f.session.inbox(0, 0)).items).toHaveLength(1);
+});
+
+it("cancels queued messages once, without drafting or delivering them", async () => {
+  const f = await setup();
+  await f.send("POST", `/api/agent/sessions/${SESSION}/messages`, {
+    kind: "followup",
+    text: "Cancel me",
+  });
+  const message = f.events.find((e) => e.type === "message.user")?.data as { messageId: string };
+  const path = `/api/agent/sessions/${SESSION}/messages/${message.messageId}`;
+  expect((await f.send("POST", `${path}/cancel`)).status).toBe(204);
+  expect((await f.send("POST", `${path}/cancel`)).status).toBe(204);
+  expect((await f.send("POST", `${path}/edit`)).status).toBe(409);
+  expect((await f.send("POST", `${path}/steer`)).status).toBe(404);
+  expect((await f.session.inbox(0, 0)).items).toEqual([]);
+  expect(f.events.filter((e) => e.type === "message.delivery").map((e) => e.data)).toEqual([
+    { messageId: message.messageId, state: "cancelled" },
+  ]);
+});
+it("cannot cancel a message after steering has delivered it", async () => {
+  const f = await setup();
+  await f.send("POST", `/api/agent/sessions/${SESSION}/messages`, {
+    kind: "followup",
+    text: "Keep me",
+  });
+  const message = f.events.find((e) => e.type === "message.user")?.data as { messageId: string };
+  const path = `/api/agent/sessions/${SESSION}/messages/${message.messageId}`;
+  expect((await f.send("POST", `${path}/steer`)).status).toBe(204);
+  expect((await f.send("POST", `${path}/cancel`)).status).toBe(409);
   expect((await f.session.inbox(0, 0)).items).toHaveLength(1);
 });

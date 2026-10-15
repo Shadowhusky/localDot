@@ -61,3 +61,24 @@
 .bar-modes {
   margin-right: calc(var(--spacing) * 2);
 }
+
+/* The wordmark as the localDots menu: this localDot's name after it, quieter. */
+.bar-brand-name {
+  margin-left: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font-weight: var(--font-weight-normal);
+}
+
+.bar-brand-chevron {
+  margin-left: var(--spacing);
+  color: var(--color-fg-3);
+}
+
+.bar-brand-item {
+  display: grid;
+}
+
+.bar-brand-host {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}

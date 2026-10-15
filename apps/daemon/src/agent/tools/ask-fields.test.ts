@@ -7,7 +7,7 @@ import type {
   Target,
   TypeRequest,
 } from "@localdot/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NativeDevice } from "../../desktopd/registry.ts";
 import { Conversations } from "../conversation.ts";
 import { redactor } from "../redact.ts";
@@ -15,6 +15,7 @@ import { PROXY_TOKEN, toolHarness } from "../testing/harness.ts";
 import { dispatchTool } from "./index.ts";
 
 const SECRET = "correct horse battery staple 42";
+// A page only the desktop reaches, such as a router's; a website's sign-in belongs in the web browser.
 const PASSWORD: Target = {
   point: { x: 800, y: 600 },
   bbox: { x: 640, y: 580, w: 320, h: 40 },
@@ -23,12 +24,12 @@ const PASSWORD: Target = {
   name: "Password",
   app: "chromium",
   window: "Sign in",
-  url: "https://mail.example.test/login",
+  url: "https://router.lan/login",
   secret: true,
 };
 const FRAME = { x: 0, y: 0, w: 2560, h: 1600 };
 const LOGIN = {
-  question: "Sign in to your mail so I can read the latest message",
+  question: "Sign in to your router so I can list the connected devices",
   fields: [
     { id: "email", kind: "email", label: "Email" },
     { id: "password", kind: "secret", label: "Password", target: [400, 300] },
@@ -118,6 +119,77 @@ const textOf = (result: { content: { type: string; text?: string }[] }) =>
   result.content.map((c) => c.text ?? "").join("\n");
 
 describe("ask_user with fields", () => {
+  it("never fetches, fills or saves a saved login on the desktop screen", async () => {
+    const h = setup();
+    const logins = {
+      login: vi.fn(async () => ({
+        username: "ada@example.test",
+        password: "saved-password-canary",
+      })),
+      saveLogin: vi.fn(async () => {}),
+    };
+    h.tools.logins = logins;
+    // desktopd vouches for the form, but the desktop's browser is under dot's own control.
+    const vouched = { ...PASSWORD, loginOrigin: "https://router.lan" };
+    h.state.hit.target = vouched;
+    h.state.focus.target = { ...vouched };
+    const asking = h.call(LOGIN);
+    h.session.answerFields(
+      await h.asked(),
+      { email: "ada@example.test", password: SECRET },
+      (t) => t,
+    );
+    const { result } = await asking;
+    expect(result.ok).toBe(true);
+    expect(textOf(result)).toContain("was not saved");
+    expect(h.state.typed.map((t) => t.text)).toEqual([SECRET]);
+    expect(logins.login).not.toHaveBeenCalled();
+    expect(logins.saveLogin).not.toHaveBeenCalled();
+  });
+  it("sends a website's sign-in to the web browser instead of typing it on the desktop", async () => {
+    for (const loginOrigin of ["https://github.com", undefined]) {
+      const h = setup();
+      const logins = { login: vi.fn(async () => undefined), saveLogin: vi.fn(async () => {}) };
+      h.tools.logins = logins;
+      const site = {
+        ...PASSWORD,
+        url: "https://github.com/login",
+        ...(loginOrigin ? { loginOrigin } : {}),
+      };
+      h.state.hit.target = site;
+      h.state.focus.target = { ...site };
+      const { result } = await h.call(LOGIN);
+      expect(result.ok).toBe(false);
+      expect(textOf(result)).toContain("browser_navigate");
+      expect(textOf(result)).toContain("retry ask_user");
+      expect(h.session.pendingAsk).toBeUndefined();
+      expect(h.events().some((e) => e.type === "ask.request")).toBe(false);
+      expect(logins.login).not.toHaveBeenCalled();
+      expect(h.state.typed).toEqual([]);
+    }
+  });
+  it("adds each delivered password and code to the task's redactor", async () => {
+    const h = setup();
+    // Made before anything was delivered, as a driver's is when the task starts.
+    const later = redactor([], h.session);
+    const asking = h.call(LOGIN);
+    h.session.answerFields(
+      await h.asked(),
+      { email: "ada@example.test", password: SECRET },
+      (t) => t,
+    );
+    expect((await asking).result.ok).toBe(true);
+    const code = h.call({
+      question: "What is the code on your phone?",
+      fields: [{ id: "code", kind: "code", label: "Code", length: 6 }],
+    });
+    h.session.answerFields(await h.asked(), { code: "482913" }, (t) => t);
+    expect((await code).result.ok).toBe(true);
+    expect(later(`$ cat notes.txt\n${SECRET} 482913`)).toBe(
+      "$ cat notes.txt\n[redacted] [redacted]",
+    );
+    expect(redactor([])(`${SECRET} 482913`)).toBe(`${SECRET} 482913`);
+  });
   it("types a secret into the field dot named and never stores it or shows it to the model", async () => {
     const h = setup();
     const asking = h.call(LOGIN);
@@ -139,7 +211,7 @@ describe("ask_user with fields", () => {
             screen: "desktop",
             point: { x: 800, y: 600 },
             bbox: PASSWORD.bbox,
-            site: "mail.example.test",
+            site: "router.lan",
           },
         },
       ],

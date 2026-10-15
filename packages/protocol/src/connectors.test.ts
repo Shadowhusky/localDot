@@ -202,6 +202,27 @@ describe("toolAccess", () => {
       actionClass: "unknown",
     });
   });
+
+  it("readOnlyHint cannot override a destructive tool name", () => {
+    for (const [name, actionClass] of [
+      ["delete_repository", "delete"],
+      ["transfer_funds", "purchase"],
+      ["send_email", "send"],
+    ] as const)
+      expect(toolAccess({ name, annotations: { readOnlyHint: true } })).toEqual({
+        access: "write",
+        from: "name",
+        actionClass,
+      });
+    expect(
+      toolAccess({ name: "delete_repository", annotations: { readOnlyHint: true } }, "read"),
+    ).toEqual({ access: "read", from: "you", actionClass: "reading" });
+    expect(toolAccess({ name: "list_issues", annotations: { readOnlyHint: true } })).toEqual({
+      access: "read",
+      from: "app",
+      actionClass: "reading",
+    });
+  });
 });
 
 describe("sanitizeToolText", () => {

@@ -21,6 +21,7 @@ export interface SearchRow {
   kind: SearchKind;
   at: string;
   snippet: string;
+  context?: string;
 }
 interface Hit {
   sessionId: string;
@@ -138,12 +139,14 @@ export class SearchIndex {
     kind?: SearchKind;
     limit?: number;
     excludeSessionId?: string;
+    details?: boolean;
   }): SearchRow[] {
     const limit = Math.min(Math.max(q.limit ?? 20, 1), 50);
     const terms = searchTerms(q.query);
     if (!terms.length) return [];
     const kind = q.kind ?? null;
     const exclude = q.excludeSessionId ?? null;
+    if (q.details) return this.#details(terms, kind, exclude, limit);
     const raw =
       this.mode === "fts" && !terms.some(hasCjk)
         ? (
@@ -173,6 +176,66 @@ export class SearchIndex {
       })
       .slice(0, limit);
   }
+  // Recall needs the original redacted message, not a twelve-word search-card snippet.
+  // Do not group by task: a title or summary must not hide the user's configuration/correction.
+  #details(
+    terms: readonly string[],
+    kind: SearchKind | null,
+    exclude: string | null,
+    limit: number,
+  ): SearchRow[] {
+    const fts = this.mode === "fts" && !terms.some(hasCjk);
+    const where = fts ? "docs MATCH ?" : terms.map(() => "text LIKE ? ESCAPE '\\'").join(" AND ");
+    const rows = this.#db
+      .prepare(
+        `SELECT kind, session_id, at, text FROM ${this.#table} WHERE ${where}
+       AND (? IS NULL OR kind = ?) AND (? IS NULL OR session_id <> ?)
+       ORDER BY CASE kind WHEN 'user' THEN 0 WHEN 'note' THEN 1 ELSE 2 END, at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(
+        ...(fts ? [ftsMatch(terms)] : terms.map((term) => `%${escapeLike(term)}%`)),
+        kind,
+        kind,
+        exclude,
+        exclude,
+        limit * 2,
+      ) as {
+      kind: SearchKind;
+      session_id: string;
+      at: string;
+      text: string;
+    }[];
+    const info = this.#sessions.sessionInfo(
+      rows.flatMap((r) => (r.session_id ? [r.session_id] : [])),
+    );
+    let remaining = 20_000;
+    return rows
+      .flatMap((r): SearchRow[] => {
+        const session = r.session_id ? info.get(r.session_id) : undefined;
+        if ((!session && r.kind !== "note") || remaining <= 0) return [];
+        // Apply current redaction rules again to indexes written by older versions.
+        const safe = redactForIndex(r.text);
+        const lower = safe.toLowerCase();
+        const at = Math.max(0, lower.indexOf(terms.find((term) => lower.includes(term)) ?? ""));
+        const from = Math.max(0, at - 1500);
+        const size = Math.min(8000, remaining);
+        const context = `${from ? "[Earlier text omitted]\n" : ""}${safe.slice(from, from + size)}${from + size < safe.length ? "\n[More text omitted; narrow the recall query]" : ""}`;
+        remaining -= context.length;
+        return [
+          {
+            sessionId: session ? r.session_id : null,
+            title: session?.title ?? null,
+            startedAt: session?.startedAt ?? null,
+            kind: r.kind,
+            at: r.at,
+            snippet: clipSnippet(likeSnippet(safe, terms)),
+            context,
+          },
+        ];
+      })
+      .slice(0, limit);
+  }
+
   #like(terms: readonly string[], kind: SearchKind | null, exclude: string | null, limit: number) {
     const where = terms.map(() => "text LIKE ? ESCAPE '\\'").join(" AND ");
     const rows = this.#db

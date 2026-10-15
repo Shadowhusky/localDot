@@ -126,6 +126,7 @@ export function fakeApi(
 ) {
   const toolCalls: { name: string; input: unknown }[] = [];
   const callIds: string[] = [];
+  const catalogCalls: { name: string; input: unknown }[] = [];
   const transcript: TranscriptMessage[] = [];
   const inbox: InboxItem[] = [];
   let stopped = false;
@@ -133,6 +134,20 @@ export function fakeApi(
   const fetched = new Set<number>();
   const api = {
     tool: async (name: string, id: string, input: unknown): Promise<ToolResult> => {
+      // Harness filesystem discovery is tracked separately from model-requested actions.
+      if (id.startsWith("skill-") && name === "files") {
+        catalogCalls.push({ name, input });
+        const request = input as { op: string; path: string };
+        const custom = answer(name, input);
+        if (custom) return custom;
+        return request.op === "list"
+          ? {
+              ok: true,
+              content: [],
+              fileList: { path: request.path, entries: [], truncated: false },
+            }
+          : { ok: false, content: [], fileError: "not_found" };
+      }
       toolCalls.push({ name, input });
       callIds.push(id);
       const custom = answer(name, input);
@@ -216,6 +231,7 @@ export function fakeApi(
   return {
     api,
     toolCalls,
+    catalogCalls,
     callIds,
     transcript,
     inbox,

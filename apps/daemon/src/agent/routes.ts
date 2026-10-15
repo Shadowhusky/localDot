@@ -76,6 +76,7 @@ import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./man
 import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
 import { PeopleError, type PeopleStore, type StoredPerson } from "./people.ts";
 import { AgentError, type AgentRunner, CLAUDE_CODE_OFF, RAISE_BUDGET_FIRST } from "./runner.ts";
+import type { PurposeService } from "./safety/purpose-service.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
@@ -109,6 +110,7 @@ export interface AgentRoutesDeps {
     >;
   conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has" | "list">;
   settings: Pick<SettingsStore, "get" | "put">;
+  purpose?: Pick<PurposeService, "status" | "test">;
   catalog: Pick<CatalogStore, "get" | "refresh" | "fresh" | "freshness">;
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
   memory: Pick<
@@ -520,6 +522,20 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     }),
   );
   app.get(
+    "/api/agent/purpose-check",
+    route(async (c) => {
+      if (!deps.purpose) throw new RouteError(503, "Purpose check diagnostics are unavailable.");
+      return c.json(await deps.purpose.status());
+    }),
+  );
+  app.post(
+    "/api/agent/purpose-check/test",
+    route(async (c) => {
+      if (!deps.purpose) throw new RouteError(503, "Purpose check diagnostics are unavailable.");
+      return c.json(await deps.purpose.test());
+    }),
+  );
+  app.get(
     "/api/agent/settings",
     route((c) => c.json(deps.settings.get())),
   );
@@ -568,7 +584,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     // A finished task waiting for a follow-up ends, so the next message starts the chosen one.
     const release = async (signal: AbortSignal) => {
       try {
-        await deps.runner.release?.(signal);
+        await deps.runner.release?.(signal, conversations.current());
       } catch (error) {
         if (error instanceof AgentError) throw new RouteError(409, error.message);
         throw error;
@@ -685,6 +701,17 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const text = s.withdrawQueued(messageId);
       if (text === undefined) throw new RouteError(409, "message is no longer queued");
       return c.json({ text });
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/messages/:messageId/cancel",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const messageId = c.req.param("messageId") ?? "";
+      if (!ULID_PATTERN.test(messageId)) throw new RouteError(400, "invalid message id");
+      check(c.req.raw.signal);
+      if (!s.cancelQueued(messageId)) throw new RouteError(409, "message is no longer queued");
+      return c.body(null, 204);
     }),
   );
   // The user's word on a research task's budget: wrap up now, or keep going for longer.

@@ -79,6 +79,20 @@ describe("handler generation and control fences", () => {
     expect(h.events().filter((e) => e.type === "takeover.end")).toHaveLength(1);
     expect(observe).not.toHaveBeenCalled();
   });
+  it("hands dot the user's hand-back note once, as their next message", async () => {
+    const h = setup();
+    const takeover = h.call("request_takeover", { reason: "login", note: "Sign in" });
+    await turns();
+    h.session.endTakeover(required(h.session.pendingTakeover), "Use the work account");
+    const { result } = await takeover;
+    expect(result.ok).toBe(true);
+    const said = result.content.map((c) => ("text" in c ? c.text : "")).join("\n");
+    expect(said).not.toContain("Use the work account");
+    expect(said).toContain("Their note follows as their next message.");
+    expect(
+      h.events().filter((e) => JSON.stringify(e.data).includes("Use the work account")).length,
+    ).toBeGreaterThan(0);
+  });
   it("refuses every tool behind takeover without desktop, memory, policy, or PNG calls", async () => {
     const h = setup();
     const held = h.call("request_takeover", { reason: "login", note: "Sign in" });
@@ -423,6 +437,7 @@ describe("taint and containment", () => {
 });
 
 describe("bounded redaction and final publication", () => {
+  // A whole harness for each split, about 90 of them.
   it("redacts secrets across every streamed shell split in both model results and log", async () => {
     for (const secret of [PROXY_TOKEN, SURROGATE])
       for (let split = 1; split < secret.length; split++) {
@@ -441,7 +456,7 @@ describe("bounded redaction and final publication", () => {
         expect(output).toBe("prefix [redacted] suffix");
         expect(JSON.stringify(result)).not.toContain(secret);
       }
-  });
+  }, 15_000);
   it("bounds UTF-8 shell output bytes in the terminal log and model tail", async () => {
     const h = setup();
     h.desktop.shellOutput = [{ stream: "stdout", chunk: "中".repeat(300000) }];

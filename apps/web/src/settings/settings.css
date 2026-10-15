@@ -100,7 +100,18 @@
   min-height: calc(var(--spacing) * 7);
 }
 
-.settings-catalog > .settings-lede {
+/* A note with an action, such as the model list's age and Refresh: the words in line with the group
+   notes around it, the action ending where the rows' values do. */
+.settings-note-line {
+  padding-inline-start: calc(var(--spacing) * 3.5);
+}
+
+.ui-group-note + .settings-note-line {
+  margin-top: var(--spacing);
+}
+
+.settings-note-line > .settings-lede {
+  margin: 0;
   color: var(--color-fg-3);
   font-size: var(--text-callout);
   line-height: var(--text-callout--line-height);
@@ -465,10 +476,11 @@
 
 /* Notifications: a Mac and a Phone column of switches, each head centred over its switch. A
    switch with a hidden label keeps the kit's gap before it, so each head takes that gap too. */
+/* Each label centred over its column of switches: the heading sits 2 px further in than a row's end. */
 .settings-notify-columns {
   display: flex;
   gap: calc(var(--spacing) * 1.5);
-  margin-right: calc(var(--spacing) * 2.5);
+  margin-right: calc(var(--spacing) * -0.5);
   color: var(--color-fg-3);
   font:
     var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
@@ -511,8 +523,12 @@
     padding-top: calc(var(--spacing) * 1.5);
   }
 
+  .settings-note-line {
+    padding-inline-start: calc(var(--spacing) * 3);
+  }
+
   .settings-lede,
-  .settings-catalog > .settings-lede {
+  .settings-note-line > .settings-lede {
     margin: 0;
     color: var(--color-fg-3);
     font-size: var(--text-body);
@@ -523,9 +539,10 @@
     width: 8.5rem;
   }
 
+  /* A phone's heading sits 2 px nearer the edge than a row's end. */
   .settings-notify-columns {
     gap: var(--spacing);
-    margin-right: calc(var(--spacing) * -0.5);
+    margin-right: calc(var(--spacing) * 0.5);
   }
 
   .settings-autonomy-row {
@@ -1086,4 +1103,17 @@
 }
 .settings-role {
   row-gap: calc(var(--spacing) * 2);
+}
+
+.settings-accessories {
+  margin-block: calc(var(--spacing) * 3) var(--_settings-block);
+}
+
+/* An accessory's tile: the user's dot wearing it. */
+.accessory-preview {
+  display: grid;
+  place-items: center;
+  height: calc(var(--spacing) * 14);
+  border-radius: var(--radius-row);
+  background: linear-gradient(180deg, var(--color-void), var(--color-raised-2));
 }

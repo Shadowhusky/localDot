@@ -205,6 +205,32 @@ describe("what was said earlier", () => {
     ]);
   });
 
+  it("leaves out what the user withdrew or cancelled before dot read it", async () => {
+    const f = setup();
+    const first = await f.task("Draw a dog");
+    for (const [text, state] of [
+      ["Make it a cat instead", "withdrawn"],
+      ["Paint it red", "cancelled"],
+    ] as const) {
+      const messageId = ulid();
+      f.log.append(first, {
+        type: "message.user",
+        agent: "main",
+        data: { messageId, text, kind: "steer", queued: true },
+      });
+      f.log.append(first, { type: "message.delivery", agent: "main", data: { messageId, state } });
+    }
+    f.say(first, "Add a hat", "followup");
+    f.end(first, "done");
+    const second = await f.task("Make it bigger", first);
+    expect(f.open().earlier(second)).toEqual([
+      "The user: Draw a dog",
+      "The user: Add a hat",
+      "The user: Make it bigger",
+      "(That task was interrupted.)",
+    ]);
+  });
+
   it("stops reading older tasks once the record is full", async () => {
     const f = setup();
     const old = await f.task("An old task");
@@ -271,11 +297,13 @@ describe("conversation routes", () => {
     expect(fresh.status).toBe(200);
     expect(await fresh.json()).toEqual({ sessions: [], more: false });
     expect(f.releases).toHaveBeenCalledTimes(1);
+    expect(f.releases).toHaveBeenLastCalledWith(expect.any(AbortSignal), newer);
     expect(f.conversations.current()).toBeNull();
     const continued = await f.send("POST", "/api/conversation/continue", { sessionId: older });
     expect(continued.status).toBe(200);
     expect(await continued.json()).toEqual({ sessions: [older], more: false });
     expect(f.releases).toHaveBeenCalledTimes(2);
+    expect(f.releases).toHaveBeenLastCalledWith(expect.any(AbortSignal), null);
     expect(f.conversations.current()).toBe(older);
   });
 

@@ -191,6 +191,20 @@ describe("daemon-owned generations and control", () => {
     expect(await second).toEqual({ by: "user", option: "A" });
     expect(session.tainted).toBe(false);
   });
+  it("keeps taint when the user says Not now to a question or a hand-off", async () => {
+    const { session, generation } = setup();
+    session.tainted = true;
+    const question = session.ask("Continue?", ["Yes"], false, 10000, undefined, generation);
+    expect(session.decline(required(session.pendingAsk))).toBe(true);
+    expect(await question).toEqual({ declined: true, by: "user" });
+    expect(session.tainted).toBe(true);
+    const handoff = session.takeover("login", "Please sign in");
+    await flush();
+    const requestId = required(session.pendingTakeover);
+    expect(await session.handback(requestId, undefined, undefined, true)).toBe(true);
+    expect(await handoff).toEqual({ by: "user", declined: true });
+    expect(session.tainted).toBe(true);
+  });
 });
 
 describe("durable inbox acknowledgements", () => {

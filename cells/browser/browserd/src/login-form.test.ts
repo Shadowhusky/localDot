@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loginForm } from "./login-form.ts";
+import { loginForm, REACT_FORM_ACTION } from "./login-form.ts";
 
 function fixture(action = "/session", method = "post", label = "Sign in") {
   const strings = [
@@ -34,6 +34,31 @@ function fixture(action = "/session", method = "post", label = "Sign in") {
   };
 }
 describe("protected sign-in submission", () => {
+  it("accepts React function actions on current-password sign-in steps", () => {
+    const f = fixture(REACT_FORM_ACTION, "post", "Sign in");
+    f.raw.strings.push("current-password");
+    const n = f.raw.documents[0]!.nodes;
+    n.attributes[1] = [6, 7]; // React omits method and installs an inert throw action.
+    n.attributes[3]!.push(10, 12);
+    expect(loginForm(f.raw, f.ax, 10, "https://auth.example.test")).toEqual({
+      form: 2,
+      username: 9,
+      submit: 20,
+    });
+    n.attributes[3] = [8, 9];
+    expect(() => loginForm(f.raw, f.ax, 10, "https://auth.example.test")).toThrow();
+  });
+  it.each([
+    "javascript:alert(1)",
+    REACT_FORM_ACTION + ";fetch('/steal')",
+    "javascript:throw new Error('anything')",
+    "https://other.example.test/login",
+  ])("does not confuse other actions with the inert React sentinel: %s", (action) => {
+    const f = fixture(action);
+    f.raw.strings.push("current-password");
+    f.raw.documents[0]!.nodes.attributes[3]!.push(10, 12);
+    expect(() => loginForm(f.raw, f.ax, 10, "https://auth.example.test")).toThrow();
+  });
   it("binds the account and submit control to the password's own form", () => {
     const f = fixture();
     expect(loginForm(f.raw, f.ax, 10, "https://github.com")).toEqual({

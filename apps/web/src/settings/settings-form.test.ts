@@ -31,6 +31,41 @@ describe("configuration validation before explicit save", () => {
     expect(reset.ok).toBe(true);
     if (reset.ok) expect(reset.document.main?.options).toBeUndefined();
   });
+  it("saves this localDot's name, accessory and the user's others, and clears them when emptied", () => {
+    const saved = {
+      main: {
+        provider: "openai-responses-compatible",
+        model: "gpt-6.1-sol",
+        key: "gateway",
+        price: { inputUSDPerMTok: 2, outputUSDPerMTok: 10 },
+      },
+      name: "Studio Mac",
+      accessory: "cap" as const,
+      localDots: [{ name: "Office PC", url: "https://office.example:4750" }],
+    };
+    const form = formOf(saved);
+    expect(form).toMatchObject({ name: "Studio Mac", accessory: "cap" });
+    const kept = validateForm({ ...form, name: " Studio Mac 2 " }, saved, providerFixture());
+    expect(kept).toMatchObject({
+      ok: true,
+      document: { name: "Studio Mac 2", accessory: "cap", localDots: saved.localDots },
+    });
+    const cleared = validateForm(
+      { ...form, name: "", accessory: undefined, localDots: [] },
+      saved,
+      providerFixture(),
+    );
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) {
+      expect(cleared.document.name).toBeUndefined();
+      expect(cleared.document.accessory).toBeUndefined();
+      expect(cleared.document.localDots).toBeUndefined();
+    }
+    expect(validateForm({ ...form, name: "<b>" }, saved, providerFixture())).toMatchObject({
+      ok: false,
+      problems: ["Name this localDot in up to 40 letters, numbers and punctuation."],
+    });
+  });
   it("refuses conflicting manual rates for the same route/model across active roles", () => {
     const d = custom();
     d.choices.fast = { provider: "openai-compatible", model: "custom", key: "gateway" };

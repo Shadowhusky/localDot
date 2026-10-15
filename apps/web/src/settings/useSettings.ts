@@ -1,4 +1,4 @@
-import type { AgentSettingsDocument } from "@localdot/protocol";
+import type { AgentSettingsDocument, PersonaId } from "@localdot/protocol";
 import { AutonomyPolicy } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -564,7 +564,8 @@ export function useSettings(
       void read(true, true);
     }
   };
-  const choosePermissions = async (permissionMode: "custom" | "auto" | "full") => {
+  // A one-tap choice outside the sheet, such as the permission mode or the user's dot.
+  const choose = async (patch: Pick<AgentSettingsDocument, "permissionMode" | "persona">) => {
     const owner = current.current;
     if (!owner.saved || owner.open || mutating.current || unresolved.current || blocked.current)
       return false;
@@ -573,7 +574,7 @@ export function useSettings(
     writing.current = true;
     setBusy(true);
     try {
-      const next = await saveSettings(api, { ...owner.saved, permissionMode }, abort.signal);
+      const next = await saveSettings(api, { ...owner.saved, ...patch }, abort.signal);
       if (!mounted.current || owner.api !== api) return false;
       owner.saved = next;
       setSaved(next);
@@ -661,6 +662,17 @@ export function useSettings(
         d = current.current.draft;
       if (parsed.success && d) edit({ ...d, autonomy: parsed.data });
     },
+    changePersona: (persona: PersonaId) => {
+      const d = current.current.draft;
+      if (d) edit({ ...d, persona });
+    },
+    changeLook: (look: Partial<Pick<SettingsDraft, "name" | "accessory" | "localDots">>) => {
+      const d = current.current.draft;
+      if (!d) return;
+      const next = { ...d, ...look };
+      if (!next.accessory) delete next.accessory;
+      edit(next);
+    },
     spending,
     checkIn,
     research,
@@ -671,7 +683,8 @@ export function useSettings(
     refreshModels: () => refreshCatalogIndex(true),
     reload,
     chooseMain,
-    choosePermissions,
+    choosePermissions: (permissionMode: "custom" | "auto" | "full") => choose({ permissionMode }),
+    choosePersona: (persona: PersonaId) => choose({ persona }),
     checkModels,
     browseAccounts: () => {
       setBrowsing(true);

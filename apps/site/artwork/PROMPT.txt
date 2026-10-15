@@ -1,9 +1,0 @@
-Use case: stylized-concept
-Asset type: atmospheric wallpaper and subtle light field for the localDot launch website
-Primary request: A sophisticated cinematic abstract environment, a black obsidian world with a thin luminous icy-blue elliptical horizon or portal at center-right. Wisps of volumetric silver-blue fog float above a subtly reflective dark floor. The frame is expansive, quiet, mysterious, and restrained.
-Style/medium: photorealistic high-end 3D Octane render feel, physically convincing light and materials.
-Composition/framing: wide 16:9 landscape, ideally 2048x1152; elliptical light occupies the middle-right, with huge nearly black negative space at the left and upper frame. Low horizon. The luminous form should feel distant, spacious, and delicate rather than a large close-up object.
-Lighting/mood: minimal icy-blue emission, very subtle silver-blue atmospheric haze and floor reflections, deep near-black shadows.
-Color palette: near-black #0a0b0d, xenon cyan #3fb5de, cool white highlights; tightly restrained saturation.
-Materials/textures: glossy black obsidian floor softened by haze; fine volumetric fog; elegant clean render without gritty noise.
-Constraints: exactly one original image. No text, no lettering, no UI, no logo, no watermark, no stars, no galaxy or space imagery, no purple, no robots, no faces, no people, no characters. Do not add a foreground sphere or orb; a live WebGL character will sit over the asset later.

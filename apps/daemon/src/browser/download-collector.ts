@@ -18,6 +18,8 @@ export class BrowserDownloadCollector {
     private readonly deps: {
       store: Pick<QuarantineStore, "ingestBrowser">;
       transfers: Pick<Transfers, "acquire">;
+      // Told what was stored once this collection has let go of its lease.
+      collected?(parentCellId: string, items: readonly QuarantineItem[]): void;
     },
   ) {}
 
@@ -34,12 +36,12 @@ export class BrowserDownloadCollector {
       throw new Error("A browser download collection is already active.");
     const lease = this.deps.transfers.acquire(parent, [scope.signal], () => scope.check());
     this.#active.add(parent);
+    const items: QuarantineItem[] = [];
     try {
       const offers = BrowserDownloadOffer.array()
         .max(1)
         .parse(await client.downloads(binding, lease));
       lease.check();
-      const items: QuarantineItem[] = [];
       for (const offer of offers) {
         const origin = offer.origin;
         if (
@@ -62,11 +64,12 @@ export class BrowserDownloadCollector {
         lease.check();
         items.push(item);
       }
-      return items;
     } finally {
       this.#active.delete(parent);
       // Client/store operations retain their source and HTTP owners until closed.
       lease.release();
     }
+    if (items.length) this.deps.collected?.(parent, items);
+    return items;
   }
 }

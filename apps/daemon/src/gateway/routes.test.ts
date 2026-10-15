@@ -345,6 +345,7 @@ describe("puppet, live and frame routes", () => {
     );
     expect(frame.status).toBe(200);
     expect(frame.headers.get("content-type")).toBe("image/webp");
+    expect(frame.headers.get("cache-control")).toBe("no-store");
     expect(
       (
         await app.request(url(`/api/sessions/${sessionId}/frames/01JXYZ0000000000000000ABCD`), {

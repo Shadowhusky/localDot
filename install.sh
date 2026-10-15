@@ -56,6 +56,7 @@ Usage: install.sh [options]
   --port <port>                  Local port for the app (default 4750)
   --home <folder>                Where localDot keeps your data (default ~/.localdot)
   --prefix <folder>              Where the app is installed (default ~/.local/share/localdot)
+  --yes                          Don't ask where to install; use the default folders
   --tailscale                    Reach localDot from your other devices through Tailscale Serve
   --no-tailscale                 Stop serving localDot through Tailscale
   --passphrase-vault             Linux: keep saved keys in a file only your passphrase opens
@@ -67,7 +68,8 @@ Usage: install.sh [options]
   --uninstall                    Remove localDot; keeps your data
   --help                         Show this help
 
-Run it again at any time to upgrade; it keeps your settings and data.
+In a terminal, the first install asks where to install. Run it again at any time to upgrade;
+it keeps your settings, your data and the folders you chose.
 EOF
 }
 
@@ -109,14 +111,65 @@ sha256_of() {
   fi
 }
 
-# Paths end up in service files and the shim unquoted by those formats, so only plain characters.
+# Folders go into service files, the command and install.env, which can't hold control
+# characters or double quotes; systemd and launchd also need UTF-8.
 check_path() {
   case "$2" in
   /*) ;;
   *) die "$1 must be an absolute path: $2" ;;
   esac
+  if ! (LC_ALL=C; case "$2" in *[[:cntrl:]]* | *$'\302'[$'\200'-$'\237']*) exit 1 ;; esac); then
+    die "$1 can't contain control characters, such as a line break."
+  fi
   case "$2" in
-  *[!A-Za-z0-9._/@+,:~-]*) die "$1 has characters the services can't use: $2. Choose a path with letters, digits and . _ - / only." ;;
+  *\"*) die "$1 can't contain double quotes (\"): $2" ;;
+  esac
+  if command -v iconv >/dev/null 2>&1 && ! printf '%s' "$2" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+    die "$1 isn't valid UTF-8 text."
+  fi
+}
+
+# Sets variable $1 to folder $3's real path, so the services, install.env and the daemon all name
+# it the same way: ~ is your home, and symlinks resolve in the part that exists already.
+folder_path() {
+  local path=$3 rest="" real
+  case $path in
+  '~') path=$HOME ;;
+  '~/'*) path=$HOME/${path#'~/'} ;;
+  esac
+  check_path "$2" "$path"
+  while :; do
+    case $path in
+    *//*) path=${path//\/\//\/} ;;
+    / | *[!/]) break ;;
+    *) path=${path%/} ;;
+    esac
+  done
+  while [ ! -d "$path" ]; do
+    if [ -e "$path" ] || [ -L "$path" ]; then die "$2 isn't a folder: $path"; fi
+    case ${path##*/} in . | ..) die "$2 can't use . or .. in folders that don't exist yet: $3" ;; esac
+    rest=/${path##*/}$rest
+    path=${path%/*}
+    path=${path:-/}
+  done
+  real=$(cd -P -- "$path" && pwd -P) || die "$2 can't be opened: $path"
+  real=${real%/}$rest
+  real=${real:-/}
+  check_path "$2" "$real"
+  printf -v "$1" '%s' "$real"
+}
+
+# Quotes a value for sh, for the localdot command and for commands printed for you to paste.
+sh_quote() {
+  local quoted=${1//\'/"'\\''"}
+  printf "'%s'" "$quoted"
+}
+
+pretty_path() {
+  case $1 in
+  "$HOME") printf '~' ;;
+  "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;;
+  *) printf '%s' "$1" ;;
   esac
 }
 
@@ -461,11 +514,10 @@ check_prerequisites() {
 
 parse_args() {
   OPT_PACKAGE_CHANNEL="" OPT_PACKAGE_VERSION=""
-  OPT_REF="" OPT_REPO="" OPT_PORT="" OPT_HOME="" OPT_TAILSCALE="" OPT_REGISTRY="" OPT_VAULT=""
-  PREREQUISITES=ask
+  OPT_REF="" OPT_REPO="" OPT_PORT="" OPT_HOME="" OPT_PREFIX="" OPT_TAILSCALE="" OPT_REGISTRY="" OPT_VAULT=""
+  PREREQUISITES=ask ASK_LOCATION=1
   SKIP_IMAGES=0 UNINSTALL=0 AS_COMMAND=0
   COMMAND="" COMMAND_ARGS=()
-  PREFIX="${LOCALDOT_PREFIX:-${XDG_DATA_HOME:-$HOME/.local/share}/localdot}"
   while [ $# -gt 0 ]; do
     case "$1" in
     --ref | --repo | --port | --home | --prefix | --registry | --package-channel | --package-version)
@@ -475,7 +527,7 @@ parse_args() {
       --repo) OPT_REPO=$2 ;;
       --port) OPT_PORT=$2 ;;
       --home) OPT_HOME=$2 ;;
-      --prefix) PREFIX=$2 ;;
+      --prefix) OPT_PREFIX=$2 ;;
       --registry) OPT_REGISTRY=$2 ;;
       --package-channel) OPT_PACKAGE_CHANNEL=$2 ;;
       --package-version) OPT_PACKAGE_VERSION=$2 ;;
@@ -488,6 +540,7 @@ parse_args() {
     --no-tailscale) OPT_TAILSCALE=off && shift ;;
     --passphrase-vault) OPT_VAULT=passphrase && shift ;;
     --skip-images) SKIP_IMAGES=1 && shift ;;
+    --yes) ASK_LOCATION=0 && shift ;;
     --uninstall) UNINSTALL=1 && shift ;;
     --as-command)
       AS_COMMAND=1
@@ -543,15 +596,65 @@ LOCALDOT_REGISTRY="$REGISTRY"
 LOCALDOT_VAULT="$VAULT"
 LOCALDOT_COMMIT="$COMMIT"
 EOF
+  # The daemon's updater ignores a file that others could change, whatever your umask.
+  chmod 644 "$PREFIX/install.env.new"
   mv "$PREFIX/install.env.new" "$PREFIX/install.env"
 }
 
-# Recorded settings win over the environment, and options win over both.
+# Prints a setting from a file the installer wrote, such as install.env.
+recorded() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in "$2=\""*\") line=${line#*=\"}; printf '%s' "${line%\"}"; return ;; esac
+  done <"$1"
+}
+
+# Where localDot is installed, kept outside its folders so a bare rerun, an update or an uninstall
+# finds it wherever you put it. Installs older than this file are found through their command.
+recall_location() {
+  local link
+  LOCATION_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/localdot/install-location
+  REMEMBERED_PREFIX="" REMEMBERED_HOME=""
+  if owned "$LOCATION_FILE"; then
+    REMEMBERED_PREFIX=$(recorded "$LOCATION_FILE" LOCALDOT_PREFIX)
+    REMEMBERED_HOME=$(recorded "$LOCATION_FILE" LOCALDOT_HOME)
+  else
+    link=$(readlink "$HOME/.local/bin/localdot" 2>/dev/null || true)
+    case $link in
+    /*/bin/localdot) if owned "${link%/bin/localdot}/install.env"; then REMEMBERED_PREFIX=${link%/bin/localdot}; fi ;;
+    esac
+  fi
+  if [ -n "$REMEMBERED_PREFIX" ]; then folder_path REMEMBERED_PREFIX "The remembered install folder" "$REMEMBERED_PREFIX"; fi
+  if [ -n "$REMEMBERED_HOME" ]; then folder_path REMEMBERED_HOME "The remembered data folder" "$REMEMBERED_HOME"; fi
+}
+
+remember_location() {
+  mkdir -p "${LOCATION_FILE%/*}"
+  printf '# %s\nLOCALDOT_PREFIX="%s"\nLOCALDOT_HOME="%s"\n' "$MARKER" "$PREFIX" "$LD_HOME" >"$LOCATION_FILE.new"
+  mv "$LOCATION_FILE.new" "$LOCATION_FILE"
+}
+
+forget_location() {
+  [ "$PREFIX" = "$REMEMBERED_PREFIX" ] || return 0
+  rm -f "$LOCATION_FILE"
+  rmdir "${LOCATION_FILE%/*}" 2>/dev/null || true
+}
+
+# Options win over recorded settings, which win over the environment. So the install folder is
+# --prefix, else the one localDot is installed in, else LOCALDOT_PREFIX or the default.
 resolve_settings() {
   REPO=$DEFAULT_REPO REF=$DEFAULT_REF PACKAGE_CHANNEL=$DEFAULT_PACKAGE_CHANNEL
-  LD_HOME=${LOCALDOT_HOME:-$HOME/.localdot} PORT=${LOCALDOT_PORT:-4750}
+  PORT=${LOCALDOT_PORT:-4750}
   TAILSCALE=off PUBLIC_ORIGIN="" REGISTRY="" VAULT="" BUILT_COMMIT="" INSTALLED=0
-  check_path "The install folder" "$PREFIX"
+  check_path "Your home folder" "$HOME"
+  recall_location
+  folder_path PREFIX "The install folder" \
+    "${OPT_PREFIX:-${REMEMBERED_PREFIX:-${LOCALDOT_PREFIX:-${XDG_DATA_HOME:-$HOME/.local/share}/localdot}}}"
+  case $PREFIX in
+  *:*) die "The install folder can't contain a colon (:), which separates folders in PATH: $PREFIX" ;;
+  esac
+  LD_HOME=${LOCALDOT_HOME:-$HOME/.localdot}
+  if [ "$PREFIX" = "$REMEMBERED_PREFIX" ] && [ -n "$REMEMBERED_HOME" ]; then LD_HOME=$REMEMBERED_HOME; fi
   if read_state; then INSTALLED=1; fi
   # A published installer must not silently fall back to a private Git checkout on upgrade.
   [ -z "$DEFAULT_PACKAGE_CHANNEL" ] || [ -n "$PACKAGE_CHANNEL" ] || PACKAGE_CHANNEL=$DEFAULT_PACKAGE_CHANNEL
@@ -576,8 +679,7 @@ resolve_settings() {
   '' | passphrase) ;;
   *) die "install.env names an unknown key vault: $VAULT" ;;
   esac
-  check_path "Your home folder" "$HOME"
-  check_path "The data folder" "$LD_HOME"
+  folder_path LD_HOME "The data folder" "$LD_HOME"
   case "$PORT" in
   '' | *[!0-9]*) die "--port wants a number from 1024 to 65535." ;;
   esac
@@ -621,24 +723,165 @@ check_prefix() {
   [ -e "$PREFIX" ] || return 0
   [ -d "$PREFIX" ] || die "$PREFIX isn't a folder. Choose another one with --prefix."
   ! owned "$PREFIX/install.env" || return 0
-  local other
-  other=$(cd "$PREFIX" && find . -mindepth 1 -maxdepth 2 \
+  local other data=""
+  local -a skip=()
+  # Your data may be in the install folder, as when you choose one folder for both.
+  case $LD_HOME in "$PREFIX"/*) data=${LD_HOME#"$PREFIX"/} ;; esac
+  data=${data%%/*}
+  case $data in '' | *[][*?\\]*) ;; *) skip=(! -path "./$data" ! -path "./$data/*") ;; esac
+  other=$(cd "$PREFIX" && find . -mindepth 1 -maxdepth 2 ${skip[@]+"${skip[@]}"} \
     ! -path ./app.previous ! -path './app.previous/*' ! -path ./.package-install.lock ! -path './.package-install.lock/*' \
     ! -path ./app ! -path './app/*' ! -path ./app.new ! -path './app.new/*' \
     ! -path ./runtime ! -path './runtime/*' ! -path ./install.env.new ! -path ./bin \
     ! -path ./bin/keyd ! -path ./bin/keyd.new ! -path ./bin/localdot ! -path ./bin/localdot.new \
     -print -quit)
-  [ -z "$other" ] || die "$PREFIX already holds other files (such as ${other#./}). localDot needs a folder of its own: choose a new or empty one with --prefix, such as ~/.local/share/localdot."
+  [ -z "$other" ] || die "$(pretty_path "$PREFIX") already holds other files (such as ${other#./}). localDot needs a folder of its own: choose a new or empty one, such as $(pretty_path "${PREFIX%/}/localdot")."
 }
 
 # Removes only what the installer makes, and the prefix itself once nothing else is in it.
 remove_installed() {
   rm -rf "$PREFIX/app" "$PREFIX/app.new" "$PREFIX/app.previous" "$PREFIX/runtime"
-  rm -f "$PREFIX/install.env" "$PREFIX/install.env.new" "$PREFIX/bin/keyd" "$PREFIX/bin/keyd.new" \
-    "$PREFIX/bin/localdot" "$PREFIX/bin/localdot.new"
+  rm -f "$PREFIX/install.env" "$PREFIX/install.env.new" "$PREFIX/start-at-login" "$PREFIX/start-at-login.new" \
+    "$PREFIX/bin/keyd" "$PREFIX/bin/keyd.new" "$PREFIX/bin/localdot" "$PREFIX/bin/localdot.new"
   rmdir "$PREFIX/bin" 2>/dev/null || true
   rmdir "$PREFIX" 2>/dev/null || true
-  [ ! -d "$PREFIX" ] || say "Kept $PREFIX: it holds files localDot didn't make."
+  if [ -d "$PREFIX" ]; then
+    case $LD_HOME in
+    "$PREFIX"/*) ;;
+    *) say "Kept $PREFIX: it holds files localDot didn't make." ;;
+    esac
+  fi
+}
+
+# A folder must be one you can write to, on a drive that keeps file permissions: localDot's
+# services refuse key and install files that other users could change.
+check_folder() {
+  local label=$1 folder=$2 dir=$2 probe mode
+  case $folder in
+  /) die "$label can't be / itself. Choose a folder of its own." ;;
+  "$3") die "$label can't be your home folder itself. Choose a folder of its own, such as ~/localdot." ;;
+  esac
+  while [ ! -d "$dir" ]; do
+    dir=${dir%/*}
+    dir=${dir:-/}
+  done
+  if [ ! -w "$dir" ] || ! probe=$(mktemp -d "$dir/.localdot-check.XXXXXX" 2>/dev/null); then
+    die "$label is $folder, but you can't write to $dir. If it is on a drive, check that the drive is connected; otherwise choose a folder you own."
+  fi
+  chmod 700 "$probe" 2>/dev/null || true
+  mode=$(ls -ld "$probe")
+  rmdir "$probe"
+  case $mode in
+  drwx------*) ;;
+  *) die "$label, $folder, is on a drive that doesn't keep file permissions (such as exFAT, FAT or a Windows drive), which localDot needs to keep its files private. Choose a folder on another drive." ;;
+  esac
+}
+
+check_locations() {
+  # An installation keeps the folders it already uses.
+  [ "$INSTALLED" = 0 ] || [ -n "$OPT_HOME" ] || return 0
+  local home limit length
+  folder_path home "Your home folder" "$HOME"
+  check_folder "The install folder" "$PREFIX" "$home"
+  check_folder "The data folder" "$LD_HOME" "$home"
+  case $LD_HOME/ in
+  "$PREFIX"/app/* | "$PREFIX"/app.new/* | "$PREFIX"/app.previous/* | "$PREFIX"/runtime/* | "$PREFIX"/bin/*)
+    die "The data folder can't be inside the app's own folders in $PREFIX: upgrades replace them." ;;
+  esac
+  # The key service, the computers' relay and doctor's relay check listen on sockets up to 47 bytes
+  # into the data folder on Linux (16 on macOS), and a socket's path is at most 107 bytes (103).
+  limit=60
+  [ "$OS" != macos ] || limit=87
+  length=$(($(printf '%s' "$LD_HOME" | wc -c)))
+  [ "$length" -le "$limit" ] ||
+    die "The data folder's path is too long for the sockets localDot keeps in it: $length bytes, where at most $limit fit. Choose a shorter one than $LD_HOME"
+}
+
+# A user has one localDot: a second copy would take over its services and strand the first.
+check_other_install() {
+  [ -n "$OPT_PREFIX" ] && [ -n "$REMEMBERED_PREFIX" ] && [ "$PREFIX" != "$REMEMBERED_PREFIX" ] || return 0
+  owned "$REMEMBERED_PREFIX/install.env" || return 0
+  local home
+  home=$(recorded "$REMEMBERED_PREFIX/install.env" LOCALDOT_HOME)
+  die "localDot is already installed in $REMEMBERED_PREFIX. To move it, run localdot uninstall, which keeps your data, then install again with:
+  --prefix $(sh_quote "$PREFIX") --home $(sh_quote "${home:-$LD_HOME}")"
+}
+
+# Reads a typed folder as sh would read one word, without expanding anything: terminals quote or
+# backslash-escape a folder dropped into them, and may add a space after it.
+typed_folder() {
+  local text=$1 folder="" char quote=""
+  text=${text#"${text%%[![:space:]]*}"}
+  text=${text%"${text##*[![:space:]]}"}
+  while [ -n "$text" ]; do
+    char=${text:0:1}
+    text=${text:1}
+    if [ "$quote" = "'" ]; then
+      if [ "$char" = "'" ]; then quote=""; else folder=$folder$char; fi
+    elif [ "$quote" = '"' ]; then
+      case $char in
+      '"') quote="" ;;
+      '\')
+        case ${text:0:1} in
+        '$' | '`' | '"' | '\') folder=$folder${text:0:1} text=${text:1} ;;
+        *) folder=$folder$char ;;
+        esac
+        ;;
+      *) folder=$folder$char ;;
+      esac
+    else
+      case $char in
+      "'" | '"') quote=$char ;;
+      '\') folder=$folder${text:0:1} text=${text:1} ;;
+      *) folder=$folder$char ;;
+      esac
+    fi
+  done
+  printf '%s' "$folder"
+}
+
+# The folder you type holds the app, and your data in its data folder unless you have data already.
+use_folder() {
+  folder_path OPT_PREFIX "That folder" "$1"
+  OPT_HOME=""
+  if ! owned "$OPT_PREFIX/install.env"; then
+    if [ -d "$LD_HOME" ]; then OPT_HOME=$LD_HOME; else OPT_HOME=$OPT_PREFIX/data; fi
+  fi
+  resolve_settings
+  set_paths
+}
+
+# The first install in a terminal asks where to go, once. Answers come from the terminal: stdin
+# may be the curl | bash script itself.
+choose_location() {
+  [ "$INSTALLED" = 0 ] && [ "$ASK_LOCATION" = 1 ] && [ -z "$OPT_PREFIX$OPT_HOME$REMEMBERED_PREFIX" ] &&
+    [ -z "${LOCALDOT_PREFIX:-}${LOCALDOT_HOME:-}${LOCALDOT_INSTALL_STAGE:-}" ] && has_terminal || return 0
+  local answer folder problem
+  printf '\nlocalDot will be installed in:\n  App   %s\n  Data  %s\n' "$(pretty_path "$PREFIX")" "$(pretty_path "$LD_HOME")" >/dev/tty
+  printf 'Press Enter to continue, or type another folder: ' >/dev/tty
+  while :; do
+    IFS= read -r answer </dev/tty || die "No folder was chosen, so nothing was installed."
+    folder=$(typed_folder "$answer")
+    case $folder in
+    '' | [Yy] | [Yy]es) return 0 ;;
+    [Nn] | [Nn]o)
+      printf 'Type a folder: ' >/dev/tty
+      continue
+      ;;
+    '~' | '~/'* | /*) ;;
+    *) folder=$PWD/$folder ;;
+    esac
+    if problem=$( (use_folder "$folder" && check_locations && check_prefix) 2>&1); then break; fi
+    printf '%s\nType another folder, or press Enter for the default folders: ' "$problem" >/dev/tty
+  done
+  use_folder "$folder"
+  if [ "$LD_HOME" = "$PREFIX/data" ]; then
+    say "Installing in $(pretty_path "$PREFIX"), with your data in $(pretty_path "$LD_HOME")."
+  else
+    say "Installing in $(pretty_path "$PREFIX"). Your existing data stays in $(pretty_path "$LD_HOME")."
+  fi
+  # The installer of the version it checks out continues in the same folders.
+  ORIGINAL_ARGS+=(--prefix "$PREFIX" --home "$LD_HOME")
 }
 
 check_services_are_ours() {
@@ -666,7 +909,7 @@ sync_source() {
     origin=$(git -C "$APP" remote get-url origin 2>/dev/null || true)
     [ "$origin" = "$REPO" ] || die "$APP was installed from $origin, not $REPO. Pass --repo $origin to keep using it."
     if [ -n "$(git -C "$APP" status --porcelain --untracked-files=no)" ]; then
-      die "Files in $APP were changed by hand. Undo that (git -C $APP stash) and run the installer again."
+      die "Files in $APP were changed by hand. Undo that (git -C $(sh_quote "$APP") stash) and run the installer again."
     fi
   else
     [ ! -e "$APP" ] || die "$APP exists but isn't a localDot checkout. Move it away, or choose another --prefix."
@@ -810,7 +1053,9 @@ run_setup_stage() {
   shift
   capture=$(mktemp "$RUNTIME/.image-build.XXXXXX") || return 1
   chmod 600 "$capture"
-  "$@" 2>&1 | awk -v diagnostic="$capture" '
+  # Through the environment: awk -v would read backslashes in the folder's name as escapes.
+  "$@" 2>&1 | LOCALDOT_DIAGNOSTIC=$capture awk '
+    BEGIN { diagnostic = ENVIRON["LOCALDOT_DIAGNOSTIC"] }
     { print; fflush(); line=tolower($0)
       if (line ~ /read-only file system/) print "read-only file system" >> diagnostic
       if (line ~ /no space left on device|disk quota exceeded|not enough space/) print "no space left on device" >> diagnostic
@@ -855,15 +1100,32 @@ check_docker_storage() {
   say "Docker storage is writable now. Downloads can still fail if storage fills later."
 }
 
+# Prints the free KiB and the name of the filesystem holding a folder, or the folder it will be
+# made in.
+free_space() {
+  local dir=$1
+  while [ ! -d "$dir" ]; do
+    dir=${dir%/*}
+    dir=${dir:-/}
+  done
+  LC_ALL=C df -Pk "$dir" | awk 'NR == 2 { print $4, $1 }'
+}
+
 check_install_storage() {
-  local available
-  available=$(LC_ALL=C df -Pk "$PREFIX" | awk 'NR == 2 { print $4 }') ||
+  local app data
+  app=$(free_space "$PREFIX") ||
     die "Could not measure the installation filesystem. Check its mount and free space before retrying."
-  case "$available" in
-    '' | *[!0-9]*) die "Could not read the installation filesystem's available space." ;;
+  data=$(free_space "$LD_HOME") ||
+    die "Could not measure the data folder's filesystem. Check its mount and free space before retrying."
+  case "${app%% *} ${data%% *}" in
+    ' '* | *' ' | *[!0-9\ ]*) die "Could not read the installation filesystem's available space." ;;
   esac
-  [ "$available" -gt 0 ] || die "The installation filesystem has no free space. Free space, then rerun setup."
-  printf 'Installation filesystem available: %s KiB.\n' "$available"
+  [ "${app%% *}" -gt 0 ] || die "The installation filesystem has no free space. Free space, then rerun setup."
+  printf 'Installation filesystem available: %s KiB.\n' "${app%% *}"
+  if [ "${data#* }" != "${app#* }" ]; then
+    [ "${data%% *}" -gt 0 ] || die "The data folder's filesystem has no free space. Free space, then rerun setup."
+    printf 'Data folder filesystem available: %s KiB.\n' "${data%% *}"
+  fi
   [ -n "${PACKAGE_CHANNEL:-}" ] || say "Source-build peak usage is not yet measured."
   if [ -n "$WSL" ]; then
     say "This is Ubuntu's filesystem space, not Windows physical disk space. Check free space on the Windows drive holding Docker/WSL data too."
@@ -940,11 +1202,26 @@ daemon_environment() {
   fi
 }
 
+# systemd reads C escapes and %-specifiers inside quotes, and also $ in a command line, so a word
+# is quoted with those escaped. Other settings that take a path expand only %.
+systemd_word() {
+  local word=${1//\\/"\\\\"}
+  word=${word//\"/"\\\""}
+  word=${word//%/"%%"}
+  [ "${2:-}" != command ] || word=${word//\$/"\$\$"}
+  printf '"%s"' "$word"
+}
+
+systemd_path() {
+  local path=${1//%/"%%"}
+  printf '%s' "$path"
+}
+
 systemd_units() {
   local environment="" line vault="" daemon_args='"--import" "tsx" "src/main.ts"' working=$APP/apps/daemon
   if [ -n "${PACKAGE_CHANNEL:-}" ]; then daemon_args='"dist/daemon.mjs"'; working=$APP; fi
   [ "$VAULT" != passphrase ] || vault=' "-vault" "passphrase"'
-  while IFS= read -r line; do environment="$environment"$'\n'"Environment=\"$line\""; done <<EOF
+  while IFS= read -r line; do environment="$environment"$'\n'"Environment=$(systemd_word "$line")"; done <<EOF
 $(daemon_environment)
 EOF
   KEYD_CONTENT="# $MARKER
@@ -953,12 +1230,12 @@ Description=localDot key service
 
 [Service]
 Type=exec
-ExecStart=\"$PREFIX/bin/keyd\" \"-home\" \"$LD_HOME\"$vault
+ExecStart=$(systemd_word "$PREFIX/bin/keyd" command) \"-home\" $(systemd_word "$LD_HOME" command)$vault
 UMask=0077
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:$LD_HOME/logs/keyd.log
-StandardError=append:$LD_HOME/logs/keyd.log
+StandardOutput=append:$(systemd_path "$LD_HOME/logs/keyd.log")
+StandardError=append:$(systemd_path "$LD_HOME/logs/keyd.log")
 
 [Install]
 WantedBy=default.target"
@@ -970,27 +1247,34 @@ After=$KEYD_UNIT
 
 [Service]
 Type=exec
-WorkingDirectory=$working$environment
-ExecStart=\"$NODE_DIR/bin/node\" $daemon_args
+WorkingDirectory=$(systemd_path "$working")$environment
+ExecStart=$(systemd_word "$NODE_DIR/bin/node" command) $daemon_args
 SuccessExitStatus=143
 UMask=0077
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:$LD_HOME/logs/daemon.log
-StandardError=append:$LD_HOME/logs/daemon.log
+StandardOutput=append:$(systemd_path "$LD_HOME/logs/daemon.log")
+StandardError=append:$(systemd_path "$LD_HOME/logs/daemon.log")
 
 [Install]
 WantedBy=default.target"
+}
+
+xml_text() {
+  local text=${1//&/"&amp;"}
+  text=${text//</"&lt;"}
+  text=${text//>/"&gt;"}
+  printf '%s' "$text"
 }
 
 plist() {
   local label=$1 log=$2 arguments="" environment="" argument line working=$APP/apps/daemon
   [ -z "${PACKAGE_CHANNEL:-}" ] || working=$APP
   shift 2
-  for argument in "$@"; do arguments="$arguments"$'\n'"    <string>$argument</string>"; done
+  for argument in "$@"; do arguments="$arguments"$'\n'"    <string>$(xml_text "$argument")</string>"; done
   if [ "$label" = "$DAEMON_LABEL" ]; then
     while IFS= read -r line; do
-      environment="$environment"$'\n'"    <key>${line%%=*}</key><string>${line#*=}</string>"
+      environment="$environment"$'\n'"    <key>$(xml_text "${line%%=*}")</key><string>$(xml_text "${line#*=}")</string>"
     done <<EOF
 $(daemon_environment)
 EOF
@@ -998,7 +1282,7 @@ EOF
   <key>EnvironmentVariables</key>
   <dict>$environment
   </dict>
-  <key>WorkingDirectory</key><string>$working</string>"
+  <key>WorkingDirectory</key><string>$(xml_text "$working")</string>"
   fi
   say "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -1013,8 +1297,8 @@ EOF
   <key>RunAtLoad</key><true/>
   <key>ThrottleInterval</key><integer>5</integer>
   <key>Umask</key><integer>63</integer>
-  <key>StandardOutPath</key><string>$LD_HOME/logs/$log.log</string>
-  <key>StandardErrorPath</key><string>$LD_HOME/logs/$log.log</string>
+  <key>StandardOutPath</key><string>$(xml_text "$LD_HOME/logs/$log.log")</string>
+  <key>StandardErrorPath</key><string>$(xml_text "$LD_HOME/logs/$log.log")</string>
 </dict>
 </plist>"
 }
@@ -1178,11 +1462,12 @@ install_command() {
   cat >"$shim.new" <<EOF
 #!/bin/sh
 # $MARKER
-exec "$BASH" "$APP/install.sh" --prefix "$PREFIX" --as-command "\$@"
+exec $(sh_quote "$BASH") $(sh_quote "$APP/install.sh") --prefix $(sh_quote "$PREFIX") --as-command "\$@"
 EOF
   chmod 755 "$shim.new"
   mv "$shim.new" "$shim"
-  if [ ! -e "$link" ] && [ ! -L "$link" ] || [ "$(readlink "$link" 2>/dev/null || true)" = "$shim" ]; then
+  # -ef also knows the command when an earlier install named this folder through a symlink.
+  if [ ! -e "$link" ] && [ ! -L "$link" ] || [ "$link" -ef "$shim" ]; then
     ln -sfn "$shim" "$link"
     install_command_path
   else
@@ -1312,9 +1597,13 @@ finish() {
 run_install() {
   detect_platform
   resolve_settings
-  check_prefix
+  check_other_install
   set_paths
   check_services_are_ours
+  choose_location
+  check_locations
+  check_prefix
+  remember_location
   if [ -n "$PACKAGE_CHANNEL" ]; then run_package_install; return; fi
   prepare_prerequisites
   check_prerequisites
@@ -1327,7 +1616,11 @@ run_install() {
   if [ "${LOCALDOT_INSTALL_STAGE:-}" != checked-out ] || [ ! -d "$APP/.git" ]; then
     sync_source
     # Continue with the installer of the version just checked out, so its pins match its code.
-    LOCALDOT_INSTALL_STAGE=checked-out exec "$BASH" "$APP/install.sh" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+    # The folders are settled, and an older installer wouldn't know --yes.
+    local arg
+    local -a args=()
+    for arg in ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}; do [ "$arg" = --yes ] || args+=("$arg"); done
+    LOCALDOT_INSTALL_STAGE=checked-out exec "$BASH" "$APP/install.sh" ${args[@]+"${args[@]}"}
   fi
   unset LOCALDOT_INSTALL_STAGE
   COMMIT=$(git -C "$APP" rev-parse HEAD)
@@ -1354,6 +1647,7 @@ run_uninstall() {
   resolve_settings
   set_paths
   if [ "$INSTALLED" = 0 ] && ! owned "$DAEMON_FILE" && ! owned "$KEYD_FILE"; then
+    forget_location
     say "localDot isn't installed in $PREFIX."
     return
   fi
@@ -1361,9 +1655,12 @@ run_uninstall() {
   remove_services
   [ "$TAILSCALE" != on ] || stop_tailscale "$PORT"
   local link=$HOME/.local/bin/localdot
-  if [ "$(readlink "$link" 2>/dev/null || true)" = "$PREFIX/bin/localdot" ]; then rm -f "$link"; fi
+  if [ "$(readlink "$link" 2>/dev/null || true)" = "$PREFIX/bin/localdot" ] || { [ -L "$link" ] && [ "$link" -ef "$PREFIX/bin/localdot" ]; }; then
+    rm -f "$link"
+  fi
   remove_installed
-  say "Removed localDot. Your data is still in $LD_HOME; to delete it too: rm -rf $LD_HOME"
+  forget_location
+  say "Removed localDot. Your data is still in $LD_HOME; to delete it too: rm -rf $(sh_quote "$LD_HOME")"
   say "Computers and their images stay in Docker. To remove them (and those of any other localDot on this Docker):"
   say "  docker rm -f \$(docker ps -aq --filter label=localdot.role)"
   say "  docker volume rm \$(docker volume ls -q --filter label=localdot.role)"
@@ -1377,8 +1674,10 @@ run_command() {
     return
     ;;
   update)
-    ORIGINAL_ARGS=(--prefix "$PREFIX" ${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"})
-    parse_args "${ORIGINAL_ARGS[@]}"
+    ORIGINAL_ARGS=()
+    [ -z "$OPT_PREFIX" ] || ORIGINAL_ARGS=(--prefix "$OPT_PREFIX")
+    ORIGINAL_ARGS+=(${COMMAND_ARGS[@]+"${COMMAND_ARGS[@]}"})
+    parse_args ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
     run_install
     return
     ;;
@@ -1399,6 +1698,7 @@ run_command() {
     ;;
   down) stop_services; cli stop --computers ;;
   doctor)
+    say "localDot is installed in $PREFIX, with your data in $LD_HOME."
     case "${COMMAND_ARGS[*]-}" in
     --fix)
       say "Restarting localDot and checking its computers. Saved apps and files are kept."

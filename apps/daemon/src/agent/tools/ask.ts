@@ -4,6 +4,7 @@ import type {
   RequestTakeoverInput,
   ToolResult,
 } from "@localdot/protocol";
+import { addTaskSecret } from "../redact.ts";
 import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, AskAnswer } from "../session.ts";
 import { fail, frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
@@ -132,9 +133,15 @@ async function askFields(
   const secrets = new Map<string, SecretField>();
   for (const field of fields) {
     if (field.kind !== "secret" && field.kind !== "code") continue;
-    const found = await findSecretField(deps, ctx, field.target);
+    const found = await findSecretField(deps, ctx, field.target, field.kind);
     if (typeof found === "string") return fail(found);
-    secrets.set(field.id, field.kind === "code" ? { ...found, loginOrigin: undefined } : found);
+    // Saved sign-ins are read and kept only for a password on the web browser screen.
+    secrets.set(
+      field.id,
+      field.kind === "secret" && found.screen.name === "browser"
+        ? found
+        : { ...found, loginOrigin: undefined },
+    );
   }
   // Saved credentials stay on the trusted input channel. Reuse once per task/site;
   // another request after a rejected login lets the user replace the saved password.
@@ -193,6 +200,7 @@ async function askFields(
             await deps.logins.saveLogin(origin, saved.username, saved.password);
           }
           delivering = true;
+          addTaskSecret(ctx.session, saved.password);
           const landed = await typeSecret(deps, ctx, field, saved.password, saved.username);
           ctx.check();
           if (!landed.filled)
@@ -305,6 +313,7 @@ async function askFields(
     let saveFailed = false;
     for (const [id, field] of secrets) {
       const value = typed?.take(id);
+      if (value !== undefined) addTaskSecret(ctx.session, value);
       let landed = { filled: false, submitted: false };
       let username: string | undefined;
       if (value !== undefined && field.loginOrigin && deps.logins) {
@@ -375,7 +384,7 @@ async function askFields(
             secrets.size
               ? `\n${deliveries.join("\n")} Verification codes are never saved. The page may advance after the last character; inspect it and never replay a code after it advances. A rejected password needs a replacement; a different verification step needs the matching input form.`
               : ""
-          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : ""}`,
+          }${saveFailed ? "\nThe password could not be saved for future sign-ins; tell the user." : secrets.size && [...secrets.values()].some((field) => field.loginOrigin) && deps.logins ? "\nThe sign-in was saved securely for future use on this site." : secrets.size && fields.some((field) => field.kind === "secret") && ![...secrets.values()].some((field) => field.loginOrigin) ? "\nThis password was entered once but was not saved: this surface did not provide a verified website sign-in form. Tell the user it will need to be provided again if this sign-in is lost." : ""}`,
         ),
       ],
     };
@@ -411,7 +420,8 @@ export async function requestTakeoverTool(
   ctx.check();
   const image = await frame(deps, ctx, o.frameId);
   ctx.check();
-  const note = outcome.note ? ` Their note: ${outcome.note}` : "";
+  // The session posts their note as their message; saying it here too would hand it over twice.
+  const note = outcome.note ? " Their note follows as their next message." : "";
   return {
     ok: true,
     content: [

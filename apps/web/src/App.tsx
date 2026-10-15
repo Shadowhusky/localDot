@@ -1,13 +1,16 @@
 import {
   DEFAULT_AUTONOMY,
+  DEFAULT_PERSONA,
   isJevKey,
   LLM_PROVIDERS,
+  outfit,
+  personaOf,
   type QuestionAnswerRequest,
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById, sameModelOptions } from "@localdot/providers";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
 import { useAskDraft } from "./agent/ask-draft.ts";
@@ -22,6 +25,7 @@ import { heldByUser } from "./agent/model.ts";
 import { PermissionChip } from "./agent/PermissionChip.tsx";
 import { requestResearch, researchWait } from "./agent/research.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
+import { onStepFocus, wantedStep } from "./agent/step-focus.ts";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
@@ -48,6 +52,8 @@ import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
 import type { TipAction } from "./dot/tips.ts";
+import { VOICES } from "./dot/voices.ts";
+import { setWearing } from "./dot/wearing.ts";
 import { hasExported } from "./export/export-estimate.ts";
 import { createHostExports } from "./export/host-exports.ts";
 import { createExportJob } from "./export/job.ts";
@@ -117,11 +123,13 @@ import { useSettings } from "./settings/useSettings.ts";
 import { useSignIn } from "./settings/useSignIn.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
+import { ChatToggle } from "./shell/ChatToggle.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
 import { ConversationList, ConversationsButton } from "./shell/ConversationList.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheetPresence } from "./shell/DecisionIsland.tsx";
+import { DotChooser } from "./shell/DotChooser.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
 import { useEdgeStill, useFullScreen, useFullScreenKeys } from "./shell/fullscreen.ts";
@@ -134,11 +142,11 @@ import {
   takeReason,
   takeSlot,
 } from "./shell/island.ts";
+import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
-import { CommandsButton, CommandsMenuItem, PanelMenu } from "./shell/PanelMenu.tsx";
 import { type RailView, usePanelPreferences } from "./shell/panel-preferences.ts";
 import { CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
@@ -151,14 +159,6 @@ import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
 import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
-import { WorkOverlay } from "./shell/WorkOverlay.tsx";
-import {
-  backgroundStep,
-  commandsHidden,
-  onCommandsVisibility,
-  requestHideCommands,
-  requestShowCommands,
-} from "./shell/work-overlay.ts";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -346,7 +346,6 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 const SENDING_HOLD_MS = 20_000;
 
 function Theatre({ api }: { api: ApiClient }) {
-  const workHidden = useSyncExternalStore(onCommandsVisibility, commandsHidden);
   const appearance = useAppearance();
   const showDot = useShowDot();
   const streamChoice = useStreamPreference(showToast);
@@ -437,6 +436,13 @@ function Theatre({ api }: { api: ApiClient }) {
   const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
+  // Every dot on screen wears what the user's dot wears, with this localDot's accessory.
+  const persona = settings.saved?.persona;
+  const accessory = settings.saved?.accessory;
+  const worn = useMemo(() => outfit(persona, accessory), [persona, accessory]);
+  const dotAnchor = useRef<HTMLElement | null>(null);
+  const [choosingDot, setChoosingDot] = useState(false);
+  useEffect(() => setWearing(worn), [worn]);
   const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
@@ -675,6 +681,10 @@ function Theatre({ api }: { api: ApiClient }) {
   // A phone shows Activity in a sheet over the thread.
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
+  // A chat row showing its step opens Activity: the sheet on a phone, the rail's tab elsewhere.
+  const openActivity = useRef(() => {});
+  openActivity.current = () => (phone ? setActivityOpen(true) : setRailView("activity"));
+  useEffect(() => onStepFocus(() => wantedStep() && openActivity.current()), []);
   // A phone shows the routines in a sheet too.
   const [routinesOpen, setRoutinesOpen] = useState(false);
   if (routinesOpen && !phone) setRoutinesOpen(false);
@@ -734,7 +744,6 @@ function Theatre({ api }: { api: ApiClient }) {
     () =>
       !phone && (
         <RowMenu label="More" size={32}>
-          <CommandsMenuItem />
           <MenuItem icon="repeat" onSelect={() => showRoutines.current()}>
             Routines
           </MenuItem>
@@ -1245,6 +1254,7 @@ function Theatre({ api }: { api: ApiClient }) {
       ? `${mainProvider?.name ?? (mainApp === "claude-code" ? "Claude Code" : "ChatGPT")} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
       : null,
     permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
+    persona: settings.saved?.persona ? personaOf(settings.saved.persona).name : null,
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
@@ -1320,15 +1330,6 @@ function Theatre({ api }: { api: ApiClient }) {
     working: taskWorking,
     onChoose: (option: ModelOption) => void chooseModel(option),
   };
-  const commandsUnavailable =
-    curtain.up ||
-    viewedConversation ||
-    switching ||
-    !stageHud.live ||
-    !session.sessionId ||
-    ![...agent.model.steps.values()].some(backgroundStep)
-      ? "No commands available for this computer yet"
-      : undefined;
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -1595,10 +1596,12 @@ function Theatre({ api }: { api: ApiClient }) {
   const touch = useMediaQuery(TOUCH);
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again each time dot comes to rest
   const exported = useMemo(() => hasExported(), [resting]);
+  const voice = VOICES[settings.saved?.persona ?? DEFAULT_PERSONA];
   const idle = useIdleLine({
     resting,
     suspended: !!replayId || onboarding.open,
     held: pageHidden || overBand || settings.open,
+    voice,
     signals: {
       touch: touch || phone,
       apple: isApple(),
@@ -1693,6 +1696,15 @@ function Theatre({ api }: { api: ApiClient }) {
       data-entering={opening ? "" : undefined}
     >
       <TopBar
+        brand={
+          settings.saved ? (
+            <LocalDotSwitcher
+              name={settings.saved.name}
+              others={settings.saved.localDots ?? []}
+              onManage={(trigger) => goToSettings(trigger, "dot")}
+            />
+          ) : undefined
+        }
         title={
           replayId === LIBRARY
             ? "Replay"
@@ -1728,9 +1740,8 @@ function Theatre({ api }: { api: ApiClient }) {
         panels={
           !phone &&
           !replayId && (
-            <PanelMenu
+            <ChatToggle
               buttonRef={panelsButton}
-              commandsUnavailable={commandsUnavailable}
               chat={chatVisible}
               onChat={() =>
                 updatePanels({ chat: !chatVisible, ...(!chatVisible ? { view: "chat" } : {}) })
@@ -1755,20 +1766,6 @@ function Theatre({ api }: { api: ApiClient }) {
         >
           <ErrorBoundary>
             <StageFrame
-              overlay={
-                !replayId &&
-                !curtain.up &&
-                !viewedConversation &&
-                !switching &&
-                (stageHud.live || stageHud.phase === "reconnecting") &&
-                session.sessionId ? (
-                  <WorkOverlay
-                    key={session.sessionId}
-                    model={agent.model}
-                    working={!!appStatus.control && !yours && !agent.model.ended}
-                  />
-                ) : undefined
-              }
               boxRef={stageBox}
               onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
               light={appStatus.control ? "dot" : yours ? "you" : "none"}
@@ -1835,6 +1832,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     notices={<SafetyNotes safety={safety} agent={agent} visible={sheetsClosed} />}
                   />
                   <Toaster anchor={toastAnchor} />
+                  {/* A phone has no top bar: New conversation waits in the top corner, beside the
+                      island, whenever there is something to start afresh from. */}
+                  {phone && !newConversation.reason && (
+                    <span className="island-new">
+                      <NewConversationButton {...newConversation} />
+                    </span>
+                  )}
                 </>
               }
               band={
@@ -1854,7 +1858,26 @@ function Theatre({ api }: { api: ApiClient }) {
                             run: (trigger) => openTip(tipAction, trigger),
                           }
                     }
+                    dot={
+                      settings.saved
+                        ? {
+                            label: `Change your dot, now ${personaOf(settings.saved.persona).name}`,
+                            open: choosingDot,
+                            onPress: (trigger) => {
+                              dotAnchor.current = trigger;
+                              setChoosingDot(true);
+                            },
+                          }
+                        : undefined
+                    }
                     onHover={setOverBand}
+                  />
+                  <DotChooser
+                    open={choosingDot}
+                    anchor={dotAnchor}
+                    value={settings.saved?.persona ?? DEFAULT_PERSONA}
+                    onChange={(persona) => void settings.choosePersona(persona)}
+                    onClose={() => setChoosingDot(false)}
                   />
                   {full && !focus && (
                     <div className="fullscreen-stream-controls">
@@ -1866,7 +1889,6 @@ function Theatre({ api }: { api: ApiClient }) {
                           onFullScreen={fullScreen.toggle}
                         />
                       )}
-                      <CommandsButton unavailable={commandsUnavailable} />
                       <StreamMenu stream={streamChoice} />
                     </div>
                   )}
@@ -1883,7 +1905,6 @@ function Theatre({ api }: { api: ApiClient }) {
               side={
                 focus && (
                   <FocusControls
-                    commands={<CommandsButton unavailable={commandsUnavailable} />}
                     stream={streamChoice}
                     take={takeState}
                     pause={shape === "task" ? pause : null}
@@ -1983,6 +2004,7 @@ function Theatre({ api }: { api: ApiClient }) {
           <ErrorBoundary>
             <ChatThread
               visible={shownView === "chat"}
+              suggestions={voice.suggestions}
               agent={switching ? undefined : viewedConversation ? historyAgent : agent}
               words={
                 switching
@@ -2047,7 +2069,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       },
                       {
                         label: "Research a question",
-                        icon: "library",
+                        icon: "globe",
                         disabledReason: researchWait(agent),
                         run: requestResearch,
                       },
@@ -2083,21 +2105,12 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: (trigger) => showSettings(trigger),
                       },
                       { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
-                      {
-                        label: workHidden ? "Show commands" : "Hide commands",
-                        icon: "terminal",
-                        disabledReason:
-                          curtain.up ||
-                          replayId ||
-                          viewedConversation ||
-                          switching ||
-                          !stageHud.live ||
-                          !session.sessionId ||
-                          ![...agent.model.steps.values()].some(backgroundStep)
-                            ? "No commands available for this computer yet"
-                            : undefined,
-                        run: workHidden ? requestShowCommands : requestHideCommands,
-                      },
+                      ...(settings.saved?.localDots ?? []).map((link, index) => ({
+                        label: `Switch to ${link.name}`,
+                        icon: "monitor" as const,
+                        startsGroup: index === 0,
+                        run: () => window.location.assign(link.url),
+                      })),
                       {
                         label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
                         icon: mobileScreen.minimized ? "monitor" : "chevron-up",
@@ -2317,6 +2330,19 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
+          persona={{
+            value: settings.draft?.persona ?? settings.saved?.persona ?? DEFAULT_PERSONA,
+            onChange: settings.changePersona,
+          }}
+          look={{
+            name: settings.draft?.name ?? settings.saved?.name ?? "",
+            accessory: settings.draft ? settings.draft.accessory : settings.saved?.accessory,
+            problem: settings.validation?.find((line) => line.startsWith("Name this localDot")),
+            onName: (name) => settings.changeLook({ name }),
+            onAccessory: (accessory) => settings.changeLook({ accessory }),
+            others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
+            onOthers: (localDots) => settings.changeLook({ localDots }),
+          }}
           voice={{
             prefs: voicePrefs.value,
             saved: voicePrefs.saved,
@@ -2444,6 +2470,13 @@ function Theatre({ api }: { api: ApiClient }) {
             settings.draft
               ? {
                   on: settings.draft.purposeCheck,
+                  api,
+                  keyId: keys.keys
+                    .filter(isJevKey)
+                    .map((key) => key.id)
+                    .sort()[0],
+                  fullAccess: settings.saved?.permissionMode === "full",
+                  manageJevKey: (trigger) => goToSettings(trigger, "keys"),
                   change: settings.purposeCheck,
                   judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
                   ...(subscription(settings.draft.choices.main?.provider)

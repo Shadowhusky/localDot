@@ -16,6 +16,12 @@ for (const width of [320, 390, 1440]) {
           return "available";
         }
         onstart: (() => void) | null = null;
+        onspeechstart: (() => void) | null = null;
+        onspeechend: (() => void) | null = null;
+        constructor() {
+          window.addEventListener("test-speech-start", () => this.onspeechstart?.());
+          window.addEventListener("test-speech-end", () => this.onspeechend?.());
+        }
         onend: (() => void) | null = null;
         start() {
           queueMicrotask(() => this.onstart?.());
@@ -65,7 +71,31 @@ for (const width of [320, 390, 1440]) {
         return node.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
       }),
     ).toBe(true);
+    // Inspect the newest bar, not a finishing animation or an old history sample.
+    const newestBar = () =>
+      waveform.locator("canvas").evaluate((element) => {
+        const canvas = element as HTMLCanvasElement;
+        const ctx = canvas.getContext("2d")!;
+        const ratio = window.devicePixelRatio || 1;
+        const x = Math.floor((Math.floor(canvas.clientWidth / 5) - 1) * 5 * ratio);
+        const pixels = ctx.getImageData(x, 0, Math.max(1, Math.floor(3 * ratio)), canvas.height);
+        let rows = 0;
+        for (let y = 0; y < pixels.height; y++) {
+          if (
+            Array.from(
+              { length: pixels.width },
+              (_, x) => pixels.data[(y * pixels.width + x) * 4 + 3],
+            ).some((alpha) => alpha! > 0)
+          )
+            rows++;
+        }
+        return rows / ratio;
+      });
+    await page.evaluate(() => window.dispatchEvent(new Event("test-speech-start")));
+    await expect.poll(newestBar).toBeGreaterThan(6);
     await page.screenshot({ path: test.info().outputPath("recording.png") });
+    await page.evaluate(() => window.dispatchEvent(new Event("test-speech-end")));
+    await expect.poll(newestBar).toBeLessThanOrEqual(4);
     await send.click();
     await expect(send).toHaveAccessibleName("Transcribing speech");
     await page.evaluate(() => window.dispatchEvent(new Event("finish-test-speech")));

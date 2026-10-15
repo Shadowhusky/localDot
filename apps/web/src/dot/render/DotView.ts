@@ -1,13 +1,16 @@
+import type { Wearable } from "@localdot/protocol";
 import { parseCssColor } from "../../stage/theme.ts";
 import { DotEngine, type DotPose, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import type { DotTool } from "../engine/tools.ts";
 import { BODY_PLATES, type BodyPlate, SHADOW_PLATE } from "../plates.ts";
+import { onWearing, wearing } from "../wearing.ts";
 import { canvasColour, GLOSS_STOPS, PEARL_STOPS, PROP, SHEEN_STOPS, VOID } from "./dot-colours.ts";
 import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
 import { type PropLayer, paintProps } from "./prop-paint.ts";
 import { addView, type Frameable, kick, now, removeView } from "./scheduler.ts";
+import { Wardrobe } from "./wearables.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
 // A view left unrendered this long (off screen, hidden tab) jumps ahead instead of replaying it.
@@ -53,11 +56,13 @@ export interface DotViewOptions {
   control: boolean;
   reducedMotion: boolean;
   seed?: number;
+  // What this dot wears; by default the user's dot's outfit, and it follows changes to it.
+  wearables?: readonly Wearable[];
 }
 
-// Renders a DotEngine into a host element: Blender body plates under a procedural SVG face. The
-// neutral plate loads at once, the xenon and dim plates the first time they show, and if any plate
-// fails the body falls back to SVG. Attributes and styles are written only when they change.
+// Renders a DotEngine into a host element: Blender body plates under a procedural SVG face, and
+// what dot wears over both. The neutral plate loads at once, the xenon and dim plates the first time
+// they show, and if any plate fails the body falls back to SVG. Attributes and styles are written only when they change.
 export class DotView implements Frameable {
   readonly root: HTMLElement;
   visible = true;
@@ -80,6 +85,8 @@ export class DotView implements Frameable {
   private props: Record<PropLayer, HTMLCanvasElement> | null = null;
   private propsOut = false;
   private xenonColour: string | null = null;
+  private readonly wardrobe: Wardrobe;
+  private own: readonly Wearable[] | undefined;
 
   constructor(root: HTMLElement, o: DotViewOptions) {
     this.root = root;
@@ -190,6 +197,13 @@ export class DotView implements Frameable {
       };
     };
     this.eyes = [eye("L"), eye("R")];
+    this.wardrobe = new Wardrobe(this.body);
+    this.own = o.wearables;
+    this.wardrobe.wear(this.own ?? wearing(), this.size);
+    const follow = onWearing(() => {
+      if (!this.own) this.dress(wearing());
+    });
+    signal.addEventListener("abort", follow, { once: true });
 
     this.load(this.plates.neutral, BODY_PLATES.neutral);
     this.applyLod();
@@ -242,6 +256,12 @@ export class DotView implements Frameable {
     kick();
   }
 
+  // An outfit of its own, or undefined to follow the user's dot.
+  setWearables(list: readonly Wearable[] | undefined): void {
+    this.own = list;
+    this.dress(list ?? wearing());
+  }
+
   setTool(tool: DotTool | null): void {
     this.engine.setTool(tool, now());
     kick();
@@ -258,6 +278,7 @@ export class DotView implements Frameable {
     for (const img of [this.shadow, ...Object.values(this.plates)]) {
       if (img.srcset) img.sizes = `${size}px`;
     }
+    this.wardrobe.setSize(size);
     const lod = lodFor(size);
     if (lod !== this.lod) {
       this.lod = lod;
@@ -288,6 +309,12 @@ export class DotView implements Frameable {
       : this.detail.calmGapMs;
     if (t - this.lastRender >= gap) this.render(t);
     return Math.max(0, Math.min(this.lastRender + gap, this.engine.nextEventAt()) - t);
+  }
+
+  // A new outfit takes its place in the current pose at once.
+  private dress(list: readonly Wearable[]): void {
+    this.wardrobe.wear(list, this.size);
+    this.render(now());
   }
 
   private image(className: string, parent: Element): HTMLImageElement {
@@ -356,6 +383,7 @@ export class DotView implements Frameable {
     const devPerUnit = k * dpr;
     this.renderEye(this.eyes[0], p.eyes[0], devPerUnit);
     this.renderEye(this.eyes[1], p.eyes[1], devPerUnit);
+    this.wardrobe.render(p, k);
     this.renderProps(p, dpr);
   }
 

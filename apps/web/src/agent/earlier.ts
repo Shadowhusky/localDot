@@ -24,7 +24,9 @@ function owned(items: readonly ThreadItem[], sessionId: string): ThreadItem[] {
   return items.map((item) =>
     item.kind === "result" && item.result.sessionId !== sessionId
       ? { ...item, result: { ...item.result, sessionId } }
-      : item,
+      : item.kind === "work"
+        ? { ...item, earlier: true as const }
+        : item,
   );
 }
 

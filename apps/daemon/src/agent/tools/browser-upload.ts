@@ -148,7 +148,10 @@ export async function browserUploadTool(
   ctx.check();
   if (!permit || !(await revalidate())) {
     append(ctx, "tool.end", { ok: false });
-    append(ctx, "step.end", { status: "blocked" });
+    append(ctx, "step.end", {
+      status: "blocked",
+      note: "The upload wasn't approved, or its files or the page changed.",
+    });
     return fail(
       "This upload was not authorized or its files or receiving page changed. Do not retry automatically.",
     );

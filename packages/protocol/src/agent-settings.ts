@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SECRET_ID_PATTERN } from "./keyd.ts";
 import { ModelOptions } from "./model-options.ts";
+import { Accessory, PersonaId } from "./personas.ts";
 import { PurposeCheck } from "./purpose.ts";
 import { ResearchBudget } from "./research.ts";
 import { AutonomyPolicy } from "./safety.ts";
@@ -54,6 +55,28 @@ export const CheckIns = z.strictObject({
 });
 export type CheckIns = z.infer<typeof CheckIns>;
 // The daemon additionally validates the path against its actual host's isAbsolute semantics.
+// Another localDot the user runs, which the switcher opens at its own address.
+export const LocalDotLink = z.strictObject({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .refine((name) => !/[\p{Cc}<>]/u.test(name), "Use letters, numbers and punctuation"),
+  url: z
+    .string()
+    .max(512)
+    .refine((url) => {
+      try {
+        const parsed = new URL(url);
+        return /^https?:$/.test(parsed.protocol) && !parsed.username && !parsed.password;
+      } catch {
+        return false;
+      }
+    }, "An http or https address"),
+});
+export type LocalDotLink = z.infer<typeof LocalDotLink>;
+
 export const AgentSettingsDocument = z.strictObject({
   autonomy: AutonomyPolicy.optional(),
   main: AgentRoleChoice.optional(),
@@ -73,5 +96,17 @@ export const AgentSettingsDocument = z.strictObject({
   recentActivity: z.enum(["on", "off"]).optional(),
   // How far a research task reads before it writes; DEFAULT_RESEARCH_BUDGET when absent.
   research: ResearchBudget.optional(),
+  // Which dot works the next task; the everyday dot when absent.
+  persona: PersonaId.optional(),
+  // This localDot, as the user tells it apart from their others.
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .refine((name) => !/[\p{Cc}<>]/u.test(name), "Use letters, numbers and punctuation")
+    .optional(),
+  accessory: Accessory.optional(),
+  localDots: z.array(LocalDotLink).max(12).optional(),
 });
 export type AgentSettingsDocument = z.infer<typeof AgentSettingsDocument>;

@@ -104,6 +104,13 @@ export async function webSearchTool(
   };
 }
 
+// The pages that failed in each task. One that did not answer, or found no connection, gets one more
+// try; any other failure is the same the next time, so a repeat is answered without reading again.
+const failed = new WeakMap<object, Map<string, { times: number; said: string }>>();
+const PASSING = /did not answer in time|could not be reached|no connection is free/;
+// A read's step shows the start of the page dot was given.
+const SHOWN_CHARS = 4000;
+
 // Reads a public page as Markdown, or a picture, without the screen. It carries no sign-ins, so
 // what it reads is public; in research mode a page read is a numbered source.
 export async function webFetchTool(
@@ -120,12 +127,19 @@ export async function webFetchTool(
       "Only public http and https pages can be read this way. Open local addresses with browser_navigate.",
     );
   if (!deps.web) return fail(UNAVAILABLE);
+  const page = url.href.replace(/#.*$/, "");
+  const tried = failed.get(ctx.session)?.get(page);
+  if (tried && (tried.times > 1 || !PASSING.test(tried.said)))
+    return fail(
+      `This page already failed in this task: ${tried.said} Use another source, or open it with browser_navigate.`,
+    );
   const site = url.hostname.replace(/^www\./, "");
   append(ctx, "step.start", { kind: "browser" });
   append(ctx, "tool.start", {
     tool: "web_fetch",
     title: PICTURE.test(url.pathname) ? `Looked at a picture from ${site}` : `Read ${site}`,
   });
+  append(ctx, "tool.output", { stream: "stdout", chunk: `${ctx.redact(page)}\n` });
   let got: Awaited<ReturnType<typeof webFetch>>;
   try {
     got = await webFetch(deps.web, url, input.max_chars ?? WEB_FETCH_DEFAULT_CHARS, ctx.signal);
@@ -134,6 +148,8 @@ export async function webFetchTool(
     if (!(error instanceof WebError)) throw error;
     // The user sees the first sentence; the rest is advice for dot.
     const said = /^.*?[.:](?=\s|$)/.exec(error.message)?.[0].replace(/:$/, ".") ?? error.message;
+    const pages = failed.get(ctx.session) ?? new Map();
+    failed.set(ctx.session, pages.set(page, { times: (tried?.times ?? 0) + 1, said }));
     append(ctx, "tool.end", { ok: false });
     append(ctx, "step.end", { status: "failed", note: clipText(said, 500) });
     return fail(ctx.redact(error.message));
@@ -168,9 +184,14 @@ export async function webFetchTool(
   );
   if (source.refused) {
     append(ctx, "tool.end", { ok: false });
-    append(ctx, "step.end", { status: "blocked" });
+    append(ctx, "step.end", { status: "blocked", note: source.note });
     return fail(source.refused);
   }
+  const read = ctx.redact(`${got.title ? `${got.title}\n` : ""}\n${got.text}`);
+  append(ctx, "tool.output", {
+    stream: "stdout",
+    chunk: read.length > SHOWN_CHARS ? `${read.slice(0, SHOWN_CHARS)}\n…` : read,
+  });
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
   return {

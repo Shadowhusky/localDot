@@ -1,6 +1,14 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState, PlanItemState } from "@localdot/stage";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
 import { ActivityRow } from "../agent/ActivityRow.tsx";
 import {
@@ -11,14 +19,15 @@ import {
   type EntryView,
   entryView,
   foldKeyUses,
+  groupActivity,
   hasDetails,
   matchesFilter,
-  withNextMoves,
 } from "../agent/activity.ts";
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
 import { PlanStrip } from "../agent/PlanStrip.tsx";
 import { ResearchSources } from "../agent/ResearchSources.tsx";
+import { onStepFocus, takeStep, wantedStep } from "../agent/step-focus.ts";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { useStepHistory } from "../agent/useStepHistory.ts";
@@ -30,13 +39,17 @@ import { timeLabel } from "../replay/replay-view.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { Button } from "../ui/Button.tsx";
+import { GroupHeading } from "../ui/GroupHeading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
+import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { SwipePanels } from "../ui/SwipePanels.tsx";
 import { TabPanel, Tabs } from "../ui/Tabs.tsx";
+import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import { VirtualList } from "../ui/VirtualList.tsx";
 import { activityTabs as chosenTabs } from "./activity-tabs.ts";
 import { HANDHELD } from "./layout.ts";
 import "../agent/activity.css";
@@ -77,7 +90,9 @@ const FILTERS = [
 ] as const;
 // Long enough for a row's detail to finish opening before it is brought into view.
 const REVEAL_AFTER = 300;
+const estimateStep = () => 64;
 const entryKey = (entry: ActivityEntry) => entry.key;
+const changeKey = (change: AgentChange) => change.id;
 const EMPTY = emptyAgentModel();
 // dot is still at the task, so the user can still change how far it reads.
 const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
@@ -119,21 +134,33 @@ export function ActivityRail({
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const [opened, setOpened] = useState<{ owner: string; key: string } | null>(null);
   const entries = useMemo(
-    () => foldKeyUses(activityRows(rows, agent, keyUses)),
-    [rows, agent, keyUses],
+    () => foldKeyUses(activityRows(rows, { steps: model.steps }, keyUses)),
+    [rows, model.steps, keyUses],
   );
   const selected = useMemo(
     () => entries.filter((entry) => matchesFilter(entry.row, filter)),
     [entries, filter],
   );
+
   const history = useStepHistory(selected, entryKey, `${owner}:${filter}`);
-  // Views come from the whole history, so a failure says what dot did next even when the filter
-  // or the page hides that step.
-  const views = useMemo(() => {
-    const all = withNextMoves(entries.map((entry) => entryView(entry, model.changes, ended)));
-    return new Map(entries.map((entry, index) => [entry.key, all[index] as EntryView]));
-  }, [entries, model.changes, ended]);
-  const viewOf = (entry: ActivityEntry) => views.get(entry.key) as EntryView;
+  const viewOf = useMemo(() => {
+    const changes = new Map<string, AgentChange[]>();
+    for (const change of model.changes) {
+      if (!change.step) continue;
+      const own = changes.get(change.step) ?? [];
+      own.push(change);
+      changes.set(change.step, own);
+    }
+    // Keyed by the entry itself: another task's step with the same id is another entry.
+    const cache = new WeakMap<ActivityEntry, EntryView>();
+    return (entry: ActivityEntry): EntryView => {
+      const found = cache.get(entry);
+      if (found) return found;
+      const view = entryView(entry, changes.get(entry.row.id) ?? [], ended);
+      cache.set(entry, view);
+      return view;
+    };
+  }, [model.changes, ended]);
   const plan = planSnapshot ?? model.plan;
   const handed = useMemo(() => latestFiles(model.results).length, [model.results]);
   const started = !!sessionId || !!plan.length;
@@ -176,7 +203,7 @@ export function ActivityRail({
   const tabKey = tabs.map((item) => item.value).join(",");
   const tabValues = useMemo(() => tabKey.split(","), [tabKey]);
   const onSteps = tab === "steps";
-  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
+  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started, { glide: false });
   const timeline = useRef<HTMLElement>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
@@ -188,6 +215,31 @@ export function ActivityRail({
           return last && viewOf(last).state === "doing" ? last.key : undefined;
         })();
   const openKey = opened?.owner === owner ? opened.key : null;
+  const [expanded, setExpanded] = useState<{ owner: string; keys: Set<string> }>({
+    owner,
+    keys: new Set(),
+  });
+  const groups = useMemo(() => groupActivity(history.rows), [history.rows]);
+  const display = useMemo(
+    () =>
+      groups.flatMap<{
+        key: string;
+        entry?: ActivityEntry;
+        child?: boolean;
+        group?: (typeof groups)[number];
+      }>((group) => {
+        if (group.entries.length === 1 || replay)
+          return group.entries.map((entry) => ({ key: entry.key, entry }));
+        const header = { key: `group-${group.key}`, group };
+        return expanded.owner === owner && expanded.keys.has(group.key)
+          ? [header, ...group.entries.map((entry) => ({ key: entry.key, entry, child: true }))]
+          : [header];
+      }),
+    [groups, expanded, owner, replay],
+  );
+  const virtualKeys = useMemo(() => display.map((item) => item.key), [display]);
+  const virtual = useVirtualRows(timeline, virtualKeys, estimateStep);
+
   // When embedded without its own scroll constraint, bring the live step into the outer scroller.
   const placed = useRef(false);
   useLayoutEffect(() => {
@@ -200,8 +252,37 @@ export function ActivityRail({
 
   useEffect(() => {
     if (!replay || !currentKey) return;
+    const index = display.findIndex((item) => item.key === currentKey);
+    if (index >= 0) virtual.scrollTo(index);
     reveal(timeline.current?.querySelector("[data-current]") ?? null);
-  }, [replay, currentKey]);
+  }, [replay, currentKey, display, virtual.scrollTo]);
+
+  // A step a chat row asked for: bring it onto the list, then open it where the reader can see it.
+  const focus = useSyncExternalStore(onStepFocus, wantedStep);
+  useEffect(() => {
+    if (!focus || !entries.some((entry) => entry.key === focus.key)) return;
+    if (tab !== "steps") return choose("steps");
+    if (filter !== "all") return setFilter("all");
+    if (!history.rows.some((entry) => entry.key === focus.key))
+      return history.hasOlder ? history.older() : undefined;
+    const group = groups.find(
+      (each) => each.entries.length > 1 && each.entries.some((entry) => entry.key === focus.key),
+    );
+    if (group && !replay && !(expanded.owner === owner && expanded.keys.has(group.key)))
+      return setExpanded((previous) => ({
+        owner,
+        keys: new Set([...(previous.owner === owner ? previous.keys : []), group.key]),
+      }));
+    const index = display.findIndex((item) => item.key === focus.key);
+    if (index < 0) return;
+    takeStep(focus.serial);
+    setOpened({ owner, key: focus.key });
+    virtual.scrollTo(index);
+    window.setTimeout(
+      () => reveal(timeline.current?.querySelector(`[data-index="${index}"]`) ?? null),
+      REVEAL_AFTER,
+    );
+  });
 
   const older = () => {
     const pane = timeline.current?.closest<HTMLElement>(".activity-scroll");
@@ -312,7 +393,7 @@ export function ActivityRail({
       </div>
       {plan.length > 0 && (
         <div className="activity-plan">
-          <PlanStrip overlay plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+          <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
         </div>
       )}
       <div className="activity-body">
@@ -355,7 +436,50 @@ export function ActivityRail({
                 )}
                 {started && (
                   <section ref={timeline} className="activity-timeline" aria-label="Recorded steps">
-                    {sessionId && history.rows.map(renderEntry)}
+                    <div aria-hidden="true" style={{ height: virtual.before, flexShrink: 0 }} />
+                    {sessionId &&
+                      virtual.indexes.map((index) => {
+                        const item = display[index];
+                        if (!item) return null;
+                        const group = item.group;
+                        const isOpen =
+                          !!group && expanded.owner === owner && expanded.keys.has(group.key);
+                        return (
+                          <div
+                            key={item.key}
+                            data-index={index}
+                            data-last={index === display.length - 1 || undefined}
+                            ref={virtual.measure}
+                            className="activity-window-row"
+                            data-group-child={item.child || undefined}
+                          >
+                            {item.entry
+                              ? renderEntry(item.entry)
+                              : group && (
+                                  <GroupHeading
+                                    className="activity-read-group"
+                                    leading={<StatusGlyph state="done" />}
+                                    title={group.label}
+                                    meta={`${group.entries.length} read-only steps · ${isOpen ? "Hide" : "Show"} details`}
+                                    count={group.entries.length}
+                                    open={isOpen}
+                                    onToggle={(trigger) => {
+                                      follow.anchorTo(trigger);
+                                      setExpanded((previous) => {
+                                        const keys = new Set(
+                                          previous.owner === owner ? previous.keys : [],
+                                        );
+                                        if (keys.has(group.key)) keys.delete(group.key);
+                                        else keys.add(group.key);
+                                        return { owner, keys };
+                                      });
+                                    }}
+                                  />
+                                )}
+                          </div>
+                        );
+                      })}
+                    <div aria-hidden="true" style={{ height: virtual.after, flexShrink: 0 }} />
                   </section>
                 )}
                 {started && (!sessionId || !selected.length) && (
@@ -414,7 +538,9 @@ export function ActivityRail({
                         <h3 id={`${domId}-changed`}>Changed</h3>
                         <span className="activity-section-meta num">{fileChanges.length}</span>
                       </div>
-                      {fileChanges.map(changeRow)}
+                      <VirtualList items={fileChanges} itemKey={changeKey}>
+                        {changeRow}
+                      </VirtualList>
                     </section>
                   )}
                   {memoryChanges.length > 0 && (
@@ -423,7 +549,9 @@ export function ActivityRail({
                         <h3 id={`${domId}-memory`}>Memory</h3>
                         <span className="activity-section-meta num">{memoryChanges.length}</span>
                       </div>
-                      {memoryChanges.map(changeRow)}
+                      <VirtualList items={memoryChanges} itemKey={changeKey}>
+                        {changeRow}
+                      </VirtualList>
                     </section>
                   )}
                   {!files && <p className="activity-empty">Files dot hands over appear here.</p>}

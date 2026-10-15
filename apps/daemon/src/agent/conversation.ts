@@ -40,7 +40,7 @@ const LOOK_BACK = 20;
 // What an ended task said never changes, so the tasks read back most often are kept.
 const KEPT_TASKS = 64;
 const TURN_TYPES =
-  /"type":"(?:message\.user|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end|plan\.set|tool\.start|step\.end|action\.intent|action\.target)"/;
+  /"type":"(?:message\.user|message\.delivery|message\.assistant|ask\.request|ask\.answer|task\.result|session\.end|plan\.set|tool\.start|step\.end|action\.intent|action\.target)"/;
 // The list of conversations reads through this many of the newest sessions.
 const LIST_SCAN = 200;
 // A task's session.end is among the last lines of its log.
@@ -167,10 +167,19 @@ export class Conversations {
     let ended = false;
     let completed = false;
     const events = this.#events(sessionId);
+    // A queued message the user withdrew or cancelled never reached dot.
+    const unsaid = new Set(
+      events.flatMap((event) =>
+        event.type === "message.delivery" &&
+        (event.data.state === "withdrawn" || event.data.state === "cancelled")
+          ? [event.data.messageId]
+          : [],
+      ),
+    );
     for (const event of events) {
       switch (event.type) {
         case "message.user":
-          turns.push(`The user: ${clip(event.data.text)}`);
+          if (!unsaid.has(event.data.messageId)) turns.push(`The user: ${clip(event.data.text)}`);
           break;
         case "message.assistant":
           if (event.data.text.trim()) turns.push(`dot: ${clip(event.data.text)}`);

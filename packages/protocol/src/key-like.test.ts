@@ -3,6 +3,7 @@ import {
   claudePlanToken,
   KEY_SCAN_CHARS,
   KEY_SCAN_MATCHES,
+  keyLikeMatches,
   keyLikePresent,
   scanKeyLike,
 } from "./key-like.ts";
@@ -25,6 +26,52 @@ const shapes = [
   [`pplx-${"k".repeat(48)}`, "Perplexity"],
   [`sk-${"a".repeat(32)}`, "API key"],
 ] as const;
+// Service tokens a user's files or command output can hold, as synthetic as the shapes above.
+const tokens = [
+  [`ghp_${"a".repeat(36)}`, "GitHub"],
+  [`gho_${"b".repeat(36)}`, "GitHub"],
+  [`github_pat_${"C".repeat(22)}_${"d".repeat(59)}`, "GitHub"],
+  [`glpat-${"e".repeat(20)}`, "GitLab"],
+  [`AKIA${"F".repeat(16)}`, "AWS"],
+  [`xoxb-${"1".repeat(12)}-${"2".repeat(13)}-${"g".repeat(24)}`, "Slack"],
+  [`sk_live_${"h".repeat(24)}`, "Stripe"],
+  [`rk_live_${"i".repeat(99)}`, "Stripe"],
+] as const;
+describe("service token recognition", () => {
+  it.each(tokens.map(([key, hint]) => ({ key, hint })))(
+    "finds a synthetic $hint token by its prefix and shape",
+    ({ key, hint }) => {
+      const text = `前面 token: "${key}".`;
+      expect(scanKeyLike(text)).toEqual({
+        overflow: false,
+        matches: [{ start: text.indexOf(key), end: text.indexOf(key) + key.length, hint }],
+      });
+    },
+  );
+  it("permits ordinary words that only share a token's prefix", () => {
+    for (const text of [
+      "ghp_ and github_pat_ are GitHub prefixes",
+      `ghp_${"a".repeat(35)}`,
+      `my_ghp_${"a".repeat(36)}`,
+      `AKIA${"F".repeat(15)}`,
+      `AKIA${"f".repeat(16)}`,
+      "xoxo-hugs",
+      "xoxp-and-some-long-hyphenated-words",
+      `sk_test_${"h".repeat(24)}`,
+      "glpat-short",
+    ])
+      expect(keyLikePresent(text), text).toBe(false);
+  });
+  it("finds every key in text of any length, for masking", () => {
+    const [key] = tokens[0];
+    const text = `${"word ".repeat(KEY_SCAN_CHARS)}${Array(KEY_SCAN_MATCHES + 4)
+      .fill(key)
+      .join(" ")}`;
+    const matches = [...keyLikeMatches(text)];
+    expect(matches).toHaveLength(KEY_SCAN_MATCHES + 4);
+    for (const match of matches) expect(text.slice(match.start, match.end)).toBe(key);
+  });
+});
 describe("bounded key-shaped text recognition", () => {
   it.each(shapes.map(([key, hint], index) => ({ key, hint, index })))(
     "finds synthetic $hint candidate $index inside multilingual prose without returning credential text",

@@ -4,7 +4,11 @@ import type { RiskFacts } from "../safety/risk.ts";
 import { untrusted } from "../untrusted.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
-export function connectorFacts(entry: TaskConnectorTool, actionClass: ActionClass): RiskFacts {
+export function connectorFacts(
+  entry: TaskConnectorTool,
+  actionClass: ActionClass,
+  asks = false,
+): RiskFacts {
   return {
     operation: "connector",
     connector: {
@@ -13,6 +17,7 @@ export function connectorFacts(entry: TaskConnectorTool, actionClass: ActionClas
       exposed: entry.exposed,
       actionClass,
       ...(entry.host ? { host: entry.host } : {}),
+      ...(asks ? { asks: true as const } : {}),
     },
   };
 }

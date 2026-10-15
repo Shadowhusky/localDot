@@ -35,6 +35,7 @@ describe("completion waits for missing user input", () => {
   it("requires the model's input assessment while retaining old client compatibility", () => {
     const base = {
       summary: "Checked.",
+      files: [],
       experience: null,
       completion: { status: "complete", evidence: "All requested checks passed" },
     };

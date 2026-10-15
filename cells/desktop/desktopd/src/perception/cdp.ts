@@ -3,6 +3,7 @@ import {
   clipText,
   type ElementState,
   type FindRequest,
+  loginForm,
   type Point,
   type Rect,
   type Target,
@@ -353,6 +354,29 @@ export class ChromiumPerception {
     const attrs = node.node.attributes ?? [];
     const secret =
       attrs.findIndex((a, i) => i % 2 === 0 && a === "type" && attrs[i + 1] === "password") >= 0;
+    let loginOrigin: string | undefined;
+    if (secret && url?.startsWith("https://")) {
+      try {
+        const expected = new URL(url).origin;
+        const [snapshot, tree] = await Promise.all([
+          cdp.send<{ strings: string[]; documents: { documentURL: number }[] }>(
+            "DOMSnapshot.captureSnapshot",
+            { computedStyles: [] },
+          ),
+          cdp.send("Accessibility.getFullAXTree", {}),
+        ]);
+        // Bind to the snapshot's actual top-level document, not a stale title/metrics URL.
+        // Passwords inside frames fail the top-level form/node check and are not retained.
+        const actual = snapshot.strings[snapshot.documents[0]?.documentURL ?? -1];
+        if (actual && new URL(actual).origin === expected) {
+          loginForm(snapshot, tree, backendNodeId, expected, true);
+          loginOrigin = expected;
+        }
+      } catch {
+        // Native app passwords and unsupported/change-password forms still accept a private
+        // one-time answer, but are never auto-filled from the saved website credential store.
+      }
+    }
     const centre = point ?? {
       x: Math.round(bbox.x + bbox.w / 2),
       y: Math.round(bbox.y + bbox.h / 2),
@@ -367,6 +391,7 @@ export class ChromiumPerception {
       window: clipText(win.title, 256),
       ...(url ? { url: clipText(url, 2048) } : {}),
       ...(secret ? { secret: true } : {}),
+      ...(loginOrigin ? { loginOrigin } : {}),
     };
   }
 

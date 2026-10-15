@@ -216,6 +216,20 @@ const MAX_DETAIL = 200;
 const clamp = (text: string) =>
   text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL - 1)}…` : text;
 
+// Plain --internal still exposes Docker Desktop VM listeners on the bridge gateway (S3, D14): an
+// internal network that reports a gateway address is on an engine that ignored isolated mode.
+export function requireNoGateway(
+  networkId: string,
+  configs: readonly { Gateway?: string }[],
+): void {
+  const gateway = configs.find((entry) => entry.Gateway && entry.Gateway !== "invalid IP")?.Gateway;
+  if (gateway && gateway !== "invalid IP") {
+    throw new Error(
+      `network ${networkId} has a gateway address (${clamp(gateway)}): this Docker Engine does not isolate internal networks; run the doctor`,
+    );
+  }
+}
+
 // Spec, error handling: a crashed cell is restarted with backoff. Docker's own restart policy is not
 // used (P2-R14): it would restart behind the daemon's back and change the published ports unseen.
 const DEFAULT_RESTART_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000];
@@ -287,6 +301,11 @@ export class CellOrchestrator {
   get(id: string): CellSummary | undefined {
     const record = this.#record(id);
     return record && this.#summary(record);
+  }
+
+  // Only exact retirement plus key revocation releases an archived computer's port.
+  retiredPortOwner(id: string): boolean {
+    return this.#retiredPortOwners.has(id);
   }
 
   reservedKeydPorts(): number[] {
@@ -729,6 +748,10 @@ export class CellOrchestrator {
       throw new CellControlConflict(
         "the computer is permanently fenced or awaiting replacement confirmation",
       );
+    // Resolve exact container identities before changing state. Docker cannot gracefully stop a
+    // frozen desktop; thaw only after the key layer has closed, inside this lifecycle operation.
+    const owned = await inspectOwnedCell(this.#docker, id, record.docker, record.ownership);
+    if (this.#held(id)) throw new CellControlConflict("the computer is held for replacement");
     this.#updating.add(id);
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
     this.#ops.begin(id, "update", "shutdown", { startedAt });
@@ -740,8 +763,15 @@ export class CellOrchestrator {
         refusal = "The key layer didn't answer. Try again in a moment.";
         throw new CellControlConflict(refusal);
       }
-      for (const name of [record.docker.desktop, record.docker.gate])
-        await this.#stopContainer(name);
+      for (const container of owned.filter((object) => object.kind === "containers")) {
+        if (container.paused) {
+          await this.#docker.request({
+            method: "POST",
+            path: objectPath("containers", container.id, "unpause"),
+          });
+        }
+        await this.#stopContainer(container.id);
+      }
       this.#step(id, "install");
       next = await updates.swap(await this.#finishUpdate(record), (n) => this.#adopt(n));
     } catch (error) {
@@ -1748,14 +1778,7 @@ export class CellOrchestrator {
     const config = info.IPAM.Config[0];
     const subnet = config?.Subnet;
     if (!subnet) throw new Error(`network ${networkId} has no IPv4 subnet`);
-    const gateway = info.IPAM.Config.find(
-      (entry) => entry.Gateway && entry.Gateway !== "invalid IP",
-    )?.Gateway;
-    if (opts.isolated && gateway && gateway !== "invalid IP") {
-      throw new Error(
-        `network ${networkId} has a gateway address (${clamp(gateway)}): this Docker Engine does not isolate internal networks; run the doctor`,
-      );
-    }
+    if (opts.isolated) requireNoGateway(networkId, info.IPAM.Config);
     return subnet;
   }
 

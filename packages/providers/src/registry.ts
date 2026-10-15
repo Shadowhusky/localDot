@@ -85,7 +85,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
   compatible("siliconflow-cn", "SiliconFlow (China)", "https://api.siliconflow.cn/v1"),
   {
     id: "openai-compatible",
-    name: "Other (OpenAI-compatible)",
+    name: "Custom endpoint (OpenAI Chat Completions)",
     client: "openai-compatible",
     keyd: "openai-compatible",
     custom: true,
@@ -94,14 +94,14 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     // Responses-only gateways can reuse an existing compatible key and its bound endpoint.
     // The OpenAI client already uses stateless Responses through that keyd route.
     id: "openai-responses-compatible",
-    name: "Other (OpenAI Responses-compatible)",
+    name: "Custom endpoint (OpenAI Responses)",
     client: "openai",
     keyd: "openai-compatible",
     custom: true,
   },
   {
     id: "anthropic-compatible",
-    name: "Other (Anthropic-compatible)",
+    name: "Custom endpoint (Anthropic Messages)",
     client: "anthropic-compatible",
     keyd: "anthropic-compatible",
     custom: true,

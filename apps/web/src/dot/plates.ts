@@ -1,3 +1,4 @@
+import { Wearable } from "@localdot/protocol";
 import dim48 from "./plates/body-dim-48.webp?no-inline";
 import dim96 from "./plates/body-dim-96.webp?no-inline";
 import dim192 from "./plates/body-dim-192.webp?no-inline";
@@ -55,6 +56,25 @@ export const BODY_PLATES: Record<BodyPlate, string> = {
 };
 
 export const SHADOW_PLATE = srcset(SHADOW_FILES);
+
+const WEAR_FILES = import.meta.glob<string>("./plates/wear-*.webp", {
+  eager: true,
+  query: "?no-inline",
+  import: "default",
+});
+
+// What dot wears, rendered over the same body at the body's sizes (build_wearables.py).
+export const WEAR_PLATES = Object.fromEntries(
+  Wearable.options.map((name) => [
+    name,
+    srcset(
+      [48, 96, 192, 448].flatMap((px) => {
+        const url = WEAR_FILES[`./plates/wear-${name}-${px}.webp`];
+        return url ? [[px, url] as const] : [];
+      }),
+    ),
+  ]),
+) as Record<Wearable, string>;
 
 // The file a canvas draws a dot of this many pixels from: the smallest at least that wide.
 export function plateFile(sizes: Sizes, px: number): string {

@@ -162,11 +162,12 @@ describe("immutable model frame basis", () => {
     expect(await u.run()).toBe("done");
     expect(u.f.toolCalls.filter((c) => c.name === "computer")).toEqual([]);
   });
-  it("does not borrow a full image that pruning removed behind three recent crops", async () => {
+  it("does not borrow a full image that pruning removed behind recent crops", async () => {
+    // Six crops after it: pruning, four at a time, takes the full frame and three crops out.
     const t = setup([call("computer", { action: "left_click", coordinate: [1, 1] }), done()], {
       history: [
         frame(ulid()),
-        ...Array.from({ length: 3 }, () => frame(ulid(), { x: 0, y: 0, w: 10, h: 10 })),
+        ...Array.from({ length: 6 }, () => frame(ulid(), { x: 0, y: 0, w: 10, h: 10 })),
       ],
     });
     expect(await t.run()).toBe("done");
@@ -724,5 +725,111 @@ describe("daemon safety Pause directives", () => {
     isPaused = false;
     resumed.resolve({ revision: 2 });
     expect(await running).toBe("done");
+  });
+});
+
+describe("a resumed task's harness context", () => {
+  const skills = [
+    { name: "office-files", description: "Office conversions", path: "~/.skills/office-files" },
+  ];
+  it("does not re-add harness context restored with the transcript", async () => {
+    const f = fakeApi();
+    const sessionId = ulid();
+    const first = setup([done()], { f, boot: { sessionId, resume: false, skills } });
+    expect(await first.run()).toBe("done");
+    for (const seq of [1, 2]) {
+      f.inbox.push(item(seq, "followup", `Follow-up ${seq}`));
+      const stored = await f.api.transcript();
+      const history = await fromTranscript(stored, async () => undefined);
+      const next = setup([done()], {
+        f,
+        stored,
+        history,
+        boot: { sessionId, skills, inboxAfter: seq - 1 },
+      });
+      expect(await next.run()).toBe("done");
+      expect(JSON.stringify(next.main.prompts[0])).toContain(`Follow-up ${seq}`);
+      expect(JSON.stringify(next.main.prompts[0]).split("Office conversions")).toHaveLength(2);
+    }
+  });
+});
+
+describe("when the conversation is compacted", () => {
+  const summarized = (prompt: unknown) =>
+    JSON.stringify(prompt).includes("Summary of the earlier part of this task");
+
+  const long = (main: ReturnType<typeof binding>) =>
+    setup([done()], {
+      history: [
+        { role: "user", content: "x".repeat(460_000) },
+        { role: "assistant", content: "first" },
+        { role: "user", content: "y" },
+      ],
+      boot: { models: { main, fast: binding() } },
+      fast: [say("Earlier: read a long document.")],
+    });
+
+  it("compacts at the 120k budget on a 1M window", async () => {
+    const t = long(
+      binding({
+        route: "deepseek",
+        client: "deepseek",
+        model: "deepseek-flash",
+        computer: "none",
+        contextTokens: 1_000_000,
+      }),
+    );
+    expect(await t.run()).toBe("done");
+    expect(t.fast?.prompts).toHaveLength(1);
+    expect(summarized(t.main.prompts[0])).toBe(true);
+  });
+
+  // The turns a compaction keeps would carry thinking bound to the conversation it replaced.
+  it("keeps compacting a Claude model's 1M window at 60 %", async () => {
+    const t = long(binding({ contextTokens: 1_000_000 }));
+    expect(await t.run()).toBe("done");
+    expect(t.fast?.prompts).toHaveLength(0);
+  });
+
+  it("does not compact for screenshots no longer sent", async () => {
+    const history: ModelMessage[] = [{ role: "user", content: "Check the dashboard" }];
+    for (let i = 0; i < 40; i++)
+      history.push({ role: "assistant", content: `step ${i}` }, frame(ulid()));
+    const t = setup([done()], {
+      history,
+      boot: { models: { main: binding({ contextTokens: 100_000 }), fast: binding() } },
+      fast: [say("Earlier steps.")],
+    });
+    expect(await t.run()).toBe("done");
+    expect(t.fast?.prompts).toHaveLength(0);
+  });
+
+  it("tries a failed compaction again only once the history has grown by a tenth", async () => {
+    const f = fakeApi((name, input) =>
+      name === "shell" && (input as { command: string }).command === "cat big"
+        ? { ok: true, content: [{ type: "text", text: "z".repeat(3000) }] }
+        : undefined,
+    );
+    const t = setup(
+      [
+        call("shell", { command: "a" }),
+        call("shell", { command: "b" }),
+        call("shell", { command: "cat big" }),
+        done(),
+      ],
+      {
+        f,
+        history: [
+          { role: "user", content: "x".repeat(21_000) },
+          { role: "assistant", content: "a" },
+          { role: "user", content: "b" },
+        ],
+        boot: { models: { main: binding({ contextTokens: 10_000 }), fast: binding() } },
+        fast: [new Error("summary failed"), say("Earlier: read x.")],
+      },
+    );
+    expect(await t.run()).toBe("done");
+    expect(t.fast?.prompts).toHaveLength(2);
+    expect(t.main.prompts.map(summarized)).toEqual([false, false, false, true]);
   });
 });

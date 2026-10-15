@@ -269,7 +269,7 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
     return new Response(readFileSync(file), {
       headers: {
         "content-type": "image/webp",
-        "cache-control": "private, max-age=31536000, immutable",
+        "cache-control": "no-store",
       },
     });
   });

@@ -34,3 +34,25 @@ export function isJevKey(record: Pick<KeydRecord, "kind" | "hosts" | "header" | 
     record.format === "bearer"
   );
 }
+
+// Metadata only. Neither credentials nor task text belongs in diagnostic responses.
+export const PurposeCheckStatus = z.object({
+  mode: z.enum(["active", "off", "bypassed", "unconfigured", "unavailable"]),
+  keyId: z.string().optional(),
+  host: z.literal(JEV_HOST),
+  model: z.literal(JEV_MODEL),
+  calls: z.number().int().nonnegative(),
+  succeeded: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  last: z
+    .object({
+      at: z.iso.datetime(),
+      kind: z.enum(["task", "test"]),
+      ok: z.boolean(),
+      latencyMs: z.number().nonnegative(),
+      model: z.string().max(100).optional(),
+      problem: z.string().max(200).optional(),
+    })
+    .optional(),
+});
+export type PurposeCheckStatus = z.infer<typeof PurposeCheckStatus>;

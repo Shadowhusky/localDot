@@ -57,6 +57,7 @@ try {
   const rendered = await page.locator("#icon").screenshot({ animations: "disabled" });
   for (const [name, size] of [
     ["apple-touch-icon.png", 180],
+    ["apple-touch-icon-mascot-2.png", 180],
     ["icon-192.png", 192],
     ["icon-512.png", 512],
     ["icon-maskable-512.png", 512],

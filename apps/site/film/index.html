@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Meet dot — localDot</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Chinese, from the Mac that renders the film. */
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Regular"), local("PingFangSC-Regular");
+        font-weight: 400;
+      }
+
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Medium"), local("PingFangSC-Medium");
+        font-weight: 500;
+      }
+
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Semibold"), local("PingFangSC-Semibold");
+        font-weight: 600 900;
+      }
+
+      @font-face {
+        font-family: "Inter";
+        src: url("assets/fonts/inter.woff2") format("woff2");
+        font-weight: 100 900;
+        font-display: block;
+      }
+
+      :root {
+        --void: #0a0b0d;
+        --raised: #18191c;
+        --fg-1: #eeeff1;
+        --fg-2: #a8abb0;
+        --fg-3: #83868b;
+        --hairline: rgba(255, 255, 255, 0.09);
+        --xenon: #3fb5de;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--void);
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        color: var(--fg-1);
+        font-family: "Inter", sans-serif;
+        font-optical-sizing: auto;
+      }
+
+      #studio {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(120% 70% at 50% 108%, rgb(38 46 58 / 0.6), transparent 62%),
+          radial-gradient(90% 60% at 50% 0%, rgb(26 30 38 / 0.7), transparent 70%),
+          var(--void);
+      }
+
+      #studio::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(60% 60% at 50% 46%, var(--wash, transparent), transparent 72%);
+        opacity: var(--wash-on, 0);
+      }
+
+      #app {
+        position: absolute;
+        top: 0;
+        left: 0;
+        overflow: hidden;
+        border-radius: 22px;
+        box-shadow:
+          0 0 0 1px rgb(255 255 255 / 0.12),
+          0 0 0 8px rgb(255 255 255 / 0.025),
+          0 40px 120px rgb(0 0 0 / 0.6);
+        transform-origin: 0 0;
+        visibility: hidden;
+      }
+
+      #app img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      #app-yours {
+        opacity: 0;
+      }
+
+      #app[data-yours] #app-yours {
+        opacity: 1;
+      }
+
+      #app-dim {
+        position: absolute;
+        inset: 0;
+        background: var(--void);
+        opacity: calc(var(--focus, 0) * 0.9);
+      }
+
+      #theatre {
+        position: absolute;
+        overflow: hidden;
+        border-radius: 10px;
+        background: #000;
+      }
+
+      #theatre video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      #stage {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+      }
+
+      #ring {
+        position: absolute;
+        inset: 0;
+        list-style: none;
+        pointer-events: none;
+      }
+
+      #ring li {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 10px 20px;
+        border-radius: 999px;
+        background: rgb(255 255 255 / 0.06);
+        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+        color: var(--fg-2);
+        font-size: 26px;
+        font-weight: 500;
+        white-space: nowrap;
+        visibility: hidden;
+      }
+
+      #ring li[data-front] {
+        background: rgb(255 255 255 / 0.14);
+        color: var(--fg-1);
+      }
+
+      .words {
+        position: absolute;
+        visibility: hidden;
+      }
+
+      .words h2,
+      .words h1 {
+        font-size: 100px;
+        font-weight: 650;
+        line-height: 1;
+        letter-spacing: -0.04em;
+      }
+
+      .words [data-word] {
+        display: inline-block;
+        margin-right: 0.24em;
+        white-space: nowrap;
+      }
+
+      .words [data-word].joined {
+        margin-right: 0;
+      }
+
+      /* Chinese sets at its own spacing, phrase against phrase, its commas closed up. */
+      :lang(zh) #root {
+        font-family: "Inter", "PingFang SC", sans-serif;
+      }
+
+      :lang(zh) :is(.words h1, .words h2, .role strong, .line.name) {
+        letter-spacing: 0;
+      }
+
+      /* A Chinese line breaks between its phrases, not inside them, and balances its lines. */
+      :lang(zh) .words p {
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+        text-wrap: balance;
+      }
+
+      :lang(zh) #w-hello {
+        width: 780px;
+      }
+
+      :lang(zh) .side {
+        width: 720px;
+      }
+
+      :lang(zh) #w-hello h1 {
+        font-size: 116px;
+      }
+
+      .zh-punct {
+        margin-inline-end: -0.42em;
+      }
+
+      .words p {
+        max-width: 600px;
+        margin-top: 26px;
+        color: var(--fg-2);
+        font-size: 38px;
+        line-height: 1.3;
+        letter-spacing: -0.012em;
+      }
+
+      .side {
+        top: 330px;
+        left: 112px;
+        width: 620px;
+      }
+
+      #w-hello {
+        top: 372px;
+        left: 112px;
+        width: 700px;
+      }
+
+      #w-hello h1 {
+        font-size: 132px;
+      }
+
+      #w-models {
+        bottom: 104px;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+
+      #w-models p {
+        max-width: none;
+      }
+
+      #w-jobs {
+        top: 92px;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+
+      .button {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        height: 72px;
+        margin-top: 40px;
+        padding: 0 34px;
+        border-radius: 999px;
+        background: var(--fg-1);
+        color: #111;
+        font-size: 30px;
+        font-weight: 600;
+      }
+
+      .role {
+        position: absolute;
+        top: 400px;
+        left: 112px;
+        width: 560px;
+        visibility: hidden;
+      }
+
+      .role strong {
+        display: block;
+        font-size: 92px;
+        font-weight: 650;
+        letter-spacing: -0.04em;
+        line-height: 1;
+      }
+
+      .role span {
+        display: block;
+        margin-top: 22px;
+        color: var(--fg-2);
+        font-size: 34px;
+        line-height: 1.3;
+      }
+
+      #lines {
+        position: absolute;
+        height: 90px;
+      }
+
+      .line {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        color: var(--fg-1);
+        font-size: 17px;
+        white-space: nowrap;
+        translate: 0 -50%;
+      }
+
+      /* The app is turned away in its side framing, so a line along it falls to the right; dot's own
+         line sits a little higher to read level with dot. The names show with the app face on. */
+      .line:not(.name) {
+        top: calc(50% - 10px);
+      }
+
+      .line.name {
+        color: #f3f4f6;
+        font-size: 40px;
+        font-weight: 600;
+        letter-spacing: -0.022em;
+        text-shadow: 0 0 28px rgb(255 255 255 / 0.14);
+        visibility: hidden;
+      }
+
+      .line.name span {
+        display: inline-block;
+        margin-right: 0.24em;
+      }
+
+      #burst {
+        position: absolute;
+        top: 540px;
+        left: 960px;
+        width: 0;
+        height: 0;
+      }
+
+      #burst-glow {
+        position: absolute;
+        top: -300px;
+        left: -300px;
+        width: 600px;
+        height: 600px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, rgb(255 255 255 / 0.42), rgb(255 255 255 / 0.12) 55%, transparent);
+        visibility: hidden;
+      }
+
+      #burst .spark {
+        position: absolute;
+        top: -16px;
+        left: -16px;
+        width: 32px;
+        height: 32px;
+        filter: drop-shadow(0 0 8px rgb(255 255 255 / 0.85));
+        visibility: hidden;
+      }
+
+      #burst .spark svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        fill: #fff;
+      }
+
+      #end-credit {
+        position: absolute;
+        bottom: 44px;
+        left: 0;
+        right: 0;
+        color: var(--fg-3);
+        font-size: 20px;
+        text-align: center;
+        visibility: hidden;
+      }
+
+      #cards {
+        position: absolute;
+        inset: 0;
+      }
+
+      .card {
+        position: absolute;
+        width: 720px;
+        overflow: hidden;
+        border-radius: 18px;
+        background: var(--raised);
+        box-shadow:
+          0 0 0 1px rgb(255 255 255 / 0.12),
+          0 30px 80px rgb(0 0 0 / 0.55);
+        visibility: hidden;
+      }
+
+      /* The renderer gives each video the width and height attributes of its media; height: auto
+         keeps the card's own shape over them. */
+      .card video {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: var(--ratio, 16 / 10);
+        object-fit: cover;
+      }
+
+      /* Each look's name sits at the top of the part of it in view, like a folder's tab. */
+      .card span {
+        position: absolute;
+        top: calc(var(--covered, 0px) + 16px);
+        left: 16px;
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: rgb(10 11 13 / 0.78);
+        font-size: 22px;
+        font-weight: 600;
+      }
+
+
+      #saved {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        border-radius: inherit;
+        background: #34c759;
+        color: #0a0b0d;
+        font-weight: 700;
+        visibility: hidden;
+      }
+
+      #rewind {
+        position: absolute;
+        top: 250px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 120px;
+        letter-spacing: -0.2em;
+        color: rgb(255 255 255 / 0.9);
+        visibility: hidden;
+      }
+
+      #end-name {
+        position: absolute;
+        top: 400px;
+        left: 820px;
+        font-size: 176px;
+        font-weight: 650;
+        letter-spacing: -0.045em;
+        visibility: hidden;
+      }
+
+      #end-url {
+        position: absolute;
+        top: 610px;
+        left: 830px;
+        font-size: 44px;
+        font-weight: 600;
+        visibility: hidden;
+      }
+
+      #end-line {
+        position: absolute;
+        top: 676px;
+        left: 830px;
+        color: var(--fg-2);
+        font-size: 30px;
+        visibility: hidden;
+      }
+
+      #cursor-wrap {
+        position: absolute;
+        top: 0;
+        left: 0;
+        visibility: hidden;
+      }
+
+      #cursor {
+        width: 46px;
+        height: 46px;
+        transform-origin: 6px 4px;
+      }
+
+      #ripple {
+        position: absolute;
+        top: -38px;
+        left: -38px;
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        border: 3px solid rgb(255 255 255 / 0.9);
+        visibility: hidden;
+      }
+
+      #fade {
+        position: absolute;
+        inset: 0;
+        background: #000;
+        visibility: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-vnw1" id="root" data-composition-id="main" data-composition-variables='[{"id":"lang","type":"string","label":"Language (en or zh)","default":"en"}]' data-start="0" data-duration="72" data-width="1920" data-height="1080">
+      <video id="localdot-film" data-hf-id="hf-202989a0-d67b-40c0-9fed-fae354654fcd" class="clip" src="localdot-film.mp4" data-start="37" data-duration="35" data-track-index="1" data-has-audio="true" playsinline style="position: absolute; left: 0px; top: 0px; width: 1920px; height: 1080px; object-fit: contain; z-index: 124"></video>
+      <div data-hf-id="hf-euin" id="studio"></div>
+
+      <div data-hf-id="hf-9gvy" id="app">
+        <img data-hf-id="hf-r67j" id="app-work" src="assets/app/work.png" alt="" />
+        <img data-hf-id="hf-phj5" id="app-yours" src="assets/app/yours.png" alt="" />
+        <div id="app-dim"></div>
+        <div id="lines" data-layout-allow-overlap></div>
+        <div data-hf-id="hf-vnm2" id="theatre">
+          <video data-hf-id="hf-3wro" id="v-intro" class="clip" data-start="2.35" data-duration="3.75" data-media-start="16" data-track-index="1" src="assets/clips/breakout.mp4" muted playsinline></video>
+          <video data-hf-id="hf-p7m9" id="v-cut-0" class="clip" data-start="6" data-duration="1.25" data-media-start="21" data-track-index="1" src="assets/clips/breakout.mp4" muted playsinline></video>
+          <video data-hf-id="hf-o36s" id="v-cut-1" class="clip" data-start="6.75" data-duration="1.5" data-media-start="29.75" data-track-index="1" src="assets/clips/kyoto.mp4" muted playsinline></video>
+          <video data-hf-id="hf-podj" id="v-cut-2" class="clip" data-start="7.75" data-duration="1.5" data-media-start="19.75" data-track-index="1" src="assets/clips/spending.mp4" muted playsinline></video>
+          <video data-hf-id="hf-giw4" id="v-cut-3" class="clip" data-start="8.75" data-duration="1.5" data-media-start="7.75" data-track-index="1" src="assets/clips/poster.mp4" muted playsinline></video>
+          <video data-hf-id="hf-ffr3" id="v-cut-4" class="clip" data-start="9.75" data-duration="1.25" data-media-start="8.75" data-track-index="1" src="assets/clips/teaser.mp4" muted playsinline></video>
+          <video data-hf-id="hf-o26m" id="v-work" class="clip" data-start="11" data-duration="4.4" data-media-start="22.7" data-track-index="1" src="assets/clips/breakout.mp4" muted playsinline></video>
+          <video data-hf-id="hf-m5lw" id="v-rewind" class="clip" data-start="26" data-duration="1.5" data-media-start="0" data-track-index="1" src="assets/clips/rewind.mp4" muted playsinline></video>
+          <video data-hf-id="hf-9mbs" id="v-replay" class="clip" data-start="27.5" data-duration="4.7" data-media-start="20" data-track-index="1" src="assets/clips/breakout.mp4" muted playsinline></video>
+        </div>
+      </div>
+
+      <div id="burst"><span id="burst-glow"></span></div>
+      <canvas data-hf-id="hf-au30" id="stage"></canvas>
+      <ul data-hf-id="hf-nf3b" id="ring" data-layout-allow-overlap></ul>
+
+      <div data-hf-id="hf-a2iv" id="w-hello" class="words">
+        <h1 data-hf-id="hf-m3fm"><span data-hf-id="hf-yf2f" data-word>Hi,</span><span data-hf-id="hf-gw81" data-word>I'm</span><span data-hf-id="hf-nhwx" data-word>dot.</span></h1>
+        <p data-hf-id="hf-vzqp" data-line>I do real work on a computer of my own.</p>
+      </div>
+      <div data-hf-id="hf-5aev" id="w-watch" class="words side">
+        <h2 data-hf-id="hf-2l5r"><span data-hf-id="hf-k8nx" data-word>Watch</span><span data-hf-id="hf-fojo" data-word>me</span><span data-hf-id="hf-50d3" data-word>work.</span></h2>
+        <p data-hf-id="hf-wl8w" data-line>Live, from your laptop or your phone.</p>
+      </div>
+      <div data-hf-id="hf-wofw" id="w-step" class="words side">
+        <h2 data-hf-id="hf-gavz"><span data-hf-id="hf-jvxo" data-word>Step</span><span data-hf-id="hf-hk9t" data-word>in</span><span data-hf-id="hf-9xhc" data-word>any</span><span data-hf-id="hf-9cwr" data-word>time.</span></h2>
+        <p data-hf-id="hf-79up" data-line>Take control, then hand it back. I pick up where you left off.</p>
+        <div data-hf-id="hf-x4e5" data-line><span data-hf-id="hf-onlg" id="take" class="button">Take control</span></div>
+      </div>
+      <div data-hf-id="hf-2dtb" id="w-models" class="words">
+        <h2 data-hf-id="hf-fi9x"><span data-hf-id="hf-9kpl" data-word>Use</span><span data-hf-id="hf-jmig" data-word>any</span><span data-hf-id="hf-uztr" data-word>model.</span></h2>
+        <p data-hf-id="hf-r0i0" data-line>25 providers, your ChatGPT or Claude plan, or your own machine.</p>
+      </div>
+      <div data-hf-id="hf-22jp" id="w-jobs" class="words">
+        <h2 data-hf-id="hf-iaf4"><span data-hf-id="hf-5j7x" data-word>A</span><span data-hf-id="hf-umo5" data-word>dot</span><span data-hf-id="hf-zp3p" data-word>for</span><span data-hf-id="hf-5aa5" data-word>every</span><span data-hf-id="hf-iqz1" data-word>job.</span></h2>
+      </div>
+      <div data-hf-id="hf-5k9s" id="roles"></div>
+      <div data-hf-id="hf-10x3" id="w-rewind" class="words side">
+        <h2 data-hf-id="hf-hw43"><span data-hf-id="hf-7ax1" data-word>Rewind</span><span data-hf-id="hf-y3au" data-word>anything.</span></h2>
+        <p data-hf-id="hf-sckl" data-line>Every task is recorded.</p>
+      </div>
+      <div data-hf-id="hf-ycuf" id="w-share" class="words side">
+        <h2 data-hf-id="hf-hht2"><span data-hf-id="hf-ijqd" data-word>Share</span><span data-hf-id="hf-f6hx" data-word>the</span><span data-hf-id="hf-ui2f" data-word>good</span><span data-hf-id="hf-273v" data-word>part.</span></h2>
+        <p data-hf-id="hf-fu2q" data-line>Trim it, speed it up, add captions.</p>
+        <div data-hf-id="hf-4no8" data-line><span data-hf-id="hf-ysxu" id="save" class="button">Save video<span id="saved">✓ Saved</span></span></div>
+      </div>
+      <div data-hf-id="hf-sane" id="w-yours" class="words side">
+        <h2 data-hf-id="hf-h3i1"><span data-hf-id="hf-0ztq" data-word>Open</span><span data-hf-id="hf-pzil" data-word>source,</span><span data-hf-id="hf-yelj" data-word>and</span><span data-hf-id="hf-o634" data-word>yours.</span></h2>
+        <p data-hf-id="hf-nx4c" data-line>MIT licensed. Runs on your machine.</p>
+      </div>
+
+
+      <div data-hf-id="hf-nia2" id="cards">
+        <div data-hf-id="hf-4nf5" class="card" style="top: 70px; left: 800px; z-index: 3"><video data-hf-id="hf-ro1r" id="v-card-0" class="clip" data-start="27.5" data-duration="4.6" data-media-start="2" data-track-index="2" src="assets/clips/card-captions.mp4" muted playsinline></video><span data-hf-id="hf-0res">With captions</span></div>
+        <div data-hf-id="hf-lb46" class="card" style="top: 270px; left: 950px; z-index: 2; --ratio: 1280 / 940; --covered: 250px"><video data-hf-id="hf-6xg4" id="v-card-1" class="clip" data-start="27.5" data-duration="4.6" data-media-start="2" data-track-index="2" src="assets/clips/card-band.mp4" muted playsinline></video><span data-hf-id="hf-mki8">Me under the picture</span></div>
+        <div data-hf-id="hf-ecw4" class="card" style="top: 540px; left: 1100px; z-index: 1; --covered: 259px"><video data-hf-id="hf-kwuj" id="v-card-2" class="clip" data-start="27.5" data-duration="4.6" data-media-start="2" data-track-index="2" src="assets/clips/card-corner.mp4" muted playsinline></video><span data-hf-id="hf-0b12">Me in the corner</span></div>
+      </div>
+      <div data-hf-id="hf-bq44" id="rewind">◀◀</div>
+
+      <div data-hf-id="hf-0mta" id="end-name">localDot</div>
+      <div data-hf-id="hf-hd3n" id="end-url">localdot.dev</div>
+      <div data-hf-id="hf-3lcz" id="end-line">Free and open source. For macOS, Windows and Linux.</div>
+      <div id="end-credit">Teaser footage: Big Buck Bunny, Blender Foundation, CC BY 3.0</div>
+
+      <div data-hf-id="hf-nx44" id="cursor-wrap">
+        <span data-hf-id="hf-f2ns" id="ripple"></span>
+        <svg data-hf-id="hf-kz6g" id="cursor" viewBox="0 0 24 24" aria-hidden="true">
+          <path data-hf-id="hf-1r2i" d="M5 2.5v17.2l4.6-4.4 2.9 6.7 3-1.3-2.9-6.6h6.4z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div data-hf-id="hf-128z" id="fade"></div>
+
+      <audio data-hf-id="hf-6khr" id="music" data-start="0" data-duration="37" data-track-index="9" src="assets/music.wav"></audio>
+    </div>
+    <script type="module">
+      import { film } from "./assets/stage.js";
+
+      window.__hf = window.__hf || {};
+      window.__hf.buildReady = window.__hf.buildReady || {};
+      window.__hf.buildReady.film = film().then(({ timeline }) => {
+        window.__timelines["main"] = timeline;
+        window.__hfForceTimelineRebind?.();
+      });
+    </script>
+  </body>
+</html>

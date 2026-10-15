@@ -234,6 +234,7 @@ browser = new BrowserOrchestrator({
   relay,
   streamFullcolor: stream.fullcolor,
   parentAvailable: browserAvailable,
+  retiredDesktopPortOwner: (id) => orchestrator.retiredPortOwner(id),
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const browserRecovery = new BrowserRecovery(browser);
@@ -328,7 +329,11 @@ const searchFeed = new SearchFeed({ index: searchIndex, eventLog, notes: new Mem
 const stopSearchFeed = searchFeed.start();
 const transfers = new Transfers();
 const quarantine = await QuarantineStore.open(home);
-const downloads = new BrowserDownloadCollector({ store: quarantine, transfers });
+const downloads = new BrowserDownloadCollector({
+  store: quarantine,
+  transfers,
+  collected: (parentCellId, items) => agent?.releaseDownloads(parentCellId, items),
+});
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const routineStore = new RoutineStore(home, { now: Date.now, zone });
 const appEvents = new AppEvents();

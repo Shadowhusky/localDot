@@ -1,4 +1,11 @@
-import type { AutonomyPolicy, StartAtLoginState } from "@localdot/protocol";
+import {
+  type Accessory,
+  type AutonomyPolicy,
+  type LocalDotLink,
+  type PersonaId,
+  personaOf,
+  type StartAtLoginState,
+} from "@localdot/protocol";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
@@ -9,11 +16,13 @@ import type { ShowDotControl } from "../dot/show-dot.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
+import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
 import { FreshStartButton } from "../shell/FreshStartButton.tsx";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
 import { Button } from "../ui/Button.tsx";
 import { DetailLines } from "../ui/Disclosure.tsx";
+import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
@@ -21,8 +30,10 @@ import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { TextField } from "../ui/TextField.tsx";
 import { routeLabel } from "../voice/words.ts";
 import { AccessLinksSettings } from "./AccessLinksSettings.tsx";
+import { AccessoryPicker } from "./AccessoryPicker.tsx";
 import { AccountsSection } from "./AccountsSection.tsx";
 import { AppUpdateSettings } from "./AppUpdateSettings.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
@@ -43,6 +54,7 @@ import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
 import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
+import { OtherLocalDots } from "./OtherLocalDots.tsx";
 import { PurposeCheck, type PurposeCheckControl } from "./PurposeCheck.tsx";
 import { RemoteAccessSettings } from "./RemoteAccessSettings.tsx";
 import { RoleCard } from "./RoleCard.tsx";
@@ -84,6 +96,18 @@ export interface SettingsSheetProps {
   sectionRequest?: number;
   appearance?: AppearanceControl;
   showDot?: ShowDotControl;
+  // Which dot works the next task.
+  persona?: { value: PersonaId; onChange(value: PersonaId): void };
+  // What tells this localDot apart from the user's others: its name and its dot's accessory.
+  look?: {
+    name: string;
+    accessory?: Accessory;
+    others: readonly LocalDotLink[];
+    problem?: string;
+    onName(value: string): void;
+    onAccessory(value: Accessory | undefined): void;
+    onOthers(value: LocalDotLink[]): void;
+  };
   voice?: VoiceControl;
   // How this browser's live view gives way when the connection or the device slows.
   stream?: StreamPreferenceControl;
@@ -491,6 +515,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
 function shownSections(props: SettingsSheetProps, phone = false): SettingsSection[] {
   const planMain = subscription(props.choices.main?.provider);
   const has: Record<SettingsSection, boolean> = {
+    dot: !!props.persona,
     models: true,
     autonomy: !!props.onAutonomy,
     rules: !!props.rules,
@@ -632,6 +657,7 @@ function SectionList({
       )?.find((model) => model.id === main.model)?.name ?? main.model)
     : "";
   const values: Partial<Record<SettingsSection, string>> = {
+    dot: props.persona ? personaOf(props.persona.value).name : "",
     models: props.loading ? "" : mainName,
     autonomy: props.loading ? "" : autonomyValue(props.autonomy),
     rules: countValue(props.rules?.rules.length),
@@ -670,7 +696,7 @@ function SectionList({
           {row("computer")}
         </Group>
       )}
-      <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
+      <Group>{(["dot", "models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(
           [
@@ -931,6 +957,38 @@ function FreshStartRow({
   );
 }
 
+// The name and accessory that tell this localDot apart, as every device that opens it shows them.
+function ThisLocalDot({
+  look,
+  persona,
+}: {
+  look: NonNullable<SettingsSheetProps["look"]>;
+  persona: PersonaId;
+}) {
+  return (
+    <div>
+      <GroupHead title="This localDot" />
+      <Group>
+        <Field label="Name" inline className="ui-group-row" error={look.problem}>
+          <TextField
+            size="sm"
+            value={look.name}
+            maxLength={40}
+            placeholder="Studio Mac"
+            autoComplete="off"
+            onChange={(event) => look.onName(event.target.value)}
+          />
+        </Field>
+      </Group>
+      <GroupNote>A name and an accessory tell this localDot apart from your others.</GroupNote>
+      <div className="settings-accessories">
+        <AccessoryPicker persona={persona} value={look.accessory} onChange={look.onAccessory} />
+      </div>
+      <OtherLocalDots links={look.others} onChange={look.onOthers} />
+    </div>
+  );
+}
+
 function SectionContent({
   id,
   props,
@@ -976,7 +1034,7 @@ function SectionContent({
               onPrice={(value) => props.onPrice?.(role, value)}
             />
           ))}
-          <div className="settings-inline settings-catalog">
+          <div className="settings-inline settings-note-line">
             <p className="settings-lede" role="status">
               {catalogLine(props.catalog, props.catalogAt)}
             </p>
@@ -1065,6 +1123,18 @@ function SectionContent({
               </GroupNote>
             </div>
           )}
+        </>
+      );
+    case "dot":
+      if (props.loading || !props.persona) return wait(220);
+      return (
+        <>
+          <p className="settings-lede">
+            Each dot brings the skills and habits for one kind of work, so a task carries only what
+            it needs. Your choice applies from the next task.
+          </p>
+          <PersonaPicker value={props.persona.value} onChange={props.persona.onChange} />
+          {props.look && <ThisLocalDot look={props.look} persona={props.persona.value} />}
         </>
       );
     case "appearance":

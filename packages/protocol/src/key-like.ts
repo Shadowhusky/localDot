@@ -1,5 +1,6 @@
-// Recognition is an accidental-paste safeguard, not a universal secret classifier. Bare
-// hex/base64 keys, passwords, renamed/obfuscated credentials and file contents are not detected.
+// Recognition is a safeguard for accidental pastes and command output, not a universal secret
+// classifier. Bare hex/base64 keys, passwords, renamed/obfuscated credentials and file contents
+// are not detected.
 export const KEY_SCAN_CHARS = 8000;
 export const KEY_SCAN_MATCHES = 16;
 export type KeyHint =
@@ -11,7 +12,12 @@ export type KeyHint =
   | "OpenRouter"
   | "xAI"
   | "Perplexity"
-  | "API key";
+  | "API key"
+  | "GitHub"
+  | "GitLab"
+  | "AWS"
+  | "Slack"
+  | "Stripe";
 export interface KeyMatch {
   readonly start: number;
   readonly end: number;
@@ -53,23 +59,40 @@ const RULES: readonly { pattern: RegExp; hint: KeyHint; provider?: KeyMatch["pro
   { pattern: /^pplx-[A-Za-z0-9_-]{32,8000}$/, hint: "Perplexity" },
   // Legacy OpenAI and DeepSeek share this shape; the provider cannot be inferred from it.
   { pattern: /^sk-[A-Za-z0-9]{32,64}$/, hint: "API key" },
+  { pattern: /^gh[pousr]_[A-Za-z0-9]{36,251}$/, hint: "GitHub" },
+  { pattern: /^github_pat_[A-Za-z0-9_]{36,244}$/, hint: "GitHub" },
+  { pattern: /^glpat-[A-Za-z0-9_-]{20,250}$/, hint: "GitLab" },
+  { pattern: /^(?:AKIA|ASIA)[A-Z0-9]{16}$/, hint: "AWS" },
+  // Slack's tokens carry the workspace's number, which hyphenated words do not.
+  { pattern: /^xox[abprs]-(?=[A-Za-z-]*\d)[A-Za-z0-9-]{10,250}$/, hint: "Slack" },
+  { pattern: /^[rs]k_live_[A-Za-z0-9]{24,247}$/, hint: "Stripe" },
 ];
 
+// No key shape is shorter than a Slack token's prefix and ten characters.
+const SHORTEST = 15;
+
+// Every key-shaped token, in order, however long the text: what masking text needs. A fresh local
+// regexp has no shared cursor. Results contain no credential text or preview.
+export function* keyLikeMatches(text: string): Generator<KeyMatch> {
+  for (const token of text.matchAll(/AQ\.[A-Za-z0-9_.-]+|[A-Za-z0-9_-]+/g)) {
+    if (token[0].length < SHORTEST) continue;
+    const rule = RULES.find((rule) => rule.pattern.test(token[0]));
+    if (rule)
+      yield {
+        start: token.index,
+        end: token.index + token[0].length,
+        hint: rule.hint,
+        ...(rule.provider ? { provider: rule.provider } : {}),
+      };
+  }
+}
 // At most 8000 UTF-16 code units, one token walk, a fixed rule count and sixteen metadata spans.
-// A fresh local regexp has no shared cursor. Results contain no credential text or preview.
 export function scanKeyLike(text: string): KeyScan {
   if (text.length > KEY_SCAN_CHARS) return { matches: [], overflow: true };
   const matches: KeyMatch[] = [];
-  for (const token of text.matchAll(/AQ\.[A-Za-z0-9_.-]+|[A-Za-z0-9_-]+/g)) {
-    const rule = RULES.find((rule) => rule.pattern.test(token[0]));
-    if (!rule) continue;
+  for (const match of keyLikeMatches(text)) {
     if (matches.length === KEY_SCAN_MATCHES) return { matches, overflow: true };
-    matches.push({
-      start: token.index,
-      end: token.index + token[0].length,
-      hint: rule.hint,
-      ...(rule.provider ? { provider: rule.provider } : {}),
-    });
+    matches.push(match);
   }
   return { matches, overflow: false };
 }

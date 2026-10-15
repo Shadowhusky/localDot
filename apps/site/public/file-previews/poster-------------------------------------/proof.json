@@ -1,0 +1,16 @@
+{
+  "recording": "complete",
+  "results": [
+    {
+      "resultId": "01M4ZB08R0MQ3PV9GC7XSMWRAT",
+      "frames": [
+        { "role": "start", "frameId": "01M4ZAFH91KCEM6VP2VYV5F4QQ", "tMs": 2576 },
+        { "role": "change", "frameId": "01M4ZAXSNG0YT7DG5GKJMA81AD", "tMs": 469763 },
+        { "role": "end", "frameId": "01M4ZAZ8R78FXMRZ1737CTBYP5", "tMs": 517976 }
+      ],
+      "checked": "PDF: 1 page, 313x436 mm page with 297x420 mm A3 trim, fonts embedded, rendered and inspected. PNG: exactly 1080x1350, checked at 100% and at phone width. Both open side by side in the desktop browser.",
+      "startMs": 0,
+      "endMs": 550730
+    }
+  ]
+}

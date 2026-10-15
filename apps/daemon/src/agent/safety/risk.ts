@@ -64,11 +64,15 @@ export interface ConnectorFacts {
   readonly actionClass: ActionClass;
   // Where its arguments go, when known.
   readonly host?: string;
+  // The user set this tool to ask first, which holds in every mode.
+  readonly asks?: true;
 }
 export type RiskDecision = {
   actionClass: ActionClass;
   mode: AutonomyMode;
   risk: "none" | "medium" | "high";
+  // A deletion inside the computer, and nothing else the step does, that Auto's judge may approve.
+  local?: true;
 };
 export function safeTargetURL(value: string | undefined): string {
   if (!value) return "";

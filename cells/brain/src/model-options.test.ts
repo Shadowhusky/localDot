@@ -1,7 +1,9 @@
-import type { ModelOptions } from "@localdot/protocol";
+import type { ModelBinding, ModelOptions } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
+import { type AssistantContent, generateText, jsonSchema, type ModelMessage, tool } from "ai";
 import { describe, expect, it } from "vitest";
-import { languageModel } from "./models.ts";
+import { settleOldTurns } from "./context.ts";
+import { editsOlderTurns, languageModel } from "./models.ts";
 import { binding } from "./testing/scripted.ts";
 
 // Exercise each installed SDK, stopping at its network boundary. Expectations are HTTP fields,
@@ -188,5 +190,160 @@ describe("model option wire contracts", () => {
     const body = await request("deepseek", "deepseek-flash");
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body).not.toHaveProperty("thinking");
+  });
+});
+
+type ReasoningPart = Extract<Exclude<AssistantContent, string>[number], { type: "reasoning" }>;
+
+describe("older reasoning on the wire", () => {
+  // A task's turns as each SDK returned them: reasoning, a tool call, then the tool's result.
+  const history = (reasoning: (k: number) => ReasoningPart): ModelMessage[] => [
+    { role: "user", content: "Research the topic" },
+    ...Array.from({ length: 24 }, (_, k): ModelMessage[] => [
+      {
+        role: "assistant",
+        content: [
+          reasoning(k),
+          { type: "tool-call", toolCallId: `call_${k}`, toolName: "shell", input: { k } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: `call_${k}`,
+            toolName: "shell",
+            output: { type: "text", value: `ran ${k}` },
+          },
+        ],
+      },
+    ]).flat(),
+  ];
+  async function wire(over: Partial<ModelBinding>, messages: ModelMessage[]) {
+    const b = { ...binding(), computer: "generic" as const, ...over };
+    expect(editsOlderTurns(b)).toBe(true);
+    let body: Record<string, unknown> | undefined;
+    const model = languageModel(b, async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      throw new Error("captured request");
+    });
+    await expect(
+      generateText({
+        model,
+        messages: settleOldTurns(messages),
+        tools: { shell: tool({ inputSchema: jsonSchema({ type: "object" }) }) },
+        maxRetries: 0,
+      }),
+    ).rejects.toThrow();
+    return body as Record<string, unknown>;
+  }
+
+  it("sends DeepSeek V4 an empty reasoning_content for older turns", async () => {
+    const body = await wire(
+      { route: "deepseek", client: "deepseek", model: "deepseek-flash", reasoning: true },
+      history((k) => ({ type: "reasoning", text: `[thought-${k}]` })),
+    );
+    const assistants = (body.messages as { role: string; reasoning_content?: string }[]).filter(
+      (m) => m.role === "assistant",
+    );
+    expect(assistants.map((m) => m.reasoning_content)).toEqual([
+      ...Array.from({ length: 16 }, () => ""),
+      ...Array.from({ length: 8 }, (_, k) => `[thought-${16 + k}]`),
+    ]);
+  });
+
+  it.each(["openai", "azure"] as const)(
+    "sends the stateless %s Responses API no item for older reasoning and no call item ids",
+    async (client) => {
+      const body = await wire(
+        { route: client, client, model: "gpt-5.4", reasoning: true },
+        history((k) => ({
+          type: "reasoning",
+          text: "",
+          providerOptions: {
+            [client]: { itemId: `rs_${k}`, reasoningEncryptedContent: `enc-${k}` },
+          },
+        })),
+      );
+      const input = body.input as { type?: string; id?: string; encrypted_content?: string }[];
+      expect(body.store).toBe(false);
+      expect(
+        input.flatMap((item) =>
+          item.type === "reasoning" ? [[item.id, item.encrypted_content]] : [],
+        ),
+      ).toEqual(Array.from({ length: 8 }, (_, k) => [`rs_${16 + k}`, `enc-${16 + k}`]));
+      const calls = input.filter((item) => item.type === "function_call");
+      expect(calls).toHaveLength(24);
+      for (const call of calls) expect(call).not.toHaveProperty("id");
+    },
+  );
+});
+
+describe("a Claude conversation whose earlier turns changed", () => {
+  const BOUND =
+    "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation.";
+  const reply = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const answer = {
+    id: "msg_1",
+    type: "message",
+    role: "assistant",
+    model: "claude-sonnet-4-5",
+    content: [{ type: "text", text: "4" }],
+    stop_reason: "end_turn",
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  function claude(refuse: (body: Record<string, unknown>) => string | undefined) {
+    const spec = providerById("anthropic");
+    if (!spec) throw new Error("anthropic");
+    const sent: { body: Record<string, unknown>; beta: string }[] = [];
+    const model = languageModel(
+      {
+        ...binding(),
+        provider: "anthropic",
+        client: spec.client,
+        route: spec.keyd,
+        model: "claude-sonnet-4-5",
+        maxOutputTokens: 16000,
+      },
+      async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        sent.push({ body, beta: new Headers(init?.headers).get("anthropic-beta") ?? "" });
+        const why = refuse(body);
+        return why
+          ? reply(400, { type: "error", error: { type: "invalid_request_error", message: why } })
+          : reply(200, answer);
+      },
+    );
+    return { model, sent };
+  }
+
+  it("is sent again with the thinking that no longer fits dropped, and so is every later call", async () => {
+    const { model, sent } = claude((body) =>
+      (body.thinking as { block_binding?: unknown } | undefined)?.block_binding ? undefined : BOUND,
+    );
+    expect((await generateText({ model, prompt: "2 + 2?", maxRetries: 0 })).text).toBe("4");
+    expect((await generateText({ model, prompt: "3 + 3?", maxRetries: 0 })).text).toBe("4");
+    expect(sent.map((s) => s.body.thinking)).toEqual([
+      undefined,
+      { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+      { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+    ]);
+    expect(
+      sent.slice(1).every((s) => s.beta.includes("thinking-binding-controls-2026-08-01")),
+    ).toBe(true);
+  });
+
+  it("leaves a request the account accepts, and any other refusal, as they were", async () => {
+    const fine = claude(() => undefined);
+    await generateText({ model: fine.model, prompt: "2 + 2?", maxRetries: 0 });
+    expect(fine.sent).toHaveLength(1);
+    expect(fine.sent[0]?.body).not.toHaveProperty("thinking");
+    const other = claude(() => "max_tokens: 64000 > 32000, the maximum for this model");
+    await expect(
+      generateText({ model: other.model, prompt: "2 + 2?", maxRetries: 0 }),
+    ).rejects.toThrow(/max_tokens/);
+    expect(other.sent).toHaveLength(1);
   });
 });

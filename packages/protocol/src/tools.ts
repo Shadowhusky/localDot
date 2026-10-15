@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
+import { FileListResult, FileReadResult } from "./desktopd-tools.ts";
 import { LearnedExperience } from "./experience.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { ResearchInput } from "./research.ts";
@@ -303,7 +304,12 @@ export const AskUserInput = z
   .object({
     question: z.string().min(1).max(1000),
     // Explicitly marks account collection, including username-first sign-in pages.
-    purpose: z.enum(["sign_in", "verification"]).optional(),
+    purpose: z
+      .enum(["sign_in", "verification"])
+      .optional()
+      .describe(
+        "Set sign_in for every account/email/username or password sign-in request so saved credentials are checked before prompting. Set verification for an authentication code. Omit for ordinary task information.",
+      ),
     options: z.array(z.string().min(1).max(200)).max(6).optional(),
     allow_text: z.boolean().optional(),
     fields: z.array(AskField).min(1).max(MAX_ASK_FIELDS).optional(),
@@ -390,7 +396,13 @@ export const DoneInput = z.object({
       "Reflect on this session: a reusable skill, correction or recovery actually supported by observations, with applicability and a cheap recheck. Use null when nothing durable was learned. Never turn a tool success alone into a claim that the task succeeded.",
     ),
   summary: z.string().min(1).max(8000),
-  files: z.array(z.string().min(1).max(1024)).max(16).optional(),
+  files: z
+    .array(z.string().min(1).max(1024))
+    .max(16)
+    .optional()
+    .describe(
+      "Paths of the final files to hand over in the conversation Files list. Include created videos, audio, images, documents and archives, even if already saved on Desktop or opened in the browser. Use exact file paths, not directories or URLs. Each file must be at most 100 MiB; provide a smaller export if needed. Use [] only when there are no file deliverables (or while waiting).",
+    ),
   checked: z
     .string()
     .min(1)
@@ -405,6 +417,7 @@ export const DoneModelInput = DoneInput.required({
   completion: true,
   experience: true,
   input_request: true,
+  files: true,
 });
 
 // The daemon validates a call's input with these; the brain declares the same schemas (the
@@ -457,6 +470,10 @@ export const ToolContent = z.discriminatedUnion("type", [
 export type ToolContent = z.infer<typeof ToolContent>;
 
 export const ToolResult = z.object({
+  // Structured, redacted observations for upstream virtual-filesystem consumers.
+  fileRead: FileReadResult.optional(),
+  fileList: FileListResult.optional(),
+  fileError: z.literal("not_found").optional(),
   recovery: ToolRecovery.optional(),
   ok: z.boolean(),
   content: z.array(ToolContent),

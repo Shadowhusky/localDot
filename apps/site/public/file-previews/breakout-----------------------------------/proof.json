@@ -1,0 +1,16 @@
+{
+  "recording": "complete",
+  "results": [
+    {
+      "resultId": "01M4YR6N711GQJNEAJJTDW26C5",
+      "frames": [
+        { "role": "start", "frameId": "01M4YQGM834WYTVJZV8N59HAGK", "tMs": 1333 },
+        { "role": "change", "frameId": "01M4YQP9BGAZ55WVZP08KRVX1K", "tMs": 186777 },
+        { "role": "end", "frameId": "01M4YR56T5CP888N1YMHJAV73A", "tMs": 675684 }
+      ],
+      "checked": "tsc and vite build clean; browser round won (score 1500, 0 bricks), another lost at 0 lives; mouse, arrow keys, Space, P, R all checked by hand.",
+      "startMs": 0,
+      "endMs": 723196
+    }
+  ]
+}

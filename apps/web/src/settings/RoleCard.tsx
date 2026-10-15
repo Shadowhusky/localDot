@@ -19,7 +19,7 @@ import {
 } from "./choices.ts";
 import { subscription } from "./chooser.ts";
 import { ModelChooser, modelNote, providerNote } from "./ModelChooser.tsx";
-import { ModelOptionsFields } from "./ModelOptionsFields.tsx";
+import { ModelOptionsFields, optionsNote } from "./ModelOptionsFields.tsx";
 
 const ROLE: Record<ModelRole, { title: string; description: string }> = {
   main: { title: "Main model", description: "Does the work" },
@@ -61,12 +61,8 @@ const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 function keyNote(provider: ReturnType<typeof providerById>): string | undefined {
   if (!provider) return undefined;
   if (provider.plan) return "Use a key from this plan, not a pay-as-you-go key.";
-  if (provider.id === "openai-compatible")
-    return "Uses Chat Completions. For a Responses-only endpoint, choose Other (OpenAI Responses-compatible). The endpoint's address is set with the key.";
-  if (provider.id === "openai-responses-compatible")
-    return "Uses the Responses API with your OpenAI-compatible key. The endpoint's address is set with the key.";
   if (provider.client === "azure" || provider.custom)
-    return "The endpoint's address is set with the key.";
+    return "The endpoint's address is set with its key.";
   return undefined;
 }
 
@@ -104,6 +100,7 @@ export function RoleCard({
           typed && "Type the model ID as the server names it.",
           (!SCREEN_TIERS.has(tier ?? "") || isOpenRouterRouterId(value.provider, value.model)) &&
             modelNote(value, providers),
+          value.model && optionsNote(value),
           provider && !provider.notOffered && !provider.local && keyNote(provider),
           manualPrice &&
             !subscription(value.provider) &&
@@ -203,7 +200,7 @@ function RoleDetails({
     keyLayer !== "online"
       ? "Keys can't be read right now. Reconnect, then choose one."
       : !available.length && !missing
-        ? `No keys for ${provider.name} yet. Add one.`
+        ? `No keys for ${provider.custom ? "your endpoint" : provider.name} yet. Add one.`
         : undefined;
   const addKey = (trigger: HTMLButtonElement) => onKeys(role, provider.id, trigger);
   return (

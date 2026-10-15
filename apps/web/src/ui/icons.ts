@@ -418,6 +418,16 @@ export const ICONS = {
     ["rect", { x: "14", y: "14", width: "7", height: "7", rx: "1" }],
     ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1" }],
   ],
+  smile: [
+    ["circle", { cx: "12", cy: "12", r: "10" }],
+    ["path", { d: "M8 14s1.5 2 4 2 4-2 4-2" }],
+    ["line", { x1: "9", x2: "9.01", y1: "9", y2: "9" }],
+    ["line", { x1: "15", x2: "15.01", y1: "9", y2: "9" }],
+  ],
+  "panel-right": [
+    ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }],
+    ["path", { d: "M15 3v18" }],
+  ],
   "zoom-in": [
     ["circle", { cx: "11", cy: "11", r: "8" }],
     ["path", { d: "m21 21-4.35-4.35" }],

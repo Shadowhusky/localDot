@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import type { TaskRow } from "../session/status.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
+import { GroupHeading } from "../ui/GroupHeading.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
-import { clock } from "./activity.ts";
+import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import { ActivityRow } from "./ActivityRow.tsx";
+import { clock, groupReadSteps } from "./activity.ts";
 import type { WorkStep } from "./thread.ts";
 import { useFollowScroll } from "./useFollowScroll.ts";
 
@@ -56,6 +59,7 @@ export function LiveWorkLine({
   startMs,
   live,
   ended,
+  onOpenStep,
 }: {
   steps: readonly WorkStep[];
   startMs: number | null;
@@ -64,6 +68,8 @@ export function LiveWorkLine({
   // Given for the latest turn while its task has not ended.
   live: LiveWork | null;
   ended?: "done" | "stopped" | "interrupted" | "error";
+  // Shows a step in Activity with its details; only for the task Activity is showing.
+  onOpenStep?(key: string): void;
 }) {
   const [open, setOpen] = useState(false);
   const running = live?.phase === "running";
@@ -152,7 +158,7 @@ export function LiveWorkLine({
         onOpenChange={setOpen}
       >
         {steps.length ? (
-          <WorkHistory steps={steps} startMs={startMs} />
+          <WorkHistory steps={steps} startMs={startMs} onOpenStep={onOpenStep} />
         ) : (
           <p className="thread-note">No steps yet.</p>
         )}
@@ -161,8 +167,40 @@ export function LiveWorkLine({
   );
 }
 
-function WorkHistory({ steps, startMs }: { steps: readonly WorkStep[]; startMs: number | null }) {
+const estimateWorkStep = () => 56;
+const readGroupOf = (step: WorkStep) => step.readGroup;
+function WorkHistory({
+  steps,
+  startMs,
+  onOpenStep,
+}: {
+  steps: readonly WorkStep[];
+  startMs: number | null;
+  onOpenStep?(key: string): void;
+}) {
+  const id = useId();
   const follow = useFollowScroll(String(startMs), true, { glide: false });
+  const list = useRef<HTMLOListElement>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const groups = useMemo(() => groupReadSteps(steps, readGroupOf), [steps]);
+  const display = useMemo(
+    () =>
+      groups.flatMap<{
+        key: string;
+        step?: WorkStep;
+        child?: boolean;
+        group?: (typeof groups)[number];
+      }>((group) => {
+        if (group.entries.length === 1) return [{ key: group.key, step: group.entries[0] }];
+        const header = { key: `group-${group.key}`, group };
+        return expanded.has(group.key)
+          ? [header, ...group.entries.map((step) => ({ key: step.key, step, child: true }))]
+          : [header];
+      }),
+    [groups, expanded],
+  );
+  const keys = useMemo(() => display.map((row) => row.key), [display]);
+  const virtual = useVirtualRows(list, keys, estimateWorkStep);
   return (
     <ScrollArea
       className="thread-work-scroll"
@@ -176,14 +214,55 @@ function WorkHistory({ steps, startMs }: { steps: readonly WorkStep[]; startMs: 
       onPointerDown={follow.interrupt}
       onKeyDown={follow.interrupt}
     >
-      <ol className="thread-work-list" aria-label="Steps in this turn">
-        {steps.map((step) => (
-          <li key={step.key} data-anchor className="thread-work-step">
-            <StatusGlyph state={step.state} />
-            <span className="thread-work-title">{step.title}</span>
-            {step.time && <span className="thread-work-time num">{step.time}</span>}
-          </li>
-        ))}
+      <ol ref={list} className="thread-work-list" aria-label="Steps in this turn">
+        <li role="presentation" aria-hidden="true" style={{ height: virtual.before }} />
+        {virtual.indexes.map((index) => {
+          const item = display[index];
+          if (!item) return null;
+          const { step, group } = item;
+          const open = !!group && expanded.has(group.key);
+          return (
+            <li
+              key={item.key}
+              ref={virtual.measure}
+              data-index={index}
+              data-last={index === display.length - 1 || undefined}
+              data-anchor
+              className="thread-work-window-row"
+              data-group-child={item.child || undefined}
+            >
+              {step ? (
+                <ActivityRow
+                  id={`${id}-${step.key}`}
+                  view={step.meta === step.title ? { ...step, meta: "" } : step}
+                  onSelect={onOpenStep && (() => onOpenStep(step.key))}
+                  selectLabel="Show in Activity"
+                />
+              ) : (
+                group && (
+                  <GroupHeading
+                    className="activity-read-group"
+                    leading={<StatusGlyph state="done" />}
+                    title={group.label}
+                    meta={`${group.entries.length} read-only steps · ${open ? "Hide" : "Show"} details`}
+                    count={group.entries.length}
+                    open={open}
+                    onToggle={(trigger) => {
+                      follow.anchorTo(trigger);
+                      setExpanded((previous) => {
+                        const next = new Set(previous);
+                        if (next.has(group.key)) next.delete(group.key);
+                        else next.add(group.key);
+                        return next;
+                      });
+                    }}
+                  />
+                )
+              )}
+            </li>
+          );
+        })}
+        <li role="presentation" aria-hidden="true" style={{ height: virtual.after }} />
       </ol>
     </ScrollArea>
   );

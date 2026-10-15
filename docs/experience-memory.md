@@ -29,7 +29,7 @@ learning means changing the context available to later runs; it does not train m
 
 All API-model, Claude Code and Codex runs use the same daemon storage and tool path. DeepSeek
 Harness drives API-model orchestration; localDot still owns durable context, memory selection
-and compaction. DSH's context/compaction plugins are not enabled alongside that state.
+and compaction. DSH's compaction summarizes only subagents' own histories, never that state.
 
 ## Selection and token cost
 

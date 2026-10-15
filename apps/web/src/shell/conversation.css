@@ -733,13 +733,10 @@
 }
 
 /* The work line (design-v2 §10.21): a 32 px row with the turn's glyph, what it did and how long,
-   and a chevron at the far end that opens its steps. Its glyph's ink lines up with the text. */
+   and a chevron at the far end that opens its steps. The steps hang under it on the same status
+   column, the thread of the list starting at its glyph. */
 .thread-work-steps {
   margin-inline: calc(var(--spacing) * -2);
-}
-
-.thread-work-steps > .ui-collapse {
-  margin-inline: calc(var(--spacing) * 2);
 }
 
 .thread-work-steps .ui-disclosure-chevron {
@@ -754,8 +751,23 @@
 }
 
 .thread-work-glyph {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+}
+
+.thread-work-steps[data-open] > .ui-disclosure-trigger::after {
+  content: "";
+  position: absolute;
+  top: calc(50% + var(--spacing) * 2.75);
+  bottom: 0;
+  left: calc(var(--spacing) * 4);
+  width: 1px;
+  translate: -50% 0;
+  background-color: var(--color-separator);
+}
+
+.thread-work-steps .thread-work-window-row[data-index="0"]::before {
+  display: block;
 }
 
 .thread-work-meta {
@@ -764,33 +776,17 @@
 
 .thread-work-scroll {
   max-height: min(280px, 32dvh);
+  padding-inline: calc(var(--spacing) * 2);
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
 .thread-work-list {
   margin: 0;
-  display: grid;
-  gap: var(--spacing);
-  padding: var(--spacing) 0 calc(var(--spacing) * 2);
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 calc(var(--spacing) * 2);
   list-style: none;
-}
-
-.thread-work-step {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
-  gap: calc(var(--spacing) * 2);
-  color: var(--color-fg-2);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-.thread-work-title {
-  overflow-wrap: anywhere;
-}
-
-.thread-work-time {
-  color: var(--color-fg-3);
 }
 
 /* A finished turn's last line: the model and what its calls reported, aligned with the
@@ -1396,6 +1392,15 @@
   color: var(--color-fg-3);
 }
 
+.file-chip-thumb {
+  flex: none;
+  width: calc(var(--spacing) * 5);
+  height: calc(var(--spacing) * 5);
+  margin-inline-start: calc(var(--spacing) * -1);
+  border-radius: var(--radius-xs);
+  object-fit: cover;
+}
+
 .file-chip:is([data-phase="refused"], [data-phase="uncertain"]) .file-chip-icon {
   color: var(--color-danger-fg);
 }
@@ -1655,26 +1660,34 @@
   padding: var(--spacing) 0 calc(var(--spacing) * 2);
 }
 
-.composer-drop {
-  position: absolute;
+/* Files dragged over any part of the window: one quiet sheet says where they go, or why not. */
+.composer-window-drop {
+  position: fixed;
   inset: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(var(--spacing) * 2);
-  border-radius: inherit;
-  background-color: var(--color-popover);
-  box-shadow: inset 0 0 0 1px var(--color-fg-2);
-  color: var(--color-fg-1);
-  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--spacing) * 6);
+  background-color: var(--color-scrim);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fade) var(--ease-standard);
 }
 
-.composer-card[data-dragging] > .composer-drop {
+.composer-window-drop[data-shown] {
   opacity: 1;
+}
+
+.composer-window-drop-card {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 5) calc(var(--spacing) * 8);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-popover);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-fg-1);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 /* On a touch screen every control in the row is a full-height target, whichever ones it holds. */
@@ -2122,7 +2135,7 @@
   .result-files,
   .thread-recovery,
   .composer-card,
-  .composer-drop,
+  .composer-window-drop-card,
   .file-chip {
     border: 1px solid CanvasText;
   }

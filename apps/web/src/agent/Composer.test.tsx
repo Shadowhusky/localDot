@@ -79,6 +79,7 @@ const agent: AgentSessionView = {
   reconcile: vi.fn(),
 };
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -258,15 +259,10 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests[1]?.body).toEqual({ kind: "followup", text: "captured ordinary message" });
     expect(f.field.value).toBe("new unsent draft");
   });
-  it("does not interpret Shift/modified Enter or IME composition as submit", () => {
+  it("does not interpret Shift Enter or IME composition as submit", () => {
     const f = setup();
     f.input("多行\ntext");
-    for (const modifier of [
-      { shiftKey: true },
-      { ctrlKey: true },
-      { metaKey: true },
-      { isComposing: true },
-    ])
+    for (const modifier of [{ shiftKey: true }, { isComposing: true }])
       fireEvent.keyDown(f.field, { key: "Enter", ...modifier });
     fireEvent.compositionStart(f.field);
     fireEvent.keyDown(f.field, { key: "Enter" });
@@ -841,6 +837,76 @@ describe("the composer's controls", () => {
     expect(card.hasAttribute("data-dragging")).toBe(false);
     await screen.findByText("Uploaded to Downloads");
     expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain("one.txt");
+  });
+  it("attaches pasted files and screenshots, naming each pasted picture apart", async () => {
+    transfer.trustNames = true;
+    const f = setup();
+    const shot = () => new File(["png"], "image.png", { type: "image/png" });
+    fireEvent.paste(f.field, { clipboardData: { files: [shot()], getData: () => "" } });
+    fireEvent.paste(f.field, {
+      clipboardData: { files: [shot(), new File(["x"], "notes.md")], getData: () => "notes.md" },
+    });
+    await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(3));
+    const names = screen.getByRole("list", { name: "Attached files" }).textContent ?? "";
+    expect(names.match(/Pasted image [\d-]+ [\d.]+( 2)?\.png/g)).toHaveLength(2);
+    expect(names).toContain("notes.md");
+    expect(f.field.value).toBe("");
+  });
+  it("turns a long pasted text into a text file, keeping the field for the message", async () => {
+    transfer.trustNames = true;
+    const f = setup();
+    const log = "line of a long build log\n".repeat(400);
+    fireEvent.paste(f.field, { clipboardData: { files: [], getData: () => log } });
+    await screen.findByText("Uploaded to Downloads");
+    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toMatch(
+      /Pasted text [\d-]+ [\d.]+\.txt/,
+    );
+    expect(f.field.value).toBe("");
+  });
+  it("keeps a long paste with a key in the field, where the key guard catches it", () => {
+    const f = setup();
+    const key = `sk-proj-${"z".repeat(80)}`;
+    const text = `${"filler words ".repeat(400)} ${key}`;
+    fireEvent.paste(f.field, { clipboardData: { files: [], getData: () => text } });
+    expect(screen.queryByRole("list", { name: "Attached files" })).toBeNull();
+    expect(f.field.value).not.toContain(key);
+    expect(screen.getByRole("button", { name: "Move to Keys" })).toBeTruthy();
+  });
+  it("shows a picture's thumbnail on its chip and lets the preview go with the chip", async () => {
+    transfer.trustNames = true;
+    const made = vi.fn(() => "blob:preview");
+    const revoked = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: made, revokeObjectURL: revoked }));
+    const f = setup();
+    f.attach(new File(["png"], "sketch.png", { type: "image/png" }), new File(["x"], "notes.md"));
+    await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
+    const chips = screen.getByRole("list", { name: "Attached files" });
+    expect([...chips.querySelectorAll("img")].map((img) => img.getAttribute("src"))).toEqual([
+      "blob:preview",
+    ]);
+    expect(made).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Remove sketch.png" }));
+    expect(revoked).toHaveBeenCalledWith("blob:preview");
+  });
+  it("sends now with Command or Control and Enter while dot works, and queues with Enter", async () => {
+    const f = setup();
+    f.input("Use the blue palette");
+    fireEvent.keyDown(f.field, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(f.requests).toHaveLength(1));
+    expect(f.requests[0]?.body).toMatchObject({ kind: "steer", text: "Use the blue palette" });
+  });
+  it("takes files dropped anywhere on the window", async () => {
+    transfer.trustNames = true;
+    setup();
+    fireEvent.dragEnter(document.body, { dataTransfer: { types: ["Files"], files: [] } });
+    expect(screen.getByText("Drop files to attach")).toBeTruthy();
+    expect(document.querySelector(".composer-window-drop[data-shown]")).not.toBeNull();
+    fireEvent.drop(document.body, {
+      dataTransfer: { types: ["Files"], files: [new File(["x"], "far.txt")] },
+    });
+    expect(document.querySelector(".composer-window-drop[data-shown]")).toBeNull();
+    await screen.findByText("Uploaded to Downloads");
+    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain("far.txt");
   });
   it("says politely that attachments went when the computer changed", async () => {
     transfer.trustNames = true;

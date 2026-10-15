@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import sharp from "sharp";
 import type { FrameStore } from "../gateway/frames.ts";
+import { raster } from "../raster.ts";
 
 export interface Region {
   x: number;
@@ -20,8 +20,8 @@ export interface FrameDetail {
   ): Promise<Buffer | undefined>;
 }
 
-const fit = (image: Buffer) =>
-  sharp(image, { limitInputPixels: 2560 * 1600 }).resize(1280, 800, { fit: "inside" });
+const fit = async (image: Buffer) =>
+  (await raster(image, { limitInputPixels: 2560 * 1600 })).resize(1280, 800, { fit: "inside" });
 
 // Screenshots go to the model as PNG (P4a-R27: keyd sizes PNG and JPEG for the budget), from the
 // WebP observe frames the gateway stores. A zoom crops a region of a frame (model pixels) and
@@ -48,7 +48,7 @@ export class FramePng {
     signal?.throwIfAborted();
     const file = this.frames.path(sessionId, frameId);
     if (!file) throw new Error(`no frame ${frameId}`);
-    let image = sharp(readFileSync(file)).resize(1280, 800, { fit: "fill" });
+    let image = (await raster(readFileSync(file))).resize(1280, 800, { fit: "fill" });
     if (region) {
       const left = Math.max(0, Math.min(1272, Math.round(region.x)));
       const top = Math.max(0, Math.min(792, Math.round(region.y)));
@@ -60,13 +60,13 @@ export class FramePng {
         .catch(() => undefined);
       signal?.throwIfAborted();
       if (device) {
-        const result = await fit(device).png({ compressionLevel: 6 }).toBuffer();
+        const result = await (await fit(device)).png({ compressionLevel: 6 }).toBuffer();
         signal?.throwIfAborted();
         return result;
       }
       const cropped = await image.extract({ left, top, width, height }).png().toBuffer();
       signal?.throwIfAborted();
-      image = fit(cropped);
+      image = await fit(cropped);
     }
     signal?.throwIfAborted();
     const result = await image.png({ compressionLevel: 6 }).toBuffer();

@@ -24,11 +24,14 @@ import {
   readLocalAcceptance,
   writeLocalAcceptance,
 } from "@localdot/codex-harness";
-import { type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
+import { type PersonaId, type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
+import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import type { BrowserScope } from "../browser/client.ts";
+import { releaseForFullAccess } from "../browser/full-access-downloads.ts";
 import { desktopPlacement } from "../browser/placement.ts";
 import type { QuarantineStore } from "../browser/quarantine.ts";
 import { quarantineAccess } from "../browser/quarantine-access.ts";
+import { releaseDownload } from "../browser/quarantine-routes.ts";
 import type { ScreenLease } from "../browser/screen-controller.ts";
 import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
@@ -87,11 +90,12 @@ import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
 import { NativeTasks } from "./safety/native-tasks.ts";
+import { PurposeService } from "./safety/purpose-service.ts";
 import { RulesStore } from "./safety/rules.ts";
 import { taintMemory } from "./safety/taint.ts";
 import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
-import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
+import { leftoverSkills, listSkills, skillDesktopPath, skillFiles, skillsFor } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
 import type { ToolDeps } from "./tools/deps.ts";
 import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
@@ -270,6 +274,11 @@ export function createAgent(d: AgentWiringDeps) {
     keyd: d.keyd,
     ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
+  const purposeService = new PurposeService({
+    keys: () => d.keyd.secrets(),
+    settings: () => settings.get(),
+    post: (key, body, signal) => judgeCell.post(key, body, signal),
+  });
   const connectorPorts = {
     reserve: () => brains.reservePort(),
     release: (port: number) => brains.releasePort(port),
@@ -295,12 +304,35 @@ export function createAgent(d: AgentWiringDeps) {
     fetchFor: (id) => remoteLinks.signIn(id),
   });
   const skills = () => listSkills(BUILTIN_SKILLS, join(d.home, "skills"));
-  const installSkills = async (cellId: string, signal: AbortSignal): Promise<SkillSummary[]> => {
+  const installSkills = async (
+    cellId: string,
+    signal: AbortSignal,
+    persona?: PersonaId,
+  ): Promise<SkillSummary[]> => {
     signal.throwIfAborted();
     const tools = desktop(cellId);
     if (!tools) throw new AgentError(409, "the computer is not ready");
+    const chosen = skillsFor(persona, skills());
+    // Built-in skills an earlier task's dot left behind go, so this dot carries only its own; a
+    // computer that can't list or remove them still starts the task.
+    try {
+      const present = await tools.listDir(".skills", signal);
+      for (const name of leftoverSkills(
+        present.entries.filter((entry) => entry.type === "dir").map((entry) => entry.name),
+        chosen,
+      )) {
+        signal.throwIfAborted();
+        await tools.shell(
+          { command: `rm -rf -- ~/.skills/${name}`, timeoutMs: 10_000 },
+          () => {},
+          signal,
+        );
+      }
+    } catch {
+      signal.throwIfAborted();
+    }
     const installed: SkillSummary[] = [];
-    for (const skill of skills()) {
+    for (const skill of chosen) {
       for (const file of skillFiles(skill)) {
         signal.throwIfAborted();
         const source = new ReadableStream<Uint8Array>({
@@ -532,6 +564,7 @@ export function createAgent(d: AgentWiringDeps) {
               ...(session.run ? { run: session.run } : {}),
               ...(session.research ? { research: session.research.budget } : {}),
               apps: session.connectors.specs.map((spec) => spec.app),
+              role: runner.roleOf(session.id),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
@@ -630,6 +663,7 @@ export function createAgent(d: AgentWiringDeps) {
             ...(session.run ? { run: session.run } : {}),
             ...(session.research ? { research: session.research.budget } : {}),
             apps: session.connectors.specs.map((spec) => spec.app),
+            role: runner.roleOf(session.id),
           }),
         redactorFor: (session) => forText(session),
       })
@@ -660,7 +694,7 @@ export function createAgent(d: AgentWiringDeps) {
     ...(claudeDriver && claudeSetup
       ? { claudeCode: { driver: claudeDriver, status: () => claudeSetup.status() } }
       : {}),
-    jev: (secretId, body, signal) => judgeCell.post(secretId, body, signal),
+    jev: (secretId, body, signal) => purposeService.post(secretId, body, signal),
     ...(driver && auth
       ? {
           codex: {
@@ -691,13 +725,16 @@ export function createAgent(d: AgentWiringDeps) {
   });
   const forText = (session?: AgentSession, cellId = session?.cellId) => {
     const record = cellId ? d.cells.record(cellId) : undefined;
-    return redactor([
-      d.installToken,
-      session?.toolToken,
-      session?.boot?.proxy.token,
-      record?.tokens.desktopd,
-      record?.tokens.stream,
-    ]);
+    return redactor(
+      [
+        d.installToken,
+        session?.toolToken,
+        session?.boot?.proxy.token,
+        record?.tokens.desktopd,
+        record?.tokens.stream,
+      ],
+      session,
+    );
   };
   const upload = (cellId: string, requestSignal: AbortSignal): UploadAccess | undefined => {
     const sessionId = d.live.get(cellId),
@@ -857,6 +894,7 @@ export function createAgent(d: AgentWiringDeps) {
     redactorFor: (session) => forText(session),
   });
   const routes: AgentRoutesDeps = {
+    purpose: purposeService,
     quarantine: d.quarantine
       ? {
           store: d.quarantine,
@@ -967,11 +1005,27 @@ export function createAgent(d: AgentWiringDeps) {
     socketServer: ReturnType<typeof createAdaptorServer> | undefined,
     startPromise: Promise<void> | undefined,
     closePromise: Promise<void> | undefined;
+  const quarantine = routes.quarantine;
   return {
     runner,
     routes,
     connections,
     connectors,
+    releaseDownloads(parentCellId: string, items: readonly QuarantineItem[]): void {
+      if (!quarantine) return;
+      void releaseForFullAccess(
+        {
+          session: (id) => {
+            const live = d.live.get(id);
+            return live ? runner.get(live) : undefined;
+          },
+          release: (parent, id, request, signal) =>
+            releaseDownload(quarantine, parent, id, request, signal),
+        },
+        parentCellId,
+        items,
+      );
+    },
     connectorSignIn,
     computerAccess,
     // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.

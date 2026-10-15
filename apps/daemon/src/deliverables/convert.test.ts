@@ -102,6 +102,27 @@ describe("conversion inside dot's computer", () => {
     });
     expect(await refusing.convert("a.ods", Buffer.from("x"), signal())).toBe("busy");
   });
+  it("converts on another ready computer when the first one is busy", async () => {
+    const other = "01JXYZ0000000000000000CE12";
+    const c = fakeComputer({ png: Buffer.from("png") });
+    const asked: string[] = [];
+    const twoComputers = computerConverter({
+      computers: () => [
+        { id: CELL, state: "ready" },
+        { id: "01JXYZ0000000000000000CE13", state: "stopped" },
+        { id: other, state: "ready" },
+      ],
+      access: (id) => {
+        asked.push(id);
+        return id === CELL ? "busy" : c.access;
+      },
+    });
+    expect(await twoComputers.convert("a.ods", Buffer.from("x"), signal())).toEqual(
+      Buffer.from("png"),
+    );
+    expect(asked).toEqual([CELL, other]);
+    expect(c.released).toHaveBeenCalledOnce();
+  });
   it("stops at Stop: no page image, no cleanup on a frozen computer, the lease released", async () => {
     let c!: ReturnType<typeof fakeComputer>;
     c = fakeComputer({
