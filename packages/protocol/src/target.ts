@@ -15,7 +15,8 @@ export const Target = z.object({
   url: boundedText(2048).optional(),
   mark: z.number().int().nonnegative().optional(),
   secret: z.boolean().optional(),
-  // Set by trusted desktop Chromium perception only after validating the password's form.
+  // The site a password's form signs in to, as the screen's browser read it. Saved logins go by
+  // the web browser screen's only: the desktop's Chromium is the agent's own.
   loginOrigin: z.string().url().optional(),
   editable: z.boolean().optional(),
   // A check box's, radio button's or switch's tick as it was read.

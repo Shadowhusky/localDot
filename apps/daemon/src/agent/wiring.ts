@@ -725,13 +725,16 @@ export function createAgent(d: AgentWiringDeps) {
   });
   const forText = (session?: AgentSession, cellId = session?.cellId) => {
     const record = cellId ? d.cells.record(cellId) : undefined;
-    return redactor([
-      d.installToken,
-      session?.toolToken,
-      session?.boot?.proxy.token,
-      record?.tokens.desktopd,
-      record?.tokens.stream,
-    ]);
+    return redactor(
+      [
+        d.installToken,
+        session?.toolToken,
+        session?.boot?.proxy.token,
+        record?.tokens.desktopd,
+        record?.tokens.stream,
+      ],
+      session,
+    );
   };
   const upload = (cellId: string, requestSignal: AbortSignal): UploadAccess | undefined => {
     const sessionId = d.live.get(cellId),

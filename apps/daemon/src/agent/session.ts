@@ -1257,7 +1257,8 @@ export class AgentSession {
           reject(error);
           return false;
         }
-        if (answer.by === "user") this.tainted = false;
+        // Only the user's own words vouch for what comes next; "Not now" says nothing.
+        if (answer.by === "user" && !answer.declined) this.tainted = false;
         if (ownerCurrent() && !this.#control && !this.safetyPause) this.status = "running";
         resolve(answer);
         return true;
@@ -1596,7 +1597,7 @@ export class AgentSession {
     // Whatever the user did on the computer, a page read before it is no longer one to act on.
     this.pageRefs = undefined;
     const user = record.user;
-    if (!user) this.tainted = false;
+    if (!user && !declined) this.tainted = false;
     this.status = this.safetyPause ? "paused" : user?.from === "idle" ? "idle" : "running";
     if (user) {
       this.#lookFirst = true;

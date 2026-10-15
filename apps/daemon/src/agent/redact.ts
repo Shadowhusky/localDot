@@ -1,41 +1,91 @@
+import { keyLikeMatches } from "@localdot/protocol";
+
 const SURROGATE_ANYWHERE = /ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}/g;
+// A private key block, whole; one cut short ends where its key lines do. A key's lines are base64,
+// headers and line breaks, escaped ones included, and no key is longer than 32 KiB; its first line
+// fits in what a stream holds back.
+const PRIVATE_KEY =
+  /-----BEGIN [A-Z0-9 ]{0,10}PRIVATE KEY(?: BLOCK)?-----(?:[A-Za-z0-9+/=:,\s\\-]{0,32768}?-----END [A-Z0-9 ]{0,10}PRIVATE KEY(?: BLOCK)?-----|[A-Za-z0-9+/=:,\s\\-]{0,32768})/g;
+const HOLD = 46;
+const KEY_CHAR = /[A-Za-z0-9_.-]/;
+// A shorter secret, such as a six-digit code, is masked only where it stands on its own.
+const WORD = 8;
+const WORD_CHAR = /[A-Za-z0-9]/;
 export const REDACTED = "[redacted]";
 type Chunk = { stream: "stdout" | "stderr"; chunk: string };
+type Span = { start: number; end: number };
 export type Redactor = ((text: string) => string) & {
   stream?: () => { push(chunk: Chunk): Chunk[]; finish(): Chunk[] };
 };
-export function redactor(secrets: Iterable<string | undefined>): Redactor {
-  const known = [
+
+const delivered = new WeakMap<object, Set<string>>();
+// A password or code typed for a task stays out of everything that task shows from then on.
+export function addTaskSecret(task: object, secret: string): void {
+  if (secret.length < 4 || !secret.trim() || REDACTED.includes(secret)) return;
+  const secrets = delivered.get(task) ?? new Set<string>();
+  secrets.add(secret);
+  delivered.set(task, secrets);
+}
+
+// Where a stream's last run of key characters starts. It may still grow into a key, so it waits
+// until it is longer than the longest shortest key shape, the 67-character AQ. form.
+function tailStart(raw: string): number {
+  let start = raw.length;
+  while (start > 0 && KEY_CHAR.test(raw[start - 1] ?? "")) {
+    start -= 1;
+    if (raw.length - start > 67) return raw.length;
+  }
+  return start;
+}
+
+function spansOf(raw: string, known: readonly string[]): Span[] {
+  const spans: Span[] = [];
+  for (const pattern of [SURROGATE_ANYWHERE, PRIVATE_KEY])
+    for (const m of raw.matchAll(pattern))
+      spans.push({ start: m.index, end: m.index + m[0].length });
+  for (const m of keyLikeMatches(raw)) spans.push({ start: m.start, end: m.end });
+  for (const secret of known)
+    for (let at = raw.indexOf(secret); at !== -1; at = raw.indexOf(secret, at + 1)) {
+      const end = at + secret.length;
+      if (
+        secret.length >= WORD ||
+        (!WORD_CHAR.test(raw[at - 1] ?? "") && !WORD_CHAR.test(raw[end] ?? ""))
+      )
+        spans.push({ start: at, end });
+    }
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: Span[] = [];
+  for (const span of spans) {
+    const last = merged.at(-1);
+    if (last && span.start < last.end) last.end = Math.max(last.end, span.end);
+    else merged.push({ ...span });
+  }
+  return merged;
+}
+
+// `task`: whose delivered secrets to mask too, including any delivered after this was made.
+export function redactor(secrets: Iterable<string | undefined>, task?: object): Redactor {
+  const fixed = [
     ...new Set([...secrets].filter((s): s is string => typeof s === "string" && s.length >= 8)),
-  ].sort((a, b) => b.length - a.length);
+  ];
+  const known = () => [...fixed, ...((task && delivered.get(task)) ?? [])];
   const redact: Redactor = (text) => {
-    let out = text.replace(SURROGATE_ANYWHERE, REDACTED);
-    for (const secret of known) out = out.split(secret).join(REDACTED);
-    return out;
+    let out = "",
+      at = 0;
+    for (const span of spansOf(text, known())) {
+      out += text.slice(at, span.start) + REDACTED;
+      at = span.end;
+    }
+    return out + text.slice(at);
   };
   redact.stream = () => {
     let pending: Chunk[] = [];
-    const hold = Math.max(46, ...known.map((s) => s.length));
     const drain = (final: boolean): Chunk[] => {
       const raw = pending.map((c) => c.chunk).join("");
-      const spans: { start: number; end: number }[] = [];
-      for (const m of raw.matchAll(SURROGATE_ANYWHERE))
-        spans.push({ start: m.index, end: m.index + m[0].length });
-      for (const secret of known) {
-        let at = raw.indexOf(secret);
-        while (at !== -1) {
-          spans.push({ start: at, end: at + secret.length });
-          at = raw.indexOf(secret, at + 1);
-        }
-      }
-      spans.sort((a, b) => a.start - b.start || b.end - a.end);
-      const merged: typeof spans = [];
-      for (const span of spans) {
-        const last = merged.at(-1);
-        if (last && span.start < last.end) last.end = Math.max(last.end, span.end);
-        else merged.push({ ...span });
-      }
-      let cut = final ? raw.length : Math.max(0, raw.length - hold);
+      const secrets = known();
+      const merged = spansOf(raw, secrets);
+      const hold = Math.max(HOLD, ...secrets.map((s) => s.length));
+      let cut = final ? raw.length : Math.min(Math.max(0, raw.length - hold), tailStart(raw));
       for (const span of merged) if (span.start < cut && span.end > cut) cut = span.start;
       // Do not emit half a Unicode scalar: downstream byte-tail encoding cannot reconstruct it.
       if (

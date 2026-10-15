@@ -23,6 +23,7 @@ import { EventLog } from "../event-log.ts";
 import type { NativeScreenBinding } from "../gateway/gateway.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
 import { ManualInputUncertain, sendManualInput } from "./manual-input.ts";
+import { redactor } from "./redact.ts";
 import { AgentSession, ControlHeldError } from "./session.ts";
 import { toolHarness } from "./testing/harness.ts";
 import { dispatchTool } from "./tools/index.ts";
@@ -375,6 +376,10 @@ describe("session-owned screen authority", () => {
       if (mode === "unavailable-store")
         expect(JSON.stringify(reply)).toContain("temporarily unavailable");
       else expect(JSON.stringify(reply)).toContain("Submission was not confirmed");
+      // A saved password filled for the task is masked in whatever the task shows afterwards.
+      expect(redactor([], f.session)("saved-private-canary")).toBe(
+        mode === "unavailable-store" ? "saved-private-canary" : "[redacted]",
+      );
     },
   );
 
