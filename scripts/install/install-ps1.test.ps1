@@ -62,6 +62,7 @@ function wsl.exe {
     }
     "--exec test -d /run/systemd/system$" { $code = $script:machine.Systemd }
     "--exec mktemp \.localdot-install\.XXXXXX$" { $out = ".localdot-install.Ab12Cd" }
+    "--exec wslpath -a -u ([A-Za-z]):\\(.*)$" { $out = "/mnt/$($Matches[1].ToLower())/$($Matches[2].Replace('\', '/'))" }
     "--exec curl " { $code = $script:machine.Download }
     "--exec bash \.localdot-install\.Ab12Cd" { $code = $script:machine.Installer }
   }
@@ -442,6 +443,17 @@ try { Install-LocalDot } catch { $message = $_.Exception.Message }
 Check ($message -like "*inside Ubuntu failed (exit 1)*" -and $message -like "*data are kept*") "reports a failed Linux install with its exit code and recovery guidance"
 Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec rm -f .localdot-install.Ab12Cd") "removes the file after a failed install too"
 Check (-not (@($script:calls) -match "Register-ScheduledTask")) "registers nothing after a failed install"
+
+Reset-Machine @{}
+$machine.Distros = @(, @("Ubuntu", "2"))
+$Prefix = 'D:\localDot'; $HomeDir = "~/Husky's data"
+Install-LocalDot
+Write-SetupResume
+$savedOptions = Get-Content (Join-Path $SetupDirectory 'options.json') -Raw | ConvertFrom-Json
+$Prefix = $null; $HomeDir = $null
+Check ($script:calls -contains 'wsl -d Ubuntu --exec wslpath -a -u D:\localDot') "finds a Windows folder's path inside Linux"
+Check ($script:calls -contains "wsl -d Ubuntu --cd ~ --exec bash .localdot-install.Ab12Cd --prefix /mnt/d/localDot --home ~/Husky's data") "passes the chosen folders to install.sh"
+Check ($savedOptions.Prefix -eq 'D:\localDot' -and $savedOptions.HomeDir -eq "~/Husky's data") "keeps the chosen folders for resuming after a restart"
 
 Reset-Machine @{}
 $machine.Distros = @(, @("Ubuntu", "2"))

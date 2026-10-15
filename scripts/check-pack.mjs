@@ -28,7 +28,7 @@ export const PACK_ALLOWLIST = [
   /^web\/dist\/native\/localDot\.app\/Contents\/(Info\.plist|MacOS\/localdot-notify|Resources\/dot\.icns|_CodeSignature\/CodeResources)$/,
   /^web\/dist\/(index|export)\.html$/,
   /^web\/dist\/(sw\.js|manifest\.webmanifest)$/,
-  /^web\/dist\/icons\/(apple-touch-icon|icon-192|icon-512|icon-maskable-512)\.png$/,
+  /^web\/dist\/icons\/(apple-touch-icon(?:-mascot-2)?|icon-192|icon-512|icon-maskable-512)\.png$/,
   /^web\/dist\/assets\/[A-Za-z0-9_.-]+\.(js|mjs|css|woff2|svg|png|webp)$/,
   /^web\/dist\/assets\/licenses\/[A-Za-z0-9_.@-]+\.txt$/,
   /^web\/vendor\/selkies\/(index\.html|manifest\.json|icon\.png|icon-512\.png|LICENSE|NOTICE\.md)$/,
