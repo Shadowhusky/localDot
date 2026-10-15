@@ -1,115 +1,187 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#090b0d" />
-  <title>localDot — An AI assistant with its own computer</title>
-  <meta name="description" content="Run an AI assistant in a Linux desktop on your machine. Watch it use apps, browse, and make files. Choose your model and take control at any time." />
-  <link rel="canonical" href="https://localdot.dev/" />
-  <meta property="og:title" content="localDot — An AI assistant with its own computer" />
-  <meta property="og:description" content="An AI assistant that runs on your computer. Watch real tasks and try the alpha." />
-  <meta property="og:image" content="https://localdot.dev/demos/work-poster.webp?v=real-runs1" />
-  <meta property="og:url" content="https://localdot.dev/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0a0b0d" />
+  <title>localDot — an AI with a computer of its own</title>
+  <meta name="description" content="Meet dot: an open-source AI that does real work on a computer of its own, on yours. Watch it live, take over any time, use any model, and replay or export every task." />
+  <meta property="og:site_name" content="localDot" />
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://localdot.dev/" />
+  <meta property="og:title" content="localDot — an AI with a computer of its own" />
+  <meta property="og:description" content="Meet dot: an open-source AI that does real work on a computer of its own, on yours." />
+  <meta property="og:image" content="https://localdot.dev/social/localdot-social-v1.jpg" />
+  <meta property="og:image:secure_url" content="https://localdot.dev/social/localdot-social-v1.jpg" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="The pearly white dot mascot beside the words: A little dot. A lot done." />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="localDot — an AI with a computer of its own" />
+  <meta name="twitter:description" content="Meet dot: an open-source AI that does real work on a computer of its own, on yours." />
+  <meta name="twitter:image" content="https://localdot.dev/social/localdot-social-v1.jpg" />
+  <meta name="twitter:image:alt" content="The pearly white dot mascot beside the words: A little dot. A lot done." />
+  <link rel="canonical" href="https://localdot.dev/" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/src/style.css" />
+  <script>
+    document.documentElement.classList.replace("no-js", "js");
+    // Zod, under the app's schemas, takes its settings from here. Set before any module runs, it
+    // never probes eval, which the page's CSP refuses.
+    globalThis.__zod_globalConfig = { jitless: true };
+    // The language the address names, else the one the visitor picked, else their system's, from the
+    // first paint (see i18n.ts).
+    let lang = new URLSearchParams(location.search).get("lang");
+    if (lang !== "en" && lang !== "zh")
+      try {
+        lang = localStorage.getItem("localdot.lang");
+      } catch (e) {}
+    if (lang !== "en" && lang !== "zh") lang = /^zh\b/i.test(navigator.language || "") ? "zh" : "en";
+    if (lang === "zh") {
+      document.documentElement.lang = "zh-Hans";
+      document.documentElement.dataset.lang = "zh";
+    }
+  </script>
 </head>
 <body>
-<a class="skip" href="#hello">Skip demo and meet dot</a>
-<section id="loader" class="loader" hidden aria-label="Loading the demo">
-  <span id="loading-dot" class="dot" style="--dot-size:128px" aria-hidden="true"></span>
-  <p id="loading-status" role="status">dot is getting ready.</p>
-  <button id="skip-loading" class="text-button" type="button">Continue to the page <span aria-hidden="true">↗</span></button>
-</section>
-<div class="world" aria-hidden="true"><canvas id="world-canvas"></canvas><div class="studio-halo"></div></div>
-<header class="site-header">
-  <a href="#watch" class="brand" aria-label="localDot home"><img src="/dot.png" width="36" height="36" alt="" /><span>localDot</span></a>
-  <nav aria-label="Main navigation"><a href="#watch">Watch dot</a><a href="#hello">Meet dot</a><a href="#yours">Why local?</a></nav>
-  <div class="header-actions">
-    <a class="pill small github-link" href="https://github.com/Shadowhusky/localdot" target="_blank" rel="noopener noreferrer" aria-label="localDot on GitHub (opens in a new tab)" title="View the localDot repository on GitHub">
-      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" /></svg>
-      <span class="github-label">GitHub</span>
-    </a>
-    <a class="pill small install-link" href="#get-dot">Get localDot <span aria-hidden="true">↗</span></a>
-  </div>
+<header class="site-nav">
+  <a class="site-nav-brand" href="#top">localDot</a>
+  <nav aria-label="Story" data-i18n-label>
+    <a href="#hello" data-go="out" data-i18n>Meet dot</a>
+    <a href="#watch" data-go="watch" data-i18n>Watch</a>
+    <a href="#models" data-go="models" data-i18n>Models</a>
+    <a href="#replay" data-go="replay" data-i18n>Replay</a>
+    <a href="#dots" data-go="dots" data-i18n>Dots</a>
+  </nav>
+  <button type="button" class="site-nav-lang" data-act="lang" aria-label="阅读中文版"><span class="to-zh" lang="zh-Hans">中文</span><span class="to-en" lang="en">EN</span></button>
+  <a class="site-nav-get" href="#get" data-go="install" data-i18n>Get localDot</a>
 </header>
-<main>
-<section id="watch" class="chapter" aria-labelledby="watch-title">
-<div class="scene-panel demo-panel">
-  <div class="demo-heading"><div><p class="eyebrow">WATCH DOT AT WORK</p><h1 id="watch-title">Give dot <span>something to do.</span></h1></div><span class="sample-label"><i></i> Real agent tasks · edited excerpts</span></div>
-  <div class="replay-shell">
-    <aside class="replay-library" aria-label="Choose a demo replay">
-      <div class="library-heading"><span>Replay library</span><span>03</span></div>
-      <div class="demo-options">
-        <button type="button" class="demo-option" data-demo="work" aria-pressed="true"><span class="demo-symbol">↗</span><span><strong>Build a spreadsheet.</strong><small>Tables & charts</small></span><span class="replay-number">01</span></button>
-        <button type="button" class="demo-option" data-demo="research" aria-pressed="false"><span class="demo-symbol">◎</span><span><strong>Compare two ideas.</strong><small>Research & sources</small></span><span class="replay-number">02</span></button>
-        <button type="button" class="demo-option" data-demo="play" aria-pressed="false"><span class="demo-symbol">⌘</span><span><strong>Draw a smile.</strong><small>Draw & create</small></span><span class="replay-number">03</span></button>
-      </div>
-      <noscript><p class="no-script-links"><a href="/demos/research.mp4?v=real-runs1">Watch research demo</a><br /><a href="/demos/play.mp4?v=real-runs1">Watch drawing demo</a></p></noscript><p class="library-note">Recorded in localDot.<br />Choose a task to watch.</p>
-      <a class="library-next" href="#hello">Meet dot <span aria-hidden="true">↓</span></a>
-    </aside>
-    <div class="replay-main">
-      <div class="replay-topbar"><span id="replay-name">Build a spreadsheet.</span><span class="replay-caption">AGENT REPLAY · 2× <i></i></span></div>
-      <div class="video-stage" id="video-stage">
-        <video id="demo-video" muted playsinline loop preload="metadata" controls poster="/demos/work-poster.webp?v=real-runs1" aria-label="Recorded localDot agent task"><source src="/demos/work.mp4?v=real-runs1" type="video/mp4" /></video>
-        <div id="video-message" class="video-message" role="status" hidden></div>
-      </div>
-      <div class="replay-controls" hidden>
-        <button id="play-toggle" class="icon-button" type="button" aria-label="Play replay"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="play-path" d="m8 5 11 7-11 7Z" /></svg></button>
-        <span id="replay-time">0:00 / 0:20</span>
-        <label class="scrubber"><span class="sr-only">Replay position</span><input id="replay-seek" type="range" min="0" max="100" value="0" step="0.1" /></label>
-        <button id="fullscreen" class="icon-button" type="button" aria-label="Expand replay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" fill="none" stroke="currentColor" stroke-width="1.6" /></svg></button>
-      </div>
+<main id="story" class="story">
+  <div class="site-stage" id="stage">
+    <div class="site-studio" aria-hidden="true"></div>
+    <div class="hero-intro">
+      <h1 data-i18n>An AI with a computer of its own.</h1>
+      <p data-i18n-html="intro">Below are replays of real tasks dot did, sped up. Pick one to watch, or <a class="film-link" href="/film/localdot-film.mp4" data-film>play the film</a>.</p>
     </div>
-  </div>
-  <div class="demo-bottom"><p id="replay-description">Watch dot enter sales figures, calculate a total, and create a chart in LibreOffice. A real task with invented data; edited at 2× speed.</p><a href="#hello" class="scroll-link">Scroll to meet dot <span aria-hidden="true">↓</span></a></div>
-</div>
-</section>
-<section id="hello" class="chapter" aria-labelledby="hello-title">
-<div class="scene-panel story-panel">
-  <div class="story-copy"><p class="eyebrow">01 / MEET DOT</p><h2 id="hello-title">Hi.<br />I’m <em>dot.</em></h2><p class="lead">Your AI assistant.<br />With a computer of its own.</p><p class="body-copy">Ask me to make a spreadsheet, research a question, or use an app. I work in a Linux desktop on your machine. You can watch, send instructions, or take over.</p><button class="pill greet" id="greet" type="button">Say hello <span aria-hidden="true">✳</span></button><p id="greeting" class="response" role="status" aria-live="polite"></p></div>
-  <div class="character-fallback"><img src="/dot.png" alt="dot, a small pearl-white ball with two curious eyes" width="360" height="360" /></div>
-  <div class="scene-note"><span class="coordinate">01 — DOT</span><span>Runs on your computer.<br />Opens in your browser.</span></div>
-</div>
-</section>
-<section id="possibilities" class="chapter" aria-labelledby="possibilities-title">
-<div class="scene-panel story-panel">
-  <div class="story-copy"><p class="eyebrow">02 / TASKS AND TOOLS</p><h2 id="possibilities-title">Browse. Build.<br /><em>Try things.</em></h2><p class="lead" id="feature-title">Apps, files, and a terminal.</p><p class="body-copy" id="feature-copy">dot can use desktop apps, read websites, and run code. Files appear in the conversation for you to open or revise. Connect your apps to give it more tools.</p>
-    <fieldset class="feature-options" aria-label="Explore dot’s capabilities"><button type="button" data-feature="work" aria-pressed="true">Make things</button><button type="button" data-feature="memory" aria-pressed="false">Learn as you go</button><button type="button" data-feature="routines" aria-pressed="false">Set a routine</button></fieldset>
-    <a href="#watch" class="text-link" id="feature-demo">See it in the app <span aria-hidden="true">↗</span></a>
-  </div>
-  <div class="character-fallback"><img src="/dot.png" width="320" height="320" alt="" /></div>
-  <div class="floating-labels" aria-hidden="true"><span id="window-label-one">Browser · Terminal · Files</span><span id="window-label-two">Watch or replay a task.</span></div>
-  <div class="scene-note"><span class="coordinate">02 — POSSIBILITIES</span><span>From spreadsheets<br />to a quick sketch.</span></div>
-</div>
-</section>
-<section id="yours" class="chapter" aria-labelledby="yours-title">
-<div class="scene-panel story-panel">
-  <div class="story-copy"><p class="eyebrow">03 / MODELS AND PERMISSIONS</p><h2 id="yours-title">Choose a model.<br /><em>Set its limits.</em></h2><p class="lead">A separate computer.<br />Still under your control.</p><p class="body-copy">The desktop, files, and recordings stay on your machine. Use an API key, a supported plan, or a local model. Hosted models receive screenshots and task context. API keys are kept in a local vault.</p>
-    <div class="permission-demo"><div class="permission-label">You choose how much dot asks.</div><fieldset class="permission-options" aria-label="Permission mode examples"><button type="button" data-permission="ask" aria-pressed="false">Ask</button><button type="button" data-permission="auto" aria-pressed="true">Auto</button><button type="button" data-permission="full" aria-pressed="false">Full access</button></fieldset><p id="permission-copy">Automatic review handles routine approvals. You stay involved when a decision needs you.</p></div>
-  </div>
-  <div class="character-fallback"><img src="/dot.png" width="320" height="320" alt="" /></div>
-  <div class="scene-note"><span class="coordinate">03 — YOURS</span><span>Take over. Stop a task.<br />Replay any moment.</span></div>
-</div>
-</section>
-<section id="get-dot" class="chapter" aria-labelledby="get-title">
-<div class="scene-panel story-panel final-panel">
-  <div class="story-copy"><p class="eyebrow">04 / INSTALL</p><h2 id="get-title">Try <em>localDot.</em></h2><p class="lead">On your computer.<br />Within reach of your phone.</p><p class="body-copy">The installer sets up the app and its desktop. Open the link it prints, choose a model, and send your first task. This is an alpha; expect bugs.</p>
-    <div class="release-card"><span class="release-status"><i></i> Alpha · open for testing</span>
-      <fieldset class="install-platforms" aria-label="Choose your system"><button type="button" data-os="mac" aria-pressed="true">macOS</button><button type="button" data-os="windows" aria-pressed="false">Windows</button><button type="button" data-os="linux" aria-pressed="false">Linux</button></fieldset>
-      <p id="install-help">Apple silicon Mac. Paste this in Terminal.</p>
-      <div class="install-command"><code id="install-command">curl -fsSL https://downloads.localdot.dev/install.sh | bash</code><button type="button" id="copy-install" aria-label="Copy installation command">Copy</button></div>
-      <noscript><p>Windows PowerShell: <code>irm https://downloads.localdot.dev/install.ps1 | iex</code></p></noscript><p id="install-feedback" role="status" aria-live="polite">Setup guides you through Docker if it is missing.</p>
-      <a class="text-link" href="https://github.com/Shadowhusky/localdot/blob/main/docs/install.md">Installation guide <span aria-hidden="true">↗</span></a>
+    <section id="hero" class="hero" aria-label="A replay of localDot at work" data-i18n-label></section>
+    <canvas id="scene" class="site-scene" aria-hidden="true"></canvas>
+    <div class="site-chapters">
+      <section class="chapter" data-chapter="out" aria-labelledby="hello-title">
+        <div class="beat" data-place="hello" data-span="0.66 1.1">
+          <h2 id="hello-title" data-i18n>Hi, I'm dot.</h2>
+          <p data-i18n>I do real work on a computer of my own, right on yours.</p>
+          <a class="site-button" href="/film/localdot-film.mp4" data-film><span class="film-play" aria-hidden="true"></span><span data-i18n>Watch the film</span></a>
+        </div>
+      </section>
+      <section class="chapter" data-chapter="watch" aria-label="Watch dot work" data-i18n-label>
+        <div class="beat" data-place="watch" data-span="0.04 0.4">
+          <h2 data-i18n>Watch me work.</h2>
+          <p data-i18n>Live, from your laptop or your phone. You see every click and keystroke as it happens.</p>
+        </div>
+        <div class="beat" data-place="step-in" data-span="0.4 0.7">
+          <h2 data-i18n>Step in any time.</h2>
+          <p data-i18n>Take control and the mouse is yours. Hand it back and I pick up where you left off.</p>
+          <button type="button" class="site-button" data-act="control" data-i18n>Take control</button>
+        </div>
+        <div class="beat" data-place="ask" data-span="0.7 0.98">
+          <h2 data-i18n>You decide how often I ask.</h2>
+          <p data-permission-copy data-i18n>Routine steps just happen. Anything risky waits for you.</p>
+          <fieldset class="site-segments">
+            <legend class="sr-only" data-i18n>How often dot asks</legend>
+            <label><input type="radio" name="permission" value="ask" /><span data-i18n>Ask</span></label>
+            <label><input type="radio" name="permission" value="auto" checked /><span data-i18n>Auto</span></label>
+            <label><input type="radio" name="permission" value="full" /><span data-i18n>Full access</span></label>
+          </fieldset>
+        </div>
+      </section>
+      <section class="chapter" data-chapter="models" aria-labelledby="models-title">
+        <div class="beat" data-place="models" data-span="0.06 0.96">
+          <h2 id="models-title" data-i18n>Use any model.</h2>
+          <p data-i18n="models.body">An API key from any of <!-- provider-count --> providers, your ChatGPT or Claude plan, or a model running on your own machine. Switch whenever you like.</p>
+        </div>
+        <ul class="ring" aria-label="Some of the models dot can use" data-i18n-label><!-- ring --></ul>
+      </section>
+      <section class="chapter" data-chapter="replay" aria-label="Replay and export" data-i18n-label>
+        <div class="beat" data-place="replay" data-span="0.04 0.5">
+          <h2 data-i18n>Rewind anything.</h2>
+          <p data-i18n>Every task is recorded, step by step. Scrub back to see exactly what I did.</p>
+        </div>
+        <div class="beat" data-place="share" data-span="0.5 0.97">
+          <h2 data-i18n>Share the good part.</h2>
+          <p data-i18n>Trim to the moment, speed it up as much as 16 times, add captions, and keep me under the picture or in its corner. Then save it as a video.</p>
+        </div>
+        <div class="cards" aria-hidden="true">
+          <figure class="card" data-card="captions"><video muted loop playsinline preload="none" data-src="/demos/breakout/card-captions.mp4"></video><figcaption data-i18n>With captions</figcaption></figure>
+          <figure class="card" data-card="band"><video muted loop playsinline preload="none" data-src="/demos/breakout/card-band.mp4"></video><figcaption data-i18n>Me under the picture</figcaption></figure>
+          <figure class="card" data-card="corner"><video muted loop playsinline preload="none" data-src="/demos/breakout/card-corner.mp4"></video><figcaption data-i18n>Me in the corner</figcaption></figure>
+        </div>
+      </section>
+      <section class="chapter" data-chapter="dots" aria-labelledby="dots-title">
+        <div class="beat" data-place="dots" data-span="0.02 0.15">
+          <h2 id="dots-title" data-i18n>A dot for every job.</h2>
+          <p data-i18n>Each one brings only the skills its work needs, so it stays focused and spends nothing on the rest.</p>
+        </div>
+        <ol class="roles" aria-label="The dots" data-i18n-label>
+        <!-- roles -->
+        </ol>
+        <div class="beat" data-place="pick" data-span="0.8 0.98">
+          <h2 data-i18n>Pick yours.</h2>
+          <p data-i18n>Choose when you set up and change any time: just press me. Then give your localDot a look of its own.</p>
+          <fieldset class="site-segments">
+            <legend class="sr-only" data-i18n>Accessory</legend>
+            <label><input type="radio" name="accessory" value="" checked /><span data-i18n>None</span></label>
+            <label><input type="radio" name="accessory" value="cap" /><span data-i18n>Cap</span></label>
+            <label><input type="radio" name="accessory" value="sunglasses" /><span data-i18n>Shades</span></label>
+            <label><input type="radio" name="accessory" value="bow" /><span data-i18n>Bow</span></label>
+            <label><input type="radio" name="accessory" value="star-pin" /><span data-i18n>Star</span></label>
+          </fieldset>
+        </div>
+      </section>
+      <section class="chapter" data-chapter="yours" aria-labelledby="yours-title">
+        <div class="beat" data-place="yours" data-span="0.06 0.96">
+          <h2 id="yours-title" data-i18n>Open source, and yours.</h2>
+          <p data-i18n>MIT licensed. The app, my computer and every recording stay on your machine, and your keys live in a local vault.</p>
+          <a class="site-button" href="https://github.com/Shadowhusky/localdot" target="_blank" rel="noopener" data-i18n>Read the code on GitHub</a>
+        </div>
+      </section>
+      <section class="chapter" data-chapter="install" aria-labelledby="install-title">
+        <div class="beat" data-place="get" data-span="0.08 1.2">
+          <h2 id="install-title" data-i18n>Get localDot.</h2>
+          <p data-i18n>One command sets up the app and my computer. Open the link it prints, pick a model, and give me something to do.</p>
+          <div class="install">
+            <fieldset class="site-segments">
+              <legend class="sr-only" data-i18n>Your computer</legend>
+              <label><input type="radio" name="os" value="mac" checked /><span>macOS</span></label>
+              <label><input type="radio" name="os" value="windows" /><span>Windows</span></label>
+              <label><input type="radio" name="os" value="linux" /><span>Linux</span></label>
+            </fieldset>
+            <div class="install-command">
+              <code data-command>curl -fsSL https://downloads.localdot.dev/install.sh | bash</code>
+              <button type="button" class="site-button" data-act="copy" data-i18n>Copy</button>
+            </div>
+            <p class="install-note" data-install-note role="status" data-i18n>Paste it in Terminal. It walks you through Docker if you don't have it yet.</p>
+            <a class="install-guide" href="https://github.com/Shadowhusky/localdot/blob/main/docs/install.md" target="_blank" rel="noopener" data-i18n>Read the install guide</a>
+          </div>
+        </div>
+      </section>
     </div>
-  </div><div class="character-fallback"><img src="/dot.png" width="360" height="360" alt="" /></div>
-  <div class="scene-note"><span class="coordinate">04 — GET STARTED</span><a href="#watch">One more look <span aria-hidden="true">↗</span></a></div>
-</div>
-</section>
+    <button type="button" class="dot-press" aria-label="Talk to dot" data-i18n-label hidden></button>
+    <p class="dot-line" role="status"></p>
+  </div>
+  <div class="marks" aria-hidden="true"></div>
 </main>
-<footer class="journey-footer"><button type="button" id="motion-toggle" class="motion-control" aria-pressed="false" hidden>Pause motion</button><nav aria-label="Chapters"><a href="#watch" aria-label="Watch dot" aria-current="location">00</a><a href="#hello" aria-label="Meet dot">01</a><a href="#possibilities" aria-label="Explore capabilities">02</a><a href="#yours" aria-label="Models and permissions">03</a><a href="#get-dot" aria-label="Get localDot">04</a></nav><span class="footer-signature">LOCALDOT · ALPHA</span></footer>
-<script type="module" src="/src/main.js"></script>
+<footer class="site-footer">
+  <p data-i18n>localDot is open source under the MIT licence.</p>
+  <nav aria-label="More" data-i18n-label>
+    <a href="https://github.com/Shadowhusky/localdot" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/Shadowhusky/localdot/blob/main/docs/install.md" target="_blank" rel="noopener" data-i18n>Install guide</a>
+  </nav>
+</footer>
+<dialog class="film-sheet" aria-label="The localDot film" data-i18n-label>
+  <button type="button" class="film-close" aria-label="Close the film" data-i18n-label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+  <div class="film-frame"></div>
+</dialog>
+<script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

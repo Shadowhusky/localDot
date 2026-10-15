@@ -1,0 +1,153 @@
+/* Blue Hour — jazz night poster
+   Design system: palette, type scale, grid. Shared by the A3 print sheet
+   and the 1080x1350 Instagram crop. Sizes come from the --fs-* / --pad-*
+   variables each sheet sets, so one system covers both formats. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /* palette — three colours plus two tints of the ink */
+  --night: #0a1430; /* deep blue ground */
+  --ink: #f2eee3; /* warm off-white */
+  --amber: #f2a03c; /* single accent: the lantern light */
+  --ink-70: rgba(242, 238, 227, 0.7);
+  --ink-20: rgba(242, 238, 227, 0.2);
+
+  --display: "Inter Display", "Inter", system-ui, sans-serif;
+  --sans: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--night);
+}
+
+.sheet {
+  position: relative;
+  overflow: hidden;
+  width: var(--sheet-w);
+  height: var(--sheet-h);
+  padding: var(--pad-y) var(--pad-x);
+  background: var(--night);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sans);
+}
+
+/* --- top line ------------------------------------------------------- */
+.hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1em;
+  padding-bottom: var(--gap-s);
+}
+
+.eyebrow {
+  margin: 0;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: var(--fs-eyebrow);
+  line-height: 1;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.eyebrow--dim {
+  color: var(--ink-70);
+}
+
+.rule {
+  flex: none;
+  height: var(--hairline);
+  background: var(--ink-20);
+}
+
+/* --- title ---------------------------------------------------------- */
+.title {
+  margin: var(--title-gap) 0 0;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: var(--fs-display);
+  line-height: 0.84;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+}
+.title span {
+  display: block;
+}
+
+/* --- illustration band, full bleed, sitting on the footer rule ------- */
+.band {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: flex-end;
+  margin: var(--band-gap) calc(-1 * var(--pad-x)) 0;
+}
+.band img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* --- details -------------------------------------------------------- */
+.foot {
+  flex: none;
+}
+.details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  column-gap: var(--gap-m);
+  row-gap: var(--gap-r);
+  padding-top: var(--gap-s);
+}
+.label {
+  margin: 0;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: var(--fs-label);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.value {
+  margin: 0.42em 0 0;
+  font-weight: 800;
+  font-size: var(--fs-value);
+  line-height: 1.06;
+  letter-spacing: -0.012em;
+}
+.badge {
+  display: inline-block;
+  margin-top: 0.42em;
+  padding: var(--badge-pad);
+  background: var(--amber);
+  color: var(--night);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: var(--fs-badge);
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* --- title mark: an amber full stop on the second line --------------- */
+.title .row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.1em;
+}
+.title .mark {
+  display: block;
+  width: 0.17em;
+  height: 0.17em;
+  background: var(--amber);
+}

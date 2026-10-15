@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "paths": { "@app/*": ["../web/src/*"] }
+  },
+  "include": ["src", "../web/src/stage/webcodecs.d.ts"],
+  "exclude": ["src/worker.ts"]
+}

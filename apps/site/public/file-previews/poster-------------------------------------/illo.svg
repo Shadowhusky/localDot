@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 440" width="1000" height="440" role="img"
+     aria-label="A moon rising behind four horizon lines, with a hanging lantern and its ring of light to the left">
+  <!-- geometric illustration, three colours: night ground, off-white moon, amber lantern -->
+
+  <!-- moon: cropped by the right edge and resting on the baseline -->
+  <circle cx="880" cy="440" r="210" fill="#F2EEE3"/>
+
+  <!-- horizon lines: off-white across the night ground, night-blue where they cross the moon -->
+  <g stroke="#F2EEE3" stroke-width="2" fill="none">
+    <line x1="0" y1="312" x2="1000" y2="312" opacity=".20"/>
+    <line x1="0" y1="354" x2="1000" y2="354" opacity=".17"/>
+    <line x1="0" y1="396" x2="1000" y2="396" opacity=".14"/>
+    <line x1="0" y1="436" x2="1000" y2="436" opacity=".10"/>
+  </g>
+  <g stroke="#0A1430" stroke-width="2" fill="none">
+    <line x1="660" y1="312" x2="1000" y2="312" opacity=".32"/>
+    <line x1="660" y1="354" x2="1000" y2="354" opacity=".28"/>
+    <line x1="660" y1="396" x2="1000" y2="396" opacity=".23"/>
+    <line x1="660" y1="436" x2="1000" y2="436" opacity=".18"/>
+  </g>
+
+  <!-- lantern: ring of light, cord, roof, glass, base -->
+  <circle cx="170" cy="205" r="95" fill="none" stroke="#F2A03C" stroke-width="2.5"
+          stroke-dasharray="12 15" opacity=".45"/>
+  <line x1="170" y1="-4" x2="170" y2="120" stroke="#F2EEE3" stroke-opacity=".65" stroke-width="2.5"/>
+  <polygon points="128,120 212,120 196,152 144,152" fill="#F2A03C"/>
+  <rect x="146" y="152" width="48" height="112" rx="9" fill="#F2A03C"/>
+  <rect x="158" y="166" width="24" height="84" rx="5" fill="#F2EEE3" opacity=".93"/>
+  <rect x="142" y="264" width="56" height="11" rx="3.5" fill="#F2A03C"/>
+</svg>

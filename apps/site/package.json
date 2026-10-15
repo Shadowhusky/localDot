@@ -4,24 +4,40 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4321 --strictPort",
-    "build": "vite build && node scripts/security-headers.mjs",
+    "dev": "vite --configLoader runner --host 127.0.0.1 --port 4321 --strictPort",
+    "build": "vite build --configLoader runner && node scripts/security-headers.mjs && node scripts/media-lengths.mjs",
     "build:holding": "node scripts/build-holding.mjs",
-    "preview": "vite preview --host 127.0.0.1 --port 4321 --strictPort",
+    "preview": "vite preview --configLoader runner --host 127.0.0.1 --port 4321 --strictPort",
     "deploy": "pnpm build && wrangler deploy --assets ./dist",
     "deploy:check": "pnpm build && wrangler deploy --assets ./dist --dry-run",
-    "typecheck": "wrangler types && tsc --noEmit -p tsconfig.worker.json",
+    "typecheck": "wrangler types && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.json",
     "check:browser": "node scripts/check-experience.mjs",
-    "preview:worker": "wrangler dev --local --assets ./dist --host localhost --ip 127.0.0.1 --port 8788 --inspector-port 9237"
+    "preview:worker": "wrangler dev --local --assets ./dist --host localhost --ip 127.0.0.1 --port 8788 --inspector-port 9237",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@localdot/protocol": "link:../../packages/protocol",
+    "@localdot/providers": "link:../../packages/providers",
+    "@localdot/stage": "link:../../packages/stage",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "three": "0.186.1"
   },
   "devDependencies": {
+    "@fontsource-variable/inter": "5.3.0",
     "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-react": "6.1.1",
     "axe-core": "4.13.0",
+    "gsap": "3.13.0",
+    "jsdom": "30.1.1",
+    "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.1",
+    "vitest": "5.0.3",
     "wrangler": "4.141.0"
   }
 }

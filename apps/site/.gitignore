@@ -5,3 +5,16 @@ dist-holding/
 
 node_modules/
 dist/
+film/assets/
+film/renders/
+film/models/
+film/.hyperframes/
+film/.waveform-cache/
+film/.thumbnails/
+
+# Videos are published with the site, not kept here: the films carry licensed music and the demos
+# come from reviewed sessions (README: Films, Demos).
+public/film/*.mp4
+public/demos/**/*.mp4
+public/file-previews/**/*.mp4
+film/localdot-film.mp4

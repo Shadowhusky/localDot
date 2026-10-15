@@ -26,6 +26,8 @@ export default defineConfig({
       "**/*.keyd.test.ts",
       "**/*.codex.test.ts",
       "**/*.eval.test.ts",
+      // The website's tests run under its own config: pnpm --dir apps/site test.
+      "apps/site/**",
     ],
   },
 });

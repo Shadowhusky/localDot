@@ -1,0 +1,16 @@
+{
+  "recording": "complete",
+  "results": [
+    {
+      "resultId": "01M4YTEFANZ67TMEANAS31E5EQ",
+      "frames": [
+        { "role": "start", "frameId": "01M4YREMTPB7AM5XJ1Q3N7D57C", "tMs": 1170 },
+        { "role": "change", "frameId": "01M4YRVTV7AK05N8VB75Z21B8S", "tMs": 433313 },
+        { "role": "end", "frameId": "01M4YTC9YWN01R64VNYPPAGF3Q", "tMs": 2021626 }
+      ],
+      "checked": "Opened the PDF: 12 pages, A4; cover, three day tables with 29 map links, budget tables, three rainy-day cards and the source list render with colours intact and none clipped.",
+      "startMs": 0,
+      "endMs": 2092648
+    }
+  ]
+}
