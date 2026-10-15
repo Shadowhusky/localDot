@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_THUMBS, ULID_PATTERN } from "@localdot/protocol";
-import sharp from "sharp";
 import type { FrameStore } from "../gateway/frames.ts";
+import { raster } from "../raster.ts";
 export const THUMB_W = 320,
   THUMB_H = 200,
   THUMB_CONCURRENCY = 2;
@@ -49,7 +49,7 @@ export class Thumbnails {
     try {
       if (!existsSync(source)) return undefined;
       if (existsSync(file)) return file;
-      const bytes = await sharp(source)
+      const bytes = await (await raster(readFileSync(source)))
         .resize(THUMB_W, THUMB_H, { fit: "fill", background: { r: 0, g: 0, b: 0, alpha: 1 } })
         .webp({ quality: 70 })
         .toBuffer();

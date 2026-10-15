@@ -9,6 +9,7 @@ import { NO_STREAM } from "../cells/types.ts";
 import { DesktopdRegistry } from "../desktopd/registry.ts";
 import { FakeDesktopd } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
+import { NotRaster } from "../raster.ts";
 import { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged, regionChanged } from "./freshness.ts";
 import { ActionGateway, type GuiAction } from "./gateway.ts";
@@ -100,6 +101,14 @@ describe("freshness pixels", () => {
     expect(() => lumaRegionChanged(base(), base(), point, { threshold: NaN })).toThrow(RangeError);
     expect(() => lumaRegionChanged(base(), base(), point, { fraction: 2 })).toThrow(RangeError);
     expect(() => animationKeepsTarget(base(), base(), Buffer.alloc(1), point)).toThrow(RangeError);
+  });
+  it("decodes no frame from the computer that is not a PNG, JPEG, GIF or WebP", async () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800"/>');
+    const tiff = await sharp(base(), { raw: { width: 1280, height: 800, channels: 1 } })
+      .tiff()
+      .toBuffer();
+    for (const frame of [svg, tiff])
+      await expect(frameLuma(frame)).rejects.toBeInstanceOf(NotRaster);
   });
 });
 

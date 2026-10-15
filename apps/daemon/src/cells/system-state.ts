@@ -27,6 +27,11 @@ const failure = () =>
     "Your computer's system data could not be preserved. Recovery has stopped without creating a clean computer.",
   );
 
+// Docker commit copies the container's environment into the image, and a desktop's holds its
+// desktopd token and stream password. A computer made from the image gets its own again
+// (desktopSpec), so the image keeps them blank.
+export const BLANK_CREDENTIALS = ["LOCALDOT_DESKTOPD_TOKEN=", "PASSWORD="];
+
 // The snapshot a desktop's system descends from, if any. A migrated image inherits the labels of
 // the snapshot it was built from, so its system-base label wins and an empty value counts as none.
 export function snapshotOf(labels: Record<string, string> | undefined): string | undefined {
@@ -95,7 +100,10 @@ export class ComputerSystemState {
         repo: "localdot/system-state",
         tag: record.id.toLowerCase(),
       },
-      body: { Labels: { "localdot.snapshot": record.id, "localdot.snapshot-source": id } },
+      body: {
+        Env: BLANK_CREDENTIALS,
+        Labels: { "localdot.snapshot": record.id, "localdot.snapshot-source": id },
+      },
     });
     const value = Snapshot.parse({
       cellId: record.id,

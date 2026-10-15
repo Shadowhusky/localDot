@@ -4,6 +4,7 @@ import { KeydOpened, type LocalServer } from "@localdot/protocol";
 import { homeLabel } from "../agent/brain-cell.ts";
 import { type DockerClient, DockerError } from "../cells/docker.ts";
 import { hostAddress } from "../cells/ipv4.ts";
+import { requireNoGateway } from "../cells/orchestrator.ts";
 import { type GateRelay, HOST_RELAY } from "../cells/relay.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { AttachTransport, attachContainer } from "./attach.ts";
@@ -50,7 +51,7 @@ interface Created {
 }
 interface NetworkInspect {
   Id: string;
-  IPAM?: { Config?: { Subnet?: string }[] };
+  IPAM?: { Config?: { Subnet?: string; Gateway?: string }[] };
 }
 
 export const connectorCellId = (connectorId: string) => `connector-${connectorId}`;
@@ -122,13 +123,14 @@ export class ConnectorCells {
       if (typeof reply?.Id !== "string" || !reply.Id) throw new Error("invalid Docker reply");
       object.id = reply.Id;
     };
-    const subnet = async (id: string) => {
+    const subnet = async (id: string, isolated = false) => {
       const inspect = await this.deps.docker.request<NetworkInspect>({
         method: "GET",
         path: objectPath("networks", id),
       });
       const value = inspect?.IPAM?.Config?.[0]?.Subnet;
       if (!value) throw new Error("a connector network has no IPv4 subnet");
+      if (isolated) requireNoGateway(id, inspect.IPAM?.Config ?? []);
       return value;
     };
     try {
@@ -137,7 +139,7 @@ export class ConnectorCells {
       const egress: Created = { kind: "networks", name: layout.names.egressNetwork };
       await create(internal, networks.internal);
       await create(egress, networks.egress);
-      const internalSubnet = await subnet(internal.id as string);
+      const internalSubnet = await subnet(internal.id as string, true);
       const egressSubnet = await subnet(egress.id as string);
       layout.gateInternalIp = hostAddress(internalSubnet, CONNECTOR_GATE_OFFSET);
       layout.gateEgressIp = hostAddress(egressSubnet, CONNECTOR_GATE_OFFSET);

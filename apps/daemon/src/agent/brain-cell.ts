@@ -9,6 +9,7 @@ import {
 } from "@localdot/protocol";
 import { type DockerClient, DockerError } from "../cells/docker.ts";
 import { hostAddress } from "../cells/ipv4.ts";
+import { requireNoGateway } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
 import { type GateRelay, HOST_RELAY } from "../cells/relay.ts";
 import type { KeydClient } from "../keyd/client.ts";
@@ -104,7 +105,7 @@ interface Owned {
 interface NetworkInspect {
   Id: string;
   Labels: Record<string, string>;
-  IPAM: { Config: { Subnet?: string }[] };
+  IPAM: { Config: { Subnet?: string; Gateway?: string }[] };
 }
 interface Listed {
   Id: string;
@@ -269,6 +270,7 @@ export class BrainCells {
       const egressSubnet = egress.IPAM?.Config?.[0]?.Subnet;
       if (!internalSubnet || !egressSubnet)
         throw new BrainStateError("a brain network has no IPv4 subnet");
+      requireNoGateway(internalId, internal.IPAM.Config);
       layout.gateInternalIp = hostAddress(internalSubnet, BRAIN_GATE_OFFSET);
       layout.gateEgressIp = hostAddress(egressSubnet, BRAIN_GATE_OFFSET);
       layout.brainIp = hostAddress(internalSubnet, BRAIN_OFFSET);

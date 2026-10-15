@@ -12,7 +12,7 @@ import {
   SystemBaseMissing,
   verifyMigration,
 } from "./system-migration-plan.ts";
-import { ComputerSystemState, snapshotOf } from "./system-state.ts";
+import { BLANK_CREDENTIALS, ComputerSystemState, snapshotOf } from "./system-state.ts";
 import { tar } from "./tar.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -117,6 +117,7 @@ export class SystemMigration {
         repo: "localdot/update-backup",
         tag: operation,
       },
+      body: { Env: BLANK_CREDENTIALS },
     });
     imageId.parse(checkpoint.Id);
     try {
@@ -198,6 +199,12 @@ export class SystemMigration {
         },
         body: {
           ...image.Config,
+          Env: [
+            ...((image.Config.Env as string[] | undefined) ?? []).filter(
+              (entry) => !BLANK_CREDENTIALS.some((blank) => entry.startsWith(blank)),
+            ),
+            ...BLANK_CREDENTIALS,
+          ],
           Labels: {
             ...((image.Config.Labels as Record<string, string>) ?? {}),
             [SYSTEM_BASE]: target,

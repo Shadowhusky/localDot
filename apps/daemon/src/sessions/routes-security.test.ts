@@ -104,6 +104,15 @@ describe("replay routes: auth, ids and byte ranges", () => {
     expect(dotted.status).toBe(404);
   });
 
+  it("serves a thumbnail for no cache to keep", async () => {
+    const res = await app.request(url(`/api/sessions/${id}/thumbs/${frameId}`), {
+      headers: bearer,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/webp");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("serves byte ranges inside the recording only", async () => {
     const full = await app.request(url(`/api/sessions/${id}/recording/video.mp4`), {
       headers: bearer,

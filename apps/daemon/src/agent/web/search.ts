@@ -107,7 +107,7 @@ async function picturesOf(
       try {
         const reply = await web.get(url, {
           signal,
-          accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
+          accept: "image/webp,image/png,image/jpeg",
           maxBytes: PICTURE_BYTES,
         });
         if (reply.status !== 200 || reply.truncated || !reply.contentType.startsWith("image/"))

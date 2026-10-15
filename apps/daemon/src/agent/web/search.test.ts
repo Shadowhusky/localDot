@@ -36,11 +36,19 @@ const page = (name: string, contentType = "text/html; charset=utf-8") => ({
   body: fixture(name),
   contentType,
 });
-const png = await sharp({
-  create: { width: 900, height: 600, channels: 4, background: { r: 200, g: 40, b: 40, alpha: 1 } },
-})
-  .png()
-  .toBuffer();
+const canvas = () =>
+  sharp({
+    create: {
+      width: 900,
+      height: 600,
+      channels: 4,
+      background: { r: 200, g: 40, b: 40, alpha: 1 },
+    },
+  });
+const png = await canvas().png().toBuffer();
+const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"/>');
+const tiff = await canvas().tiff().toBuffer();
+const heif = await canvas().avif().toBuffer();
 
 describe("web search", () => {
   it("returns the first engine's results, as many as asked for", async () => {
@@ -112,6 +120,24 @@ describe("web search", () => {
     for (const host of hosts) expect(host).toMatch(/\.mm\.bing\.net$|^th\.bing\.com$/);
     expect(hosts.length).toBeLessThanOrEqual(6);
   });
+
+  it("asks only for WebP, PNG and JPEG thumbnails, and shows no SVG, TIFF or HEIF served as one", async () => {
+    const { web, asked } = fakeWeb({
+      "www.bing.com": page("bing-images.html"),
+      "ts1.mm.bing.net": { body: svg, contentType: "image/svg+xml" },
+      "ts2.mm.bing.net": { body: tiff, contentType: "image/png" },
+      "ts3.mm.bing.net": { body: heif, contentType: "image/avif" },
+      "ts4.mm.bing.net": { body: png, contentType: "image/png" },
+    });
+    const out = await webSearch(web, { query: "Zelda", kind: "images", count: 10 }, signal);
+    const thumbnails = asked.slice(1);
+    expect(thumbnails.length).toBeGreaterThan(0);
+    for (const { options } of thumbnails)
+      expect(options.accept).toBe("image/webp,image/png,image/jpeg");
+    const shown = out.pictures.map((picture) => new URL(picture.url).hostname);
+    expect(shown.length).toBeGreaterThan(0);
+    for (const host of shown) expect(host).toBe("ts4.mm.bing.net");
+  });
 });
 
 describe("reading a page or a picture", () => {
@@ -156,5 +182,18 @@ describe("reading a page or a picture", () => {
     await expect(read("d.example.org")).rejects.toThrow("application/zip");
     await expect(read("e.example.org")).rejects.toThrow("The picture could not be read.");
     await expect(read("f.example.org")).resolves.toMatchObject({ kind: "page", text: '{"a":1}' });
+  });
+
+  it("refuses SVG, TIFF and HEIF served as image/*", async () => {
+    const { web } = fakeWeb({
+      "a.example.org": { body: svg, contentType: "image/svg+xml" },
+      "b.example.org": { body: svg, contentType: "image/png" },
+      "c.example.org": { body: tiff, contentType: "image/tiff" },
+      "d.example.org": { body: heif, contentType: "image/avif" },
+    });
+    for (const host of ["a.example.org", "b.example.org", "c.example.org", "d.example.org"])
+      await expect(webFetch(web, new URL(`https://${host}/x`), 5000, signal), host).rejects.toThrow(
+        "The picture could not be read.",
+      );
   });
 });

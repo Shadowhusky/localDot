@@ -78,9 +78,10 @@ describe("ConnectorCells", () => {
     reserved.clear();
   });
 
-  async function cells() {
+  async function cells({ gatewayOnInternal = false } = {}) {
     docker = await startFakeDocker({
       images: new Set(["localdot/connector:dev", "localdot/gate:dev"]),
+      gatewayOnInternal,
     });
     keyd = await startFakeKeyd();
     keyd.records.set("connector-brave", {
@@ -169,6 +170,17 @@ describe("ConnectorCells", () => {
     expect(docker.state.containers.size).toBe(0);
     expect(docker.state.networks.size).toBe(0);
     expect(keyd.cells.has(cell.cellId)).toBe(false);
+    expect(reserved.size).toBe(0);
+  });
+
+  it("refuses an internal network that has a gateway address, and leaves nothing behind", async () => {
+    const { connectorCells } = await cells({ gatewayOnInternal: true });
+    await expect(connectorCells.open("brave", BRAVE, new AbortController().signal)).rejects.toThrow(
+      /has a gateway address .*does not isolate internal networks/,
+    );
+    expect(docker.state.containers.size).toBe(0);
+    expect(docker.state.networks.size).toBe(0);
+    expect(keyd.cells.size).toBe(0);
     expect(reserved.size).toBe(0);
   });
 

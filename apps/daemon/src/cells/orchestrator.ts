@@ -216,6 +216,20 @@ const MAX_DETAIL = 200;
 const clamp = (text: string) =>
   text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL - 1)}…` : text;
 
+// Plain --internal still exposes Docker Desktop VM listeners on the bridge gateway (S3, D14): an
+// internal network that reports a gateway address is on an engine that ignored isolated mode.
+export function requireNoGateway(
+  networkId: string,
+  configs: readonly { Gateway?: string }[],
+): void {
+  const gateway = configs.find((entry) => entry.Gateway && entry.Gateway !== "invalid IP")?.Gateway;
+  if (gateway && gateway !== "invalid IP") {
+    throw new Error(
+      `network ${networkId} has a gateway address (${clamp(gateway)}): this Docker Engine does not isolate internal networks; run the doctor`,
+    );
+  }
+}
+
 // Spec, error handling: a crashed cell is restarted with backoff. Docker's own restart policy is not
 // used (P2-R14): it would restart behind the daemon's back and change the published ports unseen.
 const DEFAULT_RESTART_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000];
@@ -1764,14 +1778,7 @@ export class CellOrchestrator {
     const config = info.IPAM.Config[0];
     const subnet = config?.Subnet;
     if (!subnet) throw new Error(`network ${networkId} has no IPv4 subnet`);
-    const gateway = info.IPAM.Config.find(
-      (entry) => entry.Gateway && entry.Gateway !== "invalid IP",
-    )?.Gateway;
-    if (opts.isolated && gateway && gateway !== "invalid IP") {
-      throw new Error(
-        `network ${networkId} has a gateway address (${clamp(gateway)}): this Docker Engine does not isolate internal networks; run the doctor`,
-      );
-    }
+    if (opts.isolated) requireNoGateway(networkId, info.IPAM.Config);
     return subnet;
   }
 
