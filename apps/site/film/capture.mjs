@@ -16,6 +16,8 @@ const page = await browser.newPage({
   deviceScaleFactor: 2,
 });
 await page.goto(origin, { waitUntil: "networkidle" });
+// The page opens still on the task picker: Breakout is the first task.
+await page.locator(".site-app .site-demo").first().click();
 // The film puts its own dot in the dock, and frames the window itself.
 await page.addStyleTag({
   content:
