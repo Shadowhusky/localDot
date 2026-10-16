@@ -116,3 +116,22 @@ Validation: 329 focused TypeScript tests, 18 Python browser-profile tests, the
 native Chromium preview regression, workspace typecheck/lint, 15 pinned offline
 Codex probes and 9 native sandbox probes passed. These browser regressions use
 synthetic data; they do not certify the application's four authenticated UI changes.
+
+## Component-copy ownership and subsequent computer updates
+
+A later full-image update can correctly refuse files that were patched directly in a running
+computer. On 17 October, the two conflicting files (`/opt/localdot/desktop-browser.py` and
+`/opt/localdot/desktopd.mjs`) already matched the target image byte-for-byte and had the same
+permissions, but retained the macOS copier's UID/GID (`501:20`) instead of the image's `0:0`.
+Migration compares ownership as well as contents; the update therefore rolled back, leaving
+Update available. This was a deployment metadata conflict, not a successful update followed
+by a stale badge.
+
+Prefer building and activating images through the normal updater. Do not use `docker cp -a`
+from a macOS source tree to install Linux runtime files: it preserves the host's ownership.
+If an emergency component copy is unavoidable, preserve the target image's exact mode,
+UID/GID and contents, and record both old and new metadata. Do not apply a recursive `chown`
+to the computer or relax migration's protection for user-modified files.
+
+For this incident, both runtime files and their metadata were backed up, exact target hashes
+were verified, and only their ownership was corrected before retrying the normal updater.
