@@ -25,7 +25,8 @@
     "keyd": "cd keyd && go build -o bin/keyd ./cmd/keyd && exec ./bin/keyd",
     "test:codex": "vitest run --config vitest.codex.config.ts",
     "test:codex-signin": "vitest run --config vitest.codex-signin.config.ts",
-    "check:codex-release": "node --experimental-transform-types scripts/check-codex-release.mjs"
+    "check:codex-release": "node --experimental-transform-types scripts/check-codex-release.mjs",
+    "images:cleanup": "node scripts/cleanup-images.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

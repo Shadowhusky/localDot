@@ -552,3 +552,32 @@ VM evidence includes available RAM and the kernel full-memory-stall average, rep
 from the container limit; absent kernel metrics remain unknown.
 The desktop cap must leave room for the separate browser, brain, Docker engine and other apps;
 increasing it alone is not a solution to a small VM or an unbounded development workload.
+
+
+### Reclaiming old development images
+
+From a source checkout, run `pnpm images:cleanup` to preview old localDot runtime builds,
+then `pnpm images:cleanup --apply` to remove the reviewed candidates. Run between image
+builds and computer updates. `LOCALDOT_HOME` selects the source installation;
+`LOCALDOT_DOCKER_SOCKET` selects its local Docker socket (default `/var/run/docker.sock`).
+
+The retention policy keeps images younger than 24 hours, current `dev`/`latest`/`stable`
+tags, two development rollback generations per role, and the newest two release versions
+per role and architecture. Every running or stopped container, saved image reference,
+system snapshot, update checkpoint and migration base is protected. Unknown image tags,
+unlabelled dangling images and unrelated repositories are retained. New runtime builds
+carry `localdot.image-role`, allowing future cleanup to recognize untagged localDot builds.
+
+The command is manual, defaults to preview, checks fresh references before each deletion,
+and aborts when metadata changes or cannot be read. Docker deletion is non-forced and
+ancestor pruning is disabled. A conflicting Docker reference is retained and reported.
+It never deletes containers, volumes, build caches, installed apps, or recovery disk copies.
+Packaged installations are deliberately refused until this operation participates in the
+installer's lock and authenticated release-retention policy. There is no background timer.
+
+Image sizes include shared layers: adding displayed sizes exaggerates savings. Compare
+Docker's `system df` before and after cleanup. Build cache and APFS recovery clones can
+retain underlying blocks, so removing images need not immediately free the same amount
+of host disk space. Recovery checkpoint retirement is a separate, explicit operation.
+See [Docker image removal](https://docs.docker.com/reference/cli/docker/image/rm/) for
+alias and shared-image behavior.

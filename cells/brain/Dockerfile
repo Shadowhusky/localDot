@@ -5,3 +5,6 @@ FROM node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db86
 COPY dist/brain.mjs /opt/localdot/brain.mjs
 USER node
 ENTRYPOINT ["node", "/opt/localdot/brain.mjs"]
+
+# Ownership survives retagging so maintenance can identify unused localDot builds.
+LABEL localdot.image-role="brain"

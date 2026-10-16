@@ -10,3 +10,6 @@ RUN chmod 555 /relay.sh /gate.sh /link.sh /usr/local/bin/ldgate
 LABEL localdot.capture="1"
 USER nobody
 ENTRYPOINT ["/gate.sh"]
+
+# Ownership survives retagging so maintenance can identify unused localDot builds.
+LABEL localdot.image-role="gate"

@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "691a8a1794e45b011019e6cb3b06923a13d3df84ea3c46e3bf22ace5598648f4",
+  "inputSha256": "6f9d9573d2fd966a84d7c8c32e1ce37da695eb4559601e03ceb5fc6ee9649b1b",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -885,7 +885,7 @@
     "harness/codex/src/testing/pinned-fixture.ts": "e905aa7f455de621baf12dff5a8a76aa922c7c4d314cc3f76e89b3ca350851cd",
     "harness/codex/src/version.ts": "98f86e761b18ee30f72b4183d75e527bc0d4246ce990ccfced9c0c2ed0dd37b6",
     "harness/codex/tsconfig.json": "312a00e9197ad8b96721449f6fdc65b996219e6c3c867a14e01eaded553b247e",
-    "package.json": "de0f8b06ab0732b1f5cafa5781a9bb30f2b78b676841014efa58b7ad59449116",
+    "package.json": "71175a754db56c7788e2824b4fb3c8460cb414bec61e1024abcbf9dbf90c9143",
     "packages/protocol/src/accounts.test.ts": "9740cce2ba608b76327cf81a8055234f6028c678a41fba4a93fbae0ce262b71a",
     "packages/protocol/src/accounts.ts": "e0304d7f8cde9f9301a75924534ad4963078f46a194928a7ee48851da88c79a5",
     "packages/protocol/src/agent-controls.test.ts": "6056c8fd02dc841ce87d46a071ce564830311508adf23375b87f9b7775b56f51",
@@ -1065,7 +1065,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "dd99b25017a300c1184196def660079803a76cc802c1bf8a39337e7e81e86a52",
+  "reportSha256": "54cf654f67cbcaddcfe84475c85f12effe35873da3db9a3217fe76a9f01538c4",
   "exit": {
     "code": 0,
     "signal": null

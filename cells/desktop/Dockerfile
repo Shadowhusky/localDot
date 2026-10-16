@@ -267,3 +267,6 @@ RUN chmod 644 /opt/localdot/forwarder.mjs /etc/apt/apt.conf.d/95localdot-proxy /
  && install -d -m 755 /etc/localdot/cell \
  && printf '\n# localDot web API key surrogates.\n. /etc/profile.d/localdot-cell.sh\n' >> /etc/bash.bashrc
 EXPOSE 3000 7700
+
+# Ownership survives retagging so maintenance can identify unused localDot builds.
+LABEL localdot.image-role="desktop"

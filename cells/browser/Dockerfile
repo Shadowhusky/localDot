@@ -9,3 +9,6 @@ COPY cells/desktop/desktopd/x/xhelper.py /opt/localdot/xhelper.py
 USER 1000:1000
 WORKDIR /
 ENTRYPOINT ["/usr/local/bin/node", "/opt/localdot/browserd.mjs"]
+
+# Ownership survives retagging so maintenance can identify unused localDot builds.
+LABEL localdot.image-role="browser"
