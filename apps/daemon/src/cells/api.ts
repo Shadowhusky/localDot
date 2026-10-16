@@ -22,11 +22,12 @@ export interface CellApiDeps {
   replacement?: ReturnType<typeof createReplacementController>;
   reset?: ReturnType<typeof createComputerResetController>;
   update?(id: string, signal: AbortSignal): Promise<void>;
+  checkRuntime?(): Promise<void>;
 }
 
 export function cellRoutes(
   app: Hono,
-  { cells, tickets, replacement, reset, update }: CellApiDeps,
+  { cells, tickets, replacement, reset, update, checkRuntime }: CellApiDeps,
 ): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
   // cell revokes it, so no stream path stays open for a computer that is off.
@@ -85,6 +86,14 @@ export function cellRoutes(
       if (!replacement) return c.text("replacement unavailable", 503);
       const parsed = ReplacementRequest.safeParse(await c.req.json().catch(() => null));
       if (!parsed.success) return c.text("invalid replacement request", 400);
+      // Refuse before reserving a request or retiring anything. Desktop can still be
+      // running while its Linux engine is stuck, so checking the app/version isn't enough.
+      try {
+        await checkRuntime?.();
+      } catch {
+        c.header("x-localdot-recovery", "runtime-unavailable");
+        return c.text("computer runtime unavailable; replacement was not started", 503);
+      }
       try {
         return c.json(await replacement.owner.replace(id, parsed.data));
       } catch (error) {

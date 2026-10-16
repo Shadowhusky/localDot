@@ -156,12 +156,13 @@ async function fixture() {
     readyTimeoutMs: 1000,
   });
   const clock = monotonicClock(),
-    registry = new DesktopdRegistry(cells, clock);
+    registry = new DesktopdRegistry(cells, clock),
+    checkRuntime = vi.fn(async () => {});
   const app = createApp({
     token: TOKEN,
     port: 4750,
     eventLog: h.eventLog,
-    cells: { cells, tickets, replacement },
+    cells: { cells, tickets, replacement, checkRuntime },
     desktop: { cells, tickets, vendorDir: "/private/tmp/unused-selkies" },
     gateway: { registry, clock, live, killSwitch },
   });
@@ -211,6 +212,7 @@ async function fixture() {
     runnerDeps,
     retireBrain,
     replacement,
+    checkRuntime,
     request,
     fence,
     body,
@@ -219,6 +221,31 @@ async function fixture() {
   };
 }
 describe("replacement crosses real runner, lifecycle and public route boundaries", () => {
+  it("refuses an unavailable engine before retiring the old computer and allows the same request after recovery", async () => {
+    const f = await fixture();
+    await f.fence();
+    const body = f.body(),
+      path = `/api/cells/${f.oldCellId}/replacement`,
+      retire = vi.spyOn(f.cells, "retireReplacement"),
+      create = vi.spyOn(f.cells, "create"),
+      original = f.fences.record(f.oldCellId);
+    f.checkRuntime.mockRejectedValueOnce(new Error("private Docker socket diagnostic"));
+    const refused = await f.request(path, "POST", body);
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("x-localdot-recovery")).toBe("runtime-unavailable");
+    expect(await refused.text()).not.toContain("private");
+    expect(retire).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(f.fences.record(f.oldCellId)).toEqual(original);
+    expect(await f.replacement.owner.status(f.oldCellId, body.requestId)).toBeUndefined();
+    const retried = await f.request(path, "POST", body);
+    expect(retried.status).toBe(200);
+    const result = ReplacementRecord.parse(await retried.json());
+    expect(result.phase).toBe("ready");
+    expect(create).toHaveBeenCalledOnce();
+    if (!result.newCellId) throw new Error("replacement identity missing");
+    expect(f.cells.get(result.newCellId)?.state).toBe("ready");
+  });
   it("a named shell uncertainty permanently fences historical work; only the fresh Ready identity can run", async () => {
     const f = await fixture(),
       ticket = f.tickets.issue(f.oldCellId);

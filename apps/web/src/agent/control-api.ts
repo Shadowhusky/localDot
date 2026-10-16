@@ -9,6 +9,7 @@ import {
   TakeControlReply,
   ULID_PATTERN,
 } from "@localdot/protocol";
+import { RECOVERY_RUNTIME_UNAVAILABLE } from "../cells/errors.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export class ControlFailure extends Error {
@@ -84,12 +85,21 @@ export async function controlRequest<T>(
     if (response.status === 401) api.rejectUnauthorized?.();
     if (response.status !== status) {
       void response.body?.cancel().catch(() => {});
+      const replacementCell = path.match(/^\/api\/cells\/([^/]+)\/replacement$/)?.[1];
+      const runtimeUnavailable =
+        method === "POST" &&
+        response.status === 503 &&
+        !!replacementCell &&
+        ULID_PATTERN.test(replacementCell) &&
+        response.headers.get("x-localdot-recovery") === "runtime-unavailable";
       throw new ControlFailure(
-        ![400, 401, 403, 404, 409, 413, 415, 422].includes(response.status),
+        !runtimeUnavailable && ![400, 401, 403, 404, 409, 413, 415, 422].includes(response.status),
         response.status,
-        response.headers.get("x-localdot-recovery") === "task-retirement"
-          ? "The previous task has not finished shutting down. Recovery is blocked until its cleanup is confirmed. Run localdot doctor for details."
-          : undefined,
+        runtimeUnavailable
+          ? RECOVERY_RUNTIME_UNAVAILABLE
+          : response.headers.get("x-localdot-recovery") === "task-retirement"
+            ? "The previous task has not finished shutting down. Recovery is blocked until its cleanup is confirmed. Run localdot doctor for details."
+            : undefined,
       );
     }
     const length = response.headers.get("content-length");

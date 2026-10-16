@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../lib/api.ts";
-import { describeRequestError } from "./errors.ts";
+import { describeRequestError, RECOVERY_RUNTIME_UNAVAILABLE, replacementNotice } from "./errors.ts";
 
 // Bodies the daemon really sends: apps/daemon/src/cells/api.ts and DockerError's message, captured
 // from a daemon run against a missing Docker socket.
@@ -58,4 +58,20 @@ it("does not diagnose generic startup conflicts as corrupt computer records", ()
   expect(unknown).not.toContain("record");
   expect(unknown).not.toContain("/home");
   expect(unknown).not.toContain("remove");
+});
+
+it("explains the stage that failed instead of claiming a fresh computer was created", () => {
+  const old = { phase: "blocked", reason: "old_retirement" } as const;
+  const note = replacementNotice(old);
+  expect(note).toContain("old computer");
+  expect(note).not.toContain("fresh computer");
+  expect(note).toContain("files are kept");
+  expect(replacementNotice({ phase: "blocked", reason: "new_creation" })).toContain(
+    "fresh computer",
+  );
+  expect(replacementNotice(old, RECOVERY_RUNTIME_UNAVAILABLE)).toBe(RECOVERY_RUNTIME_UNAVAILABLE);
+  expect(replacementNotice(undefined, RECOVERY_RUNTIME_UNAVAILABLE)).toBe(
+    RECOVERY_RUNTIME_UNAVAILABLE,
+  );
+  expect(replacementNotice(undefined)).toBeUndefined();
 });

@@ -1,7 +1,23 @@
+import type { ReplacementRecord } from "@localdot/protocol";
 import { ApiError } from "../lib/api.ts";
 
 export const DOCKER_DOWN = "Docker isn't answering. Check that Docker Desktop is running";
 export const GONE = "This computer no longer exists.";
+export const RECOVERY_RUNTIME_UNAVAILABLE =
+  "Docker isn't responding. Start or restart Docker on the host computer, then try again. Your files are kept.";
+
+export function replacementNotice(
+  record: Pick<ReplacementRecord, "phase" | "reason"> | null | undefined,
+  error?: string | null,
+): string | undefined {
+  if (error) return error;
+  if (record?.phase === "blocked")
+    return record.reason === "old_retirement"
+      ? "The old computer couldn't be saved and shut down safely. Your files are kept. Check Docker, then try again."
+      : "The fresh computer couldn't be checked. Your saved computer data is kept. Try recovery again.";
+  if (record?.phase === "ready") return "The fresh computer is ready. Opening it…";
+  return record ? "Saving the old computer and starting a fresh one." : undefined;
+}
 
 const RESUME_ANSWERS: Record<string, string> = {
   "the computer is not paused": "Your computer isn't paused.",

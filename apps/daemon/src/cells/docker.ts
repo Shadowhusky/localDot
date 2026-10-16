@@ -72,6 +72,18 @@ export class DockerClient {
     if (socketPath === "") throw new RangeError("the Docker socket path is empty");
   }
 
+  // /version may be answered by Desktop's host proxy even if the Linux engine is
+  // unresponsive. Require an actual, bounded engine response before recovery writes.
+  async checkReady(timeoutMs = 5000): Promise<void> {
+    const info = await this.request<{ OSType?: unknown; ServerVersion?: unknown } | null>({
+      method: "GET",
+      path: "/info",
+      timeoutMs,
+    });
+    if (info?.OSType !== "linux" || typeof info.ServerVersion !== "string" || !info.ServerVersion)
+      throw new DockerError(503, "Linux engine readiness unconfirmed", "/info");
+  }
+
   request<T = undefined>(req: DockerRequest): Promise<T> {
     return this.#send<T>(`/${DOCKER_API}`, req);
   }

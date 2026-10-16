@@ -40,6 +40,7 @@ import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { stopNotice, stoppedOff, useStopToast } from "./agent/useStopToast.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { deliverText } from "./agent/write-api.ts";
+import { replacementNotice } from "./cells/errors.ts";
 import { type HudActionKind, hudFor, withScreenHud } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
@@ -1553,7 +1554,6 @@ function Theatre({ api }: { api: ApiClient }) {
   const confirming = agent.snapshot?.manualControl === "unconfirmed";
   const handBack = useHandBack({ takeover, controls, drained: manual.drained });
   const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
-  const replacement = safety.replacement?.phase;
   // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
   // is a sheet below, dot asks it aloud.
   const narration = curtain.up
@@ -1784,14 +1784,7 @@ function Theatre({ api }: { api: ApiClient }) {
                         ? {
                             enabled: safety.canReplace,
                             busy: safety.replacing,
-                            note:
-                              replacement === "blocked"
-                                ? "The fresh computer couldn't be checked, so the old one stays off."
-                                : replacement === "ready"
-                                  ? "The fresh computer is ready. Opening it…"
-                                  : replacement
-                                    ? "Setting the old computer aside and starting a fresh one."
-                                    : undefined,
+                            note: replacementNotice(safety.replacement, safety.error),
                             run: () => void safety.replace(),
                           }
                         : undefined

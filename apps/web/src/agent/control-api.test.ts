@@ -4,6 +4,7 @@ import { createApi } from "../lib/api.ts";
 import {
   answerQuestion,
   ControlFailure,
+  controlRequest,
   returnControl,
   stopTask,
   undoMemory,
@@ -123,4 +124,39 @@ it("takes memory Undo's 503 as a refusal: memory doesn't change while the user h
     undoMemory(fixture(vi.fn<typeof fetch>(async () => new Response("", { status }))), ID, signal);
   await expect(answer(503)).rejects.toMatchObject({ uncertain: false, status: 503 });
   await expect(answer(502)).rejects.toMatchObject({ uncertain: true, status: 502 });
+});
+
+it("only treats the replacement route's explicit runtime preflight refusal as safely unstarted", async () => {
+  const path = `/api/cells/${ID}/replacement`;
+  for (const [requestPath, method, status, header, refused] of [
+    [path, "POST", 503, "runtime-unavailable", true],
+    [path, "GET", 503, "runtime-unavailable", false],
+    [path, "POST", 502, "runtime-unavailable", false],
+    [path, "POST", 503, "", false],
+    [`/api/agent/sessions/${SESSION}/stop`, "POST", 503, "runtime-unavailable", false],
+  ] as const) {
+    const api = fixture(
+      async () =>
+        new Response("private engine diagnostic", {
+          status,
+          headers: { "x-localdot-recovery": header },
+        }),
+    );
+    const error = await controlRequest(
+      api,
+      requestPath,
+      undefined,
+      200,
+      new AbortController().signal,
+      () => {},
+      method,
+    ).catch((error: unknown) => error);
+    expect(error).toMatchObject({ uncertain: !refused, status });
+    expect((error as ControlFailure).detail).toBe(
+      refused
+        ? "Docker isn't responding. Start or restart Docker on the host computer, then try again. Your files are kept."
+        : undefined,
+    );
+    expect(String(error)).not.toContain("private");
+  }
 });

@@ -605,6 +605,7 @@ const app = createApp({
     tickets,
     replacement,
     reset,
+    checkRuntime: () => docker.checkReady(),
     update: (id, signal) =>
       updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
   },

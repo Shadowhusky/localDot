@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "c00839213dc2fbcd2b0379dc2dd0dd9ff2ef498ade5edc75d310fb4df64144d7",
+  "inputSha256": "691a8a1794e45b011019e6cb3b06923a13d3df84ea3c46e3bf22ace5598648f4",
   "inputs": {
     ".github/workflows/ci.yml": "0aea6d6709252bdbfc3b910197aad079f7865030e699cdfd9fc0b0ab405f6df1",
     "apps/daemon/src/access-links.test.ts": "3348d08c5379a766a87d120001f4d7b0a8983c8fa3ae6d03e4ada1344f1f5374",
@@ -181,7 +181,7 @@
     "apps/daemon/src/agent/safety/purpose.ts": "ca7dc944ff1d300ee1c8ef1784826b2077f3ae34a0d8bbfff5c15c0ac9772bbc",
     "apps/daemon/src/agent/safety/repeat-guard.test.ts": "ad5f5203d2cf0c558cfd83566db33227223385ae63d8b73a1d2766b226737e72",
     "apps/daemon/src/agent/safety/repeat-guard.ts": "7c3aee441ac69982a41605c5552d01f6f6368d4577a2f5a40a868e1618944b3c",
-    "apps/daemon/src/agent/safety/replacement-boundaries.test.ts": "0fea0dbbb87c249356f72913aadf5c3104fc0bddb6de9a4484bcc49077152c20",
+    "apps/daemon/src/agent/safety/replacement-boundaries.test.ts": "76490426f7341e4852c335f30658cf57b9bdb84509369842a61f4ef20c9ffb23",
     "apps/daemon/src/agent/safety/replacement-cleanup-review.test.ts": "fabd32858bfcc657d734f6ab543dbe32f8f86ee83d9795e024c9c5c9a6ac7f9a",
     "apps/daemon/src/agent/safety/replacement-controller.ts": "7d05aaa850539ab5f938ec2feb5c305af6fb45ab92915baa24da2c2d30580d37",
     "apps/daemon/src/agent/safety/replacement-effects-review.test.ts": "d20e24bbf9def06d157bf80f7db107b15d9015bcb8b40dd0369ac7473a3720b9",
@@ -355,7 +355,7 @@
     "apps/daemon/src/cells/accounts-profile.test.ts": "766e4bbc338f0572b5d260e5488177a5ee29add09f82508521b287092b987337",
     "apps/daemon/src/cells/accounts-profile.ts": "8bc524bf17da355dc0020a799841d7f683fb6f11b1128b5684984f7cad2d7456",
     "apps/daemon/src/cells/api.test.ts": "3b9032418286d102503e1bc626d64fd8516189ddf04c4aac92e4b01c26c419b3",
-    "apps/daemon/src/cells/api.ts": "72a579d0c92d18613d7d23a1d7208a28900da5974bb89822e556fad1d0a8035e",
+    "apps/daemon/src/cells/api.ts": "83d077bef7cfb9839dcf98fe43c9718784ab5b02afaaa9947544b8f0cdfb4f49",
     "apps/daemon/src/cells/browser-health.ts": "77a660c6f41c5759001c4cfdeccfe0e0d77b91235416b4756ff2df7c766bcc0d",
     "apps/daemon/src/cells/browser-ledger.test.ts": "250dbf574538c8dc209299b6588ab785f253ff31ac2261ca3ba4a8a49fa7bad3",
     "apps/daemon/src/cells/browser-ledger.ts": "984f001825ceb88a23c9ad04aa56ec0f72cd69d39b671144b30559d3f7214551",
@@ -388,8 +388,8 @@
     "apps/daemon/src/cells/diagnostic-selftest.test.ts": "58dfdff661cff81ce3359cd87ef400bddef774b46d274d061697ac5855403ad7",
     "apps/daemon/src/cells/diagnostic-selftest.ts": "b1e954507c90235053edc3790bf1e4b59826c2149f64e55ca5618f4779c2aba9",
     "apps/daemon/src/cells/docker.docker.test.ts": "ed2977bda3688bd649f876b6558ce79cf49dea3ddf8b5f10463e2f658b5f8a96",
-    "apps/daemon/src/cells/docker.test.ts": "bced841a19ef34fc6c5f421a4d7bcc5fa293db6304d716cdb95f83744a38c519",
-    "apps/daemon/src/cells/docker.ts": "011ca23cfa677665f3a97b6d9e7f3b583ca57e55833537035a6b81ca69aa3a83",
+    "apps/daemon/src/cells/docker.test.ts": "7361b2d90b86f19dd87f40106274cbf6e1ec2a4009520de39c31e262602ab120",
+    "apps/daemon/src/cells/docker.ts": "4d923cfb72f873a4a4a9840aa265d5d1f9d83d9b19b525268519b77dadad248c",
     "apps/daemon/src/cells/driver-optout.docker.test.ts": "df059553ff32be26b240fdeb2cae4b12d90e0929b1fcd6250a0d34fcbcf5387f",
     "apps/daemon/src/cells/exact-retirement.ts": "17af9c3dd64caa2eb1da53a048c28ec3a4749e806e64cec28c964073af085b9a",
     "apps/daemon/src/cells/gate-image.docker.test.ts": "9ab35d8971beba131d862922348eb806b599e810b5d5e629dce7df6ce54f3d35",
@@ -648,7 +648,7 @@
     "apps/daemon/src/main-startup.test.ts": "1cd20bbb7e4c86b2f7e101388060d9e6b43186f8e36899c87d8d26dd010aea60",
     "apps/daemon/src/main-startup.ts": "2cace882eeec33364fa18a462fe7d2c736f799a6f1ac6e1ac1a773b42953de85",
     "apps/daemon/src/main.test.ts": "ef5addc925ec16e30250aa48d5549b7b9c74ccda51b0728944a3aec79e04109e",
-    "apps/daemon/src/main.ts": "eaf0a3d1d2aefcdb55e8a672ad171a99c609c4bb1dd7089f9a4dccd021c084b5",
+    "apps/daemon/src/main.ts": "b56b9aed9a55d6717263fa11d60df742873ac567c94a07b347ace4eeb68c7967",
     "apps/daemon/src/notify/attention.test.ts": "0339830c9b226ceedbeb76b90ae19d0c642bc4ba3f8b9411440eff91dceabd7e",
     "apps/daemon/src/notify/attention.ts": "4070c8a942e81f7386bc6576b45ff8b4b2b812712f9073b48a394686b30d4ff4",
     "apps/daemon/src/notify/banner.test.ts": "b6f97743d58353ed9836b670cb6923c5ba6efc6a282a4cf16ee62bcea8ebc9c0",
@@ -1065,7 +1065,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "3f6bac464cb3fd12d52cbce652f80bc80f98f6a423c5ec1434a367f83d101d48",
+  "reportSha256": "dd99b25017a300c1184196def660079803a76cc802c1bf8a39337e7e81e86a52",
   "exit": {
     "code": 0,
     "signal": null

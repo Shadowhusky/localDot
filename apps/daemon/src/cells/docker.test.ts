@@ -75,6 +75,35 @@ async function fakeDocker(
 const missingSocket = () => join(tmpdir(), "ld-missing.sock");
 
 describe("DockerClient", () => {
+  it("checks the actual Linux engine rather than Desktop's version proxy", async () => {
+    const { socketPath, seen } = await fakeDocker(() => ({
+      status: 200,
+      body: { OSType: "linux", ServerVersion: "29.8.2" },
+    }));
+    await expect(new DockerClient(socketPath).checkReady()).resolves.toBeUndefined();
+    expect(seen.map(({ method, url }) => ({ method, url }))).toEqual([
+      { method: "GET", url: `/${DOCKER_API}/info` },
+    ]);
+  });
+  it.each([undefined, null, {}, { OSType: "windows", ServerVersion: "29" }])(
+    "does not accept an incomplete engine readiness response: %j",
+    async (body) => {
+      const { socketPath } = await fakeDocker(() => ({ status: 200, body }));
+      await expect(new DockerClient(socketPath).checkReady()).rejects.toMatchObject({
+        name: "DockerError",
+        path: "/info",
+        status: 503,
+      });
+    },
+  );
+  it("bounds an engine readiness probe even when Desktop accepts the socket but never responds", async () => {
+    const socketPath = await listen(() => {});
+    await expect(new DockerClient(socketPath).checkReady(50)).rejects.toMatchObject({
+      name: "DockerError",
+      status: 0,
+      path: "/info",
+    });
+  });
   it("uploads exact binary tar bytes with an encoded target directory and container", async () => {
     const { socketPath, seen } = await fakeDocker(() => ({ status: 200 }));
     const archive = tar([{ name: "proxy-token", data: Buffer.from([0, 255, 192, 10, 128]) }]);
