@@ -126,6 +126,18 @@ describe("browser runtime bootstrap confinement", () => {
     expect(chromium.args.at(-1)).toBe("about:blank");
   });
 
+  it("keeps normal headed browser services without automation or identity overrides", () => {
+    const { args } = browserProcessSpecs(browserRuntimeConfig(fixture())).chromium;
+    expect(
+      args.some((argument) =>
+        /^(?:--headless|--enable-automation|--disable-background-networking|--disable-component-update|--user-agent|--disable-blink-features)(?:=|$)/u.test(
+          argument,
+        ),
+      ),
+    ).toBe(false);
+    expect(args).toContain("--user-data-dir=/profile/chromium");
+  });
+
   it.each([1, 2])("matches stream pixels and display pixels at scale %s", (scale) => {
     const specs = browserProcessSpecs(
       browserRuntimeConfig({ ...fixture(), LOCALDOT_SCALE: String(scale) }),

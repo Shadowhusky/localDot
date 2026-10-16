@@ -38,6 +38,26 @@ held drag. It does not send another motion or replay input. The native command t
 in force; an unacknowledged operation still retires the controller rather than guessing its state.
 This avoids treating an ordinary Stop between a motion and its acknowledgement as a browser crash.
 
+## Browser defaults and site compatibility
+
+The account browser is headed Chromium with a persistent profile, a native user agent, and
+private-pipe CDP control. It does not add `--enable-automation`, headless mode, user-agent
+spoofing or Blink automation concealment. CDP is still automation: these defaults do not
+promise that a website will classify localDot as a human-operated browser.
+
+Keep background networking and component updates at Chromium's defaults. The old
+`--disable-background-networking` and `--disable-component-update` switches suppressed
+normal browser services; removing them is a compatibility correction, not a verified fix for
+any particular challenge. Requests still pass through the gate. Sync and extensions remain
+disabled, keyd owns saved credentials, and the sandbox and certificate checks remain enabled.
+
+[Chromium describes background-network suppression as a performance-testing option](https://chromium.googlesource.com/chromium/src/+/00b44ff60356aad499a2ee49d5b513cb98bb63e7/chrome/common/chrome_switches.cc).
+[Cloudflare does not support automation frameworks for production challenges](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/).
+[Google may reject automated browser sign-ins](https://support.google.com/accounts/answer/7675428?hl=en).
+A legitimate task can still encounter these restrictions. Diagnose the visible error, page
+loading, graphics and network separately; use a site's supported connector or OAuth flow when
+available, and preserve the existing browser session when user verification is needed.
+
 ## Verification pages
 
 Keep JavaScript, cookies and working graphics available, and let an ordinary challenge finish

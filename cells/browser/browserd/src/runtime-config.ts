@@ -224,8 +224,9 @@ export function browserProcessSpecs(
         // The shared profile outlives its cells: after one unclean stop, Chromium shows "Restore
         // pages?" on every later start until someone answers it, and nothing can take the screen.
         "--hide-crash-restore-bubble",
-        "--disable-background-networking",
-        "--disable-component-update",
+        // Keep Chromium background services and component updates at their normal defaults.
+        // Test-harness suppression switches break browser functionality; the gate still
+        // controls every network request, including background requests.
         "--disable-sync",
         "--disable-quic",
         "--disable-extensions",
